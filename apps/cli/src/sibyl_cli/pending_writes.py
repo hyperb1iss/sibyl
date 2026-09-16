@@ -11,11 +11,11 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, get_args
+from typing import Any, Literal, TypedDict, get_args
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
-from sibyl_cli.pending_identity import normalize_replay_identity
+from sibyl_cli.pending_identity import normalize_replay_identity, pending_identity_matches
 
 # Every buffered write leaves the queue through exactly one of these outcomes,
 # so `attempted` should equal their sum plus whatever is still queued. A gap
@@ -59,6 +59,45 @@ _REQUIRED_STRING_FIELDS = (
 _CANONICAL_WRITE_ID = re.compile(r"^[0-9a-f]{32}$")
 _CANONICAL_WRITE_ID_PREFIX = re.compile(r"^[0-9a-f]{1,32}$")
 _REPLAYABLE_METHODS = {"POST", "PATCH", "DELETE"}
+
+# A queued write belongs to exactly one of these classes, and only the operator
+# can move it out of the three terminal ones. Reporting the total instead of the
+# classes is what made a healthy command look broken for two weeks.
+PendingWriteClass = Literal[
+    "retrying", "needs_attention", "unowned", "foreign_server", "read_like", "corrupt"
+]
+PENDING_WRITE_CLASSES: tuple[PendingWriteClass, ...] = get_args(PendingWriteClass)
+# Enough of the server's own words to name the offending field, short enough
+# that a queue file cannot become a transcript of response bodies.
+PENDING_FAILURE_MESSAGE_MAX = 200
+PENDING_OWNERSHIP_REASON_MAX = 200
+# A write younger than this with no recorded failure is simply in flight, and
+# saying so after every command is noise rather than information.
+PENDING_RETRY_QUIET_SECONDS = 300.0
+
+# Read-like POSTs (search, recall, context-pack assembly) carry no durable
+# write, so a failed one is simply re-run, never replayed. Buffering them
+# flooded the pending-write queue with hundreds of /search and /context/pack
+# entries. /context/reflect and /memory/raw are intentionally absent: they can
+# persist, so they stay buffered.
+READ_LIKE_POST_PATHS = (
+    "/search",
+    "/rag/search",
+    "/rag/hybrid-search",
+    "/rag/code-examples",
+    "/context/pack",
+    "/memory/raw/recall",
+)
+
+
+def is_read_like_post(path: str) -> bool:
+    return any(path.startswith(prefix) for prefix in READ_LIKE_POST_PATHS)
+
+
+def is_buffered_read_like(item: dict[str, Any]) -> bool:
+    return str(item.get("method") or "").upper() == "POST" and is_read_like_post(
+        str(item.get("path") or "")
+    )
 
 
 def pending_writes_dir() -> Path:
@@ -247,6 +286,9 @@ def _read_pending_path(path: Path) -> dict[str, Any]:
         return _corrupt_pending_write(path, "Missing or invalid required field: replay_identity")
     if data.get("status", "pending") not in ("pending", "attention"):
         return _corrupt_pending_write(path, "Missing or invalid required field: status")
+    reason = data.get("ownership_reason")
+    if reason is not None and (not isinstance(reason, str) or not reason):
+        return _corrupt_pending_write(path, "Missing or invalid required field: ownership_reason")
     return data
 
 
@@ -276,7 +318,15 @@ def create_pending_write(
     params: dict[str, Any] | None,
     replay_scope: str | None = None,
     replay_identity: dict[str, Any] | None = None,
+    ownership_reason: str | None = None,
 ) -> dict[str, Any]:
+    """Buffer one mutation, recording who owns it or why nobody does.
+
+    An owner is written whenever the caller can name one, because ownership is
+    what lets a later command replay the write. When no login exists for the
+    destination at all, the reason is recorded instead, so the queue says why
+    the write is parked rather than leaving a future reader to guess.
+    """
     write_id = uuid4().hex
     idempotency_key = str(uuid4())
     data: dict[str, Any] = {
@@ -297,6 +347,10 @@ def create_pending_write(
         if normalized is None:
             raise ValueError("Invalid pending write replay identity")
         data["replay_identity"] = normalized
+    elif ownership_reason:
+        data["ownership_reason"] = _bounded_diagnostic(
+            ownership_reason, PENDING_OWNERSHIP_REASON_MAX
+        )
     _secure_write_json(_pending_path(write_id), data)
     record_pending_metric("attempted")
     return data
@@ -375,14 +429,31 @@ def increment_attempts(write_id: str) -> dict[str, Any]:
     return data
 
 
+def _bounded_diagnostic(text: str, limit: int) -> str:
+    """Flatten a message to one bounded, control-character-free line."""
+    collapsed = " ".join(str(text).split())
+    printable = "".join(char for char in collapsed if char.isprintable())
+    if len(printable) <= limit:
+        return printable
+    return printable[: limit - 1].rstrip() + "…"
+
+
 def record_pending_failure(
     write_id: str,
     *,
     category: PendingFailureCategory,
     status_code: int | None = None,
     error_code: str | None = None,
+    message: str | None = None,
 ) -> dict[str, Any]:
-    """Retain the operation with a diagnostic that cannot contain response secrets."""
+    """Retain the operation with a diagnostic that cannot contain response secrets.
+
+    A refusal message is kept only for `rejected` and `conflict`, where the
+    server is describing the caller's own payload ("name too long", "priority
+    urgent is not valid"). Without it the operator can see that a write was
+    refused but never what to repair. Authentication and server-error bodies
+    stay out of the queue file: those describe the server, not the request.
+    """
     if category not in get_args(PendingFailureCategory):
         raise ValueError("Invalid pending write failure category")
     if status_code is not None and (type(status_code) is not int or not 400 <= status_code <= 599):
@@ -391,13 +462,17 @@ def record_pending_failure(
     data = _read_pending_path(path)
     if is_corrupt_pending_write(data):
         raise ValueError("Cannot record a failure for a corrupt pending write")
-    data["status"] = "attention" if category in {"rejected", "conflict"} else "pending"
-    data["last_failure"] = {
+    rejected = category in {"rejected", "conflict"}
+    data["status"] = "attention" if rejected else "pending"
+    failure: dict[str, Any] = {
         "category": category,
         "status_code": status_code,
         "error_code": error_code if error_code in _SAFE_FAILURE_CODES else None,
         "at": datetime.now(UTC).isoformat(),
     }
+    if rejected and message:
+        failure["message"] = _bounded_diagnostic(message, PENDING_FAILURE_MESSAGE_MAX)
+    data["last_failure"] = failure
     _secure_write_json(path, data)
     return data
 
@@ -524,12 +599,127 @@ def record_pending_metric(name: PendingMetric, count: int = 1) -> dict[str, int]
     return metrics
 
 
+def classify_pending_write(
+    item: dict[str, Any],
+    *,
+    base_url: str | None,
+    replay_scope: str | None,
+    identity: dict[str, Any] | None,
+) -> PendingWriteClass:
+    """Say which of the queue's classes a buffered write is actually in.
+
+    Only `retrying` moves on its own. The rest need an operator decision, and
+    counting them as retries is what made the queue notice untrustworthy.
+    """
+    if is_corrupt_pending_write(item):
+        return "corrupt"
+    if base_url is not None and normalize_base_url(str(item.get("base_url"))) != normalize_base_url(
+        base_url
+    ):
+        return "foreign_server"
+    if is_buffered_read_like(item):
+        return "read_like"
+    owner = normalize_replay_identity(item.get("replay_identity"))
+    if owner is not None:
+        # An owner from a different user, org, or server instance can never be
+        # replayed by this login, however healthy the destination looks.
+        owned = identity is None or owner == identity
+    else:
+        owned = pending_identity_matches(item, identity, replay_scope)
+    # Ownership outranks the recorded failure: a write nobody can replay is
+    # unowned even when the last attempt was refused, because adopting it is
+    # the only thing that can move it.
+    if not owned:
+        return "unowned"
+    return "needs_attention" if item.get("status") == "attention" else "retrying"
+
+
+def normalize_base_url(base_url: str) -> str:
+    """Compare destinations the way the credential store keys them."""
+    from sibyl_cli.auth_store import normalize_api_url
+
+    return normalize_api_url(base_url)
+
+
+def _write_age_seconds(item: dict[str, Any], now: datetime) -> float | None:
+    try:
+        created_at = datetime.fromisoformat(str(item.get("created_at") or ""))
+    except ValueError:
+        return None
+    if created_at.tzinfo is None:
+        return None
+    return (now - created_at).total_seconds()
+
+
+class PendingWriteTriage(TypedDict):
+    """The queue summarized by class, with the ages that decide what to print."""
+
+    count: int
+    counts: dict[str, int]
+    foreign_base_urls: list[str]
+    stale_retrying: int
+    oldest_stale_retrying_seconds: float
+    base_url: str | None
+
+
+def pending_write_triage(
+    *,
+    base_url: str | None = None,
+    replay_scope: str | None = None,
+    identity: dict[str, Any] | None = None,
+    writes: list[dict[str, Any]] | None = None,
+) -> PendingWriteTriage:
+    """Summarize the queue by class so callers can report only what is actionable."""
+    items = list_pending_writes() if writes is None else writes
+    now = datetime.now(UTC)
+    counts: dict[str, int] = dict.fromkeys(PENDING_WRITE_CLASSES, 0)
+    foreign_base_urls: list[str] = []
+    stale_retrying = 0
+    oldest_retrying_seconds = 0.0
+    for item in items:
+        write_class = classify_pending_write(
+            item, base_url=base_url, replay_scope=replay_scope, identity=identity
+        )
+        counts[write_class] += 1
+        if write_class == "foreign_server":
+            candidate = normalize_base_url(str(item.get("base_url")))
+            if candidate not in foreign_base_urls:
+                foreign_base_urls.append(candidate)
+        if write_class != "retrying":
+            continue
+        age = _write_age_seconds(item, now)
+        if item.get("last_failure") is not None or (
+            age is not None and age >= PENDING_RETRY_QUIET_SECONDS
+        ):
+            stale_retrying += 1
+            oldest_retrying_seconds = max(oldest_retrying_seconds, age or 0.0)
+    return PendingWriteTriage(
+        count=len(items),
+        counts=counts,
+        foreign_base_urls=foreign_base_urls,
+        stale_retrying=stale_retrying,
+        oldest_stale_retrying_seconds=oldest_retrying_seconds,
+        base_url=None if base_url is None else normalize_base_url(base_url),
+    )
+
+
 def pending_write_status() -> dict[str, Any]:
     writes = list_pending_writes()
+    from sibyl_cli.pending_identity import current_pending_owner
+
+    base_url, replay_scope, identity = current_pending_owner()
+    triage = pending_write_triage(
+        base_url=base_url,
+        replay_scope=replay_scope,
+        identity=identity,
+        writes=writes,
+    )
     return {
         "count": len(writes),
         "pending": sum(item.get("status", "pending") == "pending" for item in writes),
         "attention": sum(item.get("status") == "attention" for item in writes),
+        "classes": triage["counts"],
+        "foreign_base_urls": triage["foreign_base_urls"],
         "failures": [
             {"filename": item["filename"], "error": item["error"]}
             for item in writes

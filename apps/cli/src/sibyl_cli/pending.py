@@ -24,14 +24,20 @@ from sibyl_cli.common import (
     create_table,
     error,
     mark_pending_writes_reported,
+    pending_writes_notice_lines,
     print_json,
     run_async,
     success,
     warn,
 )
-from sibyl_cli.pending_identity import normalize_replay_identity, pending_identity_matches
+from sibyl_cli.pending_identity import (
+    current_pending_owner,
+    normalize_replay_identity,
+    pending_identity_matches,
+)
 from sibyl_cli.pending_writes import (
     claim_pending_write_replay_scope,
+    classify_pending_write,
     delete_pending_write,
     increment_attempts,
     is_canonical_pending_write_id,
@@ -40,6 +46,7 @@ from sibyl_cli.pending_writes import (
     pending_replay_lock,
     pending_write_label,
     pending_write_resource,
+    pending_write_triage,
     pending_writes_dir,
     read_pending_write,
     record_pending_metric,
@@ -49,11 +56,21 @@ from sibyl_cli.pending_writes import (
 app = typer.Typer(help="Inspect and replay locally buffered writes")
 
 
-def _summary(item: dict[str, Any]) -> dict[str, Any]:
+def _summary(
+    item: dict[str, Any],
+    *,
+    base_url: str | None = None,
+    replay_scope: str | None = None,
+    identity: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    write_class = classify_pending_write(
+        item, base_url=base_url, replay_scope=replay_scope, identity=identity
+    )
     if is_corrupt_pending_write(item):
         return {
             "id": item["id"],
             "status": "corrupt",
+            "class": write_class,
             "filename": item["filename"],
             "error": item["error"],
         }
@@ -68,22 +85,28 @@ def _summary(item: dict[str, Any]) -> dict[str, Any]:
         "attempts": item.get("attempts", 0),
         "base_url": item.get("base_url"),
         "status": item.get("status", "pending"),
+        "class": write_class,
         "ownership": "verified" if item.get("replay_identity") else "legacy",
+        "ownership_reason": item.get("ownership_reason"),
         "last_failure": item.get("last_failure"),
     }
 
 
 def _state_label(item: dict[str, Any]) -> str:
-    failure = item.get("last_failure")
-    reason = failure.get("category") if isinstance(failure, dict) else None
-    status_code = failure.get("status_code") if isinstance(failure, dict) else None
+    """Say why a write is where it is, including the server's own refusal."""
+    failure = item.get("last_failure") if isinstance(item.get("last_failure"), dict) else {}
     state = str(item.get("status", "pending"))
     if item.get("ownership") == "legacy":
         state += " / legacy ownership"
-    if reason:
+    if reason := failure.get("category"):
         state += f" / {reason}"
-    if status_code:
-        state += f" ({status_code})"
+    codes = [str(part) for part in (failure.get("status_code"), failure.get("error_code")) if part]
+    if codes:
+        state += f" ({' '.join(codes)})"
+    if message := failure.get("message"):
+        state += f": {message}"
+    elif ownership_reason := item.get("ownership_reason"):
+        state += f": {ownership_reason}"
     return state
 
 
@@ -141,6 +164,25 @@ def _context_name_for_base_url(
     return None
 
 
+def _is_client_rejection(item: dict[str, Any]) -> bool:
+    """A refusal the payload itself caused, so replaying it unchanged cannot work."""
+    failure = item.get("last_failure")
+    if not isinstance(failure, dict) or failure.get("category") != "rejected":
+        return False
+    status_code = failure.get("status_code")
+    return type(status_code) is int and 400 <= status_code < 500
+
+
+def _replay_plan(items: list[dict[str, Any]]) -> str:
+    """One line naming what a claim will send, grouped by the request it repeats."""
+    grouped: dict[str, int] = {}
+    for item in items:
+        key = f"{str(item.get('method') or '?').upper()} {item.get('path') or '?'}"
+        grouped[key] = grouped.get(key, 0) + 1
+    parts = [f"{count}x {request}" if count > 1 else request for request, count in grouped.items()]
+    return ", ".join(parts)
+
+
 def _legacy_claim_candidate(item: dict[str, Any]) -> bool:
     scope = item.get("replay_scope")
     return scope is None or str(scope).startswith("context:")
@@ -152,7 +194,11 @@ def list_writes(
 ) -> None:
     """List buffered writes without printing sensitive payload bodies."""
     mark_pending_writes_reported()
-    summaries = [_summary(item) for item in list_pending_writes()]
+    base_url, replay_scope, identity = current_pending_owner()
+    summaries = [
+        _summary(item, base_url=base_url, replay_scope=replay_scope, identity=identity)
+        for item in list_pending_writes()
+    ]
     if json_output:
         print_json({"pending_writes": summaries})
         return
@@ -160,35 +206,46 @@ def list_writes(
         success("No pending writes")
         return
     table = create_table("Pending Writes")
-    table.add_column("ID", style="cyan")
+    table.add_column("ID", style="cyan", overflow="fold")
     table.add_column("Method")
     table.add_column("Path")
     table.add_column("Kind")
     table.add_column("Title")
     table.add_column("Attempts", justify="right")
+    table.add_column("Class")
     table.add_column("State / reason")
     for item in summaries:
         if item.get("status") == "corrupt":
             table.add_row(
-                str(item["id"])[:12],
+                str(item["id"]),
                 "CORRUPT",
                 str(item["filename"]),
                 "repair",
                 str(item["error"]),
                 "-",
                 "corrupt",
+                "corrupt",
             )
             continue
         table.add_row(
-            str(item["id"])[:12],
+            str(item["id"]),
             str(item["method"]),
             str(item["path"]),
             str(item["kind"]),
             str(item["title"]),
             str(item["attempts"]),
+            str(item["class"]),
             _state_label(item),
         )
     console.print(table)
+    for line in pending_writes_notice_lines(
+        pending_write_triage(
+            base_url=base_url,
+            replay_scope=replay_scope,
+            identity=identity,
+        )
+    ):
+        warn(line)
 
 
 @app.command("discard")
@@ -204,11 +261,52 @@ def discard_writes(
             help="Discard buffered read-like requests from older CLI versions.",
         ),
     ] = False,
+    foreign: Annotated[
+        bool,
+        typer.Option(
+            "--foreign",
+            help="Discard writes buffered for a server other than the current one.",
+        ),
+    ] = False,
+    rejected: Annotated[
+        bool,
+        typer.Option(
+            "--rejected",
+            help="Discard writes the server refused with a 4xx the payload cannot pass.",
+        ),
+    ] = False,
 ) -> None:
-    """Discard buffered writes without replaying them."""
+    """Discard buffered writes without replaying them.
+
+    Every selector is explicit. Nothing is ever discarded on the CLI's own
+    initiative, because a discarded payload is gone and the queue is the only
+    copy.
+    """
+    selectors = [flag for flag in (read_like, foreign, rejected) if flag]
+    if len(selectors) > 1:
+        error("Choose one of --read-like, --foreign, or --rejected per run.")
+        raise typer.Exit(code=1)
+    if selectors and write_ids:
+        error("Name write IDs or use a selector flag, not both.")
+        raise typer.Exit(code=1)
     if read_like:
         selected = [
             str(item["id"]) for item in list_pending_writes() if _is_buffered_read_like(item)
+        ]
+    elif foreign or rejected:
+        wanted = "foreign_server" if foreign else "needs_attention"
+        base_url, replay_scope, identity = current_pending_owner()
+        if foreign and base_url is None:
+            error("No Sibyl context is configured, so no write can be called foreign.")
+            raise typer.Exit(code=1)
+        selected = [
+            str(item["id"])
+            for item in list_pending_writes()
+            if classify_pending_write(
+                item, base_url=base_url, replay_scope=replay_scope, identity=identity
+            )
+            == wanted
+            and (foreign or _is_client_rejection(item))
         ]
     else:
         selected = write_ids or []
@@ -218,6 +316,7 @@ def discard_writes(
     # Deduplicated, since the same id named twice discards once and the second
     # pass would otherwise count as a miss.
     selected = list(dict.fromkeys(selected))
+    selector_used = bool(read_like or foreign or rejected)
     removed = 0
     missed = 0
     for write_id in selected:
@@ -234,11 +333,14 @@ def discard_writes(
     success(f"Discarded {removed} pending write{'s' if removed != 1 else ''}")
     # A named id that matched nothing is a refusal, not an empty result: the
     # caller asked for a specific write and the queue still holds it.
-    if not read_like and missed:
+    if not selector_used and missed:
         error(f"No pending write matched {missed} of the given IDs")
         raise typer.Exit(code=1)
 
 
+# `adopt` is the word the notices use, because it says what the verb does to a
+# write whose original owner is gone. `claim` stays for existing muscle memory.
+@app.command("adopt")
 @app.command("claim")
 def claim_writes(
     write_ids: Annotated[
@@ -288,11 +390,15 @@ def claim_writes(
             if client._replay_scope is None:
                 error("No authenticated credential is available for this context.")
                 raise typer.Exit(code=1)
-            matching = [
-                item
-                for item in candidates
-                if normalize_api_url(str(item["base_url"])) == client.base_url
-            ]
+            matching = sorted(
+                (
+                    item
+                    for item in candidates
+                    if normalize_api_url(str(item["base_url"])) == client.base_url
+                ),
+                # Replay order, so the plan reads the way the queue drains.
+                key=lambda item: (str(item.get("created_at") or ""), str(item["id"])),
+            )
             if len(matching) != len(candidates):
                 error("Some selected writes belong to another server; select its context first.")
                 raise typer.Exit(code=1)
@@ -320,8 +426,9 @@ def claim_writes(
                 or "unknown"
             )
             warn(
-                f"Claim {len(matching)} legacy write"
-                f"{'s' if len(matching) != 1 else ''} for {user_label} in {org_label}."
+                f"Will replay {len(matching)} legacy write"
+                f"{'s' if len(matching) != 1 else ''} to {client.base_url} as {user_label} "
+                f"in {org_label}: {_replay_plan(matching)}."
             )
             if unverified:
                 warn(

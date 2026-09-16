@@ -875,3 +875,200 @@ def test_unverified_adoption_requires_server_identity(
     assert result.exit_code == 1
     assert "Upgrade the server" in result.stdout
     assert pending_writes.resolve_pending_write_path(item["id"]).read_bytes() == original
+
+
+LOCAL_BASE_URL = "http://localhost:3334/api"
+OTHER_LOCAL_BASE_URL = "http://localhost:3364/api"
+
+
+@pytest.fixture
+def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Isolate queue, credentials, and contexts, since list now classifies."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    return tmp_path
+
+
+def _signed_in() -> None:
+    from sibyl_cli import auth_store
+
+    auth_store.set_tokens(LOCAL_BASE_URL, "stored-token", "stored-refresh")
+    auth_store.cache_pending_replay_identity(LOCAL_BASE_URL, "stored-token", TEST_IDENTITY)
+
+
+def _queued(
+    *,
+    base_url: str = LOCAL_BASE_URL,
+    path: str = "/memory/raw",
+    identity: dict[str, Any] | None = None,
+    scope: str | None = None,
+) -> dict[str, Any]:
+    return pending_writes.create_pending_write(
+        method="POST",
+        path=path,
+        base_url=base_url,
+        json_payload={"title": "Queued"},
+        params=None,
+        replay_identity=identity,
+        replay_scope=scope,
+    )
+
+
+def test_pending_writes_list_shows_the_class_and_the_servers_refusal(
+    isolated_home: Path,
+) -> None:
+    _signed_in()
+    rejected = _queued(identity=TEST_IDENTITY, path="/entities")
+    pending_writes.record_pending_failure(
+        str(rejected["id"]),
+        category="rejected",
+        status_code=422,
+        error_code="validation_error",
+        message="name must have at most 200 characters",
+    )
+    _queued(base_url=OTHER_LOCAL_BASE_URL)
+
+    result = CliRunner().invoke(pending.app, ["list"])
+
+    assert result.exit_code == 0
+    flattened = " ".join(result.stdout.split())
+    assert "needs_attention" in flattened
+    assert "422 validation_error" in flattened
+    assert "name must have at most 200 characters" in flattened
+    assert "foreign_server" in flattened
+    assert "need a decision" in flattened
+
+
+def test_pending_writes_list_prints_the_whole_id(isolated_home: Path) -> None:
+    """A cropped ID gets completed by guesswork, and the guess buffers a bad write."""
+    item = _queued(base_url=OTHER_LOCAL_BASE_URL)
+
+    result = CliRunner().invoke(pending.app, ["list"])
+
+    assert result.exit_code == 0
+    assert str(item["id"]) in "".join(result.stdout.split())
+
+
+def test_pending_writes_discard_foreign_removes_only_other_servers(
+    isolated_home: Path,
+) -> None:
+    _signed_in()
+    mine = _queued(identity=TEST_IDENTITY)
+    theirs = _queued(base_url=OTHER_LOCAL_BASE_URL)
+
+    result = CliRunner().invoke(pending.app, ["discard", "--foreign"])
+
+    assert result.exit_code == 0
+    assert [item["id"] for item in pending_writes.list_pending_writes()] == [mine["id"]]
+    assert theirs["id"] != mine["id"]
+
+
+def test_pending_writes_discard_rejected_removes_only_client_refusals(
+    isolated_home: Path,
+) -> None:
+    _signed_in()
+    rejected = _queued(identity=TEST_IDENTITY, path="/tasks")
+    pending_writes.record_pending_failure(
+        str(rejected["id"]),
+        category="rejected",
+        status_code=422,
+        error_code="validation_error",
+        message="priority urgent is not supported",
+    )
+    transient = _queued(identity=TEST_IDENTITY)
+    pending_writes.record_pending_failure(str(transient["id"]), category="server", status_code=503)
+
+    result = CliRunner().invoke(pending.app, ["discard", "--rejected"])
+
+    assert result.exit_code == 0
+    assert [item["id"] for item in pending_writes.list_pending_writes()] == [transient["id"]]
+
+
+def test_pending_writes_discard_refuses_two_selectors(isolated_home: Path) -> None:
+    _queued(base_url=OTHER_LOCAL_BASE_URL)
+
+    result = CliRunner().invoke(pending.app, ["discard", "--foreign", "--rejected"])
+
+    assert result.exit_code == 1
+    assert len(pending_writes.list_pending_writes()) == 1
+
+
+def test_pending_writes_discard_refuses_ids_alongside_a_selector(
+    isolated_home: Path,
+) -> None:
+    item = _queued(base_url=OTHER_LOCAL_BASE_URL)
+
+    result = CliRunner().invoke(pending.app, ["discard", "--foreign", str(item["id"])])
+
+    assert result.exit_code == 1
+    assert len(pending_writes.list_pending_writes()) == 1
+
+
+def test_pending_writes_discard_selectors_never_touch_a_healthy_queue(
+    isolated_home: Path,
+) -> None:
+    _signed_in()
+    _queued(identity=TEST_IDENTITY)
+
+    for flag in ("--foreign", "--rejected", "--read-like"):
+        result = CliRunner().invoke(pending.app, ["discard", flag])
+        assert result.exit_code == 0
+        assert "No pending writes matched" in result.stdout
+    assert len(pending_writes.list_pending_writes()) == 1
+
+
+def test_adopt_is_the_same_verb_and_says_what_it_will_replay(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    pending_writes.create_pending_write(
+        method="POST",
+        path="/memory/raw",
+        base_url="http://testserver/api",
+        json_payload={"title": "Legacy"},
+        params=None,
+    )
+    pending_writes.create_pending_write(
+        method="PATCH",
+        path="/tasks/123",
+        base_url="http://testserver/api",
+        json_payload={"title": "Legacy task"},
+        params=None,
+    )
+
+    class FakeClient:
+        def __init__(self, *, context_name: str | None = None) -> None:
+            self.base_url = "http://testserver/api"
+            self._replay_scope = TEST_REPLAY_SCOPE
+
+        async def _ensure_pending_identity(self) -> dict[str, Any]:
+            return TEST_IDENTITY
+
+        async def __aenter__(self) -> FakeClient:
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        async def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+            return {
+                "user": {"email": "bliss@example.test"},
+                "organization": {"slug": "silkcircuit"},
+            }
+
+        async def _maybe_replay_pending_writes(self, *, ignore_backoff: bool = False) -> None:
+            for queued in pending_writes.list_pending_writes():
+                pending_writes.delete_pending_write(str(queued["id"]))
+
+    monkeypatch.setattr(pending, "SibylClient", FakeClient)
+    monkeypatch.setattr("sibyl_cli.config_store.resolve_context_name", lambda: "local")
+
+    result = CliRunner().invoke(pending.app, ["adopt", "--yes"])
+
+    assert result.exit_code == 0
+    flattened = " ".join(result.stdout.split())
+    assert (
+        "Will replay 2 legacy writes to http://testserver/api as bliss@example.test "
+        "in silkcircuit: POST /memory/raw, PATCH /tasks/123." in flattened
+    )
+    assert pending_writes.list_pending_writes() == []

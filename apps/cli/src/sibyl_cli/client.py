@@ -16,7 +16,6 @@ from sibyl_cli.client_transport import (
     FAILURE_WINDOW_SECONDS,
     INIT_REMEDIATION,
     PENDING_WRITE_REMEDIATION,
-    READ_LIKE_POST_PATHS,
     ClientTransportMixin,
     ErrorPayload,
     SibylClientError,
@@ -32,7 +31,8 @@ from sibyl_cli.client_transport import (
     resolve_api_base_url,
 )
 from sibyl_cli.client_work import ClientWorkMixin
-from sibyl_cli.pending_identity import normalize_replay_identity
+from sibyl_cli.pending_identity import normalize_replay_identity, stored_replay_identity
+from sibyl_cli.pending_writes import READ_LIKE_POST_PATHS
 
 __all__ = [
     "BUFFERED_WRITE_METHODS",
@@ -116,6 +116,16 @@ class SibylClient(
         self._pending_identity = (
             normalize_replay_identity(creds.get("pending_replay_identity"))
             if creds.get("access_token") == self.auth_token
+            else None
+        )
+        # The owner to stamp on a write this command has to buffer. It outlives
+        # a token rotation and an identity endpoint the server does not expose,
+        # because a write with no owner can never be replayed by any later
+        # command. `_pending_identity` stays the *freshly verified* owner and is
+        # the only one allowed to authorize a replay.
+        self._owner_identity = self._pending_identity or (
+            stored_replay_identity(self.base_url, credential_scope=self.credential_scope)
+            if self._uses_stored_auth
             else None
         )
         self._identity_checked = False

@@ -498,23 +498,29 @@ def _check_agent_prompt_content() -> DoctorCheck:
 
 def _check_pending_writes() -> DoctorCheck:
     """Surface the local write buffer, where refused writes accumulate unseen."""
-    from sibyl_cli.common import mark_pending_writes_reported
+    from sibyl_cli.common import (
+        current_pending_write_triage,
+        mark_pending_writes_reported,
+        pending_writes_headline,
+        pending_writes_notice_lines,
+    )
     from sibyl_cli.pending_writes import pending_write_count, pending_writes_dir
 
     mark_pending_writes_reported()
-    count = pending_write_count()
-    if not count:
+    if not pending_write_count():
         return DoctorCheck("pending-writes", "pass", "No writes are buffered locally.")
-    plural = "s" if count != 1 else ""
-    return DoctorCheck(
-        "pending-writes",
-        "warn",
-        f"{count} write{plural} buffered locally without a confirmed server outcome.",
-        (
-            "Verified retryable writes replay automatically. Use 'sibyl pending-writes list' "
-            f"for attention states and legacy ownership; local files: {pending_writes_dir()}."
-        ),
+    triage = current_pending_write_triage()
+    actionable = pending_writes_notice_lines(triage)
+    detail = " ".join(
+        [
+            *actionable,
+            f"Local files: {pending_writes_dir()}.",
+        ]
     )
+    # A queue of young, owned writes is the system working, so it reports as a
+    # pass with the depth stated rather than a warning that never clears.
+    status = "warn" if actionable else "pass"
+    return DoctorCheck("pending-writes", status, pending_writes_headline(triage), detail)
 
 
 def collect_agent_checks() -> list[DoctorCheck]:
