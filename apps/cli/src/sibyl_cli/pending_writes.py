@@ -609,11 +609,17 @@ def classify_pending_write(
     base_url: str | None,
     replay_scope: str | None,
     identity: dict[str, Any] | None,
+    cached_identity: dict[str, Any] | None = None,
 ) -> PendingWriteClass:
     """Say which of the queue's classes a buffered write is actually in.
 
     Only `retrying` moves on its own. The rest need an operator decision, and
     counting them as retries is what made the queue notice untrustworthy.
+
+    Either `identity` or `cached_identity` may carry the owner this machine
+    knows, since the reporting surfaces read it from the credential store while
+    a live client has one it verified. Whichever arrives, it decides, so this
+    cannot call a write retrying that the replay gate would refuse.
     """
     if is_corrupt_pending_write(item):
         return "corrupt"
@@ -627,10 +633,11 @@ def classify_pending_write(
     if owner is not None:
         # An owner from a different user, org, or server instance can never be
         # replayed by this login, however healthy the destination looks. With
-        # no local identity to compare, the credential lineage is the only
-        # claim left, so a foreign owner under a dead scope reads as unowned
-        # rather than borrowing the benefit of the doubt.
-        owned = owner == identity if identity is not None else _scope_matches(item, replay_scope)
+        # no known owner to compare, the credential lineage is the only claim
+        # left, so a foreign owner under a dead scope reads as unowned rather
+        # than borrowing the benefit of the doubt.
+        known = identity if identity is not None else cached_identity
+        owned = owner == known if known is not None else _scope_matches(item, replay_scope)
     else:
         owned = pending_identity_matches(item, identity, replay_scope)
     # Ownership outranks the recorded failure: a write nobody can replay is

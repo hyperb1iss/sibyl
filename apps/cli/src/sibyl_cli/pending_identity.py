@@ -83,6 +83,7 @@ def stored_replay_identity(
     api_url: str,
     *,
     credential_scope: str | None = None,
+    access_token: str | None = None,
 ) -> dict[str, Any] | None:
     """Return the owner a stored login already proved, with no network call.
 
@@ -91,12 +92,19 @@ def stored_replay_identity(
     signed in. That makes it a sound owner to stamp on a write buffered while
     the server is unreachable, which is exactly when the identity endpoint
     cannot be asked.
+
+    Pass `access_token` to require that the credential asking is the one the
+    owner was recorded for. Without it, a login as somebody else between two
+    reads could pair this caller's token with the new user's identity, and the
+    write would replay into their organization.
     """
     from sibyl_cli.auth_store import read_server_credentials
 
     try:
         creds = read_server_credentials(api_url, credential_scope=credential_scope)
     except (OSError, RuntimeError, ValueError):
+        return None
+    if access_token is not None and creds.get("access_token") != access_token:
         return None
     return normalize_replay_identity(creds.get("pending_replay_identity"))
 
@@ -179,7 +187,11 @@ def current_pending_owner(
         credential_scope_name = _auth_credential_scope(context_name)
         auth_token = _load_default_auth_token(base_url, credential_scope_name)
         replay_scope = _load_default_replay_scope(base_url, credential_scope_name, auth_token)
-        identity = stored_replay_identity(base_url, credential_scope=credential_scope_name)
+        identity = stored_replay_identity(
+            base_url,
+            credential_scope=credential_scope_name,
+            access_token=auth_token,
+        )
     except Exception:
         return (None, None, None)
     return (base_url or None, replay_scope, identity)

@@ -639,3 +639,33 @@ async def test_a_404_server_replays_its_own_recorded_owner(identity: dict) -> No
     await client._maybe_replay_pending_writes(ignore_backoff=True)
     await client.close()
     assert pending_writes.list_pending_writes() == []
+
+
+@pytest.mark.asyncio
+async def test_a_login_as_someone_else_mid_command_never_owns_this_draft(
+    identity: dict,
+) -> None:
+    """The buffer-time re-read must not pair this token with a new user.
+
+    Another terminal can sign in between this client starting and the write
+    being buffered. Stamping whoever the store names now would hand the
+    payload to that account's organization on the next replay.
+    """
+    auth_store.set_tokens(BASE_URL, "mine", "refresh")
+    client = SibylClient(base_url=BASE_URL)
+    assert client._owner_identity is None
+
+    stranger = {**identity, "user_id": "44444444-4444-4444-4444-444444444444"}
+    auth_store.set_tokens(BASE_URL, "theirs", "their-refresh")
+    auth_store.cache_pending_replay_identity(BASE_URL, "theirs", stranger)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("offline", request=request)
+
+    attach(client, handler)
+    with pytest.raises(SibylClientError):
+        await client.post("/memory/raw", json={"raw_content": "mine alone"})
+    await client.close()
+    item = pending_writes.list_pending_writes()[0]
+    assert item.get("replay_identity") is None
+    assert "ownership_reason" in item

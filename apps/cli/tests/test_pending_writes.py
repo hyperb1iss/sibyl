@@ -693,3 +693,41 @@ def test_a_cold_identity_cache_does_not_flatter_a_foreign_owner(
     assert _classified(theirs, identity=identity, replay_scope="credential:rotated-away") == (
         "unowned"
     )
+
+
+def test_classification_and_the_replay_gate_agree_on_a_known_owner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One rule, two surfaces.
+
+    The report reads the owner from the credential store while a live client
+    holds one it verified, so either slot has to decide. Otherwise a write the
+    gate refuses can still be announced as retrying.
+    """
+    from sibyl_cli.pending_identity import pending_identity_matches
+
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    mine = _replay_identity()
+    stranger = {**mine, "user_id": "44444444-4444-4444-4444-444444444444"}
+    item = pending_writes.create_pending_write(
+        method="POST",
+        path="/memory/raw",
+        base_url=CURRENT_BASE_URL,
+        json_payload={"raw_content": "keep"},
+        params=None,
+        replay_identity=stranger,
+        replay_scope="credential:live",
+    )
+
+    write_class = pending_writes.classify_pending_write(
+        item,
+        base_url=CURRENT_BASE_URL,
+        replay_scope="credential:live",
+        identity=None,
+        cached_identity=mine,
+    )
+    gate_allows = pending_identity_matches(item, None, "credential:live", cached_identity=mine)
+
+    assert write_class == "unowned"
+    assert gate_allows is False

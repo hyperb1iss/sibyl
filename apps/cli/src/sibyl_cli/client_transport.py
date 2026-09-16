@@ -513,7 +513,11 @@ class ClientTransportMixin:
         if self._owner_identity is not None:
             return self._owner_identity, None
         if self._uses_stored_auth:
-            cached = stored_replay_identity(self.base_url, credential_scope=self.credential_scope)
+            cached = stored_replay_identity(
+                self.base_url,
+                credential_scope=self.credential_scope,
+                access_token=self.auth_token,
+            )
             if cached is not None:
                 self._owner_identity = cached
                 return cached, None
