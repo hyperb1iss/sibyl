@@ -274,6 +274,11 @@ def print_db_hint() -> None:
     console.print(f"  [{NEON_CYAN}]sibyld up[/{NEON_CYAN}]")
 
 
+def _is_identifier_column(header: str) -> bool:
+    name = header.strip().lower()
+    return name.endswith("id") or name.endswith("ids") or name.endswith("uuid")
+
+
 def create_table(title: str | None = None, *columns: str, expand: bool = True) -> Table:
     """Create a styled table with SilkCircuit colors.
 
@@ -286,7 +291,12 @@ def create_table(title: str | None = None, *columns: str, expand: bool = True) -
         justify = (
             "left" if i == 0 else "right" if col.lower() in ("count", "score", "value") else "left"
         )
-        table.add_column(col, style=style, justify=justify)
+        # Rich ellipsizes an over-wide cell by default, which silently drops the
+        # tail of an identifier. Agents then complete the missing characters by
+        # guessing and buffer writes against UUIDs that never existed (see the
+        # confabulated task IDs in the pending-write queue). An ID wraps instead.
+        overflow = "fold" if _is_identifier_column(col) else "ellipsis"
+        table.add_column(col, style=style, justify=justify, overflow=overflow, no_wrap=False)
     return table
 
 
