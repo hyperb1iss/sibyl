@@ -27,6 +27,23 @@ PRICES = {
     "price_output_per_million": Decimal("25"),
 }
 
+#: A live-credential verdict, the shape ``preflight_provider`` returns.
+PREFLIGHT_OK = {
+    "provider": "anthropic",
+    "model": "claude-opus-5",
+    "status": "ok",
+    "status_code": None,
+    "error_type": None,
+    "error_message": None,
+    "checked_at": "2026-09-15T00:00:00+00:00",
+}
+
+#: Stands in for a real key so the receipt can be searched for key material.
+FAKE_API_KEY = "sk-ant-api03-SCREEN48-FAKE-KEY-DO-NOT-LOG"
+
+#: Captured before any fixture swaps it, so a test can ask for the real probe.
+REAL_PREFLIGHT = cycle.preflight_provider
+
 
 def make_config(**overrides: Any) -> cycle.CycleConfig:
     base: dict[str, Any] = {
@@ -146,8 +163,12 @@ def product(monkeypatch: pytest.MonkeyPatch):
         async def noop(*_args: Any, **_kwargs: Any) -> None:
             return None
 
+        async def preflight_ok(_config: Any) -> dict[str, Any]:
+            return dict(PREFLIGHT_OK)
+
         monkeypatch.setattr(cycle, "bootstrap_runtime", noop)
         monkeypatch.setattr(cycle, "shutdown_runtime", noop)
+        monkeypatch.setattr(cycle, "preflight_provider", preflight_ok)
         monkeypatch.setattr(cycle, "invoke_dream_cycle", fake.invoke)
         monkeypatch.setattr(cycle, "load_cursor", fake.load_cursor)
         monkeypatch.setattr(cycle, "count_eligible_sources", fake.count_eligible)
@@ -684,12 +705,15 @@ async def test_invocations_jsonl_grows_once_per_product_invocation(
     receipt = await cycle.run_cycle(make_config(), tmp_path)
 
     lines = (tmp_path / "invocations.jsonl").read_text(encoding="utf-8").splitlines()
-    assert len(lines) == len(fake.calls) == receipt["invocations"]
     records = [json.loads(line) for line in lines]
+    # One line for the provider probe, then one per product invocation.
     assert [record["index"] for record in records] == list(range(len(records)))
-    assert [record["requested_source_limit"] for record in records] == [100, 100, 33]
-    assert all(record["phase"] == "proposal" for record in records)
-    assert all("receipt" in record for record in records)
+    assert records[0]["phase"] == "provider_preflight"
+    invocations = records[1:]
+    assert len(invocations) == len(fake.calls) == receipt["invocations"]
+    assert [record["requested_source_limit"] for record in invocations] == [100, 100, 33]
+    assert all(record["phase"] == "proposal" for record in invocations)
+    assert all("receipt" in record for record in invocations)
 
     written = json.loads((tmp_path / "cycle.json").read_text(encoding="utf-8"))
     assert written["status"] == receipt["status"]
@@ -711,6 +735,245 @@ async def test_a_dispatch_failure_still_seals_a_receipt(
     assert receipt["status"] == cycle.STATUS_INCOMPLETE
     assert any("provider refused" in reason for reason in receipt["reasons"])
     assert (tmp_path / "cycle.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# Provider preflight
+# ---------------------------------------------------------------------------
+
+
+class FakeAPIStatusError(Exception):
+    """Shaped like ``anthropic.APIStatusError``: a status code and a JSON body.
+
+    Its own string carries the fake key, the way a transport-level error can,
+    so a driver that falls back to ``str(exc)`` when a body is right there
+    would leak it into the receipt.
+    """
+
+    def __init__(self, status_code: int, body: dict[str, Any]) -> None:
+        super().__init__(f"Error code: {status_code} - x-api-key {FAKE_API_KEY} - {body}")
+        self.status_code = status_code
+        self.body = body
+
+
+CAPPED_ACCOUNT_BODY = {
+    "error": {
+        "type": "invalid_request_error",
+        "message": "You have reached your specified API usage limits...",
+    }
+}
+
+
+def install_probe(
+    monkeypatch: pytest.MonkeyPatch, *, raises: BaseException | None = None
+) -> list[tuple[str, str]]:
+    """Resolve the MEMORY surface to Anthropic and record every probe.
+
+    Restores the real ``preflight_provider`` over whatever the ``product``
+    fixture installed, so the driver's own probe policy is what runs.
+    """
+    probes: list[tuple[str, str]] = []
+
+    async def resolve() -> tuple[str, str]:
+        return "anthropic", "claude-opus-5"
+
+    def probe(provider: str, model: str) -> None:
+        probes.append((provider, model))
+        if raises is not None:
+            raise raises
+
+    monkeypatch.setattr(cycle, "preflight_provider", REAL_PREFLIGHT)
+    monkeypatch.setattr(cycle, "_resolve_memory_llm", resolve)
+    monkeypatch.setattr(cycle, "_probe_provider", probe)
+    return probes
+
+
+async def test_preflight_records_a_live_credential(monkeypatch: pytest.MonkeyPatch) -> None:
+    probes = install_probe(monkeypatch)
+
+    record = await cycle.preflight_provider(make_config())
+
+    assert probes == [("anthropic", "claude-opus-5")]
+    assert record["status"] == "ok"
+    assert record["provider"] == "anthropic"
+    assert record["model"] == "claude-opus-5"
+    assert record["status_code"] is None
+    assert record["error_type"] is None
+    assert record["error_message"] is None
+    assert record["checked_at"]
+
+
+async def test_preflight_reports_a_capped_account_from_the_provider_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_probe(monkeypatch, raises=FakeAPIStatusError(400, CAPPED_ACCOUNT_BODY))
+
+    record = await cycle.preflight_provider(make_config())
+
+    assert record["status"] == "refused"
+    assert record["status_code"] == 400
+    assert record["error_type"] == "invalid_request_error"
+    assert record["error_message"] == "You have reached your specified API usage limits..."
+    assert FAKE_API_KEY not in json.dumps(record)
+
+
+async def test_preflight_calls_a_bodyless_failure_an_error_not_a_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A connection that never reached the provider is the driver failing to ask."""
+    install_probe(monkeypatch, raises=ConnectionError("no route to host"))
+
+    record = await cycle.preflight_provider(make_config())
+
+    assert record["status"] == "error"
+    assert record["status_code"] is None
+    assert record["error_type"] == "ConnectionError"
+    assert record["error_message"] == "no route to host"
+
+
+async def test_a_refusal_with_no_usable_body_never_quotes_the_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The exception string renders the request, so a key can ride along in it."""
+    install_probe(monkeypatch, raises=FakeAPIStatusError(502, {"error": "rate limited"}))
+
+    record = await cycle.preflight_provider(make_config())
+
+    assert record["status"] == "refused"
+    assert record["status_code"] == 502
+    assert record["error_type"] == "FakeAPIStatusError"
+    assert record["error_message"] == "provider answered with no error body"
+    assert FAKE_API_KEY not in json.dumps(record)
+
+
+async def test_an_unresolvable_memory_surface_seals_instead_of_raising(
+    tmp_path: Path, product: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A malformed SIBYL_LLM_MEMORY_* binding must not strand the receipt."""
+    fake = product(FakeProduct(sources=["s000"]))
+
+    async def unresolvable() -> tuple[str, str]:
+        raise RuntimeError("Unsupported LLM provider: nonesuch")
+
+    monkeypatch.setattr(cycle, "preflight_provider", REAL_PREFLIGHT)
+    monkeypatch.setattr(cycle, "_resolve_memory_llm", unresolvable)
+
+    receipt = await cycle.run_cycle(make_config(expected_sources=1), tmp_path)
+
+    assert fake.calls == []
+    assert receipt["status"] == cycle.STATUS_PROVIDER_UNAVAILABLE
+    assert receipt["reasons"] == ["provider_preflight_failed: RuntimeError"]
+    assert receipt["provider_preflight"]["error_message"] == "Unsupported LLM provider: nonesuch"
+    written = json.loads((tmp_path / "cycle.json").read_text(encoding="utf-8"))
+    assert written["status"] == cycle.STATUS_PROVIDER_UNAVAILABLE, "no receipt left at running"
+
+
+def test_a_long_provider_message_is_clipped() -> None:
+    body = {"error": {"type": "overloaded_error", "message": "x" * 5_000}}
+
+    record = cycle._provider_failure(FakeAPIStatusError(529, body))
+
+    assert len(record["error_message"]) == cycle.PROVIDER_ERROR_MESSAGE_LIMIT
+
+
+async def test_a_live_credential_proceeds_to_the_proposal_passes(
+    tmp_path: Path, product: Any
+) -> None:
+    fake = product(FakeProduct(sources=["s000"]))
+
+    receipt = await cycle.run_cycle(make_config(expected_sources=1), tmp_path)
+
+    assert receipt["provider_preflight"]["status"] == "ok"
+    assert len(fake.calls) == 1
+    assert receipt["status"] == cycle.STATUS_COMPLETE
+
+
+async def test_a_capped_key_stops_the_run_before_a_single_cohort_is_packed(
+    tmp_path: Path, product: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The failure the first live cycle paid ten minutes to discover."""
+    fake = product(FakeProduct(sources=[f"s{index:03d}" for index in range(233)]))
+    install_probe(monkeypatch, raises=FakeAPIStatusError(400, CAPPED_ACCOUNT_BODY))
+
+    receipt = await cycle.run_cycle(make_config(), tmp_path)
+
+    assert fake.calls == [], "not one proposal pass may be dispatched"
+    assert fake.repairs == 0
+    assert receipt["status"] == cycle.STATUS_PROVIDER_UNAVAILABLE
+    assert receipt["reasons"] == ["provider_preflight_failed: invalid_request_error"]
+    assert receipt["invocations"] == 0
+    assert "proposal" not in receipt
+    assert "drain" not in receipt
+    assert "embedding_repair" not in receipt
+
+    preflight = receipt["provider_preflight"]
+    assert preflight["status"] == "refused"
+    assert preflight["status_code"] == 400
+    assert preflight["error_type"] == "invalid_request_error"
+
+    lines = (tmp_path / "invocations.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    written = json.loads(lines[0])
+    assert written["phase"] == "provider_preflight"
+    assert written["provider_preflight"]["status_code"] == 400
+
+
+def test_a_refused_preflight_writes_no_key_material_anywhere(
+    tmp_path: Path, product: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    product(FakeProduct(sources=["s000"]))
+    install_probe(monkeypatch, raises=FakeAPIStatusError(400, CAPPED_ACCOUNT_BODY))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", FAKE_API_KEY)
+
+    cycle.main(["--output", str(tmp_path), "--expected-sources", "1"])
+
+    written = [path for path in tmp_path.rglob("*") if path.is_file()]
+    assert written, "the run must leave evidence to search"
+    for path in written:
+        assert FAKE_API_KEY not in path.read_text(encoding="utf-8"), path
+
+
+async def test_the_skip_flag_dispatches_without_probing_the_provider(
+    tmp_path: Path, product: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = product(FakeProduct(sources=["s000"]))
+    probes = install_probe(monkeypatch)
+
+    receipt = await cycle.run_cycle(
+        make_config(expected_sources=1, skip_provider_preflight=True), tmp_path
+    )
+
+    assert probes == [], "the offline escape hatch must reach no provider"
+    assert receipt["provider_preflight"] == {
+        "status": "ok",
+        "skipped": True,
+        "checked_at": receipt["provider_preflight"]["checked_at"],
+    }
+    assert len(fake.calls) == 1
+    assert receipt["status"] == cycle.STATUS_COMPLETE
+    lines = (tmp_path / "invocations.jsonl").read_text(encoding="utf-8").splitlines()
+    assert [json.loads(line)["phase"] for line in lines] == ["proposal"]
+
+
+def test_the_skip_flag_is_off_by_default_and_reaches_the_config(tmp_path: Path) -> None:
+    parser = cycle.build_parser()
+
+    default = parser.parse_args(["--output", str(tmp_path)])
+    skipped = parser.parse_args(["--output", str(tmp_path), "--skip-provider-preflight"])
+
+    assert cycle.config_from_args(default).skip_provider_preflight is False
+    assert cycle.config_from_args(skipped).skip_provider_preflight is True
+
+
+def test_a_refused_provider_exits_non_zero(
+    tmp_path: Path, product: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    product(FakeProduct(sources=["s000"]))
+    install_probe(monkeypatch, raises=FakeAPIStatusError(400, CAPPED_ACCOUNT_BODY))
+
+    assert cycle.main(["--output", str(tmp_path), "--expected-sources", "1"]) == 1
+    assert cycle.EXIT_CODES[cycle.STATUS_PROVIDER_UNAVAILABLE] == 1
+    assert cycle.EXIT_CODES[cycle.STATUS_COMPLETE] == 0
 
 
 # ---------------------------------------------------------------------------

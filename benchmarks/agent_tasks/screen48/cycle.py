@@ -39,6 +39,15 @@ A candidate whose automatic correction returns ``pending`` /
 re-selected by every drain. The driver bounds drain passes and stops early when
 a pass produces no state transition, reporting those ids as ``stuck_pending``.
 
+A dead or spend-capped API key is invisible to the cost guard. The first live
+cycle scanned 100 sources, spent ten minutes bin-packing cohorts, dispatched 17
+proposals, and watched the provider refuse every one of them with an HTTP 400
+spend cap; measured cost stayed at zero, so only the no-transition guard would
+ever have stopped it. So the driver asks the provider whether it will answer
+before it packs anything: one free Anthropic token count (or an OpenAI model
+lookup) against the model the MEMORY surface resolves to. A refusal seals the
+receipt as ``stopped_provider_unavailable`` in seconds and dispatches nothing.
+
 Pricing defaults are the campaign's accepted Anthropic binding; see the module
 constants below for the artifact path they are cited from.
 """
@@ -105,6 +114,11 @@ STATUS_COMPLETE = "complete_original_cycle"
 STATUS_INCOMPLETE = "incomplete_original_cycle"
 STATUS_COST_CEILING = "stopped_cost_ceiling"
 STATUS_RING_WRAP = "stopped_ring_wrap"
+STATUS_PROVIDER_UNAVAILABLE = "stopped_provider_unavailable"
+
+#: A provider error record carries only what the provider itself said, and the
+#: message is clipped so a verbose body cannot bloat the receipt.
+PROVIDER_ERROR_MESSAGE_LIMIT = 200
 
 #: The proposal loop stops itself when a pass leaves the cursor and the
 #: remaining count exactly where it found them.
@@ -128,6 +142,7 @@ class CycleConfig:
     price_input_per_million: Decimal
     price_output_per_million: Decimal
     expected_sources: int = EXPECTED_SOURCES
+    skip_provider_preflight: bool = False
 
 
 # --------------------------------------------------------------------------
@@ -378,6 +393,114 @@ async def shutdown_runtime() -> None:
     await get_broker().shutdown()
     await stop_surreal_connectivity_monitor()
     await close_shared_surreal_content_client()
+
+
+async def _resolve_memory_llm() -> tuple[str, str]:
+    """Resolve the MEMORY surface the product way and keep only its identity.
+
+    The resolved config also carries the API key. Nothing here reads it: the
+    preflight lets each SDK find its own credential in the environment, so no
+    key value ever reaches a local variable, let alone the receipt.
+    """
+    from sibyl_core.ai.llm.config import LLMSurface, resolve_llm_config
+
+    resolved = await resolve_llm_config(LLMSurface.MEMORY)
+    return resolved.provider.value, resolved.model.value
+
+
+def _probe_provider(provider: str, model: str) -> None:
+    """Ask the provider whether it will answer, for free, and return nothing.
+
+    Anthropic's token-count endpoint bills nothing and is refused by exactly
+    the credentials that would refuse a real consolidation request, spend caps
+    included. OpenAI has no free counter, so the cheapest live equivalent is a
+    model lookup. Any other provider has no free probe the driver trusts, and
+    refusing to guess is the point: ``--skip-provider-preflight`` is the named
+    way past it.
+    """
+    if provider == "anthropic":
+        import anthropic
+
+        # The SDK finds its own credential in ANTHROPIC_API_KEY, so no key value
+        # passes through this driver. The product resolver also accepts
+        # SIBYL_ANTHROPIC_API_KEY, which the SDK does not read: an environment
+        # that binds only the prefixed name must skip the preflight.
+        anthropic.Anthropic().messages.count_tokens(
+            model=model, messages=[{"role": "user", "content": "ping"}]
+        )
+        return
+    if provider == "openai":
+        import openai
+
+        openai.OpenAI().models.retrieve(model)
+        return
+    raise CycleError(f"no free provider preflight for {provider!r}")
+
+
+def _text(value: object) -> str | None:
+    return None if value is None else str(value)
+
+
+def _provider_failure(exc: BaseException) -> dict[str, Any]:
+    """Describe a refused probe using only what the provider itself said.
+
+    Two fields are read off the exception: the status code it answered with,
+    and the ``error.type`` / ``error.message`` pair inside its body. The
+    request, its headers and the credential are never in reach, and the
+    exception's own string is the last resort for providers that raise before
+    any body exists. A status code means the provider answered and said no;
+    anything else is the driver failing to ask.
+    """
+    status_code = getattr(exc, "status_code", None)
+    if isinstance(status_code, bool) or not isinstance(status_code, int):
+        status_code = None
+    error_type: str | None = None
+    message: str | None = None
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        error = body.get("error")
+        if isinstance(error, dict):
+            error_type = _text(error.get("type"))
+            message = _text(error.get("message"))
+    if message is None:
+        # A provider that answered has already said everything it is going to
+        # say. Its transport's rendering of the exception adds only the request,
+        # which is the one place a credential could ride along into the receipt.
+        message = "provider answered with no error body" if status_code else str(exc)
+    return {
+        "status": "refused" if status_code is not None else "error",
+        "status_code": status_code,
+        "error_type": error_type or type(exc).__name__,
+        "error_message": message[:PROVIDER_ERROR_MESSAGE_LIMIT],
+    }
+
+
+async def preflight_provider(config: CycleConfig) -> dict[str, Any]:
+    """Prove the configured LLM credential is live before anything is packed.
+
+    Returns the record the receipt carries: never the key, never the request,
+    only the provider's own verdict. ``config`` is accepted so the probe reads
+    like every other seam and can grow policy without a signature change.
+    """
+    import asyncio
+
+    provider, model = await _resolve_memory_llm()
+    outcome: dict[str, Any] = {
+        "status": "ok",
+        "status_code": None,
+        "error_type": None,
+        "error_message": None,
+    }
+    try:
+        await asyncio.to_thread(_probe_provider, provider, model)
+    except Exception as exc:  # every refusal shape is evidence, not a crash
+        outcome = _provider_failure(exc)
+    return {
+        "provider": provider,
+        "model": model,
+        **outcome,
+        "checked_at": datetime.now(UTC).isoformat(),
+    }
 
 
 async def broker_health() -> dict[str, Any]:
@@ -691,6 +814,8 @@ class _Evidence:
         self.receipt_path = output / _RECEIPT_NAME
         self.invocations_path = output / _INVOCATIONS_NAME
         self.records: list[dict[str, Any]] = []
+        #: Every line the file carries, invocations and driver probes alike.
+        self.lines = 0
 
     def reserve(self, header: dict[str, Any]) -> None:
         self.output.mkdir(parents=True, exist_ok=True)
@@ -701,12 +826,25 @@ class _Evidence:
         except FileExistsError as exc:
             raise CycleError(f"{self.receipt_path} already exists; refusing to overwrite") from exc
 
-    def append(self, record: dict[str, Any]) -> None:
-        self.records.append(record)
+    def _write(self, record: dict[str, Any]) -> dict[str, Any]:
+        stamped = {"index": self.lines, **record}
         with self.invocations_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, sort_keys=True, default=str) + "\n")
+            handle.write(json.dumps(stamped, sort_keys=True, default=str) + "\n")
             handle.flush()
             os.fsync(handle.fileno())
+        self.lines += 1
+        return stamped
+
+    def note(self, record: dict[str, Any]) -> None:
+        """Record a driver-side probe, which is not a product invocation.
+
+        The line is durable like any other; ``records`` stays the count of
+        product invocations, which the receipt and the usage roll-up read.
+        """
+        self._write(record)
+
+    def append(self, record: dict[str, Any]) -> None:
+        self.records.append(self._write(record))
 
     def finish(self, receipt: dict[str, Any]) -> None:
         with self.receipt_path.open("w", encoding="utf-8") as handle:
@@ -774,7 +912,6 @@ async def _run_invocation(
     usage = await guard.measure()
     evidence.append(
         {
-            "index": len(evidence.records),
             "phase": phase,
             "requested_source_limit": source_limit,
             "requested_candidate_limit": config.candidate_limit,
@@ -973,8 +1110,16 @@ async def _finalize(
 
 
 def _seal(
-    receipt: dict[str, Any], guard: _CostGuard, evidence: _Evidence, errors: list[str]
+    receipt: dict[str, Any],
+    guard: _CostGuard,
+    evidence: _Evidence,
+    errors: list[str],
+    *,
+    provider_unavailable: dict[str, Any] | None = None,
 ) -> None:
+    if provider_unavailable is not None:
+        _seal_provider_unavailable(receipt, guard, evidence, errors, provider_unavailable)
+        return
     drain = receipt.get("drain") or {}
     proposal = receipt.get("proposal") or {}
     ring_wrap = proposal.get("ring_wrap") is not None
@@ -994,12 +1139,79 @@ def _seal(
         else:
             status = STATUS_COST_CEILING if guard.exceeded else STATUS_INCOMPLETE
         reasons = [*reasons, *(f"driver_error:{error}" for error in errors)]
+    _stamp_outcome(receipt, guard, evidence, errors, status=status, reasons=reasons)
+
+
+def _stamp_outcome(
+    receipt: dict[str, Any],
+    guard: _CostGuard,
+    evidence: _Evidence,
+    errors: list[str],
+    *,
+    status: str,
+    reasons: list[str],
+) -> None:
     receipt.setdefault("usage", guard.usage)
     receipt["errors"] = errors
     receipt["invocations"] = len(evidence.records)
     receipt["status"] = status
     receipt["reasons"] = reasons
     receipt["finished_at"] = datetime.now(UTC).isoformat()
+
+
+def _seal_provider_unavailable(
+    receipt: dict[str, Any],
+    guard: _CostGuard,
+    evidence: _Evidence,
+    errors: list[str],
+    preflight: dict[str, Any],
+) -> None:
+    """Seal a run the provider refused before it cost anything.
+
+    No predicate is folded in. Nothing was dispatched, so every predicate would
+    read as unsatisfied and bury the one fact that matters under four that are
+    merely downstream of it.
+    """
+    reasons = [f"provider_preflight_failed: {preflight.get('error_type')}"]
+    reasons.extend(f"driver_error:{error}" for error in errors)
+    _stamp_outcome(
+        receipt,
+        guard,
+        evidence,
+        errors,
+        status=STATUS_PROVIDER_UNAVAILABLE,
+        reasons=reasons,
+    )
+
+
+async def _preflight_phase(config: CycleConfig, evidence: _Evidence) -> dict[str, Any]:
+    """Probe the provider once, durably, before the first cohort is packed.
+
+    A probe that cannot even be built is still a stop, not a crash: resolving
+    the MEMORY surface raises on a malformed ``SIBYL_LLM_MEMORY_*`` binding,
+    and letting that escape would leave the reserved receipt at "running" with
+    no evidence of why.
+    """
+    if config.skip_provider_preflight:
+        return {
+            "status": "ok",
+            "skipped": True,
+            "checked_at": datetime.now(UTC).isoformat(),
+        }
+    try:
+        record = await preflight_provider(config)
+    except Exception as exc:
+        record = {
+            "provider": None,
+            "model": None,
+            "status": "error",
+            "status_code": None,
+            "error_type": type(exc).__name__,
+            "error_message": str(exc)[:PROVIDER_ERROR_MESSAGE_LIMIT],
+            "checked_at": datetime.now(UTC).isoformat(),
+        }
+    evidence.note({"phase": "provider_preflight", "provider_preflight": record})
+    return record
 
 
 async def run_cycle(config: CycleConfig, output: Path) -> dict[str, Any]:
@@ -1010,22 +1222,31 @@ async def run_cycle(config: CycleConfig, output: Path) -> dict[str, Any]:
     evidence.reserve(receipt)
     guard = _CostGuard(config, started)
     errors: list[str] = []
+    refusal: dict[str, Any] | None = None
     try:
         await bootstrap_runtime()
-        try:
-            await _dispatch_phases(config, evidence, guard, receipt)
-        except Exception as exc:  # a dispatch failure still owes evidence
-            errors.append(f"{type(exc).__name__}: {exc}")
-        try:
-            await _finalize(config, evidence, guard, receipt)
-        except Exception as exc:  # so does a read-back failure
-            errors.append(f"finalize:{type(exc).__name__}: {exc}")
+        preflight = await _preflight_phase(config, evidence)
+        receipt["provider_preflight"] = preflight
+        if preflight["status"] == "ok":
+            try:
+                await _dispatch_phases(config, evidence, guard, receipt)
+            except Exception as exc:  # a dispatch failure still owes evidence
+                errors.append(f"{type(exc).__name__}: {exc}")
+            try:
+                await _finalize(config, evidence, guard, receipt)
+            except Exception as exc:  # so does a read-back failure
+                errors.append(f"finalize:{type(exc).__name__}: {exc}")
+        else:
+            # Nothing is dispatched, nothing is drained, nothing is repaired.
+            # Stopping the database is the phase runner's job, so returning is
+            # the whole of the driver's part.
+            refusal = preflight
     finally:
         try:
             await shutdown_runtime()
         except Exception as exc:  # a drain failure must not eat the receipt
             errors.append(f"shutdown:{type(exc).__name__}: {exc}")
-    _seal(receipt, guard, evidence, errors)
+    _seal(receipt, guard, evidence, errors, provider_unavailable=refusal)
     evidence.finish(receipt)
     return receipt
 
@@ -1064,6 +1285,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--candidate-limit", type=int, default=PRODUCT_CANDIDATE_LIMIT_CEILING)
     parser.add_argument("--max-drain-passes", type=int, default=6)
     parser.add_argument("--expected-sources", type=int, default=EXPECTED_SOURCES)
+    parser.add_argument(
+        "--skip-provider-preflight",
+        action="store_true",
+        help=(
+            "dispatch without proving the LLM credential is live; needed offline, "
+            "for a provider with no free probe (gemini), and wherever the key is "
+            "bound only as SIBYL_ANTHROPIC_API_KEY, which the SDK cannot see"
+        ),
+    )
     return parser
 
 
@@ -1078,7 +1308,20 @@ def config_from_args(args: argparse.Namespace) -> CycleConfig:
         price_input_per_million=args.price_input,
         price_output_per_million=args.price_output,
         expected_sources=args.expected_sources,
+        skip_provider_preflight=args.skip_provider_preflight,
     )
+
+
+#: Only a cycle that satisfied every predicate exits clean. Each guard status
+#: is spelled out so the phase runner's caller can read the contract here
+#: rather than infer it from a fallback.
+EXIT_CODES: dict[str, int] = {
+    STATUS_COMPLETE: 0,
+    STATUS_INCOMPLETE: 1,
+    STATUS_COST_CEILING: 1,
+    STATUS_RING_WRAP: 1,
+    STATUS_PROVIDER_UNAVAILABLE: 1,
+}
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -1104,7 +1347,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         + "\n"
     )
-    return 0 if receipt["status"] == STATUS_COMPLETE else 1
+    return EXIT_CODES.get(receipt["status"], 1)
 
 
 if __name__ == "__main__":
