@@ -24,6 +24,7 @@ from sibyl.persistence.auth_runtime import (
 )
 from sibyl_core.ai.llm.budget import set_llm_budget_context
 from sibyl_core.auth import AuthOrganization, AuthUser, OrganizationRole
+from sibyl_core.backends.surreal.connection import SurrealConnectTimeout
 
 _logger = logging.getLogger(__name__)
 
@@ -93,6 +94,21 @@ def _api_key_claims(auth: ApiKeyAuth, *, scopes: list[str]) -> dict[str, object]
     return claims
 
 
+def _auth_storage_unavailable(error: TimeoutError) -> HTTPException:
+    """Return the 503 for an auth store that could not answer in time.
+
+    A connect timeout says the API could not open a socket, which is a
+    different fault from a store that answered too slowly, so it gets its own
+    wording. Neither detail carries internals.
+    """
+    detail = (
+        "Authentication storage connection timed out"
+        if isinstance(error, SurrealConnectTimeout)
+        else "Authentication storage temporarily unavailable"
+    )
+    return HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=detail)
+
+
 async def resolve_claims(
     request: Request, _session: object | None = None
 ) -> dict[str, object] | None:
@@ -120,14 +136,16 @@ async def resolve_claims(
                     setattr(request.state, _VALIDATED_AUTH_CLAIMS_ATTR, resolved_claims)
                     return resolved_claims
             except TimeoutError as e:
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="Authentication storage temporarily unavailable",
-                ) from e
+                raise _auth_storage_unavailable(e) from e
             return None
 
         if token.startswith("sk_"):
-            auth = await authenticate_api_key(token)
+            # API keys hit the same auth pool as a session, so they owe the
+            # caller the same 503 rather than an unhandled timeout.
+            try:
+                auth = await authenticate_api_key(token)
+            except TimeoutError as e:
+                raise _auth_storage_unavailable(e) from e
             if auth:
                 scopes = list(auth.scopes or [])
                 if _is_rest_request(request) and not _api_key_allows_rest(
@@ -170,10 +188,7 @@ async def get_current_user(
     try:
         user = await get_user_by_id(user_id)
     except TimeoutError as e:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication storage temporarily unavailable",
-        ) from e
+        raise _auth_storage_unavailable(e) from e
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
     await _validate_replay_server_instance(request)
@@ -250,10 +265,7 @@ async def build_auth_context(
     try:
         ctx = await resolve_auth_context(claims=claims, session=session)
     except TimeoutError as e:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication storage temporarily unavailable",
-        ) from e
+        raise _auth_storage_unavailable(e) from e
     except InvalidAuthClaimsError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from e
     except UserNotFoundError as e:

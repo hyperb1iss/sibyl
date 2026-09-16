@@ -106,14 +106,26 @@ def _error_category(message: str) -> str:
     return "query_error"
 
 
-def _error_log_fields(error: BaseException) -> dict[str, int | str]:
+def _error_log_fields(error: BaseException) -> dict[str, int | str | float]:
+    from sibyl_core.backends.surreal.connection import SurrealConnectTimeout
+
     message = _error_message(error)
-    return {
+    # A connect timeout never reached the server, so it must not read as a
+    # query timeout in the receipt.
+    category = (
+        "connect_timeout" if isinstance(error, SurrealConnectTimeout) else _error_category(message)
+    )
+    fields: dict[str, int | str | float] = {
         "error_type": type(error).__name__,
-        "error_category": _error_category(message),
+        "error_category": category,
         "error_hash": fingerprint_text(message),
         "error_length": len(message),
     }
+    if isinstance(error, SurrealConnectTimeout):
+        fields["connect_timeout_seconds"] = error.timeout_seconds
+        fields["connect_attempts"] = error.attempt
+        fields["connect_budget_seconds"] = round(error.timeout_seconds * error.attempt, 3)
+    return fields
 
 
 def log_query(

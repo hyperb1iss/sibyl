@@ -93,6 +93,15 @@ class CoreConfig(BaseSettings):
         ge=0.0,
         description="Log SurrealDB queries at warning level when elapsed time exceeds this threshold.",
     )
+    surreal_connect_timeout_seconds: float = Field(
+        default=3.0,
+        gt=0.0,
+        le=120.0,
+        description=(
+            "Budget for opening one SurrealDB socket, including the websocket handshake. "
+            "Applies to remote URLs only; embedded stores open without a budget."
+        ),
+    )
     surreal_pool_size: int = Field(
         default=8,
         ge=1,

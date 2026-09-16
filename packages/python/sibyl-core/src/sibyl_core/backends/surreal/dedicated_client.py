@@ -9,13 +9,18 @@ import random
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
+import structlog
+
 from sibyl_core.backends.surreal.connection import (
+    SurrealConnectTimeout,
     _can_retry_query,
     _can_retry_raw_query,
     _is_transient_connection_error,
     _query_tokens,
+    _url_scheme,
 )
 from sibyl_core.backends.surreal.observability import (
     elapsed_ms,
@@ -28,6 +33,7 @@ if TYPE_CHECKING:
     from sibyl_core.backends.surreal.schema_version import SurrealExecute
 
 logger = logging.getLogger(__name__)
+log = structlog.get_logger()
 _MAX_CLOSED_CONNECTION_RETRIES = 2
 _MAX_TRANSACTION_CONFLICT_RETRIES = 8
 _TRANSACTION_CONFLICT_RETRY_BASE_SECONDS = 0.05
@@ -42,6 +48,17 @@ def _is_embedded_url(url: str) -> bool:
     # Embedded stores are single-writer and `memory://` hands out a fresh empty
     # database per connection, so a pool there would fragment state.
     return url.startswith(_EMBEDDED_URL_SCHEMES)
+
+
+def _connect_timeout_seconds(url: str) -> float | None:
+    # Embedded stores open a local file rather than a socket, and a cold
+    # SurrealKV directory can legitimately take longer than a handshake
+    # budget, so only remote URLs get one.
+    if _is_embedded_url(url):
+        return None
+    from sibyl_core.config import core_config
+
+    return core_config.surreal_connect_timeout_seconds
 
 
 def _checked_query_result(response: object, *, all_results: bool = False) -> object:
@@ -115,6 +132,15 @@ def _can_replay_query(query: str, response: object = None) -> bool:
     return tokens.count("BEGIN") == 1 and tokens.count("COMMIT") == 1 and "CANCEL" not in tokens
 
 
+@dataclass(frozen=True, slots=True)
+class PoolHealth:
+    """Outcome of one pool sweep: slots checked, slots dropped, and why."""
+
+    checked: int
+    reaped: int
+    failures: tuple[str, ...] = ()
+
+
 def _transaction_conflict_retry_delay(retry_count: int) -> float:
     ceiling = min(
         _TRANSACTION_CONFLICT_RETRY_MAX_SECONDS,
@@ -145,7 +171,7 @@ class _PooledConnection:
         self._client: SurrealClient | None = None
         self._connect_lock = asyncio.Lock()
 
-    async def connect(self) -> SurrealClient:
+    async def connect(self, *, attempt: int = 1) -> SurrealClient:
         if self._client is not None:
             return self._client
 
@@ -155,22 +181,64 @@ class _PooledConnection:
 
             from surrealdb import AsyncSurreal
 
+            started_at = query_start()
+            budget = _connect_timeout_seconds(self._url)
             client = cast(SurrealClient, AsyncSurreal(self._url))
             try:
-                if self._requires_auth():
-                    if self._token:
-                        await client.authenticate(self._token)
-                    elif self._username and self._password:
-                        await client.signin(
-                            {"username": self._username, "password": self._password}
-                        )
-                await client.use(self._namespace, self._database)
-            except Exception:
+                async with asyncio.timeout(budget):
+                    await self._handshake(client)
+            except TimeoutError as exc:
                 with contextlib.suppress(Exception):
                     await client.close()
+                elapsed = elapsed_ms(started_at)
+                # The SDK opens the socket lazily inside the first RPC, so a
+                # handshake stall surfaces here rather than on the statement
+                # that was about to run. Name it so the receipt cannot blame
+                # an innocent query.
+                timeout = budget if budget is not None else elapsed / 1000
+                failure = SurrealConnectTimeout(
+                    url=self._url, attempt=attempt, timeout_seconds=timeout
+                )
+                log.warning(
+                    "surreal_connect_failed",
+                    attempt=attempt,
+                    elapsed_ms=elapsed,
+                    timeout_seconds=budget,
+                    url_scheme=_url_scheme(self._url),
+                    namespace=self._namespace,
+                    database=self._database,
+                    # The raised class, so this line joins the query receipt
+                    # on error_type; the inner asyncio error is the cause.
+                    error_type=type(failure).__name__,
+                    cause_type=type(exc).__name__,
+                    error_category="connect_timeout",
+                )
+                raise failure from exc
+            except Exception as exc:
+                with contextlib.suppress(Exception):
+                    await client.close()
+                log.warning(
+                    "surreal_connect_failed",
+                    attempt=attempt,
+                    elapsed_ms=elapsed_ms(started_at),
+                    timeout_seconds=budget,
+                    url_scheme=_url_scheme(self._url),
+                    namespace=self._namespace,
+                    database=self._database,
+                    error_type=type(exc).__name__,
+                    error_category="connect_error",
+                )
                 raise
             self._client = client
             return client
+
+    async def _handshake(self, client: SurrealClient) -> None:
+        if self._requires_auth():
+            if self._token:
+                await client.authenticate(self._token)
+            elif self._username and self._password:
+                await client.signin({"username": self._username, "password": self._password})
+        await client.use(self._namespace, self._database)
 
     def _requires_auth(self) -> bool:
         return not self._url.startswith(("memory://", "surrealkv://"))
@@ -335,7 +403,10 @@ class DedicatedSurrealClient:
         drained = [await self._available.get() for _ in range(self._pool_size)]
         try:
             await asyncio.gather(*(connection.connect() for connection in drained))
-        except Exception:
+        except BaseException:
+            # BaseException, not Exception: a cancelled warm would otherwise
+            # leave the sockets it already opened behind on a client nobody
+            # holds.
             await asyncio.gather(
                 *(connection.drop() for connection in drained),
                 return_exceptions=True,
@@ -345,17 +416,41 @@ class DedicatedSurrealClient:
             for connection in drained:
                 self._available.put_nowait(connection)
 
-    async def ping(self) -> None:
-        connection = await self._available.get()
-        try:
-            client = await connection.connect()
-            await self._send_query(client, "RETURN true;", params={}, raw=False)
-        except Exception as exc:
-            if _is_transient_connection_error(exc):
-                await connection.drop()
-            raise
-        finally:
-            self._available.put_nowait(connection)
+    async def ping_pool(self) -> PoolHealth:
+        """Check each idle slot in turn, dropping the ones whose socket is gone.
+
+        One slot is held at a time so a sweep never freezes the whole pool,
+        and a dropped slot reconnects lazily on its next query rather than on
+        a request path.
+        """
+        checked = 0
+        reaped = 0
+        failures: list[str] = []
+        seen: set[int] = set()
+        for _ in range(self._pool_size):
+            try:
+                # Idle slots only. A busy slot is being proved healthy by the
+                # query holding it, and waiting on one would park the sweep
+                # behind a long query.
+                connection = self._available.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            try:
+                if id(connection) in seen:
+                    # Every idle slot has been checked already.
+                    continue
+                seen.add(id(connection))
+                checked += 1
+                try:
+                    client = await connection.connect()
+                    await self._send_query(client, "RETURN true;", params={}, raw=False)
+                except Exception as exc:
+                    failures.append(type(exc).__name__)
+                    reaped += 1
+                    await connection.drop()
+            finally:
+                self._available.put_nowait(connection)
+        return PoolHealth(checked=checked, reaped=reaped, failures=tuple(failures))
 
     @asynccontextmanager
     async def live_table(
@@ -397,7 +492,9 @@ class DedicatedSurrealClient:
                     if not can_retry:
                         while True:
                             try:
-                                client = await connection.connect()
+                                client = await connection.connect(
+                                    attempt=connection_retry_count + 1
+                                )
                                 await self._send_query(
                                     client,
                                     "RETURN true;",
@@ -418,7 +515,7 @@ class DedicatedSurrealClient:
                                     connection_retry_count,
                                     exc,
                                 )
-                    client = await connection.connect()
+                    client = await connection.connect(attempt=connection_retry_count + 1)
                     response = await self._send_query(client, query, params=params, raw=True)
                     transaction_retry_allowed = _can_replay_query(query, response)
                     if raw:
@@ -531,4 +628,4 @@ def _pop_query_label(params: QueryParams) -> str | None:
     return str(value)
 
 
-__all__ = ["DedicatedSurrealClient"]
+__all__ = ["DedicatedSurrealClient", "PoolHealth"]

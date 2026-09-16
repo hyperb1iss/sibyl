@@ -51,6 +51,8 @@ def _is_connection_closed_error(exc: BaseException) -> bool:
 
 
 def _is_transient_connection_error(exc: BaseException) -> bool:
+    if isinstance(exc, SurrealConnectTimeout):
+        return True
     if _is_connection_closed_error(exc):
         return True
     if isinstance(exc, KeyError) and exc.args:
@@ -80,6 +82,29 @@ def _can_retry_raw_query(query: str) -> bool:
     ) and not (set(tokens) & _WRITE_QUERY_TOKENS)
 
 
+class SurrealConnectTimeout(TimeoutError):
+    """Raised when opening a SurrealDB socket exceeds the connect budget.
+
+    Distinct from a slow query: the statement never reached the server. It
+    subclasses ``TimeoutError`` so existing transient-error handling keeps
+    working, while callers that care about the difference can catch this.
+    """
+
+    def __init__(self, *, url: str, attempt: int, timeout_seconds: float) -> None:
+        super().__init__(
+            f"SurrealDB connect timed out after {timeout_seconds:.3f}s "
+            f"(attempt {attempt}, scheme {_url_scheme(url)})"
+        )
+        self.attempt = attempt
+        self.timeout_seconds = timeout_seconds
+        self.url_scheme = _url_scheme(url)
+
+
+def _url_scheme(url: str) -> str:
+    scheme, separator, _ = url.partition("://")
+    return scheme if separator else "unknown"
+
+
 class SurrealQueryError(RuntimeError):
     """Raised when SurrealDB returns an error envelope instead of result rows."""
 
@@ -91,6 +116,7 @@ class SurrealQueryError(RuntimeError):
 
 
 __all__ = [
+    "SurrealConnectTimeout",
     "SurrealQueryError",
     "_can_retry_query",
     "_can_retry_raw_query",

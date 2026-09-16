@@ -527,6 +527,14 @@ class Settings(BaseSettings):
         le=256,
         description="Override SurrealDB graph client pool size; defaults to surreal_pool_size.",
     )
+    surreal_pool_health_interval_seconds: float = Field(
+        default=30.0,
+        gt=0.0,
+        description=(
+            "Seconds between shared SurrealDB pool health sweeps, which drop dead "
+            "sockets so a request never pays the reconnect."
+        ),
+    )
 
     # LLM Provider configuration
     llm_provider: Literal["openai", "anthropic"] = Field(

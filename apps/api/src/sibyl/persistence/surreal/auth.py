@@ -22,6 +22,7 @@ from sibyl.persistence.auth_common import (
     RepositoryAuthContextResolver,
     UserNotFoundError,
 )
+from sibyl.persistence.surreal.pool import warm_shared_pool
 from sibyl_core.auth import (
     AuthContext,
     AuthMembership,
@@ -85,7 +86,13 @@ async def get_shared_surreal_auth_client() -> SurrealAuthClient:
 
     async with _shared_auth_client_lock:
         if _shared_auth_client_state.client is None:
-            _shared_auth_client_state.client = build_surreal_auth_client()
+            client = build_surreal_auth_client()
+            # Open the sockets here rather than on the first token validation,
+            # which would otherwise pay the handshake on a request path. A
+            # cold pool is still usable, so warming may fail loudly and the
+            # client is kept either way.
+            await warm_shared_pool(client, client_kind="auth")
+            _shared_auth_client_state.client = client
         return _shared_auth_client_state.client
 
 

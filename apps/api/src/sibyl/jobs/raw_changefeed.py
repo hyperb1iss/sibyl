@@ -23,6 +23,9 @@ log = structlog.get_logger()
 RAW_CAPTURE_CHANGEFEED_CONSUMER = "raw_capture_enrichment"
 RAW_CAPTURE_CHANGEFEED_TABLE = "raw_captures"
 RAW_CAPTURE_CHANGEFEED_CURSOR_TABLE = "content_changefeed_cursors"
+_MAX_PENDING_RAW_MEMORY_IDS = 500
+_VECTOR_FIELD_NAMES = frozenset({"embedding", "embeddings", "vector", "vectors"})
+_VECTOR_FIELD_SUFFIXES = ("_embedding", "_embeddings", "_vector", "_vectors")
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +33,9 @@ class RawCaptureChangefeedCursor:
     organization_id: str
     consumer_name: str
     versionstamp: int = 0
+    # Ids whose promotion enqueue failed on an earlier poll. They ride in the
+    # cursor record so the next poll retries them instead of losing them.
+    pending_raw_memory_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,41 +76,130 @@ async def poll_raw_capture_changefeed(
         next_versionstamp = _last_versionstamp(rows, default=cursor.versionstamp)
         changed_refs = _raw_capture_refs_for_org(rows, organization_id=organization_id)
         raw_memory_ids = [ref.raw_memory_id for ref in changed_refs]
+        # Ids a previous poll could not enqueue come first, so a queue outage
+        # delays promotion by a poll instead of dropping it.
+        attempt_ids = _dedupe(cursor.pending_raw_memory_ids, raw_memory_ids)
         promotion_job_id: str | None = None
-        if raw_memory_ids:
-            promotion_job_id = await queue_raw_capture_changes(
-                organization_id,
-                raw_memory_ids=raw_memory_ids,
-                rows_seen=len(rows),
-                previous_versionstamp=cursor.versionstamp,
-                next_versionstamp=next_versionstamp,
-            )
-        if next_versionstamp > cursor.versionstamp:
+        enqueue_error: str | None = None
+        pending_ids: list[str] = []
+        dropped_ids = 0
+        if attempt_ids:
+            # An enqueue failure must not strand the cursor either. Leaving it
+            # behind replays the same oldest changes on every poll forever,
+            # which never delivers the batch and never advances, so the cursor
+            # moves on and carries the undelivered ids instead.
+            try:
+                promotion_job_id = await queue_raw_capture_changes(
+                    organization_id,
+                    raw_memory_ids=attempt_ids,
+                    rows_seen=len(rows),
+                    previous_versionstamp=cursor.versionstamp,
+                    next_versionstamp=next_versionstamp,
+                )
+            except Exception as exc:
+                enqueue_error = type(exc).__name__
+                pending_ids = attempt_ids[:_MAX_PENDING_RAW_MEMORY_IDS]
+                dropped_ids = len(attempt_ids) - len(pending_ids)
+                log.warning(
+                    "raw_capture_changefeed_enqueue_failed",
+                    organization_id=organization_id,
+                    consumer_name=consumer_name,
+                    error=str(exc),
+                    error_type=enqueue_error,
+                    raw_memory_count=len(attempt_ids),
+                    pending_raw_memory_count=len(pending_ids),
+                    dropped_raw_memory_count=dropped_ids,
+                    previous_versionstamp=cursor.versionstamp,
+                    next_versionstamp=next_versionstamp,
+                )
+        # Save when the feed advanced, and also when the carried set changed,
+        # so a retry queue is never left behind by a quiet poll.
+        if next_versionstamp > cursor.versionstamp or tuple(pending_ids) != tuple(
+            cursor.pending_raw_memory_ids
+        ):
             await _save_cursor(
                 client,
                 organization_id=organization_id,
                 consumer_name=consumer_name,
                 versionstamp=next_versionstamp,
-                metadata={
-                    "rows_seen": len(rows),
-                    "raw_memory_count": len(raw_memory_ids),
-                    "promotion_job_id": promotion_job_id,
-                },
+                metadata=_cursor_metadata(
+                    rows_seen=len(rows),
+                    raw_memory_ids=raw_memory_ids,
+                    promotion_job_id=promotion_job_id,
+                    enqueue_error=enqueue_error,
+                    pending_ids=pending_ids,
+                    dropped_ids=dropped_ids,
+                ),
             )
 
-    status = "queued" if promotion_job_id else "advanced" if rows else "idle"
+    status = _poll_status(
+        rows_seen=len(rows),
+        promotion_job_id=promotion_job_id,
+        enqueue_error=enqueue_error,
+    )
     result = {
         "organization_id": organization_id,
         "status": status,
         "rows_seen": len(rows),
         "changed_raw_memory_ids": raw_memory_ids,
+        "attempted_raw_memory_ids": attempt_ids,
+        "pending_raw_memory_ids": pending_ids,
+        "dropped_raw_memory_count": dropped_ids,
         "promotion_job_id": promotion_job_id,
+        "enqueue_error": enqueue_error,
         "previous_versionstamp": cursor.versionstamp,
         "next_versionstamp": next_versionstamp,
         "duration_ms": elapsed_ms(started_at),
     }
     log.info("raw_capture_changefeed_polled", **result)
     return result
+
+
+def _poll_status(*, rows_seen: int, promotion_job_id: str | None, enqueue_error: str | None) -> str:
+    if enqueue_error:
+        return "enqueue_failed"
+    if promotion_job_id:
+        return "queued"
+    return "advanced" if rows_seen else "idle"
+
+
+def _cursor_metadata(
+    *,
+    rows_seen: int,
+    raw_memory_ids: list[str],
+    promotion_job_id: str | None,
+    enqueue_error: str | None,
+    pending_ids: list[str],
+    dropped_ids: int,
+) -> dict[str, object]:
+    # The whole metadata object is replaced on every save, so anything that
+    # must survive the next poll is written here every time.
+    metadata: dict[str, object] = {
+        "rows_seen": rows_seen,
+        "raw_memory_count": len(raw_memory_ids),
+        "promotion_job_id": promotion_job_id,
+        "pending_raw_memory_ids": pending_ids,
+    }
+    if enqueue_error:
+        metadata["enqueue_error"] = enqueue_error
+    if dropped_ids:
+        # Past the carry cap the ids are only recoverable from the log, so say
+        # so in the record rather than leaving a silent gap.
+        metadata["dropped_raw_memory_count"] = dropped_ids
+    return metadata
+
+
+def _dedupe(*id_groups: Iterable[object]) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for group in id_groups:
+        for value in group:
+            text = _optional_str(value)
+            if text is None or text in seen:
+                continue
+            seen.add(text)
+            ordered.append(text)
+    return ordered
 
 
 async def poll_all_raw_capture_changefeeds(
@@ -142,7 +237,29 @@ async def _show_raw_capture_changes(
         f"SHOW CHANGES FOR TABLE {RAW_CAPTURE_CHANGEFEED_TABLE} SINCE {since} LIMIT $limit;",
         limit=limit,
     )
-    return [dict(row) for row in normalize_records(raw)]
+    # SHOW CHANGES cannot project fields, so every change arrives with the
+    # whole record, embedding vectors included. The consumer only needs ids,
+    # so the vectors are dropped here, before anything holds or re-encodes
+    # them.
+    return [strip_vector_fields(dict(row)) for row in normalize_records(raw)]
+
+
+def strip_vector_fields(value: Any) -> Any:
+    """Return a copy of a change payload without its embedding vectors."""
+    if isinstance(value, Mapping):
+        return {
+            str(key): strip_vector_fields(item)
+            for key, item in value.items()
+            if not _is_vector_field(str(key))
+        }
+    if isinstance(value, list | tuple):
+        return [strip_vector_fields(item) for item in value]
+    return value
+
+
+def _is_vector_field(name: str) -> bool:
+    lowered = name.lower()
+    return lowered in _VECTOR_FIELD_NAMES or lowered.endswith(_VECTOR_FIELD_SUFFIXES)
 
 
 async def _load_cursor(
@@ -154,7 +271,7 @@ async def _load_cursor(
     rows = await _execute_records(
         client,
         """
-        SELECT versionstamp FROM content_changefeed_cursors
+        SELECT versionstamp, metadata FROM content_changefeed_cursors
         WHERE organization_id = $organization_id
             AND table_name = $table_name
             AND consumer_name = $consumer_name
@@ -173,7 +290,17 @@ async def _load_cursor(
         organization_id=organization_id,
         consumer_name=consumer_name,
         versionstamp=_coerce_int(rows[0].get("versionstamp")),
+        pending_raw_memory_ids=tuple(_pending_ids_from_metadata(rows[0].get("metadata"))),
     )
+
+
+def _pending_ids_from_metadata(value: object) -> list[str]:
+    if not isinstance(value, Mapping):
+        return []
+    pending = value.get("pending_raw_memory_ids")
+    if not isinstance(pending, list | tuple):
+        return []
+    return _dedupe(pending)
 
 
 async def _save_cursor(
@@ -377,4 +504,5 @@ __all__ = [
     "poll_raw_capture_changefeed",
     "queue_raw_capture_changes",
     "raw_capture_ref_from_payload",
+    "strip_vector_fields",
 ]

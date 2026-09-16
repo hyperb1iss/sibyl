@@ -25,6 +25,7 @@ _ROLLUP_INTERVAL_SECONDS = 60
 _ROLLUP_RETENTION_HOURS = 24
 _ROLLUP_FAILURE_BACKOFF_SECONDS = 60.0
 _last_persisted_bucket: int | None = None
+_logged_failure_buckets: dict[str, int] = {}
 _next_scheduled_rollup_at = 0.0
 _scheduled_rollup_task: asyncio.Task[object] | None = None
 _persist_lock = asyncio.Lock()
@@ -86,11 +87,43 @@ async def persist_runtime_rollup(
                 raise RuntimeError(error)
             await _prune_old_rollups(client)
         except Exception as exc:
-            log.debug("runtime_telemetry_rollup_failed", error=str(exc))
+            _report_rollup_failure(exc, bucket=bucket, bucket_key=bucket_key)
             return None
 
         _last_persisted_bucket = bucket
         return record
+
+
+def _report_rollup_failure(error: Exception, *, bucket: int, bucket_key: str) -> None:
+    """Name a rollup failure once per error class per interval.
+
+    telemetry_rollups sat empty because every failure went to log.debug, so
+    nothing said why. Counting is unconditional; the warning is throttled by
+    error class so a persistent fault does not flood the log.
+    """
+    error_type = type(error).__name__
+    telemetry_registry().increment(
+        "sibyl_telemetry_rollup_failures_total",
+        labels={"error_type": error_type},
+    )
+    if _logged_failure_buckets.get(error_type) == bucket:
+        log.debug(
+            "runtime_telemetry_rollup_failed",
+            error=str(error),
+            error_type=error_type,
+            bucket_key=bucket_key,
+        )
+        return
+    # Only the current interval decides throttling, so older entries are
+    # dropped rather than accumulating one row per error class seen.
+    _logged_failure_buckets.clear()
+    _logged_failure_buckets[error_type] = bucket
+    log.warning(
+        "runtime_telemetry_rollup_failed",
+        error=str(error),
+        error_type=error_type,
+        bucket_key=bucket_key,
+    )
 
 
 async def list_runtime_rollups(*, limit: int = 120) -> list[dict[str, Any]]:
