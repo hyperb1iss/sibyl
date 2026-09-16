@@ -586,7 +586,12 @@ class ClientTransportMixin:
                     for item in list_pending_writes()
                     if not is_corrupt_pending_write(item)
                     and str(item.get("base_url")) == self.base_url
-                    and pending_identity_matches(item, identity, self._replay_scope)
+                    and pending_identity_matches(
+                        item,
+                        identity,
+                        self._replay_scope,
+                        cached_identity=self._owner_identity,
+                    )
                     and not (
                         str(item.get("method") or "").upper() == "POST"
                         and _is_read_like_post(str(item.get("path") or ""))
@@ -714,7 +719,12 @@ class ClientTransportMixin:
             try:
                 identity = await self._ensure_pending_identity()
                 pending = read_pending_write(pending_write_id)
-                if not pending_identity_matches(pending, identity, self._replay_scope):
+                if not pending_identity_matches(
+                    pending,
+                    identity,
+                    self._replay_scope,
+                    cached_identity=self._owner_identity,
+                ):
                     raise SibylClientError(
                         "Buffered write belongs to a different or unverified identity; "
                         "no mutation was sent.",
@@ -731,7 +741,12 @@ class ClientTransportMixin:
                     if (
                         is_corrupt_pending_write(earlier)
                         or earlier.get("base_url") != self.base_url
-                        or not pending_identity_matches(earlier, identity, self._replay_scope)
+                        or not pending_identity_matches(
+                            earlier,
+                            identity,
+                            self._replay_scope,
+                            cached_identity=self._owner_identity,
+                        )
                         or (str(earlier.get("created_at", "")), str(earlier["id"])) >= order
                     ):
                         continue

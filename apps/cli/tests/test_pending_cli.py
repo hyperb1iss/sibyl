@@ -115,6 +115,7 @@ def test_pending_writes_flush_replays_valid_entries_but_keeps_corrupt_ones(
             self.base_url = base_url
             self.context_name = context_name
             self._replay_scope = TEST_REPLAY_SCOPE
+            self._owner_identity = TEST_IDENTITY
 
         async def _ensure_pending_identity(self) -> dict[str, Any]:
             return TEST_IDENTITY
@@ -246,6 +247,7 @@ def test_pending_writes_claim_binds_and_retries_legacy_entries(
             self.context_name = context_name
             self.base_url = "http://testserver/api"
             self._replay_scope = TEST_REPLAY_SCOPE
+            self._owner_identity = TEST_IDENTITY
 
         async def _ensure_pending_identity(self) -> dict[str, Any]:
             return TEST_IDENTITY
@@ -304,6 +306,7 @@ def test_pending_writes_claim_fails_when_replay_lock_is_busy(
             self.context_name = context_name
             self.base_url = "http://testserver/api"
             self._replay_scope = TEST_REPLAY_SCOPE
+            self._owner_identity = TEST_IDENTITY
 
         async def _ensure_pending_identity(self) -> dict[str, Any]:
             return TEST_IDENTITY
@@ -361,6 +364,7 @@ def test_pending_writes_claim_reports_a_concurrent_queue_change(
             self.context_name = context_name
             self.base_url = "http://testserver/api"
             self._replay_scope = TEST_REPLAY_SCOPE
+            self._owner_identity = TEST_IDENTITY
 
         async def _ensure_pending_identity(self) -> dict[str, Any]:
             return TEST_IDENTITY
@@ -411,6 +415,7 @@ def test_pending_writes_flush_refuses_an_unclaimed_legacy_entry(
 
     class FakeClient:
         _replay_scope = TEST_REPLAY_SCOPE
+        _owner_identity = TEST_IDENTITY
 
         def __init__(self, *, base_url: str, context_name: str | None = None) -> None:
             self.base_url = base_url
@@ -450,6 +455,7 @@ def test_pending_writes_flush_replays_and_deletes(
             self.base_url = base_url
             self.context_name = context_name
             self._replay_scope = TEST_REPLAY_SCOPE
+            self._owner_identity = TEST_IDENTITY
 
         async def _ensure_pending_identity(self) -> dict[str, Any]:
             return TEST_IDENTITY
@@ -492,6 +498,7 @@ def test_pending_writes_flush_skips_read_like_replays(
             self.base_url = base_url
             self.context_name = context_name
             self._replay_scope = TEST_REPLAY_SCOPE
+            self._owner_identity = TEST_IDENTITY
 
         async def _ensure_pending_identity(self) -> dict[str, Any]:
             return TEST_IDENTITY
@@ -534,6 +541,7 @@ def test_pending_writes_flush_reuses_client_per_base_url(
             self.base_url = base_url
             self.context_name = context_name
             self._replay_scope = TEST_REPLAY_SCOPE
+            self._owner_identity = TEST_IDENTITY
             instances.append(self)
 
         async def _ensure_pending_identity(self) -> dict[str, Any]:
@@ -573,6 +581,7 @@ def test_pending_writes_flush_retains_writes_after_auth_refresh_failure(
             self.base_url = base_url
             self.context_name = context_name
             self._replay_scope = TEST_REPLAY_SCOPE
+            self._owner_identity = TEST_IDENTITY
 
         async def _ensure_pending_identity(self) -> dict[str, Any]:
             return TEST_IDENTITY
@@ -615,6 +624,7 @@ def test_pending_writes_flush_failure_summary_names_both_classes(
             self.base_url = base_url
             self.context_name = context_name
             self._replay_scope = TEST_REPLAY_SCOPE
+            self._owner_identity = TEST_IDENTITY
 
         async def _ensure_pending_identity(self) -> dict[str, Any]:
             return TEST_IDENTITY
@@ -1040,6 +1050,7 @@ def test_adopt_is_the_same_verb_and_says_what_it_will_replay(
         def __init__(self, *, context_name: str | None = None) -> None:
             self.base_url = "http://testserver/api"
             self._replay_scope = TEST_REPLAY_SCOPE
+            self._owner_identity = TEST_IDENTITY
 
         async def _ensure_pending_identity(self) -> dict[str, Any]:
             return TEST_IDENTITY
@@ -1072,3 +1083,129 @@ def test_adopt_is_the_same_verb_and_says_what_it_will_replay(
         "in silkcircuit: POST /memory/raw, PATCH /tasks/123." in flattened
     )
     assert pending_writes.list_pending_writes() == []
+
+
+def _write_contexts(home: Path, active: str = "local") -> None:
+    """Two contexts on different ports, so foreign really means foreign."""
+    (home / ".sibyl").mkdir(parents=True, exist_ok=True)
+    (home / ".sibyl" / "config.toml").write_text(
+        "\n".join(
+            [
+                f'active_context = "{active}"',
+                "",
+                "[contexts.local]",
+                'name = "local"',
+                'server_url = "http://localhost:3334"',
+                "",
+                "[contexts.remote]",
+                'name = "remote"',
+                'server_url = "http://localhost:3364"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_the_selected_context_decides_which_writes_are_foreign(
+    isolated_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Triage has to agree with the client about the current server.
+
+    Resolving the active context instead of the effective one made the write
+    for the server the operator selected the one that looked foreign, and
+    `discard --foreign` then deleted exactly the wrong payload.
+    """
+    from sibyl_cli.pending_identity import current_pending_owner
+
+    _write_contexts(isolated_home)
+    monkeypatch.setenv("SIBYL_CONTEXT", "remote")
+
+    base_url, _scope, _identity = current_pending_owner()
+
+    assert base_url == OTHER_LOCAL_BASE_URL
+
+
+def test_discard_foreign_keeps_the_writes_for_the_selected_context(
+    isolated_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_contexts(isolated_home)
+    monkeypatch.setenv("SIBYL_CONTEXT", "remote")
+    for_remote = _queued(base_url=OTHER_LOCAL_BASE_URL)
+    for_local = _queued(base_url=LOCAL_BASE_URL)
+
+    result = CliRunner().invoke(pending.app, ["discard", "--foreign"])
+
+    assert result.exit_code == 0
+    assert [item["id"] for item in pending_writes.list_pending_writes()] == [for_remote["id"]]
+    assert for_local["id"] != for_remote["id"]
+    assert OTHER_LOCAL_BASE_URL in " ".join(result.stdout.split())
+
+
+def test_discard_rejected_reaches_a_refusal_whose_owner_rotated_away(
+    isolated_home: Path,
+) -> None:
+    """A rejected payload is a payload problem, whoever owns the entry."""
+    _signed_in()
+    stranger = {**TEST_IDENTITY, "user_id": "44444444-4444-4444-4444-444444444444"}
+    orphaned = _queued(identity=stranger, path="/tasks")
+    pending_writes.record_pending_failure(
+        str(orphaned["id"]),
+        category="rejected",
+        status_code=422,
+        error_code="validation_error",
+        message="priority urgent is not supported",
+    )
+    keep = _queued(identity=stranger)
+
+    result = CliRunner().invoke(pending.app, ["discard", "--rejected"])
+
+    assert result.exit_code == 0
+    assert [item["id"] for item in pending_writes.list_pending_writes()] == [keep["id"]]
+
+
+def test_discard_rejected_leaves_another_servers_refusal_alone(
+    isolated_home: Path,
+) -> None:
+    _signed_in()
+    elsewhere = _queued(base_url=OTHER_LOCAL_BASE_URL, path="/tasks")
+    pending_writes.record_pending_failure(
+        str(elsewhere["id"]),
+        category="rejected",
+        status_code=422,
+        error_code="validation_error",
+    )
+
+    result = CliRunner().invoke(pending.app, ["discard", "--rejected"])
+
+    assert result.exit_code == 0
+    assert [item["id"] for item in pending_writes.list_pending_writes()] == [elsewhere["id"]]
+
+
+def test_a_write_the_lineage_still_owns_is_not_labelled_ownerless(
+    isolated_home: Path,
+) -> None:
+    """An automation token records no owner but its scope still replays."""
+    from sibyl_cli.client_transport import _auth_replay_scope
+
+    scope = _auth_replay_scope(None, "env-token")
+    pending_writes.create_pending_write(
+        method="POST",
+        path="/memory/raw",
+        base_url=LOCAL_BASE_URL,
+        json_payload={"title": "Automation"},
+        params=None,
+        replay_scope=scope,
+        ownership_reason="The credential was supplied per command.",
+    )
+    summary = pending._summary(
+        pending_writes.list_pending_writes()[0],
+        base_url=LOCAL_BASE_URL,
+        replay_scope=scope,
+        identity=None,
+    )
+
+    assert summary["class"] == "retrying"
+    assert "supplied per command" not in pending._state_label(summary)

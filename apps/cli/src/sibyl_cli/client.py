@@ -138,6 +138,23 @@ class SibylClient(
 _clients: dict[str | None, SibylClient] = {}
 
 
+def resolve_client_context_name() -> str | None:
+    """Resolve the context every command actually talks to.
+
+    The override, the environment variable, and the directory pin all count, so
+    anything that has to agree with the client about the current server has to
+    resolve through here rather than reading the active context directly.
+    """
+    from sibyl_cli import config_store
+    from sibyl_cli.state import get_context_override
+
+    return (
+        get_context_override()
+        if _paired_automation_api_url()
+        else config_store.resolve_context_name()
+    )
+
+
 def get_client(context_name: str | None = None) -> SibylClient:
     """Get a client instance for the given context.
 
@@ -161,14 +178,7 @@ def get_client(context_name: str | None = None) -> SibylClient:
 
     # Resolve the effective context when one isn't explicitly provided.
     if context_name is None:
-        from sibyl_cli import config_store
-        from sibyl_cli.state import get_context_override
-
-        context_name = (
-            get_context_override()
-            if _paired_automation_api_url()
-            else config_store.resolve_context_name()
-        )
+        context_name = resolve_client_context_name()
 
     cache_key = context_name
 

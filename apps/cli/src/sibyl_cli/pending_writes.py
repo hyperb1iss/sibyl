@@ -599,6 +599,10 @@ def record_pending_metric(name: PendingMetric, count: int = 1) -> dict[str, int]
     return metrics
 
 
+def _scope_matches(item: dict[str, Any], replay_scope: str | None) -> bool:
+    return replay_scope is not None and item.get("replay_scope") == replay_scope
+
+
 def classify_pending_write(
     item: dict[str, Any],
     *,
@@ -622,8 +626,11 @@ def classify_pending_write(
     owner = normalize_replay_identity(item.get("replay_identity"))
     if owner is not None:
         # An owner from a different user, org, or server instance can never be
-        # replayed by this login, however healthy the destination looks.
-        owned = identity is None or owner == identity
+        # replayed by this login, however healthy the destination looks. With
+        # no local identity to compare, the credential lineage is the only
+        # claim left, so a foreign owner under a dead scope reads as unowned
+        # rather than borrowing the benefit of the doubt.
+        owned = owner == identity if identity is not None else _scope_matches(item, replay_scope)
     else:
         owned = pending_identity_matches(item, identity, replay_scope)
     # Ownership outranks the recorded failure: a write nobody can replay is

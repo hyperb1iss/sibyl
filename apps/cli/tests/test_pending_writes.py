@@ -658,3 +658,38 @@ def test_triage_counts_classes_and_ages_only_the_retrying_ones(
     assert triage["stale_retrying"] == 1
     assert 7000 < triage["oldest_stale_retrying_seconds"] < 7400
     assert young["id"] != stale["id"]
+
+
+def test_a_cold_identity_cache_does_not_flatter_a_foreign_owner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With no local identity, the lineage is the only claim left.
+
+    Treating every owned write as retrying whenever the cache is cold is the
+    same dishonesty the classes exist to remove: the operator is told a write
+    is on its way when no command can send it.
+    """
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    identity = _replay_identity()
+    stranger = {**identity, "user_id": "44444444-4444-4444-4444-444444444444"}
+
+    def queued(**kwargs: object) -> dict:
+        defaults: dict = {
+            "method": "POST",
+            "path": "/memory/raw",
+            "base_url": CURRENT_BASE_URL,
+            "json_payload": {"raw_content": "keep"},
+            "params": None,
+        }
+        return pending_writes.create_pending_write(**{**defaults, **kwargs})
+
+    mine = queued(replay_identity=identity, replay_scope="credential:live")
+    theirs = queued(replay_identity=stranger, replay_scope="credential:rotated-away")
+
+    assert _classified(mine, identity=None, replay_scope="credential:live") == "retrying"
+    assert _classified(theirs, identity=None, replay_scope="credential:live") == "unowned"
+    # And with the cache warm, the owner decides on its own.
+    assert _classified(theirs, identity=identity, replay_scope="credential:rotated-away") == (
+        "unowned"
+    )

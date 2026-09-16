@@ -567,3 +567,75 @@ def test_a_failed_owner_probe_never_breaks_a_login(monkeypatch: pytest.MonkeyPat
 
     assert pending_identity.warm_pending_replay_identity(BASE_URL, "fresh-token") is False
     assert pending_identity.stored_replay_identity(BASE_URL) is None
+
+
+@pytest.mark.asyncio
+async def test_a_server_without_the_identity_route_still_sends_the_mutation(
+    identity: dict,
+) -> None:
+    """Recording an owner must not turn a 404 server into a write-refusing one.
+
+    The identity route answers 404, so nothing can be freshly verified, but the
+    write now always carries the owner this login recorded. If the replay gate
+    treated that owner as unverifiable it would refuse every write on such a
+    server, which is worse than the orphaning it was meant to prevent.
+    """
+    auth_store.set_tokens(BASE_URL, "synthetic", "refresh")
+    auth_store.cache_pending_replay_identity(BASE_URL, "synthetic", identity)
+    paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path == "/api/auth/replay-identity":
+            return httpx.Response(404, json={"detail": "Not found"})
+        return httpx.Response(200, json={"ok": True})
+
+    client = attach(SibylClient(base_url=BASE_URL), handler)
+    assert await client.post("/memory/raw", json={"raw_content": "legacy server draft"}) == {
+        "ok": True
+    }
+    await client.close()
+    assert "/api/memory/raw" in paths
+    assert pending_writes.list_pending_writes() == []
+
+
+@pytest.mark.asyncio
+async def test_a_404_server_still_refuses_another_logins_owner(identity: dict) -> None:
+    """The lineage fallback is a fallback, not an amnesty."""
+    auth_store.set_tokens(BASE_URL, "synthetic", "refresh")
+    auth_store.cache_pending_replay_identity(BASE_URL, "synthetic", identity)
+    client = SibylClient(base_url=BASE_URL)
+    stranger = {**identity, "user_id": "44444444-4444-4444-4444-444444444444"}
+    queued(stranger, scope=client._replay_scope)
+    paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path == "/api/auth/replay-identity":
+            return httpx.Response(404, json={"detail": "Not found"})
+        return httpx.Response(200, json={"ok": True})
+
+    attach(client, handler)
+    await client._maybe_replay_pending_writes(ignore_backoff=True)
+    await client.close()
+    assert "/api/memory/raw" not in paths
+    assert len(pending_writes.list_pending_writes()) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_404_server_replays_its_own_recorded_owner(identity: dict) -> None:
+    auth_store.set_tokens(BASE_URL, "synthetic", "refresh")
+    auth_store.cache_pending_replay_identity(BASE_URL, "synthetic", identity)
+    client = SibylClient(base_url=BASE_URL)
+    original = queued(identity, scope=client._replay_scope)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/auth/replay-identity":
+            return httpx.Response(404, json={"detail": "Not found"})
+        assert request.headers["Idempotency-Key"] == original["idempotency_key"]
+        return httpx.Response(200, json={"ok": True})
+
+    attach(client, handler)
+    await client._maybe_replay_pending_writes(ignore_backoff=True)
+    await client.close()
+    assert pending_writes.list_pending_writes() == []

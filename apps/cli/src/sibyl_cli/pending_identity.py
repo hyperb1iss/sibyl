@@ -44,12 +44,38 @@ def normalize_replay_identity(value: object) -> dict[str, Any] | None:
 
 
 def pending_identity_matches(
-    item: dict[str, Any], identity: dict[str, Any] | None, replay_scope: str | None
+    item: dict[str, Any],
+    identity: dict[str, Any] | None,
+    replay_scope: str | None,
+    *,
+    cached_identity: dict[str, Any] | None = None,
 ) -> bool:
-    """Never fall back to credential lineage when a durable owner is present."""
+    """Decide whether this login may replay a buffered write.
+
+    A verified identity from the destination is the only proof that outranks
+    credential lineage, so it is used alone whenever the server supplies one.
+
+    `cached_identity` is the owner this login recorded locally, and it is
+    consulted only when the destination cannot verify identities at all, which
+    means a server without /auth/replay-identity. There, refusing every write
+    that carries an owner would refuse every write on that server, since a
+    buffered write now always records one. The lineage still has to agree, so
+    this is no weaker than the credential-scope check such a server got before
+    owners were recorded: the write must carry the owner this login holds and
+    the scope that buffered it.
+    """
     if item.get("replay_identity") is not None:
         owner = normalize_replay_identity(item["replay_identity"])
-        return owner is not None and identity is not None and owner == identity
+        if owner is None:
+            return False
+        if identity is not None:
+            return owner == identity
+        return (
+            cached_identity is not None
+            and owner == cached_identity
+            and replay_scope is not None
+            and item.get("replay_scope") == replay_scope
+        )
     return replay_scope is not None and item.get("replay_scope") == replay_scope
 
 
@@ -129,6 +155,12 @@ def current_pending_owner(
     Used by the reporting surfaces, which run after every command and must not
     add a request. A base URL of None means the destination could not be
     resolved, and callers then decline to classify anything as foreign.
+
+    The context resolves the way `get_client` resolves it, including the
+    --context override, SIBYL_CONTEXT, and the directory pin. Resolving it any
+    other way makes the triage disagree with the client about which server is
+    current, and then a write for the server the operator selected reads as
+    foreign and invites a discard.
     """
     from sibyl_cli.auth_store import normalize_api_url
     from sibyl_cli.client_transport import (
@@ -139,6 +171,10 @@ def current_pending_owner(
     )
 
     try:
+        if context_name is None:
+            from sibyl_cli.client import resolve_client_context_name
+
+            context_name = resolve_client_context_name()
         base_url = normalize_api_url(resolve_api_base_url(context_name))
         credential_scope_name = _auth_credential_scope(context_name)
         auth_token = _load_default_auth_token(base_url, credential_scope_name)

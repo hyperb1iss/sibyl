@@ -105,7 +105,9 @@ def _state_label(item: dict[str, Any]) -> str:
         state += f" ({' '.join(codes)})"
     if message := failure.get("message"):
         state += f": {message}"
-    elif ownership_reason := item.get("ownership_reason"):
+    elif item.get("class") != "retrying" and (ownership_reason := item.get("ownership_reason")):
+        # A write the credential lineage can still replay is not an ownership
+        # problem, whatever was unknown when it was buffered.
         state += f": {ownership_reason}"
     return state
 
@@ -294,20 +296,33 @@ def discard_writes(
             str(item["id"]) for item in list_pending_writes() if _is_buffered_read_like(item)
         ]
     elif foreign or rejected:
-        wanted = "foreign_server" if foreign else "needs_attention"
         base_url, replay_scope, identity = current_pending_owner()
-        if foreign and base_url is None:
-            error("No Sibyl context is configured, so no write can be called foreign.")
+        if base_url is None:
+            error("The current server could not be resolved, so neither selector can be scoped.")
             raise typer.Exit(code=1)
-        selected = [
-            str(item["id"])
-            for item in list_pending_writes()
-            if classify_pending_write(
+
+        def _class_of(item: dict[str, Any]) -> str:
+            return classify_pending_write(
                 item, base_url=base_url, replay_scope=replay_scope, identity=identity
             )
-            == wanted
-            and (foreign or _is_client_rejection(item))
-        ]
+
+        if foreign:
+            # Named explicitly, because this decides which payloads are deleted.
+            warn(f"Discarding writes buffered for a server other than {base_url}.")
+            selected = [
+                str(item["id"])
+                for item in list_pending_writes()
+                if _class_of(item) == "foreign_server"
+            ]
+        else:
+            # Ownership is irrelevant to a rejected payload: the server refused
+            # the request itself, so a write whose owner has since rotated away
+            # still has to be reachable here rather than only by ID.
+            selected = [
+                str(item["id"])
+                for item in list_pending_writes()
+                if _class_of(item) != "foreign_server" and _is_client_rejection(item)
+            ]
     else:
         selected = write_ids or []
     if not selected:
@@ -436,9 +451,7 @@ def claim_writes(
                     "to this account and organization."
                 )
             for item in matching:
-                warn(
-                    f"{str(item['id'])[:12]} {item['method']} {item['path']} at {item['base_url']}"
-                )
+                warn(f"{item['id']} {item['method']} {item['path']} at {item['base_url']}")
             if not yes and not typer.confirm("Continue?"):
                 raise typer.Abort()
 
@@ -462,7 +475,7 @@ def claim_writes(
                     else:
                         claimed += 1
             for write_id, reason in claim_failures:
-                error(f"Could not claim {write_id[:12]}: {reason}")
+                error(f"Could not claim {write_id}: {reason}")
             if claimed == 0:
                 raise typer.Exit(code=1)
             claimed_message = (
@@ -590,7 +603,7 @@ def flush_writes(
                 ):
                     blocked_resources.add(resource)
                     failures += 1
-                    warn(f"Skipped {write_id[:12]}: needs attention or an earlier related write.")
+                    warn(f"Skipped {write_id}: needs attention or an earlier related write.")
                     continue
                 names = [_context_name_for_base_url(base_url, replay_scope)]
                 if owner:
@@ -612,13 +625,18 @@ def flush_writes(
                         identity = await client._ensure_pending_identity()
                     except SibylClientError:
                         continue
-                    if pending_identity_matches(item, identity, client._replay_scope):
+                    if pending_identity_matches(
+                        item,
+                        identity,
+                        client._replay_scope,
+                        cached_identity=client._owner_identity,
+                    ):
                         selected_client = client
                         break
                 if selected_client is None:
                     failures += 1
                     blocked_resources.add(resource)
-                    error(f"Skipped {write_id[:12]}: no verified matching owner is signed in.")
+                    error(f"Skipped {write_id}: no verified matching owner is signed in.")
                     continue
                 try:
                     current = increment_attempts(write_id)
@@ -633,13 +651,13 @@ def flush_writes(
                     )
                     record_pending_metric("replayed")
                     replayed += 1
-                    success(f"Flushed {write_id[:12]}")
+                    success(f"Flushed {write_id}")
                 except FileNotFoundError:
                     continue
                 except SibylClientError as exc:
                     failures += 1
                     blocked_resources.add(resource)
-                    error(f"Failed {write_id[:12]}: {exc.detail or exc}")
+                    error(f"Failed {write_id}: {exc.detail or exc}")
             if failures:
                 warn(
                     f"{replayed} replayed, {failures} unresolved; payloads remain local. "
