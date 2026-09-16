@@ -23,6 +23,9 @@ log = structlog.get_logger()
 RAW_CAPTURE_CHANGEFEED_CONSUMER = "raw_capture_enrichment"
 RAW_CAPTURE_CHANGEFEED_TABLE = "raw_captures"
 RAW_CAPTURE_CHANGEFEED_CURSOR_TABLE = "content_changefeed_cursors"
+_MAX_RECORDED_FAILED_RAW_MEMORY_IDS = 50
+_VECTOR_FIELD_NAMES = frozenset({"embedding", "embeddings", "vector", "vectors"})
+_VECTOR_FIELD_SUFFIXES = ("_embedding", "_embeddings", "_vector", "_vectors")
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,40 +74,94 @@ async def poll_raw_capture_changefeed(
         changed_refs = _raw_capture_refs_for_org(rows, organization_id=organization_id)
         raw_memory_ids = [ref.raw_memory_id for ref in changed_refs]
         promotion_job_id: str | None = None
+        enqueue_error: str | None = None
         if raw_memory_ids:
-            promotion_job_id = await queue_raw_capture_changes(
-                organization_id,
-                raw_memory_ids=raw_memory_ids,
-                rows_seen=len(rows),
-                previous_versionstamp=cursor.versionstamp,
-                next_versionstamp=next_versionstamp,
-            )
+            # An enqueue failure must not strand the cursor. Leaving it behind
+            # replays the same oldest changes on every poll forever, which
+            # never delivers the batch and never advances, so the failure is
+            # recorded against the cursor instead and the feed moves on.
+            try:
+                promotion_job_id = await queue_raw_capture_changes(
+                    organization_id,
+                    raw_memory_ids=raw_memory_ids,
+                    rows_seen=len(rows),
+                    previous_versionstamp=cursor.versionstamp,
+                    next_versionstamp=next_versionstamp,
+                )
+            except Exception as exc:
+                enqueue_error = type(exc).__name__
+                log.warning(
+                    "raw_capture_changefeed_enqueue_failed",
+                    organization_id=organization_id,
+                    consumer_name=consumer_name,
+                    error=str(exc),
+                    error_type=enqueue_error,
+                    raw_memory_count=len(raw_memory_ids),
+                    previous_versionstamp=cursor.versionstamp,
+                    next_versionstamp=next_versionstamp,
+                )
         if next_versionstamp > cursor.versionstamp:
             await _save_cursor(
                 client,
                 organization_id=organization_id,
                 consumer_name=consumer_name,
                 versionstamp=next_versionstamp,
-                metadata={
-                    "rows_seen": len(rows),
-                    "raw_memory_count": len(raw_memory_ids),
-                    "promotion_job_id": promotion_job_id,
-                },
+                metadata=_cursor_metadata(
+                    rows_seen=len(rows),
+                    raw_memory_ids=raw_memory_ids,
+                    promotion_job_id=promotion_job_id,
+                    enqueue_error=enqueue_error,
+                ),
             )
 
-    status = "queued" if promotion_job_id else "advanced" if rows else "idle"
+    status = _poll_status(
+        rows_seen=len(rows),
+        promotion_job_id=promotion_job_id,
+        enqueue_error=enqueue_error,
+    )
     result = {
         "organization_id": organization_id,
         "status": status,
         "rows_seen": len(rows),
         "changed_raw_memory_ids": raw_memory_ids,
         "promotion_job_id": promotion_job_id,
+        "enqueue_error": enqueue_error,
         "previous_versionstamp": cursor.versionstamp,
         "next_versionstamp": next_versionstamp,
         "duration_ms": elapsed_ms(started_at),
     }
     log.info("raw_capture_changefeed_polled", **result)
     return result
+
+
+def _poll_status(*, rows_seen: int, promotion_job_id: str | None, enqueue_error: str | None) -> str:
+    if enqueue_error:
+        return "enqueue_failed"
+    if promotion_job_id:
+        return "queued"
+    return "advanced" if rows_seen else "idle"
+
+
+def _cursor_metadata(
+    *,
+    rows_seen: int,
+    raw_memory_ids: list[str],
+    promotion_job_id: str | None,
+    enqueue_error: str | None,
+) -> dict[str, object]:
+    metadata: dict[str, object] = {
+        "rows_seen": rows_seen,
+        "raw_memory_count": len(raw_memory_ids),
+        "promotion_job_id": promotion_job_id,
+    }
+    if enqueue_error:
+        # Keep enough to re-drive the lost batch by hand without letting a
+        # large poll bloat the cursor record.
+        metadata["enqueue_error"] = enqueue_error
+        metadata["enqueue_failed_raw_memory_ids"] = raw_memory_ids[
+            :_MAX_RECORDED_FAILED_RAW_MEMORY_IDS
+        ]
+    return metadata
 
 
 async def poll_all_raw_capture_changefeeds(
@@ -142,7 +199,29 @@ async def _show_raw_capture_changes(
         f"SHOW CHANGES FOR TABLE {RAW_CAPTURE_CHANGEFEED_TABLE} SINCE {since} LIMIT $limit;",
         limit=limit,
     )
-    return [dict(row) for row in normalize_records(raw)]
+    # SHOW CHANGES cannot project fields, so every change arrives with the
+    # whole record, embedding vectors included. The consumer only needs ids,
+    # so the vectors are dropped here, before anything holds or re-encodes
+    # them.
+    return [strip_vector_fields(dict(row)) for row in normalize_records(raw)]
+
+
+def strip_vector_fields(value: Any) -> Any:
+    """Return a copy of a change payload without its embedding vectors."""
+    if isinstance(value, Mapping):
+        return {
+            str(key): strip_vector_fields(item)
+            for key, item in value.items()
+            if not _is_vector_field(str(key))
+        }
+    if isinstance(value, list | tuple):
+        return [strip_vector_fields(item) for item in value]
+    return value
+
+
+def _is_vector_field(name: str) -> bool:
+    lowered = name.lower()
+    return lowered in _VECTOR_FIELD_NAMES or lowered.endswith(_VECTOR_FIELD_SUFFIXES)
 
 
 async def _load_cursor(
@@ -377,4 +456,5 @@ __all__ = [
     "poll_raw_capture_changefeed",
     "queue_raw_capture_changes",
     "raw_capture_ref_from_payload",
+    "strip_vector_fields",
 ]
