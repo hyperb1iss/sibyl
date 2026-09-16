@@ -9,7 +9,7 @@
 
 services:
   surrealdb:
-    image: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.3}
+    image: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.4}
     container_name: ${COMPOSE_PROJECT_NAME:-sibyl}-surrealdb
     command:
       [
@@ -33,7 +33,7 @@ services:
     restart: unless-stopped
 
   surrealdb-eval:
-    image: surrealdb/surrealdb:v3.2.3
+    image: surrealdb/surrealdb:v3.2.4
     container_name: ${COMPOSE_PROJECT_NAME:-sibyl}-surrealdb-eval
     profiles: ["eval"]
     command: ["start", "--log", "info", "rocksdb:///data/sibyl.db"]

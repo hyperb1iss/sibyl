@@ -137,7 +137,7 @@ COMPOSE_CONFIG = {
         },
         "surreal-init": surreal_volume_initializer(),
         "surrealdb": {
-            "image": "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.3}",
+            "image": "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.4}",
             "container_name": "sibyl-surrealdb",
             "depends_on": {"surreal-init": {"condition": "service_completed_successfully"}},
             "command": [
