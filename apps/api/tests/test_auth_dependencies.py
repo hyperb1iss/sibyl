@@ -424,3 +424,38 @@ async def test_user_only_mutation_checks_server_instance(monkeypatch, cached, ma
         assert exc.value.status_code == 409
         assert exc.value.detail["error"] == "replay_identity_mismatch"
     lookup.assert_awaited_once()
+
+
+def _api_key_request(token: str) -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/test",
+            "headers": [(b"authorization", f"Bearer {token}".encode())],
+            "state": {},
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_api_key_path_returns_the_same_503_on_a_connect_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _api_key_request("sk_live_example")
+    connect_timeout = SurrealConnectTimeout(
+        url="ws://localhost:8000/rpc", attempt=3, timeout_seconds=3.0
+    )
+    monkeypatch.setattr(
+        dependencies,
+        "authenticate_api_key",
+        AsyncMock(side_effect=connect_timeout),
+    )
+
+    with pytest.raises(dependencies.HTTPException) as exc:
+        await dependencies.resolve_claims(request)
+
+    # An API key hits the same auth pool, so it owes the same answer as a
+    # session rather than an unhandled timeout.
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "Authentication storage connection timed out"

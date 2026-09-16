@@ -296,3 +296,27 @@ async def test_rollup_failure_warns_again_in_a_new_interval(
         if entry["event"] == "runtime_telemetry_rollup_failed"
     ]
     assert levels == ["warning", "warning"]
+
+
+@pytest.mark.asyncio
+async def test_rollup_failure_throttle_does_not_accumulate_error_classes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    errors = [RuntimeError("one"), TimeoutError("two"), ValueError("three")]
+
+    class FailingClient:
+        async def execute_query(self, query: str, **params: object) -> object:
+            raise errors.pop(0)
+
+    async def failing_client() -> FailingClient:
+        return FailingClient()
+
+    monkeypatch.setattr(telemetry_service, "get_shared_surreal_content_client", failing_client)
+    monkeypatch.setattr(telemetry_service, "_logged_failure_buckets", {})
+
+    for index in range(3):
+        monkeypatch.setattr(telemetry_service, "_last_persisted_bucket", None)
+        await telemetry_service.persist_runtime_rollup(bucket=240 + index * 60)
+
+    # One entry per interval, not one per error class ever seen.
+    assert len(telemetry_service._logged_failure_buckets) == 1

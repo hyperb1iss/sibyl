@@ -114,6 +114,9 @@ def _report_rollup_failure(error: Exception, *, bucket: int, bucket_key: str) ->
             bucket_key=bucket_key,
         )
         return
+    # Only the current interval decides throttling, so older entries are
+    # dropped rather than accumulating one row per error class seen.
+    _logged_failure_buckets.clear()
     _logged_failure_buckets[error_type] = bucket
     log.warning(
         "runtime_telemetry_rollup_failed",

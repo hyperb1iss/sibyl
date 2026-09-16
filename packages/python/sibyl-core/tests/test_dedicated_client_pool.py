@@ -339,9 +339,10 @@ async def test_ping_drops_transient_failed_connection(monkeypatch) -> None:
         pool_size=1,
     )
 
-    with pytest.raises(TimeoutError):
-        await client.ping()
+    health = await client.ping_pool()
 
+    assert health.checked == 1
+    assert health.reaped == 1
     pooled = await client._available.get()
     assert pooled._client is None
     client._available.put_nowait(pooled)
@@ -625,3 +626,34 @@ async def test_ping_pool_reaps_dead_slots_and_reconnects_them_later(monkeypatch)
     # the sweep already absorbed.
     await client.execute_query("SELECT * FROM entity;")
     assert len(clients) == 3
+
+
+@pytest.mark.asyncio
+async def test_ping_pool_skips_busy_slots_instead_of_waiting(monkeypatch) -> None:
+    tracker = _ConcurrencyTracker()
+    _install_overlap_surreal(monkeypatch, tracker)
+    client = DedicatedSurrealClient(
+        url="ws://localhost:8000/rpc",
+        username="root",
+        password="root",
+        namespace="org_busy",
+        database="graph",
+        pool_size=1,
+    )
+
+    query = asyncio.create_task(client.execute_query("SELECT * FROM entity;"))
+    for _ in range(200):
+        if tracker.in_flight >= 1:
+            break
+        await asyncio.sleep(0.005)
+    assert tracker.in_flight >= 1
+
+    # The only slot is busy. A sweep that waited for it would be parked behind
+    # the query for as long as the query runs.
+    health = await asyncio.wait_for(client.ping_pool(), timeout=1.0)
+
+    assert health.checked == 0
+    assert health.reaped == 0
+
+    tracker.release.set()
+    await query

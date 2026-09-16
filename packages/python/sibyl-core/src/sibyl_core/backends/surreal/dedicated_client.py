@@ -61,10 +61,6 @@ def _connect_timeout_seconds(url: str) -> float | None:
     return core_config.surreal_connect_timeout_seconds
 
 
-def _connect_error_category(exc: BaseException) -> str:
-    return "connect_timeout" if isinstance(exc, TimeoutError) else "connect_error"
-
-
 def _checked_query_result(response: object, *, all_results: bool = False) -> object:
     """Validate every statement before selecting the requested result shape."""
     from surrealdb.errors import SurrealError, parse_query_error, parse_rpc_error
@@ -200,12 +196,8 @@ class _PooledConnection:
                 # that was about to run. Name it so the receipt cannot blame
                 # an innocent query.
                 timeout = budget if budget is not None else elapsed / 1000
-                failure: BaseException = (
-                    exc
-                    if isinstance(exc, SurrealConnectTimeout)
-                    else SurrealConnectTimeout(
-                        url=self._url, attempt=attempt, timeout_seconds=timeout
-                    )
+                failure = SurrealConnectTimeout(
+                    url=self._url, attempt=attempt, timeout_seconds=timeout
                 )
                 log.warning(
                     "surreal_connect_failed",
@@ -215,7 +207,10 @@ class _PooledConnection:
                     url_scheme=_url_scheme(self._url),
                     namespace=self._namespace,
                     database=self._database,
-                    error_type=type(exc).__name__,
+                    # The raised class, so this line joins the query receipt
+                    # on error_type; the inner asyncio error is the cause.
+                    error_type=type(failure).__name__,
+                    cause_type=type(exc).__name__,
                     error_category="connect_timeout",
                 )
                 raise failure from exc
@@ -231,7 +226,7 @@ class _PooledConnection:
                     namespace=self._namespace,
                     database=self._database,
                     error_type=type(exc).__name__,
-                    error_category=_connect_error_category(exc),
+                    error_category="connect_error",
                 )
                 raise
             self._client = client
@@ -408,7 +403,10 @@ class DedicatedSurrealClient:
         drained = [await self._available.get() for _ in range(self._pool_size)]
         try:
             await asyncio.gather(*(connection.connect() for connection in drained))
-        except Exception:
+        except BaseException:
+            # BaseException, not Exception: a cancelled warm would otherwise
+            # leave the sockets it already opened behind on a client nobody
+            # holds.
             await asyncio.gather(
                 *(connection.drop() for connection in drained),
                 return_exceptions=True,
@@ -417,18 +415,6 @@ class DedicatedSurrealClient:
         finally:
             for connection in drained:
                 self._available.put_nowait(connection)
-
-    async def ping(self) -> None:
-        connection = await self._available.get()
-        try:
-            client = await connection.connect()
-            await self._send_query(client, "RETURN true;", params={}, raw=False)
-        except Exception as exc:
-            if _is_transient_connection_error(exc):
-                await connection.drop()
-            raise
-        finally:
-            self._available.put_nowait(connection)
 
     async def ping_pool(self) -> PoolHealth:
         """Check each idle slot in turn, dropping the ones whose socket is gone.
@@ -442,11 +428,16 @@ class DedicatedSurrealClient:
         failures: list[str] = []
         seen: set[int] = set()
         for _ in range(self._pool_size):
-            connection = await self._available.get()
+            try:
+                # Idle slots only. A busy slot is being proved healthy by the
+                # query holding it, and waiting on one would park the sweep
+                # behind a long query.
+                connection = self._available.get_nowait()
+            except asyncio.QueueEmpty:
+                break
             try:
                 if id(connection) in seen:
-                    # Every idle slot has been checked; the rest are busy
-                    # serving queries and get checked on the next sweep.
+                    # Every idle slot has been checked already.
                     continue
                 seen.add(id(connection))
                 checked += 1

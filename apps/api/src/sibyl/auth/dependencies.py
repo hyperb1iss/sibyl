@@ -140,7 +140,12 @@ async def resolve_claims(
             return None
 
         if token.startswith("sk_"):
-            auth = await authenticate_api_key(token)
+            # API keys hit the same auth pool as a session, so they owe the
+            # caller the same 503 rather than an unhandled timeout.
+            try:
+                auth = await authenticate_api_key(token)
+            except TimeoutError as e:
+                raise _auth_storage_unavailable(e) from e
             if auth:
                 scopes = list(auth.scopes or [])
                 if _is_rest_request(request) and not _api_key_allows_rest(
