@@ -549,3 +549,79 @@ async def test_raw_query_preserves_envelopes_and_retries_only_atomic_conflicts(
     assert result is (success if expected_calls == 2 else original)
     assert len(calls) == expected_calls
     assert all(params == {"expected_revision": 7} for _, params in calls)
+
+
+def _install_flaky_surreal(monkeypatch, *, fail_pings: bool) -> list[Any]:
+    clients: list[Any] = []
+
+    class FakeAsyncSurreal:
+        def __init__(self, url: str) -> None:
+            self.url = url
+            self.closed = False
+            self.queries: list[str] = []
+            clients.append(self)
+
+        async def signin(self, credentials: dict[str, str]) -> None:
+            self.credentials = credentials
+
+        async def use(self, namespace: str, database: str) -> None:
+            self.namespace = namespace
+            self.database = database
+
+        async def query_raw(self, query: str, params: object | None = None) -> dict[str, object]:
+            self.queries.append(query)
+            if fail_pings and query == "RETURN true;":
+                raise RuntimeError("keepalive ping timeout")
+            return {"result": [{"status": "OK", "result": [{"ok": "yes"}]}]}
+
+        async def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setattr("surrealdb.AsyncSurreal", FakeAsyncSurreal)
+    return clients
+
+
+@pytest.mark.asyncio
+async def test_ping_pool_checks_every_idle_slot(monkeypatch) -> None:
+    _install_flaky_surreal(monkeypatch, fail_pings=False)
+    client = DedicatedSurrealClient(
+        url="ws://localhost:8000/rpc",
+        username="root",
+        password="root",
+        namespace="org_sweep",
+        database="graph",
+        pool_size=4,
+    )
+
+    health = await client.ping_pool()
+
+    assert health.checked == 4
+    assert health.reaped == 0
+    assert health.failures == ()
+
+
+@pytest.mark.asyncio
+async def test_ping_pool_reaps_dead_slots_and_reconnects_them_later(monkeypatch) -> None:
+    clients = _install_flaky_surreal(monkeypatch, fail_pings=True)
+    client = DedicatedSurrealClient(
+        url="ws://localhost:8000/rpc",
+        username="root",
+        password="root",
+        namespace="org_sweep",
+        database="graph",
+        pool_size=2,
+    )
+    await client.warm_pool()
+    assert len(clients) == 2
+
+    health = await client.ping_pool()
+
+    assert health.checked == 2
+    assert health.reaped == 2
+    assert set(health.failures) == {"RuntimeError"}
+    assert all(fake.closed for fake in clients)
+
+    # A reaped slot reconnects on its next query, off any request path that
+    # the sweep already absorbed.
+    await client.execute_query("SELECT * FROM entity;")
+    assert len(clients) == 3

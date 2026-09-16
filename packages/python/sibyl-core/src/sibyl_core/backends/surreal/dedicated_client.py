@@ -9,6 +9,7 @@ import random
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 import structlog
@@ -133,6 +134,15 @@ def _can_replay_query(query: str, response: object = None) -> bool:
     # words may suppress a retry, but cannot hide an intervening commit.
     tokens = _query_tokens(query)
     return tokens.count("BEGIN") == 1 and tokens.count("COMMIT") == 1 and "CANCEL" not in tokens
+
+
+@dataclass(frozen=True, slots=True)
+class PoolHealth:
+    """Outcome of one pool sweep: slots checked, slots dropped, and why."""
+
+    checked: int
+    reaped: int
+    failures: tuple[str, ...] = ()
 
 
 def _transaction_conflict_retry_delay(retry_count: int) -> float:
@@ -420,6 +430,37 @@ class DedicatedSurrealClient:
         finally:
             self._available.put_nowait(connection)
 
+    async def ping_pool(self) -> PoolHealth:
+        """Check each idle slot in turn, dropping the ones whose socket is gone.
+
+        One slot is held at a time so a sweep never freezes the whole pool,
+        and a dropped slot reconnects lazily on its next query rather than on
+        a request path.
+        """
+        checked = 0
+        reaped = 0
+        failures: list[str] = []
+        seen: set[int] = set()
+        for _ in range(self._pool_size):
+            connection = await self._available.get()
+            try:
+                if id(connection) in seen:
+                    # Every idle slot has been checked; the rest are busy
+                    # serving queries and get checked on the next sweep.
+                    continue
+                seen.add(id(connection))
+                checked += 1
+                try:
+                    client = await connection.connect()
+                    await self._send_query(client, "RETURN true;", params={}, raw=False)
+                except Exception as exc:
+                    failures.append(type(exc).__name__)
+                    reaped += 1
+                    await connection.drop()
+            finally:
+                self._available.put_nowait(connection)
+        return PoolHealth(checked=checked, reaped=reaped, failures=tuple(failures))
+
     @asynccontextmanager
     async def live_table(
         self, table: str, *, diff: bool = False
@@ -596,4 +637,4 @@ def _pop_query_label(params: QueryParams) -> str | None:
     return str(value)
 
 
-__all__ = ["DedicatedSurrealClient"]
+__all__ = ["DedicatedSurrealClient", "PoolHealth"]

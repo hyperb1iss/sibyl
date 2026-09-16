@@ -12,7 +12,6 @@ from sibyl_core.backends.surreal.dedicated_client import DedicatedSurrealClient
 
 log = structlog.get_logger()
 
-_CHECK_INTERVAL_SECONDS = 30.0
 _monitor_task: asyncio.Task[None] | None = None
 
 type ClientFactory = Callable[[], Awaitable[DedicatedSurrealClient]]
@@ -57,11 +56,17 @@ async def stop_surreal_connectivity_monitor() -> None:
 
 async def _monitor_loop() -> None:
     while True:
-        await asyncio.sleep(_CHECK_INTERVAL_SECONDS)
+        await asyncio.sleep(_health_interval_seconds())
         await asyncio.gather(
-            _ping_client("auth", _auth_client),
-            _ping_client("content", _content_client),
+            _sweep_client("auth", _auth_client),
+            _sweep_client("content", _content_client),
         )
+
+
+def _health_interval_seconds() -> float:
+    from sibyl.config import settings
+
+    return settings.surreal_pool_health_interval_seconds
 
 
 async def _warm_client(name: str, factory: ClientFactory) -> None:
@@ -70,12 +75,29 @@ async def _warm_client(name: str, factory: ClientFactory) -> None:
     log.info("shared_surreal_client_warmed", client=name)
 
 
-async def _ping_client(name: str, factory: ClientFactory) -> None:
+async def _sweep_client(name: str, factory: ClientFactory) -> None:
+    """Drop dead slots between requests so no caller pays the reconnect."""
     try:
         client = await factory()
-        await client.ping()
+        health = await client.ping_pool()
     except Exception as exc:
-        log.warning("shared_surreal_client_ping_failed", client=name, error=str(exc))
+        log.warning(
+            "shared_surreal_client_ping_failed",
+            client=name,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        return
+    if health.reaped:
+        log.warning(
+            "shared_surreal_pool_slots_reaped",
+            client=name,
+            checked=health.checked,
+            reaped=health.reaped,
+            failures=sorted(set(health.failures)),
+        )
+        return
+    log.debug("shared_surreal_pool_healthy", client=name, checked=health.checked)
 
 
 async def _auth_client() -> DedicatedSurrealClient:

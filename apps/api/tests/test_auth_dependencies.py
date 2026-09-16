@@ -9,6 +9,7 @@ from starlette.requests import Request
 
 from sibyl.auth import dependencies
 from sibyl_core.auth import OrganizationRole
+from sibyl_core.backends.surreal.connection import SurrealConnectTimeout
 
 
 def _make_request(*, user_id: str, org_id: str) -> Request:
@@ -200,6 +201,30 @@ async def test_build_auth_context_returns_503_when_auth_store_times_out(
 
     assert exc.value.status_code == 503
     assert exc.value.detail == "Authentication storage temporarily unavailable"
+
+
+@pytest.mark.asyncio
+async def test_build_auth_context_names_a_connect_timeout_separately(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = uuid4()
+    org_id = uuid4()
+    request = _make_request(user_id=str(user_id), org_id=str(org_id))
+    connect_timeout = SurrealConnectTimeout(
+        url="ws://localhost:8000/rpc", attempt=3, timeout_seconds=3.0
+    )
+    resolve_auth_context = AsyncMock(side_effect=connect_timeout)
+
+    monkeypatch.setattr(dependencies, "resolve_auth_context", resolve_auth_context)
+
+    with pytest.raises(dependencies.HTTPException) as exc:
+        await dependencies.build_auth_context(request)
+
+    # The store is fine; the API could not open a socket to it.
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "Authentication storage connection timed out"
+    assert "3.0" not in exc.value.detail
+    assert "localhost" not in exc.value.detail
 
 
 @pytest.mark.asyncio

@@ -22,6 +22,7 @@ from sibyl.persistence.content_common import (
     DocumentEntityRecord,
     RawCaptureRecord,
 )
+from sibyl.persistence.surreal.pool import warm_shared_pool
 from sibyl_core.backends.surreal import SurrealContentClient
 from sibyl_core.backends.surreal.fulltext import build_fulltext_query
 from sibyl_core.backends.surreal.knn import knn_search_effort
@@ -196,7 +197,11 @@ async def get_shared_surreal_content_client() -> SurrealContentClient:
 
     async with _shared_content_client_lock:
         if _shared_content_client_state.client is None:
-            _shared_content_client_state.client = build_surreal_content_client()
+            client = build_surreal_content_client()
+            # Same reasoning as the auth singleton: the handshake belongs on
+            # the build, not on whichever request happens to be first.
+            await warm_shared_pool(client, client_kind="content")
+            _shared_content_client_state.client = client
         return _shared_content_client_state.client
 
 
