@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from cryptography.fernet import Fernet
 
+from sibyl_core.ai.errors import provider_error_detail
 from sibyl_core.ai.llm.extractor import ExtractionUsage
 from sibyl_core.ai.transport import FailedExtractionUsage, TransportAttempt
 from sibyl_core.services import content_client, validation_receipts
@@ -278,7 +279,8 @@ class ValidationExecution:
         if row.get("state") == "running":
             await _query(
                 """UPDATE memory_validation_executions SET state = 'recorded',
-                        usage_json = $usage, result_json = $result, error_type = NONE
+                        usage_json = $usage, result_json = $result, error_type = NONE,
+                        error_detail = NONE
                     WHERE uuid = $uuid AND organization_id = $org AND principal_id = $principal
                         AND request_sha256 = $uuid AND state = 'running' AND purged = false
                         AND request_json = $request_json RETURN AFTER;""",
@@ -304,10 +306,14 @@ class ValidationExecution:
             usage = reported.model_dump(mode="json")
         else:
             usage = FailedExtractionUsage.model_validate(reported or {}).model_dump(mode="json")
+        # Operators reading a failed row should learn why the provider refused
+        # without replaying the request against a live provider.
+        refusal = provider_error_detail(failure)
         await self._finish(
             "cancelled" if isinstance(failure, asyncio.CancelledError) else "failed",
             usage=usage,
             error=type(failure).__name__,
+            error_detail=canonical(refusal) if refusal else None,
         )
 
     async def _finish(
@@ -317,6 +323,7 @@ class ValidationExecution:
         usage: object,
         result: str | None = None,
         error: str | None = None,
+        error_detail: str | None = None,
         request_json: str | None = None,
     ) -> None:
         request_guard = (
@@ -326,7 +333,8 @@ class ValidationExecution:
         )
         rows = await _query(
             """UPDATE memory_validation_executions SET state = $state, usage_json = $usage,
-                    result_json = IF purged THEN NONE ELSE $result END, error_type = $error
+                    result_json = IF purged THEN NONE ELSE $result END, error_type = $error,
+                    error_detail = $error_detail
                 WHERE uuid = $uuid AND organization_id = $org AND principal_id = $principal
                     AND state = 'running'"""
             + request_guard
@@ -337,6 +345,7 @@ class ValidationExecution:
             usage=canonical(usage),
             result=result,
             error=error,
+            error_detail=error_detail,
         )
         if len(rows) != 1:
             raise ValidationExecutionUnavailable("Validation outcome was not committed")

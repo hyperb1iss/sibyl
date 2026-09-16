@@ -61,6 +61,10 @@ VALIDATION_RECEIPT_RECOVERY_SCHEMA = """
 DEFINE FIELD IF NOT EXISTS recovery_key ON memory_validation_executions TYPE option<string>;
 """
 
+VALIDATION_PROVIDER_ERROR_SCHEMA = """
+DEFINE FIELD IF NOT EXISTS error_detail ON memory_validation_executions TYPE option<string>;
+"""
+
 VALIDATION_ORIGIN_SCHEMA = """
 DEFINE FIELD IF NOT EXISTS origin_execution_id ON memory_derivations TYPE option<string>;
 DEFINE EVENT IF NOT EXISTS retain_derivation_origin ON memory_derivations WHEN $event='UPDATE'
