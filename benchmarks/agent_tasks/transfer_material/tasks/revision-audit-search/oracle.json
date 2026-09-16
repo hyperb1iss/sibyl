@@ -1,0 +1,101 @@
+{
+  "schema_version": "sibyl-json-cli-cases-v1",
+  "cases": [
+    {
+      "id": "public-simple",
+      "input": {
+        "records": [
+          [
+            "a",
+            1,
+            false,
+            "red"
+          ]
+        ],
+        "query": "red"
+      },
+      "expected": {
+        "positions": [
+          0
+        ]
+      }
+    },
+    {
+      "id": "history-not-state",
+      "input": {
+        "records": [
+          [
+            "a",
+            1,
+            false,
+            "red"
+          ],
+          [
+            "a",
+            2,
+            false,
+            "blue"
+          ]
+        ],
+        "query": "red"
+      },
+      "expected": {
+        "positions": [
+          0
+        ]
+      }
+    },
+    {
+      "id": "deletion-is-record",
+      "input": {
+        "records": [
+          [
+            "a",
+            1,
+            false,
+            "note"
+          ],
+          [
+            "a",
+            2,
+            true,
+            "removed note"
+          ]
+        ],
+        "query": "note"
+      },
+      "expected": {
+        "positions": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "id": "empty-query",
+      "input": {
+        "records": [
+          [
+            "a",
+            3,
+            false,
+            "x"
+          ],
+          [
+            "a",
+            1,
+            false,
+            "y"
+          ]
+        ],
+        "query": ""
+      },
+      "expected": {
+        "positions": [
+          0,
+          1
+        ]
+      }
+    }
+  ]
+}

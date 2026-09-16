@@ -1,0 +1,83 @@
+{
+  "schema_version": "sibyl-json-cli-cases-v1",
+  "cases": [
+    {
+      "id": "public-simple",
+      "input": {
+        "gap": 2,
+        "ticks": [
+          1,
+          2,
+          5
+        ]
+      },
+      "expected": {
+        "bursts": [
+          [
+            1,
+            2
+          ],
+          [
+            5
+          ]
+        ]
+      }
+    },
+    {
+      "id": "backward-reset",
+      "input": {
+        "gap": 3,
+        "ticks": [
+          5,
+          2,
+          3
+        ]
+      },
+      "expected": {
+        "bursts": [
+          [
+            5
+          ],
+          [
+            2,
+            3
+          ]
+        ]
+      }
+    },
+    {
+      "id": "duplicates",
+      "input": {
+        "gap": 0,
+        "ticks": [
+          2,
+          2,
+          1,
+          1
+        ]
+      },
+      "expected": {
+        "bursts": [
+          [
+            2,
+            2
+          ],
+          [
+            1,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "id": "empty",
+      "input": {
+        "gap": 2,
+        "ticks": []
+      },
+      "expected": {
+        "bursts": []
+      }
+    }
+  ]
+}

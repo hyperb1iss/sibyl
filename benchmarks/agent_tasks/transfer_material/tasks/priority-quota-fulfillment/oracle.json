@@ -1,0 +1,93 @@
+{
+  "schema_version": "sibyl-json-cli-cases-v1",
+  "cases": [
+    {
+      "id": "public-simple",
+      "input": {
+        "available": 10,
+        "requests": [
+          {
+            "id": "a",
+            "need": 3,
+            "priority": 1
+          }
+        ]
+      },
+      "expected": {
+        "granted": {
+          "a": 3
+        },
+        "remaining": 7
+      }
+    },
+    {
+      "id": "priority-not-weight",
+      "input": {
+        "available": 5,
+        "requests": [
+          {
+            "id": "a",
+            "need": 4,
+            "priority": 0
+          },
+          {
+            "id": "b",
+            "need": 9,
+            "priority": 1
+          }
+        ]
+      },
+      "expected": {
+        "granted": {
+          "a": 4,
+          "b": 1
+        },
+        "remaining": 0
+      }
+    },
+    {
+      "id": "tie",
+      "input": {
+        "available": 3,
+        "requests": [
+          {
+            "id": "b",
+            "need": 5,
+            "priority": 1
+          },
+          {
+            "id": "a",
+            "need": 2,
+            "priority": 1
+          }
+        ]
+      },
+      "expected": {
+        "granted": {
+          "b": 1,
+          "a": 2
+        },
+        "remaining": 0
+      }
+    },
+    {
+      "id": "no-stock",
+      "input": {
+        "available": 0,
+        "requests": [
+          {
+            "id": "a",
+            "need": 8,
+            "priority": 0
+          }
+        ]
+      },
+      "expected": {
+        "granted": {
+          "a": 0
+        },
+        "remaining": 0
+      }
+    }
+  ]
+}

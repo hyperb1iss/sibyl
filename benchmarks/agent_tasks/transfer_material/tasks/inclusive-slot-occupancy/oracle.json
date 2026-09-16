@@ -1,0 +1,104 @@
+{
+  "schema_version": "sibyl-json-cli-cases-v1",
+  "cases": [
+    {
+      "id": "public-simple",
+      "input": {
+        "limit": 3,
+        "ranges": [
+          [
+            0,
+            2,
+            1
+          ]
+        ]
+      },
+      "expected": {
+        "peak": 1,
+        "over": []
+      }
+    },
+    {
+      "id": "single-slot",
+      "input": {
+        "limit": 0,
+        "ranges": [
+          [
+            2,
+            2,
+            4
+          ]
+        ]
+      },
+      "expected": {
+        "peak": 4,
+        "over": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "shared-end",
+      "input": {
+        "limit": 3,
+        "ranges": [
+          [
+            0,
+            1,
+            2
+          ],
+          [
+            1,
+            2,
+            2
+          ]
+        ]
+      },
+      "expected": {
+        "peak": 4,
+        "over": [
+          1
+        ]
+      }
+    },
+    {
+      "id": "negative",
+      "input": {
+        "limit": 1,
+        "ranges": [
+          [
+            -2,
+            -1,
+            2
+          ]
+        ]
+      },
+      "expected": {
+        "peak": 2,
+        "over": [
+          -2,
+          -1
+        ]
+      }
+    },
+    {
+      "id": "reversed-after-valid",
+      "input": {
+        "limit": 2,
+        "ranges": [
+          [
+            0,
+            2,
+            1
+          ],
+          [
+            4,
+            3,
+            1
+          ]
+        ]
+      },
+      "expected": null
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+Repair fleet profile resolution. Input {base,profiles:{name:object},nodes:[{id,use:[profile_names],patch}]}. Resolve each node independently: base, named profiles in order (missing names ignored), patch. Null removes; other present values replace including falsy values. Final schema required endpoint(nonempty string), retries(nonnegative int excluding bool), enabled(bool), optional note(string), no extras. Return {nodes:{id:resolved_map_or_null}}. Input objects must remain unchanged.
+
+Repair the existing program. Run python app.py as a JSON stdin/stdout program; public examples are in public_checks.py. Python standard library only.

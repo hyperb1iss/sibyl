@@ -1,0 +1,58 @@
+{
+  "all_exact": true,
+  "files": [
+    {
+      "path": "packages/python/sibyl-core/src/sibyl_core/retrieval/_search_fusion.py",
+      "sha256": "3170400cc9fe4070870e9b2e5ca92e77fe9c48eae83a7c0de13463f9d60ca751"
+    },
+    {
+      "path": "packages/python/sibyl-core/src/sibyl_core/retrieval/_search_plan.py",
+      "sha256": "dfbbd01dea93e9a6ff66c7b2bdc93d0272df142a580dd2b0d3d4a3fc52fcc785"
+    },
+    {
+      "path": "packages/python/sibyl-core/src/sibyl_core/retrieval/_search_sources.py",
+      "sha256": "026230ed442ff5f7b3133bf7f1cc88d41a22f231beee37b8a0fcd86594173b4f"
+    },
+    {
+      "path": "packages/python/sibyl-core/src/sibyl_core/retrieval/naive.py",
+      "sha256": "a322e52ff830125fd475288d39acb91429b6b4b84de79a7d8cfb187447887044"
+    },
+    {
+      "path": "packages/python/sibyl-core/src/sibyl_core/retrieval/search.py",
+      "sha256": "c0aee61786291bb7ed918975f2041d74e566048012df9132c61a54d296ac8777"
+    },
+    {
+      "path": "packages/python/sibyl-core/src/sibyl_core/services/content_models.py",
+      "sha256": "eb10381ba3ca20e5b01e12e0e9adf61cabd490f3a24928817271589a5d4cd5bd"
+    },
+    {
+      "path": "packages/python/sibyl-core/src/sibyl_core/services/content_raw_recall.py",
+      "sha256": "1f786b8c75e4017d31af2d0d237f655b92c8b1bf1f61ff47f63fecb7cd38fdb0"
+    },
+    {
+      "path": "packages/python/sibyl-core/src/sibyl_core/tasks/_evidence_json.py",
+      "sha256": "f147a034098f6d2708ce6d6c8e744c20c65d7e39dfcc8959838744e97a27c062"
+    },
+    {
+      "path": "packages/python/sibyl-core/src/sibyl_core/tasks/episode_evidence.py",
+      "sha256": "fc0abb8b4de2d67757d4c7daceaf568ae25ef6bd33e6cb48679407e4ae3231d5"
+    },
+    {
+      "path": "packages/python/sibyl-core/src/sibyl_core/tools/context.py",
+      "sha256": "a49991ff5e8579b481d20de8b8b81e9633214dfc8b1854bbd4253ddaa1eb87a7"
+    },
+    {
+      "path": "packages/python/sibyl-core/src/sibyl_core/tools/context_rendering.py",
+      "sha256": "5fde0a5ba7b52c5246b2253b8953370fa87ffc41aa071f1f1230c87968bf802b"
+    },
+    {
+      "path": "packages/python/sibyl-core/src/sibyl_core/memory_pipeline/source_lifecycle.py",
+      "sha256": "a5132f38235f76a2a12b70149cea30dcab2c7e28dad8e6a40f7d20ac27be55d0"
+    },
+    {
+      "path": "packages/python/sibyl-core/src/sibyl_core/retrieval/_search_candidates.py",
+      "sha256": "8664a6bbbfe1077cb50faaf37cfc16a746b77a23af5c01b07da7bc4fd9c8ab04"
+    }
+  ],
+  "selected_main": "e4d6b0af969cf89b275213780c8a72e352caed38"
+}

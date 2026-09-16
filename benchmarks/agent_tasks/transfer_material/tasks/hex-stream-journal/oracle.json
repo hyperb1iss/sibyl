@@ -1,0 +1,71 @@
+{
+  "schema_version": "sibyl-json-cli-cases-v1",
+  "cases": [
+    {
+      "id": "public-simple",
+      "input": {
+        "fragments": [
+          "310a320a"
+        ]
+      },
+      "expected": {
+        "entries": [
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "id": "split-unicode",
+      "input": {
+        "fragments": [
+          "22c3",
+          "a9220a"
+        ]
+      },
+      "expected": {
+        "entries": [
+          "é"
+        ]
+      }
+    },
+    {
+      "id": "final-record",
+      "input": {
+        "fragments": [
+          "0d0a7b2261223a",
+          "317d"
+        ]
+      },
+      "expected": {
+        "entries": [
+          {
+            "a": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "incomplete",
+      "input": {
+        "fragments": [
+          "310a22e2"
+        ]
+      },
+      "expected": {
+        "entries": null
+      }
+    },
+    {
+      "id": "invalid-json-after-record",
+      "input": {
+        "fragments": [
+          "310a7b"
+        ]
+      },
+      "expected": {
+        "entries": null
+      }
+    }
+  ]
+}

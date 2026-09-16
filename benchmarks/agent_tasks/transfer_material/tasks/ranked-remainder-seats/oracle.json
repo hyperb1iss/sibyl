@@ -1,0 +1,165 @@
+{
+  "schema_version": "sibyl-json-cli-cases-v1",
+  "cases": [
+    {
+      "id": "public-simple",
+      "input": {
+        "seats": 4,
+        "candidates": [
+          {
+            "name": "a",
+            "weight": 1
+          },
+          {
+            "name": "b",
+            "weight": 1
+          }
+        ],
+        "tie_order": [
+          "a",
+          "b"
+        ]
+      },
+      "expected": {
+        "seats": [
+          {
+            "name": "a",
+            "count": 2
+          },
+          {
+            "name": "b",
+            "count": 2
+          }
+        ]
+      }
+    },
+    {
+      "id": "explicit-tie",
+      "input": {
+        "seats": 1,
+        "candidates": [
+          {
+            "name": "a",
+            "weight": 1
+          },
+          {
+            "name": "b",
+            "weight": 1
+          }
+        ],
+        "tie_order": [
+          "b",
+          "a"
+        ]
+      },
+      "expected": {
+        "seats": [
+          {
+            "name": "a",
+            "count": 0
+          },
+          {
+            "name": "b",
+            "count": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "remainder-before-rank",
+      "input": {
+        "seats": 2,
+        "candidates": [
+          {
+            "name": "a",
+            "weight": 1
+          },
+          {
+            "name": "b",
+            "weight": 3
+          }
+        ],
+        "tie_order": [
+          "b",
+          "a"
+        ]
+      },
+      "expected": {
+        "seats": [
+          {
+            "name": "a",
+            "count": 0
+          },
+          {
+            "name": "b",
+            "count": 2
+          }
+        ]
+      }
+    },
+    {
+      "id": "zero",
+      "input": {
+        "seats": 1,
+        "candidates": [
+          {
+            "name": "zero",
+            "weight": 0
+          },
+          {
+            "name": "live",
+            "weight": 1
+          }
+        ],
+        "tie_order": [
+          "zero",
+          "live"
+        ]
+      },
+      "expected": {
+        "seats": [
+          {
+            "name": "zero",
+            "count": 0
+          },
+          {
+            "name": "live",
+            "count": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "large-exact",
+      "input": {
+        "seats": 9007199254740995,
+        "candidates": [
+          {
+            "name": "a",
+            "weight": 1
+          },
+          {
+            "name": "b",
+            "weight": 1
+          }
+        ],
+        "tie_order": [
+          "b",
+          "a"
+        ]
+      },
+      "expected": {
+        "seats": [
+          {
+            "name": "a",
+            "count": 4503599627370497
+          },
+          {
+            "name": "b",
+            "count": 4503599627370498
+          }
+        ]
+      }
+    }
+  ]
+}

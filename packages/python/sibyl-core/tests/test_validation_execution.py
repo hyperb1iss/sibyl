@@ -382,3 +382,58 @@ async def test_validation_execution_cancellation_during_result_write(candidate, 
     assert first == second and first["status"] == "no_findings"
     assert first["usage"]["requests"] == 1
     forbidden.assert_not_awaited()
+
+
+async def _running_execution(content_store, parent):
+    from sibyl_core.tasks.procedure_review import review_digest
+
+    request = {
+        "org": "org",
+        "principal": "owner",
+        "parent": parent,
+        "source_bindings": [],
+        "policy": "{}",
+    }
+    execution = ValidationExecution(review_digest(request), "org", "owner")
+    assert await execution.begin(
+        parent_id=parent, source_ids=["source"], policy="{}", request=request
+    )
+    return execution
+
+
+async def test_validation_execution_failure_records_provider_refusal(content_store):
+    from sibyl_core.ai.errors import LLMProviderError
+
+    refused = await _running_execution(content_store, "refused")
+    await refused.record_failure(
+        LLMProviderError(
+            "LLM provider request failed with HTTP 400",
+            provider="openai",
+            model="gpt-5",
+            details={
+                "status_code": 400,
+                "body": {
+                    "error": {
+                        "type": "billing_hard_limit_reached",
+                        "message": "You have reached your specified API usage limits",
+                        "prompt": "SECRET EVIDENCE TEXT",
+                    }
+                },
+            },
+        )
+    )
+    opaque = await _running_execution(content_store, "opaque")
+    await opaque.record_failure(TimeoutError("read timeout"))
+
+    stored = {row["parent_id"]: row for row in await rows("memory_validation_executions")}
+    assert stored["refused"]["error_type"] == "LLMProviderError"
+    assert json.loads(stored["refused"]["error_detail"]) == {
+        "message": "You have reached your specified API usage limits",
+        "status_code": 400,
+        "type": "billing_hard_limit_reached",
+    }
+    assert "SECRET" not in stored["refused"]["error_detail"]
+    assert stored["opaque"]["error_type"] == "TimeoutError"
+    # SELECT * omits NONE columns, so count the rows that really carry a detail.
+    carried = await rows("memory_validation_executions WHERE error_detail != NONE")
+    assert [row["parent_id"] for row in carried] == ["refused"]

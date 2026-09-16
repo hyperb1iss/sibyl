@@ -1,0 +1,193 @@
+{
+  "schema_version": "sibyl-json-cli-cases-v1",
+  "cases": [
+    {
+      "id": "public-simple",
+      "input": {
+        "base": {
+          "endpoint": "x",
+          "retries": 1,
+          "enabled": true
+        },
+        "profiles": {},
+        "nodes": [
+          {
+            "id": "a",
+            "use": [],
+            "patch": {}
+          }
+        ]
+      },
+      "expected": {
+        "nodes": {
+          "a": {
+            "endpoint": "x",
+            "retries": 1,
+            "enabled": true
+          }
+        }
+      }
+    },
+    {
+      "id": "isolation",
+      "input": {
+        "base": {
+          "endpoint": "x",
+          "retries": 1,
+          "enabled": true
+        },
+        "profiles": {},
+        "nodes": [
+          {
+            "id": "a",
+            "use": [],
+            "patch": {
+              "retries": 7
+            }
+          },
+          {
+            "id": "b",
+            "use": [],
+            "patch": {}
+          }
+        ]
+      },
+      "expected": {
+        "nodes": {
+          "a": {
+            "endpoint": "x",
+            "retries": 7,
+            "enabled": true
+          },
+          "b": {
+            "endpoint": "x",
+            "retries": 1,
+            "enabled": true
+          }
+        }
+      }
+    },
+    {
+      "id": "ordered-profiles",
+      "input": {
+        "base": {
+          "endpoint": "x",
+          "retries": 1,
+          "enabled": true
+        },
+        "profiles": {
+          "off": {
+            "enabled": false
+          },
+          "on": {
+            "enabled": true
+          }
+        },
+        "nodes": [
+          {
+            "id": "a",
+            "use": [
+              "off",
+              "missing",
+              "on"
+            ],
+            "patch": {
+              "retries": 0
+            }
+          }
+        ]
+      },
+      "expected": {
+        "nodes": {
+          "a": {
+            "endpoint": "x",
+            "retries": 0,
+            "enabled": true
+          }
+        }
+      }
+    },
+    {
+      "id": "final-types",
+      "input": {
+        "base": {
+          "endpoint": "x",
+          "retries": 1,
+          "enabled": true
+        },
+        "profiles": {},
+        "nodes": [
+          {
+            "id": "a",
+            "use": [],
+            "patch": {
+              "retries": true
+            }
+          }
+        ]
+      },
+      "expected": {
+        "nodes": {
+          "a": null
+        }
+      }
+    },
+    {
+      "id": "deletion-and-types",
+      "input": {
+        "base": {
+          "endpoint": "x",
+          "retries": 1,
+          "enabled": true
+        },
+        "profiles": {},
+        "nodes": [
+          {
+            "id": "missing",
+            "use": [],
+            "patch": {
+              "endpoint": null
+            }
+          },
+          {
+            "id": "extra",
+            "use": [],
+            "patch": {
+              "other": 1
+            }
+          },
+          {
+            "id": "note",
+            "use": [],
+            "patch": {
+              "note": 0
+            }
+          },
+          {
+            "id": "flag",
+            "use": [],
+            "patch": {
+              "enabled": 0
+            }
+          },
+          {
+            "id": "negative",
+            "use": [],
+            "patch": {
+              "retries": -1
+            }
+          }
+        ]
+      },
+      "expected": {
+        "nodes": {
+          "missing": null,
+          "extra": null,
+          "note": null,
+          "flag": null,
+          "negative": null
+        }
+      }
+    }
+  ]
+}

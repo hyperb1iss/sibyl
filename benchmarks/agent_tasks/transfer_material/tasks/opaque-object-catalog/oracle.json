@@ -1,0 +1,85 @@
+{
+  "schema_version": "sibyl-json-cli-cases-v1",
+  "cases": [
+    {
+      "id": "public-simple",
+      "input": {
+        "objects": {
+          "a": 7
+        },
+        "lookups": [
+          "a",
+          "b"
+        ]
+      },
+      "expected": {
+        "values": [
+          7,
+          null
+        ]
+      }
+    },
+    {
+      "id": "encoded-distinction",
+      "input": {
+        "objects": {
+          "a/b": 1,
+          "a%2fb": 2
+        },
+        "lookups": [
+          "a%2fb",
+          "a/b"
+        ]
+      },
+      "expected": {
+        "values": [
+          2,
+          1
+        ]
+      }
+    },
+    {
+      "id": "literal-invalid",
+      "input": {
+        "objects": {
+          "%GG": 3,
+          "../x": 4,
+          "a?b#c": 5
+        },
+        "lookups": [
+          "%GG",
+          "../x",
+          "a?b#c"
+        ]
+      },
+      "expected": {
+        "values": [
+          3,
+          4,
+          5
+        ]
+      }
+    },
+    {
+      "id": "double-escape",
+      "input": {
+        "objects": {
+          "%252f": 8,
+          "%2f": 9
+        },
+        "lookups": [
+          "%252f",
+          "%2f",
+          "/"
+        ]
+      },
+      "expected": {
+        "values": [
+          8,
+          9,
+          null
+        ]
+      }
+    }
+  ]
+}

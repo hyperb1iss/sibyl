@@ -61,6 +61,49 @@ class LLMTimeoutError(LLMError):
     """Raised when a provider request times out."""
 
 
+PROVIDER_ERROR_MESSAGE_LIMIT = 200
+
+
+def provider_error_detail(exc: BaseException) -> dict[str, Any] | None:
+    """Summarize a provider refusal so operators never need a live replay.
+
+    Only the HTTP status and the provider's own ``error.type`` and
+    ``error.message`` survive, with the message truncated. Request and prompt
+    text, and every other body field, are deliberately excluded: these receipts
+    are stored alongside transport rows that stay body-free because bodies can
+    echo secrets. Returns ``None`` when the exception carries nothing usable.
+    """
+    details = getattr(exc, "details", None)
+    if not isinstance(details, dict):
+        return None
+    status_code = details.get("status_code")
+    if isinstance(status_code, bool) or not isinstance(status_code, int):
+        status_code = None
+    error_type, message = _provider_error_body(details.get("body"))
+    if status_code is None and error_type is None and message is None:
+        return None
+    return {"status_code": status_code, "type": error_type, "message": message}
+
+
+def _provider_error_body(body: Any) -> tuple[str | None, str | None]:
+    """Read only the provider's declared error type and message from a body."""
+    if isinstance(body, str):
+        return None, body[:PROVIDER_ERROR_MESSAGE_LIMIT] or None
+    if not isinstance(body, dict):
+        return None, None
+    error = body.get("error")
+    if isinstance(error, str):
+        return None, error[:PROVIDER_ERROR_MESSAGE_LIMIT] or None
+    if not isinstance(error, dict):
+        return None, None
+    error_type = error.get("type")
+    message = error.get("message")
+    return (
+        error_type if isinstance(error_type, str) and error_type else None,
+        message[:PROVIDER_ERROR_MESSAGE_LIMIT] or None if isinstance(message, str) else None,
+    )
+
+
 @lru_cache(maxsize=1)
 def _pydantic_ai_error_types() -> tuple[type[Exception] | None, tuple[type[Exception], ...]]:
     try:
