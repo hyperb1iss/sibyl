@@ -528,7 +528,7 @@ async def test_raw_query_preserves_envelopes_and_retries_only_atomic_conflicts(
         calls.append((statement, params))
         return original if len(calls) == 1 else success
 
-    async def connect(_self):
+    async def connect(_self, *, attempt: int = 1):
         return object()
 
     async def sleep(_seconds):

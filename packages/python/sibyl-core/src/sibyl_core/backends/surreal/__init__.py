@@ -6,6 +6,10 @@ from typing import Any
 _EXPORTS = {
     "SurrealAuthClient": ("sibyl_core.backends.surreal.auth_client", "SurrealAuthClient"),
     "SurrealContentClient": ("sibyl_core.backends.surreal.content_client", "SurrealContentClient"),
+    "SurrealConnectTimeout": (
+        "sibyl_core.backends.surreal.connection",
+        "SurrealConnectTimeout",
+    ),
     "SurrealQueryError": ("sibyl_core.backends.surreal.connection", "SurrealQueryError"),
     "bootstrap_auth_schema": ("sibyl_core.backends.surreal.auth_schema", "bootstrap_auth_schema"),
     "bootstrap_content_schema": (
