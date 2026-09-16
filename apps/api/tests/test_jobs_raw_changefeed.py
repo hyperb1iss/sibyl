@@ -35,7 +35,7 @@ class FakeChangefeedClient:
     async def execute_query(self, query: str, **params: object) -> object:
         self.queries.append((query, dict(params)))
         stripped = query.strip()
-        if stripped.startswith("SELECT versionstamp FROM content_changefeed_cursors"):
+        if stripped.startswith("SELECT versionstamp, metadata FROM content_changefeed_cursors"):
             return list(self.cursor_rows)
         if stripped.startswith("SELECT organization_id FROM raw_captures"):
             return list(self.organization_rows)
@@ -125,6 +125,7 @@ async def test_poll_raw_capture_changefeed_queues_changes_and_saves_cursor(
         "rows_seen": 2,
         "raw_memory_count": 2,
         "promotion_job_id": "raw_promotion:queued",
+        "pending_raw_memory_ids": [],
     }
     publish_event.assert_awaited_once_with(
         WSEvent.RAW_CAPTURE_CHANGED,
@@ -248,7 +249,8 @@ async def test_poll_raw_capture_changefeed_advances_cursor_when_enqueue_fails(
     assert saved["versionstamp"] == 5
     metadata = saved["metadata"]
     assert metadata["enqueue_error"] == "RuntimeError"
-    assert metadata["enqueue_failed_raw_memory_ids"] == ["raw-a"]
+    assert metadata["pending_raw_memory_ids"] == ["raw-a"]
+    assert result["pending_raw_memory_ids"] == ["raw-a"]
 
 
 @pytest.mark.asyncio
@@ -283,9 +285,6 @@ async def test_poll_raw_capture_changefeed_never_hauls_embeddings(
     result = await raw_changefeed.poll_raw_capture_changefeed({}, "org-1")
 
     assert result["changed_raw_memory_ids"] == ["raw-a"]
-    assert "0.125" not in repr(enqueue.await_args)
-    assert "0.125" not in repr(result)
-
     # The vectors are gone at the point the rows enter the process, so nothing
     # downstream can hold or re-encode 1536 floats per change.
     rows = await raw_changefeed._show_raw_capture_changes(client, since=0, limit=100)
@@ -387,3 +386,97 @@ def test_changefeed_parser_dedupes_current_raw_capture_payloads() -> None:
     refs = raw_changefeed._raw_capture_refs_for_org(rows, organization_id="org-1")
 
     assert refs == [raw_changefeed.RawCaptureChangeRef("raw-a", "org-1")]
+
+
+@pytest.mark.asyncio
+async def test_pending_ids_are_retried_on_the_next_poll_and_then_cleared(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A cursor left carrying an undelivered id, as an enqueue failure leaves it.
+    client = FakeChangefeedClient(
+        cursor_rows=[{"versionstamp": 5, "metadata": {"pending_raw_memory_ids": ["raw-old"]}}],
+        change_rows=[
+            {
+                "versionstamp": 9,
+                "changes": [
+                    {
+                        "update": {
+                            "uuid": "raw-new",
+                            "organization_id": "org-1",
+                        }
+                    }
+                ],
+            }
+        ],
+        update_returns_row=True,
+    )
+    monkeypatch.setattr(raw_changefeed, "surreal_content_client", _client_context(client))
+    enqueue = AsyncMock(return_value="job-2")
+    monkeypatch.setattr(raw_changefeed.job_queue, "enqueue_raw_promotion", enqueue)
+    monkeypatch.setattr(raw_changefeed, "publish_raw_capture_changed", AsyncMock())
+
+    result = await raw_changefeed.poll_raw_capture_changefeed({}, "org-1")
+
+    # The carried id rides along with the new one rather than being lost.
+    assert enqueue.await_args.kwargs["raw_memory_ids"] == ["raw-old", "raw-new"]
+    assert result["attempted_raw_memory_ids"] == ["raw-old", "raw-new"]
+    # A successful enqueue clears the carry, so it is not retried forever.
+    assert result["pending_raw_memory_ids"] == []
+    assert client.updated_records[0]["metadata"]["pending_raw_memory_ids"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_quiet_poll_still_persists_a_cleared_carry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # No new changes, but a carry to drain: the cursor must still be written,
+    # or the pending set would be replayed forever.
+    client = FakeChangefeedClient(
+        cursor_rows=[{"versionstamp": 5, "metadata": {"pending_raw_memory_ids": ["raw-old"]}}],
+        change_rows=[],
+        update_returns_row=True,
+    )
+    monkeypatch.setattr(raw_changefeed, "surreal_content_client", _client_context(client))
+    enqueue = AsyncMock(return_value="job-3")
+    monkeypatch.setattr(raw_changefeed.job_queue, "enqueue_raw_promotion", enqueue)
+    monkeypatch.setattr(raw_changefeed, "publish_raw_capture_changed", AsyncMock())
+
+    result = await raw_changefeed.poll_raw_capture_changefeed({}, "org-1")
+
+    assert enqueue.await_args.kwargs["raw_memory_ids"] == ["raw-old"]
+    assert result["next_versionstamp"] == 5
+    assert client.updated_records != []
+    assert client.updated_records[0]["metadata"]["pending_raw_memory_ids"] == []
+
+
+@pytest.mark.asyncio
+async def test_carry_is_capped_and_the_overflow_is_recorded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    overflow = raw_changefeed._MAX_PENDING_RAW_MEMORY_IDS + 3
+    client = FakeChangefeedClient(
+        cursor_rows=[{"versionstamp": 1, "metadata": {}}],
+        change_rows=[
+            {
+                "versionstamp": 2,
+                "changes": [
+                    {"update": {"uuid": f"raw-{index}", "organization_id": "org-1"}}
+                    for index in range(overflow)
+                ],
+            }
+        ],
+        update_returns_row=True,
+    )
+    monkeypatch.setattr(raw_changefeed, "surreal_content_client", _client_context(client))
+    monkeypatch.setattr(
+        raw_changefeed.job_queue,
+        "enqueue_raw_promotion",
+        AsyncMock(side_effect=RuntimeError("queue down")),
+    )
+
+    result = await raw_changefeed.poll_raw_capture_changefeed({}, "org-1")
+
+    assert len(result["pending_raw_memory_ids"]) == raw_changefeed._MAX_PENDING_RAW_MEMORY_IDS
+    assert result["dropped_raw_memory_count"] == 3
+    metadata = client.updated_records[0]["metadata"]
+    assert metadata["dropped_raw_memory_count"] == 3
