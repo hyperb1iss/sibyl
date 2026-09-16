@@ -9,7 +9,7 @@ sibyl_version: "1.3.2"
 # fallback so the engine a host runs is a deliberate, reviewable value: an
 # unset variable would otherwise let a checkout's default silently upgrade
 # the database on the next restart, independently of sibyl_version.
-sibyl_surreal_image: "surrealdb/surrealdb:v3.2.3"
+sibyl_surreal_image: "surrealdb/surrealdb:v3.2.4"
 
 # Public hostname Caddy serves and requests a certificate for.
 sibyl_domain: sibyl.hyperbliss.tech

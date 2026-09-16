@@ -154,7 +154,7 @@ authorization says the treatment is not applicable.
 
 ### Plan a stage
 
-Prepare an isolated database directory, then start the pinned SurrealDB 3.2.3 eval service and
+Prepare an isolated database directory, then start the pinned SurrealDB 3.2.4 eval service and
 Valkey:
 
 ```bash
@@ -518,7 +518,7 @@ moon run bench-gate -- \
 - Official LongMemEval-V2 checkout available through `--official-repo`.
 - Full dataset prepared with `questions.jsonl`, `haystacks/lme_v2_<tier>.json`,
   `trajectories.jsonl`, and screenshots if image evidence is enabled.
-- Live disposable SurrealDB 3.2.3 and Valkey services, plus the Sibyl API and worker started with
+- Live disposable SurrealDB 3.2.4 and Valkey services, plus the Sibyl API and worker started with
   `api:serve-local-embeddings` and `api:worker-local-embeddings`. The adapter mutates the target
   through `/entities` and `/search`.
 - Reader model endpoint, normally OpenRouter `qwen/qwen3.5-9b` with `OPENROUTER_API_KEY`.
