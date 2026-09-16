@@ -7,6 +7,7 @@ from sibyl.persistence.auth_runtime import (
     resolve_accessible_project_graph_ids,
     resolve_auth_context,
 )
+from sibyl_core.ai.errors import provider_error_detail
 from sibyl_core.auth import OrganizationRole, ProjectRole
 from sibyl_core.services.content_models import RawMemory
 from sibyl_core.services.ordinary_cohort import (
@@ -75,6 +76,7 @@ async def reflect_cohorts(org: str, sources: list[RawMemory], *, dry_run: bool):
                     "source_ids": identifiers,
                     "outcome": "error",
                     "reason": str(exc),
+                    "provider_error": provider_error_detail(exc),
                     "stage_kind": "ordinary_cohort_preparation",
                 }
             )
@@ -118,6 +120,7 @@ async def reflect_cohorts(org: str, sources: list[RawMemory], *, dry_run: bool):
                     "source_ids": identifiers,
                     "outcome": "error",
                     "reason": str(exc),
+                    "provider_error": provider_error_detail(exc),
                     "stage_kind": "ordinary_cohort",
                     "execution_state": getattr(exc, "execution_state", None),
                 }
@@ -143,7 +146,12 @@ async def _reflect_packet_source(org: str, principal: str, source_id: str):
             org, principal, source_id, writable_source_authority
         )
     except Exception as exc:
-        return {**result, "outcome": "error", "reason": str(exc)}
+        return {
+            **result,
+            "outcome": "error",
+            "reason": str(exc),
+            "provider_error": provider_error_detail(exc),
+        }
     result["manifest"] = packets[0].binding["manifest"]
     result["packet_count"] = len(packets)
 
@@ -173,6 +181,7 @@ async def _reflect_packet_source(org: str, principal: str, source_id: str):
             page.update(
                 outcome="pending" if state in {"running", "recorded", "returned"} else "failed",
                 reason=str(exc),
+                provider_error=provider_error_detail(exc),
                 execution_state=state,
             )
             if execution_id := getattr(exc, "execution_id", None):
