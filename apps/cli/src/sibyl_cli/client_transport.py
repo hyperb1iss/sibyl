@@ -512,21 +512,31 @@ class ClientTransportMixin:
         """
         if self._owner_identity is not None:
             return self._owner_identity, None
-        if self._uses_stored_auth:
-            cached = stored_replay_identity(
-                self.base_url,
-                credential_scope=self.credential_scope,
-                access_token=self.auth_token,
-            )
-            if cached is not None:
-                self._owner_identity = cached
-                return cached, None
+        # Checked before the store is consulted: with nobody signed in there is
+        # no credential to own the write, and a leftover owner in the store is
+        # somebody else's to claim.
         if not self.auth_token:
             return None, f"No credential is signed in for {self.base_url}."
         if not self._uses_stored_auth:
             return None, (
                 "The credential was supplied per command, so no durable owner is stored; "
                 "sign in with 'sibyl auth login' to make buffered writes replayable."
+            )
+        cached = stored_replay_identity(
+            self.base_url,
+            credential_scope=self.credential_scope,
+            access_token=self.auth_token,
+        )
+        if cached is not None:
+            self._owner_identity = cached
+            return cached, None
+        if stored_replay_identity(self.base_url, credential_scope=self.credential_scope):
+            # The lineage has an owner, recorded against a token this command
+            # never held, so the reason has to say that rather than blame the
+            # server for never confirming one.
+            return None, (
+                "The recorded owner belongs to a credential this command no longer holds; "
+                "the write still replays under its credential lineage."
             )
         return None, (
             "This server never confirmed write ownership, so replay is limited to the "

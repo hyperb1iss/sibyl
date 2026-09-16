@@ -669,3 +669,63 @@ async def test_a_login_as_someone_else_mid_command_never_owns_this_draft(
     item = pending_writes.list_pending_writes()[0]
     assert item.get("replay_identity") is None
     assert "ownership_reason" in item
+
+
+@pytest.mark.asyncio
+async def test_a_leftover_owner_is_never_stamped_with_nobody_signed_in(
+    identity: dict,
+) -> None:
+    """No login means no owner, whatever the credential store still holds."""
+    auth_store.set_tokens(BASE_URL, "gone", "refresh")
+    auth_store.cache_pending_replay_identity(BASE_URL, "gone", identity)
+    # The token is gone but the recorded owner outlived it.
+    auth_store.write_server_credentials(BASE_URL, {"access_token": ""})
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("offline", request=request)
+
+    client = attach(SibylClient(base_url=BASE_URL), handler)
+    assert not client.auth_token
+    with pytest.raises(SibylClientError):
+        await client.post("/memory/raw", json={"raw_content": "no owner here"})
+    await client.close()
+    item = pending_writes.list_pending_writes()[0]
+    assert item.get("replay_identity") is None
+    assert item["ownership_reason"] == f"No credential is signed in for {BASE_URL}."
+
+
+@pytest.mark.asyncio
+async def test_a_rotated_token_says_the_owner_is_out_of_reach(identity: dict) -> None:
+    """The server did confirm an owner; this command just no longer holds it."""
+    auth_store.set_tokens(BASE_URL, "first", "refresh")
+    client = SibylClient(base_url=BASE_URL)
+    assert client._owner_identity is None
+    # Another command in this lineage verified the owner and refreshed the token.
+    auth_store.cache_pending_replay_identity(BASE_URL, "first", identity)
+    auth_store.set_tokens(
+        BASE_URL,
+        "second",
+        "refresh",
+        pending_replay_scope=client._replay_scope,
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("offline", request=request)
+
+    attach(client, handler)
+    with pytest.raises(SibylClientError):
+        await client.post("/memory/raw", json={"raw_content": "rotated"})
+    await client.close()
+    item = pending_writes.list_pending_writes()[0]
+    assert item.get("replay_identity") is None
+    assert "no longer holds" in item["ownership_reason"]
+    # It is still replayable by its lineage, so the report must not call it parked.
+    assert (
+        pending_writes.classify_pending_write(
+            item,
+            base_url=BASE_URL,
+            replay_scope=client._replay_scope,
+            identity=None,
+        )
+        == "retrying"
+    )
