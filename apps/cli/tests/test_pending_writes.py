@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -434,3 +435,299 @@ def test_fallback_groups_actions_on_the_same_source() -> None:
     resource = pending_writes.pending_write_resource
     assert resource({"path": "/sources/123/sync"}) == resource({"path": "/sources/123"})
     assert resource({"path": "/sources/123"}) != resource({"path": "/sources/456"})
+
+
+CURRENT_BASE_URL = "https://testserver/api"
+OTHER_BASE_URL = "https://elsewhere/api"
+
+
+def test_a_rejection_keeps_the_servers_own_reason_bounded(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without the message the operator sees a refusal but never what to repair."""
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    item = pending_writes.create_pending_write(
+        method="POST",
+        path="/entities",
+        base_url=CURRENT_BASE_URL,
+        json_payload={"name": "x" * 216},
+        params=None,
+    )
+
+    updated = pending_writes.record_pending_failure(
+        item["id"],
+        category="rejected",
+        status_code=422,
+        error_code="validation_error",
+        message="name\n  must have at most 200 characters " + "y" * 400,
+    )
+
+    message = updated["last_failure"]["message"]
+    assert message.startswith("name must have at most 200 characters y")
+    assert len(message) == pending_writes.PENDING_FAILURE_MESSAGE_MAX
+    assert "\n" not in message
+
+
+@pytest.mark.parametrize("category", ["authentication", "transport", "server", "dependency"])
+def test_a_non_rejection_never_stores_a_response_body(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    category: pending_writes.PendingFailureCategory,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    item = pending_writes.create_pending_write(
+        method="POST",
+        path="/memory/raw",
+        base_url=CURRENT_BASE_URL,
+        json_payload={"raw_content": "keep"},
+        params=None,
+    )
+
+    updated = pending_writes.record_pending_failure(
+        item["id"],
+        category=category,
+        status_code=503,
+        error_code="service_unavailable",
+        message="internal detail nobody should persist",
+    )
+
+    assert "message" not in updated["last_failure"]
+    assert (
+        "internal detail" not in pending_writes.resolve_pending_write_path(item["id"]).read_text()
+    )
+
+
+def test_an_ownerless_write_records_why_nobody_owns_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+
+    item = pending_writes.create_pending_write(
+        method="POST",
+        path="/memory/raw",
+        base_url=CURRENT_BASE_URL,
+        json_payload={"raw_content": "keep"},
+        params=None,
+        ownership_reason="No credential is signed in for " + "z" * 400,
+    )
+
+    stored = pending_writes.read_pending_write(item["id"])
+    assert len(stored["ownership_reason"]) == pending_writes.PENDING_OWNERSHIP_REASON_MAX
+    assert stored["ownership_reason"].startswith("No credential is signed in for z")
+
+
+def test_a_recorded_owner_leaves_no_ownership_reason(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+
+    item = pending_writes.create_pending_write(
+        method="POST",
+        path="/memory/raw",
+        base_url=CURRENT_BASE_URL,
+        json_payload={"raw_content": "keep"},
+        params=None,
+        replay_identity=_replay_identity(),
+        ownership_reason="should be ignored",
+    )
+
+    assert "ownership_reason" not in pending_writes.read_pending_write(item["id"])
+
+
+def test_an_empty_ownership_reason_is_a_corrupt_record(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    item = pending_writes.create_pending_write(
+        method="POST",
+        path="/memory/raw",
+        base_url=CURRENT_BASE_URL,
+        json_payload={"raw_content": "keep"},
+        params=None,
+    )
+    path = pending_writes.resolve_pending_write_path(item["id"])
+    path.write_text(json.dumps({**item, "ownership_reason": ""}), encoding="utf-8")
+
+    assert pending_writes.is_corrupt_pending_write(pending_writes.read_pending_write(item["id"]))
+
+
+def _classified(
+    item: dict,
+    *,
+    identity: dict | None = None,
+    replay_scope: str | None = None,
+) -> str:
+    return pending_writes.classify_pending_write(
+        item,
+        base_url=CURRENT_BASE_URL,
+        replay_scope=replay_scope,
+        identity=identity,
+    )
+
+
+def test_classification_separates_the_queues_five_real_states(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    identity = _replay_identity()
+    other_identity = {**identity, "user_id": "44444444-4444-4444-4444-444444444444"}
+
+    def queued(**kwargs: object) -> dict:
+        defaults: dict = {
+            "method": "POST",
+            "path": "/memory/raw",
+            "base_url": CURRENT_BASE_URL,
+            "json_payload": {"raw_content": "keep"},
+            "params": None,
+        }
+        return pending_writes.create_pending_write(**{**defaults, **kwargs})
+
+    owned = queued(replay_identity=identity)
+    attention = pending_writes.record_pending_failure(
+        queued(replay_identity=identity)["id"],
+        category="rejected",
+        status_code=422,
+        error_code="validation_error",
+    )
+    legacy = queued(replay_scope="credential:a-login-that-rotated-away")
+    other_owner = queued(replay_identity=other_identity)
+    foreign = queued(base_url=OTHER_BASE_URL, replay_identity=identity)
+    read_like = queued(path="/search", replay_identity=identity)
+
+    assert _classified(owned, identity=identity) == "retrying"
+    assert _classified(attention, identity=identity) == "needs_attention"
+    assert _classified(legacy, identity=identity) == "unowned"
+    assert _classified(other_owner, identity=identity) == "unowned"
+    assert _classified(foreign, identity=identity) == "foreign_server"
+    assert _classified(read_like, identity=identity) == "read_like"
+    # A legacy write still owned by the live credential lineage keeps retrying.
+    assert (
+        _classified(legacy, identity=identity, replay_scope="credential:a-login-that-rotated-away")
+        == "retrying"
+    )
+
+
+def test_triage_counts_classes_and_ages_only_the_retrying_ones(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    identity = _replay_identity()
+    young = pending_writes.create_pending_write(
+        method="POST",
+        path="/memory/raw",
+        base_url=CURRENT_BASE_URL,
+        json_payload={"raw_content": "young"},
+        params=None,
+        replay_identity=identity,
+    )
+    stale = pending_writes.create_pending_write(
+        method="POST",
+        path="/memory/raw",
+        base_url=CURRENT_BASE_URL,
+        json_payload={"raw_content": "stale"},
+        params=None,
+        replay_identity=identity,
+    )
+    aged = datetime.now(UTC) - timedelta(hours=2)
+    pending_writes.resolve_pending_write_path(stale["id"]).write_text(
+        json.dumps({**stale, "created_at": aged.isoformat()}), encoding="utf-8"
+    )
+    pending_writes.create_pending_write(
+        method="POST",
+        path="/memory/raw",
+        base_url=OTHER_BASE_URL,
+        json_payload={"raw_content": "foreign"},
+        params=None,
+        replay_identity=identity,
+    )
+
+    triage = pending_writes.pending_write_triage(
+        base_url=CURRENT_BASE_URL, replay_scope=None, identity=identity
+    )
+
+    assert triage["count"] == 3
+    assert triage["counts"]["retrying"] == 2
+    assert triage["counts"]["foreign_server"] == 1
+    assert triage["foreign_base_urls"] == ["https://elsewhere/api"]
+    assert triage["stale_retrying"] == 1
+    assert 7000 < triage["oldest_stale_retrying_seconds"] < 7400
+    assert young["id"] != stale["id"]
+
+
+def test_a_cold_identity_cache_does_not_flatter_a_foreign_owner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With no local identity, the lineage is the only claim left.
+
+    Treating every owned write as retrying whenever the cache is cold is the
+    same dishonesty the classes exist to remove: the operator is told a write
+    is on its way when no command can send it.
+    """
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    identity = _replay_identity()
+    stranger = {**identity, "user_id": "44444444-4444-4444-4444-444444444444"}
+
+    def queued(**kwargs: object) -> dict:
+        defaults: dict = {
+            "method": "POST",
+            "path": "/memory/raw",
+            "base_url": CURRENT_BASE_URL,
+            "json_payload": {"raw_content": "keep"},
+            "params": None,
+        }
+        return pending_writes.create_pending_write(**{**defaults, **kwargs})
+
+    mine = queued(replay_identity=identity, replay_scope="credential:live")
+    theirs = queued(replay_identity=stranger, replay_scope="credential:rotated-away")
+
+    assert _classified(mine, identity=None, replay_scope="credential:live") == "retrying"
+    assert _classified(theirs, identity=None, replay_scope="credential:live") == "unowned"
+    # And with the cache warm, the owner decides on its own.
+    assert _classified(theirs, identity=identity, replay_scope="credential:rotated-away") == (
+        "unowned"
+    )
+
+
+def test_classification_and_the_replay_gate_agree_on_a_known_owner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One rule, two surfaces.
+
+    The report reads the owner from the credential store while a live client
+    holds one it verified, so either slot has to decide. Otherwise a write the
+    gate refuses can still be announced as retrying.
+    """
+    from sibyl_cli.pending_identity import pending_identity_matches
+
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    mine = _replay_identity()
+    stranger = {**mine, "user_id": "44444444-4444-4444-4444-444444444444"}
+    item = pending_writes.create_pending_write(
+        method="POST",
+        path="/memory/raw",
+        base_url=CURRENT_BASE_URL,
+        json_payload={"raw_content": "keep"},
+        params=None,
+        replay_identity=stranger,
+        replay_scope="credential:live",
+    )
+
+    write_class = pending_writes.classify_pending_write(
+        item,
+        base_url=CURRENT_BASE_URL,
+        replay_scope="credential:live",
+        identity=None,
+        cached_identity=mine,
+    )
+    gate_allows = pending_identity_matches(item, None, "credential:live", cached_identity=mine)
+
+    assert write_class == "unowned"
+    assert gate_allows is False

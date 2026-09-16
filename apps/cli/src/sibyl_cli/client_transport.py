@@ -21,7 +21,11 @@ from sibyl_cli.auth_store import (
     normalize_api_url,
     read_server_credentials,
 )
-from sibyl_cli.pending_identity import normalize_replay_identity, pending_identity_matches
+from sibyl_cli.pending_identity import (
+    normalize_replay_identity,
+    pending_identity_matches,
+    stored_replay_identity,
+)
 from sibyl_cli.pending_writes import (
     PendingMetric,
     bind_pending_write_identity,
@@ -29,6 +33,7 @@ from sibyl_cli.pending_writes import (
     delete_pending_write,
     increment_attempts,
     is_corrupt_pending_write,
+    is_read_like_post,
     list_pending_writes,
     pending_replay_lock,
     pending_write_resource,
@@ -310,23 +315,8 @@ def _is_refresh_revoked(message: str | None) -> bool:
     )
 
 
-# Read-like POSTs (search, recall, context-pack assembly) carry no durable
-# write, so a failed one is simply re-run, never replayed. Buffering them
-# flooded the pending-write queue with hundreds of /search and /context/pack
-# entries. /context/reflect and /memory/raw are intentionally absent: they can
-# persist, so they stay buffered.
-READ_LIKE_POST_PATHS = (
-    "/search",
-    "/rag/search",
-    "/rag/hybrid-search",
-    "/rag/code-examples",
-    "/context/pack",
-    "/memory/raw/recall",
-)
-
-
 def _is_read_like_post(path: str) -> bool:
-    return any(path.startswith(prefix) for prefix in READ_LIKE_POST_PATHS)
+    return is_read_like_post(path)
 
 
 def _should_buffer_request(method: str, path: str) -> bool:
@@ -498,6 +488,7 @@ class ClientTransportMixin:
                     error_code="replay_identity_invalid",
                 )
             self._pending_identity = identity
+            self._owner_identity = identity
             if self._uses_stored_auth:
                 cache_pending_replay_identity(
                     self.base_url,
@@ -509,12 +500,60 @@ class ClientTransportMixin:
         self._identity_token = self.auth_token
         return self._pending_identity
 
+    def _buffered_write_owner(self) -> tuple[dict[str, Any] | None, str | None]:
+        """Name the owner to stamp on a write about to be buffered, or say why not.
+
+        A write with no owner is unreplayable forever: `pending_identity_matches`
+        then falls back to the credential scope, and `set_tokens` mints a fresh
+        scope on every login, so the next sign-in strands it permanently. So the
+        last verified owner of this credential lineage counts, even when the
+        destination is unreachable right now and the identity endpoint cannot be
+        asked.
+        """
+        if self._owner_identity is not None:
+            return self._owner_identity, None
+        # Checked before the store is consulted: with nobody signed in there is
+        # no credential to own the write, and a leftover owner in the store is
+        # somebody else's to claim.
+        if not self.auth_token:
+            return None, f"No credential is signed in for {self.base_url}."
+        if not self._uses_stored_auth:
+            return None, (
+                "The credential was supplied per command, so no durable owner is stored; "
+                "sign in with 'sibyl auth login' to make buffered writes replayable."
+            )
+        cached = stored_replay_identity(
+            self.base_url,
+            credential_scope=self.credential_scope,
+            access_token=self.auth_token,
+        )
+        if cached is not None:
+            self._owner_identity = cached
+            return cached, None
+        if stored_replay_identity(self.base_url, credential_scope=self.credential_scope):
+            # The lineage has an owner, recorded against a token this command
+            # never held, so the reason has to say that rather than blame the
+            # server for never confirming one.
+            return None, (
+                "The recorded owner belongs to a credential this command no longer holds; "
+                "the write still replays under its credential lineage."
+            )
+        return None, (
+            "This server never confirmed write ownership, so replay is limited to the "
+            "credential that buffered the write."
+        )
+
     def _record_pending_failure(self, write_id: str | None, exc: SibylClientError) -> None:
         if write_id is None:
             return
         status = exc.status_code
         if exc.error_code == "pending_dependency":
             category = "dependency"
+        elif exc.error_code == "replay_identity_mismatch":
+            # This refusal is the CLI's own: the request never left the machine,
+            # so it is an ownership problem to adopt or discard, not a payload
+            # the server rejected.
+            category = "authentication"
         elif status == 401 or exc.error_code == "token_refresh_failed":
             category = "authentication"
         elif status == 409 and exc.error_code in {"idempotency_in_progress", "entity_locked"}:
@@ -529,7 +568,11 @@ class ClientTransportMixin:
             category = "transport"
         with suppress(FileNotFoundError):
             record_pending_failure(
-                write_id, category=category, status_code=status, error_code=exc.error_code
+                write_id,
+                category=category,
+                status_code=status,
+                error_code=exc.error_code,
+                message=exc.detail,
             )
 
     async def _maybe_replay_pending_writes(self, *, ignore_backoff: bool = False) -> None:
@@ -557,7 +600,12 @@ class ClientTransportMixin:
                     for item in list_pending_writes()
                     if not is_corrupt_pending_write(item)
                     and str(item.get("base_url")) == self.base_url
-                    and pending_identity_matches(item, identity, self._replay_scope)
+                    and pending_identity_matches(
+                        item,
+                        identity,
+                        self._replay_scope,
+                        cached_identity=self._owner_identity,
+                    )
                     and not (
                         str(item.get("method") or "").upper() == "POST"
                         and _is_read_like_post(str(item.get("path") or ""))
@@ -662,6 +710,7 @@ class ClientTransportMixin:
                 await self._ensure_pending_identity()
             except SibylClientError as exc:
                 identity_failure = exc
+            owner, ownership_reason = self._buffered_write_owner()
             pending = create_pending_write(
                 method=method,
                 path=path,
@@ -669,7 +718,8 @@ class ClientTransportMixin:
                 json_payload=json,
                 params=params,
                 replay_scope=self._replay_scope,
-                replay_identity=self._pending_identity,
+                replay_identity=owner,
+                ownership_reason=ownership_reason,
             )
             pending_write_id = str(pending["id"])
             pending_write_created = True
@@ -683,7 +733,12 @@ class ClientTransportMixin:
             try:
                 identity = await self._ensure_pending_identity()
                 pending = read_pending_write(pending_write_id)
-                if not pending_identity_matches(pending, identity, self._replay_scope):
+                if not pending_identity_matches(
+                    pending,
+                    identity,
+                    self._replay_scope,
+                    cached_identity=self._owner_identity,
+                ):
                     raise SibylClientError(
                         "Buffered write belongs to a different or unverified identity; "
                         "no mutation was sent.",
@@ -700,7 +755,12 @@ class ClientTransportMixin:
                     if (
                         is_corrupt_pending_write(earlier)
                         or earlier.get("base_url") != self.base_url
-                        or not pending_identity_matches(earlier, identity, self._replay_scope)
+                        or not pending_identity_matches(
+                            earlier,
+                            identity,
+                            self._replay_scope,
+                            cached_identity=self._owner_identity,
+                        )
                         or (str(earlier.get("created_at", "")), str(earlier["id"])) >= order
                     ):
                         continue

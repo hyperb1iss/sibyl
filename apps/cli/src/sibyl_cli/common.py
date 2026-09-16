@@ -33,6 +33,7 @@ from sibyl_core.logging.colors import (
 
 if TYPE_CHECKING:
     from sibyl_cli.client import SibylClientError
+    from sibyl_cli.pending_writes import PendingWriteTriage
 
 # Shared console instance (for styled output only, NOT for JSON)
 console = Console(width=160) if not sys.stdout.isatty() else Console()
@@ -213,12 +214,88 @@ def hint(message: str) -> None:
     console.print(f"[{ELECTRIC_YELLOW}]Hint:[/{ELECTRIC_YELLOW}] {message}")
 
 
-def pending_writes_summary(count: int) -> str:
+def format_write_age(seconds: float) -> str:
+    """Render a queue age at the resolution an operator decides on."""
+    if seconds < 60:
+        return "under a minute"
+    if seconds < 3600:
+        return f"{int(seconds // 60)}m"
+    if seconds < 86400:
+        return f"{int(seconds // 3600)}h"
+    return f"{int(seconds // 86400)}d"
+
+
+# Each class gets the words an operator needs to recognize it, and the counts
+# are named separately so one line can carry the whole decision.
+_PENDING_CLASS_LABELS: tuple[tuple[str, str], ...] = (
+    ("needs_attention", "rejected by the server"),
+    ("unowned", "with no owner this login can replay"),
+    ("foreign_server", "for another server"),
+    ("read_like", "re-runnable reads"),
+    ("corrupt", "corrupt"),
+)
+
+
+def _parked_counts(triage: PendingWriteTriage) -> list[str]:
+    counts = triage["counts"]
+    return [
+        f"{counts.get(name, 0)} {label}"
+        for name, label in _PENDING_CLASS_LABELS
+        if counts.get(name, 0)
+    ]
+
+
+def pending_writes_notice_lines(triage: PendingWriteTriage) -> list[str]:
+    """Report only what the operator can act on, and nothing when all is well.
+
+    A young write with a verified owner is in flight, not a problem, so it
+    prints nothing. Everything else is parked until a person decides, so it
+    gets one line that names the counts and the command that resolves them.
+    """
+    lines: list[str] = []
+    stale = triage["stale_retrying"]
+    if stale:
+        age = format_write_age(triage["oldest_stale_retrying_seconds"])
+        verb = "have" if stale != 1 else "has"
+        retry = "they retry" if stale != 1 else "it retries"
+        lines.append(
+            f"{stale} buffered write{'s' if stale != 1 else ''} {verb} not reached the server "
+            f"yet (oldest {age}); {retry} automatically, or run "
+            "'sibyl pending-writes flush' to see why."
+        )
+    parked = _parked_counts(triage)
+    if parked:
+        foreign = triage["foreign_base_urls"]
+        where = f" ({', '.join(foreign)})" if foreign else ""
+        lines.append(
+            f"Buffered writes need a decision: {', '.join(parked)}{where}. "
+            "Run 'sibyl pending-writes list', then 'adopt' or 'discard'."
+        )
+    return lines
+
+
+def pending_writes_headline(triage: PendingWriteTriage) -> str:
+    """One line for the surfaces that report the queue whether or not it is healthy."""
+    count = triage["count"]
+    if not count:
+        return "No writes are buffered locally."
+    retrying = triage["counts"].get("retrying", 0)
+    parts = [f"{retrying} retrying"] if retrying else []
+    parts.extend(_parked_counts(triage))
     plural = "s" if count != 1 else ""
-    return (
-        f"{count} write{plural} buffered locally without a confirmed server outcome. "
-        "Writes with a verified owner retry automatically; "
-        "run 'sibyl pending-writes list' for failures and ownership requiring attention."
+    return f"{count} write{plural} buffered locally: {', '.join(parts)}."
+
+
+def current_pending_write_triage() -> PendingWriteTriage:
+    """Classify the queue against this command's destination, with no network call."""
+    from sibyl_cli.pending_identity import current_pending_owner
+    from sibyl_cli.pending_writes import pending_write_triage
+
+    base_url, replay_scope, identity = current_pending_owner()
+    return pending_write_triage(
+        base_url=base_url,
+        replay_scope=replay_scope,
+        identity=identity,
     )
 
 
@@ -238,10 +315,12 @@ def mark_pending_writes_reported() -> None:
 
 
 def notify_pending_writes() -> None:
-    """Warn on stderr when writes are sitting in the local buffer.
+    """Warn on stderr when the local buffer holds something a person must resolve.
 
-    Runs at the end of every command, including the ones that just filled
-    the buffer, so a queued write is never silent.
+    Runs at the end of every command, including the ones that just filled the
+    buffer. A write that is young and owned is in flight, so it stays silent;
+    a write that is rejected, unowned, or aimed at another server cannot move
+    without a decision, so it gets named along with the command that makes it.
 
     Nothing in here may change the outcome. It runs from a finally block, so
     any exception that escapes replaces the status the command already earned,
@@ -255,12 +334,11 @@ def notify_pending_writes() -> None:
     if _pending_writes_reported:
         return
     try:
-        count = pending_write_count()
-        if count <= 0:
+        if pending_write_count() <= 0:
             return
-        err_console.print(
-            f"[{ELECTRIC_YELLOW}]![/{ELECTRIC_YELLOW}] {pending_writes_summary(count)}"
-        )
+        lines = pending_writes_notice_lines(current_pending_write_triage())
+        for line in lines:
+            err_console.print(f"[{ELECTRIC_YELLOW}]![/{ELECTRIC_YELLOW}] {line}")
     except (Exception, SystemExit):
         return
     # Claimed only once the line is out, so a queue we failed to read stays
@@ -272,6 +350,11 @@ def print_db_hint() -> None:
     """Print the common local data-services hint."""
     hint("Are the local data services running?")
     console.print(f"  [{NEON_CYAN}]sibyld up[/{NEON_CYAN}]")
+
+
+def _is_identifier_column(header: str) -> bool:
+    name = header.strip().lower()
+    return name.endswith("id") or name.endswith("ids") or name.endswith("uuid")
 
 
 def create_table(title: str | None = None, *columns: str, expand: bool = True) -> Table:
@@ -286,7 +369,12 @@ def create_table(title: str | None = None, *columns: str, expand: bool = True) -
         justify = (
             "left" if i == 0 else "right" if col.lower() in ("count", "score", "value") else "left"
         )
-        table.add_column(col, style=style, justify=justify)
+        # Rich ellipsizes an over-wide cell by default, which silently drops the
+        # tail of an identifier. Agents then complete the missing characters by
+        # guessing and buffer writes against UUIDs that never existed (see the
+        # confabulated task IDs in the pending-write queue). An ID wraps instead.
+        overflow = "fold" if _is_identifier_column(col) else "ellipsis"
+        table.add_column(col, style=style, justify=justify, overflow=overflow, no_wrap=False)
     return table
 
 

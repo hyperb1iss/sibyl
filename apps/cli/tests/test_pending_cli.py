@@ -115,6 +115,7 @@ def test_pending_writes_flush_replays_valid_entries_but_keeps_corrupt_ones(
             self.base_url = base_url
             self.context_name = context_name
             self._replay_scope = TEST_REPLAY_SCOPE
+            self._owner_identity = TEST_IDENTITY
 
         async def _ensure_pending_identity(self) -> dict[str, Any]:
             return TEST_IDENTITY
@@ -246,6 +247,7 @@ def test_pending_writes_claim_binds_and_retries_legacy_entries(
             self.context_name = context_name
             self.base_url = "http://testserver/api"
             self._replay_scope = TEST_REPLAY_SCOPE
+            self._owner_identity = TEST_IDENTITY
 
         async def _ensure_pending_identity(self) -> dict[str, Any]:
             return TEST_IDENTITY
@@ -304,6 +306,7 @@ def test_pending_writes_claim_fails_when_replay_lock_is_busy(
             self.context_name = context_name
             self.base_url = "http://testserver/api"
             self._replay_scope = TEST_REPLAY_SCOPE
+            self._owner_identity = TEST_IDENTITY
 
         async def _ensure_pending_identity(self) -> dict[str, Any]:
             return TEST_IDENTITY
@@ -361,6 +364,7 @@ def test_pending_writes_claim_reports_a_concurrent_queue_change(
             self.context_name = context_name
             self.base_url = "http://testserver/api"
             self._replay_scope = TEST_REPLAY_SCOPE
+            self._owner_identity = TEST_IDENTITY
 
         async def _ensure_pending_identity(self) -> dict[str, Any]:
             return TEST_IDENTITY
@@ -411,6 +415,7 @@ def test_pending_writes_flush_refuses_an_unclaimed_legacy_entry(
 
     class FakeClient:
         _replay_scope = TEST_REPLAY_SCOPE
+        _owner_identity = TEST_IDENTITY
 
         def __init__(self, *, base_url: str, context_name: str | None = None) -> None:
             self.base_url = base_url
@@ -450,6 +455,7 @@ def test_pending_writes_flush_replays_and_deletes(
             self.base_url = base_url
             self.context_name = context_name
             self._replay_scope = TEST_REPLAY_SCOPE
+            self._owner_identity = TEST_IDENTITY
 
         async def _ensure_pending_identity(self) -> dict[str, Any]:
             return TEST_IDENTITY
@@ -492,6 +498,7 @@ def test_pending_writes_flush_skips_read_like_replays(
             self.base_url = base_url
             self.context_name = context_name
             self._replay_scope = TEST_REPLAY_SCOPE
+            self._owner_identity = TEST_IDENTITY
 
         async def _ensure_pending_identity(self) -> dict[str, Any]:
             return TEST_IDENTITY
@@ -534,6 +541,7 @@ def test_pending_writes_flush_reuses_client_per_base_url(
             self.base_url = base_url
             self.context_name = context_name
             self._replay_scope = TEST_REPLAY_SCOPE
+            self._owner_identity = TEST_IDENTITY
             instances.append(self)
 
         async def _ensure_pending_identity(self) -> dict[str, Any]:
@@ -573,6 +581,7 @@ def test_pending_writes_flush_retains_writes_after_auth_refresh_failure(
             self.base_url = base_url
             self.context_name = context_name
             self._replay_scope = TEST_REPLAY_SCOPE
+            self._owner_identity = TEST_IDENTITY
 
         async def _ensure_pending_identity(self) -> dict[str, Any]:
             return TEST_IDENTITY
@@ -615,6 +624,7 @@ def test_pending_writes_flush_failure_summary_names_both_classes(
             self.base_url = base_url
             self.context_name = context_name
             self._replay_scope = TEST_REPLAY_SCOPE
+            self._owner_identity = TEST_IDENTITY
 
         async def _ensure_pending_identity(self) -> dict[str, Any]:
             return TEST_IDENTITY
@@ -875,3 +885,327 @@ def test_unverified_adoption_requires_server_identity(
     assert result.exit_code == 1
     assert "Upgrade the server" in result.stdout
     assert pending_writes.resolve_pending_write_path(item["id"]).read_bytes() == original
+
+
+LOCAL_BASE_URL = "http://localhost:3334/api"
+OTHER_LOCAL_BASE_URL = "http://localhost:3364/api"
+
+
+@pytest.fixture
+def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Isolate queue, credentials, and contexts, since list now classifies."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    return tmp_path
+
+
+def _signed_in() -> None:
+    from sibyl_cli import auth_store
+
+    auth_store.set_tokens(LOCAL_BASE_URL, "stored-token", "stored-refresh")
+    auth_store.cache_pending_replay_identity(LOCAL_BASE_URL, "stored-token", TEST_IDENTITY)
+
+
+def _queued(
+    *,
+    base_url: str = LOCAL_BASE_URL,
+    path: str = "/memory/raw",
+    identity: dict[str, Any] | None = None,
+    scope: str | None = None,
+) -> dict[str, Any]:
+    return pending_writes.create_pending_write(
+        method="POST",
+        path=path,
+        base_url=base_url,
+        json_payload={"title": "Queued"},
+        params=None,
+        replay_identity=identity,
+        replay_scope=scope,
+    )
+
+
+def test_pending_writes_list_shows_the_class_and_the_servers_refusal(
+    isolated_home: Path,
+) -> None:
+    _signed_in()
+    rejected = _queued(identity=TEST_IDENTITY, path="/entities")
+    pending_writes.record_pending_failure(
+        str(rejected["id"]),
+        category="rejected",
+        status_code=422,
+        error_code="validation_error",
+        message="name must have at most 200 characters",
+    )
+    _queued(base_url=OTHER_LOCAL_BASE_URL)
+
+    result = CliRunner().invoke(pending.app, ["list"])
+
+    assert result.exit_code == 0
+    flattened = " ".join(result.stdout.split())
+    assert "needs_attention" in flattened
+    assert "422 validation_error" in flattened
+    assert "name must have at most 200 characters" in flattened
+    assert "foreign_server" in flattened
+    assert "need a decision" in flattened
+
+
+def test_pending_writes_list_prints_the_whole_id(isolated_home: Path) -> None:
+    """A cropped ID gets completed by guesswork, and the guess buffers a bad write."""
+    item = _queued(base_url=OTHER_LOCAL_BASE_URL)
+
+    result = CliRunner().invoke(pending.app, ["list"])
+
+    assert result.exit_code == 0
+    assert str(item["id"]) in "".join(result.stdout.split())
+
+
+def test_pending_writes_discard_foreign_removes_only_other_servers(
+    isolated_home: Path,
+) -> None:
+    _signed_in()
+    mine = _queued(identity=TEST_IDENTITY)
+    theirs = _queued(base_url=OTHER_LOCAL_BASE_URL)
+
+    result = CliRunner().invoke(pending.app, ["discard", "--foreign"])
+
+    assert result.exit_code == 0
+    assert [item["id"] for item in pending_writes.list_pending_writes()] == [mine["id"]]
+    assert theirs["id"] != mine["id"]
+
+
+def test_pending_writes_discard_rejected_removes_only_client_refusals(
+    isolated_home: Path,
+) -> None:
+    _signed_in()
+    rejected = _queued(identity=TEST_IDENTITY, path="/tasks")
+    pending_writes.record_pending_failure(
+        str(rejected["id"]),
+        category="rejected",
+        status_code=422,
+        error_code="validation_error",
+        message="priority urgent is not supported",
+    )
+    transient = _queued(identity=TEST_IDENTITY)
+    pending_writes.record_pending_failure(str(transient["id"]), category="server", status_code=503)
+
+    result = CliRunner().invoke(pending.app, ["discard", "--rejected"])
+
+    assert result.exit_code == 0
+    assert [item["id"] for item in pending_writes.list_pending_writes()] == [transient["id"]]
+
+
+def test_pending_writes_discard_refuses_two_selectors(isolated_home: Path) -> None:
+    _queued(base_url=OTHER_LOCAL_BASE_URL)
+
+    result = CliRunner().invoke(pending.app, ["discard", "--foreign", "--rejected"])
+
+    assert result.exit_code == 1
+    assert len(pending_writes.list_pending_writes()) == 1
+
+
+def test_pending_writes_discard_refuses_ids_alongside_a_selector(
+    isolated_home: Path,
+) -> None:
+    item = _queued(base_url=OTHER_LOCAL_BASE_URL)
+
+    result = CliRunner().invoke(pending.app, ["discard", "--foreign", str(item["id"])])
+
+    assert result.exit_code == 1
+    assert len(pending_writes.list_pending_writes()) == 1
+
+
+def test_pending_writes_discard_selectors_never_touch_a_healthy_queue(
+    isolated_home: Path,
+) -> None:
+    _signed_in()
+    _queued(identity=TEST_IDENTITY)
+
+    for flag in ("--foreign", "--rejected", "--read-like"):
+        result = CliRunner().invoke(pending.app, ["discard", flag])
+        assert result.exit_code == 0
+        assert "No pending writes matched" in result.stdout
+    assert len(pending_writes.list_pending_writes()) == 1
+
+
+def test_adopt_is_the_same_verb_and_says_what_it_will_replay(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    pending_writes.create_pending_write(
+        method="POST",
+        path="/memory/raw",
+        base_url="http://testserver/api",
+        json_payload={"title": "Legacy"},
+        params=None,
+    )
+    pending_writes.create_pending_write(
+        method="PATCH",
+        path="/tasks/123",
+        base_url="http://testserver/api",
+        json_payload={"title": "Legacy task"},
+        params=None,
+    )
+
+    class FakeClient:
+        def __init__(self, *, context_name: str | None = None) -> None:
+            self.base_url = "http://testserver/api"
+            self._replay_scope = TEST_REPLAY_SCOPE
+            self._owner_identity = TEST_IDENTITY
+
+        async def _ensure_pending_identity(self) -> dict[str, Any]:
+            return TEST_IDENTITY
+
+        async def __aenter__(self) -> FakeClient:
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        async def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+            return {
+                "user": {"email": "bliss@example.test"},
+                "organization": {"slug": "silkcircuit"},
+            }
+
+        async def _maybe_replay_pending_writes(self, *, ignore_backoff: bool = False) -> None:
+            for queued in pending_writes.list_pending_writes():
+                pending_writes.delete_pending_write(str(queued["id"]))
+
+    monkeypatch.setattr(pending, "SibylClient", FakeClient)
+    monkeypatch.setattr("sibyl_cli.config_store.resolve_context_name", lambda: "local")
+
+    result = CliRunner().invoke(pending.app, ["adopt", "--yes"])
+
+    assert result.exit_code == 0
+    flattened = " ".join(result.stdout.split())
+    assert (
+        "Will replay 2 legacy writes to http://testserver/api as bliss@example.test "
+        "in silkcircuit: POST /memory/raw, PATCH /tasks/123." in flattened
+    )
+    assert pending_writes.list_pending_writes() == []
+
+
+def _write_contexts(home: Path, active: str = "local") -> None:
+    """Two contexts on different ports, so foreign really means foreign."""
+    (home / ".sibyl").mkdir(parents=True, exist_ok=True)
+    (home / ".sibyl" / "config.toml").write_text(
+        "\n".join(
+            [
+                f'active_context = "{active}"',
+                "",
+                "[contexts.local]",
+                'name = "local"',
+                'server_url = "http://localhost:3334"',
+                "",
+                "[contexts.remote]",
+                'name = "remote"',
+                'server_url = "http://localhost:3364"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_the_selected_context_decides_which_writes_are_foreign(
+    isolated_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Triage has to agree with the client about the current server.
+
+    Resolving the active context instead of the effective one made the write
+    for the server the operator selected the one that looked foreign, and
+    `discard --foreign` then deleted exactly the wrong payload.
+    """
+    from sibyl_cli.pending_identity import current_pending_owner
+
+    _write_contexts(isolated_home)
+    monkeypatch.setenv("SIBYL_CONTEXT", "remote")
+
+    base_url, _scope, _identity = current_pending_owner()
+
+    assert base_url == OTHER_LOCAL_BASE_URL
+
+
+def test_discard_foreign_keeps_the_writes_for_the_selected_context(
+    isolated_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_contexts(isolated_home)
+    monkeypatch.setenv("SIBYL_CONTEXT", "remote")
+    for_remote = _queued(base_url=OTHER_LOCAL_BASE_URL)
+    for_local = _queued(base_url=LOCAL_BASE_URL)
+
+    result = CliRunner().invoke(pending.app, ["discard", "--foreign"])
+
+    assert result.exit_code == 0
+    assert [item["id"] for item in pending_writes.list_pending_writes()] == [for_remote["id"]]
+    assert for_local["id"] != for_remote["id"]
+    assert OTHER_LOCAL_BASE_URL in " ".join(result.stdout.split())
+
+
+def test_discard_rejected_reaches_a_refusal_whose_owner_rotated_away(
+    isolated_home: Path,
+) -> None:
+    """A rejected payload is a payload problem, whoever owns the entry."""
+    _signed_in()
+    stranger = {**TEST_IDENTITY, "user_id": "44444444-4444-4444-4444-444444444444"}
+    orphaned = _queued(identity=stranger, path="/tasks")
+    pending_writes.record_pending_failure(
+        str(orphaned["id"]),
+        category="rejected",
+        status_code=422,
+        error_code="validation_error",
+        message="priority urgent is not supported",
+    )
+    keep = _queued(identity=stranger)
+
+    result = CliRunner().invoke(pending.app, ["discard", "--rejected"])
+
+    assert result.exit_code == 0
+    assert [item["id"] for item in pending_writes.list_pending_writes()] == [keep["id"]]
+
+
+def test_discard_rejected_leaves_another_servers_refusal_alone(
+    isolated_home: Path,
+) -> None:
+    _signed_in()
+    elsewhere = _queued(base_url=OTHER_LOCAL_BASE_URL, path="/tasks")
+    pending_writes.record_pending_failure(
+        str(elsewhere["id"]),
+        category="rejected",
+        status_code=422,
+        error_code="validation_error",
+    )
+
+    result = CliRunner().invoke(pending.app, ["discard", "--rejected"])
+
+    assert result.exit_code == 0
+    assert [item["id"] for item in pending_writes.list_pending_writes()] == [elsewhere["id"]]
+
+
+def test_a_write_the_lineage_still_owns_is_not_labelled_ownerless(
+    isolated_home: Path,
+) -> None:
+    """An automation token records no owner but its scope still replays."""
+    from sibyl_cli.client_transport import _auth_replay_scope
+
+    scope = _auth_replay_scope(None, "env-token")
+    pending_writes.create_pending_write(
+        method="POST",
+        path="/memory/raw",
+        base_url=LOCAL_BASE_URL,
+        json_payload={"title": "Automation"},
+        params=None,
+        replay_scope=scope,
+        ownership_reason="The credential was supplied per command.",
+    )
+    summary = pending._summary(
+        pending_writes.list_pending_writes()[0],
+        base_url=LOCAL_BASE_URL,
+        replay_scope=scope,
+        identity=None,
+    )
+
+    assert summary["class"] == "retrying"
+    assert "supplied per command" not in pending._state_label(summary)

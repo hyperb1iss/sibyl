@@ -25,11 +25,13 @@ from sibyl_cli.common import (
     NEON_CYAN,
     console,
     create_table,
+    current_pending_write_triage,
     error,
     info,
     mark_pending_writes_reported,
     notify_pending_writes,
-    pending_writes_summary,
+    pending_writes_headline,
+    pending_writes_notice_lines,
     print_json,
     print_json_result,
     run_async,
@@ -374,11 +376,13 @@ def _print_version_lines(data: dict[str, object]) -> None:
 def _print_pending_write_health() -> None:
     """Report the local write buffer, the queue a failed write lands in."""
     mark_pending_writes_reported()
-    count = pending_write_count()
-    if count:
-        warn(pending_writes_summary(count))
-    else:
+    if not pending_write_count():
         console.print("  [dim]Pending writes: 0[/dim]")
+        return
+    triage = current_pending_write_triage()
+    warn(pending_writes_headline(triage))
+    for line in pending_writes_notice_lines(triage):
+        console.print(f"  [dim]{line}[/dim]")
 
 
 @app.command()

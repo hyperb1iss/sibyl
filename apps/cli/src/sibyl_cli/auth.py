@@ -264,11 +264,18 @@ def _persist_tokens(
     credential_scope_name: str | None = None,
 ) -> None:
     """Persist access token and optionally refresh token for the server."""
+    from sibyl_cli.pending_identity import warm_pending_replay_identity
+
     set_tokens(
         api_url,
         access_token,
         refresh_token=refresh_token,
         expires_in=expires_in,
+        credential_scope=credential_scope_name,
+    )
+    warm_pending_replay_identity(
+        api_url,
+        access_token,
         credential_scope=credential_scope_name,
     )
 
@@ -772,8 +779,12 @@ def set_token_cmd(
     ),
 ) -> None:
     """Set an auth token for a server."""
+    from sibyl_cli.pending_identity import warm_pending_replay_identity
+
     api_url = _compute_api_url(server)
-    set_tokens(api_url, token.strip(), credential_scope=_current_credential_scope())
+    scope_name = _current_credential_scope()
+    set_tokens(api_url, token.strip(), credential_scope=scope_name)
+    warm_pending_replay_identity(api_url, token.strip(), credential_scope=scope_name)
     success(f"Auth token saved for {api_url}; refresh credentials cleared")
 
 

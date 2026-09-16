@@ -16,7 +16,6 @@ from sibyl_cli.client_transport import (
     FAILURE_WINDOW_SECONDS,
     INIT_REMEDIATION,
     PENDING_WRITE_REMEDIATION,
-    READ_LIKE_POST_PATHS,
     ClientTransportMixin,
     ErrorPayload,
     SibylClientError,
@@ -33,6 +32,7 @@ from sibyl_cli.client_transport import (
 )
 from sibyl_cli.client_work import ClientWorkMixin
 from sibyl_cli.pending_identity import normalize_replay_identity
+from sibyl_cli.pending_writes import READ_LIKE_POST_PATHS
 
 __all__ = [
     "BUFFERED_WRITE_METHODS",
@@ -118,6 +118,13 @@ class SibylClient(
             if creds.get("access_token") == self.auth_token
             else None
         )
+        # The owner to stamp on a write this command has to buffer. It outlives
+        # an identity endpoint the server does not expose, because a write with
+        # no owner can never be replayed by any later command. It is re-read at
+        # buffer time as well, for a lineage that records its owner while this
+        # command is running. `_pending_identity` stays the *freshly verified*
+        # owner and is the only one allowed to authorize a replay.
+        self._owner_identity = self._pending_identity
         self._identity_checked = False
         self._identity_token: str | None = None
         # Load insecure setting from context
@@ -126,6 +133,23 @@ class SibylClient(
 
 # Client cache by context name (None = default/active context)
 _clients: dict[str | None, SibylClient] = {}
+
+
+def resolve_client_context_name() -> str | None:
+    """Resolve the context every command actually talks to.
+
+    The override, the environment variable, and the directory pin all count, so
+    anything that has to agree with the client about the current server has to
+    resolve through here rather than reading the active context directly.
+    """
+    from sibyl_cli import config_store
+    from sibyl_cli.state import get_context_override
+
+    return (
+        get_context_override()
+        if _paired_automation_api_url()
+        else config_store.resolve_context_name()
+    )
 
 
 def get_client(context_name: str | None = None) -> SibylClient:
@@ -151,14 +175,7 @@ def get_client(context_name: str | None = None) -> SibylClient:
 
     # Resolve the effective context when one isn't explicitly provided.
     if context_name is None:
-        from sibyl_cli import config_store
-        from sibyl_cli.state import get_context_override
-
-        context_name = (
-            get_context_override()
-            if _paired_automation_api_url()
-            else config_store.resolve_context_name()
-        )
+        context_name = resolve_client_context_name()
 
     cache_key = context_name
 

@@ -427,3 +427,305 @@ async def test_offline_draft_keeps_last_verified_owner(identity: dict) -> None:
     assert item["replay_identity"] == identity
     assert item["json"] == {"raw_content": "offline draft"}
     assert item["last_failure"]["category"] == "transport"
+
+
+@pytest.mark.asyncio
+async def test_old_server_still_stamps_the_stored_owner_on_a_new_draft(
+    identity: dict,
+) -> None:
+    """A server without the identity endpoint must not produce orphaned writes.
+
+    The endpoint 404s, so nothing is freshly verified and the write may not be
+    replayed on this connection. It still records the owner the stored login
+    proved earlier, because ownership is what a later command needs to replay
+    it at all.
+    """
+    auth_store.set_tokens(BASE_URL, "synthetic", "refresh")
+    auth_store.cache_pending_replay_identity(BASE_URL, "synthetic", identity)
+    paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path == "/api/auth/replay-identity":
+            return httpx.Response(404, json={"detail": "Not found"})
+        raise httpx.ConnectError("offline", request=request)
+
+    client = attach(SibylClient(base_url=BASE_URL), handler)
+    with pytest.raises(SibylClientError):
+        await client.post("/memory/raw", json={"raw_content": "legacy server draft"})
+    await client.close()
+    item = pending_writes.list_pending_writes()[0]
+    assert item["replay_identity"] == identity
+    assert "ownership_reason" not in item
+    assert "/api/auth/replay-identity" in paths
+
+
+@pytest.mark.asyncio
+async def test_an_owner_cached_after_this_client_started_still_lands_on_the_draft(
+    identity: dict,
+) -> None:
+    """The owner is read at buffer time, not only when the client was built.
+
+    A command that starts before the lineage has a recorded owner, and buffers
+    a write after another command recorded one, used to stamp nothing at all
+    and strand the write on the next login.
+    """
+    auth_store.set_tokens(BASE_URL, "synthetic", "refresh")
+    client = SibylClient(base_url=BASE_URL)
+    assert client._owner_identity is None
+
+    # Another sibyl command verified and cached the owner in the meantime.
+    auth_store.cache_pending_replay_identity(BASE_URL, "synthetic", identity)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("offline", request=request)
+
+    attach(client, handler)
+    with pytest.raises(SibylClientError):
+        await client.post("/memory/raw", json={"raw_content": "late-owner draft"})
+    await client.close()
+    item = pending_writes.list_pending_writes()[0]
+    assert item["replay_identity"] == identity
+    assert "ownership_reason" not in item
+
+
+@pytest.mark.asyncio
+async def test_a_draft_with_no_login_is_unowned_and_says_why() -> None:
+    """Nobody can replay it, so it must not be reported as retrying."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("offline", request=request)
+
+    client = attach(SibylClient(base_url=BASE_URL), handler)
+    assert client.auth_token is None
+    with pytest.raises(SibylClientError):
+        await client.post("/memory/raw", json={"raw_content": "anonymous draft"})
+    await client.close()
+    item = pending_writes.list_pending_writes()[0]
+    assert item.get("replay_identity") is None
+    assert item["ownership_reason"] == f"No credential is signed in for {BASE_URL}."
+    assert (
+        pending_writes.classify_pending_write(
+            item, base_url=BASE_URL, replay_scope=None, identity=None
+        )
+        == "unowned"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_per_command_credential_buffers_unowned_with_its_reason(
+    identity: dict,
+) -> None:
+    """A token handed in for one command cannot claim the stored login's writes."""
+    auth_store.set_tokens(BASE_URL, "stored", "refresh")
+    auth_store.cache_pending_replay_identity(BASE_URL, "stored", identity)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("offline", request=request)
+
+    client = attach(SibylClient(base_url=BASE_URL, auth_token="handed-in"), handler)
+    with pytest.raises(SibylClientError):
+        await client.post("/memory/raw", json={"raw_content": "automation draft"})
+    await client.close()
+    item = pending_writes.list_pending_writes()[0]
+    assert item.get("replay_identity") is None
+    assert "supplied per command" in item["ownership_reason"]
+
+
+def test_a_login_records_the_queue_owner_while_it_is_online(
+    identity: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The cold window after a login is where unowned writes came from."""
+    from sibyl_cli import pending_identity
+
+    auth_store.set_tokens(BASE_URL, "fresh-token", "refresh")
+    assert auth_store.read_server_credentials(BASE_URL).get("pending_replay_identity") is None
+
+    class Response:
+        status_code = 200
+
+        @staticmethod
+        def json() -> dict[str, Any]:
+            return identity
+
+    monkeypatch.setattr(httpx, "get", lambda *_args, **_kwargs: Response())
+
+    assert pending_identity.warm_pending_replay_identity(BASE_URL, "fresh-token") is True
+    assert pending_identity.stored_replay_identity(BASE_URL) == identity
+
+
+def test_a_failed_owner_probe_never_breaks_a_login(monkeypatch: pytest.MonkeyPatch) -> None:
+    from sibyl_cli import pending_identity
+
+    auth_store.set_tokens(BASE_URL, "fresh-token", "refresh")
+
+    def explode(*_args: object, **_kwargs: object) -> None:
+        raise httpx.ConnectError("offline")
+
+    monkeypatch.setattr(httpx, "get", explode)
+
+    assert pending_identity.warm_pending_replay_identity(BASE_URL, "fresh-token") is False
+    assert pending_identity.stored_replay_identity(BASE_URL) is None
+
+
+@pytest.mark.asyncio
+async def test_a_server_without_the_identity_route_still_sends_the_mutation(
+    identity: dict,
+) -> None:
+    """Recording an owner must not turn a 404 server into a write-refusing one.
+
+    The identity route answers 404, so nothing can be freshly verified, but the
+    write now always carries the owner this login recorded. If the replay gate
+    treated that owner as unverifiable it would refuse every write on such a
+    server, which is worse than the orphaning it was meant to prevent.
+    """
+    auth_store.set_tokens(BASE_URL, "synthetic", "refresh")
+    auth_store.cache_pending_replay_identity(BASE_URL, "synthetic", identity)
+    paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path == "/api/auth/replay-identity":
+            return httpx.Response(404, json={"detail": "Not found"})
+        return httpx.Response(200, json={"ok": True})
+
+    client = attach(SibylClient(base_url=BASE_URL), handler)
+    assert await client.post("/memory/raw", json={"raw_content": "legacy server draft"}) == {
+        "ok": True
+    }
+    await client.close()
+    assert "/api/memory/raw" in paths
+    assert pending_writes.list_pending_writes() == []
+
+
+@pytest.mark.asyncio
+async def test_a_404_server_still_refuses_another_logins_owner(identity: dict) -> None:
+    """The lineage fallback is a fallback, not an amnesty."""
+    auth_store.set_tokens(BASE_URL, "synthetic", "refresh")
+    auth_store.cache_pending_replay_identity(BASE_URL, "synthetic", identity)
+    client = SibylClient(base_url=BASE_URL)
+    stranger = {**identity, "user_id": "44444444-4444-4444-4444-444444444444"}
+    queued(stranger, scope=client._replay_scope)
+    paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path == "/api/auth/replay-identity":
+            return httpx.Response(404, json={"detail": "Not found"})
+        return httpx.Response(200, json={"ok": True})
+
+    attach(client, handler)
+    await client._maybe_replay_pending_writes(ignore_backoff=True)
+    await client.close()
+    assert "/api/memory/raw" not in paths
+    assert len(pending_writes.list_pending_writes()) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_404_server_replays_its_own_recorded_owner(identity: dict) -> None:
+    auth_store.set_tokens(BASE_URL, "synthetic", "refresh")
+    auth_store.cache_pending_replay_identity(BASE_URL, "synthetic", identity)
+    client = SibylClient(base_url=BASE_URL)
+    original = queued(identity, scope=client._replay_scope)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/auth/replay-identity":
+            return httpx.Response(404, json={"detail": "Not found"})
+        assert request.headers["Idempotency-Key"] == original["idempotency_key"]
+        return httpx.Response(200, json={"ok": True})
+
+    attach(client, handler)
+    await client._maybe_replay_pending_writes(ignore_backoff=True)
+    await client.close()
+    assert pending_writes.list_pending_writes() == []
+
+
+@pytest.mark.asyncio
+async def test_a_login_as_someone_else_mid_command_never_owns_this_draft(
+    identity: dict,
+) -> None:
+    """The buffer-time re-read must not pair this token with a new user.
+
+    Another terminal can sign in between this client starting and the write
+    being buffered. Stamping whoever the store names now would hand the
+    payload to that account's organization on the next replay.
+    """
+    auth_store.set_tokens(BASE_URL, "mine", "refresh")
+    client = SibylClient(base_url=BASE_URL)
+    assert client._owner_identity is None
+
+    stranger = {**identity, "user_id": "44444444-4444-4444-4444-444444444444"}
+    auth_store.set_tokens(BASE_URL, "theirs", "their-refresh")
+    auth_store.cache_pending_replay_identity(BASE_URL, "theirs", stranger)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("offline", request=request)
+
+    attach(client, handler)
+    with pytest.raises(SibylClientError):
+        await client.post("/memory/raw", json={"raw_content": "mine alone"})
+    await client.close()
+    item = pending_writes.list_pending_writes()[0]
+    assert item.get("replay_identity") is None
+    assert "ownership_reason" in item
+
+
+@pytest.mark.asyncio
+async def test_a_leftover_owner_is_never_stamped_with_nobody_signed_in(
+    identity: dict,
+) -> None:
+    """No login means no owner, whatever the credential store still holds."""
+    auth_store.set_tokens(BASE_URL, "gone", "refresh")
+    auth_store.cache_pending_replay_identity(BASE_URL, "gone", identity)
+    # The token is gone but the recorded owner outlived it.
+    auth_store.write_server_credentials(BASE_URL, {"access_token": ""})
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("offline", request=request)
+
+    client = attach(SibylClient(base_url=BASE_URL), handler)
+    assert not client.auth_token
+    with pytest.raises(SibylClientError):
+        await client.post("/memory/raw", json={"raw_content": "no owner here"})
+    await client.close()
+    item = pending_writes.list_pending_writes()[0]
+    assert item.get("replay_identity") is None
+    assert item["ownership_reason"] == f"No credential is signed in for {BASE_URL}."
+
+
+@pytest.mark.asyncio
+async def test_a_rotated_token_says_the_owner_is_out_of_reach(identity: dict) -> None:
+    """The server did confirm an owner; this command just no longer holds it."""
+    auth_store.set_tokens(BASE_URL, "first", "refresh")
+    client = SibylClient(base_url=BASE_URL)
+    assert client._owner_identity is None
+    # Another command in this lineage verified the owner and refreshed the token.
+    auth_store.cache_pending_replay_identity(BASE_URL, "first", identity)
+    auth_store.set_tokens(
+        BASE_URL,
+        "second",
+        "refresh",
+        pending_replay_scope=client._replay_scope,
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("offline", request=request)
+
+    attach(client, handler)
+    with pytest.raises(SibylClientError):
+        await client.post("/memory/raw", json={"raw_content": "rotated"})
+    await client.close()
+    item = pending_writes.list_pending_writes()[0]
+    assert item.get("replay_identity") is None
+    assert "no longer holds" in item["ownership_reason"]
+    # It is still replayable by its lineage, so the report must not call it parked.
+    assert (
+        pending_writes.classify_pending_write(
+            item,
+            base_url=BASE_URL,
+            replay_scope=client._replay_scope,
+            identity=None,
+        )
+        == "retrying"
+    )

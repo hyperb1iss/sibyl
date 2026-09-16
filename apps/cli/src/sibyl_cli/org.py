@@ -28,6 +28,32 @@ def _org_credential_scope(org_slug: str | None) -> str | None:
     return credential_scope(ctx.name, org_slug or ctx.org_slug)
 
 
+def _store_org_tokens(
+    api_url: str,
+    access_token: str,
+    *,
+    refresh_token: str | None,
+    expires_in: int | None,
+    scope_name: str | None,
+) -> None:
+    """Save a switched org's tokens and record who now owns buffered writes.
+
+    An org switch starts a new credential lineage, which clears the previous
+    queue owner, so the new one is recorded while the connection that produced
+    the switch is still up.
+    """
+    from sibyl_cli.pending_identity import warm_pending_replay_identity
+
+    set_tokens(
+        api_url,
+        access_token,
+        refresh_token=refresh_token,
+        expires_in=expires_in,
+        credential_scope=scope_name,
+    )
+    warm_pending_replay_identity(api_url, access_token, credential_scope=scope_name)
+
+
 class OrgRole(StrEnum):
     """Organization member roles."""
 
@@ -73,12 +99,12 @@ def create_cmd(
             expires_raw = result.get("expires_in")
             expires_in = int(expires_raw) if expires_raw is not None else None
             if token:
-                set_tokens(
+                _store_org_tokens(
                     client.base_url,
                     token,
                     refresh_token=refresh,
                     expires_in=expires_in,
-                    credential_scope=_org_credential_scope(str(result.get("slug") or slug or "")),
+                    scope_name=_org_credential_scope(str(result.get("slug") or slug or "")),
                 )
                 success("Switched org (tokens saved to ~/.sibyl/auth.json)")
         print_json(result)
@@ -102,12 +128,12 @@ def switch_cmd(slug: str) -> None:
         expires_raw = result.get("expires_in")
         expires_in = int(expires_raw) if expires_raw is not None else None
         if token:
-            set_tokens(
+            _store_org_tokens(
                 client.base_url,
                 token,
                 refresh_token=refresh,
                 expires_in=expires_in,
-                credential_scope=_org_credential_scope(slug),
+                scope_name=_org_credential_scope(slug),
             )
             success("Org switched (tokens saved to ~/.sibyl/auth.json)")
         print_json(result)
