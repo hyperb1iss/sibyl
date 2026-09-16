@@ -1,0 +1,5 @@
+# Frozen screen48 policy material, not project source. policy.json,
+# bindings.json and measurement-v2/source-geometry.json are hash-pinned by
+# contract.py, and inputs/ holds the byte-exact task workspaces and source
+# snapshots those hashes cover. Ruff skips this tree entirely.
+exclude = ["*"]

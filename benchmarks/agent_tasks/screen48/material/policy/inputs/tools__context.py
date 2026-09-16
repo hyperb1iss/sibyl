@@ -1,0 +1,1645 @@
+"""Compile precise context packs for agents."""
+
+from __future__ import annotations
+
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import asdict, replace
+from typing import Any
+
+import structlog
+
+from sibyl_core.auth.memory_policy import (
+    EVAL_CONSOLIDATION_METADATA_KEY,
+    memory_metadata_read_allowed,
+    memory_row_project_id,
+    memory_scope_policy_key,
+    private_scope_granted_for,
+)
+from sibyl_core.embeddings.providers import configured_embedding_provider
+from sibyl_core.memory_pipeline.lifecycle import (
+    GRAPH_RECALL_EXCLUSION_KEYS,
+    RECONCILE_PENDING_KEY,
+    graph_metadata_recallable,
+)
+from sibyl_core.memory_pipeline.source_lifecycle import (
+    CORRECTION_BLOCKERS_KEY,
+    SOURCE_VALIDATION_PENDING_KEY,
+    public_memory_metadata,
+)
+from sibyl_core.models.context import (
+    ContextFacet,
+    ContextIntent,
+    ContextItem,
+    ContextItemQualityMetadata,
+    ContextLayer,
+    ContextPack,
+    ContextRelatedItem,
+    ContextSection,
+)
+from sibyl_core.models.reflection import memory_lifecycle_from_metadata
+from sibyl_core.retrieval._search_lifecycle import _superseded_candidate_uuids
+from sibyl_core.retrieval.search import build_context_retrieval_plan, context_search
+from sibyl_core.services.eval_publication_guards import (
+    unavailable_publication_ids,
+)
+from sibyl_core.services.graph_runtime import get_surreal_graph_runtime
+from sibyl_core.services.surreal_content import (
+    MemoryScope,
+    RawMemory,
+    recall_raw_memory,
+)
+from sibyl_core.tools.context_rendering import (
+    DEFAULT_MARKDOWN_TOKEN_BUDGET,
+    _compact_metadata_value,
+    _quality_value,
+    context_pack_to_markdown,
+    render_context_pack,
+    validate_context_render_payload,
+)
+from sibyl_core.tools.helpers import _project_id_for_policy
+from sibyl_core.tools.responses import SearchResponse, SearchResult
+from sibyl_core.tools.usage_exposure import (
+    _USAGE_EXPOSURE_SUMMARY_KEY,
+    annotate_context_item_exposures,
+)
+
+SearchFn = Callable[..., Awaitable[SearchResponse]]
+RelatedFn = Callable[..., Awaitable[list[ContextRelatedItem]]]
+RelatedBatchFn = Callable[..., Awaitable[dict[str, list[ContextRelatedItem]]]]
+RawMemoryRecallFn = Callable[..., Awaitable[list[RawMemory]]]
+ActiveWorkFn = Callable[..., Awaitable[list["ContextItem"]]]
+MAX_RELATED_SUPPORT_CHARS = 18_000
+
+# The fallback search path exists for when the native retrieval plan cannot
+# run. Left unset it inherits search's 500-char preview default, so a degraded
+# pack served a fraction of the text a healthy one does. Degradation is allowed
+# to cost freshness or ranking quality; it must not quietly cost fidelity,
+# because the caller cannot tell truncated content from short content.
+FALLBACK_SEARCH_CONTENT_MAX_CHARS = MAX_RELATED_SUPPORT_CHARS
+
+log = structlog.get_logger()
+
+FACET_TITLES = {
+    ContextFacet.ACTIVE_WORK: "Active Work",
+    ContextFacet.PRIOR_ART: "Prior Art",
+    ContextFacet.ARTIFACTS: "Artifacts",
+    ContextFacet.CONSTRAINTS: "Constraints",
+    ContextFacet.DECISIONS: "Decisions",
+    ContextFacet.DOMAIN: "Domain Knowledge",
+    ContextFacet.GOTCHAS: "Gotchas",
+    ContextFacet.IDEATION: "Ideas",
+    ContextFacet.PLANNING: "Plans",
+    ContextFacet.PROCEDURES: "Procedures",
+    ContextFacet.RECENT_MEMORY: "Recent Memory",
+    ContextFacet.VERIFICATION: "Verification",
+}
+
+FACET_TYPES = {
+    ContextFacet.ACTIVE_WORK: ["task", "epic", "project"],
+    ContextFacet.PRIOR_ART: ["task", "epic"],
+    ContextFacet.ARTIFACTS: ["artifact", "document", "source", "config_file"],
+    ContextFacet.CONSTRAINTS: ["rule", "guide"],
+    ContextFacet.DECISIONS: ["decision"],
+    ContextFacet.DOMAIN: ["domain", "topic", "claim"],
+    ContextFacet.GOTCHAS: ["error_pattern", "pattern"],
+    ContextFacet.IDEATION: ["idea"],
+    ContextFacet.PLANNING: ["plan"],
+    ContextFacet.PROCEDURES: ["procedure", "template", "tool"],
+    ContextFacet.RECENT_MEMORY: ["session", "episode", "note"],
+    ContextFacet.VERIFICATION: ["claim", "rule", "procedure"],
+}
+
+_RECENT_MEMORY_FACT_TYPES = ("claim", "event", "preference")
+
+INTENT_FACETS = {
+    ContextIntent.BUILD: [
+        ContextFacet.ACTIVE_WORK,
+        ContextFacet.DECISIONS,
+        ContextFacet.CONSTRAINTS,
+        ContextFacet.PROCEDURES,
+        ContextFacet.GOTCHAS,
+        ContextFacet.PRIOR_ART,
+        ContextFacet.ARTIFACTS,
+        ContextFacet.RECENT_MEMORY,
+    ],
+    ContextIntent.PLAN: [
+        ContextFacet.PLANNING,
+        ContextFacet.DECISIONS,
+        ContextFacet.IDEATION,
+        ContextFacet.DOMAIN,
+        ContextFacet.CONSTRAINTS,
+        ContextFacet.ACTIVE_WORK,
+        ContextFacet.PRIOR_ART,
+    ],
+    ContextIntent.IDEATE: [
+        ContextFacet.IDEATION,
+        ContextFacet.DOMAIN,
+        ContextFacet.DECISIONS,
+        ContextFacet.PLANNING,
+        ContextFacet.RECENT_MEMORY,
+    ],
+    ContextIntent.RESEARCH: [
+        ContextFacet.DOMAIN,
+        ContextFacet.ARTIFACTS,
+        ContextFacet.RECENT_MEMORY,
+        ContextFacet.DECISIONS,
+        ContextFacet.CONSTRAINTS,
+    ],
+    ContextIntent.REVIEW: [
+        ContextFacet.VERIFICATION,
+        ContextFacet.DECISIONS,
+        ContextFacet.CONSTRAINTS,
+        ContextFacet.GOTCHAS,
+        ContextFacet.ARTIFACTS,
+        ContextFacet.ACTIVE_WORK,
+        ContextFacet.PRIOR_ART,
+        ContextFacet.RECENT_MEMORY,
+    ],
+    ContextIntent.DEBUG: [
+        ContextFacet.GOTCHAS,
+        ContextFacet.PROCEDURES,
+        ContextFacet.ARTIFACTS,
+        ContextFacet.ACTIVE_WORK,
+        ContextFacet.PRIOR_ART,
+        ContextFacet.RECENT_MEMORY,
+    ],
+    ContextIntent.DECIDE: [
+        ContextFacet.DECISIONS,
+        ContextFacet.IDEATION,
+        ContextFacet.DOMAIN,
+        ContextFacet.CONSTRAINTS,
+        ContextFacet.PLANNING,
+    ],
+    ContextIntent.LEARN: [
+        ContextFacet.RECENT_MEMORY,
+        ContextFacet.DOMAIN,
+        ContextFacet.PROCEDURES,
+        ContextFacet.GOTCHAS,
+        ContextFacet.DECISIONS,
+    ],
+    ContextIntent.GENERAL: [
+        ContextFacet.ACTIVE_WORK,
+        ContextFacet.DECISIONS,
+        ContextFacet.PLANNING,
+        ContextFacet.IDEATION,
+        ContextFacet.DOMAIN,
+        ContextFacet.PROCEDURES,
+        ContextFacet.PRIOR_ART,
+        ContextFacet.RECENT_MEMORY,
+    ],
+}
+
+LAYER_LIMITS = {
+    ContextLayer.WAKE: 8,
+    ContextLayer.RECALL: 24,
+    ContextLayer.DEEP_SEARCH: 50,
+}
+
+
+PASSAGE_ENTITY_TYPE = "passage"
+PASSAGE_COVERS_PARENT_KEY = "passage_covers_parent"
+
+_WORK_ITEM_TYPES = {"task", "epic"}
+# Tasks finish as "done"; epic container status derives to "completed".
+_PRIOR_WORK_STATUSES = {"done", "completed"}
+_DROPPED_WORK_STATUSES = {"archived"}
+_IN_FLIGHT_WORK_STATUSES = {"doing", "in_progress", "blocked", "review"}
+
+
+def _effective_facet_type(result: SearchResult) -> str:
+    """Classify a passage by the memory it was cut from, not by being a passage.
+
+    A passage is a span, not a subject. A span of a decision is decision
+    material and a span of an error pattern is a gotcha, so routing on the
+    literal type would file every span under one heading no matter what it
+    says. Falls back to the literal type when the parent type is missing.
+    """
+    normalized_type = (result.type or "").lower()
+    if normalized_type != PASSAGE_ENTITY_TYPE:
+        return normalized_type
+    metadata = result.metadata or {}
+    source_type = str(metadata.get("source_entity_type") or "").lower()
+    return source_type or normalized_type
+
+
+def _facet_for_type(entity_type: str, facets: list[ContextFacet]) -> ContextFacet:
+    normalized_type = entity_type.lower()
+    for facet in facets:
+        if normalized_type in FACET_TYPES[facet]:
+            return facet
+    for fallback in (ContextFacet.RECENT_MEMORY, ContextFacet.DOMAIN, ContextFacet.ACTIVE_WORK):
+        if fallback in facets:
+            return fallback
+    return facets[0]
+
+
+def _work_item_status(result: SearchResult) -> str | None:
+    metadata = result.metadata or {}
+    status = metadata.get("status")
+    if status is None:
+        return None
+    return str(getattr(status, "value", status)).lower() or None
+
+
+def _facet_for_result(result: SearchResult, facets: list[ContextFacet]) -> ContextFacet | None:
+    """Route a result to a facet, keeping completed work out of Active Work."""
+
+    normalized_type = _effective_facet_type(result)
+    if normalized_type in _WORK_ITEM_TYPES:
+        status = _work_item_status(result)
+        if status in _DROPPED_WORK_STATUSES:
+            return None
+        if status in _PRIOR_WORK_STATUSES:
+            return ContextFacet.PRIOR_ART if ContextFacet.PRIOR_ART in facets else None
+    return _facet_for_type(normalized_type, facets)
+
+
+def _coerce_intent(intent: str | ContextIntent) -> ContextIntent:
+    if isinstance(intent, ContextIntent):
+        return intent
+    try:
+        return ContextIntent(intent.lower())
+    except ValueError:
+        return ContextIntent.GENERAL
+
+
+def _coerce_layer(layer: str | ContextLayer) -> ContextLayer:
+    if isinstance(layer, ContextLayer):
+        return layer
+    try:
+        return ContextLayer(layer.lower())
+    except ValueError:
+        return ContextLayer.RECALL
+
+
+def _facets_for_layer(intent: ContextIntent, layer: ContextLayer) -> list[ContextFacet]:
+    facets = list(INTENT_FACETS[intent])
+    if layer is not ContextLayer.WAKE:
+        return facets
+
+    priority = [
+        ContextFacet.RECENT_MEMORY,
+        ContextFacet.ACTIVE_WORK,
+        ContextFacet.DECISIONS,
+        ContextFacet.GOTCHAS,
+        ContextFacet.PROCEDURES,
+    ]
+    wake_facets = [facet for facet in priority if facet in facets]
+    return wake_facets or facets[:3]
+
+
+def _query_for(goal: str, domain: str | None) -> str:
+    goal = " ".join(goal.strip().split())
+    if domain:
+        domain = " ".join(domain.strip().split())
+        return f"{goal} {domain}".strip()
+    return goal
+
+
+def _reason_for(result: SearchResult, facet: ContextFacet) -> str:
+    result_type = result.type or "memory"
+    if facet == ContextFacet.ACTIVE_WORK:
+        return f"{result_type} can change what the agent should do next"
+    if facet == ContextFacet.PRIOR_ART:
+        return f"completed {result_type} whose learnings may transfer to this goal"
+    if facet == ContextFacet.DECISIONS:
+        return f"{result_type} records a choice or rationale the agent should preserve"
+    if facet == ContextFacet.IDEATION:
+        return f"{result_type} may contain options, discarded paths, or raw ideas"
+    if facet == ContextFacet.PLANNING:
+        return f"{result_type} may define sequencing, scope, or milestones"
+    if facet == ContextFacet.ARTIFACTS:
+        return f"{result_type} points at concrete things the agent may need to inspect or change"
+    if facet == ContextFacet.PROCEDURES:
+        return f"{result_type} describes repeatable steps or tools"
+    if facet == ContextFacet.RECENT_MEMORY and result_type == "raw_memory":
+        return "raw memory matched the goal and preserves verbatim source context"
+    if facet == ContextFacet.CONSTRAINTS:
+        return f"{result_type} constrains acceptable work"
+    if facet == ContextFacet.GOTCHAS:
+        return f"{result_type} can prevent repeated mistakes"
+    if facet == ContextFacet.VERIFICATION:
+        return f"{result_type} can help prove the work is correct"
+    return f"{result_type} adds relevant background"
+
+
+async def get_graph_runtime(group_id: str):
+    return await get_surreal_graph_runtime(
+        group_id,
+        embedding_provider=configured_embedding_provider(),
+    )
+
+
+async def default_search(**kwargs: Any) -> SearchResponse:
+    from sibyl_core.tools.search import search
+
+    return await search(**kwargs)
+
+
+def _project_id_for(entity: Any) -> str | None:
+    return _project_id_for_policy(entity)
+
+
+def _first_metadata_value(metadata: dict[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        if value := _compact_metadata_value(metadata.get(key)):
+            return value
+    return None
+
+
+def _quality_metadata_from_result(result: SearchResult) -> Any:
+    metadata = result.metadata or {}
+    values = dict(
+        origin=_compact_metadata_value(result.result_origin),
+        source=(
+            _compact_metadata_value(result.source)
+            or _first_metadata_value(
+                metadata,
+                "source",
+                "source_file",
+                "source_name",
+                "source_title",
+                "source_id",
+                "reflection_source_title",
+            )
+            or _compact_metadata_value(result.id)
+        ),
+        url=_compact_metadata_value(result.url) or _first_metadata_value(metadata, "url"),
+        created_at=_first_metadata_value(metadata, "created_at", "created", "captured_at"),
+        updated_at=_first_metadata_value(metadata, "updated_at", "modified_at", "last_updated"),
+        valid_at=_first_metadata_value(metadata, "valid_at", "timestamp", "event_time"),
+        project_id=_first_metadata_value(metadata, "project_id", "project"),
+    )
+    return ContextItemQualityMetadata(**values)
+
+
+def _is_synthetic_relationship_result(result: SearchResult) -> bool:
+    metadata = result.metadata or {}
+    source_id = str(metadata.get("source_id") or result.id)
+    return bool(
+        metadata.get("relationship")
+        and metadata.get("source_node_uuid")
+        and metadata.get("target_node_uuid")
+        and source_id.startswith("rel_")
+    )
+
+
+def _related_source_content(entity: Any, relationship: Any, *, seed_id: str) -> str | None:
+    relationship_type = _relationship_value(relationship.relationship_type)
+    source_id = str(getattr(relationship, "source_id", ""))
+    if relationship_type != "DERIVED_FROM" or source_id != seed_id:
+        return None
+    entity_metadata = getattr(entity, "metadata", None)
+    relationship_metadata = getattr(relationship, "metadata", None)
+    if not isinstance(entity_metadata, dict) or not isinstance(relationship_metadata, dict):
+        return None
+    operational_source_id = str(entity_metadata.get("operational_source_id") or "")
+    if not operational_source_id or operational_source_id != str(
+        relationship_metadata.get("operational_source_id") or ""
+    ):
+        return None
+    if any(
+        entity_metadata.get(key) != relationship_metadata.get(key)
+        for key in ("project_id", "scope_key")
+    ):
+        return None
+    content = str(getattr(entity, "content", "") or "").strip()
+    return content[:MAX_RELATED_SUPPORT_CHARS] or None
+
+
+def _related_source_metadata(entity: Any, relationship: Any, *, seed_id: str) -> dict[str, Any]:
+    if _related_source_content(entity, relationship, seed_id=seed_id) is None:
+        return {}
+    entity_metadata = getattr(entity, "metadata", None)
+    if not isinstance(entity_metadata, dict):
+        return {}
+    return {
+        key: entity_metadata[key]
+        for key in (
+            "operational_source_id",
+            "source_observation_id",
+            "observation_ordinal",
+            "evidence_part_id",
+        )
+        if entity_metadata.get(key) is not None
+    }
+
+
+def _related_scope_allowed(
+    entity: Any,
+    *,
+    principal_id: str | None,
+    accessible_projects: set[str] | None,
+    allowed_memory_scope_keys: set[str] | None,
+) -> bool:
+    """Neighbors are attached after candidate filtering, so they gate here.
+
+    A one-hop walk off an authorized item can otherwise surface a private
+    memory the reader was never allowed to retrieve directly, and a
+    DERIVED_FROM neighbor carries source content with it.
+    """
+    return memory_metadata_read_allowed(
+        getattr(entity, "metadata", None),
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
+        private_scope_granted=private_scope_granted_for(
+            allowed_memory_scope_keys, principal_id=principal_id
+        ),
+        row_project_id=memory_row_project_id(
+            getattr(entity, "metadata", None),
+            entity_type=getattr(getattr(entity, "entity_type", None), "value", None),
+            entity_id=getattr(entity, "id", None),
+        ),
+    )
+
+
+async def _default_related_items(
+    *,
+    entity_id: str,
+    organization_id: str,
+    accessible_projects: set[str] | None = None,
+    principal_id: str | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
+    limit: int = 3,
+) -> list[ContextRelatedItem]:
+    runtime = await get_graph_runtime(organization_id)
+    raw_results = await runtime.relationship_manager.get_related_entities(
+        entity_id=entity_id,
+        max_depth=1,
+        limit=limit,
+    )
+    candidate_ids = list(
+        dict.fromkeys(str(entity.id) for entity, _relationship in raw_results if entity.id)
+    )
+    superseded, _edge_count = await _superseded_candidate_uuids(
+        runtime.client,
+        group_id=organization_id,
+        uuids=candidate_ids,
+    )
+
+    unavailable_publications = await unavailable_publication_ids(
+        organization_id,
+        {
+            str(entity.id): getattr(entity, "metadata", None)
+            for entity, _relationship in raw_results
+        },
+    )
+    related: list[ContextRelatedItem] = []
+    for entity, relationship in raw_results:
+        if str(entity.id) in superseded:
+            continue
+        if not _related_scope_allowed(
+            entity,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+        ):
+            continue
+        if accessible_projects is not None:
+            entity_project = _project_id_for(entity)
+            if entity_project is not None and entity_project not in accessible_projects:
+                continue
+
+        # Related items ride along inside an admitted item rather than as
+        # section items of their own, so the admission filter never sees them.
+        # A retired neighbour would otherwise reach the reader as the body of
+        # somebody else's row.
+        if (
+            not graph_metadata_recallable(getattr(entity, "metadata", None))
+            or str(entity.id) in unavailable_publications
+        ):
+            continue
+        related.append(
+            ContextRelatedItem(
+                id=str(entity.id),
+                source_revision=getattr(entity, "observed_revision", None),
+                type=str(entity.entity_type.value),
+                name=str(entity.name),
+                relationship=str(relationship.relationship_type.value),
+                direction="outgoing" if relationship.source_id == entity_id else "incoming",
+                content=_related_source_content(
+                    entity,
+                    relationship,
+                    seed_id=entity_id,
+                ),
+                metadata=_related_source_metadata(
+                    entity,
+                    relationship,
+                    seed_id=entity_id,
+                ),
+            )
+        )
+        if len(related) >= limit:
+            break
+    return related
+
+
+def _relationship_value(value: Any) -> str:
+    enum_value = getattr(value, "value", None)
+    return str(enum_value if enum_value is not None else value)
+
+
+async def _default_related_items_batch(
+    *,
+    entity_ids: Sequence[str],
+    organization_id: str,
+    accessible_projects: set[str] | None = None,
+    principal_id: str | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
+    limit: int = 3,
+) -> dict[str, list[ContextRelatedItem]]:
+    ids = list(dict.fromkeys(str(entity_id) for entity_id in entity_ids if entity_id))
+    if not ids:
+        return {}
+
+    runtime = await get_graph_runtime(organization_id)
+    relationship_manager = runtime.relationship_manager
+    batch_lookup = getattr(relationship_manager, "get_related_entities_batch", None)
+    if callable(batch_lookup):
+        raw_by_seed = await batch_lookup(ids, limit_per_entity=limit)
+    else:
+        raw_by_seed = {
+            entity_id: await relationship_manager.get_related_entities(
+                entity_id=entity_id,
+                max_depth=1,
+                limit=limit,
+            )
+            for entity_id in ids
+        }
+    candidate_ids = list(
+        dict.fromkeys(
+            str(entity.id)
+            for raw_results in raw_by_seed.values()
+            for entity, _relationship in raw_results
+            if entity.id
+        )
+    )
+    superseded, _edge_count = await _superseded_candidate_uuids(
+        runtime.client,
+        group_id=organization_id,
+        uuids=candidate_ids,
+    )
+
+    unavailable_publications = await unavailable_publication_ids(
+        organization_id,
+        {
+            str(entity.id): getattr(entity, "metadata", None)
+            for results in raw_by_seed.values()
+            for entity, _relationship in results
+        },
+    )
+    related_by_seed: dict[str, list[ContextRelatedItem]] = {}
+    for seed_id, raw_results in raw_by_seed.items():
+        related: list[ContextRelatedItem] = []
+        for entity, relationship in raw_results:
+            if str(entity.id) in superseded:
+                continue
+            if not _related_scope_allowed(
+                entity,
+                principal_id=principal_id,
+                accessible_projects=accessible_projects,
+                allowed_memory_scope_keys=allowed_memory_scope_keys,
+            ):
+                continue
+            if accessible_projects is not None:
+                entity_project = _project_id_for(entity)
+                if entity_project is not None and entity_project not in accessible_projects:
+                    continue
+
+            # The same gate the singular lane runs, for the same reason: related
+            # items ride inside an admitted item, so the admission filter never
+            # sees them. `compile_context` picks this batch lane whenever the
+            # default related function is in play, which makes it the lane
+            # production actually reads through.
+            if (
+                not graph_metadata_recallable(getattr(entity, "metadata", None))
+                or str(entity.id) in unavailable_publications
+            ):
+                continue
+
+            source_id = str(getattr(relationship, "source_id", ""))
+            support_content = _related_source_content(
+                entity,
+                relationship,
+                seed_id=str(seed_id),
+            )
+            related.append(
+                ContextRelatedItem(
+                    id=str(entity.id),
+                    source_revision=getattr(entity, "observed_revision", None),
+                    type=_relationship_value(entity.entity_type),
+                    name=str(entity.name),
+                    relationship=_relationship_value(relationship.relationship_type),
+                    direction="outgoing" if source_id == seed_id else "incoming",
+                    content=support_content,
+                    metadata=_related_source_metadata(
+                        entity,
+                        relationship,
+                        seed_id=str(seed_id),
+                    ),
+                )
+            )
+            if len(related) >= limit:
+                break
+        related_by_seed[str(seed_id)] = related
+    return related_by_seed
+
+
+_ITEM_METADATA_KEYS = (
+    CORRECTION_BLOCKERS_KEY,
+    SOURCE_VALIDATION_PENDING_KEY,
+    RECONCILE_PENDING_KEY,
+    "status",
+    "priority",
+    "complexity",
+    "lifecycle_state",
+    "lifecycle_flags",
+    "lifecycle_action",
+    "review_state",
+    "tags",
+    "category",
+    "operational_schema_version",
+    "operational_source_id",
+    "operational_content_hash",
+    "operational_outcome",
+    "language",
+    "domain",
+    "visibility",
+    "kind",
+    "capture_mode",
+    "capture_surface",
+    # Which artifact a remembered synthesis row is. capture_surface alone only
+    # says the row is synthesis output, so the render filter can refuse it but
+    # cannot tell it apart from any other artifact, and a caller naming the
+    # artifact it wants to build on would have nothing to match against.
+    "synthesis_artifact_id",
+    "thread_id",
+    "label",
+    "project_id",
+    "epic_id",
+    "parent_task_id",
+    "created_at",
+    "updated_at",
+    "completed_at",
+    "occurred_at",
+    "valid_at",
+    "learnings",
+    "description",
+    # Policy and correction gates downstream (synthesis render filters) read
+    # these; dropping them silently disables defense-in-depth checks.
+    "memory_scope",
+    "principal_id",
+    "scope_key",
+    "redacted",
+    "excluded_from_recall",
+    "superseded_by_source_id",
+    "superseded_by_raw_memory_id",
+    "duplicate_of_source_id",
+    "unresolved_claims",
+    "supported",
+    "claim",
+)
+
+
+def _lean_item_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Project full candidate metadata down to fields agents act on.
+
+    Retrieval plumbing (signal scores, candidate policy fields, embedding
+    provenance, double-serialized record copies) stays out of packs unless
+    the caller asks for an audit view.
+    """
+
+    lean: dict[str, Any] = {}
+    for key in _ITEM_METADATA_KEYS:
+        value = metadata.get(key)
+        if value is None or value == "" or value == [] or value == {}:
+            continue
+        lean[key] = value
+    return lean
+
+
+def _description_adds_nothing(description: str, content: str | None) -> bool:
+    """Report whether a description is wholly contained in the content already served.
+
+    Writers store description as a hard prefix of content, so equality only holds
+    while the reader is served that same prefix; once the full body is served the
+    description is still redundant, just no longer identical.
+    """
+    trimmed = description.strip()
+    body = (content or "").strip()
+    if not trimmed:
+        return not body
+    return body.startswith(trimmed)
+
+
+def _item_from_result(
+    result: SearchResult,
+    facet: ContextFacet,
+    *,
+    audit: bool = False,
+) -> ContextItem:
+    full_metadata = dict(result.metadata)
+    metadata = full_metadata if audit else _lean_item_metadata(full_metadata)
+    quality = _quality_metadata_from_result(result)
+    source = _compact_metadata_value(result.source) or quality.source or result.id
+    metadata.setdefault("source_id", source)
+    content = result.content
+    if facet is ContextFacet.PRIOR_ART:
+        learnings = metadata.get("learnings")
+        if isinstance(learnings, str) and learnings.strip():
+            content = learnings.strip()
+    if not audit:
+        description = metadata.get("description")
+        if isinstance(description, str) and _description_adds_nothing(description, content):
+            metadata.pop("description", None)
+    kwargs: dict[str, Any] = {
+        "id": result.id,
+        "source_revision": result.source_revision,
+        "type": result.type,
+        "name": result.name,
+        "content": content,
+        "score": result.score,
+        "facet": facet,
+        "reason": _reason_for(result, facet),
+        "source": source,
+        "metadata": metadata,
+    }
+    if "quality" in getattr(ContextItem, "__dataclass_fields__", {}):
+        kwargs["quality"] = quality
+    else:
+        metadata["quality"] = quality
+    return ContextItem(**kwargs)
+
+
+def _item_sort_key(item: ContextItem) -> tuple[int, float]:
+    return (0 if item.metadata.get("active_lookup") else 1, -item.score)
+
+
+_LINEAGE_TYPE_RANK = {
+    "decision": 0,
+    "plan": 0,
+    "idea": 0,
+    "claim": 0,
+    "rule": 0,
+    "guide": 0,
+    "pattern": 0,
+    "error_pattern": 0,
+    "artifact": 0,
+    "task": 1,
+    "epic": 1,
+    "project": 1,
+    "procedure": 2,
+    "template": 2,
+    "tool": 2,
+    "document": 2,
+    "source": 2,
+    "config_file": 2,
+}
+_LINEAGE_DEFAULT_RANK = 3
+_PROCEDURE_NAME_PREFIX = "procedure: "
+
+
+def _lineage_key(item: ContextItem) -> str:
+    name = " ".join((item.name or "").strip().lower().split())
+    if name.startswith(_PROCEDURE_NAME_PREFIX):
+        name = name[len(_PROCEDURE_NAME_PREFIX) :]
+    return name
+
+
+def _lineage_rank(item: ContextItem) -> tuple[int, float]:
+    if item.metadata.get("active_lookup"):
+        return (-1, -item.score)
+    item_type = (item.type or "").lower()
+    if item_type in _WORK_ITEM_TYPES:
+        status = str(item.metadata.get("status") or "").lower()
+        if status in _IN_FLIGHT_WORK_STATUSES:
+            return (-1, -item.score)
+    type_rank = _LINEAGE_TYPE_RANK.get(item_type, _LINEAGE_DEFAULT_RANK)
+    return (type_rank, -item.score)
+
+
+async def _drop_retired_items(
+    sections: list[ContextSection], organization_id: str
+) -> list[ContextSection]:
+    """Refuse admission to any row a correction retired.
+
+    The native lane gates its own candidates, but a pack also admits rows the
+    gate never saw: the active-work lookup and the legacy fallback search both
+    reach a section directly. Running ahead of selection rather than after it
+    is what keeps a retired row from spending one of the pack's limited slots
+    and shrinking the answer on its way out.
+    """
+
+    unavailable = await unavailable_publication_ids(
+        organization_id, {item.id: item.metadata for section in sections for item in section.items}
+    )
+    kept: list[ContextSection] = []
+    for section in sections:
+        items = [
+            item
+            for item in section.items
+            if graph_metadata_recallable(item.metadata) and item.id not in unavailable
+        ]
+        if items:
+            kept.append(replace(section, items=items))
+    return kept
+
+
+def _dedupe_lineage(sections: list[ContextSection]) -> list[ContextSection]:
+    """Collapse derivation-lineage duplicates across sections.
+
+    The graph stores the same fact in multiple shapes: a raw memory and the
+    decision reflected from it, a task and its auto-generated procedure
+    mirror. ID-based dedup can't see these; name-stem grouping keeps the
+    most distilled shape (decision over task over procedure over raw).
+    """
+
+    winners: dict[str, ContextItem] = {}
+    for section in sections:
+        for item in section.items:
+            key = _lineage_key(item)
+            if not key:
+                continue
+            best = winners.get(key)
+            if best is None or _lineage_rank(item) < _lineage_rank(best):
+                winners[key] = item
+
+    kept = {id(item) for item in winners.values()}
+    deduped: list[ContextSection] = []
+    for section in sections:
+        items = [item for item in section.items if not _lineage_key(item) or id(item) in kept]
+        if items:
+            deduped.append(replace(section, items=items))
+    return deduped
+
+
+def _dedupe_sections(
+    sections: list[ContextSection],
+    limit: int,
+    *,
+    per_facet_limit: int,
+) -> list[ContextSection]:
+    seen: set[str] = set()
+    unique_sections: list[ContextSection] = []
+    for section in sections:
+        items: list[ContextItem] = []
+        for item in sorted(section.items, key=_item_sort_key):
+            key = item.id or f"{item.type}:{item.name}"
+            if key in seen:
+                continue
+            seen.add(key)
+            items.append(item)
+        if items:
+            unique_sections.append(replace(section, items=items))
+
+    selected: list[list[ContextItem]] = [[] for _ in unique_sections]
+    selected_ids: set[int] = set()
+    remaining = limit
+    for item_index in range(per_facet_limit):
+        for section_index, section in enumerate(unique_sections):
+            if remaining <= 0:
+                break
+            if item_index >= len(section.items):
+                continue
+            item = section.items[item_index]
+            selected[section_index].append(item)
+            selected_ids.add(id(item))
+            remaining -= 1
+        if remaining <= 0:
+            break
+
+    if remaining > 0:
+        overflow = [
+            (*_item_sort_key(item), section_index, item_index, item)
+            for section_index, section in enumerate(unique_sections)
+            for item_index, item in enumerate(section.items)
+            if id(item) not in selected_ids
+        ]
+        for _, _, section_index, _, item in sorted(overflow, key=lambda entry: entry[:-1]):
+            if remaining <= 0:
+                break
+            selected[section_index].append(item)
+            remaining -= 1
+
+    return [
+        replace(section, items=items)
+        for section, items in zip(unique_sections, selected, strict=True)
+        if items
+    ]
+
+
+def context_item_source_id(item: ContextItem) -> str:
+    return (
+        _compact_metadata_value(item.metadata.get("source_id"))
+        or _compact_metadata_value(item.source)
+        or item.id
+    )
+
+
+def context_item_project_id(item: ContextItem) -> str | None:
+    quality = getattr(item, "quality", item.metadata.get("quality", {}))
+    return (
+        _quality_value(quality, "project_id")
+        or _compact_metadata_value(item.metadata.get("project_id"))
+        or _compact_metadata_value(item.metadata.get("project"))
+    )
+
+
+def context_item_freshness(item: ContextItem) -> str | None:
+    quality = getattr(item, "quality", item.metadata.get("quality", {}))
+    return (
+        _quality_value(quality, "valid_at")
+        or _quality_value(quality, "updated_at")
+        or _quality_value(quality, "created_at")
+        or _compact_metadata_value(item.metadata.get("freshness"))
+    )
+
+
+def context_item_lifecycle_state(item: ContextItem) -> str | None:
+    lifecycle = memory_lifecycle_from_metadata(
+        item.metadata,
+        source_id=context_item_source_id(item),
+        review_state=str(item.metadata.get("review_state") or "pending"),
+    )
+    return _compact_metadata_value(lifecycle.state)
+
+
+def context_item_lifecycle_flags(item: ContextItem) -> list[str]:
+    lifecycle = memory_lifecycle_from_metadata(
+        item.metadata,
+        source_id=context_item_source_id(item),
+        review_state=str(item.metadata.get("review_state") or "pending"),
+    )
+    return [str(flag) for flag in lifecycle.flags]
+
+
+async def _attach_related_items(
+    sections: list[ContextSection],
+    *,
+    organization_id: str,
+    accessible_projects: set[str] | None,
+    related_limit: int,
+    related_fn: RelatedFn,
+    principal_id: str | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
+    related_batch_fn: RelatedBatchFn | None = _default_related_items_batch,
+) -> list[ContextSection]:
+    related_limit = max(0, min(related_limit, 5))
+    if related_limit == 0:
+        return sections
+
+    eligible_ids = [
+        item.id
+        for section in sections
+        for item in section.items
+        if item.type != "document" and not item.id.startswith("document:")
+    ]
+    related_by_item_id: dict[str, list[ContextRelatedItem]] = {}
+    if related_fn is _default_related_items and related_batch_fn is not None:
+        try:
+            related_by_item_id = await related_batch_fn(
+                entity_ids=eligible_ids,
+                organization_id=organization_id,
+                accessible_projects=accessible_projects,
+                principal_id=principal_id,
+                allowed_memory_scope_keys=allowed_memory_scope_keys,
+                limit=related_limit,
+            )
+        except Exception as exc:
+            log.warning(
+                "context_related_batch_failed",
+                organization_id=organization_id,
+                error_type=type(exc).__name__,
+            )
+            related_by_item_id = {}
+
+    enriched_sections: list[ContextSection] = []
+    for section in sections:
+        items: list[ContextItem] = []
+        for item in section.items:
+            if item.type == "document" or item.id.startswith("document:"):
+                items.append(item)
+                continue
+            if related_fn is _default_related_items and related_batch_fn is not None:
+                items.append(replace(item, related=related_by_item_id.get(item.id, [])))
+                continue
+            try:
+                related = await related_fn(
+                    entity_id=item.id,
+                    organization_id=organization_id,
+                    accessible_projects=accessible_projects,
+                    principal_id=principal_id,
+                    allowed_memory_scope_keys=allowed_memory_scope_keys,
+                    limit=related_limit,
+                )
+            except Exception:
+                related = []
+            items.append(replace(item, related=related))
+        enriched_sections.append(replace(section, items=items))
+    return enriched_sections
+
+
+async def _compile_fallback_sections(
+    *,
+    query: str,
+    facets: list[ContextFacet],
+    domain: str | None,
+    project: str | None,
+    accessible_projects: set[str] | None,
+    organization_id: str,
+    limit: int,
+    search_fn: SearchFn,
+    principal_id: str | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
+    audit: bool = False,
+    include_documents: bool = True,
+) -> list[ContextSection]:
+    # The degraded path answers to the same reader as the native one. Dropping
+    # the principal here only failed closed for private rows by accident, and
+    # dropping the API-key grant silently widened what a narrowed key returns.
+    search_kwargs: dict[str, Any] = {
+        "query": query,
+        "types": None,
+        "category": domain,
+        "project": project,
+        "accessible_projects": accessible_projects,
+        "principal_id": principal_id,
+        "allowed_memory_scope_keys": allowed_memory_scope_keys,
+        "limit": limit,
+        "include_content": True,
+        "content_max_chars": FALLBACK_SEARCH_CONTENT_MAX_CHARS,
+        "include_documents": include_documents,
+        "include_raw_memory": include_documents,
+        "include_graph": True,
+        "organization_id": organization_id,
+    }
+    if search_fn is default_search:
+        search_kwargs["record_exposure"] = False
+    response = await search_fn(**search_kwargs)
+
+    grouped: dict[ContextFacet, list[ContextItem]] = {facet: [] for facet in facets}
+    for result, facet in _emittable_results(response.results, facets):
+        grouped[facet].append(_item_from_result(result, facet, audit=audit))
+
+    return [
+        ContextSection(facet=facet, title=FACET_TITLES[facet], items=items)
+        for facet in facets
+        if (items := grouped[facet])
+    ]
+
+
+def _types_for_facets(facets: Sequence[ContextFacet]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for facet in facets:
+        entity_types = FACET_TYPES[facet]
+        if facet is ContextFacet.RECENT_MEMORY:
+            entity_types = [*entity_types, *_RECENT_MEMORY_FACT_TYPES]
+        for entity_type in entity_types:
+            normalized = entity_type.lower()
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            ordered.append(entity_type)
+    # Requested once here rather than added to every facet's list: a passage
+    # belongs to whichever facet its parent type does, and _facet_for_result
+    # is what decides that after the rows come back.
+    if PASSAGE_ENTITY_TYPE not in seen:
+        ordered.append(PASSAGE_ENTITY_TYPE)
+    return ordered
+
+
+def _emittable_results(
+    results: Sequence[SearchResult],
+    facets: list[ContextFacet],
+) -> list[tuple[SearchResult, ContextFacet]]:
+    """Pair each result that will actually be rendered with the facet it lands in.
+
+    Eligibility is settled before parent suppression runs. A span that gets
+    filtered out here must not have suppressed anything on its way, or the
+    reader loses the span and the memory it was cut from.
+    """
+    eligible: list[tuple[SearchResult, ContextFacet]] = []
+    for result in results:
+        if _is_synthetic_relationship_result(result):
+            continue
+        facet = _facet_for_result(result, facets)
+        if facet is None:
+            continue
+        eligible.append((result, facet))
+
+    surviving = {
+        id(result) for result in _suppress_parents_of_passages([pair[0] for pair in eligible])
+    }
+    return [pair for pair in eligible if id(pair[0]) in surviving]
+
+
+def _suppress_parents_of_passages(results: Sequence[SearchResult]) -> list[SearchResult]:
+    """Drop a memory when spans covering all of it are already in the same pack.
+
+    Serving both spends the reader's budget twice on overlapping text, and the
+    fat parent is the copy the slice substrate exists to stop sending. The
+    passage carries ``parent_entity_id``, so widening back is one lookup away.
+
+    Three things must hold before a span may stand in for its parent.
+
+    The projection has to have covered the whole body: one that hit the passage
+    cap, or skipped a span too large to store, leaves text living only on the
+    parent.
+
+    This pack has to hold every span of that projection. Retrieval returns what
+    matched, not what exists, so one span of three says nothing about the other
+    two; dropping the parent on the strength of a partial set hides the text
+    those spans carry.
+
+    And the span has to be emitted itself, or the reader loses both copies.
+    Callers pass only results that survived filtering.
+    """
+    retrieved: dict[str, set[int]] = {}
+    totals: dict[str, set[int]] = {}
+    for result in results:
+        if (result.type or "").lower() != PASSAGE_ENTITY_TYPE:
+            continue
+        metadata = result.metadata or {}
+        if not metadata.get(PASSAGE_COVERS_PARENT_KEY):
+            continue
+        parent_id = str(metadata.get("parent_entity_id") or "")
+        total = metadata.get("passage_total")
+        index = metadata.get("passage_index")
+        if not parent_id or not isinstance(total, int) or not isinstance(index, int):
+            continue
+        retrieved.setdefault(parent_id, set()).add(index)
+        totals.setdefault(parent_id, set()).add(total)
+
+    # The set has to be exactly the spans the projection declared, not merely
+    # as many of them. Re-projecting an edited memory writes fewer spans while
+    # the old higher-index rows survive under their deterministic ids, so one
+    # parent can present spans from two generations: disagreeing totals, or a
+    # gap-with-a-straggler that counts to the right number while missing the
+    # middle of the body.
+    covered = set()
+    for parent_id, indices in retrieved.items():
+        declared = totals.get(parent_id) or set()
+        if len(declared) != 1:
+            continue
+        total = next(iter(declared))
+        if total > 0 and indices == set(range(total)):
+            covered.add(parent_id)
+    if not covered:
+        return list(results)
+    return [result for result in results if result.id not in covered]
+
+
+def _sections_from_response(
+    response: SearchResponse,
+    *,
+    facets: Sequence[ContextFacet],
+    audit: bool = False,
+) -> list[ContextSection]:
+    grouped: dict[ContextFacet, list[ContextItem]] = {facet: [] for facet in facets}
+    for result, facet in _emittable_results(response.results, list(facets)):
+        grouped[facet].append(_item_from_result(result, facet, audit=audit))
+
+    return [
+        ContextSection(facet=facet, title=FACET_TITLES[facet], items=items)
+        for facet in facets
+        if (items := grouped[facet])
+    ]
+
+
+_LIFECYCLE_ADMISSION_KEYS = (
+    EVAL_CONSOLIDATION_METADATA_KEY,
+    CORRECTION_BLOCKERS_KEY,
+    SOURCE_VALIDATION_PENDING_KEY,
+    RECONCILE_PENDING_KEY,
+    "lifecycle_state",
+    "lifecycle_flags",
+    "review_state",
+    *GRAPH_RECALL_EXCLUSION_KEYS,
+)
+_ACTIVE_WORK_LOOKUP_STATUSES = "doing,blocked,review"
+_ACTIVE_WORK_LOOKUP_LIMIT = 5
+
+
+def _enum_value(value: Any) -> str:
+    return str(getattr(value, "value", value))
+
+
+def _lifecycle_metadata(metadata: Any) -> dict[str, Any]:
+    """Project just the fields admission reads, for lanes that rebuild metadata."""
+
+    if not isinstance(metadata, Mapping):
+        return {}
+    carried: dict[str, Any] = {}
+    for key in _LIFECYCLE_ADMISSION_KEYS:
+        value = metadata.get(key)
+        if value is not None and value != "" and value != [] and value != {}:
+            carried[key] = value
+    return carried
+
+
+def _item_from_active_entity(entity: Any) -> ContextItem:
+    entity_id = str(entity.id)
+    status = _enum_value(getattr(entity, "status", "") or "")
+    quality = ContextItemQualityMetadata(
+        origin="graph",
+        source=entity_id,
+        created_at=_compact_metadata_value(getattr(entity, "created_at", None)),
+        updated_at=_compact_metadata_value(getattr(entity, "updated_at", None)),
+        project_id=_compact_metadata_value(getattr(entity, "project_id", None)),
+    )
+    metadata: dict[str, Any] = {
+        "source_id": entity_id,
+        "active_lookup": True,
+        "status": status,
+        "priority": _enum_value(getattr(entity, "priority", "") or ""),
+        # This lane rebuilds item metadata from the entity rather than
+        # projecting a search result, so anything not named here is invisible
+        # to admission. The lifecycle keys have to be carried explicitly or a
+        # corrected task walks straight past the filter into the pack.
+        **_lifecycle_metadata(getattr(entity, "metadata", None)),
+    }
+    # Tasks invert the usual relationship: Task.set_entity_fields seeds content
+    # from description at creation and the update path never rewrites it, so
+    # content is a frozen create-time snapshot and description is the live text.
+    # Reading content first here would serve prose the author already replaced.
+    content = str(getattr(entity, "description", "") or getattr(entity, "content", "") or "")
+    reason = "task is currently in progress for this project"
+    if status == "blocked":
+        reason = "task is currently blocked for this project"
+    return ContextItem(
+        id=entity_id,
+        source_revision=getattr(entity, "observed_revision", None),
+        type=_enum_value(getattr(entity, "entity_type", "task")),
+        name=str(entity.name),
+        content=content,
+        score=0.0,
+        facet=ContextFacet.ACTIVE_WORK,
+        reason=reason,
+        source=entity_id,
+        quality=quality,
+        metadata=metadata,
+    )
+
+
+def _active_work_project_allowed(
+    *,
+    project: str,
+    accessible_projects: set[str] | None,
+    scoped_accessible_projects: frozenset[str] | None,
+    allowed_memory_scope_keys: set[str] | None,
+) -> bool:
+    if scoped_accessible_projects is not None:
+        return project in scoped_accessible_projects
+    if accessible_projects is not None and project not in accessible_projects:
+        return False
+    if allowed_memory_scope_keys is not None:
+        return memory_scope_policy_key(MemoryScope.PROJECT, project) in allowed_memory_scope_keys
+    return True
+
+
+async def _default_active_work(
+    *,
+    organization_id: str,
+    project: str,
+    limit: int,
+    principal_id: str | None = None,
+    accessible_projects: set[str] | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
+) -> list[ContextItem]:
+    from sibyl_core.models.entities import EntityType
+
+    runtime = await get_graph_runtime(organization_id)
+    entities = await runtime.entity_manager.list_by_type(
+        EntityType.TASK,
+        limit=limit,
+        project_id=project,
+        status=_ACTIVE_WORK_LOOKUP_STATUSES,
+    )
+    # Membership in the project authorizes the section, not every row inside
+    # it: a privately scoped task sitting in an accessible project reaches the
+    # pack carrying its description text unless the row is checked too.
+    return [
+        _item_from_active_entity(entity)
+        for entity in entities
+        if memory_metadata_read_allowed(
+            getattr(entity, "metadata", None),
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+            private_scope_granted=private_scope_granted_for(
+                allowed_memory_scope_keys, principal_id=principal_id
+            ),
+            row_project_id=memory_row_project_id(getattr(entity, "metadata", None)),
+        )
+    ]
+
+
+def _merge_active_work(
+    sections: list[ContextSection],
+    active_items: list[ContextItem],
+    facets: Sequence[ContextFacet],
+) -> list[ContextSection]:
+    if not active_items:
+        return sections
+
+    existing_ids = {item.id for item in active_items}
+    merged: list[ContextSection] = []
+    inserted = False
+    facet_positions = {facet: index for index, facet in enumerate(facets)}
+    active_index = facet_positions.get(ContextFacet.ACTIVE_WORK, 0)
+    for section in sections:
+        if section.facet is ContextFacet.ACTIVE_WORK:
+            retained = [item for item in section.items if item.id not in existing_ids]
+            merged.append(replace(section, items=[*active_items, *retained]))
+            inserted = True
+            continue
+        if not inserted and facet_positions.get(section.facet, len(facet_positions)) > active_index:
+            merged.append(
+                ContextSection(
+                    facet=ContextFacet.ACTIVE_WORK,
+                    title=FACET_TITLES[ContextFacet.ACTIVE_WORK],
+                    items=list(active_items),
+                )
+            )
+            inserted = True
+        merged.append(section)
+    if not inserted:
+        merged.append(
+            ContextSection(
+                facet=ContextFacet.ACTIVE_WORK,
+                title=FACET_TITLES[ContextFacet.ACTIVE_WORK],
+                items=list(active_items),
+            )
+        )
+    return merged
+
+
+async def _compile_native_sections(
+    *,
+    plan: Any,
+    facets: Sequence[ContextFacet],
+    limit: int,
+    per_facet_limit: int,
+    raw_memory_recall_fn: RawMemoryRecallFn,
+    audit: bool = False,
+    naive_retrieval: bool = False,
+    include_raw_memory: bool = True,
+) -> list[ContextSection]:
+    search_limit = min(50, max(limit, per_facet_limit * len(facets)))
+    facet = ContextFacet.RECENT_MEMORY if ContextFacet.RECENT_MEMORY in facets else None
+    if naive_retrieval:
+        from sibyl_core.retrieval.naive import naive_search
+
+        response = await naive_search(
+            plan=plan,
+            types=_types_for_facets(facets),
+            facet=facet,
+            limit=search_limit,
+            include_content=True,
+            embedding_provider=configured_embedding_provider(),
+        )
+    else:
+        response = await context_search(
+            plan=plan,
+            types=_types_for_facets(facets),
+            facet=facet,
+            limit=search_limit,
+            include_content=True,
+            embedding_provider=configured_embedding_provider(),
+            raw_memory_recall_fn=(
+                raw_memory_recall_fn if include_raw_memory else _empty_raw_memory_recall
+            ),
+        )
+    return _sections_from_response(response, facets=facets, audit=audit)
+
+
+async def _empty_raw_memory_recall(**_kwargs: Any) -> list[Any]:
+    return []
+
+
+async def compile_context(
+    goal: str,
+    *,
+    retrieval_query: str | None = None,
+    intent: str | ContextIntent = ContextIntent.BUILD,
+    layer: str | ContextLayer = ContextLayer.RECALL,
+    domain: str | None = None,
+    project: str | None = None,
+    accessible_projects: set[str] | None = None,
+    principal_id: str | None = None,
+    agent_id: str | None = None,
+    organization_id: str | None = None,
+    limit: int = 24,
+    include_related: bool = False,
+    related_limit: int = 3,
+    audit: bool = False,
+    search_fn: SearchFn = default_search,
+    related_fn: RelatedFn = _default_related_items,
+    raw_memory_recall_fn: RawMemoryRecallFn = recall_raw_memory,
+    active_work_fn: ActiveWorkFn | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
+    record_exposure: bool = True,
+    knn_type_overfetch: int = 0,
+    naive_retrieval: bool = False,
+    include_documents: bool = True,
+) -> ContextPack:
+    """Build a small, structured context pack for an agent goal.
+
+    `naive_retrieval` swaps the 8-lane retrieval for the naive-strong control
+    arm and drops the one-hop related-item walk, so a pack compiled under the
+    arm carries no graph traversal at all. It is off unless a caller selects it.
+
+    `include_documents=False` keeps both native and fallback retrieval on the
+    graph, excluding raw content memory as well as imported documents.
+    """
+
+    goal = goal.strip()
+    if not goal:
+        msg = "goal is required"
+        raise ValueError(msg)
+    if organization_id is None:
+        msg = "organization_id is required"
+        raise ValueError(msg)
+
+    normalized_intent = _coerce_intent(intent)
+    normalized_layer = _coerce_layer(layer)
+    query = _query_for(retrieval_query.strip() if retrieval_query else goal, domain)
+    limit = max(1, min(limit, LAYER_LIMITS[normalized_layer]))
+    facets = _facets_for_layer(normalized_intent, normalized_layer)
+    per_facet_limit = max(2, min(8, (limit + len(facets) - 1) // len(facets)))
+    plan = build_context_retrieval_plan(
+        query=query,
+        organization_id=organization_id,
+        facets=facets,
+        facet_types=FACET_TYPES,
+        principal_id=principal_id,
+        project=project,
+        accessible_projects=accessible_projects,
+        agent_id=agent_id,
+        limit=limit,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
+        knn_type_overfetch=knn_type_overfetch,
+    )
+
+    sections: list[ContextSection] = []
+    retrieval_failed = False
+    try:
+        sections = await _compile_native_sections(
+            plan=plan,
+            facets=facets,
+            limit=limit,
+            per_facet_limit=per_facet_limit,
+            raw_memory_recall_fn=raw_memory_recall_fn,
+            audit=audit,
+            naive_retrieval=naive_retrieval,
+            include_raw_memory=include_documents,
+        )
+    except Exception as exc:
+        if naive_retrieval:
+            # The machine is the arm's fallback everywhere else in this
+            # function, which under the arm means a failed naive run returns
+            # eight-lane contents wearing the arm's label. A race whose labels
+            # can be wrong measures nothing, and a degraded arm silently
+            # scoring the machine's recall is the worst version of that. Fail
+            # the request instead: a missing data point is recoverable, a
+            # mislabelled one poisons the comparison.
+            log.warning(
+                "naive_retrieval_failed",
+                error_type=type(exc).__name__,
+            )
+            raise
+        retrieval_failed = True
+        log.warning(
+            "context_native_search_failed",
+            error_type=type(exc).__name__,
+        )
+
+    if (
+        ContextFacet.ACTIVE_WORK in facets
+        # Active work is its own retrieval, reaching the graph through a
+        # separate list query and merging straight into the pack. Under the arm
+        # it would put rows the arm never ranked in front of the reader.
+        and not naive_retrieval
+        and project
+        and _active_work_project_allowed(
+            project=project,
+            accessible_projects=accessible_projects,
+            scoped_accessible_projects=plan.accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+        )
+    ):
+        lookup = active_work_fn if active_work_fn is not None else _default_active_work
+        try:
+            active_items = await lookup(
+                organization_id=organization_id,
+                project=project,
+                limit=min(per_facet_limit, _ACTIVE_WORK_LOOKUP_LIMIT),
+                principal_id=principal_id,
+                accessible_projects=accessible_projects,
+                allowed_memory_scope_keys=allowed_memory_scope_keys,
+            )
+        except Exception as exc:
+            active_items = []
+            log.warning(
+                "context_active_work_lookup_failed",
+                error_type=type(exc).__name__,
+            )
+        sections = _merge_active_work(sections, active_items, facets)
+
+    sections = _dedupe_lineage(await _drop_retired_items(sections, organization_id))
+    sections = _dedupe_sections(sections, limit, per_facet_limit=per_facet_limit)
+    if not sections and retrieval_failed:
+        sections = _dedupe_sections(
+            await _drop_retired_items(
+                await _compile_fallback_sections(
+                    query=query,
+                    facets=facets,
+                    domain=domain,
+                    project=project,
+                    accessible_projects=accessible_projects,
+                    organization_id=organization_id,
+                    limit=limit,
+                    search_fn=search_fn,
+                    principal_id=principal_id,
+                    allowed_memory_scope_keys=allowed_memory_scope_keys,
+                    audit=audit,
+                    include_documents=include_documents,
+                ),
+                organization_id,
+            ),
+            limit,
+            per_facet_limit=per_facet_limit,
+        )
+    # Related items are a one-hop graph walk, which is exactly the surface the
+    # naive arm exists to measure the absence of.
+    if include_related and not naive_retrieval and normalized_layer is not ContextLayer.WAKE:
+        related_projects = (
+            set(plan.accessible_projects) if plan.accessible_projects is not None else None
+        )
+        sections = await _attach_related_items(
+            sections,
+            organization_id=organization_id,
+            accessible_projects=related_projects,
+            related_limit=related_limit,
+            related_fn=related_fn,
+            principal_id=principal_id,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+        )
+    usage_metadata: dict[str, Any] = {}
+    if sections and record_exposure:
+        usage_metadata[_USAGE_EXPOSURE_SUMMARY_KEY] = await annotate_context_item_exposures(
+            [item for section in sections for item in section.items],
+            organization_id=organization_id,
+            principal_id=principal_id,
+            project_id=project,
+            source_surface="context_pack",
+            request_metadata={
+                "goal": goal,
+                "intent": normalized_intent.value,
+                "layer": normalized_layer.value,
+                "domain": domain,
+                "project": project,
+                "limit": limit,
+                "item_ids": [item.id for section in sections for item in section.items],
+            },
+        )
+    return ContextPack(
+        goal=goal,
+        intent=normalized_intent,
+        layer=normalized_layer,
+        query=query,
+        domain=domain,
+        project=project,
+        sections=sections,
+        total_items=sum(len(section.items) for section in sections),
+        usage_metadata=usage_metadata,
+    )
+
+
+def context_pack_to_dict(pack: ContextPack) -> dict[str, Any]:
+    payload = asdict(pack)
+    for section in payload["sections"]:
+        for item in section["items"]:
+            item["metadata"] = public_memory_metadata(item["metadata"])
+            for related in item["related"]:
+                related["metadata"] = public_memory_metadata(related["metadata"])
+    return payload
+
+
+__all__ = [
+    "DEFAULT_MARKDOWN_TOKEN_BUDGET",
+    "FACET_TYPES",
+    "INTENT_FACETS",
+    "compile_context",
+    "context_item_freshness",
+    "context_item_lifecycle_flags",
+    "context_item_lifecycle_state",
+    "context_item_project_id",
+    "context_item_source_id",
+    "context_pack_to_dict",
+    "context_pack_to_markdown",
+    "render_context_pack",
+    "validate_context_render_payload",
+]

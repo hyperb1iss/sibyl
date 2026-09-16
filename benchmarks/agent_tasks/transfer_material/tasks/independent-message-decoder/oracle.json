@@ -1,0 +1,88 @@
+{
+  "schema_version": "sibyl-json-cli-cases-v1",
+  "cases": [
+    {
+      "id": "public-simple",
+      "input": {
+        "messages": [
+          [
+            49
+          ]
+        ]
+      },
+      "expected": {
+        "values": [
+          1
+        ]
+      }
+    },
+    {
+      "id": "boundaries",
+      "input": {
+        "messages": [
+          [
+            49
+          ],
+          [
+            50
+          ]
+        ]
+      },
+      "expected": {
+        "values": [
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "id": "no-cross-unicode",
+      "input": {
+        "messages": [
+          [
+            34,
+            195
+          ],
+          [
+            169,
+            34
+          ],
+          [
+            51
+          ]
+        ]
+      },
+      "expected": {
+        "values": [
+          null,
+          null,
+          3
+        ]
+      }
+    },
+    {
+      "id": "bad-neighbor",
+      "input": {
+        "messages": [
+          [
+            123
+          ],
+          [
+            116,
+            114,
+            117,
+            101
+          ],
+          []
+        ]
+      },
+      "expected": {
+        "values": [
+          null,
+          true,
+          null
+        ]
+      }
+    }
+  ]
+}

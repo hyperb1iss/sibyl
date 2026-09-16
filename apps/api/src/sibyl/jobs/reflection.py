@@ -14,6 +14,7 @@ from sibyl.persistence.auth_runtime import (
     log_memory_audit_event,
     resolve_accessible_project_graph_ids,
 )
+from sibyl_core.ai.errors import provider_error_detail
 from sibyl_core.auth import ProjectRole
 from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind
 from sibyl_core.models.reflection import ReflectionPack
@@ -260,6 +261,7 @@ async def _reflect_dream_sources(
                     "source_id": source.id,
                     "outcome": "error",
                     "reason": str(exc),
+                    "provider_error": provider_error_detail(exc),
                 }
             )
     return results
@@ -413,6 +415,7 @@ async def _drain_dream_candidates(
                         "candidate_id": candidate.id,
                         "outcome": "error",
                         "reason": str(exc),
+                        "provider_error": provider_error_detail(exc),
                         "dry_run": dry_run,
                     }
                 )

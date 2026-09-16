@@ -1,0 +1,137 @@
+{
+  "schema_version": "sibyl-json-cli-cases-v1",
+  "cases": [
+    {
+      "id": "public-simple",
+      "input": {
+        "lateness": 2,
+        "gap": 2,
+        "samples": [
+          {
+            "sensor": "a",
+            "tick": 1
+          },
+          {
+            "sensor": "a",
+            "tick": 2
+          }
+        ]
+      },
+      "expected": {
+        "sessions": [
+          {
+            "sensor": "a",
+            "first": 1,
+            "last": 2,
+            "n": 2
+          }
+        ],
+        "rejected": 0
+      }
+    },
+    {
+      "id": "independent-clocks",
+      "input": {
+        "lateness": 1,
+        "gap": 2,
+        "samples": [
+          {
+            "sensor": "a",
+            "tick": 100
+          },
+          {
+            "sensor": "b",
+            "tick": 0
+          },
+          {
+            "sensor": "b",
+            "tick": 1
+          }
+        ]
+      },
+      "expected": {
+        "sessions": [
+          {
+            "sensor": "a",
+            "first": 100,
+            "last": 100,
+            "n": 1
+          },
+          {
+            "sensor": "b",
+            "first": 0,
+            "last": 1,
+            "n": 2
+          }
+        ],
+        "rejected": 0
+      }
+    },
+    {
+      "id": "sensor-late",
+      "input": {
+        "lateness": 2,
+        "gap": 2,
+        "samples": [
+          {
+            "sensor": "a",
+            "tick": 4
+          },
+          {
+            "sensor": "a",
+            "tick": 2
+          },
+          {
+            "sensor": "a",
+            "tick": 1
+          }
+        ]
+      },
+      "expected": {
+        "sessions": [
+          {
+            "sensor": "a",
+            "first": 2,
+            "last": 4,
+            "n": 2
+          }
+        ],
+        "rejected": 1
+      }
+    },
+    {
+      "id": "separate-gap",
+      "input": {
+        "lateness": 10,
+        "gap": 1,
+        "samples": [
+          {
+            "sensor": "b",
+            "tick": 3
+          },
+          {
+            "sensor": "b",
+            "tick": 0
+          }
+        ]
+      },
+      "expected": {
+        "sessions": [
+          {
+            "sensor": "b",
+            "first": 0,
+            "last": 0,
+            "n": 1
+          },
+          {
+            "sensor": "b",
+            "first": 3,
+            "last": 3,
+            "n": 1
+          }
+        ],
+        "rejected": 0
+      }
+    }
+  ]
+}

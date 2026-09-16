@@ -115,3 +115,34 @@ async def test_validation_archive_missing_retention_flag_rejected(history):
     assert result.rows_restored == 0
     assert result.errors == ["memory_validation_executions invalid archive row (ValueError)"]
     assert await _execution.load()
+
+
+async def test_validation_purge_drops_the_provider_refusal(history):
+    """A provider message can quote the offending input, so a purge clears it."""
+    client, execution = history
+    from sibyl_core.ai.errors import LLMProviderError
+
+    await execution.record_failure(
+        LLMProviderError(
+            "LLM provider request failed with HTTP 400",
+            details={
+                "status_code": 400,
+                "body": {
+                    "error": {
+                        "type": "invalid_request_error",
+                        "message": "Invalid value for content: ORIGINAL EVIDENCE",
+                    }
+                },
+            },
+        )
+    )
+    assert "ORIGINAL EVIDENCE" in (await execution.load())["error_detail"]
+
+    await client.execute_query("DELETE raw_captures;")
+
+    purged = await execution.load()
+    assert purged["purged"] is True
+    assert purged.get("error_detail") is None
+    assert purged.get("result_json") is None
+    # The class name carries no content, so it survives for triage.
+    assert purged["error_type"] == "LLMProviderError"

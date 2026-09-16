@@ -48,6 +48,7 @@ _RAW_MEMORY_RECALL_FIELDS = ", ".join(
     (
         "id AS record_id",
         "uuid",
+        "revision",
         "organization_id",
         "source_id",
         "principal_id",

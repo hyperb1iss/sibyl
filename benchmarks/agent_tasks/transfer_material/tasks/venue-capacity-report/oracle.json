@@ -1,0 +1,125 @@
+{
+  "schema_version": "sibyl-json-cli-cases-v1",
+  "cases": [
+    {
+      "id": "public-simple",
+      "input": {
+        "rooms": [
+          {
+            "name": "a",
+            "limit": 5,
+            "bookings": [
+              {
+                "at": 0,
+                "until": 2,
+                "people": 2
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "reports": {
+          "a": {
+            "peak": 2,
+            "windows": []
+          }
+        }
+      }
+    },
+    {
+      "id": "exact-limit",
+      "input": {
+        "rooms": [
+          {
+            "name": "a",
+            "limit": 3,
+            "bookings": [
+              {
+                "at": -2,
+                "until": 0,
+                "people": 3
+              },
+              {
+                "at": 0,
+                "until": 1,
+                "people": 3
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "reports": {
+          "a": {
+            "peak": 3,
+            "windows": []
+          }
+        }
+      }
+    },
+    {
+      "id": "independent",
+      "input": {
+        "rooms": [
+          {
+            "name": "a",
+            "limit": 1,
+            "bookings": [
+              {
+                "at": 0,
+                "until": 2,
+                "people": 2
+              }
+            ]
+          },
+          {
+            "name": "b",
+            "limit": 0,
+            "bookings": []
+          }
+        ]
+      },
+      "expected": {
+        "reports": {
+          "a": {
+            "peak": 2,
+            "windows": [
+              [
+                0,
+                2
+              ]
+            ]
+          },
+          "b": {
+            "peak": 0,
+            "windows": []
+          }
+        }
+      }
+    },
+    {
+      "id": "bad-room",
+      "input": {
+        "rooms": [
+          {
+            "name": "bad",
+            "limit": 1,
+            "bookings": [
+              {
+                "at": 2,
+                "until": 1,
+                "people": 1
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "reports": {
+          "bad": null
+        }
+      }
+    }
+  ]
+}

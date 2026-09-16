@@ -1,0 +1,75 @@
+{
+  "schema_version": "sibyl-json-cli-cases-v1",
+  "cases": [
+    {
+      "id": "public-simple",
+      "input": {
+        "units": 4,
+        "weights": {
+          "a": 1,
+          "b": 1
+        }
+      },
+      "expected": {
+        "units_by_department": {
+          "a": 2,
+          "b": 2
+        }
+      }
+    },
+    {
+      "id": "large-exact",
+      "input": {
+        "units": 9007199254740995,
+        "weights": {
+          "a": 1,
+          "b": 1
+        }
+      },
+      "expected": {
+        "units_by_department": {
+          "a": 4503599627370498,
+          "b": 4503599627370497
+        }
+      }
+    },
+    {
+      "id": "tie-and-zero",
+      "input": {
+        "units": 2,
+        "weights": {
+          "c": 1,
+          "a": 1,
+          "b": 1,
+          "z": 0
+        }
+      },
+      "expected": {
+        "units_by_department": {
+          "c": 0,
+          "a": 1,
+          "b": 1,
+          "z": 0
+        }
+      }
+    },
+    {
+      "id": "unequal",
+      "input": {
+        "units": 7,
+        "weights": {
+          "a": 1,
+          "b": 2,
+          "c": 3
+        }
+      },
+      "expected": {
+        "units_by_department": {
+          "a": 1,
+          "b": 2,
+          "c": 4
+        }
+      }
+    }
+  ]
+}

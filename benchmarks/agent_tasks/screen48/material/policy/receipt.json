@@ -1,0 +1,63 @@
+{
+  "actual_io": {
+    "database_connections": 0,
+    "denied_optional_git_version_probe": true,
+    "new_reservations": 0,
+    "provider_calls": 0,
+    "remote_operations": 0,
+    "solver_dispatches": 0
+  },
+  "design": "PLAN.md",
+  "immutable_input_snapshots": 49,
+  "independent_review_performed": false,
+  "limits": [
+    "Actual native/raw retrieval selections and final summary outputs do not exist in this packet.",
+    "Source geometry and local counts are not provider-route qualification.",
+    "The20tools budget is a ceiling, not a guaranteed attainable number of tools.",
+    "New48manifest, pricing and envelope, complete-source restore, summary recipe adoption and current authority remain unarmed.",
+    "The original24diagnostic and its budget claim are not reused."
+  ],
+  "main_owner_files_exact": 13,
+  "measurement": "measurement-v2/geometry.json",
+  "original_four_docs_unchanged": {
+    "EVAL_EVIDENCE.json": "79d1143274daac4e8ad22d1be6cd8e5b297ad11cdea9202b39a80eaed476bfd6",
+    "EXECUTION.md": "731dda90f550115b8f414a1f2dd2f68cb48155c197d63834c1c3bfef69cf8f76",
+    "PLAN.md": "ba4b02ce34d1539b44b30916338866b4b44f27a0facda9af2befd565c5887850",
+    "VISION.html": "fa86b979c987320c57b8980523f85bd4beda0197f01d09a4b4932c48722471b8"
+  },
+  "policy": "policy.json",
+  "proposed_changes": [
+    "engine-level native search plus disclosed whole-item assembly",
+    "shared90k memory ceiling with actual complete request count",
+    "existing raw fulltext/vector/RRF fenced to233original capture UUIDs",
+    "whole20-summary library without task-aware selection or index",
+    "constant raw/summary packs acrosscp0/cp1 with fresh source authority"
+  ],
+  "prose_scan": {
+    "candidates": 0,
+    "hard": 0
+  },
+  "retained_measurement_failure": {
+    "path": "measurement.log",
+    "provider_calls": 0,
+    "reason": "Initial geometry script treated encode_episode_views result as text; corrected to canonical JSON before successful rerun.",
+    "source_mutations": 0
+  },
+  "schema": "sibyl-recall-policy-design-receipt-v1",
+  "selected_main": "e4d6b0af969cf89b275213780c8a72e352caed38",
+  "source_catalog": "measurement-v2/source-geometry.json",
+  "source_shape_example": "native-raw-shape-example.json",
+  "status": "frozen_unarmed_proposal_for_independent_review",
+  "timestamp_utc": "2026-09-14T06:46:21.367996+00:00",
+  "verification": {
+    "actual_retrieval_selection_qualified": false,
+    "checks": 16,
+    "current_authority_qualified": false,
+    "denominator": 48,
+    "input_snapshots": 49,
+    "paid_calls": 0,
+    "status": "PASS",
+    "tasks": 6,
+    "whole_source_views": 233
+  }
+}

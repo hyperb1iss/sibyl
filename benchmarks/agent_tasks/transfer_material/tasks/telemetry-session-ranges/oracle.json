@@ -1,0 +1,167 @@
+{
+  "schema_version": "sibyl-json-cli-cases-v1",
+  "cases": [
+    {
+      "id": "public-simple",
+      "input": {
+        "lag": 2,
+        "break_after": 3,
+        "arrivals": [
+          [
+            "a",
+            1
+          ],
+          [
+            "a",
+            2
+          ]
+        ]
+      },
+      "expected": {
+        "ranges": [
+          [
+            "a",
+            1,
+            2,
+            2
+          ]
+        ],
+        "dropped": 0
+      }
+    },
+    {
+      "id": "watermark-equality",
+      "input": {
+        "lag": 2,
+        "break_after": 3,
+        "arrivals": [
+          [
+            "a",
+            5
+          ],
+          [
+            "a",
+            3
+          ],
+          [
+            "a",
+            2
+          ]
+        ]
+      },
+      "expected": {
+        "ranges": [
+          [
+            "a",
+            3,
+            5,
+            2
+          ]
+        ],
+        "dropped": 1
+      }
+    },
+    {
+      "id": "late-merge",
+      "input": {
+        "lag": 10,
+        "break_after": 3,
+        "arrivals": [
+          [
+            "a",
+            0
+          ],
+          [
+            "a",
+            6
+          ],
+          [
+            "a",
+            3
+          ]
+        ]
+      },
+      "expected": {
+        "ranges": [
+          [
+            "a",
+            0,
+            6,
+            3
+          ]
+        ],
+        "dropped": 0
+      }
+    },
+    {
+      "id": "negative-duplicate",
+      "input": {
+        "lag": 0,
+        "break_after": 0,
+        "arrivals": [
+          [
+            "a",
+            -2
+          ],
+          [
+            "a",
+            -2
+          ],
+          [
+            "a",
+            -3
+          ]
+        ]
+      },
+      "expected": {
+        "ranges": [
+          [
+            "a",
+            -2,
+            -2,
+            2
+          ]
+        ],
+        "dropped": 1
+      }
+    },
+    {
+      "id": "global-other-clock",
+      "input": {
+        "lag": 2,
+        "break_after": 3,
+        "arrivals": [
+          [
+            "a",
+            100
+          ],
+          [
+            "b",
+            0
+          ],
+          [
+            "b",
+            98
+          ]
+        ]
+      },
+      "expected": {
+        "ranges": [
+          [
+            "a",
+            100,
+            100,
+            1
+          ],
+          [
+            "b",
+            98,
+            98,
+            1
+          ]
+        ],
+        "dropped": 1
+      }
+    }
+  ]
+}

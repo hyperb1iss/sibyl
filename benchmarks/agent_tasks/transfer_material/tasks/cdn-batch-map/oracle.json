@@ -1,0 +1,161 @@
+{
+  "schema_version": "sibyl-json-cli-cases-v1",
+  "cases": [
+    {
+      "id": "public-simple",
+      "input": {
+        "base": "/opt/site",
+        "requests": [
+          {
+            "tag": "a",
+            "url": "/news/item"
+          }
+        ]
+      },
+      "expected": {
+        "mapped": [
+          {
+            "tag": "a",
+            "destination": "/opt/site/news/item"
+          }
+        ]
+      }
+    },
+    {
+      "id": "escape-order",
+      "input": {
+        "base": "/opt/site",
+        "requests": [
+          {
+            "tag": "a",
+            "url": "/x/%2e%2e/b"
+          },
+          {
+            "tag": "b",
+            "url": "/%2e%2e/private"
+          },
+          {
+            "tag": "c",
+            "url": "/%GG"
+          }
+        ]
+      },
+      "expected": {
+        "mapped": [
+          {
+            "tag": "a",
+            "destination": "/opt/site/b"
+          },
+          {
+            "tag": "b",
+            "destination": null
+          },
+          {
+            "tag": "c",
+            "destination": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "single-decode",
+      "input": {
+        "base": "/opt/site",
+        "requests": [
+          {
+            "tag": "a",
+            "url": "/%252f?q=%GG"
+          },
+          {
+            "tag": "b",
+            "url": "/%C3%A9"
+          },
+          {
+            "tag": "c",
+            "url": "/%C3"
+          }
+        ]
+      },
+      "expected": {
+        "mapped": [
+          {
+            "tag": "a",
+            "destination": "/opt/site/%2f"
+          },
+          {
+            "tag": "b",
+            "destination": "/opt/site/é"
+          },
+          {
+            "tag": "c",
+            "destination": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "separators",
+      "input": {
+        "base": "/opt/site",
+        "requests": [
+          {
+            "tag": "a",
+            "url": "/x%2fy"
+          },
+          {
+            "tag": "b",
+            "url": "/%00"
+          },
+          {
+            "tag": "c",
+            "url": "//./"
+          }
+        ]
+      },
+      "expected": {
+        "mapped": [
+          {
+            "tag": "a",
+            "destination": null
+          },
+          {
+            "tag": "b",
+            "destination": null
+          },
+          {
+            "tag": "c",
+            "destination": "/opt/site"
+          }
+        ]
+      }
+    },
+    {
+      "id": "backslash-and-fragment",
+      "input": {
+        "base": "/root",
+        "requests": [
+          {
+            "tag": "a",
+            "url": "/%5c"
+          },
+          {
+            "tag": "b",
+            "url": "/ok#/%GG"
+          }
+        ]
+      },
+      "expected": {
+        "mapped": [
+          {
+            "tag": "a",
+            "destination": null
+          },
+          {
+            "tag": "b",
+            "destination": "/root/ok"
+          }
+        ]
+      }
+    }
+  ]
+}

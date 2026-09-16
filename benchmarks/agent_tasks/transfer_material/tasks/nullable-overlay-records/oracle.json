@@ -1,0 +1,72 @@
+{
+  "schema_version": "sibyl-json-cli-cases-v1",
+  "cases": [
+    {
+      "id": "public-simple",
+      "input": {
+        "layers": [
+          {
+            "a": 1
+          },
+          {
+            "a": 2
+          }
+        ]
+      },
+      "expected": {
+        "record": {
+          "a": 2
+        }
+      }
+    },
+    {
+      "id": "null-is-value",
+      "input": {
+        "layers": [
+          {
+            "a": 1
+          },
+          {
+            "a": null
+          }
+        ]
+      },
+      "expected": {
+        "record": {
+          "a": null
+        }
+      }
+    },
+    {
+      "id": "present-empty",
+      "input": {
+        "layers": [
+          {
+            "a": null,
+            "b": 3
+          },
+          {
+            "b": false,
+            "c": ""
+          }
+        ]
+      },
+      "expected": {
+        "record": {
+          "a": null,
+          "b": false,
+          "c": ""
+        }
+      }
+    },
+    {
+      "id": "empty",
+      "input": {
+        "layers": []
+      },
+      "expected": {
+        "record": {}
+      }
+    }
+  ]
+}

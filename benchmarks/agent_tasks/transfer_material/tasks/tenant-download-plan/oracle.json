@@ -1,0 +1,156 @@
+{
+  "schema_version": "sibyl-json-cli-cases-v1",
+  "cases": [
+    {
+      "id": "public-simple",
+      "input": {
+        "roots": {
+          "red": "/srv/red"
+        },
+        "jobs": [
+          [
+            "red",
+            "/a"
+          ]
+        ]
+      },
+      "expected": {
+        "files": [
+          "/srv/red/a"
+        ],
+        "rejected": []
+      }
+    },
+    {
+      "id": "literal-second-escape",
+      "input": {
+        "roots": {
+          "red": "/srv/red"
+        },
+        "jobs": [
+          [
+            "red",
+            "/%252e%252e/x"
+          ],
+          [
+            "red",
+            "/%252f"
+          ]
+        ]
+      },
+      "expected": {
+        "files": [
+          "/srv/red/%2e%2e/x",
+          "/srv/red/%2f"
+        ],
+        "rejected": []
+      }
+    },
+    {
+      "id": "tenants-and-traversal",
+      "input": {
+        "roots": {
+          "red": "/srv/red",
+          "blue": "/srv/blue"
+        },
+        "jobs": [
+          [
+            "blue",
+            "/a/../b"
+          ],
+          [
+            "red",
+            "/../red2"
+          ],
+          [
+            "missing",
+            "/a"
+          ]
+        ]
+      },
+      "expected": {
+        "files": [
+          "/srv/blue/b",
+          null,
+          null
+        ],
+        "rejected": [
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "id": "invalid-segment",
+      "input": {
+        "roots": {
+          "red": "/srv/red"
+        },
+        "jobs": [
+          [
+            "red",
+            "/%5c"
+          ],
+          [
+            "red",
+            "/%f"
+          ],
+          [
+            "red",
+            "/ok#/%ff"
+          ]
+        ]
+      },
+      "expected": {
+        "files": [
+          null,
+          null,
+          "/srv/red/ok"
+        ],
+        "rejected": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "id": "utf8-nul-separators",
+      "input": {
+        "roots": {
+          "r": "/root"
+        },
+        "jobs": [
+          [
+            "r",
+            "/%C3"
+          ],
+          [
+            "r",
+            "/%00"
+          ],
+          [
+            "r",
+            "/a%2Fb"
+          ],
+          [
+            "r",
+            "/%C3%A9?q=%GG"
+          ]
+        ]
+      },
+      "expected": {
+        "files": [
+          null,
+          null,
+          null,
+          "/root/é"
+        ],
+        "rejected": [
+          0,
+          1,
+          2
+        ]
+      }
+    }
+  ]
+}

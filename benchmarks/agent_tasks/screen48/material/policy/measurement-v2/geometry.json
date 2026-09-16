@@ -1,0 +1,593 @@
+{
+  "actual_recall_candidates_observed": false,
+  "bindings": {
+    "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/measure.py": "6ae57d2b13b87e396a43b3ce9c755f442346a992520266361df78f7e11196a8d",
+    "/Users/bliss/dev/eval-artifacts/sibyl/ordinary-full-cohort-workload-20260914/sources-92000-v1.jsonl": "5d7670ac29958c1c1cce65aeb1872414d1288b571d90165aecc1d19c6942ba04",
+    "/Users/bliss/dev/eval-artifacts/sibyl/sha256/8c597589c5ded445e40817b14458015741d9c09eb4919e11f90db8d3e01b3f15": "8c597589c5ded445e40817b14458015741d9c09eb4919e11f90db8d3e01b3f15",
+    "/Users/bliss/dev/eval-artifacts/sibyl/solver-bytecode-source-20260914/source/benchmarks/agent_tasks/coding_controller.py": "08063b06d522d3539645ef9bc8d5c4a0e8ac419b595c3879d57211ac8f4b219b",
+    "/Users/bliss/dev/eval-artifacts/sibyl/transfer-paid-continuation/tokenizer.json": "19564a48c4f71a2a1b937cce34c737a1e662b171c5f5d7edf641a15cd896f07d",
+    "/Users/bliss/dev/eval-artifacts/sibyl/transfer-paid-continuation/tokenizer_config.json": "fc76878832c668e3f0f8be66e6239a475b9093d2fe5cef97c242369779e6c6e6",
+    "/Users/bliss/dev/sibyl/packages/python/sibyl-core/src/sibyl_core/tasks/episode_evidence.py": "fc0abb8b4de2d67757d4c7daceaf568ae25ef6bd33e6cb48679407e4ae3231d5"
+  },
+  "current_source_authority_checked": false,
+  "database_connections": 0,
+  "denied_external_events": [
+    {
+      "event": "subprocess.Popen",
+      "executable": "git"
+    }
+  ],
+  "max_singleton_pack_tokens": 64202,
+  "new_reservations": 0,
+  "proposed_memory_ceiling_tokens": 90000,
+  "proposed_retained_controller_budget": {
+    "cost_usd": 2.0,
+    "input_tokens": 2000000,
+    "output_tokens": 8000,
+    "tool_calls": 20
+  },
+  "provider_calls": 0,
+  "repeat_budget_arithmetic": {
+    "cumulative_input_remainder_before_other_messages": 110000,
+    "guarantees_all_20_tools_fit": false,
+    "hypothetical_requests": 21,
+    "limit": "These are arithmetic planning terms, not provider usage forecasts. The unchanged controller repeats memory plus growing history, and stops when any reported budget binds.",
+    "memory_ceiling_times_21": 1890000,
+    "old_131072_ceiling_times_21": 2752512,
+    "summary_text_ceilings_times_21": 1720320
+  },
+  "schema": "sibyl-full-cohort-recall-geometry-v1",
+  "solver_dispatches": 0,
+  "source_count": 233,
+  "source_geometry_sha256": "c38c93c067eecf8dbbc9472fd46fd0d7a73abe4d51ba284ce6632faf391bca67",
+  "source_only_stress": {
+    "memory_sha256": "e94c33bfe73ba3fb6194fdd5887e04c4c57d4b1368505658dac0a739c6c8b130",
+    "memory_tokens": 64202,
+    "not_an_actual_retrieval_selection": true,
+    "omitted_source_ids": [
+      "4aaedcd2-0aa3-5c70-95ed-5dafe2b7abd2",
+      "9b1ecb3f-197e-5a95-9034-1c23478948a0",
+      "d5c2dd2a-63ee-5466-ac4b-827278fda925",
+      "181ed951-7afb-5d41-83c5-27789fd504b1",
+      "b5239fb1-c2c1-5a2d-a682-fd66441cae95",
+      "fd5e84fa-bf96-568b-91d5-391b944875de",
+      "a1373598-de24-5741-963f-2d2a512a3870",
+      "5739d117-4c63-5493-a7fb-60ab179ef3f6",
+      "ffcf9164-4bc7-5c03-aa87-409883a30964",
+      "030e9e2d-c3c3-5b09-9c53-826d07df7803",
+      "618753e0-285d-50eb-ac94-77ccc13a0e70",
+      "a0dc5515-b5fb-5101-bc7d-1663feb6ac11",
+      "94fb8c5d-86fa-56e5-9584-0c1480ac3b59",
+      "e4bfed0b-7d58-5f87-a52d-42cd4ff6b223",
+      "fa468aea-56e7-5ebe-88ea-1ffcf11835db",
+      "09ee02fc-f2f4-5d83-a554-fef64881e939",
+      "0acea037-77e5-5b50-84be-1642f03a8684",
+      "135d4fb4-7f66-5fc8-bb9d-d33181416ebc",
+      "e262fd0b-27fb-576a-af0f-90317b24aaf3",
+      "e79c805d-cdfd-56e1-8d46-46db28035095",
+      "ab767184-6bda-5b15-89de-00a0a670339d",
+      "572e91ce-f1ab-5175-9051-3a0fa2f95e33",
+      "83046562-3d72-55a9-a1eb-8f5e04cd3af1",
+      "fcdd08df-491f-5588-9a90-a89345cb65dd",
+      "39411d17-ced7-528a-9cbf-7299fc6cb183",
+      "d57ec70c-95a5-53fb-97e1-5e8a76ae51a7",
+      "0f95af3e-6b36-592c-9e84-677b4bbffd8c",
+      "cc236fe4-0781-52fc-9d7e-2232c72d0e4f",
+      "628d5301-4f36-5877-81f3-826237c09c83",
+      "891a1c4f-4b29-58ed-a692-60c5712bd1f7",
+      "71365133-211d-5597-ac20-6391b5012d20",
+      "ace087f9-c1fb-5a5e-9b62-e1c31b24a0fc",
+      "d9920cf3-664a-53b4-93ed-1f055988684b",
+      "226f7d45-8e83-5682-b733-81a97fe86fd0",
+      "d0da0c57-e44d-555d-a3f0-3e98ddab96b0",
+      "9103d623-3e32-5a91-9088-a3413a5d28e5",
+      "917c9123-d911-575b-b927-6731e0e13c8c",
+      "b46ac6b3-62b8-509c-9fda-92f656efbd73",
+      "15afc1f2-3ac0-55d1-9f8b-dfa150c4d477",
+      "adbe15af-541d-5588-90d6-0655074a0f6b",
+      "e7d804d3-70b0-5ac1-86ce-12fa8775cd2c",
+      "252194ed-892b-593f-a050-b8afc39e6683",
+      "a57e67b0-9719-57f3-b268-485ba24e360d",
+      "40048f6c-04b4-54fa-843a-3e6dc438e7b3",
+      "3c1125cb-234d-5f6c-b3d8-c302fd3fbadb",
+      "b6da8ed6-c2a4-5e41-8b46-85f52d734b30",
+      "0b45b57c-0000-5076-bdf9-525ea44f2bfa",
+      "0eab5320-d763-5c22-9688-d99f5362b8c2",
+      "f837e5f7-5e2a-5eec-8f61-55a1fff5b36c",
+      "d0017bdb-7d87-50e7-96b1-9394dbf79522",
+      "1ab10e0c-b528-574a-92fa-a3302e47ba41",
+      "a243b716-8be2-525e-9595-e32ea5f77696",
+      "1666c30a-b233-5ad6-bfbe-367101dce93d",
+      "94b7b0c4-22a7-53ea-84e2-cd23aab349de",
+      "d78ec3fb-1074-51a6-b150-25ce5ebafca2",
+      "edf082bf-5cb5-592d-8d00-1634ccb4b926",
+      "aa78cca9-0abe-5c93-a1c3-45e65bb602fe",
+      "25836787-6988-537f-b772-bcf496e9fe53",
+      "6e045897-400b-5eba-9054-e945ff5037e2",
+      "8abac17f-48d0-5a32-9687-78076111fcc1",
+      "0720b056-3a36-508f-87df-39c35a763992",
+      "660128c4-f6db-5826-b2ef-c7465ec1d682",
+      "fd818483-5387-56a6-af6d-ec557205c7ec",
+      "0323125b-10c9-5ad4-8546-d3dadf39c5ae",
+      "d5a9ff1d-2a53-5116-b4f4-6a632e363a62",
+      "859917ea-365d-58ce-b6d9-1f6421342412",
+      "c36fbc6d-f86b-52a3-a832-e767b08aef00",
+      "674c1214-c9cd-5b36-a965-6dbdb66545c7",
+      "24e4bfec-e79d-5fba-8dee-3a86b7bf1752",
+      "4c91c42b-24aa-5618-b96e-e9618212b2c6",
+      "aa56bc03-3b3c-53d1-9bc4-2dd1cbfeb89c",
+      "fd6ac0cd-9bfe-5a05-8f49-0c1655b81410",
+      "c07fbcb5-750f-581f-91ce-c9535cff9065",
+      "936027b6-7676-5bd9-a649-caa63460e2e3",
+      "a01d88c0-9e62-5c1f-8ee1-8412e8f9eae4",
+      "126851d7-3665-56ea-b4b9-a7bc6f147117",
+      "6251d318-82cf-511b-ba2c-a14576f0606e",
+      "29c835f3-4461-59d9-8f52-76ad700dea24",
+      "529d43c7-fa30-51a0-b2e3-a13b87ca5134",
+      "f9aae15d-ea98-5642-90d4-c76d432e77b7",
+      "395b2aea-e6e1-556b-a478-3ffcaddb5798",
+      "7796ea36-8568-593b-8695-cda2d212082f",
+      "199b3939-b2bc-5e88-856a-f991cbd29f1f",
+      "506b1bec-777b-5b1b-80cf-25dc23599d82",
+      "2dbb3d09-f6a6-5db1-b420-86173c7afa41",
+      "ef4f51cd-99bd-5011-b57e-4432da3cd091",
+      "2555dae3-f59b-5ea5-8fa8-d40016a7fc2d",
+      "52cac1a9-b6ad-5df2-bcbc-ddfed083beab",
+      "8f1975be-5e1f-54fa-94f2-dca23dc14c09",
+      "8eaa09ae-9b61-5bd8-adfd-9ae479142465",
+      "1fcff437-a104-52f2-89a9-7e6f09b82dfb",
+      "a48dcbbf-5872-5a7d-b605-98d3673980eb",
+      "c224088e-7327-59d2-9285-3752932d6fb6",
+      "f12ca787-31e7-55bb-8026-50c0fc42af10",
+      "e360824f-1b70-5c13-be02-561a5ba5a848",
+      "f2513dda-b984-5ae5-8e74-3f5d6a30a1e0",
+      "de86cb46-60cb-5c81-ae4a-641533773a65",
+      "573e3b2c-9719-50de-ba50-5b9b1e77755d",
+      "853760c5-976f-57be-a872-60a6b48a2ebd",
+      "8e498124-8989-53f7-961b-a7c4c34c54d9",
+      "9d945590-76fc-5123-bc82-c860377cb05b",
+      "6b32e4d1-e45d-5c61-839b-d1ec1f1fd10e",
+      "3c0916b5-95aa-58b3-b488-233a65969694",
+      "43ec8a27-d508-528e-b17e-07ca29023e65",
+      "eada8b7a-3246-5672-bd01-5a16681cfc51",
+      "52eed691-27c3-5338-a026-c8a6a8ab7c2b",
+      "cd281d82-d871-5607-ac5e-8d4a903b5327",
+      "e4263e92-ec7d-594c-81d2-33c83ff72e7d",
+      "e89317e2-ff79-5e97-b5b3-dc795838b130",
+      "6e6d7582-4891-5e00-9a11-7cd2deca006f",
+      "6b20efe3-5794-55c8-a6ae-7aba17f5bb53",
+      "637cc440-30b4-53b2-a08d-d79342da53c7",
+      "79bdc0e1-06d6-5e25-8328-841673e15b41",
+      "a2d37ce2-ec8a-56e0-ba42-752288d66e34",
+      "d8faec90-5bbd-534b-a794-2dcaecb5a513",
+      "340fbe53-8018-5783-b7b0-03471180ced3",
+      "64b4b659-46a8-5be2-b323-d20adc1a2d13",
+      "4a6c51cf-654b-5241-a8e3-c30d4dd11639",
+      "637c9ebb-fb20-5acd-bc27-5c7a6a61efa2",
+      "8f3856fe-7217-5d1a-a68b-29a75a4c650a",
+      "e8eea956-b0bb-58d5-a1c4-a38dde6b4389",
+      "d4793ca2-ac1b-5851-9052-1eb589349ec3",
+      "6ad36f99-92ce-5499-83d3-8f16b40d8970",
+      "672f54a9-028c-5c65-ac8f-7e79e9280e9f",
+      "5ba2fb5b-3738-51c9-a890-365744955262",
+      "ca6019ef-74b9-52eb-ab60-d78447b4d814",
+      "f69f9567-95ea-55c8-b357-aefd32aab6da",
+      "ff12fdc2-b5b9-5503-b425-81361c771cce",
+      "0372b24d-23af-5ab3-813b-46cd9ddf99c1",
+      "06d09dd5-7b53-5817-bae1-7196194ff4ee",
+      "a2f1867f-21f7-5a33-ad20-5a6d7a117e9c",
+      "f5075897-a17a-5884-b945-8103e2ce9ce2",
+      "3b0a7c91-4684-5110-8d98-d9d125c3c786",
+      "e6d30b92-7317-5f71-8dd5-58e84c0b4cac",
+      "f92f1c33-26ae-53ae-895a-d09c86300a9a",
+      "ea9610c4-e080-5c64-8e2e-6b35115428a0",
+      "bf2e92fd-b2a2-513e-86e5-3b725047a521",
+      "0a9ce798-ab94-5df5-9d87-73793774b9f0",
+      "d1532a04-5d58-5341-a875-e65a68d45cbc",
+      "dc07d262-c3b1-5fc9-bd49-667d33c318c2",
+      "41099059-de6c-5a32-9d23-0748528d3325",
+      "8afffe18-39a0-596c-9c9c-0eccda57ee67",
+      "6155469b-0bda-57e3-81f5-8681153ecf48",
+      "bdfb20b3-93e9-5c31-a48f-c74bf3701455",
+      "a7c8ada6-c1dd-5ec3-bb1b-373e63155f32",
+      "83c5d64f-8575-5a90-a16c-1f923fe8fdb1",
+      "b1ef2814-7a72-547b-bca8-1da52bb0fd8c",
+      "dcd32f30-bb99-5511-b78e-045dbcb85bd9",
+      "acfaabe2-d8c1-5d5a-aed0-c4ed0e4e62a8",
+      "787a7f8a-2f66-5f62-bf85-c7def5d1466c",
+      "219d3581-3f8d-5435-8968-eac3edf7e63c",
+      "121bec65-6679-5a26-97e1-3989d9ff4a75",
+      "33b85e0f-9d74-5f53-8704-f8b951873e75",
+      "33b60f48-be81-57c4-a1b3-62c607bedc4f",
+      "86758d7f-d926-5f39-8764-ea5acb065984",
+      "18287840-8713-5999-82eb-a3e251f28caf",
+      "b15df260-91c6-5fab-92e9-676742d28a9d",
+      "8b31abd0-12a0-550b-9e56-bd4f93e3b7fe",
+      "27ce7789-dfec-5771-80c9-10d2e9b6afb4",
+      "0ffe834b-971b-5847-993b-907531129292",
+      "6862fb00-cd2f-5160-9995-0d7dc6abda02",
+      "bc137d0e-7878-580c-89d8-892a68fe105f",
+      "ba1f508e-84dd-53ad-bf9d-61523d271474",
+      "3f87e4c4-7d5e-52ae-9efb-0766e22fa3d4",
+      "d8845e6e-7fd1-52fb-800b-6f622feae5ec",
+      "ce6c9985-df40-5500-a56c-461c4cac0da9",
+      "341d40df-e03b-5b21-a7ca-b4b4390c4cc7",
+      "c2e7a94b-7cde-5207-b3f5-a3d8aea98199",
+      "c98675b2-7809-5634-b2ef-d7ec8700661b",
+      "b983b93b-4727-5181-b2f3-c38dde95836a",
+      "31841a8c-c5d0-53e3-aa90-9feeec53cb16",
+      "3fda21cb-4944-5a18-b859-27af647f632f",
+      "71765cdd-0100-585f-8f00-5b02ac150a94",
+      "104122e9-7e4d-587a-b003-c5eb4fad05e3",
+      "d77dae02-7b02-56ab-b4f2-45d7464e0427",
+      "66c8470e-c0f3-5064-8975-b071e377b783",
+      "6d48826a-121c-5eec-913b-a086c5200084",
+      "ee82e175-4dd9-552c-b41d-112fb5575eb6",
+      "5949703f-2f71-552b-9cf1-eb4d86d1ede2",
+      "b5b087ad-8cd4-579a-8d83-9ab557a27b20",
+      "15623828-ed04-5409-a781-7f7cf7f6cda4",
+      "d0060c0d-b85e-5e4d-b122-de770e4b60ff",
+      "567b6d73-86ce-572e-b5ab-a54d73903ecb",
+      "883413c5-a5b5-5128-9e13-c980fc0e21d5",
+      "42f757a8-4811-5736-ac0c-ea2d5bbeb34f",
+      "e5bf55a3-c521-5871-bc82-773170d6ec16",
+      "d33890bc-b8d8-5034-8e7f-96d9d93d6158",
+      "04e3aac4-0e44-5b28-bd07-e5315a3d83bc",
+      "8a58a032-1824-5480-8c18-40c67a508f5a",
+      "66957d6b-19d3-5b89-8e97-e27c3e379a7c",
+      "6a8ba3c5-45ca-540f-8666-b9176dfaa757",
+      "8ed8cd32-6720-541b-bf88-f4c7890f57a6",
+      "cb2dca1f-32cb-51c8-8123-ff5bcc2efec5",
+      "10ea5966-f3fc-5f6d-ac5f-a89c2aa55fc5",
+      "ed5bc60f-97a8-58b4-a1e8-35884834933e",
+      "f07d2bad-10c2-5a6c-afcf-d42a92251e13",
+      "f3983ec9-08b0-500d-ab81-45374a49a7d9",
+      "58bed1c7-4332-55df-a6a7-7e5fde0039b9",
+      "80f33b1c-a632-5872-9a38-32fdcbc66083",
+      "083d7303-c570-5590-9793-9a3cd4b2800d",
+      "4836d91c-da4a-55a2-85fb-4f4444e120ac",
+      "43543b7c-d284-5cb0-9df1-d9dc66ae5ef2",
+      "bd3f3ce3-beb9-54ba-b610-c04d1a26b687",
+      "456204f1-6625-5b9d-806a-7c649344cf03",
+      "1c8b90a1-aa3e-5e14-9f78-9ef541a1872d",
+      "2819b92e-42f2-5f8c-9cc1-cb4106a11af3",
+      "2ac03294-2b53-50e8-bc9c-2dc90c8a94a1",
+      "08a74fde-e370-5705-82c1-e938b2895dd4",
+      "2fe11026-4d4f-5f89-829a-a586d24184d8",
+      "e7e99baf-e5dd-558e-9b1f-bc39f62b0f68",
+      "c6e94344-6fc1-597b-a85d-94ce7eac1e6e",
+      "04e47b54-8081-58c3-bac5-c3a003eec82a",
+      "06244620-fa98-5eb9-a1fb-b0d18e35fd68",
+      "97ac4457-72c2-5811-b5e6-bd8ecdbe37b8",
+      "275fb7a4-6ba1-55b6-be53-528cd068ac84",
+      "146b2e40-1698-5536-af1a-fcdb9f2b77c4",
+      "562861b1-62f7-5a6a-9d3d-2de5b2ec5049",
+      "9e1e7ba4-cf17-5b89-992a-3a29366de265",
+      "b750c7f1-013f-533c-9ee5-5558745f1a15",
+      "24a69479-5ccd-50aa-b33e-28cd75891192",
+      "1000135a-335f-515f-b66b-cfbcaa944143",
+      "f5dfcc2e-6e87-50ff-90fe-bff78c829db9",
+      "e6d17ccb-93f4-5d68-b38c-66ca7cdf839e",
+      "7359b988-1fce-5d01-ab90-591c916a92a6",
+      "634ad173-7d3d-5520-9082-fdba9e911488",
+      "356a3342-53c5-55e5-93af-7165da7290b9",
+      "d11bc6e2-e2dd-5e26-9c80-8ddaed5a0e67",
+      "63fd7949-3897-5e69-a985-86626ee93026",
+      "f3426391-4d42-5323-9869-95fb7bbb3188",
+      "3f5e1d77-e751-5c15-b521-f9baded38b0b",
+      "5b140264-8d84-5427-901b-55d0560cfa88",
+      "cc6458b4-f197-5fda-8a74-d20bf088e1c8"
+    ],
+    "ordering": "descending whole-block token size, source ID tie-break; geometry only, never retrieval",
+    "selected_source_ids": [
+      "9714dc2a-b97f-5b89-a1ec-ac6f8a28050a"
+    ]
+  },
+  "source_tokens": {
+    "max": 64056,
+    "min": 14017,
+    "sum": 6392356
+  },
+  "status": "offline_source_geometry_only",
+  "summary_library": {
+    "actual_complete_library_tokens": null,
+    "empty_framing_reference_tokens": 1679,
+    "limit": "Separate text counts plus empty framing are not a guaranteed BPE bound; count the actual complete library before acceptance.",
+    "memory_headroom_above_summed_text_ceilings": 8080,
+    "proposed_each_token_ceiling": 4096,
+    "references": 20,
+    "summed_separate_text_token_ceilings": 81920
+  },
+  "tasks": [
+    {
+      "actual_native_pack": null,
+      "actual_raw_recall_pack": null,
+      "actual_summary_pack": null,
+      "all_233_singleton_initial_request_tokens_max": 64924,
+      "all_233_singleton_initial_request_tokens_min": 14882,
+      "initial_fit_guard_tokens": 204800,
+      "no_memory": {
+        "body_sha256": "589976a94ebcc4077338d1c68de33e01ec80ec53e4ecef91917256ceba87d7dd",
+        "initial_request_tokens": 717,
+        "memory_tokens": 0,
+        "rendered_sha256": "eeceda9a2c2c295a36977979237bb19907051de8dc057df6d09c23ee57411a02"
+      },
+      "prompt_sha256": "4ce102cfe334af51eb0e78614a4c3d687dca05c8286c86ef123d8adaa7e453a8",
+      "query": "Repair a venue report. Input {rooms:[{name,limit,bookings:[{at,until,people}]}]}. Return {reports:{name:{peak,windows}|null}}. Each room is independent. Half-open bookings; zero-length bookings empty; any reversed booking invalidates only its room. Windows are maximal adjacent-merged intervals where demand is strictly greater than limit. Repair the existing program. Run python app.py as a JSON stdin/stdout program; public examples are in public_checks.py. Python standard library only.",
+      "query_sha256": "af7805a8880dee1582e0314782963f4485ca3f9d815f8d89d8f9c4a4426aad43",
+      "source_only_stress": {
+        "body_sha256": "3131bc3764735252295b2ffe373b28b3b31781f0e15da03a8c95349b0b2c7bc6",
+        "initial_request_tokens": 64924,
+        "memory_tokens": 64202,
+        "rendered_sha256": "db6ea6e230b62948ca280a44290db7b362d7bab6b99b224d33423764873ff2c0"
+      },
+      "stress_plus_workspace_plus_full_output": 73295,
+      "task_id": "venue-capacity-report",
+      "workspace": [
+        {
+          "path": "app.py",
+          "sha256": "4ccc70376908bc50cc0f17bd0fa2a7f15309ff4baf7fbbd232cce04a0ff83ed6",
+          "tokens": 36
+        },
+        {
+          "path": "application.py",
+          "sha256": "e300ab39481d3cbfb79186152d08831b5eb648d1ade0be0379571e59088f27a8",
+          "tokens": 53
+        },
+        {
+          "path": "resolver.py",
+          "sha256": "7a12ef5a1704f39b4500dd9e1a6741ba6900ba0dc1a6f5d344523358d265fa0b",
+          "tokens": 152
+        },
+        {
+          "path": "public_checks.py",
+          "sha256": "b4ee64aeaf4126865d89049a60ab0e272fd65db819f3f5a802372005f121352e",
+          "tokens": 130
+        }
+      ],
+      "workspace_tokens": 371
+    },
+    {
+      "actual_native_pack": null,
+      "actual_raw_recall_pack": null,
+      "actual_summary_pack": null,
+      "all_233_singleton_initial_request_tokens_max": 64910,
+      "all_233_singleton_initial_request_tokens_min": 14868,
+      "initial_fit_guard_tokens": 204800,
+      "no_memory": {
+        "body_sha256": "2ba102e977227fb1371df0c2343504492bb80d772b9108844a2765399cced2f4",
+        "initial_request_tokens": 703,
+        "memory_tokens": 0,
+        "rendered_sha256": "a1071863c420f4d1616ac1c79a22ae84d820be54670c4499f279ff36b9bff181"
+      },
+      "prompt_sha256": "d38c1f0a3c485c456959f98e287cf16453698d448b16c2fadd02fb43bfa74b1d",
+      "query": "Repair rack power planning. Input {watts, reservations:[[start,end,draw]]}. Reservations occupy half-open intervals, empty intervals consume nothing. Return {peak,windows} where windows are maximal adjacent-merged intervals above watts, or null for any reversed interval. Draw/watts nonnegative integers; times integers. Repair the existing program. Run python app.py as a JSON stdin/stdout program; public examples are in public_checks.py. Python standard library only.",
+      "query_sha256": "a09f48cb8a669d93f14fa4ba55ae7a7e324a1a03819bbfe47ca0608b6629312a",
+      "source_only_stress": {
+        "body_sha256": "198b6f6d43270bdfcf65c6bc625219197a9b81148ec45c8b3dfc7c4ddce5c683",
+        "initial_request_tokens": 64910,
+        "memory_tokens": 64202,
+        "rendered_sha256": "a0641efcacfe6f8acaf98898aa058070a88f69b3fe727127f362e0aa42f83430"
+      },
+      "stress_plus_workspace_plus_full_output": 73226,
+      "task_id": "rack-power-windows",
+      "workspace": [
+        {
+          "path": "app.py",
+          "sha256": "4ccc70376908bc50cc0f17bd0fa2a7f15309ff4baf7fbbd232cce04a0ff83ed6",
+          "tokens": 36
+        },
+        {
+          "path": "application.py",
+          "sha256": "61491c9526b55e2f59e582fc63f1ee627389e1c9014ce00a791b60a82901cd1a",
+          "tokens": 21
+        },
+        {
+          "path": "resolver.py",
+          "sha256": "49f1c24bdb7ed898d6f095cda628d79e9417decb21cd7f2701d29e62f4e6e3c6",
+          "tokens": 154
+        },
+        {
+          "path": "public_checks.py",
+          "sha256": "a5a5c2fee77a15fd13f2c15dfd1e214d324a3608956501abec41e5fa798d40e3",
+          "tokens": 105
+        }
+      ],
+      "workspace_tokens": 316
+    },
+    {
+      "actual_native_pack": null,
+      "actual_raw_recall_pack": null,
+      "actual_summary_pack": null,
+      "all_233_singleton_initial_request_tokens_max": 64917,
+      "all_233_singleton_initial_request_tokens_min": 14875,
+      "initial_fit_guard_tokens": 204800,
+      "no_memory": {
+        "body_sha256": "63a358a85e47176f33a52b836fb970fc97b8ca92effd18021d1151d41ddeaea2",
+        "initial_request_tokens": 710,
+        "memory_tokens": 0,
+        "rendered_sha256": "54e3f32f765f97035cc0600f1e99faa56b9bbdc1d84123abb3acad1969104406"
+      },
+      "prompt_sha256": "9583b1e2502c3524f47b991ce03321dc864eb43f96f57f4aab3b0fa501b89177",
+      "query": "Repair discrete slot occupancy. Input {limit,ranges:[[first,last,units]]}. Both endpoints are occupied integer slots; first==last consumes one slot. Return {peak,over:sorted_integer_slots_above_limit}, or null if first>last. Ranges have magnitude at most100, units nonnegative. Do not use half-open occupancy. Repair the existing program. Run python app.py as a JSON stdin/stdout program; public examples are in public_checks.py. Python standard library only.",
+      "query_sha256": "45c0c51d5c421a52c87625762738fc4f5eee3038635e041015ffb588fb7c4b1a",
+      "source_only_stress": {
+        "body_sha256": "dbef31d87eda873e52b04cbbc6639b3c063fe6d0b5a7dc38a1d1618ef8c7efef",
+        "initial_request_tokens": 64917,
+        "memory_tokens": 64202,
+        "rendered_sha256": "8c808d382cee3d130bc3c4887d524aa59080f8be895d044a7dacd0e1e5001f86"
+      },
+      "stress_plus_workspace_plus_full_output": 73144,
+      "task_id": "inclusive-slot-occupancy",
+      "workspace": [
+        {
+          "path": "app.py",
+          "sha256": "4ccc70376908bc50cc0f17bd0fa2a7f15309ff4baf7fbbd232cce04a0ff83ed6",
+          "tokens": 36
+        },
+        {
+          "path": "application.py",
+          "sha256": "912cca74e3bda383128a4f26ffddeb97e38f48ae9c7bc021d848fe16d196d1b8",
+          "tokens": 19
+        },
+        {
+          "path": "resolver.py",
+          "sha256": "ff4f4cb15022a1a36305b505740e478a1bdc49f7292fc649bca6097fd7c7810e",
+          "tokens": 69
+        },
+        {
+          "path": "public_checks.py",
+          "sha256": "e1c6cbba57f1de5ae39112b2e3195472226bdf207ab66d81995cdb40658f04ea",
+          "tokens": 103
+        }
+      ],
+      "workspace_tokens": 227
+    },
+    {
+      "actual_native_pack": null,
+      "actual_raw_recall_pack": null,
+      "actual_summary_pack": null,
+      "all_233_singleton_initial_request_tokens_max": 64927,
+      "all_233_singleton_initial_request_tokens_min": 14885,
+      "initial_fit_guard_tokens": 204800,
+      "no_memory": {
+        "body_sha256": "61bb81d8771bdbd2d61a4d3fce6e9d13e8e66dc8ec43f22c6673bd16124ed387",
+        "initial_request_tokens": 720,
+        "memory_tokens": 0,
+        "rendered_sha256": "49a752cbe47a03f160b43e4a4563446fea9ef9c7b46af118d80e1e0fae57a7c7"
+      },
+      "prompt_sha256": "c04db3c22654c0278f689e8f0199a9dd74e718a54eb34c4b26de9e894db24e37",
+      "query": "Repair a UTF-8 JSON journal. Input {fragments:[hex_strings]} representing one byte stream. Fragments may split Unicode or records. LF delimits JSON values; whitespace-only lines ignored, CRLF supported, final nonblank record parsed without LF. Any invalid/incomplete UTF-8 or malformed JSON invalidates the whole stream. Return {entries:list_or_null}. Hex strings are well formed. Repair the existing program. Run python app.py as a JSON stdin/stdout program; public examples are in public_checks.py. Python standard library only.",
+      "query_sha256": "b9c3adffe9daa6b4fa67edc89a3f28f288d8812cab0f0f5a5ee95005f0275881",
+      "source_only_stress": {
+        "body_sha256": "5d12db55e9c4b0801e302bf7c3ec377426b666420274576c6983639481258233",
+        "initial_request_tokens": 64927,
+        "memory_tokens": 64202,
+        "rendered_sha256": "23a24396c94b4ced5cd7e2d419aec2eaf0b09f925461ce116cff3a0549dd5304"
+      },
+      "stress_plus_workspace_plus_full_output": 73157,
+      "task_id": "hex-stream-journal",
+      "workspace": [
+        {
+          "path": "app.py",
+          "sha256": "4ccc70376908bc50cc0f17bd0fa2a7f15309ff4baf7fbbd232cce04a0ff83ed6",
+          "tokens": 36
+        },
+        {
+          "path": "application.py",
+          "sha256": "d7a2ff1927388e674029714bca216507987b43349eee97e30746d8023e4a1a65",
+          "tokens": 30
+        },
+        {
+          "path": "resolver.py",
+          "sha256": "a1825ed733b295de9191719658071fb6410f0d0a9bf1a8724e033b421cfac986",
+          "tokens": 66
+        },
+        {
+          "path": "public_checks.py",
+          "sha256": "26ab44a96733edc54dd99d7d7b07e22d4bbab00110037bf633a55dfe44cf0bea",
+          "tokens": 98
+        }
+      ],
+      "workspace_tokens": 230
+    },
+    {
+      "actual_native_pack": null,
+      "actual_raw_recall_pack": null,
+      "actual_summary_pack": null,
+      "all_233_singleton_initial_request_tokens_max": 64928,
+      "all_233_singleton_initial_request_tokens_min": 14886,
+      "initial_fit_guard_tokens": 204800,
+      "no_memory": {
+        "body_sha256": "dfcc3bcdcb803327d67854a87bc727245a22a4219bcd9f269fb70962bea95101",
+        "initial_request_tokens": 721,
+        "memory_tokens": 0,
+        "rendered_sha256": "20a1b217cdecec4003665e99f93bdcee73f307f7e57294226aee00a6ee8ef17f"
+      },
+      "prompt_sha256": "a28158ed05515d4749a3fa6839ed0d7117e7b0dc28425a804212e7c7b6b77fc8",
+      "query": "Repair a record-separator channel. Input {packets:[[byte_values]]} form one strict UTF-8 stream. ASCII RS(byte30), not LF, separates JSON records. Whitespace-only segments ignored; JSON records may contain formatting newlines. Parse final nonblank segment. Any invalid UTF-8 or JSON makes return {messages:null}; otherwise {messages:list}. Packet boundaries have no record meaning. Repair the existing program. Run python app.py as a JSON stdin/stdout program; public examples are in public_checks.py. Python standard library only.",
+      "query_sha256": "f722e3e84d07d0910c4bb8817de04a346eefd3ae3b227006d41b965a0c32dd08",
+      "source_only_stress": {
+        "body_sha256": "0a5a4ffce6573ed9cdfa06918e7a96d31b4df5cb1362d33cdf62d5d4af22878f",
+        "initial_request_tokens": 64928,
+        "memory_tokens": 64202,
+        "rendered_sha256": "fc378eba7654e2cf9a6625327ff66286f2ef6f729bd26b5817dac8cdf48ba472"
+      },
+      "stress_plus_workspace_plus_full_output": 73141,
+      "task_id": "record-separator-channel",
+      "workspace": [
+        {
+          "path": "app.py",
+          "sha256": "4ccc70376908bc50cc0f17bd0fa2a7f15309ff4baf7fbbd232cce04a0ff83ed6",
+          "tokens": 36
+        },
+        {
+          "path": "application.py",
+          "sha256": "3d08fa7d09813a8fefbc9d44f8495c7ce8b3c6572f79e437128e28ad0cfd2e50",
+          "tokens": 21
+        },
+        {
+          "path": "resolver.py",
+          "sha256": "6a0085b3df188e22f23090d77bae80d19a15a0b1d7efc98bed95f7b4f4893178",
+          "tokens": 67
+        },
+        {
+          "path": "public_checks.py",
+          "sha256": "ea879f61e6b01c721096cbc152d518ed2da4ce33ce8ad1cce0cd068e1656b258",
+          "tokens": 89
+        }
+      ],
+      "workspace_tokens": 213
+    },
+    {
+      "actual_native_pack": null,
+      "actual_raw_recall_pack": null,
+      "actual_summary_pack": null,
+      "all_233_singleton_initial_request_tokens_max": 64906,
+      "all_233_singleton_initial_request_tokens_min": 14864,
+      "initial_fit_guard_tokens": 204800,
+      "no_memory": {
+        "body_sha256": "4ce70abc3d82c4ed43bc935beaaac5d177df70b87ccbbce0fdbf5be04ab4d2ee",
+        "initial_request_tokens": 699,
+        "memory_tokens": 0,
+        "rendered_sha256": "b91bca73e0250635750e2e12ecd2a133e1374bbc3b77ece902a25e29d3d597d7"
+      },
+      "prompt_sha256": "067c0a91c3f1364d43b07734987168da1fddafacd1fd3ba0442297b8639ceb9b",
+      "query": "Repair independent transport messages. Input {messages:[[byte_values]]}; each item is a complete separate UTF-8 JSON message. Decode and parse each independently; return {values:[parsed_value_or_null]}. A malformed item must not poison neighbors. Never concatenate messages to complete Unicode or JSON across boundaries. Repair the existing program. Run python app.py as a JSON stdin/stdout program; public examples are in public_checks.py. Python standard library only.",
+      "query_sha256": "7068e2d01d6d72e6dd3116b8ad19d3507acd9e1a1530756ee4bbaa8dfb1580ab",
+      "source_only_stress": {
+        "body_sha256": "255824a45fa41d04f488a305636dcbd4beff3b260189dbe413d63aef29ea7872",
+        "initial_request_tokens": 64906,
+        "memory_tokens": 64202,
+        "rendered_sha256": "643ef04b83e955a4f9ea8676250a0c18281d237ea51702f4576ada99aa88c9ad"
+      },
+      "stress_plus_workspace_plus_full_output": 73105,
+      "task_id": "independent-message-decoder",
+      "workspace": [
+        {
+          "path": "app.py",
+          "sha256": "4ccc70376908bc50cc0f17bd0fa2a7f15309ff4baf7fbbd232cce04a0ff83ed6",
+          "tokens": 36
+        },
+        {
+          "path": "application.py",
+          "sha256": "bd70477a4a86adb50d882eb2006d0a5dedcafc7663dd2b1552a84b6515b72285",
+          "tokens": 20
+        },
+        {
+          "path": "resolver.py",
+          "sha256": "3734ce60e560a3977b0e00a29c939758b2f12f9c7a870793c0c945f00aac9d9a",
+          "tokens": 55
+        },
+        {
+          "path": "public_checks.py",
+          "sha256": "8d25c7ca79c28d8c6b36ce573c8486c00c0b2ba9673eddf2fa338fda3ce6d1b9",
+          "tokens": 88
+        }
+      ],
+      "workspace_tokens": 199
+    }
+  ],
+  "timestamp_utc": "2026-09-14T06:33:10.250203+00:00",
+  "training_families": 20
+}

@@ -174,3 +174,32 @@ async def test_capture_and_scope_filters_precede_vector_neighbor_limit(
         assert len(result.memories) == 1
         expect_retained = nearer_exclusion != "capture_ids" or capture_ids is not None
         assert (result.memories[0].id == retained_id) is expect_retained
+
+
+async def test_recalled_raw_memories_carry_their_stored_revision(content_store, monkeypatch):
+    """The recall projection must surface the revision the row was read at.
+
+    Downstream provenance (search results' source_revision, correction
+    concurrency checks) reads observed_revision; a recall lane that omits the
+    column silently reports every raw capture as unrevisioned.
+    """
+    monkeypatch.setattr(
+        content_raw_recall, "raw_memory_query_embedding", AsyncMock(return_value=None)
+    )
+    org = str(uuid4())
+    remembered = await remember_raw_memory(
+        organization_id=org,
+        principal_id="owner",
+        source_id="revisioned-source",
+        raw_content="Telescope observation with a stored revision",
+        embedding_provider=None,
+    )
+
+    result = await recall_raw_memory_with_sources(
+        organization_id=org, principal_id="owner", query="telescope", limit=5
+    )
+
+    recalled = {memory.id: memory for memory in result.memories}
+    assert remembered.id in recalled
+    assert recalled[remembered.id].observed_revision == remembered.revision
+    assert recalled[remembered.id].observed_revision is not None

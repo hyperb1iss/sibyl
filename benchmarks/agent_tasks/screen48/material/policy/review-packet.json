@@ -1,0 +1,22 @@
+{
+  "freeze_sha256": "d756bd325d0572a58c9b0eaf67b950669e3a2fc37e8c093d384c7a8819f6462c",
+  "full_offline_reproduction_command": "/Users/bliss/dev/sibyl/.venv/bin/python -I -B /Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/measure.py --output /Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/independent-measurement",
+  "geometry_sha256": "5b3267edbb7daaae0d66b763d58ac37a0e160e8a69c45266f13fc1d6fc9d7a65",
+  "independent_review_requested": [
+    "Adjudicate90k common ceiling and complete20summary/no-index choice without outcome-driven tuning.",
+    "Verify raw UUID membership before lane limits and required success receipts for both lanes.",
+    "Verify engine-level native fidelity disclosure and typed raw-capture hydration.",
+    "Verify missing-pack48denominator, exact counts versus pending actualpacks, and retained source/history boundaries."
+  ],
+  "not_an_activation": true,
+  "plan_sha256": "2a38363d79b48ac469f8a927c0d4fa3f679e4c15f0c425d8361756fc8fa4d622",
+  "policy_sha256": "b09ab77f42413ed637e61aec50314f2b47f24f32812089b74e11578c8e6551f4",
+  "receipt_sha256": "fc0ffb27e7bd5f871062cbe3f8b44e0278c3c6c99f619db017092137e76167cb",
+  "reproduction_note": "Use fresh output path. Runs only retained training projections and six public prompt/workspace counts; network and child calls are blocked. Timestamps/output path vary, semantic measurements and payload hashes must match. Original capture archive is hash-verified before reading sources.",
+  "root": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac",
+  "schema": "sibyl-recall-policy-review-packet-v1",
+  "spot_commands": [
+    "/Users/bliss/dev/sibyl/.venv/bin/python -I -B /Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/verify.py",
+    "perl /Users/bliss/.agents/skills/deslop/scripts/slopscan.pl --surface house /Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/PLAN.md"
+  ]
+}

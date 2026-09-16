@@ -1,0 +1,136 @@
+{
+  "schema_version": "sibyl-json-cli-cases-v1",
+  "cases": [
+    {
+      "id": "public-simple",
+      "input": {
+        "checkpoint": {
+          "balances": {},
+          "accepted": {}
+        },
+        "batch": [
+          {
+            "org": "a",
+            "wallet": "w",
+            "key": "k",
+            "delta": 2
+          }
+        ]
+      },
+      "expected": {
+        "balances": {
+          "a/w": 2
+        },
+        "accepted": {
+          "a/k": [
+            "w",
+            2
+          ]
+        },
+        "status": [
+          "applied"
+        ]
+      }
+    },
+    {
+      "id": "restart-replay",
+      "input": {
+        "checkpoint": {
+          "balances": {
+            "a/w": 2
+          },
+          "accepted": {
+            "a/k": [
+              "w",
+              2
+            ]
+          }
+        },
+        "batch": [
+          {
+            "org": "a",
+            "wallet": "w",
+            "key": "k",
+            "delta": 2
+          }
+        ]
+      },
+      "expected": {
+        "balances": {
+          "a/w": 2
+        },
+        "accepted": {
+          "a/k": [
+            "w",
+            2
+          ]
+        },
+        "status": [
+          "duplicate"
+        ]
+      }
+    },
+    {
+      "id": "restart-conflict",
+      "input": {
+        "checkpoint": {
+          "balances": {
+            "a/w": 2
+          },
+          "accepted": {
+            "a/k": [
+              "w",
+              2
+            ]
+          }
+        },
+        "batch": [
+          {
+            "org": "a",
+            "wallet": "x",
+            "key": "k",
+            "delta": 2
+          }
+        ]
+      },
+      "expected": {
+        "balances": {
+          "a/w": 2
+        },
+        "accepted": {
+          "a/k": [
+            "w",
+            2
+          ]
+        },
+        "status": [
+          "conflict"
+        ]
+      }
+    },
+    {
+      "id": "rejected-not-recorded",
+      "input": {
+        "checkpoint": {
+          "balances": {},
+          "accepted": {}
+        },
+        "batch": [
+          {
+            "org": "a",
+            "wallet": "w",
+            "key": "k",
+            "delta": -1
+          }
+        ]
+      },
+      "expected": {
+        "balances": {},
+        "accepted": {},
+        "status": [
+          "rejected"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,122 @@
+{
+  "schema_version": "sibyl-json-cli-cases-v1",
+  "cases": [
+    {
+      "id": "public-simple",
+      "input": {
+        "packets": [
+          [
+            49
+          ]
+        ]
+      },
+      "expected": {
+        "messages": [
+          1
+        ]
+      }
+    },
+    {
+      "id": "rs-boundary",
+      "input": {
+        "packets": [
+          [
+            49,
+            30,
+            50
+          ]
+        ]
+      },
+      "expected": {
+        "messages": [
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "id": "formatting-newline",
+      "input": {
+        "packets": [
+          [
+            30,
+            123,
+            10,
+            34,
+            120,
+            34,
+            58,
+            49,
+            10,
+            125,
+            30
+          ]
+        ]
+      },
+      "expected": {
+        "messages": [
+          {
+            "x": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "unicode-packet",
+      "input": {
+        "packets": [
+          [
+            34,
+            226
+          ],
+          [
+            130
+          ],
+          [
+            172,
+            34,
+            30,
+            51
+          ]
+        ]
+      },
+      "expected": {
+        "messages": [
+          "€",
+          3
+        ]
+      }
+    },
+    {
+      "id": "invalid-utf8",
+      "input": {
+        "packets": [
+          [
+            49,
+            30,
+            34,
+            195
+          ]
+        ]
+      },
+      "expected": {
+        "messages": null
+      }
+    },
+    {
+      "id": "invalid-json",
+      "input": {
+        "packets": [
+          [
+            49,
+            30,
+            123
+          ]
+        ]
+      },
+      "expected": {
+        "messages": null
+      }
+    }
+  ]
+}
