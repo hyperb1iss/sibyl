@@ -65,6 +65,35 @@ VALIDATION_PROVIDER_ERROR_SCHEMA = """
 DEFINE FIELD IF NOT EXISTS error_detail ON memory_validation_executions TYPE option<string>;
 """
 
+# A provider message can quote the input that offended it, so a purged row
+# drops its refusal receipt alongside the result and the recovery key. The
+# error type survives: a class name carries no content.
+VALIDATION_PROVIDER_ERROR_DEPENDENT_PURGE_EVENT = """
+DEFINE EVENT OVERWRITE purge_validation_dependents ON memory_validation_executions
+    WHEN $event='DELETE' OR ($event='UPDATE' AND $before.purged=false AND $after.purged=true)
+    THEN {
+        LET $dependent_records=(SELECT id, uuid, array::len(dependency_ids) AS depth FROM memory_validation_executions
+            WHERE organization_id=$before.organization_id AND principal_id=$before.principal_id
+                AND $before.uuid IN dependency_ids AND purged=false ORDER BY depth DESC, uuid);
+        FOR $dependent IN $dependent_records {
+            UPDATE $dependent.id SET result_json=NONE, recovery_key=NONE, error_detail=NONE, purged=true;
+        };
+    };
+"""
+
+VALIDATION_PROVIDER_ERROR_SOURCE_PURGE_EVENT = """
+DEFINE EVENT OVERWRITE memory_validation_purge ON raw_captures WHEN $event='DELETE'
+THEN {
+    LET $source_records=(SELECT id, uuid, array::len(dependency_ids) AS depth
+        FROM memory_validation_executions WHERE organization_id=$before.organization_id
+            AND (parent_id=$before.uuid OR $before.uuid IN source_ids)
+        ORDER BY depth DESC, uuid);
+    FOR $source_record IN $source_records {
+        UPDATE $source_record.id SET result_json=NONE, recovery_key=NONE, error_detail=NONE, purged=true;
+    };
+};
+"""
+
 VALIDATION_ORIGIN_SCHEMA = """
 DEFINE FIELD IF NOT EXISTS origin_execution_id ON memory_derivations TYPE option<string>;
 DEFINE EVENT IF NOT EXISTS retain_derivation_origin ON memory_derivations WHEN $event='UPDATE'

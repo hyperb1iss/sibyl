@@ -38,7 +38,9 @@ from sibyl_core.backends.surreal.schema_validation_execution import (
     VALIDATION_ORIGIN_SCHEMA,
     VALIDATION_OWNER_INDEX_REPAIR,
     VALIDATION_PROMOTION_SCHEMA,
+    VALIDATION_PROVIDER_ERROR_DEPENDENT_PURGE_EVENT,
     VALIDATION_PROVIDER_ERROR_SCHEMA,
+    VALIDATION_PROVIDER_ERROR_SOURCE_PURGE_EVENT,
     VALIDATION_PURGE_EVENT,
     VALIDATION_RECEIPT_PURGE_EVENT,
     VALIDATION_RECEIPT_RECOVERY_SCHEMA,
@@ -97,7 +99,7 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 43
+CONTENT_SCHEMA_CURRENT_VERSION = 44
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -1061,6 +1063,14 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             version=43,
             name="content_validation_provider_error",
             statements=tuple(split_statements(VALIDATION_PROVIDER_ERROR_SCHEMA)),
+        ),
+        SchemaMigration(
+            version=44,
+            name="content_validation_provider_error_purge",
+            statements=(
+                VALIDATION_PROVIDER_ERROR_DEPENDENT_PURGE_EVENT,
+                VALIDATION_PROVIDER_ERROR_SOURCE_PURGE_EVENT,
+            ),
         ),
     )
 

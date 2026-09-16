@@ -415,6 +415,7 @@ async def _drain_dream_candidates(
                         "candidate_id": candidate.id,
                         "outcome": "error",
                         "reason": str(exc),
+                        "provider_error": provider_error_detail(exc),
                         "dry_run": dry_run,
                     }
                 )

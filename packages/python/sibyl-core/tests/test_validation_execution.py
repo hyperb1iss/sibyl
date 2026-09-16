@@ -434,4 +434,6 @@ async def test_validation_execution_failure_records_provider_refusal(content_sto
     }
     assert "SECRET" not in stored["refused"]["error_detail"]
     assert stored["opaque"]["error_type"] == "TimeoutError"
-    assert stored["opaque"].get("error_detail") is None
+    # SELECT * omits NONE columns, so count the rows that really carry a detail.
+    carried = await rows("memory_validation_executions WHERE error_detail != NONE")
+    assert [row["parent_id"] for row in carried] == ["refused"]

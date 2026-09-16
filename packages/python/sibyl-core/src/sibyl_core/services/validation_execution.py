@@ -334,7 +334,7 @@ class ValidationExecution:
         rows = await _query(
             """UPDATE memory_validation_executions SET state = $state, usage_json = $usage,
                     result_json = IF purged THEN NONE ELSE $result END, error_type = $error,
-                    error_detail = $error_detail
+                    error_detail = IF purged THEN NONE ELSE $error_detail END
                 WHERE uuid = $uuid AND organization_id = $org AND principal_id = $principal
                     AND state = 'running'"""
             + request_guard
