@@ -226,3 +226,73 @@ async def test_runtime_rollup_scheduler_backs_off_after_noop_failure(
     telemetry_service.schedule_runtime_rollup_persist(window_seconds=45)
 
     assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_rollup_persistence_failure_warns_once_per_class_and_counts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from structlog.testing import capture_logs
+
+    class FailingClient:
+        async def execute_query(self, query: str, **params: object) -> object:
+            raise RuntimeError("upsert rejected")
+
+    async def failing_client() -> FailingClient:
+        return FailingClient()
+
+    monkeypatch.setattr(telemetry_service, "get_shared_surreal_content_client", failing_client)
+    monkeypatch.setattr(telemetry_service, "_last_persisted_bucket", None)
+    monkeypatch.setattr(telemetry_service, "_logged_failure_buckets", {})
+
+    with capture_logs() as entries:
+        first = await telemetry_service.persist_runtime_rollup(bucket=60)
+        monkeypatch.setattr(telemetry_service, "_last_persisted_bucket", None)
+        second = await telemetry_service.persist_runtime_rollup(bucket=60)
+
+    assert first is None
+    assert second is None
+    failures = [entry for entry in entries if entry["event"] == "runtime_telemetry_rollup_failed"]
+    assert len(failures) == 2
+    # The failure is named the first time in an interval and throttled after.
+    assert [entry["log_level"] for entry in failures] == ["warning", "debug"]
+    assert {entry["error_type"] for entry in failures} == {"RuntimeError"}
+
+    counters = [
+        metric
+        for metric in telemetry_registry().snapshot(window_seconds=60)["metrics"]
+        if metric["name"] == "sibyl_telemetry_rollup_failures_total"
+    ]
+    assert counters
+    assert counters[0]["labels"]["error_type"] == "RuntimeError"
+    assert counters[0]["value"] >= 2
+
+
+@pytest.mark.asyncio
+async def test_rollup_failure_warns_again_in_a_new_interval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from structlog.testing import capture_logs
+
+    class FailingClient:
+        async def execute_query(self, query: str, **params: object) -> object:
+            raise TimeoutError("connect budget spent")
+
+    async def failing_client() -> FailingClient:
+        return FailingClient()
+
+    monkeypatch.setattr(telemetry_service, "get_shared_surreal_content_client", failing_client)
+    monkeypatch.setattr(telemetry_service, "_last_persisted_bucket", None)
+    monkeypatch.setattr(telemetry_service, "_logged_failure_buckets", {})
+
+    with capture_logs() as entries:
+        await telemetry_service.persist_runtime_rollup(bucket=120)
+        monkeypatch.setattr(telemetry_service, "_last_persisted_bucket", None)
+        await telemetry_service.persist_runtime_rollup(bucket=180)
+
+    levels = [
+        entry["log_level"]
+        for entry in entries
+        if entry["event"] == "runtime_telemetry_rollup_failed"
+    ]
+    assert levels == ["warning", "warning"]
