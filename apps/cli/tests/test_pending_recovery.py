@@ -461,28 +461,32 @@ async def test_old_server_still_stamps_the_stored_owner_on_a_new_draft(
 
 
 @pytest.mark.asyncio
-async def test_a_rotated_access_token_does_not_orphan_a_new_draft(identity: dict) -> None:
-    """A refresh in another process changes the token, never the owner."""
-    auth_store.set_tokens(BASE_URL, "first-token", "refresh")
-    auth_store.cache_pending_replay_identity(BASE_URL, "first-token", identity)
+async def test_an_owner_cached_after_this_client_started_still_lands_on_the_draft(
+    identity: dict,
+) -> None:
+    """The owner is read at buffer time, not only when the client was built.
+
+    A command that starts before the lineage has a recorded owner, and buffers
+    a write after another command recorded one, used to stamp nothing at all
+    and strand the write on the next login.
+    """
+    auth_store.set_tokens(BASE_URL, "synthetic", "refresh")
     client = SibylClient(base_url=BASE_URL)
-    assert client._owner_identity == identity
-    # Another command refreshed the lineage while this one was in flight.
-    auth_store.set_tokens(
-        BASE_URL,
-        "second-token",
-        "refresh",
-        pending_replay_scope=client._replay_scope,
-    )
+    assert client._owner_identity is None
+
+    # Another sibyl command verified and cached the owner in the meantime.
+    auth_store.cache_pending_replay_identity(BASE_URL, "synthetic", identity)
 
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("offline", request=request)
 
     attach(client, handler)
     with pytest.raises(SibylClientError):
-        await client.post("/memory/raw", json={"raw_content": "rotated draft"})
+        await client.post("/memory/raw", json={"raw_content": "late-owner draft"})
     await client.close()
-    assert pending_writes.list_pending_writes()[0]["replay_identity"] == identity
+    item = pending_writes.list_pending_writes()[0]
+    assert item["replay_identity"] == identity
+    assert "ownership_reason" not in item
 
 
 @pytest.mark.asyncio
