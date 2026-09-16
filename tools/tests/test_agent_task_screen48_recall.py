@@ -128,6 +128,9 @@ def counter():
 
 @pytest.fixture
 def setup(monkeypatch, counter):
+    # The native arm resolves the product's configured graph embedding provider;
+    # tests must not depend on the host having a provider key.
+    monkeypatch.setattr(a, "configured_embedding_provider", object)
     raw = episode()
     rows, observations, snapshots = [], {}, {}
     authority = SourceReadAuthority("reader")
