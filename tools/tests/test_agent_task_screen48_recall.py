@@ -627,6 +627,60 @@ def assert_material_freeze_pins_every_vendored_byte():
             assert len(present) == len(c.WORKSPACE_FILES), (task, tree)
 
 
+def schedule_rows(setup):
+    """The ``original_sources`` shape the frozen schedule carries, from the catalog."""
+    return [
+        {
+            "id": sid,
+            "source_sha256": setup.catalog.rows[sid]["source_sha256"],
+            "training_family": setup.catalog.rows[sid]["training_family"],
+            "observation": asdict(observation),
+        }
+        for sid, observation in sorted(setup.observations.items())
+    ]
+
+
+def test_the_schedule_content_digest_is_the_catalog_s(setup):
+    """The two sides of the gate compute one digest over the same rows."""
+    schedule = {"original_sources": schedule_rows(setup)}
+    assert len(schedule["original_sources"]) == c.SOURCE_COUNT
+
+    assert c.schedule_content_sha256(schedule) == setup.catalog.catalog_content_sha256
+    assert setup.catalog.catalog_content_sha256 != setup.catalog.catalog_sha256
+
+    # Row order is not identity: the digest sorts by capture UUID either way.
+    reversed_rows = {"original_sources": list(reversed(schedule["original_sources"]))}
+    assert c.schedule_content_sha256(reversed_rows) == setup.catalog.catalog_content_sha256
+
+    # One rewritten content hash is a different study catalog.
+    altered = [{**row} for row in schedule["original_sources"]]
+    altered[0]["source_sha256"] = "0" * 64
+    assert c.schedule_content_sha256({"original_sources": altered}) != (
+        setup.catalog.catalog_content_sha256
+    )
+
+
+def test_a_restored_incarnation_moves_only_the_lifetime_digest(setup, monkeypatch):
+    """Restoring the study database remints incarnations and nothing the study owns.
+
+    The lifetime digest follows the incarnations, which is what lets a run
+    notice a source moving under it. The content digest does not, which is what
+    lets a restored copy still be the catalog the frozen schedule names.
+    """
+    monkeypatch.setattr(w, "source_geometry", lambda *args: deepcopy(setup.rows))
+    restored = {
+        sid: replace(observation, incarnation=f"restored-{sid}")
+        for sid, observation in setup.observations.items()
+    }
+    catalog = w.OriginalCatalog(restored, setup.authority)
+
+    assert catalog.catalog_sha256 != setup.catalog.catalog_sha256
+    assert catalog.catalog_content_sha256 == setup.catalog.catalog_content_sha256
+    assert c.schedule_content_sha256({"original_sources": schedule_rows(setup)}) == (
+        catalog.catalog_content_sha256
+    )
+
+
 def test_material_pins():
     """Every vendored binding the preparation lane resolves without the eval host."""
     # The source geometry is the study denominator: 233 captures, 20 families.

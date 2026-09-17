@@ -23,12 +23,32 @@ import pytest
 from benchmarks.agent_tasks.screen48 import checkpoints, contract, cycle, materialize
 from benchmarks.agent_tasks.screen48.recall import whole_items
 
-#: The frozen schedule's catalog digest, pinned here so a silent material or
-#: database swap cannot quietly agree with itself.
+#: The frozen schedule's two catalog digests, pinned here so a silent material
+#: or database swap cannot quietly agree with itself. The first covers the
+#: observations the schedule was frozen against, incarnations included, so it
+#: names one database lifetime. The second covers only (id, content sha256,
+#: revision) over the 233 originals, so it survives a restore.
 SCHEDULE_CATALOG_SHA256 = "d2d406d004e71ced67ae7dd8af52d2b2bbd0ac6330cf8616b6c3d99f5567d487"
+SCHEDULE_CONTENT_SHA256 = "8c5b01ec1cb86492830d750d84c6e8b60e2b95b4ecde37a742d54e0b20038ecc"
+
+#: Every fixture below runs as a fresh restore of the study database: the cold
+#: copy mints a new incarnation per capture, so the qualified catalog's lifetime
+#: digest is nothing the frozen schedule has ever seen.
+RESTORED_INCARNATION = "01a0b160-6bf3-79e2-a3fb-a95c2c022609"
+FROZEN_INCARNATION = "01a09eeb-6bf3-79e2-a3fb-a95c2c022609"
 
 MATERIALIZE_KEYS = frozenset(
-    {"status", "reason", "checkpoint", "task", "arm", "memory", "counts", "catalog_sha256"}
+    {
+        "status",
+        "reason",
+        "checkpoint",
+        "task",
+        "arm",
+        "memory",
+        "counts",
+        "catalog_sha256",
+        "catalog_content_sha256",
+    }
 )
 
 #: A value that is not a credential, used only to prove nothing writes it down.
@@ -39,15 +59,36 @@ CHECKPOINT_ARTIFACT_FLOOR = 50
 
 
 class FakeCatalog:
-    """The shape ``prepare_checkpoint`` reads off a qualified original catalog."""
+    """The shape ``prepare_checkpoint`` reads off a qualified original catalog.
 
-    def __init__(self, catalog_sha256: str, source_count: int = contract.SOURCE_COUNT) -> None:
-        self.catalog_sha256 = catalog_sha256
+    The incarnation is the field a restore changes, so it goes into the receipt
+    the lifetime digest is taken over and stays out of the content digest. The
+    two digests then move independently, exactly as the real catalog's do.
+    """
+
+    def __init__(
+        self,
+        content_sha256: str,
+        source_count: int = contract.SOURCE_COUNT,
+        *,
+        incarnation: str = RESTORED_INCARNATION,
+    ) -> None:
         self.organization_id = contract.ORGANIZATION_ID
-        self.rows = {str(UUID(int=i + 1)): {"revision": 1} for i in range(source_count)}
+        self.incarnation = incarnation
+        self.rows = {
+            str(UUID(int=i + 1)): {"revision": 1, "source_sha256": f"{i:064x}"}
+            for i in range(source_count)
+        }
+        self.catalog_sha256 = contract.digest(self.receipt())
+        self.catalog_content_sha256 = content_sha256
 
     def receipt(self) -> dict[str, Any]:
-        return {"source_ids": sorted(self.rows)}
+        return {"source_ids": sorted(self.rows), "incarnation": self.incarnation}
+
+
+#: The lifetime digest a restored study database qualifies to. It is not the
+#: schedule's, and after this change that is no longer a reason to refuse.
+RESTORED_CATALOG_SHA256 = FakeCatalog(SCHEDULE_CONTENT_SHA256).catalog_sha256
 
 
 class FakeCounter:
@@ -114,7 +155,8 @@ class FakeAdapter:
             "checkpoint": checkpoint,
             "task": task,
             "arm": arm,
-            "catalog_sha256": self.state.catalog_sha256,
+            "catalog_sha256": self.state.catalog.catalog_sha256,
+            "catalog_content_sha256": self.state.catalog.catalog_content_sha256,
             "reader": {"principal_id": contract.PRINCIPAL_ID},
         }
         if (task, arm) in self.state.missing:
@@ -167,14 +209,28 @@ class QuarterCounter:
 
 
 def cell_pack(**overrides: Any) -> dict[str, Any]:
-    """A preparation receipt carrying the four coordinates, before any tampering."""
+    """A preparation receipt carrying the five coordinates, before any tampering."""
     return {
         "checkpoint": 0,
         "task": contract.TASKS[0],
         "arm": "raw_retrieval",
-        "catalog_sha256": SCHEDULE_CATALOG_SHA256,
+        "catalog_sha256": RESTORED_CATALOG_SHA256,
+        "catalog_content_sha256": SCHEDULE_CONTENT_SHA256,
         **overrides,
     }
+
+
+def stamp(pack: dict[str, Any], **overrides: Any) -> dict[str, Any]:
+    """Run ``coordinate`` over one cell of the restored study database."""
+    arguments: dict[str, Any] = {
+        "checkpoint": 0,
+        "task": contract.TASKS[0],
+        "arm": "raw_retrieval",
+        "catalog": RESTORED_CATALOG_SHA256,
+        "catalog_content": SCHEDULE_CONTENT_SHA256,
+        "schedule_catalog": SCHEDULE_CATALOG_SHA256,
+    }
+    return checkpoints.coordinate(pack, **{**arguments, **overrides})
 
 
 def rewrite_json(path: Path, payload: Any) -> None:
@@ -210,7 +266,9 @@ def consolidated_inventory() -> tuple[dict, dict]:
 def state(monkeypatch: pytest.MonkeyPatch) -> Any:
     items, inventory = raw_only_inventory()
     fixture = SimpleNamespace(
-        catalog_sha256=SCHEDULE_CATALOG_SHA256,
+        content_sha256=SCHEDULE_CONTENT_SHA256,
+        incarnation=RESTORED_INCARNATION,
+        catalog=None,
         source_count=contract.SOURCE_COUNT,
         items=items,
         inventory=inventory,
@@ -230,7 +288,10 @@ def state(monkeypatch: pytest.MonkeyPatch) -> Any:
 
     async def qualify(*, group_id: str, principal_id: str) -> tuple[Any, dict, Any, Any]:
         fixture.qualified.append((group_id, principal_id))
-        catalog = FakeCatalog(fixture.catalog_sha256, fixture.source_count)
+        catalog = FakeCatalog(
+            fixture.content_sha256, fixture.source_count, incarnation=fixture.incarnation
+        )
+        fixture.catalog = catalog
         return catalog, {"status": "qualified"}, "authority", lambda: {"owner": "fixture"}
 
     def counter(assets: Path) -> FakeCounter:
@@ -343,7 +404,10 @@ def test_twenty_four_receipts_carry_the_coordinates_and_catalog(tmp_path: Path, 
         for arm in contract.ARMS:
             document = pack_of(output, 0, task, arm)
             assert (document["checkpoint"], document["task"], document["arm"]) == (0, task, arm)
-            assert document["catalog_sha256"] == SCHEDULE_CATALOG_SHA256
+            assert document["catalog_sha256"] == RESTORED_CATALOG_SHA256
+            assert document["catalog_content_sha256"] == SCHEDULE_CONTENT_SHA256
+            assert document["schedule_source_catalog_sha256"] == SCHEDULE_CATALOG_SHA256
+            assert document["lifetime_catalog_matches_schedule"] is False
             assert set(document) >= MATERIALIZE_KEYS
     assert pack_of(output, 0, contract.TASKS[0], "no_memory")["memory"] == ""
 
@@ -355,14 +419,49 @@ def test_twenty_four_receipts_carry_the_coordinates_and_catalog(tmp_path: Path, 
         (task, arm) for task in contract.TASKS for arm in contract.ARMS
     }
     assert sealed["missing_reasons"] == {}
-    assert sealed["catalog_sha256"] == SCHEDULE_CATALOG_SHA256
+    assert sealed["catalog_sha256"] == RESTORED_CATALOG_SHA256
+    assert sealed["catalog_content_sha256"] == SCHEDULE_CONTENT_SHA256
     assert sealed["schedule_source_catalog_sha256"] == checkpoints.schedule_catalog_sha256()
+    assert sealed["schedule_content_sha256"] == checkpoints.schedule_catalog_content_sha256()
+    assert sealed["lifetime_catalog_matches_schedule"] is False
     assert sealed["tokenizer"]["tokenizer_sha256"] == "fixture"
     assert state.counters[0].verified == 1
 
     catalog = json.loads((output / checkpoints.CATALOG_NAME).read_text(encoding="utf-8"))
     assert catalog["source_count"] == contract.SOURCE_COUNT == len(catalog["source_ids"])
-    assert catalog["catalog_sha256"] == SCHEDULE_CATALOG_SHA256
+    assert catalog["catalog_sha256"] == RESTORED_CATALOG_SHA256
+    assert catalog["catalog_content_sha256"] == SCHEDULE_CONTENT_SHA256
+    assert catalog["schedule_source_catalog_sha256"] == SCHEDULE_CATALOG_SHA256
+    assert catalog["schedule_content_sha256"] == SCHEDULE_CONTENT_SHA256
+    assert catalog["lifetime_catalog_matches_schedule"] is False
+
+
+def test_a_fresh_restore_prepares_every_cell_although_the_lifetime_digest_moved(
+    tmp_path: Path, state: Any
+) -> None:
+    """Restoring the study database from its cold copy must not fail preparation.
+
+    The restore remints all 233 observation incarnations, so the qualified
+    catalog's lifetime digest is one the frozen schedule has never seen. Every
+    capture, content hash and revision is identical, so the content digest is
+    the schedule's and all twenty-four cells prepare.
+    """
+    output = tmp_path / "cp0"
+    frozen = FakeCatalog(SCHEDULE_CONTENT_SHA256, incarnation=FROZEN_INCARNATION)
+    assert state.incarnation == RESTORED_INCARNATION
+    assert RESTORED_CATALOG_SHA256 not in {SCHEDULE_CATALOG_SHA256, frozen.catalog_sha256}
+
+    assert run(0, output) == 0
+
+    sealed = receipt_of(output)
+    assert sealed["status"] == checkpoints.STATUS_PREPARED
+    assert sealed["prepared"] == 24
+    assert sealed["catalog_sha256"] != sealed["schedule_source_catalog_sha256"]
+    assert sealed["catalog_content_sha256"] == sealed["schedule_content_sha256"]
+    assert sealed["lifetime_catalog_matches_schedule"] is False
+    # Only the incarnation moved, so the content digest is the same on both sides.
+    assert frozen.catalog_content_sha256 == state.catalog.catalog_content_sha256
+    assert frozen.catalog_sha256 != state.catalog.catalog_sha256
 
 
 def test_a_prepared_receipt_has_a_byte_identical_memory_sibling(tmp_path: Path, state: Any) -> None:
@@ -614,19 +713,25 @@ def test_the_checkpoint_receipt_is_created_exclusively(tmp_path: Path, state: An
 async def test_a_catalog_the_schedule_does_not_know_fails_the_phase(
     tmp_path: Path, state: Any
 ) -> None:
-    state.catalog_sha256 = "f" * 64
+    """Content, not lifetime, is the disagreement that stops the phase."""
+    state.content_sha256 = "f" * 64
     output = tmp_path / "cp0"
 
-    with pytest.raises(checkpoints.CheckpointError, match="disagree"):
+    with pytest.raises(checkpoints.CheckpointError, match="disagree on source content"):
         await checkpoints.prepare_checkpoint(
             0, output=output, tokenizer_assets=tmp_path, prior_root=None
         )
 
     sealed = receipt_of(output)
     assert sealed["status"] == checkpoints.STATUS_CATALOG_DISAGREES
-    assert sealed["catalog_sha256"] == "f" * 64
+    assert sealed["catalog_content_sha256"] == "f" * 64
+    assert sealed["schedule_content_sha256"] == SCHEDULE_CONTENT_SHA256
     assert not (output / "packs").exists()
     assert state.natives == []
+    # The refused catalog is still on disk as evidence, both digests included.
+    catalog = json.loads((output / checkpoints.CATALOG_NAME).read_text(encoding="utf-8"))
+    assert catalog["catalog_content_sha256"] == "f" * 64
+    assert catalog["schedule_content_sha256"] == SCHEDULE_CONTENT_SHA256
 
 
 @pytest.mark.asyncio
@@ -710,58 +815,52 @@ async def test_an_unknown_checkpoint_is_refused(tmp_path: Path, state: Any) -> N
 def test_a_receipt_outside_its_cell_is_refused() -> None:
     pack = {"status": "prepared", "memory": "", "checkpoint": 1, "task": contract.TASKS[0]}
     with pytest.raises(checkpoints.CheckpointError, match="disagrees on checkpoint"):
-        checkpoints.coordinate(
-            pack, checkpoint=0, task=contract.TASKS[0], arm="no_memory", catalog="a" * 64
-        )
+        stamp(pack, arm="no_memory", catalog="a" * 64)
 
 
 def test_an_unprepared_pack_may_not_carry_memory() -> None:
     pack = cell_pack(status="missing_pack", reason="raw_required_lane_incomplete", memory="text")
     with pytest.raises(checkpoints.CheckpointError, match="carries memory"):
-        checkpoints.coordinate(
-            pack,
-            checkpoint=0,
-            task=contract.TASKS[0],
-            arm="raw_retrieval",
-            catalog=SCHEDULE_CATALOG_SHA256,
-        )
+        stamp(pack)
 
 
-@pytest.mark.parametrize("absent", ["catalog_sha256", "arm", "task", "checkpoint"])
+@pytest.mark.parametrize(
+    "absent", ["catalog_sha256", "catalog_content_sha256", "arm", "task", "checkpoint"]
+)
 def test_a_receipt_that_names_no_coordinate_is_refused(absent: str) -> None:
     """A silent stamp would invent the coordinates this module promises never to invent."""
     pack = cell_pack(status="prepared", memory="text", counts={"fits": True})
     del pack[absent]
 
     with pytest.raises(checkpoints.CheckpointError, match=f"disagrees on {absent}"):
-        checkpoints.coordinate(
-            pack,
-            checkpoint=0,
-            task=contract.TASKS[0],
-            arm="raw_retrieval",
-            catalog=SCHEDULE_CATALOG_SHA256,
-        )
+        stamp(pack)
+
+
+def test_a_stamped_receipt_states_whether_the_lifetime_is_the_schedule_s() -> None:
+    """Both digests travel, and the flag says plainly which one moved."""
+    restored = stamp(cell_pack(status="prepared", memory="text", counts={"fits": True}))
+    assert restored["catalog_sha256"] == RESTORED_CATALOG_SHA256
+    assert restored["catalog_content_sha256"] == SCHEDULE_CONTENT_SHA256
+    assert restored["schedule_source_catalog_sha256"] == SCHEDULE_CATALOG_SHA256
+    assert restored["lifetime_catalog_matches_schedule"] is False
+
+    pack = cell_pack(
+        status="prepared",
+        memory="text",
+        counts={"fits": True},
+        catalog_sha256=SCHEDULE_CATALOG_SHA256,
+    )
+    original = stamp(pack, catalog=SCHEDULE_CATALOG_SHA256)
+    assert original["lifetime_catalog_matches_schedule"] is True
 
 
 def test_the_no_memory_arm_carries_the_empty_string_and_nothing_else() -> None:
     carrying = cell_pack(arm="no_memory", status="prepared", memory="a leaked summary")
     with pytest.raises(checkpoints.CheckpointError, match="no-memory arm carries memory"):
-        checkpoints.coordinate(
-            carrying,
-            checkpoint=0,
-            task=contract.TASKS[0],
-            arm="no_memory",
-            catalog=SCHEDULE_CATALOG_SHA256,
-        )
+        stamp(carrying, arm="no_memory")
 
     empty = cell_pack(arm="no_memory", status="prepared", memory="")
-    document = checkpoints.coordinate(
-        empty,
-        checkpoint=0,
-        task=contract.TASKS[0],
-        arm="no_memory",
-        catalog=SCHEDULE_CATALOG_SHA256,
-    )
+    document = stamp(empty, arm="no_memory")
     assert document["memory"] == ""
     assert document["status"] == "prepared"
 
@@ -931,8 +1030,19 @@ def test_the_host_binding_names_every_owner(tmp_path: Path) -> None:
         checkpoints.host_binding(path)
 
 
-def test_the_schedule_catalog_digest_is_the_pinned_one() -> None:
+def test_the_schedule_catalog_digests_are_the_pinned_ones() -> None:
     assert checkpoints.schedule_catalog_sha256() == SCHEDULE_CATALOG_SHA256
+    assert checkpoints.schedule_catalog_content_sha256() == SCHEDULE_CONTENT_SHA256
+    assert SCHEDULE_CONTENT_SHA256 != SCHEDULE_CATALOG_SHA256
+
+
+def test_a_schedule_naming_no_originals_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "schedule.json"
+    path.write_text(json.dumps({"source_catalog_sha256": SCHEDULE_CATALOG_SHA256}))
+    with pytest.raises(checkpoints.CheckpointError, match="names no source content"):
+        checkpoints.schedule_catalog_content_sha256(path)
 
 
 def test_the_written_packs_are_the_ones_materialize_reads(tmp_path: Path, state: Any) -> None:
@@ -941,12 +1051,15 @@ def test_the_written_packs_are_the_ones_materialize_reads(tmp_path: Path, state:
     output = tmp_path / "cp0"
     assert run(0, output) == 2
 
-    schedule = {"source_catalog_sha256": SCHEDULE_CATALOG_SHA256}
+    # The real frozen schedule, whose lifetime digest these restored packs do
+    # not carry and whose content digest they do.
+    schedule = json.loads(checkpoints.SCHEDULE_PATH.read_bytes())
     prepared = materialize._read_pack(
         output, schedule, {"checkpoint": 0, "task": contract.TASKS[0], "arm": "native"}
     )
     assert prepared["status"] == "prepared"
     assert prepared["memory"] == prepared["receipt"]["memory"].encode()
+    assert prepared["receipt"]["catalog_sha256"] != schedule["source_catalog_sha256"]
 
     unprepared = materialize._read_pack(
         output, schedule, {"checkpoint": 0, "task": contract.TASKS[0], "arm": "raw_retrieval"}
@@ -954,9 +1067,15 @@ def test_the_written_packs_are_the_ones_materialize_reads(tmp_path: Path, state:
     assert unprepared["status"] == "missing_pack"
     assert unprepared["reason"] == "raw_ranked_source_changed"
 
+    # One original's content hash rewritten is a different study catalog.
+    altered = {
+        **schedule,
+        "original_sources": [
+            {**row, "source_sha256": "0" * 64} if index == 0 else row
+            for index, row in enumerate(schedule["original_sources"])
+        ],
+    }
     with pytest.raises(materialize.ManifestError, match="another source catalog"):
         materialize._read_pack(
-            output,
-            {"source_catalog_sha256": "0" * 64},
-            {"checkpoint": 0, "task": contract.TASKS[0], "arm": "native"},
+            output, altered, {"checkpoint": 0, "task": contract.TASKS[0], "arm": "native"}
         )

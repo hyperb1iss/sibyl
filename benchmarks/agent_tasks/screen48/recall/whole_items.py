@@ -10,6 +10,7 @@ from benchmarks.agent_tasks.screen48.contract import (
     HEADER,
     POLICY_ROOT,
     canonical,
+    content_catalog_digest,
     digest,
     sha,
     source_geometry,
@@ -80,6 +81,15 @@ class OriginalCatalog:
         self.observations = dict(observations)
         self.authority_ceiling = authority.ceiling_metadata()
         self.catalog_sha256 = digest(self.receipt())
+        # The receipt digest above binds this catalog to one database lifetime,
+        # observation incarnations included, which is what a run needs to detect
+        # a source moving under it. The digest below binds the study's content
+        # identity, which is what survives restoring the same database from its
+        # cold copy and is therefore what the frozen schedule can agree with.
+        self.catalog_content_sha256 = content_catalog_digest(
+            (source_id, self.rows[source_id]["source_sha256"], observation.revision)
+            for source_id, observation in sorted(self.observations.items())
+        )
 
     def receipt(self) -> dict:
         return {

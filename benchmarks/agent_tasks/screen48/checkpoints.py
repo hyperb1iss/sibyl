@@ -34,8 +34,12 @@ Outputs, all under ``--output``:
 ``checkpoint.json``
     Created exclusively and sealed at the end, whatever happened.
 ``catalog.json``
-    The 233 qualified original IDs and the catalog digest, which must equal the
-    frozen schedule's ``source_catalog_sha256``.
+    The 233 qualified original IDs and both catalog digests. The content digest
+    must equal the frozen schedule's, computed over the same ``(id, content
+    sha256, revision)`` rows; the lifetime digest is recorded beside it, because
+    restoring the study database from its cold copy remints every observation
+    incarnation and moves the lifetime digest while the study material stands
+    still.
 ``native-inventory.json``
     The checkpoint's authorized native universe and its production receipt.
 ``packs/cp{checkpoint}/{task}/{arm}.json`` and ``{arm}.txt``
@@ -151,12 +155,31 @@ class CheckpointError(RuntimeError):
 
 
 def schedule_catalog_sha256(path: Path = SCHEDULE_PATH) -> str:
-    """Read the frozen schedule's source catalog digest."""
+    """Read the frozen schedule's source catalog digest.
+
+    The digest covers the observations the schedule was frozen against,
+    incarnations included, so it names one database lifetime. It is recorded
+    rather than gated on: see ``schedule_catalog_content_sha256``.
+    """
     schedule = json.loads(path.read_bytes())
     expected = schedule.get("source_catalog_sha256")
     if not isinstance(expected, str) or not expected:
         raise CheckpointError(f"the frozen schedule names no source catalog: {path}")
     return expected
+
+
+def schedule_catalog_content_sha256(path: Path = SCHEDULE_PATH) -> str:
+    """Read the frozen schedule's lifetime-free source content digest.
+
+    This is what preparation gates on. Restoring the study database from its
+    cold copy mints a new incarnation for every capture, so the lifetime digest
+    above moves on every restore while this one does not.
+    """
+    schedule = json.loads(path.read_bytes())
+    try:
+        return contract.schedule_content_sha256(schedule)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise CheckpointError(f"the frozen schedule names no source content: {path}") from exc
 
 
 def host_binding(path: Path | str | None = None) -> dict[str, Any]:
@@ -305,20 +328,49 @@ def _write_pack(output: Path, document: dict[str, Any]) -> dict[str, str | None]
 # --------------------------------------------------------------------------
 
 
-def coordinate(pack: dict[str, Any], *, checkpoint: int, task: str, arm: str, catalog: str) -> dict:
-    """Stamp the four coordinates ``materialize`` reads, refusing a receipt that differs."""
+def coordinate(
+    pack: dict[str, Any],
+    *,
+    checkpoint: int,
+    task: str,
+    arm: str,
+    catalog: str,
+    catalog_content: str,
+    schedule_catalog: str | None,
+) -> dict:
+    """Stamp the coordinates ``materialize`` reads, refusing a receipt that differs.
+
+    Two catalog digests travel with every pack. ``catalog_sha256`` binds it to
+    one database lifetime, so ``materialize`` can refuse a cycle whose two
+    checkpoints were prepared against different restores of the study database.
+    ``catalog_content_sha256`` binds it to the study's content identity, which
+    is what the frozen schedule agrees with. Both are coordinates the adapter
+    must already have written: stamping either would invent the pack this
+    module promises never to invent.
+
+    The schedule's own lifetime digest and the flag beside it are recorded, not
+    required. After a fresh restore the flag is false and the pack says so in
+    as many words, rather than the run stalling on a difference that is not a
+    difference in the study material.
+    """
     coordinates = {
         "checkpoint": checkpoint,
         "task": task,
         "arm": arm,
         "catalog_sha256": catalog,
+        "catalog_content_sha256": catalog_content,
     }
     for key, value in coordinates.items():
         # A receipt that names no coordinate is not a receipt for this cell:
         # stamping one would invent the pack this module promises never to invent.
         if key not in pack or pack[key] != value:
             raise CheckpointError(f"preparation receipt disagrees on {key}: cp{checkpoint}/{task}")
-    document = {**pack, **coordinates}
+    document = {
+        **pack,
+        **coordinates,
+        "schedule_source_catalog_sha256": schedule_catalog,
+        "lifetime_catalog_matches_schedule": catalog == schedule_catalog,
+    }
     if document.get("status") not in {"prepared", "missing_pack"}:
         raise CheckpointError(f"unknown preparation status: cp{checkpoint}/{task}/{arm}")
     if document["status"] == "missing_pack":
@@ -442,6 +494,8 @@ async def _prepare_cells(
     native_inventory: dict,
     references: dict,
     catalog_sha256: str,
+    catalog_content_sha256: str,
+    schedule_catalog_sha256: str | None,
 ) -> None:
     """Walk the twenty-four cells of one checkpoint, writing exactly what came back."""
     cells: list[dict[str, Any]] = []
@@ -476,7 +530,13 @@ async def _prepare_cells(
                     arguments["prior_sha256"] = bound_sha256
             pack = await adapter.prepare(checkpoint=checkpoint, task=task, arm=arm, **arguments)
             document = coordinate(
-                pack, checkpoint=checkpoint, task=task, arm=arm, catalog=catalog_sha256
+                pack,
+                checkpoint=checkpoint,
+                task=task,
+                arm=arm,
+                catalog=catalog_sha256,
+                catalog_content=catalog_content_sha256,
+                schedule_catalog=schedule_catalog_sha256,
             )
             paths = _write_pack(output, document)
             counts = document.get("counts") or {}
@@ -524,6 +584,10 @@ async def _prepare(
         group_id=group_id, principal_id=principal_id
     )
     receipt["catalog_sha256"] = catalog.catalog_sha256
+    receipt["catalog_content_sha256"] = catalog.catalog_content_sha256
+    receipt["lifetime_catalog_matches_schedule"] = (
+        catalog.catalog_sha256 == receipt["schedule_source_catalog_sha256"]
+    )
     receipt["catalog"] = {"path": CATALOG_NAME, "source_count": len(catalog.rows)}
     _write_json(
         output / CATALOG_NAME,
@@ -532,7 +596,10 @@ async def _prepare(
             "checkpoint": checkpoint,
             "organization_id": catalog.organization_id,
             "catalog_sha256": catalog.catalog_sha256,
+            "catalog_content_sha256": catalog.catalog_content_sha256,
             "schedule_source_catalog_sha256": receipt["schedule_source_catalog_sha256"],
+            "schedule_content_sha256": receipt["schedule_content_sha256"],
+            "lifetime_catalog_matches_schedule": receipt["lifetime_catalog_matches_schedule"],
             "source_count": len(catalog.rows),
             "source_ids": sorted(catalog.rows),
             "qualification": qualification,
@@ -540,11 +607,15 @@ async def _prepare(
     )
     if len(catalog.rows) != contract.SOURCE_COUNT:
         raise CheckpointError(f"the qualified catalog holds {len(catalog.rows)} originals")
-    if catalog.catalog_sha256 != receipt["schedule_source_catalog_sha256"]:
+    # The content digest is the gate. A restore of the same cold copy remints
+    # every observation incarnation, so the lifetime digest above disagrees with
+    # the schedule on every fresh restore even when all 233 captures, their
+    # content hashes and their revisions are identical.
+    if catalog.catalog_content_sha256 != receipt["schedule_content_sha256"]:
         receipt["status"] = STATUS_CATALOG_DISAGREES
         raise CheckpointError(
             "the qualified catalog is not the schedule's: the frozen material and the "
-            f"database disagree ({catalog.catalog_sha256})"
+            f"database disagree on source content ({catalog.catalog_content_sha256})"
         )
 
     natives = NativeCheckpoints(
@@ -600,6 +671,8 @@ async def _prepare(
         native_inventory=items,
         references=references,
         catalog_sha256=catalog.catalog_sha256,
+        catalog_content_sha256=catalog.catalog_content_sha256,
+        schedule_catalog_sha256=receipt["schedule_source_catalog_sha256"],
     )
 
 
@@ -631,7 +704,10 @@ async def prepare_checkpoint(
         "tokenizer_assets": str(tokenizer_assets),
         # Read inside the try below: a failure there must still leave a receipt.
         "schedule_source_catalog_sha256": None,
+        "schedule_content_sha256": None,
         "catalog_sha256": None,
+        "catalog_content_sha256": None,
+        "lifetime_catalog_matches_schedule": None,
         "catalog": None,
         "native_inventory": None,
         "tokenizer": None,
@@ -650,6 +726,7 @@ async def prepare_checkpoint(
     _reserve(output / RECEIPT_NAME, receipt)
     try:
         receipt["schedule_source_catalog_sha256"] = schedule_catalog_sha256()
+        receipt["schedule_content_sha256"] = schedule_catalog_content_sha256()
         await cycle.bootstrap_runtime()
         try:
             await _prepare(
@@ -726,6 +803,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "missing_reasons": receipt["missing_reasons"],
                 "errors": receipt["errors"],
                 "catalog_sha256": receipt["catalog_sha256"],
+                "catalog_content_sha256": receipt["catalog_content_sha256"],
+                "lifetime_catalog_matches_schedule": receipt["lifetime_catalog_matches_schedule"],
                 "receipt": str(Path(receipt["output"]) / RECEIPT_NAME),
             },
             sort_keys=True,

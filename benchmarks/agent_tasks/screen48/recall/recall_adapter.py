@@ -114,6 +114,7 @@ class RecallAdapter:
             "arm": arm,
             "catalog": self.catalog.receipt(),
             "catalog_sha256": self.catalog.catalog_sha256,
+            "catalog_content_sha256": self.catalog.catalog_content_sha256,
             "solver_calls": 0,
             "reservation_changes": 0,
             "study": "engine_level_diagnostic",
@@ -134,6 +135,7 @@ class RecallAdapter:
                     or (prior.get("checkpoint"), prior.get("task"), prior.get("arm"))
                     != (0, task, arm)
                     or prior.get("catalog_sha256") != self.catalog.catalog_sha256
+                    or prior.get("catalog_content_sha256") != self.catalog.catalog_content_sha256
                     or prior.get("query_sha256") != base["query_sha256"]
                     or prior.get("prompt_sha256") != base["prompt_sha256"]
                     or prior.get("reader") != base["reader"]

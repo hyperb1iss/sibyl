@@ -5,6 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping
 
 MATERIAL_ROOT = Path(__file__).parent / "material"
 POLICY_ROOT = MATERIAL_ROOT / "policy"
@@ -70,6 +74,44 @@ def bound(path: Path, expected: str) -> bytes:
     if sha(value) != expected:
         raise ValueError(f"Bound artifact changed: {path.name}")
     return value
+
+
+def content_catalog_digest(rows: Iterable[tuple[str, str, int]]) -> str:
+    """Digest the lifetime-free content identity of a retained source catalog.
+
+    One entry per capture, sorted by capture UUID: the UUID, the sha256 of the
+    capture's content and the revision that content was observed at. Nothing
+    else. An observation also carries an ``incarnation``, minted the first time
+    a database observes a capture, and a ``generation`` counted within that
+    lifetime; both move when the same study database is restored from its cold
+    copy while the captures themselves are byte-identical. A digest that
+    included them would bind the study to one database lifetime, so no restored
+    copy could ever agree with the frozen schedule.
+    """
+    entries = [
+        {"id": str(source_id), "source_sha256": str(source_sha256), "revision": int(revision)}
+        for source_id, source_sha256, revision in rows
+    ]
+    if not entries:
+        raise ValueError("The content catalog names no sources")
+    if len({entry["id"] for entry in entries}) != len(entries):
+        raise ValueError("The content catalog repeats a source ID")
+    return digest(sorted(entries, key=lambda entry: entry["id"]))
+
+
+def schedule_content_sha256(schedule: Mapping[str, Any]) -> str:
+    """The frozen schedule's own content identity, in the catalog's formula.
+
+    The schedule already carries the content each original was frozen with, so
+    this reads it rather than deriving a second source of truth: the same three
+    fields, the same order, the same digest a qualified catalog computes.
+    """
+    rows = schedule.get("original_sources") or []
+    if not isinstance(rows, list):
+        raise TypeError("The schedule's original sources are not a list of rows")
+    return content_catalog_digest(
+        (row["id"], row["source_sha256"], row["observation"]["revision"]) for row in rows
+    )
 
 
 def source_geometry(root: Path = POLICY_ROOT) -> list[dict]:

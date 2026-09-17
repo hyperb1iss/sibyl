@@ -341,6 +341,7 @@ def _material_detail(checkpoints: Any, contract: Any) -> dict[str, Any]:
         "training_families": len({row["training_family"] for row in geometry}),
         "workspace_files_per_task": tasks,
         "schedule_catalog_sha256": checkpoints.schedule_catalog_sha256(),
+        "schedule_content_sha256": checkpoints.schedule_catalog_content_sha256(),
     }
 
 
