@@ -368,18 +368,22 @@ def stage_kind(row: dict[str, Any]) -> str:
     return kind if isinstance(kind, str) and kind else "unknown"
 
 
+#: The answered range. A 2xx was billed; anything else the provider returned is
+#: a refusal it does not charge for.
+BILLED_STATUS_RANGE = range(200, 300)
+
+
 #: Exception types that fire after the whole request has gone out, so the
 #: provider had a complete request to work on and almost certainly billed it.
 #: The line is the request phase, not the error family. A write failure died
 #: with the body still uploading and a connect or pool failure never reached
 #: the API, so neither is estimated; a cancellation after dispatch is, because
-#: the request was already in the provider's hands. Both directions matter: the
-#: cost ceiling stops runs on this number, so inflating it stops healthy runs
-#: and deflating it hides real spend.
-#: The answered range. A 2xx was billed; anything else the provider returned is
-#: a refusal it does not charge for.
-BILLED_STATUS_RANGE = range(200, 300)
-
+#: the request was already in the provider's hands. Two of those leans are
+#: judgment, because the record cannot prove which phase a cancellation or a
+#: write error fired in: each sits where that error most likely lands, a cancel
+#: during a long read wait and a write failure during a large upload. Both
+#: directions matter, since the cost ceiling stops runs on this number.
+#: Inflating it stops healthy runs and deflating it hides real spend.
 BILLED_UNMEASURED_EXCEPTIONS = frozenset(
     {
         "APITimeoutError",
