@@ -106,6 +106,7 @@ def test_provider_error_detail_names_a_failure_the_provider_never_answered():
 
     detail = provider_error_detail(failure)
 
+    assert detail is not None
     assert set(detail) == {"status_code", "type", "message"}
     assert detail["status_code"] is None
     assert detail["type"] == "APITimeoutError"
