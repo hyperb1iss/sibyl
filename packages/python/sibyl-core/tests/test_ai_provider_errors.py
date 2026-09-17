@@ -1,6 +1,7 @@
 """Provider refusals become bounded receipts that never carry request text."""
 
 import pytest
+from pydantic_ai.exceptions import UnexpectedModelBehavior
 
 from sibyl_core.ai.errors import (
     PROVIDER_ERROR_MESSAGE_LIMIT,
@@ -199,3 +200,25 @@ def test_timeout_wrapper_is_recognized_by_name_without_the_sdk():
         assert isinstance(classify_llm_exception(failure), LLMTimeoutError)
 
     assert isinstance(classify_llm_exception(RuntimeError("boom")), LLMProviderError)
+
+
+def test_unclassified_model_failures_report_a_type_but_never_their_body():
+    """str(UnexpectedModelBehavior) embeds the response body, so it stays out."""
+    failure = classify_llm_exception(
+        UnexpectedModelBehavior("Invalid JSON", body='{"text": "SECRET EVIDENCE TEXT"}')
+    )
+
+    detail = provider_error_detail(failure)
+
+    assert detail == {
+        "status_code": None,
+        "type": "UnexpectedModelBehavior",
+        "message": None,
+    }
+    assert "SECRET" not in repr(detail)
+
+
+def test_an_unknown_failure_reports_its_type_without_its_message():
+    detail = provider_error_detail(classify_llm_exception(RuntimeError("boom SECRET")))
+
+    assert detail == {"status_code": None, "type": "RuntimeError", "message": None}
