@@ -227,7 +227,7 @@ Redis/Valkey is optional. The default Surreal runtime uses local in-process coor
 
 | Variable                           | Default            | Description                                     |
 | ---------------------------------- | ------------------ | ----------------------------------------------- |
-| `SIBYL_LLM_PROVIDER`               | `anthropic`        | LLM provider: openai or anthropic               |
+| `SIBYL_LLM_PROVIDER`               | `anthropic`        | LLM provider: anthropic, gemini or openai       |
 | `SIBYL_LLM_MODEL`                  | `claude-haiku-4-5` | LLM model for entity extraction                 |
 | `SIBYL_LLM_TIMEOUT_SECONDS`        | `60`               | Per-attempt read timeout                        |
 | `SIBYL_LLM_MEMORY_TIMEOUT_SECONDS` | `600`              | Per-attempt read timeout for the memory surface |
