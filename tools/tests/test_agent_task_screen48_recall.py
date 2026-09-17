@@ -14,12 +14,14 @@ import base64
 import json
 from copy import deepcopy
 from dataclasses import asdict, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
 from benchmarks.agent_tasks.screen48 import contract as c
+from benchmarks.agent_tasks.screen48.recall import native_inventory as ni
 from benchmarks.agent_tasks.screen48.recall import recall_adapter as a
 from benchmarks.agent_tasks.screen48.recall import whole_items as w
 from benchmarks.agent_tasks.screen48.recall.request_count import (
@@ -33,7 +35,9 @@ from sibyl_core.memory_pipeline.observations import (
     SourceObservation,
 )
 from sibyl_core.memory_pipeline.retrieval import CandidateSourceResult
+from sibyl_core.migrate.source_integrity import ArchiveDatetime
 from sibyl_core.services.content_models import RawMemory, RawMemoryRecallResult
+from sibyl_core.services.graph_records import entity_from_surreal_row
 from sibyl_core.services.memory_source_validation import SourceReadAuthority
 from sibyl_core.services.source_state_store import RawSourceSnapshot
 from sibyl_core.tasks._evidence_json import canonical as evidence_json
@@ -769,3 +773,219 @@ async def test_native_arm_names_a_missing_graph_embedding_provider(setup, monkey
     assert result["status"] == "missing_pack"
     assert result["reason"] == "native_embedding_provider_unavailable"
     assert calls == []
+
+
+# ---------------------------------------------------------------------------
+# The graph branch of the native inventory: one promoted entity read twice.
+# ---------------------------------------------------------------------------
+
+GRAPH_UUID = "procedure_v3_fixture"
+GRAPH_RECORD_KEY = f"entity:{GRAPH_UUID}"
+GRAPH_CREATED = "2026-09-17T19:18:52.746008Z"
+GRAPH_UPDATED = "2026-09-17T19:19:05.265003Z"
+GRAPH_REVISION = 3
+
+
+def archive_graph_row(**overrides):
+    """The row shape `read_source_archive_snapshot` returns: no `id`, aliased key.
+
+    Its datetimes arrive as `ArchiveDatetime`, carrying the native text the SDK
+    truncates, which is the second asymmetry between the two reads.
+    """
+    row = {
+        "uuid": GRAPH_UUID,
+        "group_id": "fixture-org",
+        "entity_type": "procedure",
+        "name": "Repair the fixture CLI",
+        "summary": "fixture summary",
+        "content": "inspect before changing",
+        "revision": GRAPH_REVISION,
+        "derivation_required": True,
+        "created_at": ArchiveDatetime.parse(GRAPH_CREATED),
+        "updated_at": ArchiveDatetime.parse(GRAPH_UPDATED),
+        "attributes": {
+            "entity_type": "procedure",
+            "memory_scope": "private",
+            "principal_id": "reader",
+            "updated_at": ArchiveDatetime.parse(GRAPH_UPDATED),
+        },
+        "archive_record_key": GRAPH_RECORD_KEY,
+    }
+    return row | overrides
+
+
+def scoped_graph_row(**overrides):
+    """The row shape the scoped graph read returns: `id` renamed to `record_id`.
+
+    `normalize_graph_records` performs that rename, and entity decoding copies
+    the value into metadata, which is the field the two reads disagreed on.
+    """
+    row = {key: value for key, value in archive_graph_row().items() if key != "archive_record_key"}
+    row["record_id"] = GRAPH_RECORD_KEY
+    row["created_at"] = datetime(2026, 9, 17, 19, 18, 52, 746008, tzinfo=UTC)
+    row["updated_at"] = datetime(2026, 9, 17, 19, 19, 5, 265003, tzinfo=UTC)
+    row["attributes"] = dict(row["attributes"]) | {"updated_at": row["updated_at"]}
+    return row | overrides
+
+
+def graph_state_row(**overrides):
+    row = {
+        "organization_id": "fixture-org",
+        "source_kind": "graph_entity",
+        "source_id": GRAPH_UUID,
+        "deleted": False,
+        "revision": GRAPH_REVISION,
+        "generation": 1,
+        "incarnation": "fixture-incarnation",
+    }
+    return row | overrides
+
+
+def archive_snapshot(rows, states, *, auxiliary=True, fingerprint="a"):
+    snapshot = {
+        "source_rows": rows,
+        "source_states": states,
+        "derivations": [],
+        "fingerprint": fingerprint * 64,
+    }
+    if auxiliary:
+        snapshot["graph_auxiliary"] = {"episode": [], "relates_to": [], "mentions": []}
+    return snapshot
+
+
+@pytest.fixture
+def inventory_graph(monkeypatch):
+    """Wire `enumerate_current`'s owners around one promoted graph entity."""
+    state = SimpleNamespace(
+        archive=archive_graph_row(),
+        scoped=scoped_graph_row(),
+        source_state=graph_state_row(),
+    )
+
+    async def snapshots(execute_query, *, kind, organizations, include_graph_auxiliary=False):
+        assert organizations == ["fixture-org"]
+        if kind is SourceKind.GRAPH_ENTITY:
+            return archive_snapshot(
+                [deepcopy(state.archive)], [deepcopy(state.source_state)], fingerprint="a"
+            )
+        return archive_snapshot([], [], auxiliary=False, fingerprint="b")
+
+    async def visible(org, ids, *, runtime=None):
+        assert (org, ids) == ("fixture-org", [GRAPH_UUID])
+        return {GRAPH_UUID: entity_from_surreal_row(state.scoped)}
+
+    async def no_raw(**kwargs):
+        return []
+
+    async def gate(*, client, group_id, source_lists, plan):
+        return [(signal, list(candidates)) for signal, candidates in source_lists], {
+            "fixture_gate": True
+        }
+
+    class Content:
+        async def __aenter__(self):
+            return SimpleNamespace(execute_query=None)
+
+        async def __aexit__(self, *exc):
+            return False
+
+    async def runtime(org, *, ensure_schema=True):
+        return SimpleNamespace(client=SimpleNamespace(execute_query=None, close=None))
+
+    monkeypatch.setattr(ni, "get_surreal_graph_runtime", runtime)
+    monkeypatch.setattr(ni, "read_source_archive_snapshot", snapshots)
+    monkeypatch.setattr(ni, "surreal_content_client", Content)
+    monkeypatch.setattr(ni, "available_graph_entities", visible)
+    monkeypatch.setattr(ni, "list_raw_memories_for_scope", no_raw)
+    monkeypatch.setattr(ni, "_apply_supersession_gate", gate)
+    monkeypatch.setattr(ni, "_candidate_allowed", lambda *args, **kwargs: True)
+    # The observation owner is exercised by its own tests; here it stands in for
+    # the durable ledger so the assertions stay on the row-agreement check.
+    monkeypatch.setattr(
+        ni, "observe_graph_snapshot", lambda snapshot, source, authority: snapshot.observation
+    )
+    return state
+
+
+async def enumerate_graph():
+    return await ni.enumerate_current(
+        organization_id="fixture-org",
+        authority=SourceReadAuthority("reader"),
+        reader=a.Reader("reader", None, "private", None),
+    )
+
+
+@pytest.mark.asyncio
+async def test_inventory_accepts_the_two_reads_of_one_unchanged_graph_row(inventory_graph):
+    items, receipt = await enumerate_graph()
+    assert receipt["source_counts"]["entity"] == 1
+    assert receipt["excluded"] == {}
+    assert len(items) == 1
+    provenance = next(iter(receipt["provenance"].values()))
+    assert provenance["kind"] == "graph_entity"
+    assert provenance["observation"]["generation"] == 1
+    assert provenance["observation"]["revision"] == GRAPH_REVISION
+    # The scoped read's projected record key is bound to the archive row's own,
+    # rather than being compared as if it were stored row content.
+    scoped = entity_from_surreal_row(inventory_graph.scoped)
+    assert scoped.metadata["record_id"] == GRAPH_RECORD_KEY
+    assert "record_id" not in entity_from_surreal_row(inventory_graph.archive).metadata
+
+
+@pytest.mark.asyncio
+async def test_inventory_still_refuses_a_changed_graph_row(inventory_graph):
+    inventory_graph.scoped = scoped_graph_row(content="inspect after changing")
+    with pytest.raises(w.MissingPack, match="available_graph_row_changed"):
+        await enumerate_graph()
+
+
+@pytest.mark.asyncio
+async def test_inventory_still_refuses_a_changed_graph_row_name(inventory_graph):
+    inventory_graph.scoped = scoped_graph_row(name="Repair another CLI")
+    with pytest.raises(w.MissingPack, match="available_graph_row_changed"):
+        await enumerate_graph()
+
+
+@pytest.mark.asyncio
+async def test_inventory_refuses_a_graph_row_read_under_another_record_key(inventory_graph):
+    inventory_graph.scoped = scoped_graph_row(record_id="entity:another_physical_row")
+    with pytest.raises(w.MissingPack, match="available_graph_record_key_changed"):
+        await enumerate_graph()
+
+
+@pytest.mark.asyncio
+async def test_inventory_compares_a_stored_record_key_between_both_reads(inventory_graph):
+    stored = {"record_id": "entity:stored_in_attributes"}
+    inventory_graph.archive = archive_graph_row(
+        attributes=archive_graph_row()["attributes"] | stored
+    )
+    inventory_graph.scoped = scoped_graph_row(
+        attributes=scoped_graph_row()["attributes"] | stored, record_id=GRAPH_RECORD_KEY
+    )
+    items, _ = await enumerate_graph()
+    assert len(items) == 1
+    inventory_graph.scoped = scoped_graph_row(
+        attributes=scoped_graph_row()["attributes"] | {"record_id": "entity:other"},
+        record_id=GRAPH_RECORD_KEY,
+    )
+    with pytest.raises(w.MissingPack, match="available_graph_record_key_changed"):
+        await enumerate_graph()
+
+
+@pytest.mark.asyncio
+async def test_inventory_refuses_a_graph_row_whose_observed_revision_moved(inventory_graph):
+    inventory_graph.scoped = scoped_graph_row(revision=GRAPH_REVISION + 1)
+    with pytest.raises(w.MissingPack, match="available_graph_row_changed"):
+        await enumerate_graph()
+
+
+@pytest.mark.asyncio
+async def test_inventory_refuses_a_graph_row_whose_derivation_flag_moved(inventory_graph):
+    """The model excludes this flag from its dump; the inventory binds it anyway."""
+    inventory_graph.scoped = scoped_graph_row(derivation_required=False)
+    scoped = entity_from_surreal_row(inventory_graph.scoped).model_dump(mode="json")
+    archived = entity_from_surreal_row(inventory_graph.archive).model_dump(mode="json")
+    scoped["metadata"].pop("record_id")
+    assert scoped == archived
+    with pytest.raises(w.MissingPack, match="available_graph_row_changed"):
+        await enumerate_graph()

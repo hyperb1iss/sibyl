@@ -41,6 +41,36 @@ from sibyl_core.services.source_state_store import source_snapshot_from_records
 # A native snapshot fingerprint is a hex sha256 and nothing else.
 FINGERPRINT_LENGTH = 64
 
+# Metadata the row decoder recovers from the read's own projection rather than
+# from a stored column. The scoped graph read normalizes Surreal's `id` into
+# `record_id` (services/graph_common.py:_normalize_record), which entity
+# decoding copies into metadata; the archive snapshot omits `id` and aliases the
+# same value to `archive_record_key`, so the two reads of one unchanged row
+# disagree here by construction. The key itself stays bound, separately, against
+# the archive row that carries it.
+PROJECTED_METADATA_KEYS = frozenset({"record_id"})
+
+
+def _bound_graph_row(entity):
+    """The stored graph row as both reads agree it is, minus read-local naming."""
+    view = entity.model_dump(mode="json")
+    metadata = view.get("metadata")
+    if isinstance(metadata, dict):
+        view["metadata"] = {
+            key: value for key, value in metadata.items() if key not in PROJECTED_METADATA_KEYS
+        }
+    # The model excludes both of these from its dump, and the product's own
+    # row-agreement checks compare them alongside it (graph_read_availability
+    # and graph_derivations), so the inventory binds them too.
+    view["derivation_required"] = entity.derivation_required
+    view["observed_revision"] = entity.observed_revision
+    return view
+
+
+def _projected_record_key(entity):
+    value = (entity.metadata or {}).get("record_id")
+    return value if isinstance(value, str) else None
+
 
 def _index(rows, key, org, org_key):
     result = {}
@@ -138,8 +168,12 @@ async def enumerate_current(*, organization_id, authority, reader):  # noqa: PLR
         snapshot = source_snapshot_from_records(source, row, graph_states.get(sid))
         if snapshot is None:
             raise MissingPack("eligible_graph_source_has_no_durable_observation")
-        if visible_nodes[sid].model_dump(mode="json") != snapshot.entity.model_dump(mode="json"):
+        visible, stored = visible_nodes[sid], snapshot.entity
+        if _bound_graph_row(visible) != _bound_graph_row(stored):
             raise MissingPack("available_graph_row_changed")
+        stored_key = _projected_record_key(stored)
+        if _projected_record_key(visible) != (stored_key or row.get("archive_record_key")):
+            raise MissingPack("available_graph_record_key_changed")
         observation = observe_graph_snapshot(snapshot, source, authority)
         add(
             candidate,
