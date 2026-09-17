@@ -23,12 +23,25 @@ class LLMSurface(StrEnum):
     SYNTHESIS = "synthesis"
 
 
+#: Per-attempt read timeout for a surface that did not name one. The memory
+#: surface sends whole consolidation cohorts in one non-streaming request, and a
+#: minute of silence is a normal part of that wait rather than a failure, so it
+#: starts at Anthropic's non-streaming ceiling of ten minutes. Every other
+#: surface keeps the short default.
+DEFAULT_TIMEOUT_SECONDS = 60.0
+MEMORY_TIMEOUT_SECONDS = 600.0
+
+
+def default_timeout_seconds(surface: LLMSurface) -> float:
+    return MEMORY_TIMEOUT_SECONDS if surface is LLMSurface.MEMORY else DEFAULT_TIMEOUT_SECONDS
+
+
 class LLMConfig(BaseModel):
     provider: LLMProviderName
     model: str
     temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     max_tokens: int | None = Field(default=None, gt=0)
-    timeout_seconds: float = Field(default=60.0, gt=0.0)
+    timeout_seconds: float = Field(default=DEFAULT_TIMEOUT_SECONDS, gt=0.0)
     transport_max_retries: int = Field(default=2, ge=0, strict=True)
     api_key: SecretStr | None = None
 
@@ -103,7 +116,9 @@ class EnvConfigSource:
             ),
             temperature=self._resolve_float(surface, "TEMPERATURE", default=0.0),
             max_tokens=self._resolve_int(surface, "MAX_TOKENS", default=None),
-            timeout_seconds=self._resolve_float(surface, "TIMEOUT_SECONDS", default=60.0),
+            timeout_seconds=self._resolve_float(
+                surface, "TIMEOUT_SECONDS", default=default_timeout_seconds(surface)
+            ),
             api_key=self._resolve_api_key(provider.value),
             transport_max_retries=self._resolve_transport_retries(surface),
         ).with_model_defaults()

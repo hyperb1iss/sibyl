@@ -81,8 +81,25 @@ def provider_error_detail(exc: BaseException) -> dict[str, Any] | None:
         status_code = None
     error_type, message = _provider_error_body(details.get("body"))
     if status_code is None and error_type is None and message is None:
+        error_type, message = _provider_error_cause(details)
+    if status_code is None and error_type is None and message is None:
         return None
     return {"status_code": status_code, "type": error_type, "message": message}
+
+
+def _provider_error_cause(details: dict[str, Any]) -> tuple[str | None, str | None]:
+    """Name a failure the provider never answered, so a timeout is diagnosable.
+
+    A read timeout has no HTTP status and no body, and without this the receipt
+    said only that the request failed. The classified exception type and its own
+    message are the only fields read, so request and response text stay out.
+    """
+    exception_type = details.get("exception_type")
+    cause = details.get("cause")
+    return (
+        exception_type if isinstance(exception_type, str) and exception_type else None,
+        cause[:PROVIDER_ERROR_MESSAGE_LIMIT] or None if isinstance(cause, str) else None,
+    )
 
 
 def _provider_error_body(body: Any) -> tuple[str | None, str | None]:
@@ -134,7 +151,7 @@ def classify_llm_exception(
             provider=provider,
             model=model,
             surface=surface,
-            details={"cause": str(exc)},
+            details={"cause": str(exc), "exception_type": type(exc).__name__},
         )
 
     model_http_error, validation_error_types = _pydantic_ai_error_types()
@@ -177,8 +194,17 @@ def classify_llm_exception(
     )
 
 
+#: The Anthropic and OpenAI SDKs wrap a read timeout in ``APITimeoutError``,
+#: which subclasses their own connection error rather than ``TimeoutError`` or
+#: ``httpx.TimeoutException``. Matching the class name keeps both SDKs out of
+#: this module's imports and still recognizes their subclasses.
+TIMEOUT_EXCEPTION_NAMES = frozenset({"APITimeoutError"})
+
+
 def _is_timeout(exc: Exception) -> bool:
     if isinstance(exc, TimeoutError):
+        return True
+    if any(base.__name__ in TIMEOUT_EXCEPTION_NAMES for base in type(exc).__mro__):
         return True
     try:
         import httpx
