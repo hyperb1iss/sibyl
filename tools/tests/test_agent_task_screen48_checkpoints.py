@@ -278,6 +278,7 @@ def state(monkeypatch: pytest.MonkeyPatch) -> Any:
         natives=[],
         adapters=[],
         qualified=[],
+        graph_schema_bootstraps=[],
     )
 
     async def noop() -> None:
@@ -285,6 +286,12 @@ def state(monkeypatch: pytest.MonkeyPatch) -> Any:
 
     monkeypatch.setattr(cycle, "bootstrap_runtime", noop)
     monkeypatch.setattr(cycle, "shutdown_runtime", noop)
+
+    async def bootstrapped(group_id: str) -> bool:
+        fixture.graph_schema_bootstraps.append(group_id)
+        return True
+
+    monkeypatch.setattr(checkpoints, "ensure_graph_schema", bootstrapped)
 
     async def qualify(*, group_id: str, principal_id: str) -> tuple[Any, dict, Any, Any]:
         fixture.qualified.append((group_id, principal_id))
@@ -1079,3 +1086,18 @@ def test_the_written_packs_are_the_ones_materialize_reads(tmp_path: Path, state:
         materialize._read_pack(
             output, altered, {"checkpoint": 0, "task": contract.TASKS[0], "arm": "native"}
         )
+
+
+async def test_checkpoint_bootstraps_the_org_graph_schema_once(tmp_path: Path, state: Any) -> None:
+    fixture = state
+    output = tmp_path / "cp0"
+    await checkpoints.prepare_checkpoint(
+        0,
+        output=output,
+        tokenizer_assets=tmp_path / "assets",
+        prior_root=None,
+        group_id=contract.ORGANIZATION_ID,
+        principal_id=contract.PRINCIPAL_ID,
+    )
+    assert fixture.graph_schema_bootstraps == [contract.ORGANIZATION_ID]
+    assert receipt_of(output)["graph_schema_bootstrapped"] is True

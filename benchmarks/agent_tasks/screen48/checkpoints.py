@@ -676,6 +676,14 @@ async def _prepare(
     )
 
 
+async def ensure_graph_schema(group_id: str) -> bool:
+    """Bootstrap the org graph schema through the product's runtime getter."""
+    from sibyl_core.services.graph_runtime import get_surreal_graph_runtime
+
+    await get_surreal_graph_runtime(group_id)
+    return True
+
+
 async def prepare_checkpoint(
     checkpoint: int,
     *,
@@ -728,6 +736,12 @@ async def prepare_checkpoint(
         receipt["schedule_source_catalog_sha256"] = schedule_catalog_sha256()
         receipt["schedule_content_sha256"] = schedule_catalog_content_sha256()
         await cycle.bootstrap_runtime()
+        # A pristine restore has no graph schema for the study org yet; the
+        # product bootstraps it on first runtime use (idempotent DEFINE
+        # statements, no rows), and the inventory reader deliberately does
+        # not. Run that product step once here so checkpoint 0 can read an
+        # empty graph instead of failing on a missing table.
+        receipt["graph_schema_bootstrapped"] = await ensure_graph_schema(group_id)
         try:
             await _prepare(
                 receipt,
