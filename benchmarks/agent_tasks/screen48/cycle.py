@@ -124,6 +124,16 @@ PROVIDER_ERROR_MESSAGE_LIMIT = 200
 #: remaining count exactly where it found them.
 STOP_CURSOR_STALLED = "cursor_did_not_advance"
 
+#: Every field the usage scan needs. ``request_json`` is read for its ``kind``
+#: alone, which is how an unmeasured attempt finds the successful rows of its
+#: own stage; without it every row's stage kind reads as unknown.
+USAGE_ROW_FIELDS = ("usage_json", "request_json", "state", "created_at")
+USAGE_ROW_QUERY = (
+    "SELECT usage_json, request_json, state, created_at "
+    "FROM memory_validation_executions "
+    "WHERE organization_id = $org AND created_at >= $since;"
+)
+
 
 class CycleError(RuntimeError):
     """The cycle could not be driven through product code paths."""
@@ -296,7 +306,7 @@ def summarize_usage(
         attempts.append(
             _UnrecordedAttempts(
                 stage_kind=stage_kind(row),
-                attempts=_unrecorded_attempts(payload),
+                exception_types=unrecorded_attempts(payload),
                 measured_input_tokens=input_tokens // requests if input_tokens else 0,
             )
         )
@@ -334,11 +344,15 @@ def summarize_usage(
 
 @dataclass(frozen=True, kw_only=True)
 class _UnrecordedAttempts:
-    """One execution row's billable-but-unmeasured transport attempts."""
+    """One execution row's billed-but-unmeasured transport attempts."""
 
     stage_kind: str
-    attempts: int
+    exception_types: dict[str, int]
     measured_input_tokens: int
+
+    @property
+    def attempts(self) -> int:
+        return sum(self.exception_types.values())
 
 
 def stage_kind(row: dict[str, Any]) -> str:
@@ -354,16 +368,47 @@ def stage_kind(row: dict[str, Any]) -> str:
     return kind if isinstance(kind, str) and kind else "unknown"
 
 
-def _unrecorded_attempts(payload: dict[str, Any]) -> int:
-    """Count HTTP attempts the extractor could not attribute token usage to."""
+#: Exception types that mean the request reached the provider and no response
+#: came back, so the provider was working when the client gave up and the
+#: attempt was almost certainly billed. The complement is deliberate: an attempt
+#: that carries an HTTP status got an answer (a 429 is refused, not billed), and
+#: a connect or pool failure never reached the API at all. Estimating either
+#: would inflate a number the cost ceiling now stops runs on.
+BILLED_UNMEASURED_EXCEPTIONS = frozenset(
+    {
+        "APITimeoutError",
+        "ReadError",
+        "ReadTimeout",
+        "RemoteProtocolError",
+        "TimeoutError",
+        "WriteError",
+        "WriteTimeout",
+    }
+)
+
+
+def unrecorded_attempts(payload: dict[str, Any]) -> dict[str, int]:
+    """Count dispatched attempts that were billed but carry no token usage.
+
+    ``usage_known`` alone is too wide a net. It is set only on an attempt that
+    both answered 2xx and passed the extractor's usage gate, so every refusal,
+    every connect failure and every unmarked success would be priced as a lost
+    request. The pair that identifies a billed-but-unmeasured attempt is no
+    status plus an exception that fired after the request went out.
+    """
     attempts = payload.get("transport_attempts")
+    counts: dict[str, int] = {}
     if not isinstance(attempts, list):
-        return 0
-    return sum(
-        1
-        for attempt in attempts
-        if not (isinstance(attempt, dict) and attempt.get("usage_known") is True)
-    )
+        return counts
+    for attempt in attempts:
+        if not isinstance(attempt, dict) or attempt.get("usage_known") is True:
+            continue
+        if attempt.get("status_code") is not None:
+            continue
+        exception_type = attempt.get("exception_type")
+        if isinstance(exception_type, str) and exception_type in BILLED_UNMEASURED_EXCEPTIONS:
+            counts[exception_type] = counts.get(exception_type, 0) + 1
+    return counts
 
 
 def estimate_unrecorded_attempts(
@@ -381,7 +426,8 @@ def estimate_unrecorded_attempts(
     request of the rows of its own stage kind, then the run-wide mean. The
     stored ``request_json`` is not a proxy: it carries the evidence binding and
     digests, never the prompt. Nothing is estimated when the run measured no
-    row at all, and the count of rows without a basis is reported.
+    row at all, and the count of rows without a basis is reported, alongside the
+    exception types the estimate was built from so a reader can audit it.
     """
     stage_totals: dict[str, list[int]] = {}
     for row in rows:
@@ -390,6 +436,7 @@ def estimate_unrecorded_attempts(
     measured = [tokens for values in stage_totals.values() for tokens in values]
     run_mean = sum(measured) // len(measured) if measured else 0
     basis = {"measured_row": 0, "stage_kind_mean": 0, "run_mean": 0, "none": 0}
+    exception_types: dict[str, int] = {}
     estimate = Decimal(0)
     attempts = 0
     affected = 0
@@ -398,6 +445,8 @@ def estimate_unrecorded_attempts(
             continue
         affected += 1
         attempts += row.attempts
+        for name, count in row.exception_types.items():
+            exception_types[name] = exception_types.get(name, 0) + count
         values = stage_totals.get(row.stage_kind) or []
         if row.measured_input_tokens:
             tokens, name = row.measured_input_tokens, "measured_row"
@@ -417,6 +466,7 @@ def estimate_unrecorded_attempts(
     return {
         "rows_with_unrecorded_attempts": affected,
         "unrecorded_attempts": attempts,
+        "unrecorded_attempt_exception_types": exception_types,
         "unrecorded_attempt_estimate_usd": float(estimate),
         "unrecorded_attempt_estimate_usd_exact": str(estimate),
         "unrecorded_attempt_estimate_basis": basis,
@@ -755,13 +805,7 @@ async def live_execution_count(group_id: str) -> int:
 
 
 async def usage_rows(group_id: str, since: datetime) -> list[dict[str, Any]]:
-    return await _content_rows(
-        "SELECT usage_json, request_json, state, created_at "
-        "FROM memory_validation_executions "
-        "WHERE organization_id = $org AND created_at >= $since;",
-        org=group_id,
-        since=since,
-    )
+    return await _content_rows(USAGE_ROW_QUERY, org=group_id, since=since)
 
 
 async def capture_surface_counts(group_id: str) -> dict[str, int]:
