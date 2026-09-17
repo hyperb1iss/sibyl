@@ -178,16 +178,31 @@ class PreparedPartialProposal:
                     ref.episode_id, ref.start_byte, ref.end_byte
                 ):
                     raise ValueError("partial support is outside the observed evidence packet")
-                if projection is not None and not projection.permits(
-                    ref.episode_id, ref.start_byte, ref.end_byte
-                ):
-                    raise ValueError("partial support is outside the complete evidence projection")
-                excerpt = artifact[ref.start_byte : ref.end_byte]
+                ranges: tuple[tuple[int, int], ...] = ((ref.start_byte, ref.end_byte),)
+                if projection is not None:
+                    # A cited evidence extent keeps only the ranges the
+                    # projection made visible, so punctuation and dropped
+                    # transport bytes reach neither the excerpt nor its digest.
+                    resolved = projection.resolve(ref.episode_id, ref.start_byte, ref.end_byte)
+                    if resolved is None:
+                        raise ValueError(
+                            "partial support is outside the complete evidence projection"
+                        )
+                    ranges = resolved
+                excerpt = b"".join(artifact[left:right] for left, right in ranges)
                 if not excerpt.decode("utf-8").strip():
                     raise ValueError("partial support contains only whitespace")
-                spans.append({"path": path, **ref.model_dump(), "slice_sha256": c._digest(excerpt)})
+                spans.append(
+                    {
+                        "path": path,
+                        **ref.model_dump(),
+                        "ranges": [[left, right] for left, right in ranges],
+                        "slice_sha256": c._digest(excerpt),
+                    }
+                )
+                cited = ", ".join(f"{left}:{right}" for left, right in ranges)
                 references.append(
-                    f"episode {ref.episode_id} bytes {ref.start_byte}:{ref.end_byte} "
+                    f"episode {ref.episode_id} bytes {cited} "
                     f"(sources {', '.join(source_names[ref.episode_id])})"
                 )
             rendered[path] = (
