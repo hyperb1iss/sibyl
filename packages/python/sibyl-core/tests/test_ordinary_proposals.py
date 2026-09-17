@@ -450,3 +450,38 @@ def test_projection_rejects_spans_across_evidence_ids_and_dropped_regions():
         prepared, value = cited(group, projection, span)
         with pytest.raises(ValueError, match="outside the complete evidence projection"):
             prepared.render(value)
+
+
+def test_projection_lists_every_citation_range_in_byte_order():
+    """cite() collects ranges in selection order; the prompt must not."""
+    artifact = controller_artifact()
+    _, projection = controller_cohort(artifact)
+    payload = json.loads(projection.payload_json)
+
+    listed = {key: value["ranges"] for key, value in payload["citations"].items()}
+
+    assert any(
+        list(citation.ranges) != sorted(citation.ranges)
+        for citation in projection.citations.values()
+    ), "fixture no longer exercises an unsorted citation"
+    for key, ranges in listed.items():
+        assert ranges == sorted(ranges) == sorted(map(list, projection.citations[key].ranges))
+        first, last = ranges[0][0], ranges[-1][1]
+        assert first < last, "the extent of a listed citation must read forwards"
+
+
+def test_projection_never_repeats_bytes_from_overlapping_ranges():
+    artifact = controller_artifact()
+    _, projection = controller_cohort(artifact)
+    citation = projection.citations["s0.e3"]
+    ranges = sorted(citation.ranges)
+    nested = EvidenceCitation(
+        episode_id="controller", ranges=(*citation.ranges, (ranges[0][0], ranges[-1][1]))
+    )
+    overlapping = replace(projection, citations={**projection.citations, "s0.e3": nested})
+
+    resolved = overlapping.resolve("controller", ranges[0][0], ranges[-1][1])
+
+    assert resolved == ((ranges[0][0], ranges[-1][1]),)
+    excerpt = b"".join(artifact[left:right] for left, right in resolved)
+    assert len(excerpt) == ranges[-1][1] - ranges[0][0]

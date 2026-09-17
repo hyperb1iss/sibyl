@@ -59,13 +59,19 @@ class OrdinaryEvidenceProjection:
             )
             if not hull[0] <= start < end <= hull[1]:
                 continue
-            resolved = tuple(
-                (max(start, left), min(end, right))
-                for left, right in sorted(citation.ranges)
-                if max(start, left) < min(end, right)
-            )
+            resolved: list[ByteRange] = []
+            for left, right in sorted(citation.ranges):
+                cut = (max(start, left), min(end, right))
+                if cut[0] >= cut[1]:
+                    continue
+                # A citation that ever listed a value and one nested inside it
+                # would otherwise repeat those bytes in the excerpt and its hash.
+                if resolved and cut[0] < resolved[-1][1]:
+                    resolved[-1] = (resolved[-1][0], max(resolved[-1][1], cut[1]))
+                    continue
+                resolved.append(cut)
             if resolved:
-                return resolved
+                return tuple(resolved)
         return None
 
     def permits(self, source_id: str, start: int, end: int) -> bool:
@@ -135,7 +141,10 @@ def prepare_ordinary_projection(
         "evidence_view": view,
         "binding": binding,
         "citations": {
-            key: {"source_id": citation.episode_id, "ranges": citation.ranges}
+            # Listed in original byte order. cite() collects ranges in field
+            # selection order, and a model reading a shuffled list cannot apply
+            # the extent rule the instructions state.
+            key: {"source_id": citation.episode_id, "ranges": sorted(citation.ranges)}
             for key, citation in citations.items()
         },
     }

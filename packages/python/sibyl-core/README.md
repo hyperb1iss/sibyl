@@ -208,7 +208,12 @@ SIBYL_LLM_PROVIDER=anthropic          # anthropic | openai | gemini
 SIBYL_LLM_MODEL=claude-haiku-4-5
 SIBYL_LLM_TEMPERATURE=0
 SIBYL_LLM_MAX_TOKENS=2048
+
+# Per-attempt read timeout. A shared value wins over every surface default, so
+# setting this also shortens the memory surface, which waits 600s by default
+# because consolidation sends a whole cohort in one non-streaming request.
 SIBYL_LLM_TIMEOUT_SECONDS=60
+SIBYL_LLM_MEMORY_TIMEOUT_SECONDS=600
 
 # Surface-specific values override shared LLM values.
 SIBYL_LLM_CRAWLER_PROVIDER=gemini
