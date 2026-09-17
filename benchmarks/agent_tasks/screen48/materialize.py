@@ -29,6 +29,7 @@ from benchmarks.agent_tasks.manifest import (
     strict_json,
     validate_partitions,
 )
+from benchmarks.agent_tasks.screen48.contract import schedule_content_sha256
 from benchmarks.agent_tasks.transfer_report import IDENTITY_FIELDS
 
 if TYPE_CHECKING:
@@ -118,8 +119,23 @@ def _validate_experiences(schedule: dict[str, Any], template: dict[str, Any]) ->
             raise ManifestError(f"experience binding differs from its original source: {row.id}")
 
 
-def _read_pack(packs_root: Path, schedule: dict[str, Any], cell: dict[str, Any]) -> dict[str, Any]:
-    """Read one preparation receipt, returning an unprepared verdict when it is absent."""
+def _read_pack(
+    packs_root: Path,
+    schedule: dict[str, Any],
+    cell: dict[str, Any],
+    *,
+    content_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Read one preparation receipt, returning an unprepared verdict when it is absent.
+
+    The receipt is bound to the schedule by content, not by database lifetime.
+    Restoring the study database from its cold copy remints every observation
+    incarnation, so a receipt prepared after a restore carries a different
+    ``catalog_sha256`` than the one the schedule was frozen with while naming
+    the identical 233 captures. What must agree is ``catalog_content_sha256``.
+    Lifetime agreement is still required, but between receipts rather than
+    against the schedule: see ``_bind_lifetime``.
+    """
     base = packs_root / "packs" / f"cp{cell['checkpoint']}" / cell["task"]
     receipt_path = base / f"{cell['arm']}.json"
     if receipt_path.is_symlink() or not receipt_path.is_file():
@@ -131,8 +147,11 @@ def _read_pack(packs_root: Path, schedule: dict[str, Any], cell: dict[str, Any])
         raise ManifestError(f"pack receipt is outside its scheduled cell: {receipt_path}")
     if receipt.get("status") not in PACK_STATUSES:
         raise ManifestError(f"unknown pack preparation status: {receipt_path}")
-    if receipt.get("catalog_sha256") != schedule["source_catalog_sha256"]:
+    expected = schedule_content_sha256(schedule) if content_sha256 is None else content_sha256
+    if receipt.get("catalog_content_sha256") != expected:
         raise ManifestError(f"pack receipt used another source catalog: {receipt_path}")
+    if not isinstance(receipt.get("catalog_sha256"), str) or not receipt["catalog_sha256"]:
+        raise ManifestError(f"pack receipt names no database lifetime: {receipt_path}")
     reason = receipt.get("reason")
     if receipt["status"] == "missing_pack":
         if receipt.get("memory") is not None:
@@ -147,6 +166,39 @@ def _read_pack(packs_root: Path, schedule: dict[str, Any], cell: dict[str, Any])
     if content != memory.encode():
         raise ManifestError(f"prepared pack bytes differ from the receipt: {receipt_path}")
     return {"status": "prepared", "reason": reason, "receipt": receipt, "memory": content}
+
+
+def _bind_lifetime(schedule: dict[str, Any], packs: dict[str, dict[str, Any]]) -> str | None:
+    """Refuse a materialization whose receipts span more than one database lifetime.
+
+    One checkpoint is prepared in one phase against one restored database, and
+    checkpoint 1 continues the very cycle checkpoint 0 began: its two reusing
+    arms are handed the checkpoint-0 packs. A restore between those phases
+    remints every observation incarnation, so the lifetime digests part company
+    even though the study content did not. That is a broken cycle, not a
+    reusable pair of checkpoints, and it is refused here rather than executed.
+
+    Returns the single lifetime digest every receipt agreed on, or ``None`` when
+    no receipt was present at all.
+    """
+    lifetimes: dict[int, set[str]] = {}
+    for cell in schedule["cells"]:
+        receipt = packs[cell["attempt_id"]].get("receipt")
+        if isinstance(receipt, dict):
+            lifetimes.setdefault(cell["checkpoint"], set()).add(receipt["catalog_sha256"])
+    for checkpoint, digests in sorted(lifetimes.items()):
+        if len(digests) > 1:
+            raise ManifestError(
+                f"checkpoint {checkpoint} pack receipts span {len(digests)} database "
+                "lifetimes; one checkpoint is prepared against one restored database"
+            )
+    across = {next(iter(digests)) for digests in lifetimes.values()}
+    if len(across) > 1:
+        raise ManifestError(
+            f"pack receipts span {len(across)} database lifetimes across the checkpoints; "
+            "a restore between checkpoint 0 and checkpoint 1 breaks the cycle they share"
+        )
+    return next(iter(across), None)
 
 
 def _task_value(
@@ -297,9 +349,12 @@ def materialize(
     output = output.absolute()
     if output.exists() or output.is_symlink():
         raise ManifestError("materialization output already exists")
+    content_sha256 = schedule_content_sha256(schedule)
     packs = {
-        cell["attempt_id"]: _read_pack(packs_root, schedule, cell) for cell in schedule["cells"]
+        cell["attempt_id"]: _read_pack(packs_root, schedule, cell, content_sha256=content_sha256)
+        for cell in schedule["cells"]
     }
+    pack_catalog_sha256 = _bind_lifetime(schedule, packs)
     manifests: list[dict[str, Any]] = []
     entries: dict[str, dict[str, Any]] = {}
     pending: list[tuple[str, bytes]] = []
@@ -366,6 +421,15 @@ def materialize(
         "schema": SCHEMA,
         "schedule_sha256": identity(schedule),
         "source_commit": schedule.get("source_commit"),
+        # The content digest every receipt agreed with, the database lifetime
+        # they were all prepared against, and the lifetime the schedule was
+        # frozen with. The last two differ after a restore, and the flag says so.
+        "catalog_content_sha256": content_sha256,
+        "pack_catalog_sha256": pack_catalog_sha256,
+        "schedule_source_catalog_sha256": schedule["source_catalog_sha256"],
+        "lifetime_catalog_matches_schedule": (
+            pack_catalog_sha256 == schedule["source_catalog_sha256"]
+        ),
         "root": str(output),
         "denominator": len(cells),
         "prepared_cells": sum(cell["prepared"] for cell in cells),

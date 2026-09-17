@@ -15,6 +15,7 @@ from benchmarks.agent_tasks.manifest import (
     runtime_identity,
 )
 from benchmarks.agent_tasks.screen48 import launcher, observation
+from benchmarks.agent_tasks.screen48.contract import schedule_content_sha256
 from benchmarks.agent_tasks.screen48.materialize import materialize
 from benchmarks.agent_tasks.transfer_report import IDENTITY_FIELDS
 
@@ -28,7 +29,12 @@ FROZEN_SCHEDULE = Path(
 NAMESPACE = "b21d33fdf886433cb188cb4414e435e1"
 FROZEN_CELLS = 48
 MINI_CELLS = 12
+#: The lifetime digest the mini schedule was frozen with, and the one a restore
+#: of the same study material qualifies to instead. Receipts bind to the
+#: schedule by content, so the two are interchangeable to ``materialize`` as
+#: long as every receipt agrees on one of them.
 CATALOG = digest(b"mini-source-catalog")
+RESTORED_CATALOG = digest(b"mini-source-catalog-restored")
 TASKS = ("venue-capacity-report", "hex-stream-journal")
 ARMS = ("native", "raw_retrieval", "no_memory")
 ORACLE = json.dumps(
@@ -166,8 +172,21 @@ def build_template(root: Path, count: int = 3) -> tuple[dict, list[dict]]:
     return template, sources
 
 
-def write_packs(root: Path, cells: list[dict], *, absent: frozenset[str] = frozenset()) -> Path:
-    """Write one preparation receipt per cell, omitting the file for absent arms."""
+def write_packs(
+    root: Path,
+    cells: list[dict],
+    *,
+    content: str,
+    absent: frozenset[str] = frozenset(),
+    catalog: str = CATALOG,
+    lifetimes: dict[str, str] | None = None,
+) -> Path:
+    """Write one preparation receipt per cell, omitting the file for absent arms.
+
+    ``catalog`` is the database lifetime every receipt was prepared against;
+    ``lifetimes`` overrides it per attempt, which is how a restore part-way
+    through the cycle is staged.
+    """
     for cell in cells:
         if cell["attempt_id"] in absent:
             continue
@@ -189,7 +208,8 @@ def write_packs(root: Path, cells: list[dict], *, absent: frozenset[str] = froze
                     "arm": cell["arm"],
                     "memory": memory,
                     "counts": {"memory_sha256": digest(memory.encode()), "fits": True},
-                    "catalog_sha256": CATALOG,
+                    "catalog_sha256": (lifetimes or {}).get(cell["attempt_id"], catalog),
+                    "catalog_content_sha256": content,
                 },
                 sort_keys=True,
             )
@@ -202,11 +222,13 @@ def mini(tmp_path):
     """A complete, fully prepared miniature of the screen: 2 checkpoints, 2 tasks, 3 arms."""
     template, sources = build_template(tmp_path / "template")
     schedule = mini_schedule(sources)
+    content = schedule_content_sha256(schedule)
     return {
         "schedule": schedule,
         "template": template,
+        "content": content,
         "tasks_root": write_tasks(tmp_path / "material"),
-        "packs_root": write_packs(tmp_path / "prepared", schedule["cells"]),
+        "packs_root": write_packs(tmp_path / "prepared", schedule["cells"], content=content),
         "output": tmp_path / "materialized",
         "root": tmp_path / "run",
     }
@@ -249,6 +271,7 @@ def test_a_missing_arm_stays_unprepared_and_never_gets_an_invented_pack(mini):
     packs_root = write_packs(
         mini["packs_root"].parent / "partial",
         mini["schedule"]["cells"],
+        content=mini["content"],
         absent=frozenset({absent["attempt_id"]}),
     )
 
@@ -272,6 +295,105 @@ def test_a_missing_arm_stays_unprepared_and_never_gets_an_invented_pack(mini):
     packs = (mini["output"] / entry["path"]).parent / "packs"
     assert not (packs / f"{absent['arm']}.txt").exists()
     assert {path.name for path in packs.iterdir()} == {f"{arm.id}.txt" for arm in manifest.arms}
+
+
+def test_the_report_carries_the_content_digest_and_the_lifetime_beside_it(mini):
+    report = run_materialize(mini)
+
+    assert report["catalog_content_sha256"] == mini["content"]
+    assert report["pack_catalog_sha256"] == CATALOG
+    assert report["schedule_source_catalog_sha256"] == CATALOG
+    assert report["lifetime_catalog_matches_schedule"] is True
+    materialization = json.loads((mini["output"] / "materialization.json").read_text())
+    assert materialization["catalog_content_sha256"] == mini["content"]
+    assert materialization["pack_catalog_sha256"] == CATALOG
+
+
+def test_receipts_from_a_restored_database_still_materialize(mini):
+    """A restore moves every receipt's lifetime digest; the content digest holds.
+
+    This is the state a fresh restore of the study database leaves the lane in,
+    and it is the state the whole cycle has to be executable from.
+    """
+    packs_root = write_packs(
+        mini["packs_root"].parent / "restored",
+        mini["schedule"]["cells"],
+        content=mini["content"],
+        catalog=RESTORED_CATALOG,
+    )
+
+    report = run_materialize(mini, packs_root=packs_root)
+
+    assert report["prepared_cells"] == len(mini["schedule"]["cells"])
+    assert report["manifest_count"] == len(TASKS) * 2
+    assert report["pack_catalog_sha256"] == RESTORED_CATALOG != CATALOG
+    assert report["lifetime_catalog_matches_schedule"] is False
+    assert report["catalog_content_sha256"] == mini["content"]
+
+
+def test_one_changed_source_content_hash_is_another_catalog(mini):
+    """Receipts prepared over different source content are not this schedule's."""
+    altered = [
+        {**row, "source_sha256": digest(b"a different original")} if index == 0 else row
+        for index, row in enumerate(mini["schedule"]["original_sources"])
+    ]
+    content = schedule_content_sha256({**mini["schedule"], "original_sources": altered})
+    assert content != mini["content"]
+    packs_root = write_packs(
+        mini["packs_root"].parent / "another-catalog", mini["schedule"]["cells"], content=content
+    )
+
+    with pytest.raises(ManifestError, match="another source catalog"):
+        run_materialize(mini, packs_root=packs_root)
+
+    assert not mini["output"].exists()
+
+
+def test_receipts_of_one_checkpoint_may_not_span_two_database_lifetimes(mini):
+    """One checkpoint is one preparation phase against one restored database."""
+    within = next(cell for cell in mini["schedule"]["cells"] if cell["checkpoint"] == 0)
+    packs_root = write_packs(
+        mini["packs_root"].parent / "split-checkpoint",
+        mini["schedule"]["cells"],
+        content=mini["content"],
+        lifetimes={within["attempt_id"]: RESTORED_CATALOG},
+    )
+
+    with pytest.raises(ManifestError, match="checkpoint 0 pack receipts span 2"):
+        run_materialize(mini, packs_root=packs_root)
+
+    assert not mini["output"].exists()
+
+
+def test_a_restore_between_the_checkpoints_is_refused(mini):
+    """Checkpoint 1 continues the cycle checkpoint 0 began, so the lifetime is shared."""
+    packs_root = write_packs(
+        mini["packs_root"].parent / "restored-midcycle",
+        mini["schedule"]["cells"],
+        content=mini["content"],
+        lifetimes={
+            cell["attempt_id"]: RESTORED_CATALOG
+            for cell in mini["schedule"]["cells"]
+            if cell["checkpoint"] == 1
+        },
+    )
+
+    with pytest.raises(ManifestError, match="span 2 database lifetimes across the checkpoints"):
+        run_materialize(mini, packs_root=packs_root)
+
+    assert not mini["output"].exists()
+
+
+def test_a_receipt_naming_no_database_lifetime_is_refused(mini):
+    cell = mini["schedule"]["cells"][0]
+    path = mini["packs_root"] / "packs" / f"cp{cell['checkpoint']}" / cell["task"]
+    receipt = json.loads((path / f"{cell['arm']}.json").read_text())
+    (path / f"{cell['arm']}.json").write_text(
+        json.dumps({**receipt, "catalog_sha256": ""}, sort_keys=True)
+    )
+
+    with pytest.raises(ManifestError, match="names no database lifetime"):
+        run_materialize(mini)
 
 
 def test_a_task_whose_workspace_leaks_the_oracle_is_refused(mini, tmp_path):
