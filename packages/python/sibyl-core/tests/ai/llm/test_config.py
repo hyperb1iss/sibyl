@@ -5,6 +5,8 @@ from pydantic import SecretStr
 
 from sibyl_core.ai.errors import LLMConfigError
 from sibyl_core.ai.llm.config import (
+    DEFAULT_TIMEOUT_SECONDS,
+    MEMORY_TIMEOUT_SECONDS,
     ConfigField,
     EnvConfigSource,
     LLMConfig,
@@ -171,3 +173,42 @@ async def test_opus_memory_output_default_preserves_explicit_policy(
     assert resolved.to_llm_config().max_tokens == expected
     assert resolved.max_tokens.source == ("env" if override is not None else "default")
     assert resolved.max_tokens.locked_by_env is (override is not None)
+
+
+@pytest.mark.asyncio
+async def test_memory_surface_waits_out_a_whole_consolidation_request() -> None:
+    source = EnvConfigSource({})
+
+    resolved = await source.resolve(LLMSurface.MEMORY)
+
+    assert MEMORY_TIMEOUT_SECONDS == 600.0
+    assert resolved.timeout_seconds.value == MEMORY_TIMEOUT_SECONDS
+    assert resolved.timeout_seconds.source == "default"
+    assert resolved.to_llm_config().timeout_seconds == MEMORY_TIMEOUT_SECONDS
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("surface", [LLMSurface.DEFAULT, LLMSurface.CRAWLER, LLMSurface.SYNTHESIS])
+async def test_other_surfaces_keep_the_short_timeout(surface: LLMSurface) -> None:
+    resolved = await EnvConfigSource({}).resolve(surface)
+
+    assert resolved.timeout_seconds.value == DEFAULT_TIMEOUT_SECONDS == 60.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("SIBYL_LLM_MEMORY_TIMEOUT_SECONDS", "SIBYL_LLM_MEMORY_TIMEOUT_SECONDS"),
+        ("SIBYL_LLM_TIMEOUT_SECONDS", "SIBYL_LLM_TIMEOUT_SECONDS"),
+    ],
+)
+async def test_memory_timeout_env_overrides_the_raised_default(name: str, expected: str) -> None:
+    source = EnvConfigSource({name: "45"})
+
+    resolved = await source.resolve(LLMSurface.MEMORY)
+
+    assert resolved.timeout_seconds.value == 45.0
+    assert resolved.timeout_seconds.source == "env"
+    assert resolved.timeout_seconds.locked_by_env is True
+    assert resolved.timeout_seconds.env_var == expected

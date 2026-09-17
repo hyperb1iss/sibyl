@@ -10,10 +10,12 @@ real run's money or hang it forever.
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import re
 import subprocess
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -658,6 +660,193 @@ def test_usage_summation_ignores_cost_usd_when_cost_is_incomplete() -> None:
     assert Decimal(cycle.summarize_usage(rows, **PRICES)["cost_usd_exact"]) == Decimal(0)
 
 
+def _attempt(
+    *,
+    usage_known: bool = False,
+    status: int | None = None,
+    exception: str | None = "ReadTimeout",
+) -> dict[str, Any]:
+    """One transport attempt row, a read timeout unless told otherwise."""
+    if usage_known or status is not None:
+        exception = None
+    return {"status_code": status, "exception_type": exception, "usage_known": usage_known}
+
+
+def _row(
+    *,
+    kind: str,
+    state: str = "returned",
+    input_tokens: int | None = None,
+    requests: int = 1,
+    attempts: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    usage: dict[str, Any] = {"transport_attempts": attempts or [], "cost_complete": False}
+    if input_tokens is not None:
+        usage.update(requests=requests, input_tokens=input_tokens, output_tokens=0)
+    return {
+        "state": state,
+        "usage_json": json.dumps(usage),
+        "request_json": json.dumps({"kind": kind, "org": "org"}),
+    }
+
+
+def test_unrecorded_attempts_are_estimated_from_the_same_stage_kind() -> None:
+    # Three timed-out attempts on a row that recorded nothing, priced from the
+    # 240K input tokens the completed proposals of the same stage measured.
+    rows = [
+        _row(kind="proposal", input_tokens=240_000, attempts=[_attempt(usage_known=True)]),
+        _row(kind="proposal", input_tokens=240_000, attempts=[_attempt(usage_known=True)]),
+        _row(kind="critic", input_tokens=1_000, attempts=[_attempt(usage_known=True)]),
+        _row(kind="proposal", state="failed", attempts=[_attempt() for _ in range(3)]),
+    ]
+
+    summary = cycle.summarize_usage(rows, **PRICES)
+
+    # 240K at the long-context 10/M rate is 2.40 an attempt, three attempts.
+    assert Decimal(summary["unrecorded_attempt_estimate_usd_exact"]) == Decimal("7.2")
+    assert summary["unrecorded_attempts"] == 3
+    assert summary["rows_with_unrecorded_attempts"] == 1
+    assert summary["unrecorded_attempt_estimate_basis"]["stage_kind_mean"] == 1
+    assert summary["unrecorded_attempt_exception_types"] == {"ReadTimeout": 3}
+    # The estimate is reported beside the measured total, never inside it.
+    measured = Decimal("2.4") + Decimal("2.4") + Decimal("0.005")
+    assert Decimal(summary["cost_usd_exact"]) == measured
+    assert Decimal(summary["ceiling_cost_usd_exact"]) == measured + Decimal("7.2")
+
+
+def test_unrecorded_retry_attempts_are_estimated_from_their_own_row() -> None:
+    rows = [
+        _row(
+            kind="proposal",
+            input_tokens=100_000,
+            attempts=[_attempt(), _attempt(), _attempt(usage_known=True, status=200)],
+        )
+    ]
+
+    summary = cycle.summarize_usage(rows, **PRICES)
+
+    # Two dead attempts at 100K input tokens and the base 5/M rate.
+    assert Decimal(summary["unrecorded_attempt_estimate_usd_exact"]) == Decimal("1")
+    assert summary["unrecorded_attempt_estimate_basis"] == {
+        "measured_row": 1,
+        "stage_kind_mean": 0,
+        "run_mean": 0,
+        "none": 0,
+    }
+
+
+def test_unrecorded_attempts_fall_back_to_the_run_mean_then_report_no_basis() -> None:
+    other_stage = cycle.summarize_usage(
+        [
+            _row(kind="critic", input_tokens=200_000, attempts=[_attempt(usage_known=True)]),
+            _row(kind="proposal", state="failed", attempts=[_attempt()]),
+        ],
+        **PRICES,
+    )
+    nothing_measured = cycle.summarize_usage(
+        [_row(kind="proposal", state="failed", attempts=[_attempt(), _attempt()])], **PRICES
+    )
+
+    assert other_stage["unrecorded_attempt_estimate_basis"]["run_mean"] == 1
+    assert Decimal(other_stage["unrecorded_attempt_estimate_usd_exact"]) == Decimal("1")
+    assert nothing_measured["unrecorded_attempt_estimate_basis"]["none"] == 1
+    assert nothing_measured["unrecorded_attempt_estimate_usd_exact"] == "0"
+    assert nothing_measured["unrecorded_attempts"] == 2
+
+
+def test_only_attempts_the_provider_billed_are_estimated() -> None:
+    """An answered refusal and a connect failure were never billed."""
+    priced = _row(kind="proposal", input_tokens=240_000, attempts=[_attempt(usage_known=True)])
+    refused = _row(
+        kind="proposal",
+        input_tokens=240_000,
+        attempts=[_attempt(status=429), _attempt(usage_known=True, status=200)],
+    )
+    never_sent = _row(
+        kind="proposal",
+        state="failed",
+        attempts=[_attempt(exception="ConnectError"), _attempt(exception="PoolTimeout")],
+    )
+    unmarked_success = _row(kind="proposal", input_tokens=100_000, attempts=[_attempt(status=200)])
+
+    summary = cycle.summarize_usage([priced, refused, never_sent, unmarked_success], **PRICES)
+
+    assert summary["unrecorded_attempts"] == 0
+    assert summary["unrecorded_attempt_exception_types"] == {}
+    assert summary["ceiling_cost_usd_exact"] == summary["cost_usd_exact"]
+
+
+def test_a_billed_disconnect_is_estimated_and_named() -> None:
+    rows = [
+        _row(kind="proposal", input_tokens=100_000, attempts=[_attempt(usage_known=True)]),
+        _row(
+            kind="proposal",
+            state="failed",
+            attempts=[_attempt(exception="RemoteProtocolError"), _attempt(exception="ReadError")],
+        ),
+    ]
+
+    summary = cycle.summarize_usage(rows, **PRICES)
+
+    assert summary["unrecorded_attempts"] == 2
+    assert summary["unrecorded_attempt_exception_types"] == {
+        "RemoteProtocolError": 1,
+        "ReadError": 1,
+    }
+    assert Decimal(summary["unrecorded_attempt_estimate_usd_exact"]) == Decimal("1")
+
+
+def test_rows_without_attempt_records_estimate_nothing() -> None:
+    summary = cycle.summarize_usage(
+        [{"state": "returned", "usage_json": json.dumps({"input_tokens": 10, "output_tokens": 0})}],
+        **PRICES,
+    )
+
+    assert summary["unrecorded_attempts"] == 0
+    assert summary["rows_with_unrecorded_attempts"] == 0
+    assert summary["unrecorded_attempt_estimate_usd"] == 0.0
+    assert summary["ceiling_cost_usd_exact"] == summary["cost_usd_exact"]
+
+
+async def test_the_ceiling_counts_spend_that_hid_in_timeouts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A run whose attempts all timed out measured nothing and spent plenty."""
+    rows = [
+        _row(kind="proposal", input_tokens=240_000, attempts=[_attempt(usage_known=True)]),
+        _row(kind="proposal", state="failed", attempts=[_attempt() for _ in range(3)]),
+    ]
+
+    async def usage_rows(group_id: str, since: Any) -> list[dict[str, Any]]:
+        assert group_id
+        assert since is not None
+        return rows
+
+    monkeypatch.setattr(cycle, "usage_rows", usage_rows)
+    guard = cycle._CostGuard(make_config(cost_ceiling_usd=Decimal("5")), datetime.now(UTC))
+
+    usage = await guard.measure()
+
+    assert Decimal(usage["cost_usd_exact"]) < Decimal("5")
+    assert Decimal(usage["ceiling_cost_usd_exact"]) > Decimal("5")
+    assert guard.exceeded is True
+
+
+def test_stage_kind_reads_the_stored_request_and_never_guesses() -> None:
+    assert cycle.stage_kind(_row(kind="ordinary_cohort_proposal")) == "ordinary_cohort_proposal"
+    assert cycle.stage_kind({"request_json": "{"}) == "unknown"
+    assert cycle.stage_kind({"request_json": json.dumps([1])}) == "unknown"
+    assert cycle.stage_kind({"request_json": json.dumps({"kind": ""})}) == "unknown"
+    assert cycle.stage_kind({}) == "unknown"
+
+
+def test_the_usage_scan_reads_the_request_kind_it_estimates_from() -> None:
+    """Without request_json every row's stage kind reads as unknown."""
+    assert "request_json" in cycle.USAGE_ROW_FIELDS
+    assert cycle.USAGE_ROW_QUERY.startswith("SELECT " + ", ".join(cycle.USAGE_ROW_FIELDS) + " ")
+    assert inspect.getsource(cycle.usage_rows).count("USAGE_ROW_QUERY") == 1
+
+
 def test_usage_summation_counts_unparsable_rows() -> None:
     summary = cycle.summarize_usage([{"state": "returned", "usage_json": "{"}], **PRICES)
 
@@ -1158,3 +1347,33 @@ def test_long_context_rows_bill_at_the_doubled_tier() -> None:
     )
     # short: 101K tokens at 10/M = 1.01; long: 251K at 20/M = 5.02; split: 251K at 10/M = 2.51
     assert result["cost_usd_exact"] == str(Decimal("1.01") + Decimal("5.02") + Decimal("2.51"))
+
+
+def test_a_write_failure_is_not_estimated_but_a_cancellation_is() -> None:
+    """The line is the request phase: a half-sent body was never billed."""
+    priced = _row(kind="proposal", input_tokens=100_000, attempts=[_attempt(usage_known=True)])
+    half_sent = _row(
+        kind="proposal",
+        state="failed",
+        attempts=[_attempt(exception="WriteTimeout"), _attempt(exception="WriteError")],
+    )
+    cancelled = _row(
+        kind="proposal", state="cancelled", attempts=[_attempt(exception="CancelledError")]
+    )
+
+    summary = cycle.summarize_usage([priced, half_sent, cancelled], **PRICES)
+
+    assert summary["unrecorded_attempt_exception_types"] == {"CancelledError": 1}
+    assert Decimal(summary["unrecorded_attempt_estimate_usd_exact"]) == Decimal("0.5")
+
+
+def test_an_answered_request_with_no_measured_usage_is_still_estimated() -> None:
+    """A 2xx whose usage failed validation records the attempt and no tokens."""
+    priced = _row(kind="proposal", input_tokens=200_000, attempts=[_attempt(usage_known=True)])
+    unmeasured = _row(kind="proposal", state="failed", attempts=[_attempt(status=200)])
+
+    summary = cycle.summarize_usage([priced, unmeasured], **PRICES)
+
+    assert summary["unrecorded_attempt_exception_types"] == {"status_200": 1}
+    assert summary["unrecorded_attempt_estimate_basis"]["stage_kind_mean"] == 1
+    assert Decimal(summary["unrecorded_attempt_estimate_usd_exact"]) == Decimal("1")

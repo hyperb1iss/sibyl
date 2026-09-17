@@ -90,7 +90,10 @@ SIBYL_LLM_MODEL=claude-haiku-4-5
 SIBYL_LLM_CRAWLER_MODEL=claude-haiku-4-5
 SIBYL_LLM_SYNTHESIS_MODEL=claude-sonnet-4-6
 SIBYL_LLM_TEMPERATURE=0
+# A shared timeout wins over every surface default, so the memory surface needs
+# its own value; consolidation sends a whole cohort in one request.
 SIBYL_LLM_TIMEOUT_SECONDS=60
+SIBYL_LLM_MEMORY_TIMEOUT_SECONDS=600
 SIBYL_EMBEDDING_MODEL=text-embedding-3-small
 SIBYL_EMBEDDING_DIMENSIONS=1536
 SIBYL_GRAPH_EMBEDDING_PROVIDER=openai

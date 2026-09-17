@@ -71,7 +71,10 @@ def provider_error_detail(exc: BaseException) -> dict[str, Any] | None:
     ``error.message`` survive, with the message truncated. Request and prompt
     text, and every other body field, are deliberately excluded: these receipts
     are stored alongside transport rows that stay body-free because bodies can
-    echo secrets. Returns ``None`` when the exception carries nothing usable.
+    echo secrets. A failure the provider never answered falls back to the
+    classified exception type, and to its message only when the failure is a
+    timeout, whose message is the client's own fixed text. Returns ``None``
+    when the exception carries nothing usable.
     """
     details = getattr(exc, "details", None)
     if not isinstance(details, dict):
@@ -81,8 +84,29 @@ def provider_error_detail(exc: BaseException) -> dict[str, Any] | None:
         status_code = None
     error_type, message = _provider_error_body(details.get("body"))
     if status_code is None and error_type is None and message is None:
+        error_type, message = _provider_error_cause(exc, details)
+    if status_code is None and error_type is None and message is None:
         return None
     return {"status_code": status_code, "type": error_type, "message": message}
+
+
+def _provider_error_cause(
+    exc: BaseException, details: dict[str, Any]
+) -> tuple[str | None, str | None]:
+    """Name a failure the provider never answered, so a timeout is diagnosable.
+
+    A read timeout has no HTTP status and no body, and without this the receipt
+    said only that the request failed. The exception type is a class name and
+    always safe. Its message is not: an unclassified model failure carries the
+    response body in ``str(exc)``, so only a timeout's message is kept, and
+    that one is the client's own fixed wording.
+    """
+    exception_type = details.get("exception_type")
+    cause = details.get("cause") if isinstance(exc, LLMTimeoutError) else None
+    return (
+        exception_type if isinstance(exception_type, str) and exception_type else None,
+        cause[:PROVIDER_ERROR_MESSAGE_LIMIT] or None if isinstance(cause, str) else None,
+    )
 
 
 def _provider_error_body(body: Any) -> tuple[str | None, str | None]:
@@ -134,7 +158,7 @@ def classify_llm_exception(
             provider=provider,
             model=model,
             surface=surface,
-            details={"cause": str(exc)},
+            details={"cause": str(exc), "exception_type": type(exc).__name__},
         )
 
     model_http_error, validation_error_types = _pydantic_ai_error_types()
@@ -165,7 +189,7 @@ def classify_llm_exception(
             provider=provider,
             model=model,
             surface=surface,
-            details={"cause": str(exc)},
+            details={"cause": str(exc), "exception_type": type(exc).__name__},
         )
 
     return LLMProviderError(
@@ -177,8 +201,17 @@ def classify_llm_exception(
     )
 
 
+#: The Anthropic and OpenAI SDKs wrap a read timeout in ``APITimeoutError``,
+#: which subclasses their own connection error rather than ``TimeoutError`` or
+#: ``httpx.TimeoutException``. Matching the class name keeps both SDKs out of
+#: this module's imports and still recognizes their subclasses.
+TIMEOUT_EXCEPTION_NAMES = frozenset({"APITimeoutError"})
+
+
 def _is_timeout(exc: Exception) -> bool:
     if isinstance(exc, TimeoutError):
+        return True
+    if any(base.__name__ in TIMEOUT_EXCEPTION_NAMES for base in type(exc).__mro__):
         return True
     try:
         import httpx

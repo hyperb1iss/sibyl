@@ -124,6 +124,16 @@ PROVIDER_ERROR_MESSAGE_LIMIT = 200
 #: remaining count exactly where it found them.
 STOP_CURSOR_STALLED = "cursor_did_not_advance"
 
+#: Every field the usage scan needs. ``request_json`` is read for its ``kind``
+#: alone, which is how an unmeasured attempt finds the successful rows of its
+#: own stage; without it every row's stage kind reads as unknown.
+USAGE_ROW_FIELDS = ("usage_json", "request_json", "state", "created_at")
+USAGE_ROW_QUERY = (
+    "SELECT usage_json, request_json, state, created_at "
+    "FROM memory_validation_executions "
+    "WHERE organization_id = $org AND created_at >= $since;"
+)
+
 
 class CycleError(RuntimeError):
     """The cycle could not be driven through product code paths."""
@@ -253,6 +263,12 @@ def summarize_usage(
     ``cost_complete`` rows carry the provider's own ``cost_usd``. Everything
     else is priced from its token counts, and a ``FailedExtractionUsage`` row
     (no token fields at all) contributes zero of both.
+
+    A transport attempt that timed out records no usage and so prices at zero,
+    but the request was in flight when the client gave up and the provider
+    almost certainly billed it. Those attempts are estimated separately in
+    ``unrecorded_attempt_estimate_usd`` and never folded into the measured
+    total.
     """
     totals = {
         "rows": 0,
@@ -264,6 +280,7 @@ def summarize_usage(
         "output_tokens": 0,
     }
     states: dict[str, int] = {}
+    attempts: list[_UnrecordedAttempts] = []
     cost = Decimal(0)
     for row in rows:
         totals["rows"] += 1
@@ -283,8 +300,16 @@ def summarize_usage(
         totals["rows_with_usage"] += 1
         input_tokens = _as_int(payload.get("input_tokens"))
         output_tokens = _as_int(payload.get("output_tokens"))
+        requests = max(_as_int(payload.get("requests")), 1)
         totals["input_tokens"] += input_tokens
         totals["output_tokens"] += output_tokens
+        attempts.append(
+            _UnrecordedAttempts(
+                stage_kind=stage_kind(row),
+                exception_types=unrecorded_attempts(payload, measured=bool(input_tokens)),
+                measured_input_tokens=input_tokens // requests if input_tokens else 0,
+            )
+        )
         cost_usd = payload.get("cost_usd")
         if payload.get("cost_complete") is True and isinstance(cost_usd, int | float | str):
             totals["rows_cost_complete"] += 1
@@ -296,15 +321,171 @@ def summarize_usage(
             output_tokens,
             price_input_per_million=price_input_per_million,
             price_output_per_million=price_output_per_million,
-            requests=max(_as_int(payload.get("requests")), 1),
+            requests=requests,
         )
+    unrecorded = estimate_unrecorded_attempts(
+        attempts,
+        price_input_per_million=price_input_per_million,
+        price_output_per_million=price_output_per_million,
+    )
     return {
         **totals,
+        **unrecorded,
         "states": states,
         "cost_usd": float(cost),
         "cost_usd_exact": str(cost),
+        "ceiling_cost_usd_exact": str(
+            cost + Decimal(unrecorded["unrecorded_attempt_estimate_usd_exact"])
+        ),
         "price_input_per_million": str(price_input_per_million),
         "price_output_per_million": str(price_output_per_million),
+    }
+
+
+@dataclass(frozen=True, kw_only=True)
+class _UnrecordedAttempts:
+    """One execution row's billed-but-unmeasured transport attempts."""
+
+    stage_kind: str
+    exception_types: dict[str, int]
+    measured_input_tokens: int
+
+    @property
+    def attempts(self) -> int:
+        return sum(self.exception_types.values())
+
+
+def stage_kind(row: dict[str, Any]) -> str:
+    """Name the stage a row belongs to, from the request the product stored."""
+    raw = row.get("request_json")
+    if not isinstance(raw, str) or not raw.strip():
+        return "unknown"
+    try:
+        request = json.loads(raw)
+    except (TypeError, ValueError):
+        return "unknown"
+    kind = request.get("kind") if isinstance(request, dict) else None
+    return kind if isinstance(kind, str) and kind else "unknown"
+
+
+#: The answered range. A 2xx was billed; anything else the provider returned is
+#: a refusal it does not charge for.
+BILLED_STATUS_RANGE = range(200, 300)
+
+
+#: Exception types that fire after the whole request has gone out, so the
+#: provider had a complete request to work on and almost certainly billed it.
+#: The line is the request phase, not the error family. A write failure died
+#: with the body still uploading and a connect or pool failure never reached
+#: the API, so neither is estimated; a cancellation after dispatch is, because
+#: the request was already in the provider's hands. Two of those leans are
+#: judgment, because the record cannot prove which phase a cancellation or a
+#: write error fired in: each sits where that error most likely lands, a cancel
+#: during a long read wait and a write failure during a large upload. Both
+#: directions matter, since the cost ceiling stops runs on this number.
+#: Inflating it stops healthy runs and deflating it hides real spend.
+BILLED_UNMEASURED_EXCEPTIONS = frozenset(
+    {
+        "APITimeoutError",
+        "CancelledError",
+        "ReadError",
+        "ReadTimeout",
+        "RemoteProtocolError",
+        "TimeoutError",
+    }
+)
+
+
+def unrecorded_attempts(payload: dict[str, Any], *, measured: bool) -> dict[str, int]:
+    """Count dispatched attempts that were billed but carry no token usage.
+
+    ``usage_known`` alone is too wide a net. It is set only on an attempt that
+    both answered 2xx and passed the extractor's usage gate, so every refusal,
+    every connect failure and every unmarked success would be priced as a lost
+    request. What identifies a billed-but-unmeasured attempt is either no status
+    and an exception from after the request went out, or a 2xx answer on a row
+    that measured no tokens at all, which is what a response whose usage failed
+    validation leaves behind. ``measured`` says whether the row recorded input
+    tokens, and a row that did cannot pay twice for its own answered request.
+    """
+    attempts = payload.get("transport_attempts")
+    counts: dict[str, int] = {}
+    if not isinstance(attempts, list):
+        return counts
+    for attempt in attempts:
+        if not isinstance(attempt, dict) or attempt.get("usage_known") is True:
+            continue
+        status = attempt.get("status_code")
+        if status is not None:
+            billed = not isinstance(status, bool) and status in BILLED_STATUS_RANGE
+            if billed and not measured:
+                counts[f"status_{status}"] = counts.get(f"status_{status}", 0) + 1
+            continue
+        exception_type = attempt.get("exception_type")
+        if isinstance(exception_type, str) and exception_type in BILLED_UNMEASURED_EXCEPTIONS:
+            counts[exception_type] = counts.get(exception_type, 0) + 1
+    return counts
+
+
+def estimate_unrecorded_attempts(
+    rows: Sequence[_UnrecordedAttempts],
+    *,
+    price_input_per_million: Decimal,
+    price_output_per_million: Decimal,
+) -> dict[str, Any]:
+    """Price attempts that were dispatched and billed but never measured.
+
+    Input tokens are the only estimable side: a timed-out request produced no
+    countable output. The row's own measured input tokens per request are the
+    closest available proxy, because a row with a recorded success retried the
+    same prompt. A row with no usage at all takes the mean input tokens per
+    request of the rows of its own stage kind, then the run-wide mean. The
+    stored ``request_json`` is not a proxy: it carries the evidence binding and
+    digests, never the prompt. Nothing is estimated when the run measured no
+    row at all, and the count of rows without a basis is reported, alongside the
+    exception types the estimate was built from so a reader can audit it.
+    """
+    stage_totals: dict[str, list[int]] = {}
+    for row in rows:
+        if row.measured_input_tokens:
+            stage_totals.setdefault(row.stage_kind, []).append(row.measured_input_tokens)
+    measured = [tokens for values in stage_totals.values() for tokens in values]
+    run_mean = sum(measured) // len(measured) if measured else 0
+    basis = {"measured_row": 0, "stage_kind_mean": 0, "run_mean": 0, "none": 0}
+    exception_types: dict[str, int] = {}
+    estimate = Decimal(0)
+    attempts = 0
+    affected = 0
+    for row in rows:
+        if row.attempts <= 0:
+            continue
+        affected += 1
+        attempts += row.attempts
+        for name, count in row.exception_types.items():
+            exception_types[name] = exception_types.get(name, 0) + count
+        values = stage_totals.get(row.stage_kind) or []
+        if row.measured_input_tokens:
+            tokens, name = row.measured_input_tokens, "measured_row"
+        elif values:
+            tokens, name = sum(values) // len(values), "stage_kind_mean"
+        elif run_mean:
+            tokens, name = run_mean, "run_mean"
+        else:
+            tokens, name = 0, "none"
+        basis[name] += 1
+        estimate += row.attempts * _token_cost(
+            tokens,
+            0,
+            price_input_per_million=price_input_per_million,
+            price_output_per_million=price_output_per_million,
+        )
+    return {
+        "rows_with_unrecorded_attempts": affected,
+        "unrecorded_attempts": attempts,
+        "unrecorded_attempt_exception_types": exception_types,
+        "unrecorded_attempt_estimate_usd": float(estimate),
+        "unrecorded_attempt_estimate_usd_exact": str(estimate),
+        "unrecorded_attempt_estimate_basis": basis,
     }
 
 
@@ -640,12 +821,7 @@ async def live_execution_count(group_id: str) -> int:
 
 
 async def usage_rows(group_id: str, since: datetime) -> list[dict[str, Any]]:
-    return await _content_rows(
-        "SELECT usage_json, state, created_at FROM memory_validation_executions "
-        "WHERE organization_id = $org AND created_at >= $since;",
-        org=group_id,
-        since=since,
-    )
+    return await _content_rows(USAGE_ROW_QUERY, org=group_id, since=since)
 
 
 async def capture_surface_counts(group_id: str) -> dict[str, int]:
@@ -874,7 +1050,9 @@ class _CostGuard:
             price_input_per_million=self.config.price_input_per_million,
             price_output_per_million=self.config.price_output_per_million,
         )
-        if Decimal(self.usage["cost_usd_exact"]) > self.config.cost_ceiling_usd:
+        # The ceiling counts the estimate for billed-but-unmeasured attempts,
+        # so a run whose spend hid in timeouts still stops.
+        if Decimal(self.usage["ceiling_cost_usd_exact"]) > self.config.cost_ceiling_usd:
             self.exceeded = True
         return self.usage
 
@@ -918,6 +1096,8 @@ async def _run_invocation(
             "started_at": started.isoformat(),
             "finished_at": finished.isoformat(),
             "measured_cost_usd": usage["cost_usd_exact"],
+            "unrecorded_attempt_estimate_usd": usage["unrecorded_attempt_estimate_usd_exact"],
+            "ceiling_cost_usd": usage["ceiling_cost_usd_exact"],
             "cost_ceiling_usd": str(config.cost_ceiling_usd),
             "cost_ceiling_exceeded": guard.exceeded,
             "context": context,

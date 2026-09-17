@@ -7,7 +7,7 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from sibyl_core.tasks._evidence_json import canonical
+from sibyl_core.tasks._evidence_json import ByteRange, canonical
 from sibyl_core.tasks.episode_evidence import (
     EvidenceCitation,
     encode_episode_views,
@@ -20,7 +20,9 @@ VERSION = "ordinary_complete_controller_projection_v1"
 INSTRUCTIONS = (
     "These are complete semantic views of the listed controller observations. "
     "Resolve $ref through values and $literal as literal object entries. Evidence IDs "
-    "identify exact original UTF-8 byte ranges, not offsets into this view. Transport "
+    "identify exact original UTF-8 byte ranges, not offsets into this view. "
+    "Every cited span must lie within the listed ranges of a single evidence ID, and "
+    "the bytes between those ranges are structure, not evidence. Transport "
     "and audit fields remain bound by the projection receipt but are not assertion "
     "evidence. Source reports do not establish verified effectiveness, causality or "
     "environment compatibility. Preserve uncertainty and contradictory observations."
@@ -37,12 +39,43 @@ class OrdinaryEvidenceProjection:
     def binding(self) -> dict:
         return json.loads(self.binding_json)
 
+    def resolve(self, source_id: str, start: int, end: int) -> tuple[ByteRange, ...] | None:
+        """Intersect one cited span with the listed ranges of a single citation.
+
+        An evidence ID lists one range per selected payload field, so a model
+        that cites the ID by its own extent also names the bytes between those
+        ranges: object punctuation, key names and fields the projection dropped
+        as transport. Those bytes are never evidence, so the span resolves to
+        its intersections with the citation's own ranges, in original byte
+        order. A span no single citation's extent covers, and a span that falls
+        entirely between the listed ranges, resolve to nothing.
+        """
+        for _, citation in sorted(self.citations.items()):
+            if citation.episode_id != source_id or not citation.ranges:
+                continue
+            hull = (
+                min(left for left, _ in citation.ranges),
+                max(right for _, right in citation.ranges),
+            )
+            if not hull[0] <= start < end <= hull[1]:
+                continue
+            resolved: list[ByteRange] = []
+            for left, right in sorted(citation.ranges):
+                cut = (max(start, left), min(end, right))
+                if cut[0] >= cut[1]:
+                    continue
+                # A citation that ever listed a value and one nested inside it
+                # would otherwise repeat those bytes in the excerpt and its hash.
+                if resolved and cut[0] < resolved[-1][1]:
+                    resolved[-1] = (resolved[-1][0], max(resolved[-1][1], cut[1]))
+                    continue
+                resolved.append(cut)
+            if resolved:
+                return tuple(resolved)
+        return None
+
     def permits(self, source_id: str, start: int, end: int) -> bool:
-        return any(
-            citation.episode_id == source_id and left <= start < end <= right
-            for citation in self.citations.values()
-            for left, right in citation.ranges
-        )
+        return self.resolve(source_id, start, end) is not None
 
 
 class ProjectionReuse:
@@ -108,7 +141,10 @@ def prepare_ordinary_projection(
         "evidence_view": view,
         "binding": binding,
         "citations": {
-            key: {"source_id": citation.episode_id, "ranges": citation.ranges}
+            # Listed in original byte order. cite() collects ranges in field
+            # selection order, and a model reading a shuffled list cannot apply
+            # the extent rule the instructions state.
+            key: {"source_id": citation.episode_id, "ranges": sorted(citation.ranges)}
             for key, citation in citations.items()
         },
     }

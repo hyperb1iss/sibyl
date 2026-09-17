@@ -67,6 +67,11 @@ PHASE_ENVIRONMENT = {
     "SIBYL_COORDINATION_BACKEND": "local",
     "SIBYL_LLM_MEMORY_PROVIDER": "anthropic",
     "SIBYL_LLM_MEMORY_MODEL": "claude-opus-5",
+    # A whole cohort goes out in one non-streaming request. The study's first
+    # paid cycle ran on the old 60 second default and lost 31 of its 57
+    # transport attempts to read timeouts, so the phase pins the product's
+    # raised memory-surface timeout instead of inheriting whatever is ambient.
+    "SIBYL_LLM_MEMORY_TIMEOUT_SECONDS": "600",
     "SIBYL_CONSOLIDATION_MAX_INPUT_CHARS": "800000",
 }
 

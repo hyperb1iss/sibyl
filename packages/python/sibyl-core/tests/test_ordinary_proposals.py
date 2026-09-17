@@ -8,11 +8,13 @@ import pytest
 from sibyl_core.tasks import consolidation as c
 from sibyl_core.tasks import ordinary_evidence as o
 from sibyl_core.tasks import ordinary_proposals as p
+from sibyl_core.tasks._evidence_json import canonical
 from sibyl_core.tasks.episode_evidence import EvidenceCitation
 from sibyl_core.tasks.memory_validation import (
     OriginalValidationEvidence,
     prepare_reflection_validation,
 )
+from sibyl_core.tasks.ordinary_projection import prepare_ordinary_projection
 from sibyl_core.tasks.procedure_review import ReviewSubmission, review_digest
 from sibyl_core.tasks.reflection_correction import prepare_reflection_correction
 from tests.test_tasks_consolidation import group as group
@@ -308,3 +310,178 @@ def test_partial_ordinary_observation_only_pattern_needs_no_invented_action():
 def test_partial_ordinary_content_free_patterns_are_rejected(goal):
     with pytest.raises(ValueError):
         p.PartialProcedure.model_validate({"kind": "pattern", "goal": goal})
+
+
+# ---------------------------------------------------------------------------
+# Complete-projection citations resolve to the ranges the projection listed
+# ---------------------------------------------------------------------------
+
+
+def controller_artifact():
+    """A controller episode whose tool call drops one transport field.
+
+    ``container`` is a classified ``tool_call`` payload field that the semantic
+    view never selects, so its bytes sit between two listed evidence ranges of
+    the same evidence ID.
+    """
+    from tests.test_episode_evidence import _episode
+
+    value = _episode()
+    value["trace"].insert(
+        3,
+        {
+            "schema_version": "sibyl-coding-trace-v1",
+            "attempt_id": "one",
+            "request_id": "one",
+            "index": 3,
+            "kind": "tool_call",
+            "payload": {
+                "argv": ["bash", "-lc", "cat sibyl.log"],
+                "command": "cat sibyl.log",
+                "container": {"id": "c-1", "image": "sha256:" + "b" * 64},
+                "index": 0,
+                "name": "shell",
+                "tool_call_id": "call-1",
+            },
+        },
+    )
+    for index, event in enumerate(value["trace"]):
+        event["index"] = index
+    return canonical(value).encode()
+
+
+def controller_cohort(artifact, source_id="controller"):
+    source = o.OrdinarySource(
+        source_id=source_id,
+        incarnation="inc-controller",
+        generation=1,
+        observed_revision=1,
+        content_sha256=c._digest(artifact),
+    )
+    group = cohort(
+        p.PartialEpisode(episode_id=source_id, artifact=artifact, source=source, environment={})
+    )
+    return group, prepare_ordinary_projection([(source_id, artifact)], [source])
+
+
+def cited(group, projection, *refs, statement="Reported tool call"):
+    prepared = p.prepare_partial_proposal(group, projection=projection)
+    value = p.PartialProposal(
+        procedure=p.PartialProcedure(
+            kind="pattern",
+            goal=c.ConditionalAssertion(
+                statement=statement,
+                label="observed",
+                support=[
+                    c.SupportRef(
+                        episode_id=group.episodes[0].episode_id, start_byte=start, end_byte=end
+                    )
+                    for start, end in refs
+                ],
+            ),
+        )
+    )
+    return prepared, value
+
+
+def test_projection_resolves_a_cited_evidence_extent_to_its_listed_ranges():
+    artifact = controller_artifact()
+    _, projection = controller_cohort(artifact)
+    citation = projection.citations["s0.e3"]
+    ranges = sorted(citation.ranges)
+    hull = (ranges[0][0], max(right for _, right in ranges))
+    dropped = artifact.index(b'"container"')
+
+    resolved = projection.resolve("controller", *hull)
+
+    assert len(ranges) > 1 and tuple(ranges) == resolved
+    assert ranges[0][0] < dropped < hull[1]
+    assert not any(left <= dropped < right for left, right in resolved)
+    assert projection.permits("controller", *hull)
+
+
+def test_projection_extent_citation_renders_only_visible_bytes():
+    artifact = controller_artifact()
+    group, projection = controller_cohort(artifact)
+    citation = projection.citations["s0.e3"]
+    ranges = sorted(citation.ranges)
+    hull = (ranges[0][0], max(right for _, right in ranges))
+    prepared, value = cited(group, projection, hull)
+
+    candidate = prepared.render(value)
+
+    assert candidate is not None
+    excerpt = b"".join(artifact[left:right] for left, right in ranges)
+    span = candidate.metadata["ordinary_proposal_receipt"]["spans"][0]
+    assert (span["start_byte"], span["end_byte"]) == hull
+    assert span["ranges"] == [[left, right] for left, right in ranges]
+    assert span["slice_sha256"] == c._digest(excerpt)
+    assert b'"container"' not in excerpt and b'"container"' in artifact[hull[0] : hull[1]]
+    assert f"bytes {ranges[0][0]}:{ranges[0][1]}, " in candidate.content
+
+
+def test_projection_single_range_citation_renders_exactly_as_before():
+    artifact = controller_artifact()
+    group, projection = controller_cohort(artifact)
+    start, end = projection.citations["s0.goal"].ranges[0]
+    prepared, value = cited(group, projection, (start, end), statement="Reported goal")
+
+    candidate = prepared.render(value)
+
+    assert candidate is not None
+    span = candidate.metadata["ordinary_proposal_receipt"]["spans"][0]
+    assert (span["start_byte"], span["end_byte"]) == (start, end)
+    assert span["ranges"] == [[start, end]]
+    assert span["slice_sha256"] == c._digest(artifact[start:end])
+    assert f"bytes {start}:{end} " in candidate.content
+
+
+def test_projection_rejects_spans_across_evidence_ids_and_dropped_regions():
+    artifact = controller_artifact()
+    group, projection = controller_cohort(artifact)
+    call = sorted(projection.citations["s0.e3"].ranges)
+    terminal = sorted(projection.citations["s0.e4"].ranges)
+    across = (call[0][0], max(right for _, right in terminal))
+    dropped = artifact.index(b'"container"')
+    inside_dropped = (dropped, artifact.index(b"}", dropped) + 1)
+
+    for span in (across, inside_dropped):
+        assert projection.resolve("controller", *span) is None
+        prepared, value = cited(group, projection, span)
+        with pytest.raises(ValueError, match="outside the complete evidence projection"):
+            prepared.render(value)
+
+
+def test_projection_lists_every_citation_range_in_byte_order():
+    """cite() collects ranges in selection order; the prompt must not."""
+    artifact = controller_artifact()
+    _, projection = controller_cohort(artifact)
+    payload = json.loads(projection.payload_json)
+
+    listed = {key: value["ranges"] for key, value in payload["citations"].items()}
+
+    assert any(
+        list(citation.ranges) != sorted(citation.ranges)
+        for citation in projection.citations.values()
+    ), "fixture no longer exercises an unsorted citation"
+    for key, ranges in listed.items():
+        assert ranges == sorted(ranges) == sorted(map(list, projection.citations[key].ranges))
+        first, last = ranges[0][0], ranges[-1][1]
+        assert first < last, "the extent of a listed citation must read forwards"
+
+
+def test_projection_never_repeats_bytes_from_overlapping_ranges():
+    artifact = controller_artifact()
+    _, projection = controller_cohort(artifact)
+    citation = projection.citations["s0.e3"]
+    ranges = sorted(citation.ranges)
+    nested = EvidenceCitation(
+        episode_id="controller", ranges=(*citation.ranges, (ranges[0][0], ranges[-1][1]))
+    )
+    overlapping = replace(projection, citations={**projection.citations, "s0.e3": nested})
+
+    resolved = overlapping.resolve("controller", ranges[0][0], ranges[-1][1])
+
+    assert resolved == ((ranges[0][0], ranges[-1][1]),)
+    excerpt = b"".join(artifact[left:right] for left, right in resolved)
+    assert len(excerpt) == ranges[-1][1] - ranges[0][0]

@@ -38,6 +38,8 @@ from benchmarks.agent_tasks.screen48.devbox import (
 )
 from benchmarks.agent_tasks.screen48.recall.owners import runtime_pin
 
+from sibyl_core.ai.llm.config import MEMORY_TIMEOUT_SECONDS
+
 
 @pytest.fixture
 def root_dir(tmp_path: Path) -> Path:
@@ -834,3 +836,19 @@ def test_eval_issuers_file_refuses_an_incomplete_issuer(tmp_path: Path) -> None:
 
     with pytest.raises(run_phase.PhaseError, match="complete issuer"):
         run_phase.load_eval_issuers(path)
+
+
+def test_phase_environment_pins_the_product_memory_timeout() -> None:
+    """The study's first paid cycle lost 31 of 57 attempts to the 60s default."""
+    pinned = run_phase.PHASE_ENVIRONMENT["SIBYL_LLM_MEMORY_TIMEOUT_SECONDS"]
+
+    assert float(pinned) == MEMORY_TIMEOUT_SECONDS == 600.0
+
+
+def test_phase_environment_overrides_an_ambient_memory_timeout() -> None:
+    environ = {"SIBYL_LLM_MEMORY_TIMEOUT_SECONDS": "60"}
+
+    names = run_phase.apply_environment(environ, eval_issuers_file=None)
+
+    assert environ["SIBYL_LLM_MEMORY_TIMEOUT_SECONDS"] == "600"
+    assert "SIBYL_LLM_MEMORY_TIMEOUT_SECONDS" in names
