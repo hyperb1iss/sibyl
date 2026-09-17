@@ -1347,3 +1347,33 @@ def test_long_context_rows_bill_at_the_doubled_tier() -> None:
     )
     # short: 101K tokens at 10/M = 1.01; long: 251K at 20/M = 5.02; split: 251K at 10/M = 2.51
     assert result["cost_usd_exact"] == str(Decimal("1.01") + Decimal("5.02") + Decimal("2.51"))
+
+
+def test_a_write_failure_is_not_estimated_but_a_cancellation_is() -> None:
+    """The line is the request phase: a half-sent body was never billed."""
+    priced = _row(kind="proposal", input_tokens=100_000, attempts=[_attempt(usage_known=True)])
+    half_sent = _row(
+        kind="proposal",
+        state="failed",
+        attempts=[_attempt(exception="WriteTimeout"), _attempt(exception="WriteError")],
+    )
+    cancelled = _row(
+        kind="proposal", state="cancelled", attempts=[_attempt(exception="CancelledError")]
+    )
+
+    summary = cycle.summarize_usage([priced, half_sent, cancelled], **PRICES)
+
+    assert summary["unrecorded_attempt_exception_types"] == {"CancelledError": 1}
+    assert Decimal(summary["unrecorded_attempt_estimate_usd_exact"]) == Decimal("0.5")
+
+
+def test_an_answered_request_with_no_measured_usage_is_still_estimated() -> None:
+    """A 2xx whose usage failed validation records the attempt and no tokens."""
+    priced = _row(kind="proposal", input_tokens=200_000, attempts=[_attempt(usage_known=True)])
+    unmeasured = _row(kind="proposal", state="failed", attempts=[_attempt(status=200)])
+
+    summary = cycle.summarize_usage([priced, unmeasured], **PRICES)
+
+    assert summary["unrecorded_attempt_exception_types"] == {"status_200": 1}
+    assert summary["unrecorded_attempt_estimate_basis"]["stage_kind_mean"] == 1
+    assert Decimal(summary["unrecorded_attempt_estimate_usd_exact"]) == Decimal("1")

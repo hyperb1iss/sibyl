@@ -306,7 +306,7 @@ def summarize_usage(
         attempts.append(
             _UnrecordedAttempts(
                 stage_kind=stage_kind(row),
-                exception_types=unrecorded_attempts(payload),
+                exception_types=unrecorded_attempts(payload, measured=bool(input_tokens)),
                 measured_input_tokens=input_tokens // requests if input_tokens else 0,
             )
         )
@@ -368,33 +368,41 @@ def stage_kind(row: dict[str, Any]) -> str:
     return kind if isinstance(kind, str) and kind else "unknown"
 
 
-#: Exception types that mean the request reached the provider and no response
-#: came back, so the provider was working when the client gave up and the
-#: attempt was almost certainly billed. The complement is deliberate: an attempt
-#: that carries an HTTP status got an answer (a 429 is refused, not billed), and
-#: a connect or pool failure never reached the API at all. Estimating either
-#: would inflate a number the cost ceiling now stops runs on.
+#: Exception types that fire after the whole request has gone out, so the
+#: provider had a complete request to work on and almost certainly billed it.
+#: The line is the request phase, not the error family. A write failure died
+#: with the body still uploading and a connect or pool failure never reached
+#: the API, so neither is estimated; a cancellation after dispatch is, because
+#: the request was already in the provider's hands. Both directions matter: the
+#: cost ceiling stops runs on this number, so inflating it stops healthy runs
+#: and deflating it hides real spend.
+#: The answered range. A 2xx was billed; anything else the provider returned is
+#: a refusal it does not charge for.
+BILLED_STATUS_RANGE = range(200, 300)
+
 BILLED_UNMEASURED_EXCEPTIONS = frozenset(
     {
         "APITimeoutError",
+        "CancelledError",
         "ReadError",
         "ReadTimeout",
         "RemoteProtocolError",
         "TimeoutError",
-        "WriteError",
-        "WriteTimeout",
     }
 )
 
 
-def unrecorded_attempts(payload: dict[str, Any]) -> dict[str, int]:
+def unrecorded_attempts(payload: dict[str, Any], *, measured: bool) -> dict[str, int]:
     """Count dispatched attempts that were billed but carry no token usage.
 
     ``usage_known`` alone is too wide a net. It is set only on an attempt that
     both answered 2xx and passed the extractor's usage gate, so every refusal,
     every connect failure and every unmarked success would be priced as a lost
-    request. The pair that identifies a billed-but-unmeasured attempt is no
-    status plus an exception that fired after the request went out.
+    request. What identifies a billed-but-unmeasured attempt is either no status
+    and an exception from after the request went out, or a 2xx answer on a row
+    that measured no tokens at all, which is what a response whose usage failed
+    validation leaves behind. ``measured`` says whether the row recorded input
+    tokens, and a row that did cannot pay twice for its own answered request.
     """
     attempts = payload.get("transport_attempts")
     counts: dict[str, int] = {}
@@ -403,7 +411,11 @@ def unrecorded_attempts(payload: dict[str, Any]) -> dict[str, int]:
     for attempt in attempts:
         if not isinstance(attempt, dict) or attempt.get("usage_known") is True:
             continue
-        if attempt.get("status_code") is not None:
+        status = attempt.get("status_code")
+        if status is not None:
+            billed = not isinstance(status, bool) and status in BILLED_STATUS_RANGE
+            if billed and not measured:
+                counts[f"status_{status}"] = counts.get(f"status_{status}", 0) + 1
             continue
         exception_type = attempt.get("exception_type")
         if isinstance(exception_type, str) and exception_type in BILLED_UNMEASURED_EXCEPTIONS:
