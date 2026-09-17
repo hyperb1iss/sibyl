@@ -514,6 +514,10 @@ def test_the_frozen_forty_eight_cell_schedule_always_reports_forty_eight_rows(tm
     )
     assert report["manifest_count"] == 0
     assert report["prepared_cells"] == 0
+    # No receipt was read, so there is no lifetime to agree or disagree with.
+    assert report["pack_catalog_sha256"] is None
+    assert report["lifetime_catalog_matches_schedule"] is None
+    assert report["catalog_content_sha256"] == schedule_content_sha256(schedule)
 
     launcher.claim(
         tmp_path / "run",

@@ -424,11 +424,15 @@ def materialize(
         # The content digest every receipt agreed with, the database lifetime
         # they were all prepared against, and the lifetime the schedule was
         # frozen with. The last two differ after a restore, and the flag says so.
+        # With no receipt read at all there is no lifetime to compare, so the
+        # flag is null rather than false: nothing disagreed, nothing was asked.
         "catalog_content_sha256": content_sha256,
         "pack_catalog_sha256": pack_catalog_sha256,
         "schedule_source_catalog_sha256": schedule["source_catalog_sha256"],
         "lifetime_catalog_matches_schedule": (
-            pack_catalog_sha256 == schedule["source_catalog_sha256"]
+            None
+            if pack_catalog_sha256 is None
+            else pack_catalog_sha256 == schedule["source_catalog_sha256"]
         ),
         "root": str(output),
         "denominator": len(cells),
