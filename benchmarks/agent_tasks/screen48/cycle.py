@@ -253,6 +253,12 @@ def summarize_usage(
     ``cost_complete`` rows carry the provider's own ``cost_usd``. Everything
     else is priced from its token counts, and a ``FailedExtractionUsage`` row
     (no token fields at all) contributes zero of both.
+
+    A transport attempt that timed out records no usage and so prices at zero,
+    but the request was in flight when the client gave up and the provider
+    almost certainly billed it. Those attempts are estimated separately in
+    ``unrecorded_attempt_estimate_usd`` and never folded into the measured
+    total.
     """
     totals = {
         "rows": 0,
@@ -264,6 +270,7 @@ def summarize_usage(
         "output_tokens": 0,
     }
     states: dict[str, int] = {}
+    attempts: list[_UnrecordedAttempts] = []
     cost = Decimal(0)
     for row in rows:
         totals["rows"] += 1
@@ -283,8 +290,16 @@ def summarize_usage(
         totals["rows_with_usage"] += 1
         input_tokens = _as_int(payload.get("input_tokens"))
         output_tokens = _as_int(payload.get("output_tokens"))
+        requests = max(_as_int(payload.get("requests")), 1)
         totals["input_tokens"] += input_tokens
         totals["output_tokens"] += output_tokens
+        attempts.append(
+            _UnrecordedAttempts(
+                stage_kind=stage_kind(row),
+                attempts=_unrecorded_attempts(payload),
+                measured_input_tokens=input_tokens // requests if input_tokens else 0,
+            )
+        )
         cost_usd = payload.get("cost_usd")
         if payload.get("cost_complete") is True and isinstance(cost_usd, int | float | str):
             totals["rows_cost_complete"] += 1
@@ -296,15 +311,115 @@ def summarize_usage(
             output_tokens,
             price_input_per_million=price_input_per_million,
             price_output_per_million=price_output_per_million,
-            requests=max(_as_int(payload.get("requests")), 1),
+            requests=requests,
         )
+    unrecorded = estimate_unrecorded_attempts(
+        attempts,
+        price_input_per_million=price_input_per_million,
+        price_output_per_million=price_output_per_million,
+    )
     return {
         **totals,
+        **unrecorded,
         "states": states,
         "cost_usd": float(cost),
         "cost_usd_exact": str(cost),
+        "ceiling_cost_usd_exact": str(
+            cost + Decimal(unrecorded["unrecorded_attempt_estimate_usd_exact"])
+        ),
         "price_input_per_million": str(price_input_per_million),
         "price_output_per_million": str(price_output_per_million),
+    }
+
+
+@dataclass(frozen=True, kw_only=True)
+class _UnrecordedAttempts:
+    """One execution row's billable-but-unmeasured transport attempts."""
+
+    stage_kind: str
+    attempts: int
+    measured_input_tokens: int
+
+
+def stage_kind(row: dict[str, Any]) -> str:
+    """Name the stage a row belongs to, from the request the product stored."""
+    raw = row.get("request_json")
+    if not isinstance(raw, str) or not raw.strip():
+        return "unknown"
+    try:
+        request = json.loads(raw)
+    except (TypeError, ValueError):
+        return "unknown"
+    kind = request.get("kind") if isinstance(request, dict) else None
+    return kind if isinstance(kind, str) and kind else "unknown"
+
+
+def _unrecorded_attempts(payload: dict[str, Any]) -> int:
+    """Count HTTP attempts the extractor could not attribute token usage to."""
+    attempts = payload.get("transport_attempts")
+    if not isinstance(attempts, list):
+        return 0
+    return sum(
+        1
+        for attempt in attempts
+        if not (isinstance(attempt, dict) and attempt.get("usage_known") is True)
+    )
+
+
+def estimate_unrecorded_attempts(
+    rows: Sequence[_UnrecordedAttempts],
+    *,
+    price_input_per_million: Decimal,
+    price_output_per_million: Decimal,
+) -> dict[str, Any]:
+    """Price attempts that were dispatched and billed but never measured.
+
+    Input tokens are the only estimable side: a timed-out request produced no
+    countable output. The row's own measured input tokens per request are the
+    closest available proxy, because a row with a recorded success retried the
+    same prompt. A row with no usage at all takes the mean input tokens per
+    request of the rows of its own stage kind, then the run-wide mean. The
+    stored ``request_json`` is not a proxy: it carries the evidence binding and
+    digests, never the prompt. Nothing is estimated when the run measured no
+    row at all, and the count of rows without a basis is reported.
+    """
+    stage_totals: dict[str, list[int]] = {}
+    for row in rows:
+        if row.measured_input_tokens:
+            stage_totals.setdefault(row.stage_kind, []).append(row.measured_input_tokens)
+    measured = [tokens for values in stage_totals.values() for tokens in values]
+    run_mean = sum(measured) // len(measured) if measured else 0
+    basis = {"measured_row": 0, "stage_kind_mean": 0, "run_mean": 0, "none": 0}
+    estimate = Decimal(0)
+    attempts = 0
+    affected = 0
+    for row in rows:
+        if row.attempts <= 0:
+            continue
+        affected += 1
+        attempts += row.attempts
+        values = stage_totals.get(row.stage_kind) or []
+        if row.measured_input_tokens:
+            tokens, name = row.measured_input_tokens, "measured_row"
+        elif values:
+            tokens, name = sum(values) // len(values), "stage_kind_mean"
+        elif run_mean:
+            tokens, name = run_mean, "run_mean"
+        else:
+            tokens, name = 0, "none"
+        basis[name] += 1
+        estimate += row.attempts * _token_cost(
+            tokens,
+            0,
+            price_input_per_million=price_input_per_million,
+            price_output_per_million=price_output_per_million,
+        )
+    return {
+        "rows_with_unrecorded_attempts": affected,
+        "unrecorded_attempts": attempts,
+        "unrecorded_attempt_estimate_usd": float(estimate),
+        "unrecorded_attempt_estimate_usd_exact": str(estimate),
+        "unrecorded_attempt_estimate_basis": basis,
     }
 
 
@@ -641,7 +756,8 @@ async def live_execution_count(group_id: str) -> int:
 
 async def usage_rows(group_id: str, since: datetime) -> list[dict[str, Any]]:
     return await _content_rows(
-        "SELECT usage_json, state, created_at FROM memory_validation_executions "
+        "SELECT usage_json, request_json, state, created_at "
+        "FROM memory_validation_executions "
         "WHERE organization_id = $org AND created_at >= $since;",
         org=group_id,
         since=since,
@@ -874,7 +990,9 @@ class _CostGuard:
             price_input_per_million=self.config.price_input_per_million,
             price_output_per_million=self.config.price_output_per_million,
         )
-        if Decimal(self.usage["cost_usd_exact"]) > self.config.cost_ceiling_usd:
+        # The ceiling counts the estimate for billed-but-unmeasured attempts,
+        # so a run whose spend hid in timeouts still stops.
+        if Decimal(self.usage["ceiling_cost_usd_exact"]) > self.config.cost_ceiling_usd:
             self.exceeded = True
         return self.usage
 
@@ -918,6 +1036,8 @@ async def _run_invocation(
             "started_at": started.isoformat(),
             "finished_at": finished.isoformat(),
             "measured_cost_usd": usage["cost_usd_exact"],
+            "unrecorded_attempt_estimate_usd": usage["unrecorded_attempt_estimate_usd_exact"],
+            "ceiling_cost_usd": usage["ceiling_cost_usd_exact"],
             "cost_ceiling_usd": str(config.cost_ceiling_usd),
             "cost_ceiling_exceeded": guard.exceeded,
             "context": context,
