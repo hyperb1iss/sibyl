@@ -259,8 +259,17 @@ async def test_supersession_records_survive_a_real_content_store(content_store: 
         organization_id=ORG_ID, promoted_candidate_id=child.id
     ) == [draft.id]
     assert await superseded_draft_ids(ORG_ID) == [draft.id]
-    # The unique index, not the read, is what keeps the record single.
+    # The write is unconditional, so this really does collide with the unique
+    # index and exercise the duplicate branch rather than an early read.
     assert await _record_supersession(draft, child) is False
+    assert await superseded_draft_ids(ORG_ID) == [draft.id]
+    # A second retirement pass reaches the same branch through the walk.
+    assert (
+        await retire_superseded_reflection_drafts(
+            organization_id=ORG_ID, promoted_candidate_id=child.id
+        )
+        == []
+    )
 
     listed = await list_reflection_candidate_reviews(
         organization_id=ORG_ID, review_state="pending", limit=10
@@ -273,3 +282,91 @@ async def test_supersession_records_survive_a_real_content_store(content_store: 
         organization_id=ORG_ID, review_state="pending", limit=1
     )
     assert [memory.id for memory in first_page] == [open_draft.id]
+
+
+async def test_a_non_duplicate_write_failure_is_not_swallowed(content_store: None) -> None:
+    """Only the unique-index collision is benign; anything else must surface."""
+    from sibyl_core.services import content_client
+    from sibyl_core.services.reflection_supersession import _record_supersession
+
+    execution_id = "b" * 64
+    draft = _candidate("bbbbbbbb-bbbb-5bbb-8bbb-bbbbbbbbbbbb", revision=1)
+    child = _corrected(
+        _child_id(execution_id),
+        parent_id=draft.id,
+        execution_id=execution_id,
+        review_state="promoted",
+        revision=1,
+    )
+
+    async def broken(*_args, **_kwargs):
+        raise RuntimeError("content store unreachable")
+
+    original = content_client.select_many
+    content_client.select_many = broken  # type: ignore[assignment]
+    try:
+        with pytest.raises(RuntimeError, match="unreachable"):
+            await _record_supersession(draft, child)
+    finally:
+        content_client.select_many = original  # type: ignore[assignment]
+
+
+async def test_promotion_never_fails_on_a_retirement_error(monkeypatch) -> None:
+    """Retirement is bookkeeping after a committed write, so it cannot 500."""
+    from sibyl_core.services import memory_reflection, reflection_supersession
+    from sibyl_core.services.memory_contract import ReflectionPromotionResult
+
+    async def explode(**_kwargs):
+        raise RuntimeError("supersession write failed")
+
+    monkeypatch.setattr(
+        reflection_supersession, "retire_superseded_reflection_drafts", explode
+    )
+    promoted = ReflectionPromotionResult(
+        success=True,
+        candidate_id="child-1",
+        promoted_id="procedure_v3_abc",
+        reason="promoted",
+        review_state="promoted",
+        memory_scope=MemoryScope.PRIVATE,
+        scope_key=None,
+        raw_source_ids=["source-1"],
+    )
+
+    assert await memory_reflection._retire_superseded_drafts(promoted, ORG_ID) is promoted
+
+
+async def test_only_a_successful_promotion_retires_drafts(monkeypatch) -> None:
+    """A denied or replayed-pending promotion must not retire anything."""
+    from sibyl_core.services import memory_reflection, reflection_supersession
+    from sibyl_core.services.memory_contract import ReflectionPromotionResult
+
+    calls: list[str] = []
+
+    async def record(*, organization_id, promoted_candidate_id):
+        calls.append(promoted_candidate_id)
+        return []
+
+    monkeypatch.setattr(
+        reflection_supersession, "retire_superseded_reflection_drafts", record
+    )
+
+    def _result(**overrides) -> ReflectionPromotionResult:
+        values = {
+            "success": True,
+            "candidate_id": "child-1",
+            "promoted_id": "procedure_v3_abc",
+            "reason": "promoted",
+            "review_state": "promoted",
+            "memory_scope": MemoryScope.PRIVATE,
+            "scope_key": None,
+            "raw_source_ids": ["source-1"],
+        }
+        values.update(overrides)
+        return ReflectionPromotionResult(**values)  # type: ignore[arg-type]
+
+    await memory_reflection._retire_superseded_drafts(_result(), ORG_ID)
+    await memory_reflection._retire_superseded_drafts(_result(success=False), ORG_ID)
+    await memory_reflection._retire_superseded_drafts(_result(review_state="pending"), ORG_ID)
+
+    assert calls == ["child-1"]

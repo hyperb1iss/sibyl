@@ -380,10 +380,12 @@ async def _drain_dream_candidates(
     remaining = limit
     cursor = None
     while remaining > 0:
-        # A short page is not proof of the last page: the reader applies its own
-        # review-state filter after the query limit, so it can return fewer rows
-        # than it read. Only an empty page ends the walk, and the keyset cursor
-        # keeps every pending candidate visited exactly once.
+        # The walk does not read page length as an end signal. The reader filters
+        # rows of its own after the query limit, so coupling the drain to how
+        # many rows came back makes a reader change able to strand candidates
+        # silently. Only an empty page ends the walk; the keyset cursor advances
+        # per candidate, so the cost is one extra query and every pending
+        # candidate is still visited exactly once.
         page_size = remaining
         candidates = await list_reflection_candidate_reviews(
             organization_id=group_id,

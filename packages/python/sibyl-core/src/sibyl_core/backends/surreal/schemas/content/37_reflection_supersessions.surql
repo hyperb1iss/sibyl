@@ -9,5 +9,4 @@ DEFINE FIELD IF NOT EXISTS promoted_entity_id ON reflection_supersessions TYPE o
 DEFINE FIELD IF NOT EXISTS archive_reason ON reflection_supersessions TYPE string;
 DEFINE FIELD IF NOT EXISTS archived_at ON reflection_supersessions TYPE datetime;
 DEFINE INDEX IF NOT EXISTS reflection_supersession_draft ON reflection_supersessions FIELDS organization_id, draft_id UNIQUE;
-DEFINE INDEX IF NOT EXISTS reflection_supersession_frontier ON reflection_supersessions FIELDS organization_id, superseded_by_candidate_id;
 DEFINE EVENT IF NOT EXISTS reflection_supersession_purge ON raw_captures WHEN $event = 'DELETE' THEN { DELETE reflection_supersessions WHERE organization_id = $before.organization_id AND (draft_id = $before.uuid OR superseded_by_candidate_id = $before.uuid); };

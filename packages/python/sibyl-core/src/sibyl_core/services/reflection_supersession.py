@@ -34,6 +34,7 @@ from sibyl_core.services.content_raw_persistence import get_raw_memory
 log = structlog.get_logger(__name__)
 
 SUPERSESSION_TABLE = "reflection_supersessions"
+SUPERSESSION_DRAFT_INDEX = "reflection_supersession_draft"
 SUPERSEDED_ARCHIVE_REASON = "superseded_by_promotion"
 PROMOTED_REVIEW_STATE = "promoted"
 PENDING_REVIEW_STATE = "pending"
@@ -86,20 +87,16 @@ async def superseded_draft_ids(organization_id: str) -> list[str]:
 async def _record_supersession(draft: RawMemory, promoted: RawMemory) -> bool:
     """Write the draft's terminal record, leaving an existing one as it stands.
 
-    The unique ``(organization_id, draft_id)`` index is the real guard, so a
-    concurrent pass loses the race rather than writing a second record.
+    The write is unconditional and the unique ``(organization_id, draft_id)``
+    index is the only guard, so a second pass or a concurrent one loses the race
+    instead of reading first and racing in the gap. The duplicate is recognized
+    by the index name rather than by exception type: the content client hands
+    back whatever the Surreal SDK raised, which is an ``InternalError`` on the
+    live engine and a ``RuntimeError`` only when the client parsed the error
+    itself.
     """
     promoted_entity_id = (promoted.metadata or {}).get("promoted_entity_id")
     async with content_client.surreal_content_client() as client:
-        existing = await content_client.select_one(
-            client,
-            f"SELECT draft_id FROM {SUPERSESSION_TABLE} "
-            "WHERE organization_id = $organization_id AND draft_id = $draft_id LIMIT 1;",
-            organization_id=draft.organization_id,
-            draft_id=draft.id,
-        )
-        if existing is not None:
-            return False
         try:
             await content_client.select_many(
                 client,
@@ -117,8 +114,8 @@ async def _record_supersession(draft: RawMemory, promoted: RawMemory) -> bool:
                 else None,
                 archive_reason=SUPERSEDED_ARCHIVE_REASON,
             )
-        except RuntimeError as failure:
-            if "reflection_supersession_draft" not in str(failure):
+        except Exception as failure:
+            if SUPERSESSION_DRAFT_INDEX not in str(failure):
                 raise
             return False
     return True
@@ -131,10 +128,20 @@ async def retire_superseded_reflection_drafts(
 ) -> list[str]:
     """Retire the pending ancestors of a promoted correction candidate.
 
-    Walks upward from the promoted row, so a draft is only retired once its own
-    chain has reached a terminal state. Nothing is deleted and the draft rows
-    are not touched; an ancestor that already carries a record is left alone,
-    which makes repeated passes idempotent and lets existing databases heal.
+    Walks upward from the promoted row, so a draft is only retired once a
+    descendant of it is published. Nothing is deleted and the draft rows are not
+    touched; an ancestor that already carries a record is left alone, which
+    makes repeated passes idempotent and lets existing databases heal. Because
+    no draft is written to, a chain left half-recorded by a crash or a lost race
+    heals on the next pass: the remaining pending row still resolves its root
+    through the unchanged ancestor and reaches the same published frontier.
+
+    Two shapes it deliberately does not cover. Promoting a middle node of a
+    chain from outside the drain retires that node's ancestors while the chain's
+    own frontier is still open, which is sound because those drafts really were
+    superseded, but it is not the drain's narrower rule. And a draft with two
+    correction children, only one of them promoted, keeps the unpromoted sibling
+    pending, since a sibling is not an ancestor of the promoted row.
     """
     promoted = await get_raw_memory(
         organization_id=organization_id, memory_id=promoted_candidate_id

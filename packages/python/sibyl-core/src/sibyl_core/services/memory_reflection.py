@@ -723,6 +723,11 @@ async def _retire_superseded_drafts(
 
     Automatic correction promotes a child row, so without this the parent draft
     stays pending and every later drain re-resolves the same chain.
+
+    This runs after the promotion write has committed, so a failure here must
+    never turn a successful promotion into an error for the caller. The record
+    is bookkeeping the drain re-attempts on its next pass, and the draft it
+    describes is untouched either way, so a failure is logged and swallowed.
     """
     if not result.success or result.review_state != "promoted":
         return result
@@ -730,9 +735,18 @@ async def _retire_superseded_drafts(
         retire_superseded_reflection_drafts,
     )
 
-    await retire_superseded_reflection_drafts(
-        organization_id=organization_id, promoted_candidate_id=result.candidate_id
-    )
+    try:
+        await retire_superseded_reflection_drafts(
+            organization_id=organization_id, promoted_candidate_id=result.candidate_id
+        )
+    except Exception as failure:
+        log.warning(
+            "reflection_superseded_retirement_failed",
+            candidate_id=result.candidate_id,
+            organization_id=organization_id,
+            error=str(failure),
+            exc_info=True,
+        )
     return result
 
 
