@@ -252,3 +252,48 @@ async def test_promoted_embedding_manager_retains_explicit_client(
     )
     assert await runtime.entity_manager.backfill_embeddings_if_current([current]) == []
     factory.assert_not_awaited()
+
+
+async def test_promoted_embedding_indexes_unstripped_stored_text(publication, runtime):
+    """A stored cut ending in whitespace still reaches the vector writer."""
+    kwargs, provider, _queue = publication
+    result = await promote_reflection_candidate_review(**kwargs)
+    assert result.success
+    entity = await runtime.entity_manager.get(result.promoted_id)
+    await runtime.client.execute_query(
+        "UPDATE entity SET description=string::concat(description, ' ') WHERE uuid=$id;",
+        id=entity.id,
+    )
+    stored = await runtime.client.execute_query(
+        "SELECT description FROM entity WHERE uuid=$id;", id=entity.id
+    )
+    assert stored[0]["description"].endswith(" ")
+    # Reads normalize the field, so the canonical row is unchanged and its
+    # publication association still binds the same evidence digest.
+    canonical = await runtime.entity_manager.get(entity.id)
+    assert canonical.description == entity.description
+    assert canonical.id in await available_graph_entities("org", [canonical.id], runtime=runtime)
+    runtime.entity_manager._embedding_provider = provider
+    assert await runtime.entity_manager.backfill_embeddings_if_current([canonical]) == [entity.id]
+    embedded = await runtime.entity_manager.get(entity.id)
+    assert embedded.embedding and len(embedded.embedding) == 1024
+    assert embedded.id in await available_graph_entities("org", [embedded.id], runtime=runtime)
+    # The write fences against the stored row, so it never rewrites that text.
+    remained = await runtime.client.execute_query(
+        "SELECT description FROM entity WHERE uuid=$id;", id=entity.id
+    )
+    assert remained[0]["description"] == stored[0]["description"]
+
+
+async def test_promoted_embedding_refuses_changed_stored_text(publication, runtime):
+    """Whitespace tolerance does not extend to text that actually changed."""
+    kwargs, provider, _queue = publication
+    result = await promote_reflection_candidate_review(**kwargs)
+    assert result.success
+    entity = await runtime.entity_manager.get(result.promoted_id)
+    await runtime.client.execute_query(
+        "UPDATE entity SET description='a different summary' WHERE uuid=$id;", id=entity.id
+    )
+    runtime.entity_manager._embedding_provider = provider
+    assert await runtime.entity_manager.backfill_embeddings_if_current([entity]) == []
+    assert not (await runtime.entity_manager.get(entity.id)).embedding
