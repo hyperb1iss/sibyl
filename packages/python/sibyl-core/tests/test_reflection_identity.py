@@ -1915,3 +1915,34 @@ def test_promotion_summary_follows_graph_read_normalization() -> None:
     assert stored.description == entity.description
     # Truncating shorter content still leaves the identity untouched.
     assert _entity_from_candidate(candidate(), **args).description == candidate().content
+
+
+def test_procedure_row_digests_ignore_stored_summary_whitespace() -> None:
+    """Procedure coercion must not reintroduce bytes the read normalizes."""
+    from sibyl_core.embeddings.providers import entity_embedding_text
+    from sibyl_core.services.graph_derivations import graph_target_digest
+    from sibyl_core.services.graph_records import entity_from_surreal_row
+
+    def row(description: str) -> dict[str, object]:
+        return {
+            "uuid": "procedure_v3_stored_summary",
+            "group_id": "org",
+            "entity_type": "procedure",
+            "name": "Repair order dependent integration",
+            "description": description,
+            "content": "step one\nstep two",
+            "derivation_required": True,
+            "revision": 2,
+            "attributes": {
+                "reflection_identity": {"purpose": "candidate", "version": 3},
+                "memory_scope": "private",
+                "principal_id": "user_a",
+            },
+        }
+
+    stored = entity_from_surreal_row(row("Inspect the failing action first. "))
+    canonical = entity_from_surreal_row(row("Inspect the failing action first."))
+    assert stored.entity_type is EntityType.PROCEDURE
+    assert stored.description == canonical.description
+    assert graph_target_digest(stored) == graph_target_digest(canonical)
+    assert entity_embedding_text(stored) == entity_embedding_text(canonical)
