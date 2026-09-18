@@ -363,3 +363,178 @@ async def test_dream_worker_accepts_legacy_archive_payload(archive_exceptions):
     assert result["sources_scanned"] == 0
     assert result["candidates_scanned"] == 0
     assert result["failed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_reflection_dream_cycle_retires_superseded_drafts() -> None:
+    """A draft whose corrected child is published reaches a terminal state."""
+    draft = _raw_memory(
+        id="draft-1",
+        capture_surface="reflection_candidate",
+        metadata={"suggested_memory_scope": "private", "confidence": 0.94},
+    )
+    frontier = _raw_memory(
+        id="child-1",
+        capture_surface="reflection_candidate",
+        review_state="promoted",
+        metadata={"suggested_memory_scope": "private", "confidence": 0.94},
+    )
+
+    with (
+        patch(
+            "sibyl_core.services.automatic_reflection.automatically_review_reflection",
+            AsyncMock(
+                return_value=SimpleNamespace(
+                    candidate=frontier,
+                    executions=("critic-fixture",),
+                    candidate_ids=("draft-1", "child-1"),
+                )
+            ),
+        ),
+        patch(
+            "sibyl_core.services.reflection_validation.prepare_stored_reflection",
+            AsyncMock(
+                return_value=SimpleNamespace(
+                    sources=[], memory=SimpleNamespace(review_state="promoted")
+                )
+            ),
+        ),
+        patch(
+            "sibyl_core.services.reflection_supersession.retire_superseded_reflection_drafts",
+            AsyncMock(return_value=["draft-1"]),
+        ) as retire,
+        patch(
+            "sibyl.jobs.reflection.list_reflection_dream_source_memories",
+            AsyncMock(return_value=[]),
+        ),
+        patch(
+            "sibyl.jobs.reflection.list_reflection_candidate_reviews",
+            AsyncMock(side_effect=[[draft], []]),
+        ),
+        patch(
+            "sibyl.jobs.reflection.resolve_accessible_project_graph_ids",
+            AsyncMock(return_value=set()),
+        ),
+        patch(
+            "sibyl.jobs.reflection.preview_reflection_candidate_promotion",
+            AsyncMock(return_value=_preview(candidate_id="child-1")),
+        ),
+        patch("sibyl.jobs.reflection.promote_reflection_candidate_review", AsyncMock()) as promote,
+        patch("sibyl.jobs.reflection.log_memory_audit_event", AsyncMock()),
+    ):
+        receipt = await run_reflection_dream_cycle(
+            {},
+            ORG_ID,
+            source_limit=0,
+            candidate_limit=5,
+        )
+
+    promote.assert_not_awaited()
+    retire.assert_awaited_once()
+    assert retire.await_args.kwargs == {
+        "organization_id": ORG_ID,
+        "promoted_candidate_id": "child-1",
+    }
+    reported = receipt["candidates"][0]
+    assert reported["outcome"] == "skip"
+    assert reported["reason"] == "candidate_already_promoted"
+    assert reported["superseded_retired"] == ["draft-1"]
+    assert receipt["superseded_retired"] == 1
+
+
+@pytest.mark.asyncio
+async def test_reflection_dream_cycle_leaves_open_drafts_pending() -> None:
+    """Only a published frontier retires a draft, so open work keeps its slot."""
+    draft = _raw_memory(
+        id="draft-1",
+        capture_surface="reflection_candidate",
+        metadata={"suggested_memory_scope": "private", "confidence": 0.94},
+    )
+
+    with (
+        patch(
+            "sibyl_core.services.automatic_reflection.automatically_review_reflection",
+            AsyncMock(
+                return_value=SimpleNamespace(
+                    candidate=draft, executions=("critic-fixture",), candidate_ids=("draft-1",)
+                )
+            ),
+        ),
+        patch(
+            "sibyl_core.services.reflection_supersession.retire_superseded_reflection_drafts",
+            AsyncMock(return_value=[]),
+        ) as retire,
+        patch(
+            "sibyl.jobs.reflection.list_reflection_dream_source_memories",
+            AsyncMock(return_value=[]),
+        ),
+        patch(
+            "sibyl.jobs.reflection.list_reflection_candidate_reviews",
+            AsyncMock(side_effect=[[draft], []]),
+        ),
+        patch(
+            "sibyl.jobs.reflection.resolve_accessible_project_graph_ids",
+            AsyncMock(return_value=set()),
+        ),
+        patch(
+            "sibyl.jobs.reflection.preview_reflection_candidate_promotion",
+            AsyncMock(return_value=_preview(candidate_id="draft-1")),
+        ),
+        patch(
+            "sibyl.jobs.reflection.promote_reflection_candidate_review",
+            AsyncMock(return_value=_promotion("draft-1")),
+        ),
+        patch("sibyl.jobs.reflection.log_memory_audit_event", AsyncMock()),
+    ):
+        receipt = await run_reflection_dream_cycle(
+            {},
+            ORG_ID,
+            source_limit=0,
+            candidate_limit=5,
+        )
+
+    retire.assert_not_awaited()
+    assert receipt["candidates"][0]["outcome"] == "auto_promote"
+    assert receipt["superseded_retired"] == 0
+
+
+@pytest.mark.asyncio
+async def test_dream_drain_visits_every_pending_candidate_once() -> None:
+    """A short page is not the last page, so no pending candidate is stranded."""
+    from sibyl.jobs.reflection import _drain_dream_candidates
+
+    pending = [
+        _raw_memory(
+            id=f"candidate-{index}",
+            capture_surface="reflection_candidate",
+            captured_at=datetime(2026, 5, 15, 12, index, tzinfo=UTC),
+        )
+        for index in range(7)
+    ]
+    # The reader filters by review state after its own query limit, so it can
+    # hand back fewer rows than the drain asked for while more still remain.
+    pages = [pending[0:2], pending[2:3], pending[3:7], []]
+    visited: list[str] = []
+
+    async def _reader(*, organization_id, review_state, limit, after):
+        assert review_state == "pending"
+        return pages.pop(0) if pages else []
+
+    async def _handle(*, candidate, **_kwargs):
+        visited.append(candidate.id)
+        return {"candidate_id": candidate.id, "outcome": "skip", "reason": "x"}
+
+    with (
+        patch("sibyl.jobs.reflection.list_reflection_candidate_reviews", _reader),
+        patch("sibyl.jobs.reflection._drain_dream_candidate", _handle),
+    ):
+        results = await _drain_dream_candidates(
+            group_id=ORG_ID,
+            run_id="run-1",
+            dry_run=False,
+            limit=50,
+            confidence_threshold=None,
+        )
+
+    assert visited == [memory.id for memory in pending]
+    assert len(results) == len(pending)

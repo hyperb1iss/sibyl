@@ -161,6 +161,9 @@ async def run_reflection_dream_cycle(
         "candidates_scanned": len(candidate_results),
         "promoted": sum(1 for item in candidate_results if item.get("applied") is True),
         "archived": sum(1 for item in candidate_results if item.get("archived") is True),
+        "superseded_retired": sum(
+            len(item.get("superseded_retired") or ()) for item in candidate_results
+        ),
         "exceptioned": sum(1 for item in candidate_results if item["outcome"] == "exception"),
         "skipped": sum(1 for item in all_results if item["outcome"] == "skip"),
         "failed": sum(1 for item in all_results if item["outcome"] == "error"),
@@ -377,6 +380,10 @@ async def _drain_dream_candidates(
     remaining = limit
     cursor = None
     while remaining > 0:
+        # A short page is not proof of the last page: the reader applies its own
+        # review-state filter after the query limit, so it can return fewer rows
+        # than it read. Only an empty page ends the walk, and the keyset cursor
+        # keeps every pending candidate visited exactly once.
         page_size = remaining
         candidates = await list_reflection_candidate_reviews(
             organization_id=group_id,
@@ -419,8 +426,6 @@ async def _drain_dream_candidates(
                         "dry_run": dry_run,
                     }
                 )
-        if len(candidates) < page_size:
-            break
     return results
 
 
@@ -533,6 +538,24 @@ async def _drain_dream_candidate(
         dry_run=dry_run,
         validated_source_support=validation_promotion is not None,
     )
+    superseded_retired: list[str] = []
+    if (
+        not dry_run
+        and decision.outcome is ReflectionAutonomyOutcome.SKIP
+        and decision.reason == "candidate_already_promoted"
+    ):
+        # The chain frontier is already published, so the drafts it replaced are
+        # terminal too. Databases written before promotion retired them heal here.
+        from sibyl_core.services.reflection_supersession import (
+            retire_superseded_reflection_drafts,
+        )
+
+        superseded_retired = await retire_superseded_reflection_drafts(
+            organization_id=group_id, promoted_candidate_id=candidate.id
+        )
+        if handled_frontiers is not None:
+            handled_frontiers.update(superseded_retired)
+
     promotion: ReflectionPromotionResult | None = None
     if decision.should_promote:
         promotion = await promote_reflection_candidate_review(
@@ -602,6 +625,7 @@ async def _drain_dream_candidate(
         "reason": reason,
         "review_state": review_state,
         "promoted_id": promoted_id,
+        "superseded_retired": superseded_retired,
         "raw_source_ids": list(decision.raw_source_ids),
         "policy_reasons": list(decision.policy_reasons),
         "exception_reasons": list(decision.exception_reasons),
@@ -842,6 +866,7 @@ def _summary_log_fields(receipt: dict[str, Any]) -> dict[str, Any]:
             "candidates_scanned",
             "promoted",
             "archived",
+            "superseded_retired",
             "exceptioned",
             "skipped",
             "failed",
