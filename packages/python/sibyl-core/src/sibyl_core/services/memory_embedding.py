@@ -1,11 +1,16 @@
 """Schedule configured indexing after a reflection publication has committed."""
 
 import asyncio
+from collections.abc import Sequence
 from dataclasses import replace
 
 import structlog
 
-from sibyl_core.embeddings.providers import EmbeddingMetadata, configured_embedding_provider
+from sibyl_core.embeddings.providers import (
+    EmbeddingMetadata,
+    EmbeddingProvider,
+    configured_embedding_provider,
+)
 from sibyl_core.projection.repair import LifecycleRepairResult
 from sibyl_core.runtime_ports import get_queue_port
 from sibyl_core.services.graph_common import normalize_graph_records
@@ -102,6 +107,7 @@ async def repair_promoted_embeddings(runtime: GraphRuntime) -> LifecycleRepairRe
             if ids
             else {}
         )
+        targets = list(current.values())
         outcomes = await asyncio.gather(
             *(
                 get_queue_port().enqueue_entity_embedding_backfill(
@@ -109,13 +115,51 @@ async def repair_promoted_embeddings(runtime: GraphRuntime) -> LifecycleRepairRe
                     group_id=runtime.client.group_id,
                     relationships=None,
                 )
-                for entity in current.values()
+                for entity in targets
             ),
             return_exceptions=True,
         )
-        failed = sum(isinstance(outcome, BaseException) for outcome in outcomes)
-        counts["pending"] += len(ids) - failed
-        counts["failed"] += failed
+        failed_ids = {
+            entity.id
+            for entity, outcome in zip(targets, outcomes, strict=True)
+            if isinstance(outcome, BaseException)
+        }
+        # Re-read the rows this pass handed to the queue. An in-process queue has
+        # already written their vectors, so recovery is reported rather than
+        # accumulating as pending work a later pass has to rediscover.
+        recovered = await _embedding_current_ids(
+            runtime, [entity_id for entity_id in ids if entity_id not in failed_ids], provider
+        )
+        counts["recovered"] += len(recovered)
+        counts["failed"] += len(failed_ids)
+        counts["pending"] += len(ids) - len(failed_ids) - len(recovered)
         if len(rows) < 512:
             break
     return LifecycleRepairResult(**counts)
+
+
+async def _embedding_current_ids(
+    runtime: GraphRuntime, entity_ids: Sequence[str], provider: EmbeddingProvider
+) -> set[str]:
+    """Report which of these rows now carry a vector from the current provider."""
+    ids = list(dict.fromkeys(entity_ids))
+    if not ids:
+        return set()
+    rows = normalize_graph_records(
+        await runtime.client.execute_query(
+            "SELECT uuid, (name_embedding != NONE) AS embedding_present, "
+            "attributes.embedding_metadata AS embedding_metadata "
+            "FROM entity WHERE group_id=$group_id AND uuid IN $ids;",
+            group_id=runtime.client.group_id,
+            ids=ids,
+        )
+    )
+    return {
+        str(row["uuid"])
+        for row in rows
+        if _embedding_current(
+            row.get("embedding_present") is True,
+            row.get("embedding_metadata"),
+            provider.metadata,
+        )
+    }
