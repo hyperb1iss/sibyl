@@ -511,8 +511,10 @@ async def test_dream_drain_visits_every_pending_candidate_once() -> None:
         )
         for index in range(7)
     ]
-    # The reader filters by review state after its own query limit, so it can
-    # hand back fewer rows than the drain asked for while more still remain.
+    # Today's reader always fills a page it can fill. These shapes describe a
+    # reader the drain has to survive rather than one it currently meets: the
+    # contract under test is that page length is never read as an end signal,
+    # so a future filter cannot strand candidates behind a short page.
     pages = [pending[0:2], pending[2:3], pending[3:7], []]
     visited: list[str] = []
 

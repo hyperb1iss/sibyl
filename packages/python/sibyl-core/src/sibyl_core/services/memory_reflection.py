@@ -731,11 +731,13 @@ async def _retire_superseded_drafts(
     """
     if not result.success or result.review_state != "promoted":
         return result
-    from sibyl_core.services.reflection_supersession import (
-        retire_superseded_reflection_drafts,
-    )
-
     try:
+        # Imported inside the guard so even a broken import cannot reach the
+        # caller: nothing about this bookkeeping may fail a committed write.
+        from sibyl_core.services.reflection_supersession import (
+            retire_superseded_reflection_drafts,
+        )
+
         await retire_superseded_reflection_drafts(
             organization_id=organization_id, promoted_candidate_id=result.candidate_id
         )

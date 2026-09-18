@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock
 from uuid import NAMESPACE_URL, uuid5
 
 import pytest
@@ -319,9 +320,7 @@ async def test_promotion_never_fails_on_a_retirement_error(monkeypatch) -> None:
     async def explode(**_kwargs):
         raise RuntimeError("supersession write failed")
 
-    monkeypatch.setattr(
-        reflection_supersession, "retire_superseded_reflection_drafts", explode
-    )
+    monkeypatch.setattr(reflection_supersession, "retire_superseded_reflection_drafts", explode)
     promoted = ReflectionPromotionResult(
         success=True,
         candidate_id="child-1",
@@ -347,9 +346,7 @@ async def test_only_a_successful_promotion_retires_drafts(monkeypatch) -> None:
         calls.append(promoted_candidate_id)
         return []
 
-    monkeypatch.setattr(
-        reflection_supersession, "retire_superseded_reflection_drafts", record
-    )
+    monkeypatch.setattr(reflection_supersession, "retire_superseded_reflection_drafts", record)
 
     def _result(**overrides) -> ReflectionPromotionResult:
         values = {
@@ -370,3 +367,60 @@ async def test_only_a_successful_promotion_retires_drafts(monkeypatch) -> None:
     await memory_reflection._retire_superseded_drafts(_result(review_state="pending"), ORG_ID)
 
     assert calls == ["child-1"]
+
+
+async def test_the_promotion_entry_points_are_wired_to_retirement(monkeypatch) -> None:
+    """Pin the two splices in promote_reflection_candidate_review, not just the helper."""
+    from types import SimpleNamespace
+
+    from sibyl_core.services import memory_reflection
+    from sibyl_core.services.memory_contract import ReflectionPromotionResult
+
+    promoted = ReflectionPromotionResult(
+        success=True,
+        candidate_id="child-1",
+        promoted_id="procedure_v3_abc",
+        reason="promoted",
+        review_state="promoted",
+        memory_scope=MemoryScope.PRIVATE,
+        scope_key=None,
+        raw_source_ids=["source-1"],
+    )
+    plan = SimpleNamespace(
+        candidate_memory=SimpleNamespace(id="child-1", revision=1),
+        raw_source_ids=["source-1"],
+        target_scope=MemoryScope.PRIVATE,
+        target_scope_key=None,
+    )
+
+    # The replay path returns a finished result straight from the planner; the
+    # write path goes through _apply_promotion_plan. Both splices must retire.
+    for planned in (promoted, plan):
+        seen: list[str] = []
+
+        async def retire(result, organization_id, _seen=seen):
+            _seen.append(result.candidate_id)
+            return result
+
+        monkeypatch.setattr(memory_reflection, "_retire_superseded_drafts", retire)
+        monkeypatch.setattr(
+            memory_reflection,
+            "_resolve_reflection_promotion_plan",
+            AsyncMock(return_value=planned),
+        )
+        monkeypatch.setattr(
+            memory_reflection, "_enqueue_promoted_embedding", AsyncMock(return_value=promoted)
+        )
+        monkeypatch.setattr(
+            memory_reflection, "_apply_promotion_plan", AsyncMock(return_value=promoted)
+        )
+
+        result = await memory_reflection.promote_reflection_candidate_review(
+            candidate_id="child-1",
+            organization_id=ORG_ID,
+            principal_id=USER_ID,
+            promote_to_scope="private",
+        )
+
+        assert result is promoted
+        assert seen == ["child-1"]
