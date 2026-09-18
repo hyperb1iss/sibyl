@@ -604,11 +604,16 @@ async def _prepare_cells(
         # re-derivation ranked differently and the prior's bytes stood. Then the
         # cells that produced bytes of their own, and how many cells saw each
         # owner-receipt field the two runs disagreed on.
+        # The two named modes are what the adapter emits, so anything else is
+        # counted rather than dropped: a reusing cell whose mode this module
+        # does not recognise must still be visible in the total's breakdown.
+        named = modes.get(EQUAL_BYTES, 0) + modes.get(PRIOR_AFTER_DIVERGENCE, 0)
         receipt["checkpoint_zero_reuse"] = {
             "arms": sorted(CP1_PRIOR_ARMS),
             "reused_from_checkpoint_zero": reused,
             "reused_equal_bytes": modes.get(EQUAL_BYTES, 0),
             "reused_after_divergence": modes.get(PRIOR_AFTER_DIVERGENCE, 0),
+            "reused_unrecognised_mode": reused - named,
             "freshly_derived": prepared - reused,
             "before_differences": dict(sorted(differences.items())),
         }

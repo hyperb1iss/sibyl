@@ -145,9 +145,17 @@ class RecallAdapter:
         bytes rather than from the prior receipt. A counter that no longer
         reproduces the prior's counts over the prior's bytes has itself moved,
         which is a defect rather than a divergence, so the cell is refused.
+
+        The prior's candidate receipts travel with its bytes, and those name
+        their own observation incarnations, so the carry also requires the two
+        checkpoints to share one database lifetime. `checkpoints.prior_bindings`
+        requires the same thing of the whole prior root; this closes it where
+        the receipts are actually carried.
         """
         if any(field not in prior for field in PACK_FIELDS):
             raise MissingPack("qualified_checkpoint_zero_pack_missing")
+        if prior.get("catalog_sha256") != self.catalog.catalog_sha256:
+            raise MissingPack("checkpoint_zero_lifetime_changed")
         counts = self.counter.request(prompt, prior["memory"], workspace)
         if counts != prior["counts"]:
             raise MissingPack("checkpoint_zero_counts_unreproducible")

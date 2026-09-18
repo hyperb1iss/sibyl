@@ -709,6 +709,19 @@ async def test_cp1_raw_carries_its_bytes_through_configuration_and_ranking_drift
     assert denied["reason"] == "checkpoint_zero_counts_unreproducible"
     assert denied["memory"] is None
 
+    # The prior's candidate receipts name their own observation incarnations,
+    # so carrying them across two database lifetimes is refused as well.
+    restored = {**deepcopy(first), "catalog_sha256": "d" * 64}
+    denied = await setup.adapter.prepare(
+        checkpoint=1,
+        task=c.TASKS[0],
+        arm="raw_retrieval",
+        prior=restored,
+        prior_sha256=c.digest(restored),
+    )
+    assert denied["reason"] == "checkpoint_zero_lifetime_changed"
+    assert denied["memory"] is None
+
 
 @pytest.mark.asyncio
 async def test_cp1_raw_divergence_is_never_accepted_from_a_degraded_lane(setup, monkeypatch):

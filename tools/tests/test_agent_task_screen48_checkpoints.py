@@ -205,7 +205,13 @@ class FakeAdapter:
                 checkpoints.REUSE_MODE_KEY: (
                     checkpoints.PRIOR_AFTER_DIVERGENCE if diverged else checkpoints.EQUAL_BYTES
                 ),
-                **({checkpoints.RAW_DIVERGED_KEY: True} if diverged else {}),
+                # The real adapter flags every raw reuse cell either way, and
+                # only the raw arm carries the field at all.
+                **(
+                    {checkpoints.RAW_DIVERGED_KEY: diverged}
+                    if arm != checkpoints.SUMMARY_ARM
+                    else {}
+                ),
             }
         memory = "" if arm == checkpoints.NO_MEMORY_ARM else f"pack cp{checkpoint} {task} {arm} λ\n"
         return {
@@ -621,6 +627,7 @@ def test_checkpoint_one_counts_reused_and_freshly_derived_cells(tmp_path: Path, 
         "reused_from_checkpoint_zero": 12,
         "reused_equal_bytes": 12,
         "reused_after_divergence": 0,
+        "reused_unrecognised_mode": 0,
         "freshly_derived": 12,
         "before_differences": {"public_configuration_sha256": 12},
     }
@@ -703,7 +710,10 @@ def test_a_raw_cell_that_carried_prior_bytes_is_counted_and_flagged(
     assert (one / "packs" / "cp1" / contract.TASKS[0] / "raw_retrieval.txt").is_file()
     equal = rows[(contract.TASKS[1], "raw_retrieval")]
     assert equal["reuse_mode"] == checkpoints.EQUAL_BYTES
-    assert equal["raw_ranking_diverged"] is None
+    assert equal["raw_ranking_diverged"] is False
+    summary = rows[(contract.TASKS[0], "strong_summary")]
+    assert summary["reuse_mode"] == checkpoints.EQUAL_BYTES
+    assert summary["raw_ranking_diverged"] is None
 
     # The ledger `materialize` writes carries the flag to the observation lane.
     pack = pack_of(one, 1, contract.TASKS[0], "raw_retrieval")

@@ -180,12 +180,14 @@ def write_packs(
     absent: frozenset[str] = frozenset(),
     catalog: str = CATALOG,
     lifetimes: dict[str, str] | None = None,
+    diverged: frozenset[str] = frozenset(),
 ) -> Path:
     """Write one preparation receipt per cell, omitting the file for absent arms.
 
     ``catalog`` is the database lifetime every receipt was prepared against;
     ``lifetimes`` overrides it per attempt, which is how a restore part-way
-    through the cycle is staged.
+    through the cycle is staged. ``diverged`` marks the attempts the raw control
+    arm prepared from its checkpoint-0 bytes after a moved ranking.
     """
     for cell in cells:
         if cell["attempt_id"] in absent:
@@ -210,6 +212,14 @@ def write_packs(
                     "counts": {"memory_sha256": digest(memory.encode()), "fits": True},
                     "catalog_sha256": (lifetimes or {}).get(cell["attempt_id"], catalog),
                     "catalog_content_sha256": content,
+                    **(
+                        {
+                            "reuse_mode": "prior_bytes_after_divergence",
+                            "raw_ranking_diverged": True,
+                        }
+                        if cell["attempt_id"] in diverged
+                        else {}
+                    ),
                 },
                 sort_keys=True,
             )
@@ -264,6 +274,34 @@ def test_materialize_emits_one_loadable_manifest_per_checkpoint_and_task(mini):
         assert set(cell["expected_identity"]) == set(IDENTITY_FIELDS)
     no_memory = next(cell for cell in report["cells"] if cell["arm"] == "no_memory")
     assert no_memory["pack_sha256"] == digest(b"")
+
+
+def test_a_diverged_raw_cell_reaches_the_ledger_and_the_report(mini):
+    """The control arm's moved ranking is visible without reopening the packs."""
+    carried = next(cell for cell in mini["schedule"]["cells"] if cell["checkpoint"] == 1)
+    packs_root = write_packs(
+        mini["packs_root"].parent / "diverged",
+        mini["schedule"]["cells"],
+        content=mini["content"],
+        diverged=frozenset({carried["attempt_id"]}),
+    )
+
+    report = run_materialize(mini, packs_root=packs_root)
+
+    assert report["raw_ranking_diverged_cells"] == 1
+    rows = {cell["attempt_id"]: cell for cell in report["cells"]}
+    assert rows[carried["attempt_id"]]["raw_ranking_diverged"] is True
+    assert rows[carried["attempt_id"]]["prepared"] is True
+    assert all(
+        row["raw_ranking_diverged"] is False
+        for attempt, row in rows.items()
+        if attempt != carried["attempt_id"]
+    )
+    # The durable report, not just the returned dictionary.
+    materialization = json.loads((mini["output"] / "materialization.json").read_text())
+    assert materialization["raw_ranking_diverged_cells"] == 1
+    written = {cell["attempt_id"]: cell for cell in materialization["cells"]}
+    assert written[carried["attempt_id"]]["raw_ranking_diverged"] is True
 
 
 def test_a_missing_arm_stays_unprepared_and_never_gets_an_invented_pack(mini):
