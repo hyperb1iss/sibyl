@@ -162,6 +162,12 @@ class EntityManager(_EntityWorkItemManager):
             for row in await self._get_many_rows([entity.id for entity in entities])
         }
 
+        # Stored text can differ from the canonical read form by whitespace the
+        # read path strips, so currency, ancestry and publication checks stay on
+        # the canonical entity every other reader sees, and only the fenced
+        # write carries the exact bytes on disk.
+        stored_text_by_id: dict[str, dict[str, str]] = {}
+
         def load_matching_entity(expected: Entity) -> Entity | None:
             row = rows_by_id.get(expected.id)
             if row is None:
@@ -179,13 +185,17 @@ class EntityManager(_EntityWorkItemManager):
                 _persisted_entity_embedding_text(expected),
             }:
                 return None
-            return hydrated.model_copy(
-                update={
-                    "name": str(row.get("name") or ""),
-                    "description": str(row.get("description") or ""),
-                    "content": str(row.get("content") or ""),
-                }
-            )
+            stored_text_by_id[hydrated.id] = {
+                "name": str(row.get("name") or ""),
+                "description": str(row.get("description") or ""),
+                "content": str(row.get("content") or ""),
+            }
+            return hydrated
+
+        def stored_write_form(entity: Entity) -> Entity:
+            """Fence the write against the stored row, not its normalized read."""
+            stored = stored_text_by_id.get(entity.id)
+            return entity if stored is None else entity.model_copy(update=stored)
 
         loaded = [load_matching_entity(entity) for entity in entities]
         rows_by_id.clear()
@@ -278,7 +288,7 @@ class EntityManager(_EntityWorkItemManager):
             written_ids.update(
                 await _update_entity_embeddings_if_current(
                     self._client,
-                    batch,
+                    [stored_write_form(entity) for entity in batch],
                     group_id=self._group_id,
                     **({"derivation_snapshot": snapshot} if snapshot is not None else {}),
                 )

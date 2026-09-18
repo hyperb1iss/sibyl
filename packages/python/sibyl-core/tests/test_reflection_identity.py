@@ -1880,3 +1880,69 @@ async def test_capture_reconciliation_respects_the_derived_content_binding(
         row = await runtime.entity_manager.get(entity.id)
         assert graph_metadata_recallable(row.metadata) is (name == "current")
         assert row.metadata["source_bindings"] == {source.id: binding}
+
+
+def test_promotion_summary_follows_graph_read_normalization() -> None:
+    """A truncated summary must survive its own read without changing."""
+    from sibyl_core.services.graph_records import entity_from_surreal_row
+    from sibyl_core.services.memory_promotion import _entity_from_candidate
+
+    args = dict(
+        organization_id="org",
+        principal_id="user_a",
+        domain=None,
+        project=None,
+        source_id="summary-source",
+        memory_scope="private",
+        scope_key="user_a",
+        policy_metadata={},
+    )
+    cut_on_space = replace(candidate(), content="word " * 200)
+    entity = _entity_from_candidate(cut_on_space, **args)
+    assert entity.description == cut_on_space.content[:500].strip()
+    assert entity.description == entity.description.strip()
+    stored = entity_from_surreal_row(
+        {
+            "uuid": entity.id,
+            "group_id": "org",
+            "entity_type": entity.entity_type.value,
+            "name": entity.name,
+            "description": entity.description,
+            "content": entity.content,
+            "attributes": dict(entity.metadata),
+        }
+    )
+    assert stored.description == entity.description
+    # Truncating shorter content still leaves the identity untouched.
+    assert _entity_from_candidate(candidate(), **args).description == candidate().content
+
+
+def test_procedure_row_digests_ignore_stored_summary_whitespace() -> None:
+    """Procedure coercion must not reintroduce bytes the read normalizes."""
+    from sibyl_core.embeddings.providers import entity_embedding_text
+    from sibyl_core.services.graph_derivations import graph_target_digest
+    from sibyl_core.services.graph_records import entity_from_surreal_row
+
+    def row(description: str) -> dict[str, object]:
+        return {
+            "uuid": "procedure_v3_stored_summary",
+            "group_id": "org",
+            "entity_type": "procedure",
+            "name": "Repair order dependent integration",
+            "description": description,
+            "content": "step one\nstep two",
+            "derivation_required": True,
+            "revision": 2,
+            "attributes": {
+                "reflection_identity": {"purpose": "candidate", "version": 3},
+                "memory_scope": "private",
+                "principal_id": "user_a",
+            },
+        }
+
+    stored = entity_from_surreal_row(row("Inspect the failing action first. "))
+    canonical = entity_from_surreal_row(row("Inspect the failing action first."))
+    assert stored.entity_type is EntityType.PROCEDURE
+    assert stored.description == canonical.description
+    assert graph_target_digest(stored) == graph_target_digest(canonical)
+    assert entity_embedding_text(stored) == entity_embedding_text(canonical)

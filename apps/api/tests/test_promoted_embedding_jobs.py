@@ -214,3 +214,66 @@ def _assert_repair_scan_plan(scan_plans, *, embedded):
     )
     if embedded:
         assert all("'prefix': ['candidate', True]" in str(plan) for plan in scan_plans)
+
+
+async def test_promoted_embedding_repair_reports_recovered_for_unstripped_stored_text(
+    cohort_runtime, monkeypatch
+):
+    """A drained repair pass reports the vectors it landed, not endless pending."""
+    org, _context, _client, runtime = cohort_runtime
+    sources = await capture(cohort_runtime)
+    install_model(monkeypatch, sources[0])
+    monkeypatch.setattr(memory_embedding, "configured_embedding_provider", lambda: None)
+    assert (await reflection.run_reflection_dream_cycle({}, str(org.id)))["promoted"] == 1
+    rows = await runtime.client.execute_query(
+        "SELECT uuid FROM entity WHERE derivation_required=true;"
+    )
+    entity_id = rows[0]["uuid"]
+    # The stored summary of an already promoted row can end in the whitespace
+    # its truncation cut on, which every read normalizes away.
+    await runtime.client.execute_query(
+        "UPDATE entity SET description=string::concat(description, ' ') WHERE uuid=$id;",
+        id=entity_id,
+    )
+    provider = DeterministicEmbeddingProvider(
+        EmbeddingMetadata(
+            provider="deterministic",
+            model="repair-drain",
+            dimensions=1024,
+            cache_namespace="repair-drain",
+            tokenizer_estimate_method="utf8-byte-length",
+        )
+    )
+    monkeypatch.setattr(memory_embedding, "configured_embedding_provider", lambda: provider)
+    monkeypatch.setattr(jobs, "configured_embedding_provider", lambda: provider)
+    monkeypatch.setattr(jobs, "get_surreal_graph_runtime", AsyncMock(return_value=runtime))
+    monkeypatch.setattr(
+        "sibyl_core.services.graph_read_availability.get_surreal_graph_runtime",
+        AsyncMock(return_value=runtime),
+    )
+    runtime.entity_manager._embedding_provider = provider
+    drained = []
+
+    class InlineQueue:
+        """Stand in for the in-process broker the drain runs the job on."""
+
+        async def enqueue_entity_embedding_backfill(
+            self, *, entities_data, group_id, relationships
+        ):
+            drained.append(
+                await jobs.backfill_entity_embeddings(
+                    {}, entities_data, group_id, relationships=relationships
+                )
+            )
+            return "inline-job"
+
+    monkeypatch.setattr(memory_embedding, "get_queue_port", InlineQueue)
+    summary = await memory_embedding.repair_promoted_embeddings(runtime)
+    assert (summary.checked, summary.recovered, summary.pending, summary.failed) == (1, 1, 0, 0)
+    assert [result["entity_ids"] for result in drained] == [[entity_id]]
+    assert "stale_entity_ids" not in drained[0]
+    assert len((await runtime.entity_manager.get(entity_id)).embedding) == 1024
+    assert entity_id in await available_graph_entities(str(org.id), [entity_id], runtime=runtime)
+    repeated = await memory_embedding.repair_promoted_embeddings(runtime)
+    assert (repeated.checked, repeated.recovered, repeated.pending) == (0, 0, 0)
+    assert len(drained) == 1
