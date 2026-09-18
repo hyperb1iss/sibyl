@@ -46,15 +46,19 @@ Outputs, all under ``--output``:
     One preparation receipt per cell, beside the exact memory bytes when the
     cell was prepared. ``materialize`` reads precisely this layout.
 
-At checkpoint 1 the two byte-equal arms are handed their checkpoint-0 pack, and
+At checkpoint 1 the two reusing arms are handed their checkpoint-0 pack, and
 the digest that travels with it is the one ``--prior-root``'s own sealed
 ``checkpoint.json`` recorded for that cell, never a digest recomputed from the
 file just read. A prior whose bytes no longer hash to what checkpoint 0 sealed
 is therefore unbound rather than trusted, and the cell stays ``missing_pack``.
-The adapter does not copy that prior: it derives the cell again from the live
-database and then requires the rendered bytes and counts to equal the prior's.
-``checkpoint_zero_reuse`` in the receipt counts the cells that matched, the
-cells prepared fresh, and the owner-receipt fields the two runs differed on.
+The adapter does not copy that prior blindly: it derives the cell again from
+the live database and compares. Summary bytes that moved are a defect and the
+cell stays ``missing_pack``; raw bytes that moved are the control arm seeing
+the treatment's term statistics, so the cell carries its checkpoint-0 bytes
+and records both rankings. ``checkpoint_zero_reuse`` in the receipt counts the
+cells whose re-derivation matched, the cells that carried prior bytes after a
+divergence, the cells prepared fresh, and the owner-receipt fields the two
+runs differed on.
 """
 
 # Product-facing imports stay inside functions: run_phase stamps SIBYL_* into
@@ -79,7 +83,12 @@ from benchmarks.agent_tasks.screen48.recall.qualification import (
     CurrentOwners,
     qualify_originals,
 )
-from benchmarks.agent_tasks.screen48.recall.recall_adapter import Reader, RecallAdapter
+from benchmarks.agent_tasks.screen48.recall.recall_adapter import (
+    EQUAL_BYTES,
+    PRIOR_AFTER_DIVERGENCE,
+    Reader,
+    RecallAdapter,
+)
 from benchmarks.agent_tasks.screen48.recall.request_count import QwenRequestCounter
 from benchmarks.agent_tasks.screen48.recall.whole_items import MissingPack
 
@@ -115,10 +124,14 @@ OWNER_KEYS = frozenset(
 NATIVE_ARM = "native"
 SUMMARY_ARM = "strong_summary"
 NO_MEMORY_ARM = "no_memory"
-#: The two arms whose checkpoint-1 memory must render to its checkpoint-0 bytes.
+#: The two arms whose checkpoint-1 memory must carry its checkpoint-0 bytes.
 CP1_PRIOR_ARMS = frozenset({"raw_retrieval", SUMMARY_ARM})
-#: The adapter's marker for a cell whose fresh bytes equalled the prior's.
+#: The adapter's marker for a cell that carries its checkpoint-0 bytes.
 REUSE_KEY = "reused_checkpoint_zero_sha256"
+#: How that cell earned them: `EQUAL_BYTES` or `PRIOR_AFTER_DIVERGENCE`.
+REUSE_MODE_KEY = "reuse_mode"
+#: Set on a raw cell whose checkpoint-1 re-derivation ranked differently.
+RAW_DIVERGED_KEY = "raw_ranking_diverged"
 
 #: Every native item at checkpoint 0 must be a retained raw original.
 RAW_ORIGINAL_KIND = "raw_capture"
@@ -508,6 +521,7 @@ async def _prepare_cells(
     reasons: dict[str, int] = {}
     prepared = 0
     reused = 0
+    modes: dict[str, int] = {}
     differences: dict[str, int] = {}
     bindings: dict[tuple[str, str], str] = {}
     unbound: str | None = None
@@ -555,8 +569,10 @@ async def _prepare_cells(
             else:
                 prepared += 1
             reuse_sha256 = document.get(REUSE_KEY)
+            reuse_mode = document.get(REUSE_MODE_KEY)
             if memory is not None and reuse_sha256:
                 reused += 1
+                modes[str(reuse_mode)] = modes.get(str(reuse_mode), 0) + 1
             for field in document.get("before_differences") or []:
                 differences[str(field)] = differences.get(str(field), 0) + 1
             cells.append(
@@ -573,6 +589,8 @@ async def _prepare_cells(
                     "fits": counts.get("fits"),
                     "prior": prior_record,
                     "reused_checkpoint_zero_sha256": reuse_sha256,
+                    REUSE_MODE_KEY: reuse_mode,
+                    RAW_DIVERGED_KEY: document.get(RAW_DIVERGED_KEY),
                     "before_differences": document.get("before_differences"),
                     **paths,
                 }
@@ -581,12 +599,16 @@ async def _prepare_cells(
     receipt["prepared"] = prepared
     receipt["missing_reasons"] = dict(sorted(reasons.items()))
     if checkpoint == 1:
-        # Which prepared cells earned their memory by rendering the same bytes
-        # checkpoint 0 did, which produced bytes of their own, and how many
-        # cells saw each owner-receipt field the two runs disagreed on.
+        # Which prepared cells carry their checkpoint-0 bytes, split by how they
+        # earned them: this run rendered the same bytes, or the raw control's
+        # re-derivation ranked differently and the prior's bytes stood. Then the
+        # cells that produced bytes of their own, and how many cells saw each
+        # owner-receipt field the two runs disagreed on.
         receipt["checkpoint_zero_reuse"] = {
             "arms": sorted(CP1_PRIOR_ARMS),
-            "reused_by_equality": reused,
+            "reused_from_checkpoint_zero": reused,
+            "reused_equal_bytes": modes.get(EQUAL_BYTES, 0),
+            "reused_after_divergence": modes.get(PRIOR_AFTER_DIVERGENCE, 0),
             "freshly_derived": prepared - reused,
             "before_differences": dict(sorted(differences.items())),
         }

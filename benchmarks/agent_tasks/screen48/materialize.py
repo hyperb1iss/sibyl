@@ -41,6 +41,10 @@ CELL_COORDINATES = ("attempt_id", "checkpoint", "task", "arm", "family", "catego
 PACK_COORDINATES = ("checkpoint", "task", "arm")
 PACK_STATUSES = ("prepared", "missing_pack")
 NO_MEMORY_ARM = "no_memory"
+#: The preparation receipt's flag for a raw control cell whose checkpoint-1
+#: re-derivation ranked differently and therefore carries its checkpoint-0
+#: bytes. Carried through to the ledger so the observation report can flag it.
+RAW_DIVERGED_KEY = "raw_ranking_diverged"
 CHECKER_RUNTIME_PATH = "checker/runtime.py"
 CHECKER_EVALUATOR_PATH = "checker/evaluator.py"
 WORKSPACE_MODE = 420
@@ -139,7 +143,12 @@ def _read_pack(
     base = packs_root / "packs" / f"cp{cell['checkpoint']}" / cell["task"]
     receipt_path = base / f"{cell['arm']}.json"
     if receipt_path.is_symlink() or not receipt_path.is_file():
-        return {"status": "missing_pack", "reason": "no_pack_receipt", "memory": None}
+        return {
+            "status": "missing_pack",
+            "reason": "no_pack_receipt",
+            "memory": None,
+            RAW_DIVERGED_KEY: False,
+        }
     receipt = strict_json(_regular_file(receipt_path))
     if not isinstance(receipt, dict):
         raise ManifestError(f"pack receipt is not an object: {receipt_path}")
@@ -153,10 +162,16 @@ def _read_pack(
     if not isinstance(receipt.get("catalog_sha256"), str) or not receipt["catalog_sha256"]:
         raise ManifestError(f"pack receipt names no database lifetime: {receipt_path}")
     reason = receipt.get("reason")
+    diverged = bool(receipt.get(RAW_DIVERGED_KEY))
     if receipt["status"] == "missing_pack":
         if receipt.get("memory") is not None:
             raise ManifestError(f"unprepared pack carries memory: {receipt_path}")
-        return {"status": "missing_pack", "reason": reason or "not_prepared", "receipt": receipt}
+        return {
+            "status": "missing_pack",
+            "reason": reason or "not_prepared",
+            "receipt": receipt,
+            RAW_DIVERGED_KEY: diverged,
+        }
     memory = receipt.get("memory")
     if not isinstance(memory, str):
         raise ManifestError(f"prepared pack has no memory text: {receipt_path}")
@@ -165,7 +180,13 @@ def _read_pack(
     content = _regular_file(base / f"{cell['arm']}.txt")
     if content != memory.encode():
         raise ManifestError(f"prepared pack bytes differ from the receipt: {receipt_path}")
-    return {"status": "prepared", "reason": reason, "receipt": receipt, "memory": content}
+    return {
+        "status": "prepared",
+        "reason": reason,
+        "receipt": receipt,
+        "memory": content,
+        RAW_DIVERGED_KEY: diverged,
+    }
 
 
 def _bind_lifetime(schedule: dict[str, Any], packs: dict[str, dict[str, Any]]) -> str | None:
@@ -393,6 +414,7 @@ def materialize(
                 "prepared": True,
                 "pack_status": "prepared",
                 "reason": packs[cell["attempt_id"]]["reason"],
+                RAW_DIVERGED_KEY: packs[cell["attempt_id"]][RAW_DIVERGED_KEY],
                 "pack_sha256": digest(memory),
                 "manifest": f"{directory}/manifest.json",
                 "manifest_sha256": digest(body),
@@ -408,6 +430,7 @@ def materialize(
                     "prepared": False,
                     "pack_status": packs[cell["attempt_id"]]["status"],
                     "reason": packs[cell["attempt_id"]]["reason"],
+                    RAW_DIVERGED_KEY: packs[cell["attempt_id"]][RAW_DIVERGED_KEY],
                     "pack_sha256": None,
                     "manifest": None,
                     "manifest_sha256": None,
@@ -437,6 +460,10 @@ def materialize(
         "root": str(output),
         "denominator": len(cells),
         "prepared_cells": sum(cell["prepared"] for cell in cells),
+        # Raw control cells carrying their checkpoint-0 bytes because the
+        # checkpoint-1 re-derivation ranked differently. Executable either way:
+        # the bytes are the ones checkpoint 0 ran, which is what the arm is for.
+        "raw_ranking_diverged_cells": sum(cell[RAW_DIVERGED_KEY] for cell in cells),
         "manifest_count": len(manifests),
         "manifests": manifests,
         "cells": cells,
