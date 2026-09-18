@@ -191,6 +191,9 @@ class FakeAdapter:
                     "memory": None,
                     "counts": None,
                 }
+            # A raw cell whose re-derivation ranked differently carries the
+            # prior's bytes and says how it earned them.
+            diverged = (task, arm) in self.state.divergences
             return {
                 **base,
                 **evidence,
@@ -199,6 +202,16 @@ class FakeAdapter:
                 "memory": prior["memory"],
                 "counts": prior["counts"],
                 checkpoints.REUSE_KEY: prior_sha256,
+                checkpoints.REUSE_MODE_KEY: (
+                    checkpoints.PRIOR_AFTER_DIVERGENCE if diverged else checkpoints.EQUAL_BYTES
+                ),
+                # The real adapter flags every raw reuse cell either way, and
+                # only the raw arm carries the field at all.
+                **(
+                    {checkpoints.RAW_DIVERGED_KEY: diverged}
+                    if arm != checkpoints.SUMMARY_ARM
+                    else {}
+                ),
             }
         memory = "" if arm == checkpoints.NO_MEMORY_ARM else f"pack cp{checkpoint} {task} {arm} λ\n"
         return {
@@ -299,6 +312,7 @@ def state(monkeypatch: pytest.MonkeyPatch) -> Any:
         inventory=inventory,
         missing=set(),
         byte_changes=set(),
+        divergences=set(),
         before_differences=["public_configuration_sha256"],
         calls=[],
         counters=[],
@@ -610,7 +624,10 @@ def test_checkpoint_one_counts_reused_and_freshly_derived_cells(tmp_path: Path, 
     sealed = receipt_of(one)
     assert sealed["checkpoint_zero_reuse"] == {
         "arms": sorted(checkpoints.CP1_PRIOR_ARMS),
-        "reused_by_equality": 12,
+        "reused_from_checkpoint_zero": 12,
+        "reused_equal_bytes": 12,
+        "reused_after_divergence": 0,
+        "reused_unrecognised_mode": 0,
         "freshly_derived": 12,
         "before_differences": {"public_configuration_sha256": 12},
     }
@@ -637,7 +654,7 @@ def test_a_checkpoint_one_cell_whose_bytes_moved_is_never_counted_as_reused(
 ) -> None:
     zero = tmp_path / "cp0"
     assert run(0, zero) == 0
-    state.byte_changes = {(contract.TASKS[0], "raw_retrieval")}
+    state.byte_changes = {(contract.TASKS[0], "strong_summary")}
     state.items, state.inventory = consolidated_inventory()
     one = tmp_path / "cp1"
 
@@ -646,17 +663,65 @@ def test_a_checkpoint_one_cell_whose_bytes_moved_is_never_counted_as_reused(
     sealed = receipt_of(one)
     assert sealed["prepared"] == 23
     assert sealed["missing_reasons"] == {"checkpoint_zero_bytes_changed": 1}
-    assert sealed["checkpoint_zero_reuse"]["reused_by_equality"] == 11
+    assert sealed["checkpoint_zero_reuse"]["reused_from_checkpoint_zero"] == 11
+    assert sealed["checkpoint_zero_reuse"]["reused_equal_bytes"] == 11
+    assert sealed["checkpoint_zero_reuse"]["reused_after_divergence"] == 0
     assert sealed["checkpoint_zero_reuse"]["freshly_derived"] == 12
     rows = {(r["task"], r["arm"]): r for r in sealed["cells"]}
-    row = rows[(contract.TASKS[0], "raw_retrieval")]
+    row = rows[(contract.TASKS[0], "strong_summary")]
     assert row["status"] == "missing_pack"
     assert row["reason"] == "checkpoint_zero_bytes_changed"
     assert row["reused_checkpoint_zero_sha256"] is None
+    assert row["reuse_mode"] is None
     assert row["before_differences"] == ["public_configuration_sha256"]
     # The prior was bound and handed over; what refused the cell is the bytes.
     assert row["prior"]["status"] == "loaded"
-    assert not (one / "packs" / "cp1" / contract.TASKS[0] / "raw_retrieval.txt").exists()
+    assert not (one / "packs" / "cp1" / contract.TASKS[0] / "strong_summary.txt").exists()
+
+
+def test_a_raw_cell_that_carried_prior_bytes_is_counted_and_flagged(
+    tmp_path: Path, state: Any
+) -> None:
+    """A diverged raw control cell is prepared, counted apart, and named as such."""
+    zero = tmp_path / "cp0"
+    assert run(0, zero) == 0
+    sealed_zero = {(row["task"], row["arm"]): row for row in receipt_of(zero)["cells"]}
+    state.divergences = {(contract.TASKS[0], "raw_retrieval")}
+    state.items, state.inventory = consolidated_inventory()
+    one = tmp_path / "cp1"
+
+    assert run(1, one, prior_root=zero) == 0
+
+    sealed = receipt_of(one)
+    assert sealed["prepared"] == 24
+    assert sealed["missing_reasons"] == {}
+    assert sealed["checkpoint_zero_reuse"]["reused_from_checkpoint_zero"] == 12
+    assert sealed["checkpoint_zero_reuse"]["reused_equal_bytes"] == 11
+    assert sealed["checkpoint_zero_reuse"]["reused_after_divergence"] == 1
+    assert sealed["checkpoint_zero_reuse"]["freshly_derived"] == 12
+    rows = {(r["task"], r["arm"]): r for r in sealed["cells"]}
+    row = rows[(contract.TASKS[0], "raw_retrieval")]
+    assert row["status"] == "prepared"
+    assert row["reuse_mode"] == checkpoints.PRIOR_AFTER_DIVERGENCE
+    assert row["raw_ranking_diverged"] is True
+    assert (
+        row["memory_sha256"] == sealed_zero[(contract.TASKS[0], "raw_retrieval")]["memory_sha256"]
+    )
+    assert (one / "packs" / "cp1" / contract.TASKS[0] / "raw_retrieval.txt").is_file()
+    equal = rows[(contract.TASKS[1], "raw_retrieval")]
+    assert equal["reuse_mode"] == checkpoints.EQUAL_BYTES
+    assert equal["raw_ranking_diverged"] is False
+    summary = rows[(contract.TASKS[0], "strong_summary")]
+    assert summary["reuse_mode"] == checkpoints.EQUAL_BYTES
+    assert summary["raw_ranking_diverged"] is None
+
+    # The ledger `materialize` writes carries the flag to the observation lane.
+    pack = pack_of(one, 1, contract.TASKS[0], "raw_retrieval")
+    assert pack[checkpoints.RAW_DIVERGED_KEY] is True
+    read = materialize._read_pack(
+        one, json.loads(checkpoints.SCHEDULE_PATH.read_bytes()), dict(row)
+    )
+    assert read[materialize.RAW_DIVERGED_KEY] is True
 
 
 def test_checkpoint_one_without_a_prior_root_leaves_those_cells_missing(
