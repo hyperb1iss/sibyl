@@ -91,9 +91,16 @@ def _regular_file(path: Path) -> bytes:
     return path.read_bytes()
 
 
-def _validate_template(template: dict[str, Any]) -> None:
-    if set(template) != TEMPLATE_KEYS:
-        missing = sorted(TEMPLATE_KEYS - set(template))
+def validate_template(template: dict[str, Any], *, require_experiences: bool = True) -> None:
+    """Check the template against the keys a manifest is built from.
+
+    A manifest whose arms cite no learning source declares no experience, so
+    ``require_experiences`` lets such a caller omit the key entirely. Every
+    other key is required either way, and no unknown key is ever accepted.
+    """
+    required = TEMPLATE_KEYS if require_experiences else TEMPLATE_KEYS - {"experiences"}
+    if not required <= set(template) or not set(template) <= TEMPLATE_KEYS:
+        missing = sorted(required - set(template))
         extra = sorted(set(template) - TEMPLATE_KEYS)
         raise ManifestError(f"template keys differ (missing {missing}, unexpected {extra})")
     if set(template["checker"]) != CHECKER_KEYS:
@@ -277,28 +284,38 @@ def _grouped_cells(schedule: dict[str, Any]) -> Iterator[tuple[tuple[int, str], 
     yield from groups.items()
 
 
-def _build_manifest(
+def build_manifest(
     *,
-    schedule: dict[str, Any],
+    namespace: str,
     template: dict[str, Any],
     tasks_root: Path,
     task_id: str,
     checkpoint: int,
     prepared: list[tuple[dict[str, Any], bytes]],
+    experiences: list[dict[str, Any]] | None = None,
 ) -> tuple[Manifest, dict[str, bytes]]:
+    """Build one validated single-task manifest from a template and prepared arms.
+
+    Each prepared entry pairs a cell naming its ``arm`` and ``family`` with the
+    exact memory bytes that arm is handed. Nothing here reads a schedule: the
+    caller supplies the experiment namespace and the declared experience set,
+    so a one-arm screen with no memory at all builds the same way the 48-cell
+    materialization does.
+    """
+    declared = template["experiences"] if experiences is None else experiences
     retainer = Retainer()
     artifact_root = Path(template["artifact_root"]).resolve(strict=True)
     for row in [
         template["dependency_lock"],
         template["controller"]["script"],
-        *(row["artifact"] for row in template["experiences"]),
+        *(row["artifact"] for row in declared),
     ]:
         retainer.retain(row["path"], read_artifact(artifact_root, Artifact.model_validate(row)))
     families = {cell["family"] for cell, _ in prepared}
     if len(families) != 1:
         raise ManifestError(f"scheduled cells disagree on the task family: {task_id}")
     task = _task_value(retainer, tasks_root, template, task_id, families.pop())
-    learning_ids = [row["id"] for row in template["experiences"]]
+    learning_ids = [row["id"] for row in declared]
     arms = []
     for cell, memory in prepared:
         arm_id = cell["arm"]
@@ -309,7 +326,6 @@ def _build_manifest(
                 "learning_source_ids": [] if arm_id == NO_MEMORY_ARM else learning_ids,
             }
         )
-    namespace = schedule["experiment_namespace"]
     manifest = Manifest.model_validate(
         {
             "schema_version": SCHEMA_VERSION,
@@ -325,7 +341,7 @@ def _build_manifest(
             "controller_budget": template["controller_budget"],
             "controller_timeout_seconds": float(template["controller_timeout_seconds"]),
             "checker_timeout_seconds": float(template["checker_timeout_seconds"]),
-            "experiences": template["experiences"],
+            "experiences": declared,
             "tasks": [task],
             "arms": arms,
         }
@@ -341,7 +357,8 @@ def _expected_identity(manifest: Manifest, arm_id: str, inputs: dict[str, bytes]
     return {field: prototype[field] for field in IDENTITY_FIELDS}
 
 
-def _emit(output: Path, relative: str, content: bytes) -> None:
+def emit(output: Path, relative: str, content: bytes) -> None:
+    """Write one read-only materialized artifact, creating its parents."""
     path = output / relative
     path.parent.mkdir(parents=True, exist_ok=True)
     runner._put(path, content, ARTIFACT_MODE)
@@ -365,7 +382,7 @@ def materialize(
     experience set. Every emitted manifest is re-read through ``load_manifest``
     before this function returns, so a directory that exists is executable.
     """
-    _validate_template(template)
+    validate_template(template)
     _validate_experiences(schedule, template)
     output = output.absolute()
     if output.exists() or output.is_symlink():
@@ -387,8 +404,8 @@ def materialize(
         ]
         if not prepared:
             continue
-        manifest, files = _build_manifest(
-            schedule=schedule,
+        manifest, files = build_manifest(
+            namespace=schedule["experiment_namespace"],
             template=template,
             tasks_root=tasks_root,
             task_id=task_id,
@@ -471,7 +488,7 @@ def materialize(
     }
     output.mkdir(mode=0o700, parents=True)
     for relative, content in pending:
-        _emit(output, relative, content)
+        emit(output, relative, content)
     _verify(output, manifests, cells)
     runner._write_json(output / "materialization.json", report)
     return report
