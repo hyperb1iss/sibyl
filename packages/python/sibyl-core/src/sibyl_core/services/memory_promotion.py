@@ -331,7 +331,10 @@ def _entity_from_candidate(
         id="reflection_pending",
         entity_type=entity_type,
         name=candidate.title.strip() or "Untitled memory",
-        description=candidate.content[:500],
+        # Truncation must not store text the read path cannot reproduce: graph
+        # reads strip this field, so an unstripped cut leaves every later
+        # comparison against the canonical row permanently mismatched.
+        description=candidate.content[:500].strip(),
         content=candidate.content,
         organization_id=organization_id,
         created_by=principal_id,
