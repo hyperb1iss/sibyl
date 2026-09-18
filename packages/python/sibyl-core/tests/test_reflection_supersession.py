@@ -10,8 +10,8 @@ from sibyl_core.services import reflection_supersession
 from sibyl_core.services.content_models import RawMemory
 from sibyl_core.services.reflection_supersession import (
     SUPERSEDED_ARCHIVE_REASON,
-    retire_superseded_reflection_drafts,
     correction_parent_id,
+    retire_superseded_reflection_drafts,
 )
 from sibyl_core.services.surreal_content import MemoryScope
 from tests.test_reflection_identity import content_store as content_store
