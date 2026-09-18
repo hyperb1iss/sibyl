@@ -98,8 +98,9 @@ CONTENT_TABLES = (
     "telemetry_rollups",
     "backup_settings",
     "backups",
+    "reflection_supersessions",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 44
+CONTENT_SCHEMA_CURRENT_VERSION = 45
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -143,10 +144,15 @@ CONTENT_LEGACY_CONTENT_CHECKPOINT_DEFINITIONS = (
 CONTENT_DREAM_CHECKPOINT_DEFINITIONS = (
     _SCHEMA_DIR / "36_dream_source_checkpoints.surql"
 ).read_text(encoding="utf-8")
+CONTENT_REFLECTION_SUPERSESSION_DEFINITIONS = (
+    _SCHEMA_DIR / "37_reflection_supersessions.surql"
+).read_text(encoding="utf-8")
 CONTENT_SCHEMA_DEFINITIONS = (
     _load_schema_file("10_tables.surql")
     + "\n"
     + CONTENT_DREAM_CHECKPOINT_DEFINITIONS
+    + "\n"
+    + CONTENT_REFLECTION_SUPERSESSION_DEFINITIONS
     + VALIDATION_EXECUTION_SCHEMA
     + VALIDATION_DEPENDENCY_SCHEMA
 )
@@ -277,6 +283,7 @@ ALTER TABLE IF EXISTS memory_validation_executions PERMISSIONS NONE;
 ALTER TABLE IF EXISTS memory_validation_attempts PERMISSIONS NONE;
 ALTER TABLE IF EXISTS dream_source_checkpoints PERMISSIONS NONE;
 ALTER TABLE IF EXISTS dream_source_cursors PERMISSIONS NONE;
+ALTER TABLE IF EXISTS reflection_supersessions PERMISSIONS NONE;
 ALTER TABLE IF EXISTS eval_consolidations PERMISSIONS NONE;
 ALTER TABLE IF EXISTS eval_attempts PERMISSIONS NONE;
 ALTER TABLE IF EXISTS crawl_sources PERMISSIONS
@@ -1071,6 +1078,11 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
                 VALIDATION_PROVIDER_ERROR_DEPENDENT_PURGE_EVENT,
                 VALIDATION_PROVIDER_ERROR_SOURCE_PURGE_EVENT,
             ),
+        ),
+        SchemaMigration(
+            version=45,
+            name="content_reflection_supersessions",
+            statements=tuple(split_statements(CONTENT_REFLECTION_SUPERSESSION_DEFINITIONS)),
         ),
     )
 

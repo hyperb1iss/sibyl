@@ -678,7 +678,9 @@ async def promote_reflection_candidate_review(
         accessible_delegations=accessible_delegations,
     )
     if isinstance(plan, ReflectionPromotionResult):
-        return await _enqueue_promoted_embedding(plan, organization_id)
+        return await _retire_superseded_drafts(
+            await _enqueue_promoted_embedding(plan, organization_id), organization_id
+        )
 
     if (
         expected_candidate_revision is not None
@@ -709,7 +711,45 @@ async def promote_reflection_candidate_review(
         validation_promotion=validation_promotion,
     )
 
-    return await _enqueue_promoted_embedding(result, organization_id)
+    return await _retire_superseded_drafts(
+        await _enqueue_promoted_embedding(result, organization_id), organization_id
+    )
+
+
+async def _retire_superseded_drafts(
+    result: ReflectionPromotionResult, organization_id: str
+) -> ReflectionPromotionResult:
+    """Send the drafts this promotion replaced to a terminal state.
+
+    Automatic correction promotes a child row, so without this the parent draft
+    stays pending and every later drain re-resolves the same chain.
+
+    This runs after the promotion write has committed, so a failure here must
+    never turn a successful promotion into an error for the caller. The record
+    is bookkeeping the drain re-attempts on its next pass, and the draft it
+    describes is untouched either way, so a failure is logged and swallowed.
+    """
+    if not result.success or result.review_state != "promoted":
+        return result
+    try:
+        # Imported inside the guard so even a broken import cannot reach the
+        # caller: nothing about this bookkeeping may fail a committed write.
+        from sibyl_core.services.reflection_supersession import (
+            retire_superseded_reflection_drafts,
+        )
+
+        await retire_superseded_reflection_drafts(
+            organization_id=organization_id, promoted_candidate_id=result.candidate_id
+        )
+    except Exception as failure:
+        log.warning(
+            "reflection_superseded_retirement_failed",
+            candidate_id=result.candidate_id,
+            organization_id=organization_id,
+            error=str(failure),
+            exc_info=True,
+        )
+    return result
 
 
 async def promote_raw_memory(

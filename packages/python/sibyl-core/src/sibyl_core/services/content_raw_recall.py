@@ -822,6 +822,15 @@ async def list_reflection_candidate_reviews(
     if limit <= 0:
         return []
     target_review_state = review_state.strip().lower()
+    # A draft whose corrected child was promoted is terminal even though its own
+    # row still reads pending: the row is immutable evidence for that child's
+    # lineage proof, so its retirement is recorded beside it. Excluding those ids
+    # inside the query keeps the page exactly as long as the caller asked for.
+    from sibyl_core.services.reflection_supersession import superseded_draft_ids
+
+    retired = (
+        await superseded_draft_ids(organization_id) if target_review_state == "pending" else []
+    )
     async with content_client.surreal_content_client() as client:
         rows = await content_client.select_many(
             client,
@@ -829,12 +838,14 @@ async def list_reflection_candidate_reviews(
             "WHERE organization_id = $organization_id "
             "AND capture_surface = $capture_surface "
             "AND review_state = $review_state "
+            "AND uuid NOT IN $retired "
             "AND ($after_time = NONE OR captured_at > $after_time "
             "OR (captured_at = $after_time AND uuid > $after_id)) "
             "ORDER BY captured_at ASC, uuid ASC LIMIT $limit;",
             organization_id=organization_id,
             capture_surface="reflection_candidate",
             review_state=target_review_state,
+            retired=retired,
             limit=limit,
             after_time=after[0] if after else None,
             after_id=after[1] if after else "",
