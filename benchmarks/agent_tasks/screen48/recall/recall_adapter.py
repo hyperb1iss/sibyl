@@ -45,6 +45,26 @@ from sibyl_core.services.content_raw_recall import recall_raw_memory_with_source
 # raw arm enumerates the complete retained catalog instead of a ranked window.
 NATIVE_LIMIT = 50
 
+#: The two arms whose checkpoint-1 memory must render to their checkpoint-0
+#: bytes. Both are re-derived from the live database at checkpoint 1 and then
+#: compared; neither is ever copied out of the prior receipt.
+CP0_BYTE_ARMS = frozenset({"raw_retrieval", "strong_summary"})
+
+
+def before_differences(prior_before, before) -> list[str]:
+    """Name the owner-receipt fields the two checkpoints disagree on.
+
+    Evidence for the reviewer, not a gate. Public configuration legitimately
+    differs between two runs of one study (an exported provider key in the
+    environment of one of them is enough), and the checkpoint-1 contract is
+    byte equality of the rendered memory, not an identical runtime.
+    """
+    prior = prior_before if isinstance(prior_before, dict) else {}
+    current = before if isinstance(before, dict) else {}
+    return sorted(
+        field for field in set(prior) | set(current) if prior.get(field) != current.get(field)
+    )
+
 
 @dataclass(frozen=True)
 class Reader:
@@ -127,58 +147,35 @@ class RecallAdapter:
             base.update(query_sha256=sha(query.encode()), prompt_sha256=sha(prompt.encode()))
             authority, snapshots, before = await self.boundary()
             base["before"] = before
-            if checkpoint == 1 and arm in {"raw_retrieval", "strong_summary"}:
+            reuse = checkpoint == 1 and arm in CP0_BYTE_ARMS
+            if reuse:
                 if (
                     prior is None
                     or prior_sha256 != digest(prior)
                     or prior.get("status") != "prepared"
+                    or not isinstance(prior.get("memory"), str)
                     or (prior.get("checkpoint"), prior.get("task"), prior.get("arm"))
                     != (0, task, arm)
-                    or prior.get("catalog_sha256") != self.catalog.catalog_sha256
                     or prior.get("catalog_content_sha256") != self.catalog.catalog_content_sha256
                     or prior.get("query_sha256") != base["query_sha256"]
                     or prior.get("prompt_sha256") != base["prompt_sha256"]
                     or prior.get("reader") != base["reader"]
-                    or prior.get("before") != before
                 ):
                     raise MissingPack("qualified_checkpoint_zero_pack_missing")
-                # The caller supplies the separately hash-bound cp0 receipt. The
-                # exact source observations and complete request are checked again.
-                memory = prior["memory"]
-                if arm == "strong_summary":
-                    if references is None or digest(references) != prior.get(
-                        "summary_references_sha256"
-                    ):
-                        raise MissingPack("checkpoint_zero_summary_library_changed")
-                    validated = summary_items(
-                        references, self.catalog, self.counter, self.validate_summary_library
-                    )
-                    if SUMMARY_HEADER + "".join(item.block for item in validated) != memory:
-                        raise MissingPack("checkpoint_zero_summary_memory_changed")
-                counts = self.counter.request(prompt, memory, workspace)
-                if counts != prior["counts"] or not counts["fits"]:
-                    raise MissingPack("checkpoint_zero_pack_changed")
-                packed = {
-                    key: prior[key]
-                    for key in (
-                        "status",
-                        "reason",
-                        "memory",
-                        "counts",
-                        "overflow",
-                        "eligible_catalog",
-                        "eligible_catalog_sha256",
-                        "ranked",
-                        "selected",
-                        "ranked_budget_omitted",
-                        "eligible_not_returned",
-                    )
-                }
-                packed["reused_checkpoint_zero_sha256"] = digest(prior)
-                if arm == "strong_summary":
-                    packed["summary_references_sha256"] = prior["summary_references_sha256"]
-                diagnostics = prior["diagnostics"]
-            elif arm == "no_memory":
+                # The two owner receipts are recorded as evidence, never required
+                # to be equal: the checkpoints run with their own public
+                # configuration, and the contract is byte equality of the memory
+                # after current authority validation, not an identical
+                # environment. The prior's database lifetime stays bound one
+                # layer up, by `checkpoints.prior_bindings`.
+                base["prior_before"] = prior.get("before")
+                base["before_differences"] = before_differences(prior.get("before"), before)
+                if arm == "strong_summary" and (
+                    references is None
+                    or digest(references) != prior.get("summary_references_sha256")
+                ):
+                    raise MissingPack("checkpoint_zero_summary_library_changed")
+            if arm == "no_memory":
                 packed = pack_prefix(
                     [], {}, counter=self.counter, prompt=prompt, workspace=workspace
                 )
@@ -333,6 +330,16 @@ class RecallAdapter:
                     all_required=True,
                 )
                 packed["summary_references_sha256"] = digest(references)
+            if reuse and packed["status"] == "prepared":
+                # The frozen contract: checkpoint-1 raw and summary memory bytes
+                # must equal their checkpoint-0 bytes after current authority
+                # validation. The pack above was derived again from the live
+                # database through the same code path checkpoint 0 ran, so this
+                # compares two independent renderings rather than vouching for a
+                # copy of the prior.
+                if packed["memory"] != prior["memory"] or packed["counts"] != prior.get("counts"):
+                    raise MissingPack("checkpoint_zero_bytes_changed")
+                packed["reused_checkpoint_zero_sha256"] = prior_sha256
             _, _, after = await self.boundary()
             if after != before:
                 raise MissingPack("source_runtime_changed_during_preparation")

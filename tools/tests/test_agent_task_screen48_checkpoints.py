@@ -167,13 +167,38 @@ class FakeAdapter:
                 "memory": None,
                 "counts": None,
             }
-        if checkpoint == 1 and arm in checkpoints.CP1_PRIOR_ARMS and prior is None:
+        if checkpoint == 1 and arm in checkpoints.CP1_PRIOR_ARMS:
+            # The real adapter derives the cell again and then requires byte
+            # equality with the prior, recording both owner receipts either way.
+            if prior is None:
+                return {
+                    **base,
+                    "status": "missing_pack",
+                    "reason": "qualified_checkpoint_zero_pack_missing",
+                    "memory": None,
+                    "counts": None,
+                }
+            evidence = {
+                "prior_before": {"public_configuration_sha256": "cp0"},
+                "before_differences": list(self.state.before_differences),
+            }
+            if (task, arm) in self.state.byte_changes:
+                return {
+                    **base,
+                    **evidence,
+                    "status": "missing_pack",
+                    "reason": "checkpoint_zero_bytes_changed",
+                    "memory": None,
+                    "counts": None,
+                }
             return {
                 **base,
-                "status": "missing_pack",
-                "reason": "qualified_checkpoint_zero_pack_missing",
-                "memory": None,
-                "counts": None,
+                **evidence,
+                "status": "prepared",
+                "reason": None,
+                "memory": prior["memory"],
+                "counts": prior["counts"],
+                checkpoints.REUSE_KEY: prior_sha256,
             }
         memory = "" if arm == checkpoints.NO_MEMORY_ARM else f"pack cp{checkpoint} {task} {arm} λ\n"
         return {
@@ -273,6 +298,8 @@ def state(monkeypatch: pytest.MonkeyPatch) -> Any:
         items=items,
         inventory=inventory,
         missing=set(),
+        byte_changes=set(),
+        before_differences=["public_configuration_sha256"],
         calls=[],
         counters=[],
         natives=[],
@@ -567,6 +594,69 @@ def test_checkpoint_one_hands_the_prior_to_raw_and_summary_only(tmp_path: Path, 
     rows = {(row["task"], row["arm"]): row for row in receipt["cells"]}
     assert rows[(contract.TASKS[0], "raw_retrieval")]["prior"]["status"] == "loaded"
     assert rows[(contract.TASKS[0], "native")]["prior"] is None
+
+
+def test_checkpoint_one_counts_reused_and_freshly_derived_cells(tmp_path: Path, state: Any) -> None:
+    """The receipt separates cells that matched cp0's bytes from fresh ones."""
+    zero = tmp_path / "cp0"
+    assert run(0, zero) == 0
+    assert receipt_of(zero)["checkpoint_zero_reuse"] is None
+    sealed_zero = {(row["task"], row["arm"]): row for row in receipt_of(zero)["cells"]}
+    state.items, state.inventory = consolidated_inventory()
+    one = tmp_path / "cp1"
+
+    assert run(1, one, prior_root=zero) == 0
+
+    sealed = receipt_of(one)
+    assert sealed["checkpoint_zero_reuse"] == {
+        "arms": sorted(checkpoints.CP1_PRIOR_ARMS),
+        "reused_by_equality": 12,
+        "freshly_derived": 12,
+        "before_differences": {"public_configuration_sha256": 12},
+    }
+    rows = {(row["task"], row["arm"]): row for row in sealed["cells"]}
+    reused = rows[(contract.TASKS[0], "raw_retrieval")]
+    assert (
+        reused["reused_checkpoint_zero_sha256"]
+        == (sealed_zero[(contract.TASKS[0], "raw_retrieval")]["pack_receipt_sha256"])
+    )
+    assert reused["before_differences"] == ["public_configuration_sha256"]
+    # Byte equality is the contract, so the two checkpoints' memory agrees.
+    assert (
+        reused["memory_sha256"]
+        == sealed_zero[(contract.TASKS[0], "raw_retrieval")]["memory_sha256"]
+    )
+    fresh = rows[(contract.TASKS[0], "native")]
+    assert fresh["reused_checkpoint_zero_sha256"] is None
+    assert fresh["before_differences"] is None
+    assert fresh["memory_sha256"] != sealed_zero[(contract.TASKS[0], "native")]["memory_sha256"]
+
+
+def test_a_checkpoint_one_cell_whose_bytes_moved_is_never_counted_as_reused(
+    tmp_path: Path, state: Any
+) -> None:
+    zero = tmp_path / "cp0"
+    assert run(0, zero) == 0
+    state.byte_changes = {(contract.TASKS[0], "raw_retrieval")}
+    state.items, state.inventory = consolidated_inventory()
+    one = tmp_path / "cp1"
+
+    assert run(1, one, prior_root=zero) == 2
+
+    sealed = receipt_of(one)
+    assert sealed["prepared"] == 23
+    assert sealed["missing_reasons"] == {"checkpoint_zero_bytes_changed": 1}
+    assert sealed["checkpoint_zero_reuse"]["reused_by_equality"] == 11
+    assert sealed["checkpoint_zero_reuse"]["freshly_derived"] == 12
+    rows = {(r["task"], r["arm"]): r for r in sealed["cells"]}
+    row = rows[(contract.TASKS[0], "raw_retrieval")]
+    assert row["status"] == "missing_pack"
+    assert row["reason"] == "checkpoint_zero_bytes_changed"
+    assert row["reused_checkpoint_zero_sha256"] is None
+    assert row["before_differences"] == ["public_configuration_sha256"]
+    # The prior was bound and handed over; what refused the cell is the bytes.
+    assert row["prior"]["status"] == "loaded"
+    assert not (one / "packs" / "cp1" / contract.TASKS[0] / "raw_retrieval.txt").exists()
 
 
 def test_checkpoint_one_without_a_prior_root_leaves_those_cells_missing(

@@ -46,11 +46,15 @@ Outputs, all under ``--output``:
     One preparation receipt per cell, beside the exact memory bytes when the
     cell was prepared. ``materialize`` reads precisely this layout.
 
-At checkpoint 1 the two reusing arms are handed their checkpoint-0 pack, and the
-digest that travels with it is the one ``--prior-root``'s own sealed
+At checkpoint 1 the two byte-equal arms are handed their checkpoint-0 pack, and
+the digest that travels with it is the one ``--prior-root``'s own sealed
 ``checkpoint.json`` recorded for that cell, never a digest recomputed from the
 file just read. A prior whose bytes no longer hash to what checkpoint 0 sealed
 is therefore unbound rather than trusted, and the cell stays ``missing_pack``.
+The adapter does not copy that prior: it derives the cell again from the live
+database and then requires the rendered bytes and counts to equal the prior's.
+``checkpoint_zero_reuse`` in the receipt counts the cells that matched, the
+cells prepared fresh, and the owner-receipt fields the two runs differed on.
 """
 
 # Product-facing imports stay inside functions: run_phase stamps SIBYL_* into
@@ -111,8 +115,10 @@ OWNER_KEYS = frozenset(
 NATIVE_ARM = "native"
 SUMMARY_ARM = "strong_summary"
 NO_MEMORY_ARM = "no_memory"
-#: The two arms whose checkpoint-1 pack is the separately hash-bound cp0 pack.
+#: The two arms whose checkpoint-1 memory must render to its checkpoint-0 bytes.
 CP1_PRIOR_ARMS = frozenset({"raw_retrieval", SUMMARY_ARM})
+#: The adapter's marker for a cell whose fresh bytes equalled the prior's.
+REUSE_KEY = "reused_checkpoint_zero_sha256"
 
 #: Every native item at checkpoint 0 must be a retained raw original.
 RAW_ORIGINAL_KIND = "raw_capture"
@@ -501,6 +507,8 @@ async def _prepare_cells(
     cells: list[dict[str, Any]] = []
     reasons: dict[str, int] = {}
     prepared = 0
+    reused = 0
+    differences: dict[str, int] = {}
     bindings: dict[tuple[str, str], str] = {}
     unbound: str | None = None
     if checkpoint == 1:
@@ -546,6 +554,11 @@ async def _prepare_cells(
                 reasons[reason] = reasons.get(reason, 0) + 1
             else:
                 prepared += 1
+            reuse_sha256 = document.get(REUSE_KEY)
+            if memory is not None and reuse_sha256:
+                reused += 1
+            for field in document.get("before_differences") or []:
+                differences[str(field)] = differences.get(str(field), 0) + 1
             cells.append(
                 {
                     "checkpoint": checkpoint,
@@ -559,12 +572,24 @@ async def _prepare_cells(
                     "memory_tokens": counts.get("memory_tokens"),
                     "fits": counts.get("fits"),
                     "prior": prior_record,
+                    "reused_checkpoint_zero_sha256": reuse_sha256,
+                    "before_differences": document.get("before_differences"),
                     **paths,
                 }
             )
     receipt["cells"] = cells
     receipt["prepared"] = prepared
     receipt["missing_reasons"] = dict(sorted(reasons.items()))
+    if checkpoint == 1:
+        # Which prepared cells earned their memory by rendering the same bytes
+        # checkpoint 0 did, which produced bytes of their own, and how many
+        # cells saw each owner-receipt field the two runs disagreed on.
+        receipt["checkpoint_zero_reuse"] = {
+            "arms": sorted(CP1_PRIOR_ARMS),
+            "reused_by_equality": reused,
+            "freshly_derived": prepared - reused,
+            "before_differences": dict(sorted(differences.items())),
+        }
     receipt["status"] = STATUS_PREPARED if prepared == CELLS_PER_CHECKPOINT else STATUS_PARTIAL
 
 
@@ -720,6 +745,7 @@ async def prepare_checkpoint(
         "native_inventory": None,
         "tokenizer": None,
         "prior_bindings": None,
+        "checkpoint_zero_reuse": None,
         "denominator": CELLS_PER_CHECKPOINT,
         "prepared": 0,
         "cells": [],
