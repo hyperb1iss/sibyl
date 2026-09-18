@@ -21,6 +21,7 @@ from uuid import UUID
 
 import pytest
 from benchmarks.agent_tasks.screen48 import contract as c
+from benchmarks.agent_tasks.screen48.recall import native_evidence as ne
 from benchmarks.agent_tasks.screen48.recall import native_inventory as ni
 from benchmarks.agent_tasks.screen48.recall import recall_adapter as a
 from benchmarks.agent_tasks.screen48.recall import whole_items as w
@@ -955,6 +956,101 @@ async def test_native_arm_names_a_missing_graph_embedding_provider(setup, monkey
     assert result["status"] == "missing_pack"
     assert result["reason"] == "native_embedding_provider_unavailable"
     assert calls == []
+
+
+# ---------------------------------------------------------------------------
+# One promoted entity, read twice, dated in two notations for one instant.
+# ---------------------------------------------------------------------------
+
+#: The exact pair the live checkpoint-1 native cells disagreed on, for all 34
+#: promoted entities: the archive read keeps Surreal's `Z`, the scoped read's
+#: `datetime` spells the same instant with an explicit offset.
+PROMOTED_INSTANT_Z = "2026-09-18T00:04:33.974111Z"
+PROMOTED_INSTANT_OFFSET = "2026-09-18T00:04:33.974111+00:00"
+PROMOTED_INSTANT = datetime(2026, 9, 18, 0, 4, 33, 974111, tzinfo=UTC)
+
+
+def promoted_result(updated_at, **metadata):
+    """One consolidation publication as the retrieval surface returns it."""
+    return SearchResult(
+        "promoted-entity-1",
+        "node",
+        "Repair the fixture CLI",
+        "inspect before changing",
+        0.0,
+        source="reflection",
+        source_revision=3,
+        result_origin="graph",
+        metadata={"entity_type": "procedure", "updated_at": updated_at, **metadata},
+    )
+
+
+def test_one_instant_has_one_evidence_spelling():
+    archive = promoted_result(ArchiveDatetime.parse(PROMOTED_INSTANT_Z))
+    scoped = promoted_result(PROMOTED_INSTANT)
+
+    assert ne.canonical_datetime(PROMOTED_INSTANT_Z) == PROMOTED_INSTANT_OFFSET
+    assert ne.canonical_datetime(PROMOTED_INSTANT_OFFSET) == PROMOTED_INSTANT_OFFSET
+    assert a.native_evidence(archive) == a.native_evidence(scoped)
+    assert a.native_evidence(archive)["public_metadata"]["updated_at"] == PROMOTED_INSTANT_OFFSET
+    assert a.native_evidence(archive)["public_metadata_datetimes"] == [["updated_at"]]
+    assert ne.returned_native_evidence(archive) == ne.returned_native_evidence(scoped)
+
+    # A different instant is still a different item, at microsecond resolution.
+    moved = promoted_result(PROMOTED_INSTANT.replace(microsecond=974112))
+    assert a.native_evidence(moved) != a.native_evidence(archive)
+    # So is a same-named authored field that is not a date.
+    authored = promoted_result(ArchiveDatetime.parse(PROMOTED_INSTANT_Z), entity_type="pattern")
+    assert a.native_evidence(authored) != a.native_evidence(archive)
+    # A nested date is normalized on both sides too, and a user string that
+    # merely looks like a date is never reinterpreted as one.
+    nested = promoted_result(
+        PROMOTED_INSTANT,
+        reflection_identity={"published_at": PROMOTED_INSTANT},
+        authored_text=PROMOTED_INSTANT_Z,
+    )
+    archived_nested = promoted_result(
+        ArchiveDatetime.parse(PROMOTED_INSTANT_Z),
+        reflection_identity={"published_at": ArchiveDatetime.parse(PROMOTED_INSTANT_Z)},
+        authored_text=PROMOTED_INSTANT_Z,
+    )
+    evidence = a.native_evidence(nested)
+    assert evidence == a.native_evidence(archived_nested)
+    assert evidence["public_metadata"]["reflection_identity"]["published_at"] == (
+        PROMOTED_INSTANT_OFFSET
+    )
+    assert evidence["public_metadata"]["authored_text"] == PROMOTED_INSTANT_Z
+
+
+@pytest.mark.asyncio
+async def test_native_cp1_accepts_both_date_notations_of_one_inventory_item(setup, monkeypatch):
+    """The live checkpoint-1 native refusal: notation, not a changed value."""
+    archive = promoted_result(ArchiveDatetime.parse(PROMOTED_INSTANT_Z))
+    inventory = {w.native_key(archive): a.native_evidence(archive)}
+    returned = SimpleNamespace(result=promoted_result(PROMOTED_INSTANT))
+
+    async def native(**kwargs):
+        return healthy_native([returned.result], kwargs["plan"].query)
+
+    monkeypatch.setattr(a, "context_search", native)
+    prepared = await setup.adapter.prepare(
+        checkpoint=1, task=c.TASKS[0], arm="native", native_inventory=inventory
+    )
+    assert prepared["status"] == "prepared", prepared
+    assert len(prepared["selected"]) == 1
+    assert PROMOTED_INSTANT_OFFSET in prepared["memory"]
+
+    returned.result = promoted_result(PROMOTED_INSTANT.replace(microsecond=974112))
+    moved = await setup.adapter.prepare(
+        checkpoint=1, task=c.TASKS[0], arm="native", native_inventory=inventory
+    )
+    assert moved["reason"] == "native_ranked_item_changed"
+
+    returned.result = promoted_result(PROMOTED_INSTANT, entity_type="pattern")
+    authored = await setup.adapter.prepare(
+        checkpoint=1, task=c.TASKS[0], arm="native", native_inventory=inventory
+    )
+    assert authored["reason"] == "native_ranked_item_changed"
 
 
 # ---------------------------------------------------------------------------
