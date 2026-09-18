@@ -1,6 +1,82 @@
 # Sibyl 1.4: Dream It
 
-### Evidence checkpoint (September 15, 0:44 UTC, initial native counts accepted)
+### Evidence checkpoint (September 18, 2026, screen48 executed)
+
+The screen48 harness is entirely in git. Merged harness work covers
+[PR 612](https://github.com/hyperb1iss/sibyl/pull/612),
+[PR 617](https://github.com/hyperb1iss/sibyl/pull/617),
+[PR 618](https://github.com/hyperb1iss/sibyl/pull/618),
+[PR 619](https://github.com/hyperb1iss/sibyl/pull/619),
+[PR 622](https://github.com/hyperb1iss/sibyl/pull/622) and
+[PR 623](https://github.com/hyperb1iss/sibyl/pull/623). Running the diagnostic against a live
+database also forced product fixes that are now merged on their own:
+
+- Citation resolution, a 600 second consolidation timeout and pricing for unrecorded attempts landed
+  in [PR 616](https://github.com/hyperb1iss/sibyl/pull/616).
+- Retirement of drafts that a promoted correction supersedes landed in
+  [PR 620](https://github.com/hyperb1iss/sibyl/pull/620), which records each retirement through
+  reflection_supersessions.
+- Embedding backfill for promoted rows whose stored text needed normalizing landed in
+  [PR 621](https://github.com/hyperb1iss/sibyl/pull/621).
+- Connect and changefeed handling was fixed earlier in the campaign by
+  [PR 614](https://github.com/hyperb1iss/sibyl/pull/614), and pending writes by
+  [PR 615](https://github.com/hyperb1iss/sibyl/pull/615).
+
+The study database was restored from the pristine cold copy on September 17, 2026, and the backup
+volume of the aborted state is retained. Checkpoint zero prepared 24 of 24 cells on runtime
+da65497ec2dc at 22:27 UTC on September 17, over 233 raw originals and zero derived rows. One
+consolidation cycle then covered all 233 sources in three proposal pages of 100, 100 and 33, plus
+drains. The cycle returned 155 validation executions, promoted 34 procedures, archived 4 candidates
+through the critic and retired 37 superseded drafts. One orphaned correction child is still pending
+and is filed as a task. After PR 621, 34 of 34 entities carry embeddings.
+
+Measured Anthropic spend on this database is about $285. Pages one and two account for $250.08, page
+three ran under a killed resume and left no receipt, and the drain accounts for
+$23.19. Campaign
+real spend is about $385. Every attempt on the final runs reports complete usage,
+with an unrecorded estimate of zero. The first paid attempt, on September 17, was stopped after a
+single invocation. The attempt produced 4 usable proposals out of 18 at
+$54.35 measured plus roughly $42 unrecorded, and the restore discarded its state.
+
+Checkpoint one prepared 24 of 24 cells on runtime cdaedf33db57 at 10:02 UTC on September 18. Native
+packs differ from checkpoint zero on all six tasks, so the treatment reached the native arm. The raw
+and summary arms reused their checkpoint-zero bytes after authority validation. One raw cell,
+record-separator-channel, is recorded as ranking-diverged because consolidation candidate rows
+shifted BM25 statistics, and the divergence is filed as a task.
+
+All 48 cells executed between 10:02 and 10:20 UTC on September 18, against Qwen coder through
+OpenRouter, at $5.57 total across 785 tool calls.
+
+| Arm            | Checkpoint 0 | Checkpoint 1 |
+| -------------- | ------------ | ------------ |
+| native         | 6/6          | 6/6          |
+| strong_summary | 6/6          | 5/6          |
+| raw_retrieval  | 5/6          | 6/6          |
+| no_memory      | 5/6          | 5/6          |
+
+Both task failures are hex-stream-journal, once on raw_retrieval at checkpoint zero and once on
+strong_summary at checkpoint one. Each no_memory column carries one controller failure rather than a
+task failure: hex-stream-journal at checkpoint zero exited 3 after 229 seconds, and
+inclusive-slot-occupancy at checkpoint one exited 6 after 44 seconds. Both are recorded as unknown
+outcomes. Run totals are 44 passed, 2 task failures, 2 controller failures and 0 unprepared.
+
+The screen saturated. Native passed every task at both checkpoints, so this task set cannot show a
+learning gain, and the two contrast tasks did not regress under native. The record holds observed
+counts only, with no effect estimate and no efficacy claim, and learning_benefit_established stays
+false. The mechanism did run end to end with receipts.
+
+Next, assemble a task set with measured no-memory headroom, whether harder or simply more, before
+spending on the sealed study. The product findings above are the other open thread.
+
+Evidence: [retention index](/Users/bliss/dev/eval-artifacts/sibyl/screen48-final-20260918/INDEX.md),
+[cell observation](/Users/bliss/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-cdaedf33db57/cells-20260918T100210Z/observation.json),
+[cell terminal](/Users/bliss/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-cdaedf33db57/cells-20260918T100210Z/run/terminal.json),
+[checkpoint zero](/Users/bliss/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-da65497ec2dc/checkpoint0-20260917T222713Z/checkpoint.json),
+[checkpoint one](/Users/bliss/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-cdaedf33db57/checkpoint1-20260918T094001Z/checkpoint.json),
+[consolidation cycle](/Users/bliss/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-da65497ec2dc/cycle-20260917T224236Z/cycle.json),
+[final drain](/Users/bliss/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-cdaedf33db57/cycle-drain-20260918T093950Z/cycle.json).
+
+### Historical checkpoint (September 15, 0:44 UTC, initial native counts accepted)
 
 The initial native count run is complete and accepted. All 40 retained proposal requests cover the
 original 233 admitted sources and 240 assignment slots. Every count returned and qualified exactly
