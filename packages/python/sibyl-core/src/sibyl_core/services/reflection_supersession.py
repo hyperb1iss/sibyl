@@ -85,15 +85,17 @@ async def superseded_draft_ids(organization_id: str) -> list[str]:
 
 
 async def _record_supersession(draft: RawMemory, promoted: RawMemory) -> bool:
-    """Write the draft's terminal record, leaving an existing one as it stands.
+    """Write the draft's terminal record, or report that one already stands.
 
     The write is unconditional and the unique ``(organization_id, draft_id)``
     index is the only guard, so a second pass or a concurrent one loses the race
-    instead of reading first and racing in the gap. The duplicate is recognized
-    by the index name rather than by exception type: the content client hands
-    back whatever the Surreal SDK raised, which is an ``InternalError`` on the
-    live engine and a ``RuntimeError`` only when the client parsed the error
-    itself.
+    instead of reading first and racing in the gap. A loser writes nothing and
+    returns False, leaving the standing record untouched.
+
+    The duplicate is recognized by the index name rather than by exception type.
+    The content client hands back whatever the Surreal SDK raised, which is an
+    ``InternalError`` on the live engine and a ``RuntimeError`` only when the
+    client parsed the error itself.
     """
     promoted_entity_id = (promoted.metadata or {}).get("promoted_entity_id")
     async with content_client.surreal_content_client() as client:
