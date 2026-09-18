@@ -28,6 +28,7 @@ from benchmarks.agent_tasks.screen48.recall.native_evidence import (
     returned_native_evidence,
 )
 from benchmarks.agent_tasks.screen48.recall.whole_items import (
+    PACK_FIELDS,
     MissingPack,
     OriginalCatalog,
     native_item,
@@ -45,10 +46,22 @@ from sibyl_core.services.content_raw_recall import recall_raw_memory_with_source
 # raw arm enumerates the complete retained catalog instead of a ranked window.
 NATIVE_LIMIT = 50
 
-#: The two arms whose checkpoint-1 memory must render to their checkpoint-0
-#: bytes. Both are re-derived from the live database at checkpoint 1 and then
-#: compared; neither is ever copied out of the prior receipt.
+#: The two arms whose checkpoint-1 memory must carry their checkpoint-0 bytes.
+#: Both are re-derived from the live database at checkpoint 1 and compared with
+#: the prior, so what the cell carries is always a rendering this run observed.
 CP0_BYTE_ARMS = frozenset({"raw_retrieval", "strong_summary"})
+RAW_ARM = "raw_retrieval"
+
+#: How a checkpoint-1 reusing cell earned the bytes it carries. `equal_bytes` is
+#: the ordinary case: this run's own re-derivation rendered the prior's bytes.
+#: `prior_bytes_after_divergence` is the raw control arm's case below.
+EQUAL_BYTES = "equal_bytes"
+PRIOR_AFTER_DIVERGENCE = "prior_bytes_after_divergence"
+
+#: How many fused rows each side of an accepted raw divergence records inline.
+#: Both full rankings are digested and counted beside the excerpt, so the record
+#: is complete without carrying two 233-row lists into every receipt.
+DIVERGENCE_TOP_K = 10
 
 
 def before_differences(prior_before, before) -> list[str]:
@@ -64,6 +77,36 @@ def before_differences(prior_before, before) -> list[str]:
     return sorted(
         field for field in set(prior) | set(current) if prior.get(field) != current.get(field)
     )
+
+
+def fused_ranking(pack) -> list:
+    """The fused rows a raw pack recorded, or an empty ranking when it recorded none."""
+    diagnostics = pack.get("diagnostics") if isinstance(pack, dict) else None
+    fused = diagnostics.get("fused") if isinstance(diagnostics, dict) else None
+    return list(fused) if isinstance(fused, list) else []
+
+
+def raw_divergence(prior: dict, fresh: dict, fused: list) -> dict:
+    """Record both fused rankings of a raw cell whose re-derivation moved.
+
+    Evidence, not a verdict. A reader gets the two rankings side by side and
+    can see what the consolidation cycle did to the BM25 lane's term statistics
+    without re-running either checkpoint.
+    """
+    prior_fused = fused_ranking(prior)
+    return {
+        "top_k": DIVERGENCE_TOP_K,
+        "prior_fused_top": prior_fused[:DIVERGENCE_TOP_K],
+        "prior_fused_count": len(prior_fused),
+        "prior_fused_sha256": digest(prior_fused),
+        "prior_selected_ids": [row["id"] for row in prior.get("selected") or []],
+        "prior_memory_sha256": sha(prior["memory"].encode()),
+        "fresh_fused_top": fused[:DIVERGENCE_TOP_K],
+        "fresh_fused_count": len(fused),
+        "fresh_fused_sha256": digest(fused),
+        "fresh_selected_ids": [row["id"] for row in fresh["selected"]],
+        "fresh_memory_sha256": sha(fresh["memory"].encode()),
+    }
 
 
 @dataclass(frozen=True)
@@ -93,6 +136,22 @@ class RecallAdapter:
         self.verify_owners = verify_owners
         self.verify_native_inventory = verify_native_inventory
         self.validate_summary_library = validate_summary_library
+
+    def prior_bytes(self, prior: dict, *, prompt: str, workspace: dict[str, bytes]) -> dict:
+        """The qualified checkpoint-0 pack's own fields, re-counted by this run.
+
+        Nothing is fabricated: every field is the prior's, the memory is its
+        exact bytes, and the counts come from this run's counter reading those
+        bytes rather than from the prior receipt. A counter that no longer
+        reproduces the prior's counts over the prior's bytes has itself moved,
+        which is a defect rather than a divergence, so the cell is refused.
+        """
+        if any(field not in prior for field in PACK_FIELDS):
+            raise MissingPack("qualified_checkpoint_zero_pack_missing")
+        counts = self.counter.request(prompt, prior["memory"], workspace)
+        if counts != prior["counts"]:
+            raise MissingPack("checkpoint_zero_counts_unreproducible")
+        return {**{field: prior[field] for field in PACK_FIELDS}, "counts": counts}
 
     async def boundary(self):
         self.counter.verify()
@@ -337,8 +396,35 @@ class RecallAdapter:
                 # database through the same code path checkpoint 0 ran, so this
                 # compares two independent renderings rather than vouching for a
                 # copy of the prior.
-                if packed["memory"] != prior["memory"] or packed["counts"] != prior.get("counts"):
+                moved = packed["memory"] != prior["memory"] or packed["counts"] != prior.get(
+                    "counts"
+                )
+                if moved and arm == RAW_ARM:
+                    # The raw arm is the study's control and must not see the
+                    # treatment. The consolidation cycle wrote its reflection
+                    # candidates into the same raw_captures table the 233
+                    # originals live in, so the fulltext lane's term statistics
+                    # moved and the fused ranking with them, even though the
+                    # capture filter still admits only the 233. The contract
+                    # asks this cell for its checkpoint-0 bytes, not for an
+                    # equal re-derivation, and those bytes have just passed
+                    # current authority validation, the content catalog digest
+                    # and their own sealed receipt digest. The fresh derivation
+                    # cleared every raw lane check above to get here, so a
+                    # degraded lane is still a refusal, and both rankings are
+                    # recorded for the reviewer.
+                    diagnostics["divergence"] = raw_divergence(prior, packed, diagnostics["fused"])
+                    packed = self.prior_bytes(prior, prompt=prompt, workspace=workspace)
+                    packed["reuse_mode"] = PRIOR_AFTER_DIVERGENCE
+                    packed["raw_ranking_diverged"] = True
+                elif moved:
+                    # The summary library is static material, so a summary
+                    # rendering that moved is a real defect in this lane.
                     raise MissingPack("checkpoint_zero_bytes_changed")
+                else:
+                    packed["reuse_mode"] = EQUAL_BYTES
+                    if arm == RAW_ARM:
+                        packed["raw_ranking_diverged"] = False
                 packed["reused_checkpoint_zero_sha256"] = prior_sha256
             _, _, after = await self.boundary()
             if after != before:

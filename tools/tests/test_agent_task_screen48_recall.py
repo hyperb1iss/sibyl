@@ -612,8 +612,10 @@ async def test_summary_cp1_revalidates_child_receipts_without_rebuilding(setup):
 
 
 @pytest.mark.asyncio
-async def test_cp1_raw_binds_bytes_not_the_public_configuration(setup, monkeypatch):
-    """The live checkpoint-1 refusal: one moved owner field, identical bytes.
+async def test_cp1_raw_carries_its_bytes_through_configuration_and_ranking_drift(
+    setup, monkeypatch
+):
+    """The live checkpoint-1 cell: one moved owner field, then a moved ranking.
 
     Checkpoint 0 ran with a provider key exported for the consolidation cycle
     that followed it and checkpoint 1 ran without it, so the two owner receipts
@@ -621,6 +623,11 @@ async def test_cp1_raw_binds_bytes_not_the_public_configuration(setup, monkeypat
     contract asks for equal memory bytes after current authority validation,
     not for an identical environment, so the cell prepares and the difference
     is recorded.
+
+    A moved fused ranking is the other live case. The raw arm is the study's
+    control, and the treatment it must not see includes the term statistics the
+    consolidation cycle changed, so the cell carries checkpoint 0's bytes and
+    records both rankings instead of refusing.
     """
     ranked = [snapshot.memory for snapshot in list(setup.snapshots.values())[:3]]
     lane = SimpleNamespace(memories=ranked)
@@ -651,14 +658,80 @@ async def test_cp1_raw_binds_bytes_not_the_public_configuration(setup, monkeypat
     assert second["status"] == "prepared", second
     assert second["memory"] == first["memory"]
     assert second["counts"] == first["counts"]
+    assert second["reuse_mode"] == a.EQUAL_BYTES
+    assert second["raw_ranking_diverged"] is False
     assert second["reused_checkpoint_zero_sha256"] == c.digest(first)
     assert second["before_differences"] == ["public_configuration_sha256"]
     assert second["prior_before"] == first["before"]
     assert second["before"] != first["before"]
 
-    # A shorter ranked window is a real change of the rendered memory bytes,
-    # which the re-derivation catches and the copied prior never could.
+    # A shorter ranked window is the fused ranking moving under the control
+    # arm. The cell carries checkpoint 0's bytes, says so, and hands the
+    # reviewer both rankings; nothing about the prior's receipts is invented.
     lane.memories = ranked[:2]
+    diverged = await setup.adapter.prepare(
+        checkpoint=1,
+        task=c.TASKS[0],
+        arm="raw_retrieval",
+        prior=first,
+        prior_sha256=c.digest(first),
+    )
+    assert diverged["status"] == "prepared", diverged
+    assert diverged["memory"] == first["memory"]
+    assert diverged["counts"] == first["counts"]
+    assert diverged["selected"] == first["selected"]
+    assert diverged["reuse_mode"] == a.PRIOR_AFTER_DIVERGENCE
+    assert diverged["raw_ranking_diverged"] is True
+    assert diverged["reused_checkpoint_zero_sha256"] == c.digest(first)
+    assert diverged["before_differences"] == ["public_configuration_sha256"]
+    record = diverged["diagnostics"]["divergence"]
+    assert record["prior_fused_top"] == first["diagnostics"]["fused"]
+    assert record["prior_fused_count"] == RANKED_RAW_HITS
+    assert record["prior_selected_ids"] == [memory.id for memory in ranked]
+    assert record["prior_memory_sha256"] == c.sha(first["memory"].encode())
+    assert [row["id"] for row in record["fresh_fused_top"]] == [m.id for m in ranked[:2]]
+    assert record["fresh_fused_count"] == len(ranked[:2])
+    assert record["fresh_selected_ids"] == [memory.id for memory in ranked[:2]]
+    assert record["fresh_memory_sha256"] != record["prior_memory_sha256"]
+
+    # The counts travelling with those bytes are this run's own reading of
+    # them, so a prior that claims different counts for identical bytes is a
+    # moved counter and the cell is refused rather than prepared.
+    tampered = {**deepcopy(first), "counts": {**first["counts"], "memory_tokens": 1}}
+    denied = await setup.adapter.prepare(
+        checkpoint=1,
+        task=c.TASKS[0],
+        arm="raw_retrieval",
+        prior=tampered,
+        prior_sha256=c.digest(tampered),
+    )
+    assert denied["status"] == "missing_pack"
+    assert denied["reason"] == "checkpoint_zero_counts_unreproducible"
+    assert denied["memory"] is None
+
+
+@pytest.mark.asyncio
+async def test_cp1_raw_divergence_is_never_accepted_from_a_degraded_lane(setup, monkeypatch):
+    """A degraded fresh lane is not evidence of anything, divergence included."""
+    ranked = [snapshot.memory for snapshot in list(setup.snapshots.values())[:3]]
+    lanes = [
+        CandidateSourceResult.success("raw_fulltext", ranked),
+        CandidateSourceResult.success("raw_vector", ranked),
+    ]
+
+    async def raw(*, capture_ids, **kwargs):
+        return RawMemoryRecallResult(tuple(ranked), tuple(lanes))
+
+    monkeypatch.setattr(a, "recall_raw_memory_with_sources", raw)
+    first = await setup.adapter.prepare(checkpoint=0, task=c.TASKS[0], arm="raw_retrieval")
+    assert first["status"] == "prepared", first
+
+    # The vector lane fails and the ranking shortens with it: still a refusal.
+    ranked = ranked[:2]
+    lanes = [
+        CandidateSourceResult.success("raw_fulltext", ranked),
+        CandidateSourceResult.failed("raw_vector", "TimeoutError"),
+    ]
     denied = await setup.adapter.prepare(
         checkpoint=1,
         task=c.TASKS[0],
@@ -667,10 +740,16 @@ async def test_cp1_raw_binds_bytes_not_the_public_configuration(setup, monkeypat
         prior_sha256=c.digest(first),
     )
     assert denied["status"] == "missing_pack"
-    assert denied["reason"] == "checkpoint_zero_bytes_changed"
+    assert denied["reason"] == "raw_required_lane_incomplete"
     assert denied["memory"] is None
-    assert denied["before_differences"] == ["public_configuration_sha256"]
-    assert denied["prior_before"] == first["before"]
+    assert "divergence" not in denied["diagnostics"]
+
+
+def test_pack_fields_name_the_pack(counter):
+    """`PACK_FIELDS` is what a prepared pack carries, checked against the packer."""
+    prompt, workspace = c.public_task(c.TASKS[0])
+    packed = w.pack_prefix([], {}, counter=counter, prompt=prompt, workspace=workspace)
+    assert set(packed) == set(w.PACK_FIELDS)
 
 
 @pytest.mark.asyncio

@@ -32,6 +32,24 @@ from sibyl_core.tasks.episode_evidence import (
 MAX_SUMMARY_CHARS = 16_384
 MAX_SUMMARY_TOKENS = 4_096
 
+#: Exactly the fields `pack_prefix` returns, and therefore exactly the fields a
+#: checkpoint-1 cell may carry over from its qualified checkpoint-0 pack. A
+#: prepared pack is these and nothing else; `test_pack_fields_name_the_pack`
+#: keeps the tuple honest.
+PACK_FIELDS = (
+    "status",
+    "reason",
+    "memory",
+    "counts",
+    "overflow",
+    "eligible_catalog",
+    "eligible_catalog_sha256",
+    "ranked",
+    "selected",
+    "ranked_budget_omitted",
+    "eligible_not_returned",
+)
+
 
 class MissingPack(ValueError):
     """An observed preparation failure, never a valid empty memory."""
