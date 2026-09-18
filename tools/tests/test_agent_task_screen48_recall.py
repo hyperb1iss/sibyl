@@ -21,6 +21,7 @@ from uuid import UUID
 
 import pytest
 from benchmarks.agent_tasks.screen48 import contract as c
+from benchmarks.agent_tasks.screen48.recall import native_evidence as ne
 from benchmarks.agent_tasks.screen48.recall import native_inventory as ni
 from benchmarks.agent_tasks.screen48.recall import recall_adapter as a
 from benchmarks.agent_tasks.screen48.recall import whole_items as w
@@ -57,6 +58,8 @@ EXPECTED_SOURCE_COUNT = 233
 EXPECTED_FAMILY_COUNT = 20
 EXPECTED_CELL_COUNT = 48
 RANKED_RAW_HITS = 3
+#: One live read per checkpoint: checkpoint 1 derives its pack again.
+CHECKPOINT_READS = 2
 BYTES_PER_FIXTURE_TOKEN = 4
 
 
@@ -232,6 +235,24 @@ def refs_for(catalog):
     return refs
 
 
+def owners_receipt(configuration):
+    """A `CurrentOwners` receipt with only its public configuration digest moved.
+
+    Everything the study binds through this receipt (source commit, manifest,
+    dependency runtime, database URL) stays put; the configuration digest is
+    the one field that legitimately moves between two runs of one checkpoint
+    pair, because the environment around them is not the study material.
+    """
+    receipt = {
+        "schema": "sibyl-current-recall-owner-qualification-v1",
+        "source_commit": "324cd673a88f479ec0d2205f026cd751d6ec99fe",
+        "source_manifest_sha256": "a" * 64,
+        "auth_enabled": True,
+        "public_configuration_sha256": c.sha(configuration.encode()),
+    }
+    return lambda: receipt
+
+
 def healthy_native(results, query):
     return SearchResponse(
         results,
@@ -250,7 +271,7 @@ def healthy_native(results, query):
 
 
 @pytest.mark.asyncio
-async def test_raw_owner_capture_ids_and_cp1_exact_reuse(setup, monkeypatch):
+async def test_raw_owner_capture_ids_and_cp1_byte_equality(setup, monkeypatch):
     seen = []
     memories = [snapshot.memory for snapshot in list(setup.snapshots.values())[:3]]
 
@@ -285,7 +306,13 @@ async def test_raw_owner_capture_ids_and_cp1_exact_reuse(setup, monkeypatch):
     assert second["status"] == "prepared"
     assert second["memory"] == first["memory"]
     assert second["counts"] == first["counts"]
-    assert len(seen) == 1
+    assert second["reused_checkpoint_zero_sha256"] == c.digest(first)
+    # The checkpoint-1 pack is the live database read again, through the same
+    # owner and the same complete request, rather than a copy of the prior.
+    assert len(seen) == CHECKPOINT_READS
+    assert seen[1] == seen[0]
+    assert second["ranked"] == first["ranked"]
+    assert second["before_differences"] == []
     assert len(setup.calls) == c.SOURCE_COUNT * 4
     changed = deepcopy(first)
     changed["memory"] += "tampered"
@@ -584,6 +611,108 @@ async def test_summary_cp1_revalidates_child_receipts_without_rebuilding(setup):
     assert denied["memory"] is None
 
 
+@pytest.mark.asyncio
+async def test_cp1_raw_binds_bytes_not_the_public_configuration(setup, monkeypatch):
+    """The live checkpoint-1 refusal: one moved owner field, identical bytes.
+
+    Checkpoint 0 ran with a provider key exported for the consolidation cycle
+    that followed it and checkpoint 1 ran without it, so the two owner receipts
+    differ in `public_configuration_sha256` and nothing else. The frozen
+    contract asks for equal memory bytes after current authority validation,
+    not for an identical environment, so the cell prepares and the difference
+    is recorded.
+    """
+    ranked = [snapshot.memory for snapshot in list(setup.snapshots.values())[:3]]
+    lane = SimpleNamespace(memories=ranked)
+
+    async def raw(*, capture_ids, **kwargs):
+        assert set(capture_ids) == set(setup.snapshots)
+        return RawMemoryRecallResult(
+            tuple(lane.memories),
+            (
+                CandidateSourceResult.success("raw_fulltext", lane.memories),
+                CandidateSourceResult.success("raw_vector", lane.memories),
+            ),
+        )
+
+    monkeypatch.setattr(a, "recall_raw_memory_with_sources", raw)
+    setup.adapter.verify_owners = owners_receipt("checkpoint-zero-configuration")
+    first = await setup.adapter.prepare(checkpoint=0, task=c.TASKS[0], arm="raw_retrieval")
+    assert first["status"] == "prepared", first
+
+    setup.adapter.verify_owners = owners_receipt("checkpoint-one-configuration")
+    second = await setup.adapter.prepare(
+        checkpoint=1,
+        task=c.TASKS[0],
+        arm="raw_retrieval",
+        prior=first,
+        prior_sha256=c.digest(first),
+    )
+    assert second["status"] == "prepared", second
+    assert second["memory"] == first["memory"]
+    assert second["counts"] == first["counts"]
+    assert second["reused_checkpoint_zero_sha256"] == c.digest(first)
+    assert second["before_differences"] == ["public_configuration_sha256"]
+    assert second["prior_before"] == first["before"]
+    assert second["before"] != first["before"]
+
+    # A shorter ranked window is a real change of the rendered memory bytes,
+    # which the re-derivation catches and the copied prior never could.
+    lane.memories = ranked[:2]
+    denied = await setup.adapter.prepare(
+        checkpoint=1,
+        task=c.TASKS[0],
+        arm="raw_retrieval",
+        prior=first,
+        prior_sha256=c.digest(first),
+    )
+    assert denied["status"] == "missing_pack"
+    assert denied["reason"] == "checkpoint_zero_bytes_changed"
+    assert denied["memory"] is None
+    assert denied["before_differences"] == ["public_configuration_sha256"]
+    assert denied["prior_before"] == first["before"]
+
+
+@pytest.mark.asyncio
+async def test_cp1_summary_rerenders_the_library_and_refuses_moved_bytes(setup, monkeypatch):
+    refs = refs_for(setup.catalog)
+    setup.adapter.verify_owners = owners_receipt("checkpoint-zero-configuration")
+    first = await setup.adapter.prepare(
+        checkpoint=0, task=c.TASKS[0], arm="strong_summary", references=refs
+    )
+    assert first["status"] == "prepared", first
+
+    setup.adapter.verify_owners = owners_receipt("checkpoint-one-configuration")
+    arguments = {
+        "checkpoint": 1,
+        "task": c.TASKS[0],
+        "arm": "strong_summary",
+        "references": refs,
+        "prior": first,
+        "prior_sha256": c.digest(first),
+    }
+    second = await setup.adapter.prepare(**arguments)
+    assert second["status"] == "prepared", second
+    assert second["memory"] == first["memory"]
+    assert second["summary_references_sha256"] == first["summary_references_sha256"]
+    assert second["before_differences"] == ["public_configuration_sha256"]
+    assert second["reused_checkpoint_zero_sha256"] == c.digest(first)
+
+    # The construction-qualified library still hashes to the prior's, so what
+    # moved is the rendering, and only a re-render sees it.
+    monkeypatch.setattr(a, "SUMMARY_HEADER", "Historical family references, reworded.\n")
+    denied = await setup.adapter.prepare(**arguments)
+    assert denied["reason"] == "checkpoint_zero_bytes_changed"
+    assert denied["memory"] is None
+
+    # A different library is still named as the library, not as moved bytes.
+    changed = deepcopy(refs)
+    family = sorted(changed)[0]
+    changed[family] = {**changed[family], "construction_receipt_sha256": "c" * 64}
+    library = await setup.adapter.prepare(**{**arguments, "references": changed})
+    assert library["reason"] == "checkpoint_zero_summary_library_changed"
+
+
 def assert_material_freeze_pins_every_vendored_byte():
     """The transfer material is byte-pinned by its own frozen selection receipt.
 
@@ -827,6 +956,101 @@ async def test_native_arm_names_a_missing_graph_embedding_provider(setup, monkey
     assert result["status"] == "missing_pack"
     assert result["reason"] == "native_embedding_provider_unavailable"
     assert calls == []
+
+
+# ---------------------------------------------------------------------------
+# One promoted entity, read twice, dated in two notations for one instant.
+# ---------------------------------------------------------------------------
+
+#: The exact pair the live checkpoint-1 native cells disagreed on, for all 34
+#: promoted entities: the archive read keeps Surreal's `Z`, the scoped read's
+#: `datetime` spells the same instant with an explicit offset.
+PROMOTED_INSTANT_Z = "2026-09-18T00:04:33.974111Z"
+PROMOTED_INSTANT_OFFSET = "2026-09-18T00:04:33.974111+00:00"
+PROMOTED_INSTANT = datetime(2026, 9, 18, 0, 4, 33, 974111, tzinfo=UTC)
+
+
+def promoted_result(updated_at, **metadata):
+    """One consolidation publication as the retrieval surface returns it."""
+    return SearchResult(
+        "promoted-entity-1",
+        "node",
+        "Repair the fixture CLI",
+        "inspect before changing",
+        0.0,
+        source="reflection",
+        source_revision=3,
+        result_origin="graph",
+        metadata={"entity_type": "procedure", "updated_at": updated_at, **metadata},
+    )
+
+
+def test_one_instant_has_one_evidence_spelling():
+    archive = promoted_result(ArchiveDatetime.parse(PROMOTED_INSTANT_Z))
+    scoped = promoted_result(PROMOTED_INSTANT)
+
+    assert ne.canonical_datetime(PROMOTED_INSTANT_Z) == PROMOTED_INSTANT_OFFSET
+    assert ne.canonical_datetime(PROMOTED_INSTANT_OFFSET) == PROMOTED_INSTANT_OFFSET
+    assert a.native_evidence(archive) == a.native_evidence(scoped)
+    assert a.native_evidence(archive)["public_metadata"]["updated_at"] == PROMOTED_INSTANT_OFFSET
+    assert a.native_evidence(archive)["public_metadata_datetimes"] == [["updated_at"]]
+    assert ne.returned_native_evidence(archive) == ne.returned_native_evidence(scoped)
+
+    # A different instant is still a different item, at microsecond resolution.
+    moved = promoted_result(PROMOTED_INSTANT.replace(microsecond=974112))
+    assert a.native_evidence(moved) != a.native_evidence(archive)
+    # So is a same-named authored field that is not a date.
+    authored = promoted_result(ArchiveDatetime.parse(PROMOTED_INSTANT_Z), entity_type="pattern")
+    assert a.native_evidence(authored) != a.native_evidence(archive)
+    # A nested date is normalized on both sides too, and a user string that
+    # merely looks like a date is never reinterpreted as one.
+    nested = promoted_result(
+        PROMOTED_INSTANT,
+        reflection_identity={"published_at": PROMOTED_INSTANT},
+        authored_text=PROMOTED_INSTANT_Z,
+    )
+    archived_nested = promoted_result(
+        ArchiveDatetime.parse(PROMOTED_INSTANT_Z),
+        reflection_identity={"published_at": ArchiveDatetime.parse(PROMOTED_INSTANT_Z)},
+        authored_text=PROMOTED_INSTANT_Z,
+    )
+    evidence = a.native_evidence(nested)
+    assert evidence == a.native_evidence(archived_nested)
+    assert evidence["public_metadata"]["reflection_identity"]["published_at"] == (
+        PROMOTED_INSTANT_OFFSET
+    )
+    assert evidence["public_metadata"]["authored_text"] == PROMOTED_INSTANT_Z
+
+
+@pytest.mark.asyncio
+async def test_native_cp1_accepts_both_date_notations_of_one_inventory_item(setup, monkeypatch):
+    """The live checkpoint-1 native refusal: notation, not a changed value."""
+    archive = promoted_result(ArchiveDatetime.parse(PROMOTED_INSTANT_Z))
+    inventory = {w.native_key(archive): a.native_evidence(archive)}
+    returned = SimpleNamespace(result=promoted_result(PROMOTED_INSTANT))
+
+    async def native(**kwargs):
+        return healthy_native([returned.result], kwargs["plan"].query)
+
+    monkeypatch.setattr(a, "context_search", native)
+    prepared = await setup.adapter.prepare(
+        checkpoint=1, task=c.TASKS[0], arm="native", native_inventory=inventory
+    )
+    assert prepared["status"] == "prepared", prepared
+    assert len(prepared["selected"]) == 1
+    assert PROMOTED_INSTANT_OFFSET in prepared["memory"]
+
+    returned.result = promoted_result(PROMOTED_INSTANT.replace(microsecond=974112))
+    moved = await setup.adapter.prepare(
+        checkpoint=1, task=c.TASKS[0], arm="native", native_inventory=inventory
+    )
+    assert moved["reason"] == "native_ranked_item_changed"
+
+    returned.result = promoted_result(PROMOTED_INSTANT, entity_type="pattern")
+    authored = await setup.adapter.prepare(
+        checkpoint=1, task=c.TASKS[0], arm="native", native_inventory=inventory
+    )
+    assert authored["reason"] == "native_ranked_item_changed"
 
 
 # ---------------------------------------------------------------------------
