@@ -291,3 +291,65 @@ async def test_coverage_judges_eligibility_the_way_recall_does(content_store, mo
     assert lanes["raw_vector"].candidates == ()
     assert result.memories == ()
     assert result.degraded is False
+
+
+async def test_coverage_walks_past_ineligible_rows_before_judging(content_store, monkeypatch):
+    """A crowd of ineligible unembedded rows cannot hide one eligible row behind the pool."""
+    org = str(uuid4())
+    query_provider = provider("crowd")
+    monkeypatch.setattr(
+        content_raw_recall,
+        "raw_memory_query_embedding",
+        AsyncMock(
+            return_value=(await query_provider.embed_texts(["percent"], input_kind="query"))[0]
+        ),
+    )
+    eligible = await remember(org, "older-eligible")
+    for index in range(150):
+        await remember_raw_memory(
+            organization_id=org,
+            principal_id="owner",
+            source_id=f"crowd-{index}",
+            raw_content=f"Unrelated archived note {index}",
+            embedding_provider=None,
+            metadata={"superseded_by_source_id": "another-source"},
+        )
+
+    result = await recall_raw_memory_with_sources(
+        organization_id=org, principal_id="owner", query="percent escape", limit=5
+    )
+
+    lanes = {source.source: source for source in result.sources}
+    assert {memory.id for memory in result.memories} == {eligible.id}
+    assert lanes["raw_vector"].failure is not None
+    assert lanes["raw_vector"].failure.error_type == RAW_VECTOR_EMBEDDINGS_MISSING
+
+
+async def test_coverage_reports_healthy_when_its_walk_is_inconclusive(content_store, monkeypatch):
+    """A walk that hits its row cap without a verdict must not raise the report."""
+    org = str(uuid4())
+    query_provider = provider("capped")
+    monkeypatch.setattr(
+        content_raw_recall,
+        "raw_memory_query_embedding",
+        AsyncMock(
+            return_value=(await query_provider.embed_texts(["percent"], input_kind="query"))[0]
+        ),
+    )
+    await remember(org, "eligible-behind-the-cap")
+    sides: list[str] = []
+
+    async def capped_walk(client, *, extra_clause, **kwargs):
+        sides.append(extra_clause)
+        return False if "!= NONE" in extra_clause else None
+
+    monkeypatch.setattr(content_raw_recall, "_eligible_rows_present", capped_walk)
+
+    result = await recall_raw_memory_with_sources(
+        organization_id=org, principal_id="owner", query="percent escape", limit=1
+    )
+
+    lanes = {source.source: source for source in result.sources}
+    assert sides == [" AND embedding != NONE", " AND embedding = NONE"]
+    assert lanes["raw_vector"].failure is None
+    assert lanes["raw_vector"].candidates == ()

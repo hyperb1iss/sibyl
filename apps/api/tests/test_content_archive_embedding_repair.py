@@ -8,8 +8,12 @@ import pytest
 from sibyl.persistence import content_archive
 from sibyl.persistence.content_archive import restore_content_archive_payload
 from sibyl_core.backends.surreal import SurrealContentClient
-from sibyl_core.projection.repair import LifecycleRepairResult
+from sibyl_core.backends.surreal.content_schema import EMBEDDING_DIM
+from sibyl_core.embeddings.providers import DeterministicEmbeddingProvider, EmbeddingMetadata
+from sibyl_core.services import content_client
+from sibyl_core.services.content_models import raw_memory_embedding_metadata
 from tests.test_surreal_content_persistence import (
+    _normalize_records,
     surreal_content_client as surreal_content_client,  # noqa: PLC0414
 )
 
@@ -48,23 +52,48 @@ async def _restore(client: SurrealContentClient, payload: dict[str, object]):
 
 
 @pytest.mark.asyncio
-async def test_restore_repairs_embeddings_for_the_restored_organization(
+async def test_restore_embeds_the_restored_captures_on_its_own_client(
     surreal_content_client: SurrealContentClient, monkeypatch
 ) -> None:
+    """The repair runs through the restore's client, not a shared one pointed elsewhere."""
     org = str(uuid4())
-    repair = AsyncMock(return_value=LifecycleRepairResult(checked=1, recovered=1))
-    monkeypatch.setattr(
-        "sibyl_core.services.content_raw_embedding_repair.repair_raw_capture_embeddings", repair
+    provider = DeterministicEmbeddingProvider(
+        EmbeddingMetadata(
+            provider="deterministic",
+            model="restore-repair",
+            dimensions=EMBEDDING_DIM,
+            cache_namespace="restore-repair",
+            tokenizer_estimate_method="utf8-byte-length",
+        )
     )
+    monkeypatch.setattr(
+        "sibyl_core.services.content_models.configured_raw_memory_embedding_provider",
+        lambda: provider,
+    )
+    elsewhere = AsyncMock(side_effect=AssertionError("shared client must not be used"))
+    monkeypatch.setattr(content_client, "surreal_content_client", elsewhere)
+    payload = _payload(org, rows=2)
 
-    result = await _restore(surreal_content_client, _payload(org))
+    result = await _restore(surreal_content_client, payload)
 
     assert result.success is True
-    assert result.rows_restored == 1
-    repair.assert_awaited_once_with(org)
+    assert result.rows_restored == 2
     assert result.embedding_repair == {
-        org: {"checked": 1, "recovered": 1, "pending": 0, "failed": 0}
+        org: {"checked": 2, "recovered": 2, "pending": 0, "failed": 0}
     }
+    elsewhere.assert_not_called()
+    rows = _normalize_records(
+        await surreal_content_client.execute_query(
+            "SELECT uuid, revision, embedding, metadata.embedding_metadata AS embedding_metadata "
+            "FROM raw_captures WHERE organization_id = $organization_id;",
+            organization_id=org,
+        )
+    )
+    assert len(rows) == 2
+    for row in rows:
+        assert len(row["embedding"]) == EMBEDDING_DIM
+        assert row["embedding_metadata"] == raw_memory_embedding_metadata(provider.metadata)
+        assert row["revision"] == 1
 
 
 @pytest.mark.asyncio

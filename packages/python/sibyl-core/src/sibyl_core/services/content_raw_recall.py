@@ -345,6 +345,55 @@ async def _recall_raw_memory_vector(
     )
 
 
+# Rows the coverage probe will read per side before it stops judging. A scope
+# with more ineligible rows than this on one side is reported as healthy, never
+# as missing, so a truncated walk cannot raise a false report.
+_COVERAGE_ROW_CAP = 512
+
+
+async def _eligible_rows_present(
+    client: SurrealContentClient,
+    *,
+    where_clause: str,
+    params: Mapping[str, object],
+    as_of: datetime | None,
+    extra_clause: str,
+    page_size: int,
+) -> bool | None:
+    """Walk one side of the scope in uuid order until an eligible row appears.
+
+    Returns True on the first recall-eligible row, False when the side is
+    exhausted, and None when the walk hit its row cap without a verdict.
+    """
+    cursor = ""
+    seen = 0
+    while seen < _COVERAGE_ROW_CAP:
+        rows = await with_timeout(
+            content_client.select_many_raw(
+                client,
+                f"SELECT {_RAW_MEMORY_RECALL_FIELDS} FROM raw_captures "
+                f"WHERE {where_clause}{extra_clause} AND uuid > $coverage_cursor "
+                "ORDER BY uuid ASC LIMIT $coverage_limit;",
+                **params,
+                coverage_cursor=cursor,
+                coverage_limit=page_size,
+            ),
+            timeout_seconds=content_client.DIRECT_SEARCH_QUERY_TIMEOUT_SECONDS,
+            operation_name="surreal_raw_memory_embedding_coverage",
+        )
+        if not rows:
+            return False
+        if models.recallable_memories(
+            [models.raw_memory_from_record(row) for row in rows], limit=1, as_of=as_of
+        ):
+            return True
+        if len(rows) < page_size:
+            return False
+        seen += len(rows)
+        cursor = str(rows[-1]["uuid"])
+    return None
+
+
 async def _raw_memory_scope_lacks_embeddings(
     client: SurrealContentClient,
     *,
@@ -363,36 +412,26 @@ async def _raw_memory_scope_lacks_embeddings(
 
     Eligibility is judged exactly as recall judges it, through the lifecycle
     and as-of filters, so an archived or not-yet-valid row can neither mask a
-    missing vector nor raise the report on its own. Each probe reads the same
-    bounded pool the vector lane would, newest first.
+    missing vector nor raise the report on its own. Each side of the scope is
+    walked in uuid order to a fixed row cap; an inconclusive walk reports
+    healthy rather than missing.
     """
-    coverage_limit = max(limit * content_client.LIFECYCLE_FILTER_OVERFETCH_FACTOR, limit)
+    page_size = max(limit * content_client.LIFECYCLE_FILTER_OVERFETCH_FACTOR, 128)
 
-    async def eligible(extra_clause: str) -> bool:
-        rows = await with_timeout(
-            content_client.select_many_raw(
-                client,
-                f"SELECT {_RAW_MEMORY_RECALL_FIELDS} FROM raw_captures "
-                f"WHERE {where_clause}{extra_clause} "
-                "ORDER BY captured_at DESC LIMIT $coverage_limit;",
-                **params,
-                coverage_limit=coverage_limit,
-            ),
-            timeout_seconds=content_client.DIRECT_SEARCH_QUERY_TIMEOUT_SECONDS,
-            operation_name="surreal_raw_memory_embedding_coverage",
-        )
-        return bool(
-            models.recallable_memories(
-                [models.raw_memory_from_record(row) for row in rows],
-                limit=coverage_limit,
-                as_of=as_of,
-            )
+    async def present(extra_clause: str) -> bool | None:
+        return await _eligible_rows_present(
+            client,
+            where_clause=where_clause,
+            params=params,
+            as_of=as_of,
+            extra_clause=extra_clause,
+            page_size=page_size,
         )
 
     try:
-        if await eligible(" AND embedding != NONE"):
+        if await present(" AND embedding != NONE") is not False:
             return False
-        return await eligible(" AND embedding = NONE")
+        return await present(" AND embedding = NONE") is True
     except Exception as exc:
         # The probe is diagnostic only; a failed probe must not turn an empty
         # vector read into a failed recall.

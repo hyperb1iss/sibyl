@@ -271,20 +271,22 @@ class ContentArchiveRestoreResult:
 
 
 async def _repair_restored_capture_embeddings(
+    client: SurrealContentClient,
     organizations: Sequence[str],
 ) -> dict[str, dict[str, int | str]]:
     """Give restored raw captures their vector before the scheduler's next pass.
 
     Archived rows carry no embedding, so without this a restore leaves raw
-    recall lexical-only until the lifecycle job happens to run. A repair
-    failure is recorded per organization and never fails the restore itself.
+    recall lexical-only until the lifecycle job happens to run. The repair
+    runs on the restore's own client so it reaches the rows that just landed.
+    A repair failure is recorded per organization and never fails the restore.
     """
     from sibyl_core.services.content_raw_embedding_repair import repair_raw_capture_embeddings
 
     receipts: dict[str, dict[str, int | str]] = {}
     for organization_id in organizations:
         try:
-            result = await repair_raw_capture_embeddings(organization_id)
+            result = await repair_raw_capture_embeddings(organization_id, client=client)
         except Exception as exc:
             log.warning(
                 "content_archive_restore_embedding_repair_failed",
@@ -1025,7 +1027,7 @@ async def restore_content_archive_payload(
             },
             embedding_repair=(
                 await _repair_restored_capture_embeddings(
-                    _restored_capture_organizations(tables, scope)
+                    client, _restored_capture_organizations(tables, scope)
                 )
                 if not errors and restored_ids
                 else {}

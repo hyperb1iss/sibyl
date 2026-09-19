@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 from typing import cast
 
 import structlog
@@ -57,6 +58,7 @@ async def repair_raw_capture_embeddings(
     *,
     page_size: int = RAW_EMBEDDING_REPAIR_PAGE_SIZE,
     embedding_provider: EmbeddingProvider | object | None = _RAW_MEMORY_EMBEDDING_AUTO,
+    client: SurrealContentClient | None = None,
 ) -> LifecycleRepairResult:
     """Embed recallable raw captures whose vector is missing or from another provider.
 
@@ -66,6 +68,9 @@ async def repair_raw_capture_embeddings(
     second pass rediscovers nothing it already repaired, and a row whose
     revision moved between read and write is reported pending rather than
     overwritten.
+
+    A caller that already holds the database the captures live in, such as a
+    restore, passes its client so the repair cannot land on another store.
     """
     provider = (
         models.configured_raw_memory_embedding_provider()
@@ -78,9 +83,9 @@ async def repair_raw_capture_embeddings(
     counts = {"checked": 0, "recovered": 0, "pending": 0, "failed": 0}
     cursor = ""
     while True:
-        async with content_client.surreal_content_client() as client:
+        async with _content_session(client) as session:
             rows = await content_client.select_many(
-                client,
+                session,
                 "SELECT * FROM raw_captures "
                 "WHERE organization_id = $organization_id AND uuid > $cursor "
                 "ORDER BY uuid ASC LIMIT $limit;",
@@ -95,7 +100,7 @@ async def repair_raw_capture_embeddings(
             targets = [memory for memory in memories if _repair_candidate(memory, provider)]
             counts["checked"] += len(targets)
             if targets:
-                outcomes = await _repair_page(client, targets, provider, organization_id)
+                outcomes = await _repair_page(session, targets, provider, organization_id)
                 for outcome in outcomes:
                     counts[outcome] += 1
         if len(rows) < limit:
@@ -106,6 +111,17 @@ async def repair_raw_capture_embeddings(
         **counts,
     )
     return LifecycleRepairResult(**counts)
+
+
+@asynccontextmanager
+async def _content_session(
+    client: SurrealContentClient | None,
+) -> AsyncIterator[SurrealContentClient]:
+    if client is not None:
+        yield client
+        return
+    async with content_client.surreal_content_client() as shared:
+        yield shared
 
 
 async def _repair_page(
