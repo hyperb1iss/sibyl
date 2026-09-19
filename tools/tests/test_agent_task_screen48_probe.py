@@ -20,7 +20,7 @@ from benchmarks.agent_tasks.manifest import (
     load_manifest,
     runtime_identity,
 )
-from benchmarks.agent_tasks.screen48 import contract, headroom, probe
+from benchmarks.agent_tasks.screen48 import checkpoints, contract, cycle, headroom, probe
 from benchmarks.agent_tasks.screen48.devbox import run_phase
 
 TASKS = ("alpha-task", "beta-task")
@@ -316,14 +316,22 @@ def test_a_memory_arm_cites_every_declared_experience_and_no_memory_cites_none(
 def test_the_manifest_carries_the_bytes_that_were_sealed_not_a_caller_s_copy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A receipt rewritten after preparation is what the manifest cites."""
+    """A cell resealed after preparation is what the manifest cites.
+
+    The resealing moves all three records the cell binds together, because a
+    receipt that moved alone is refused; what is under test is that the bytes
+    come off disk rather than out of whatever the caller still holds.
+    """
     monkeypatch.setattr(runner, "run_task", FakeRunner(all_pass()))
     output = tmp_path / "out"
     preparation = write_preparation(output)
-    receipt_path = output / preparation["cells"][0]["receipt_path"]
+    cell = preparation["cells"][0]
+    receipt_path = output / cell["receipt_path"]
     sealed = json.loads(receipt_path.read_bytes())
     sealed["memory"] = "resealed memory\n"
     receipt_path.write_text(json.dumps(sealed, sort_keys=True))
+    (output / cell["memory_path"]).write_bytes(b"resealed memory\n")
+    cell["memory_sha256"] = contract.sha(b"resealed memory\n")
 
     probe.run_cells(
         preparation=preparation,
@@ -337,6 +345,33 @@ def test_the_manifest_carries_the_bytes_that_were_sealed_not_a_caller_s_copy(
     manifest, inputs = load_manifest(output / "manifests" / TASKS[0] / "manifest.json")
     arm = next(arm for arm in manifest.arms if arm.id == preparation["cells"][0]["arm"])
     assert inputs[arm.memory_pack.path] == b"resealed memory\n"
+
+
+def test_memory_that_drifted_from_the_recorded_digest_is_refused(tmp_path: Path) -> None:
+    """Both records the preparation sealed have to agree before a pack is built.
+
+    A receipt edited after preparation no longer hashes to the digest the cell
+    recorded, and a sealed ``{arm}.txt`` edited on its own no longer matches the
+    receipt beside it. Either drift means the bytes are not the prepared bytes.
+    """
+    output = tmp_path / "out"
+    preparation = write_preparation(output)
+    cell = next(cell for cell in preparation["cells"] if cell["arm"] == "native")
+    assert probe._memory_bytes(output, cell) == f"{MEMORY_TEXT}{TASKS[0]}\n".encode()
+
+    receipt_path = output / cell["receipt_path"]
+    sealed = json.loads(receipt_path.read_bytes())
+    sealed["memory"] = "drifted memory\n"
+    receipt_path.write_text(json.dumps(sealed, sort_keys=True))
+    with pytest.raises(ManifestError, match="not the digest the preparation recorded"):
+        probe._memory_bytes(output, cell)
+
+    other = tmp_path / "second"
+    second = write_preparation(other)
+    drifted = next(cell for cell in second["cells"] if cell["arm"] == "native")
+    (other / drifted["memory_path"]).write_bytes(b"drifted bytes\n")
+    with pytest.raises(ManifestError, match="sealed memory bytes disagree"):
+        probe._memory_bytes(other, drifted)
 
 
 # ---------------------------------------------------------------------------
@@ -499,6 +534,23 @@ def test_the_cli_refuses_an_unknown_arm_or_task_before_reading_anything(tmp_path
         probe.main(cli(tmp_path, output=tmp_path / "task-out", extra=["--task-ids", "not-a-task"]))
 
 
+def test_a_refused_argument_leaves_no_output_directory_behind(tmp_path: Path) -> None:
+    """The retry has to fail on the typo, not on the directory the typo made.
+
+    ``cli`` points ``--tokenizer-assets`` at a path that does not exist, so the
+    second case reaches the assets check with every coordinate already good.
+    """
+    task_out = tmp_path / "task-out"
+    with pytest.raises(ManifestError, match="outside the material catalog"):
+        probe.main(cli(tmp_path, output=task_out, extra=["--task-ids", "not-a-task"]))
+    assert not task_out.exists()
+
+    assets_out = tmp_path / "assets-out"
+    with pytest.raises(ManifestError, match="tokenizer assets are not a directory"):
+        probe.main(cli(tmp_path, output=assets_out, extra=["--task-ids", TASKS[0]]))
+    assert not assets_out.exists()
+
+
 def test_the_parser_defaults_to_all_four_arms_at_checkpoint_one(tmp_path: Path) -> None:
     args = probe.build_parser().parse_args(
         cli(tmp_path, output=tmp_path / "out", extra=["--task-ids", *TASKS])
@@ -544,3 +596,105 @@ def test_the_probe_refuses_a_repeated_task_or_an_unknown_checkpoint(tmp_path: Pa
     assert probe._validated(checkpoint=1, tasks=list(TASKS), arms=list(ARMS), tasks_root=root) == {
         task: f"transfer-{task}" for task in TASKS
     }
+
+
+# ---------------------------------------------------------------------------
+# The checkpoint-0 raw-original-only gate
+# ---------------------------------------------------------------------------
+
+CONTENT_SHA256 = "c" * 64
+CATALOG_SHA256 = "d" * 64
+
+
+class FakeCatalog:
+    """A qualified catalog of the study's size, agreeing with the schedule."""
+
+    def __init__(self) -> None:
+        self.rows = {f"source-{index}": {} for index in range(contract.SOURCE_COUNT)}
+        self.organization_id = contract.ORGANIZATION_ID
+        self.catalog_sha256 = CATALOG_SHA256
+        self.catalog_content_sha256 = CONTENT_SHA256
+
+
+class FakeNatives:
+    """Stand in for ``NativeCheckpoints``: one canned universe, no database."""
+
+    def __init__(self, inventory: tuple[dict, dict], **kwargs: Any) -> None:
+        self.items, self.receipt = inventory
+        self.kwargs = kwargs
+
+    async def produce(self, checkpoint: int) -> tuple[dict, dict]:
+        del checkpoint
+        return self.items, self.receipt
+
+    def verify(self, *args: Any, **kwargs: Any) -> dict:
+        return {}
+
+
+def consolidated_inventory() -> tuple[dict, dict]:
+    """A post-cycle universe: the cycle's publications beside a raw original."""
+    items = {
+        '["raw_memory","raw_memory:0"]': {"content_sha256": "a" * 64},
+        '["node","entity-1"]': {"content_sha256": "b" * 64},
+    }
+    return items, {
+        "schema": "sibyl-authorized-native-inventory-v1",
+        "authorized_count": len(items),
+        "source_counts": {"entity": 1, "episode": 0, "relationship": 0, "raw_capture": 1},
+        "provenance": {
+            '["raw_memory","raw_memory:0"]': {"kind": "raw_capture"},
+            '["node","entity-1"]': {"kind": "graph_entity"},
+        },
+        "excluded": {},
+    }
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_zero_refuses_a_derived_native_inventory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The gate lives in ``_prepare``, reached here through ``prepare_packs``.
+
+    ``_prepare`` is not unit-tested on its own in this file, so the smallest
+    seam that reaches the gate is its caller with the database owners faked: the
+    catalog, the runtime and the native universe. Nothing past the gate is
+    reached, so no tokenizer, summary library or adapter is needed.
+    """
+    inventory = consolidated_inventory()
+
+    async def noop() -> None:
+        return None
+
+    async def bootstrapped(group_id: str) -> bool:
+        del group_id
+        return True
+
+    async def qualify(*, group_id: str, principal_id: str) -> tuple[Any, dict, Any, Any]:
+        del group_id, principal_id
+        return FakeCatalog(), {"status": "qualified"}, "authority", lambda: {"owner": "fake"}
+
+    monkeypatch.setattr(cycle, "bootstrap_runtime", noop)
+    monkeypatch.setattr(cycle, "shutdown_runtime", noop)
+    monkeypatch.setattr(checkpoints, "ensure_graph_schema", bootstrapped)
+    monkeypatch.setattr(checkpoints, "qualify_catalog", qualify)
+    monkeypatch.setattr(checkpoints, "schedule_catalog_sha256", lambda: CATALOG_SHA256)
+    monkeypatch.setattr(checkpoints, "schedule_catalog_content_sha256", lambda: CONTENT_SHA256)
+    monkeypatch.setattr(probe, "NativeCheckpoints", lambda **kwargs: FakeNatives(inventory))
+    output = tmp_path / "cp0"
+
+    with pytest.raises(ManifestError, match="raw originals only"):
+        await probe.prepare_packs(
+            checkpoint=0,
+            tasks=[TASKS[0]],
+            arms=list(ARMS),
+            output=output,
+            tokenizer_assets=tmp_path / "tokenizer",
+            tasks_root=write_material(tmp_path / "material"),
+        )
+
+    sealed = json.loads((output / probe.PREPARATION_NAME).read_bytes())
+    assert sealed["status"] == checkpoints.STATUS_DERIVED_AT_ZERO
+    assert sealed["native_inventory"]["derived_items"] == ['["node","entity-1"]']
+    assert sealed["native_inventory"]["raw_original_only"] is False
+    assert sealed["cells"] == []
+    assert (output / checkpoints.INVENTORY_NAME).is_file()

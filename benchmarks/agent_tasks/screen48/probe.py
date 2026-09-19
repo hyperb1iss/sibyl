@@ -241,7 +241,14 @@ async def prepare_packs(
                 receipt["errors"].append(f"shutdown:{type(exc).__name__}: {exc}")
     except Exception as exc:
         receipt["errors"].append(f"{type(exc).__name__}: {exc}")
-        receipt["status"] = checkpoints.STATUS_ERROR
+        # A gate that named the refusal keeps its status; only an unnamed
+        # failure is recorded as a plain error.
+        if receipt["status"] in {
+            checkpoints.STATUS_RUNNING,
+            checkpoints.STATUS_PREPARED,
+            checkpoints.STATUS_PARTIAL,
+        }:
+            receipt["status"] = checkpoints.STATUS_ERROR
         raise
     finally:
         receipt["finished_at"] = _now()
@@ -302,6 +309,18 @@ async def _prepare(
             "items": items,
         },
     )
+    # The checkpoint phase's gate, mirrored: checkpoint 0 is the state before
+    # one consolidation cycle, so a derived item in the authorized universe
+    # means the database is past it and no arm here would carry cp0 bytes.
+    if checkpoint == 0 and not shape["raw_original_only"]:
+        receipt["status"] = checkpoints.STATUS_DERIVED_AT_ZERO
+        raise ManifestError(
+            "checkpoint 0 is the state before one consolidation cycle, so the native "
+            "inventory must hold retained raw originals only; this organization already "
+            f"holds derived items (snapshot {shape['derived_source_counts']}, "
+            f"{len(shape['derived_items'])} authorized non-raw items)"
+        )
+
     counter = checkpoints.build_counter(tokenizer_assets)
     receipt["tokenizer"] = {
         **counter.tokenizer_receipt(),
@@ -379,7 +398,11 @@ def _memory_bytes(output: Path, cell: dict[str, Any]) -> bytes:
 
     The bytes handed to the solver are the bytes on disk, read back by the path
     the preparation recorded, so the manifest cites what was sealed rather than
-    whatever a caller still holds in memory.
+    whatever a caller still holds in memory. Reading them is not enough on its
+    own: the preparation recorded a digest for this cell and sealed the same
+    bytes beside the receipt, so both are compared here. A receipt edited after
+    preparation, or a memory file that drifted from the receipt beside it, is
+    refused rather than packed under the cell's recorded digest.
     """
     receipt = strict_json((output / cell["receipt_path"]).read_bytes())
     if not isinstance(receipt, dict):
@@ -392,7 +415,16 @@ def _memory_bytes(output: Path, cell: dict[str, Any]) -> bytes:
         raise ManifestError(f"prepared pack has no memory text: {cell['receipt_path']}")
     if cell["arm"] == NO_MEMORY_ARM and memory != "":
         raise ManifestError(f"the no-memory arm carries memory: {cell['receipt_path']}")
-    return memory.encode()
+    encoded = memory.encode()
+    if contract.sha(encoded) != cell["memory_sha256"]:
+        raise ManifestError(
+            "pack receipt memory is not the digest the preparation recorded: "
+            f"{cell['receipt_path']}"
+        )
+    sealed = cell.get("memory_path")
+    if sealed and (output / sealed).read_bytes() != encoded:
+        raise ManifestError(f"sealed memory bytes disagree with their receipt: {sealed}")
+    return encoded
 
 
 def _emit_manifest(
@@ -689,13 +721,26 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     template = strict_json(args.template.read_bytes())
-    output = Path(args.output).absolute()
-    if output.exists() or output.is_symlink():
-        raise ManifestError("probe output already exists")
     materialize.validate_template(template)
     # The credential is confirmed before the database is touched, let alone the
     # provider: only the variable's name is read here, never its value.
     headroom._check_credentials(template, args.api_key_env)
+    # Every argument that can be adjudicated on its own is adjudicated before
+    # the output directory exists. A typo'd task ID or an absent tokenizer path
+    # would otherwise leave a directory behind, and the retry would die on
+    # "probe output already exists", which names the wrong problem.
+    _validated(
+        checkpoint=args.checkpoint,
+        tasks=list(args.task_ids),
+        arms=list(args.arms),
+        tasks_root=args.tasks_root,
+    )
+    output = Path(args.output).absolute()
+    if output.exists() or output.is_symlink():
+        raise ManifestError("probe output already exists")
+    tokenizer_assets = Path(args.tokenizer_assets)
+    if not tokenizer_assets.is_dir():
+        raise ManifestError(f"tokenizer assets are not a directory: {tokenizer_assets}")
     output.mkdir(mode=0o700, parents=True)
     preparation = asyncio.run(
         prepare_packs(
@@ -703,7 +748,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             tasks=list(args.task_ids),
             arms=list(args.arms),
             output=output,
-            tokenizer_assets=args.tokenizer_assets,
+            tokenizer_assets=tokenizer_assets,
             tasks_root=args.tasks_root,
         )
     )
