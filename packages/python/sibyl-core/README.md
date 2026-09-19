@@ -183,9 +183,9 @@ The adapter uses OpenRouter's dedicated alpha Decisions endpoint, with the TypeS
 no alternate routes, and explicit privacy routing requirements. It expects the canonical response
 model `typesafe/jev-1.13-20260917`. Qualify the implemented adapter with synthetic input and verify
 account terms before enrolling real source data. Routing parameters do not establish vendor
-retention compliance. The route's 32,000-token context limit is enforced by the provider; its
-catalog exposes no tokenizer or request token-budget parameter. Oversized input produces an
-unavailable observation rather than truncated evidence.
+retention compliance. The route advertises a 32,000-token context limit; its catalog exposes no
+tokenizer or request token-budget parameter. The adapter never truncates evidence. Provider input
+errors produce an unavailable observation; exact capacity behavior needs live qualification.
 
 An enabled shadow call runs concurrently with the critic and is joined before the stage returns.
 The adapter has a 30-second total deadline; a slow call can therefore add stage latency. Provider
