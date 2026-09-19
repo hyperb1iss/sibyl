@@ -428,6 +428,16 @@ def test_rows_and_lift_follow_the_measured_rates(
     monkeypatch.setattr(runner, "run_task", FakeRunner(outcomes))
     output = tmp_path / "out"
 
+    binding = {
+        "path": str(tmp_path / "headroom.json"),
+        "sha256": "e" * 64,
+        "bands": probe.bound_bands(
+            headroom_report(
+                [headroom_row(task, 0, headroom.MINIMUM_REPETITIONS) for task in TASKS]
+            ),
+            list(TASKS),
+        ),
+    }
     report = probe.run_cells(
         preparation=write_preparation(output),
         template=write_template(tmp_path / "artifacts"),
@@ -435,8 +445,12 @@ def test_rows_and_lift_follow_the_measured_rates(
         output=output,
         repetitions=REPETITIONS,
         workers=3,
+        headroom_binding=binding,
     )
 
+    # The screen report the probe was bound to travels with the probe report.
+    assert report["headroom"] == binding
+    assert report["headroom"]["bands"][TASKS[0]]["headroom_band"] == headroom.FLOOR
     rows = {(row["task"], row["arm"]): row for row in report["rows"]}
     assert len(rows) == len(TASKS) * len(ARMS)
     assert rows[(TASKS[0], "native")]["passes"] == PER_ROW_CELLS
@@ -496,6 +510,46 @@ def test_run_cells_refuses_a_repetition_or_worker_count_below_one(tmp_path: Path
 # ---------------------------------------------------------------------------
 
 
+def headroom_row(task: str, passes: int, known: int, **overrides: Any) -> dict[str, Any]:
+    """One task row in the shape the interval-banded screen writes."""
+    row = {
+        "task": task,
+        "family_id": f"transfer-{task}",
+        "repetitions": known,
+        "passes": passes,
+        "failures": known - passes,
+        "unknown": 0,
+        "known": known,
+        "minimum_repetitions": headroom.MINIMUM_REPETITIONS,
+        "pass_rate": round(passes / known, 6) if known else None,
+        "interval": headroom.wilson_interval(passes, known),
+        "headroom_band": headroom.band(passes, known),
+    }
+    row.update(overrides)
+    return row
+
+
+def headroom_report(rows: list[dict[str, Any]], **overrides: Any) -> dict[str, Any]:
+    report = {
+        "schema": headroom.SCHEMA,
+        "minimum_repetitions": headroom.MINIMUM_REPETITIONS,
+        "tasks": rows,
+    }
+    report.update(overrides)
+    return report
+
+
+def write_headroom(tmp_path: Path, report: dict[str, Any] | None = None) -> Path:
+    """A screen report that measured every fixture task at the minimum, all floor."""
+    if report is None:
+        report = headroom_report(
+            [headroom_row(task, 0, headroom.MINIMUM_REPETITIONS) for task in TASKS]
+        )
+    path = tmp_path / "headroom.json"
+    path.write_text(json.dumps(report, sort_keys=True))
+    return path
+
+
 def cli(tmp_path: Path, *, output: Path, extra: list[str]) -> list[str]:
     """The flags every CLI case shares, with the template written to disk."""
     template = write_template(tmp_path / "artifacts")
@@ -508,6 +562,8 @@ def cli(tmp_path: Path, *, output: Path, extra: list[str]) -> list[str]:
         str(path),
         "--tokenizer-assets",
         str(tmp_path / "tokenizer"),
+        "--headroom",
+        str(write_headroom(tmp_path)),
         "--output",
         str(output),
         *extra,
@@ -561,6 +617,7 @@ def test_the_parser_defaults_to_all_four_arms_at_checkpoint_one(tmp_path: Path) 
     assert args.workers == probe.DEFAULT_WORKERS
     assert args.api_key_env == "OPENROUTER_API_KEY"
     assert args.task_ids == list(TASKS)
+    assert args.headroom == tmp_path / "headroom.json"
 
 
 def test_the_devbox_phase_hands_its_own_flags_and_output_to_the_probe(
@@ -581,6 +638,115 @@ def test_the_devbox_phase_hands_its_own_flags_and_output_to_the_probe(
     assert seen == [["--task-ids", TASKS[0], "--output", str(output)]]
     # The probe reads the live database for its packs, so the phase keeps it.
     assert "probe" not in run_phase.NO_DATABASE_PHASES
+
+
+def test_the_probe_binds_every_task_to_a_band_measured_at_the_minimum() -> None:
+    five = headroom.MINIMUM_REPETITIONS
+    tasks = [*TASKS, "delta-task"]
+    report = headroom_report(
+        [
+            headroom_row(tasks[0], 0, five),
+            headroom_row(tasks[1], 3, five, unknown=2, repetitions=five + 2),
+            headroom_row(tasks[2], five, five),
+        ]
+    )
+    bound = probe.bound_bands(report, tasks)
+    assert list(bound) == tasks
+    assert bound[tasks[0]]["headroom_band"] == headroom.FLOOR
+    assert bound[tasks[1]]["known"] == five
+    assert bound[tasks[2]]["headroom_band"] == headroom.UNDETERMINED
+    assert set(bound[tasks[0]]) == set(headroom.BAND_FIELDS)
+    assert bound[tasks[0]]["interval"] == headroom.wilson_interval(0, five)
+
+
+def test_the_probe_refuses_a_band_from_fewer_than_the_minimum_repetitions() -> None:
+    """The first probe was built on 0/2. It must not be possible to do that again."""
+    five = headroom.MINIMUM_REPETITIONS
+    two_reps = headroom_report([headroom_row(TASKS[0], 0, 2), headroom_row(TASKS[1], 0, five)])
+    with pytest.raises(ManifestError, match=rf"task {TASKS[0]} was banded from 2 known outcomes"):
+        probe.bound_bands(two_reps, [TASKS[1], TASKS[0]])
+    # Five repetitions run is not five known outcomes: controller failures
+    # produced no outcome and do not count toward the minimum.
+    broken = headroom_report(
+        [headroom_row(TASKS[0], 0, four := five - 1, unknown=1, repetitions=five)]
+    )
+    with pytest.raises(ManifestError, match=f"from {four} known outcomes"):
+        probe.bound_bands(broken, [TASKS[0]])
+    assert probe.bound_bands(two_reps, [TASKS[1]])[TASKS[1]]["known"] == five
+
+
+def test_the_probe_refuses_a_report_without_interval_bands() -> None:
+    five = headroom.MINIMUM_REPETITIONS
+    point_banded = headroom_report(
+        [headroom_row(TASKS[0], 0, five)], schema="sibyl-screen48-headroom-v1"
+    )
+    with pytest.raises(ManifestError, match="bands without an interval are not bands"):
+        probe.bound_bands(point_banded, [TASKS[0]])
+    row = headroom_row(TASKS[0], 0, five)
+    del row["interval"]
+    del row["known"]
+    with pytest.raises(ManifestError, match=r"lacks \['known', 'interval'\]"):
+        probe.bound_bands(headroom_report([row]), [TASKS[0]])
+    with pytest.raises(ManifestError, match="different minimum repetition count"):
+        probe.bound_bands(
+            headroom_report([headroom_row(TASKS[0], 0, five)], minimum_repetitions=2),
+            [TASKS[0]],
+        )
+    with pytest.raises(ManifestError, match=f"task {TASKS[1]} is not in the headroom report"):
+        probe.bound_bands(headroom_report([headroom_row(TASKS[0], 0, five)]), [TASKS[1]])
+    with pytest.raises(ManifestError, match="band 'lifted' does not match its counts: floor"):
+        probe.bound_bands(
+            headroom_report([headroom_row(TASKS[0], 0, five, headroom_band="lifted")]),
+            [TASKS[0]],
+        )
+    with pytest.raises(ManifestError, match="names no tasks"):
+        probe.bound_bands(headroom_report([], tasks=None), [TASKS[0]])
+
+
+def test_the_probe_recomputes_a_hand_edited_row_instead_of_trusting_it() -> None:
+    five = headroom.MINIMUM_REPETITIONS
+    honest = headroom_row(TASKS[0], 0, five)
+    assert probe.bound_bands(headroom_report([honest]), [TASKS[0]])[TASKS[0]] == {
+        field: honest[field] for field in headroom.BAND_FIELDS
+    }
+    # A band promoted by hand while the counts still say floor.
+    with pytest.raises(ManifestError, match=f"task {TASKS[0]} band 'headroom' does not match"):
+        probe.bound_bands(
+            headroom_report([headroom_row(TASKS[0], 0, five, headroom_band="headroom")]),
+            [TASKS[0]],
+        )
+    # Counts inflated to clear the minimum without the failures to back them.
+    with pytest.raises(ManifestError, match=f"task {TASKS[0]} counts do not add up"):
+        probe.bound_bands(
+            headroom_report([headroom_row(TASKS[0], 0, five, failures=2)]), [TASKS[0]]
+        )
+    with pytest.raises(ManifestError, match="pass rate does not match"):
+        probe.bound_bands(
+            headroom_report([headroom_row(TASKS[0], 0, five, pass_rate=0.4)]), [TASKS[0]]
+        )
+    with pytest.raises(ManifestError, match="interval does not match"):
+        probe.bound_bands(
+            headroom_report(
+                [headroom_row(TASKS[0], 0, five, interval=headroom.wilson_interval(3, five))]
+            ),
+            [TASKS[0]],
+        )
+    typed = headroom_row(TASKS[0], 0, five)
+    typed["passes"] = "0"
+    with pytest.raises(ManifestError, match="counts do not add up"):
+        probe.bound_bands(headroom_report([typed]), [TASKS[0]])
+
+
+def test_the_cli_refuses_an_under_repeated_band_before_making_any_directory(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "out"
+    report = headroom_report([headroom_row(task, 0, 2) for task in TASKS])
+    argv = cli(tmp_path, output=output, extra=["--task-ids", TASKS[0]])
+    argv[argv.index("--headroom") + 1] = str(write_headroom(tmp_path, report))
+    with pytest.raises(ManifestError, match="was banded from 2 known outcomes"):
+        probe.main(argv)
+    assert not output.exists()
 
 
 def test_the_probe_refuses_a_repeated_task_or_an_unknown_checkpoint(tmp_path: Path) -> None:

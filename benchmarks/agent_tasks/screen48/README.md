@@ -15,8 +15,11 @@ Layout:
 - `checkpoints.py`: native inventory snapshots and pack preparation per checkpoint.
 - `materialize.py`: one-task-per-checkpoint manifests over `benchmarks.agent_tasks.manifest`.
 - `launcher.py`: 48-row executor with atomic claim and per-cell receipts.
-- `headroom.py`: no-memory screen over the rest of the catalogued material.
-- `probe.py`: floor probe, every arm of a catalogued task at one checkpoint.
+- `headroom.py`: no-memory screen over the rest of the catalogued material, banded from a Wilson
+  interval over at least `MINIMUM_REPETITIONS` (5) known outcomes per task; a default run asks for
+  `DEFAULT_REPETITIONS` (10), the first count at which headroom is reachable.
+- `probe.py`: floor probe, every arm of a catalogued task at one checkpoint, bound to a `headroom.json`
+  that measured that task at the minimum repetitions.
 - `observation.py`: the observation-only report over the 48-row schedule.
 - `devbox/`: staging, preflight and phase runners for the eval host.
 

@@ -30,6 +30,12 @@ HALF = 0.5
 FAILED_ELAPSED_SECONDS = 3.0
 MIXED_MEAN_ELAPSED = 7.75
 PER_TASK_CELLS = 2
+FIVE = headroom.MINIMUM_REPETITIONS
+TEN = 10
+#: Wilson 95% bounds at n=5, to six places, checked against a hand calculation.
+WILSON_0_OF_5_UPPER = 0.434482
+WILSON_3_OF_5 = (0.230724, 0.882379)
+WILSON_5_OF_5_LOWER = 0.565518
 ORACLE = json.dumps(
     {
         "schema_version": "sibyl-json-cli-cases-v1",
@@ -240,8 +246,13 @@ def test_a_raising_runner_becomes_one_bad_cell_not_a_dead_sweep(
     )
     rows = {row["task"]: row for row in report["tasks"]}
     assert rows[TASKS[2]]["unknown"] == PER_TASK_CELLS
-    assert rows[TASKS[2]]["pass_rate"] == 0.0
-    assert rows[TASKS[2]]["headroom_band"] == headroom.FLOOR
+    # Nothing is known about a task whose every cell broke before the checker:
+    # no rate, no interval, no band.
+    assert rows[TASKS[2]]["known"] == 0
+    assert rows[TASKS[2]]["pass_rate"] is None
+    assert rows[TASKS[2]]["interval"] is None
+    assert rows[TASKS[2]]["point_band"] is None
+    assert rows[TASKS[2]]["headroom_band"] == headroom.UNDETERMINED
     assert rows[TASKS[0]]["passes"] == PER_TASK_CELLS
     assert rows[TASKS[1]]["passes"] == 1
     broken = [cell for cell in report["cells"] if cell["task"] == TASKS[2]]
@@ -252,17 +263,77 @@ def test_a_raising_runner_becomes_one_bad_cell_not_a_dead_sweep(
         "passes": 3,
         "failures": 1,
         "unknown": 2,
-        "pass_rate": 0.5,
+        "known": 4,
+        "pass_rate": 0.75,
     }
 
 
-def test_bands_split_at_the_declared_thresholds() -> None:
-    assert headroom.band(1.0) == headroom.SATURATED
-    assert headroom.band(headroom.SATURATED_AT) == headroom.SATURATED
-    assert headroom.band(headroom.SATURATED_AT - 0.01) == headroom.HEADROOM
-    assert headroom.band(headroom.FLOOR_BELOW) == headroom.HEADROOM
-    assert headroom.band(headroom.FLOOR_BELOW - 0.01) == headroom.FLOOR
-    assert headroom.band(0.0) == headroom.FLOOR
+def test_point_bands_split_at_the_declared_thresholds() -> None:
+    assert headroom.point_band(1.0) == headroom.SATURATED
+    assert headroom.point_band(headroom.SATURATED_AT) == headroom.SATURATED
+    assert headroom.point_band(headroom.SATURATED_AT - 0.01) == headroom.HEADROOM
+    assert headroom.point_band(headroom.FLOOR_BELOW) == headroom.HEADROOM
+    assert headroom.point_band(headroom.FLOOR_BELOW - 0.01) == headroom.FLOOR
+    assert headroom.point_band(0.0) == headroom.FLOOR
+
+
+def test_the_wilson_interval_matches_the_hand_calculation() -> None:
+    assert headroom.wilson_interval(0, 0) is None
+    zero = headroom.wilson_interval(0, FIVE)
+    assert zero is not None
+    assert (zero["lower"], zero["upper"]) == (0.0, WILSON_0_OF_5_UPPER)
+    assert zero["method"] == "wilson"
+    assert zero["confidence"] == headroom.CONFIDENCE
+    three = headroom.wilson_interval(3, FIVE)
+    assert three is not None
+    assert (three["lower"], three["upper"]) == WILSON_3_OF_5
+    full = headroom.wilson_interval(FIVE, FIVE)
+    assert full is not None
+    assert (full["lower"], full["upper"]) == (WILSON_5_OF_5_LOWER, 1.0)
+    # Symmetric around one half, and narrowing as trials accumulate.
+    lower = headroom.wilson_interval(5, 10)
+    upper = headroom.wilson_interval(50, 100)
+    assert lower is not None
+    assert upper is not None
+    assert lower["lower"] == round(1 - lower["upper"], 6)
+    assert upper["upper"] - upper["lower"] < lower["upper"] - lower["lower"]
+    with pytest.raises(ManifestError, match="impossible outcome count"):
+        headroom.wilson_interval(6, FIVE)
+    with pytest.raises(ManifestError, match="impossible outcome count"):
+        headroom.wilson_interval(-1, FIVE)
+
+
+def test_no_band_is_assigned_below_the_minimum_repetitions() -> None:
+    """The coin flip that started this: 0/2 is not a floor, it is unmeasured."""
+    for known in range(FIVE):
+        for passes in range(known + 1):
+            assert headroom.band(passes, known) == headroom.UNDETERMINED
+
+
+def test_bands_are_read_from_the_interval_not_the_rate() -> None:
+    # 0/5 excludes saturation but not the floor: floor. 3/5 is a 60% point rate
+    # the old rule called headroom, but its interval reaches down to 0.23 and
+    # up to 0.88, so it is floor too: the solver does not pass reliably and
+    # the floor cannot be excluded.
+    assert headroom.band(0, FIVE) == headroom.FLOOR
+    assert headroom.band(3, FIVE) == headroom.FLOOR
+    assert headroom.point_band(3 / FIVE) == headroom.HEADROOM
+    # 4/5 and 5/5 reach 0.96 and 1.0: saturation is not excluded, and the
+    # lower bound is nowhere near 0.9, so neither is anything else.
+    assert headroom.band(4, FIVE) == headroom.UNDETERMINED
+    assert headroom.band(FIVE, FIVE) == headroom.UNDETERMINED
+    assert headroom.point_band(1.0) == headroom.SATURATED
+    # Headroom needs the interval clear of both thresholds: 6/10 sits at
+    # [0.31, 0.83]. Saturated needs the whole interval above 0.9, which
+    # thirty-five straight passes is the first count to reach.
+    assert headroom.band(6, 10) == headroom.HEADROOM
+    assert headroom.band(7, 10) == headroom.HEADROOM
+    assert headroom.band(8, 10) == headroom.UNDETERMINED
+    assert headroom.band(5, 10) == headroom.FLOOR
+    assert headroom.band(30, 30) == headroom.UNDETERMINED
+    assert headroom.band(35, 35) == headroom.SATURATED
+    assert headroom.band(0, 10) == headroom.FLOOR
+    assert headroom.band(9, 10) == headroom.UNDETERMINED
 
 
 def test_bands_and_cost_follow_the_measured_rates(
@@ -271,31 +342,87 @@ def test_bands_and_cost_follow_the_measured_rates(
     report, _ = run_screen(
         tmp_path,
         monkeypatch,
-        outcomes={TASKS[0]: [True, True], TASKS[1]: [True, False], TASKS[2]: [False, None]},
+        outcomes={
+            TASKS[0]: [True] * FIVE,
+            TASKS[1]: [True, False, True, False, True, False],
+            TASKS[2]: [False] * FIVE + [None],
+        },
+        repetitions=FIVE + 1,
     )
     rows = {row["task"]: row for row in report["tasks"]}
-    assert rows[TASKS[0]]["headroom_band"] == headroom.SATURATED
-    assert rows[TASKS[1]]["headroom_band"] == headroom.HEADROOM
+    assert rows[TASKS[0]]["headroom_band"] == headroom.UNDETERMINED
+    assert rows[TASKS[0]]["point_band"] == headroom.SATURATED
+    assert rows[TASKS[1]]["headroom_band"] == headroom.FLOOR
+    assert rows[TASKS[1]]["point_band"] == headroom.HEADROOM
     assert rows[TASKS[2]]["headroom_band"] == headroom.FLOOR
+    assert rows[TASKS[2]]["point_band"] == headroom.FLOOR
     assert report["bands"] == {
-        headroom.SATURATED: [TASKS[0]],
-        headroom.HEADROOM: [TASKS[1]],
-        headroom.FLOOR: [TASKS[2]],
+        headroom.SATURATED: [],
+        headroom.HEADROOM: [],
+        headroom.FLOOR: [TASKS[1], TASKS[2]],
+        headroom.UNDETERMINED: [TASKS[0]],
     }
+    assert report["schema"] == "sibyl-screen48-headroom-v2"
+    assert report["minimum_repetitions"] == FIVE
+    assert report["interval"] == {"method": "wilson", "confidence": headroom.CONFIDENCE}
     assert rows[TASKS[1]]["pass_rate"] == HALF
+    assert rows[TASKS[1]]["repetitions"] == FIVE + 1
+    assert rows[TASKS[1]]["known"] == FIVE + 1
+    assert rows[TASKS[1]]["minimum_repetitions"] == FIVE
+    assert rows[TASKS[1]]["interval"] == headroom.wilson_interval(3, FIVE + 1)
+    for field in headroom.BAND_FIELDS:
+        assert field in rows[TASKS[1]]
+    # The controller failure is a repetition that produced no outcome: it is
+    # counted, but it is outside the rate and the interval.
     assert rows[TASKS[2]]["unknown"] == 1
+    assert rows[TASKS[2]]["repetitions"] == FIVE + 1
+    assert rows[TASKS[2]]["known"] == FIVE
+    assert rows[TASKS[2]]["pass_rate"] == 0.0
+    assert rows[TASKS[2]]["interval"] == headroom.wilson_interval(0, FIVE)
     # A controller failure reports no usage, so it stays outside the usage
     # means, but it did take wall time and that time is still averaged in.
     assert rows[TASKS[2]]["mean_tool_calls"] == CELL_TOOL_CALLS
     assert rows[TASKS[2]]["mean_cost_usd"] == CELL_COST_USD
-    assert rows[TASKS[2]]["mean_elapsed_seconds"] == MIXED_MEAN_ELAPSED
-    assert report["total_cost_usd"] == pytest.approx(0.1)
+    assert rows[TASKS[2]]["mean_elapsed_seconds"] == pytest.approx(
+        (FIVE * CELL_ELAPSED_SECONDS + FAILED_ELAPSED_SECONDS) / (FIVE + 1)
+    )
+    assert report["total_cost_usd"] == pytest.approx(CELL_COST_USD * (3 * FIVE + 1))
     assert report["memory_established"] is False
     assert report["learning_benefit_established"] is False
     assert json.loads((Path(report["root"]) / "headroom.json").read_bytes()) == report
     rendered = headroom.table(report)
     assert TASKS[0] in rendered
-    assert f"{headroom.SATURATED}: {TASKS[0]}" in rendered
+    assert f"{headroom.UNDETERMINED}: {TASKS[0]}" in rendered
+    assert f"{headroom.FLOOR}: {TASKS[1]}, {TASKS[2]}" in rendered
+    assert f"{headroom.SATURATED}: none" in rendered
+    assert f"at least {FIVE} known outcomes" in rendered
+    assert "0.00-0.43" in rendered
+
+
+def test_the_cli_defaults_to_ten_repetitions_where_headroom_is_reachable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert headroom.DEFAULT_REPETITIONS == TEN
+    assert headroom.DEFAULT_REPETITIONS >= headroom.MINIMUM_REPETITIONS
+    fake = FakeRunner({task: [True] * TEN for task in TASKS})
+    monkeypatch.setattr(runner, "run_task", fake)
+    template = write_template(tmp_path / "artifacts")
+    path = tmp_path / "template.json"
+    path.write_text(json.dumps(template, sort_keys=True))
+    exit_code = headroom.main(
+        [
+            "--tasks-root",
+            str(write_material(tmp_path / "material")),
+            "--template",
+            str(path),
+            "--output",
+            str(tmp_path / "out"),
+            "--workers",
+            "2",
+        ]
+    )
+    assert exit_code == 0
+    assert len(fake.calls) == len(TASKS) * TEN
 
 
 def test_a_task_outside_the_catalog_is_refused(

@@ -8,14 +8,23 @@ band in between is worth spending a memory arm on.
 
 So every cell here is the ``no_memory`` arm: one empty memory pack, no declared
 learning source, no database, no graph read, one solver call per repetition.
-The output classifies each task as saturated, headroom or floor and reports the
-cost of having asked. No cell establishes any learning benefit; a band is a
-statement about the task, not about memory.
+The output classifies each task as saturated, headroom, floor or undetermined
+and reports the cost of having asked. No cell establishes any learning benefit;
+a band is a statement about the task, not about memory.
+
+A band is a statement about a rate, and a rate from two repetitions is a coin
+flip: the first screen called a task floor on 0/2 and the floor probe then
+passed it 3/3 cold. So a band is assigned from a Wilson 95% interval over the
+known outcomes, never from the point rate alone, and no band at all is assigned
+from fewer than ``MINIMUM_REPETITIONS`` known outcomes. The point-rate band is
+still recorded, as ``point_band``, so a reader can see what the old rule would
+have said; it decides nothing.
 """
 
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -35,7 +44,7 @@ from benchmarks.agent_tasks.manifest import (
 from benchmarks.agent_tasks.screen48 import materialize
 from benchmarks.agent_tasks.screen48.contract import TASKS as SCREEN_TASKS
 
-SCHEMA = "sibyl-screen48-headroom-v1"
+SCHEMA = "sibyl-screen48-headroom-v2"
 #: Namespace for the emitted experiment IDs. These manifests are one-arm
 #: diagnostics, never cells of the frozen 48-cell schedule.
 NAMESPACE = "headroom"
@@ -44,11 +53,36 @@ ARM = materialize.NO_MEMORY_ARM
 CATALOG_NAME = "material-catalog.json"
 MATERIAL_ROOT = Path(__file__).resolve().parents[1] / "transfer_material"
 SATURATED, HEADROOM, FLOOR = "saturated", "headroom", "floor"
+#: Too few known outcomes to place the interval, or an interval that straddles
+#: a threshold. Not a band: a task here has not been measured yet.
+UNDETERMINED = "undetermined"
 #: A task the solver passes at or above this rate without memory has no room
 #: left to show one; below the floor it has none to show yet.
 SATURATED_AT = 0.9
 FLOOR_BELOW = 0.3
-BANDS = (SATURATED, HEADROOM, FLOOR)
+BANDS = (SATURATED, HEADROOM, FLOOR, UNDETERMINED)
+#: Known outcomes (a task pass or a task failure, never a controller failure)
+#: a task needs before any band is assigned. This is a policy floor, not a
+#: derived minimum: 0/1 already excludes saturation (upper bound 0.79). Five
+#: is where 0/5 has an upper bound of 0.43, clear of ``FLOOR_BELOW`` with
+#: margin, so a floor band means the solver was given a fair number of tries
+#: and not that one attempt happened to fail. Five cannot reach headroom or
+#: saturated at all; see ``DEFAULT_REPETITIONS``.
+MINIMUM_REPETITIONS = 5
+#: What a default run asks for. At five known outcomes only floor and
+#: undetermined are reachable (4/5 and 5/5 cannot exclude saturation). Ten is
+#: the first round count at which 6/10 and 7/10 read as headroom, so a default
+#: run can place a task in the band the memory arms are spent on. Saturated
+#: stays out of reach until 35/35; a task that passes every cold attempt at ten
+#: reads undetermined, and retiring it as saturated is a larger, separate ask.
+DEFAULT_REPETITIONS = 10
+#: Two-sided confidence of the Wilson score interval the bands are read from.
+CONFIDENCE = 0.95
+_Z = 1.959964
+INTERVAL_METHOD = "wilson"
+#: The row fields a consumer of ``headroom.json`` binds a band to. A report
+#: without them was banded by point rate and must not be read as a band.
+BAND_FIELDS = ("passes", "failures", "known", "pass_rate", "interval", "headroom_band")
 USAGE_FIELDS = ("input_tokens", "output_tokens", "tool_calls", "cost_usd")
 
 
@@ -56,11 +90,61 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def band(pass_rate: float) -> str:
-    """Classify one task by the rate it reaches with no memory."""
+def point_band(pass_rate: float) -> str:
+    """The band the point rate alone would give. Recorded, never decisive."""
     if pass_rate >= SATURATED_AT:
         return SATURATED
     if pass_rate >= FLOOR_BELOW:
+        return HEADROOM
+    return FLOOR
+
+
+def wilson_interval(passes: int, known: int) -> dict[str, Any] | None:
+    """Wilson score interval for ``passes`` of ``known`` binary outcomes.
+
+    ``None`` when nothing is known: an interval over zero trials is not [0, 1],
+    it is no interval. Bounds are rounded to six places, the report's precision.
+    """
+    if known < 0 or passes < 0 or passes > known:
+        raise ManifestError(f"impossible outcome count: {passes} of {known}")
+    if known == 0:
+        return None
+    z2 = _Z * _Z
+    rate = passes / known
+    centre = (rate + z2 / (2 * known)) / (1 + z2 / known)
+    half = _Z * math.sqrt(rate * (1 - rate) / known + z2 / (4 * known * known)) / (1 + z2 / known)
+    return {
+        "method": INTERVAL_METHOD,
+        "confidence": CONFIDENCE,
+        "lower": round(max(0.0, centre - half), 6),
+        "upper": round(min(1.0, centre + half), 6),
+    }
+
+
+def band(passes: int, known: int) -> str:
+    """Classify one task by where its interval sits, not where its rate sits.
+
+    Saturated needs the whole interval at or above ``SATURATED_AT``: the solver
+    reliably passes cold and memory has no room. Headroom needs the interval to
+    exclude both saturation and the floor. Floor needs the interval to exclude
+    saturation while it cannot exclude the floor: the solver does not pass this
+    reliably, and how often it passes at all is what the floor probe measures
+    against. Anything else, including every task under ``MINIMUM_REPETITIONS``
+    known outcomes, is undetermined: the screen could not place it. That is a
+    statement about the measurement, not about eligibility; the floor probe
+    accepts any task with enough known outcomes and lets its own rows say
+    whether an arm added anything.
+    """
+    if known < MINIMUM_REPETITIONS:
+        return UNDETERMINED
+    interval = wilson_interval(passes, known)
+    assert interval is not None
+    lower, upper = interval["lower"], interval["upper"]
+    if lower >= SATURATED_AT:
+        return SATURATED
+    if upper >= SATURATED_AT:
+        return UNDETERMINED
+    if lower >= FLOOR_BELOW:
         return HEADROOM
     return FLOOR
 
@@ -208,20 +292,27 @@ def _task_row(task_id: str, family: str, cells: list[dict[str, Any]]) -> dict[st
     passes = sum(cell["passed"] is True for cell in cells)
     failures = sum(cell["passed"] is False for cell in cells)
     unknown = sum(cell["passed"] is None for cell in cells)
-    denominator = len(cells)
-    pass_rate = round(passes / denominator, 6) if denominator else 0.0
+    known = passes + failures
+    pass_rate = round(passes / known, 6) if known else None
     costs = [float(cell["usage"]["cost_usd"]) for cell in cells if cell["usage"]["cost_usd"]]
     return {
         "task": task_id,
         "family_id": family,
-        "denominator": denominator,
+        "repetitions": len(cells),
+        "denominator": len(cells),
         "passes": passes,
         "failures": failures,
         # No task outcome at all: a controller, checker or runner failure, not a
-        # statement about the task. Reported apart from a real failure.
+        # statement about the task. Reported apart from a real failure and
+        # outside the rate: a cell that never reached the checker says nothing
+        # about whether the solver can pass the task.
         "unknown": unknown,
+        "known": known,
+        "minimum_repetitions": MINIMUM_REPETITIONS,
         "pass_rate": pass_rate,
-        "headroom_band": band(pass_rate),
+        "interval": wilson_interval(passes, known),
+        "headroom_band": band(passes, known),
+        "point_band": point_band(pass_rate) if pass_rate is not None else None,
         "mean_tool_calls": _mean(
             [
                 float(cell["usage"]["tool_calls"])
@@ -338,7 +429,7 @@ def screen(
     ]
     totals = {
         key: sum(row[key] for row in rows)
-        for key in ("denominator", "passes", "failures", "unknown")
+        for key in ("denominator", "passes", "failures", "unknown", "known")
     }
     report = {
         "schema": SCHEMA,
@@ -348,13 +439,16 @@ def screen(
         "template_sha256": digest(canonical_bytes(template)),
         "controller_model": template["controller_model"],
         "repetitions": repetitions,
+        "minimum_repetitions": MINIMUM_REPETITIONS,
+        "interval": {"method": INTERVAL_METHOD, "confidence": CONFIDENCE},
+        "thresholds": {"saturated_at": SATURATED_AT, "floor_below": FLOOR_BELOW},
         "workers": workers,
         "task_count": len(task_ids),
         "tasks": rows,
         "totals": {
             **totals,
             "pass_rate": (
-                round(totals["passes"] / totals["denominator"], 6) if totals["denominator"] else 0.0
+                round(totals["passes"] / totals["known"], 6) if totals["known"] else None
             ),
         },
         "total_cost_usd": round(sum(row["cost_usd"] for row in rows), 6),
@@ -370,21 +464,36 @@ def screen(
     return report
 
 
+def _rate(value: float | None) -> str:
+    return f"{value:>7.2f}" if value is not None else f"{'-':>7}"
+
+
+def _bounds(interval: dict[str, Any] | None) -> str:
+    if interval is None:
+        return f"{'-':>13}"
+    return f"{interval['lower']:>6.2f}-{interval['upper']:<6.2f}"
+
+
 def table(report: dict[str, Any]) -> str:
     """Render the per-task bands as one compact fixed-width table."""
-    header = f"{'task':<32}{'pass':>5}{'fail':>5}{'unk':>5}{'rate':>7}  {'band':<10}{'cost':>9}"
+    header = (
+        f"{'task':<32}{'pass':>5}{'fail':>5}{'unk':>5}{'rate':>7} {'95% wilson':<13} "
+        f"{'band':<13}{'cost':>9}"
+    )
     lines = [header, "-" * len(header)]
     for row in report["tasks"]:
         lines.append(
             f"{row['task']:<32}{row['passes']:>5}{row['failures']:>5}{row['unknown']:>5}"
-            f"{row['pass_rate']:>7.2f}  {row['headroom_band']:<10}{row['cost_usd']:>9.4f}"
+            f"{_rate(row['pass_rate'])} {_bounds(row['interval'])} "
+            f"{row['headroom_band']:<13}{row['cost_usd']:>9.4f}"
         )
     totals = report["totals"]
     lines.append("-" * len(header))
     lines.append(
         f"{'totals':<32}{totals['passes']:>5}{totals['failures']:>5}{totals['unknown']:>5}"
-        f"{totals['pass_rate']:>7.2f}  {'':<10}{report['total_cost_usd']:>9.4f}"
+        f"{_rate(totals['pass_rate'])} {'':<13} {'':<13}{report['total_cost_usd']:>9.4f}"
     )
+    lines.append(f"bands need at least {report['minimum_repetitions']} known outcomes per task")
     for name in BANDS:
         lines.append(f"{name}: {', '.join(report['bands'][name]) or 'none'}")
     return "\n".join(lines) + "\n"
@@ -395,7 +504,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tasks-root", type=Path, default=MATERIAL_ROOT)
     parser.add_argument("--task-ids", nargs="+", default=None)
     parser.add_argument("--template", required=True, type=Path)
-    parser.add_argument("--repetitions", type=int, default=2)
+    parser.add_argument("--repetitions", type=int, default=DEFAULT_REPETITIONS)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--workers", type=int, default=6)
     parser.add_argument("--api-key-env", default="OPENROUTER_API_KEY")
