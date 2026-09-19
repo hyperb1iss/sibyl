@@ -17,6 +17,7 @@ from .runner import (
     policy_action,
     replay_observation,
     run,
+    select_prompts,
     summarize,
     timestamp,
 )
@@ -39,8 +40,10 @@ def toy():
 
 
 @pytest.mark.parametrize("arm", ["direct", "decomposed"])
-def test_requests_exclude_gold_and_policy_metadata(toy, arm):
-    request = prompts.make_request([toy], arm, "toy-run")
+@pytest.mark.parametrize("version", ["v1", "v2"])
+def test_requests_exclude_gold_and_policy_metadata(toy, arm, version):
+    program = select_prompts(version)
+    request = program.make_request([toy], arm, "toy-run")
     changed = dict(
         toy,
         expected_relation="unrelated",
@@ -52,7 +55,7 @@ def test_requests_exclude_gold_and_policy_metadata(toy, arm):
         memory_effective_at=None,
         event_effective_at=None,
     )
-    assert request == prompts.make_request([changed], arm, "toy-run")
+    assert request == program.make_request([changed], arm, "toy-run")
     assert "GOLD-ONLY-RATIONALE" not in request.model_dump_json()
     assert "2026-01-01" not in request.state
 
@@ -195,3 +198,66 @@ async def test_prepare_records_all_cases_and_refuses_output_reuse(toy, tmp_path)
     assert len(list((args.out / "receipts").glob("*.json"))) == 4
     with pytest.raises(FileExistsError):
         await run(args)
+
+
+async def test_legacy_v1_manifest_replays_without_new_version_fields(toy, tmp_path):
+    cases = tmp_path / "toy.json"
+    cases.write_text(json.dumps([toy]))
+    args = argparse.Namespace(
+        cases=cases,
+        out=tmp_path / "original",
+        arms="direct",
+        batch_size=1,
+        repeats=1,
+        concurrency=1,
+        live=False,
+        replay=None,
+    )
+    await run(args)
+    manifest_path = args.out / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest.pop("prompt_version")
+    manifest.pop("prompt_dependencies_sha256")
+    manifest_path.write_text(json.dumps(manifest))
+    args.replay = args.out
+    args.out = tmp_path / "replay"
+    summary = await run(args)
+    assert summary["arms"]["direct"]["pooled"]["cases"] == 1
+    receipts = list((args.out / "receipts").glob("*.json"))
+    assert json.loads(receipts[0].read_text())["observation"]["error_category"] == "not_executed"
+
+
+@pytest.mark.parametrize(
+    "changed_field", ["prompt_version", "prompts_sha256", "prompt_dependencies_sha256"]
+)
+async def test_v2_replay_rejects_changed_prompt_program(toy, tmp_path, changed_field):
+    cases = tmp_path / "toy.json"
+    cases.write_text(json.dumps([toy]))
+    args = argparse.Namespace(
+        cases=cases,
+        out=tmp_path / "original",
+        arms="direct",
+        batch_size=1,
+        repeats=1,
+        concurrency=1,
+        live=False,
+        replay=None,
+        prompt_version="v2",
+    )
+    await run(args)
+    manifest_path = args.out / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    assert manifest["prompt_version"] == "v2"
+    assert set(manifest["prompt_dependencies_sha256"]) == {"prompts.py"}
+    changed = {
+        "prompt_version": "v1",
+        "prompts_sha256": "f" * 64,
+        "prompt_dependencies_sha256": {"prompts.py": "f" * 64},
+    }
+    manifest[changed_field] = changed[changed_field]
+    manifest_path.write_text(json.dumps(manifest))
+    args.replay = args.out
+    args.out = tmp_path / "replay"
+    with pytest.raises(ValueError, match=f"replay manifest mismatch: {changed_field}"):
+        await run(args)
+    assert not args.out.exists()

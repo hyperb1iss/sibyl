@@ -16,7 +16,9 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from importlib import import_module
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 from sibyl_core.ai.decisions import DecisionObservation, DecisionRequest, ReplayDecisionProvider
@@ -292,9 +294,36 @@ def _load_cases(path: Path) -> list[dict[str, Any]]:
     return cases
 
 
+def select_prompts(version: str) -> ModuleType:
+    """Select an explicit frozen prompt program without changing historical v1."""
+    names = {"v1": ".prompts", "v2": ".prompts_v2"}
+    if version not in names:
+        raise ValueError("unknown prompt version")
+    return import_module(names[version], package=__package__)
+
+
+def _validate_replay_manifest(current: dict[str, Any], original: dict[str, Any]) -> None:
+    if current["prompt_version"] != original.get("prompt_version", "v1"):
+        raise ValueError("replay manifest mismatch: prompt_version")
+    if current["prompt_dependencies_sha256"] != original.get("prompt_dependencies_sha256", {}):
+        raise ValueError("replay manifest mismatch: prompt_dependencies_sha256")
+    for key in (
+        "cases_sha256",
+        "prompts_sha256",
+        "arms",
+        "repeats",
+        "batch_size",
+        "route_policy_sha256",
+    ):
+        if current[key] != original[key]:
+            raise ValueError(f"replay manifest mismatch: {key}")
+
+
 def _prepare_run(
     args: argparse.Namespace,
-) -> tuple[list[dict[str, Any]], list[str], str | None, dict[str, Any], OpenRouterDecisionRoute]:
+) -> tuple[
+    list[dict[str, Any]], list[str], str | None, dict[str, Any], OpenRouterDecisionRoute, ModuleType
+]:
     cases = _load_cases(args.cases)
     arms = args.arms.split(",")
     if not arms or len(set(arms)) != len(arms) or not set(arms) <= {"direct", "decomposed"}:
@@ -309,13 +338,19 @@ def _prepare_run(
     )
     run_id = replay_manifest["run_id"] if replay_manifest else uuid.uuid4().hex
     route = OpenRouterDecisionRoute()
-    prompt_path = Path(prompts.__file__)
+    prompt_version = getattr(args, "prompt_version", "v1")
+    program = select_prompts(prompt_version)
+    prompt_path = Path(str(program.__file__))
     manifest = {
         "run_id": run_id,
         "started_at": datetime.now(UTC).isoformat(),
         "mode": "live" if args.live else "replay" if args.replay else "prepare",
         "cases_sha256": _sha(args.cases),
         "prompts_sha256": _sha(prompt_path),
+        "prompt_version": prompt_version,
+        "prompt_dependencies_sha256": {"prompts.py": _sha(Path(prompts.__file__))}
+        if prompt_version == "v2"
+        else {},
         "runner_sha256": _sha(Path(__file__)),
         "base_git_sha": _git("rev-parse", "HEAD"),
         "dirty_diff_sha256": hashlib.sha256(_git("diff", "HEAD").encode()).hexdigest(),
@@ -330,20 +365,11 @@ def _prepare_run(
         "synthetic_only": True,
     }
     if replay_manifest:
-        for key in (
-            "cases_sha256",
-            "prompts_sha256",
-            "arms",
-            "repeats",
-            "batch_size",
-            "route_policy_sha256",
-        ):
-            if manifest[key] != replay_manifest[key]:
-                raise ValueError(f"replay manifest mismatch: {key}")
+        _validate_replay_manifest(manifest, replay_manifest)
     args.out.mkdir(parents=True, exist_ok=False)
     (args.out / "receipts").mkdir()
     _write(args.out / "manifest.json", manifest)
-    return cases, arms, api_key, manifest, route
+    return cases, arms, api_key, manifest, route, program
 
 
 def _initial_rows(
@@ -376,8 +402,8 @@ def _initial_rows(
     return rows, pending_rows
 
 
-def _predict(answers: dict[str, str], index: int, arm: str) -> str:
-    relation = prompts.predict(answers, index, arm)
+def _predict(program: ModuleType, answers: dict[str, str], index: int, arm: str) -> str:
+    relation = program.predict(answers, index, arm)
     if relation not in RELATIONS:
         raise ValueError("unknown relation")
     return relation
@@ -393,6 +419,7 @@ class _Experiment:
     pending_rows: dict[tuple[str, int, str], dict[str, Any]]
     calls: list[dict[str, Any]]
     semaphore: asyncio.Semaphore
+    program: ModuleType
 
     async def batch(self, arm: str, repeat: int, offset: int) -> None:
         args, cases, run_id = self.args, self.cases, self.run_id
@@ -400,7 +427,7 @@ class _Experiment:
         pending_rows, calls = self.pending_rows, self.calls
         selected = cases[offset : offset + args.batch_size]
         key = f"{arm}-{repeat}-{offset}"
-        request = prompts.make_request(selected, arm, f"{run_id}:{key}")
+        request = self.program.make_request(selected, arm, f"{run_id}:{key}")
         async with semaphore:
             started = time.monotonic()
             if provider is not None:
@@ -464,7 +491,7 @@ class _Experiment:
             status: str = observation.execution_status
             if status == "completed":
                 try:
-                    relation = _predict(answers, index, arm)
+                    relation = _predict(self.program, answers, index, arm)
                     action = policy_action(relation, case)
                 except (KeyError, ValueError, TypeError):
                     status = "invalid_prediction"
@@ -499,7 +526,7 @@ def _finish_run(
 
 
 async def run(args: argparse.Namespace) -> dict[str, Any]:
-    cases, arms, api_key, manifest, route = await asyncio.to_thread(_prepare_run, args)
+    cases, arms, api_key, manifest, route, program = await asyncio.to_thread(_prepare_run, args)
     rows, pending_rows = _initial_rows(cases, arms, args.repeats)
     calls: list[dict[str, Any]] = []
     provider = OpenRouterDecisionProvider(api_key) if api_key else None
@@ -512,6 +539,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         pending_rows,
         calls,
         asyncio.Semaphore(args.concurrency),
+        program,
     )
     tasks = [
         asyncio.create_task(experiment.batch(arm, repeat, offset))
@@ -538,6 +566,7 @@ def main() -> None:
     parser.add_argument("--cases", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--arms", default="direct,decomposed")
+    parser.add_argument("--prompt-version", choices=("v1", "v2"), default="v1")
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--concurrency", type=int, default=8)
