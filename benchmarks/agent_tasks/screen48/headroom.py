@@ -139,18 +139,30 @@ def _outcome(receipt: dict[str, Any]) -> bool | None:
     return None
 
 
-def _run_cell(
-    task_id: str, repetition: int, *, manifest_path: Path, output: Path
+def run_cell(
+    task_id: str,
+    repetition: int,
+    *,
+    arm: str,
+    manifest_path: Path,
+    output: Path,
+    relative: str,
 ) -> dict[str, Any]:
-    """Run one repetition of one task, turning any failure into a recorded cell.
+    """Run one repetition of one arm of one task, recording whatever happened.
 
-    A raising runner is this screen's own problem, never the sweep's: the cell
-    records what broke and the remaining cells still run.
+    A raising runner is the caller's own problem, never the sweep's: the cell
+    records what broke and the remaining cells still run. ``relative`` is the
+    directory the attempt runs in, under ``output``, and the receipt is
+    recorded at that same path so a report names a file a reader can open.
+
+    The arm is a parameter because two diagnostics share this: this screen,
+    which only ever runs ``no_memory``, and the floor probe, which runs every
+    arm of one task against one another.
     """
     attempt_id = uuid4().hex
     cell: dict[str, Any] = {
         "task": task_id,
-        "arm": ARM,
+        "arm": arm,
         "repetition": repetition,
         "attempt_id": attempt_id,
         "status": "runner_error",
@@ -161,14 +173,14 @@ def _run_cell(
         "receipt": None,
         "began_at": _now(),
     }
-    cell_root = output / "cells" / task_id
-    cell_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    cell_root = output / relative
+    cell_root.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     try:
         receipt = runner.run_task(
             manifest_path,
             task_id=task_id,
-            arm_id=ARM,
-            output=cell_root / str(repetition),
+            arm_id=arm,
+            output=cell_root,
             attempt_id=attempt_id,
         )
     except Exception as exc:  # one broken cell must never end the sweep
@@ -180,7 +192,7 @@ def _run_cell(
             passed=_outcome(receipt),
             usage=_usage(receipt),
             elapsed_seconds=_elapsed(receipt),
-            receipt=f"cells/{task_id}/{repetition}/receipt.json",
+            receipt=f"{relative}/receipt.json",
             receipt_sha256=receipt.get("receipt_sha256"),
             budget_status=receipt.get("budget_status"),
         )
@@ -288,11 +300,13 @@ def screen(
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = [
             pool.submit(
-                _run_cell,
+                run_cell,
                 task_id,
                 repetition,
+                arm=ARM,
                 manifest_path=manifests[task_id],
                 output=output,
+                relative=f"cells/{task_id}/{repetition}",
             )
             for task_id in task_ids
             if task_id in manifests

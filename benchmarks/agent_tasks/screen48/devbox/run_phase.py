@@ -13,6 +13,12 @@ Redis is a hard refusal rather than an override: a stray ``SIBYL_REDIS_*``
 points the coordination backend at a broker this phase does not own, and the
 consolidation work would leave the process.
 
+Five phases are registered. ``cycle`` drives the consolidation cycle between
+the two checkpoints; ``checkpoint0`` and ``checkpoint1`` prepare the frozen
+schedule's own packs; ``probe`` prepares and runs the floor probe, a diagnostic
+over other catalogued tasks that is never a cell of that schedule; and
+``preflight`` qualifies the staging without the database.
+
 The ``preflight`` phase is the exception to all of that: it never starts the
 container and never reads the owner key. It runs every qualification a
 checkpoint runs before its first database read, so a staging mistake surfaces
@@ -154,6 +160,20 @@ def _run_cycle_phase(output: Path, extra: Sequence[str], record: dict[str, Any])
 
     del record
     return cycle.main(["--output", str(output), *extra])
+
+
+def _probe_phase(output: Path, extra: Sequence[str], record: dict[str, Any]) -> int:
+    """Run the floor probe, passing the host's own flags through.
+
+    The probe prepares its packs off the live database, so this phase needs the
+    owned container up exactly as a checkpoint phase does. What it produces is a
+    diagnostic and never a cell of the frozen schedule, which is why it has its
+    own phase rather than a flag on one of the checkpoints.
+    """
+    from benchmarks.agent_tasks.screen48 import probe
+
+    del record
+    return probe.main([*extra, "--output", str(output)])
 
 
 def _checkpoint_phase(checkpoint: int) -> PhaseRunner:
@@ -346,12 +366,14 @@ def _material_detail(checkpoints: Any, contract: Any) -> dict[str, Any]:
 
 
 #: ``--tokenizer-assets`` and ``--prior-root`` reach the checkpoint phases as
-#: unparsed extras, the same way the cycle phase receives its own flags.
+#: unparsed extras, the same way the cycle phase receives its own flags. The
+#: probe phase takes its own flags the same way, ``--task-ids`` included.
 PHASES: dict[str, PhaseRunner] = {
     "cycle": _run_cycle_phase,
     "checkpoint0": _checkpoint_phase(0),
     "checkpoint1": _checkpoint_phase(1),
     "preflight": _preflight_phase,
+    "probe": _probe_phase,
 }
 
 #: Phases that read nothing out of SurrealDB, so the owned container stays as
