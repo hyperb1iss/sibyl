@@ -580,6 +580,7 @@ def test_the_registry_knows_preflight_and_keeps_it_off_the_database() -> None:
         "cycle",
         "checkpoint0",
         "checkpoint1",
+        "probe",
     }
 
 
