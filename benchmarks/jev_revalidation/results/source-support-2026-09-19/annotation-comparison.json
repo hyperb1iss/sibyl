@@ -1,0 +1,7 @@
+{
+  "cases": 48,
+  "assertions": 80,
+  "differences": [],
+  "annotation_sha256": "11e66a501d121e3e0819269af01a59f79ea2de400350fc96d3d2477dce941d11",
+  "independence": "same-model-family; blind to gold, categories, rationales and results"
+}

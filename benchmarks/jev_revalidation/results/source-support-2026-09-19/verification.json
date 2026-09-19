@@ -1,0 +1,21 @@
+{
+  "verdict": "PASS",
+  "independence": "native same-family reviewers, separate from implementation",
+  "tests": 154,
+  "lint": "PASS",
+  "typecheck": "PASS",
+  "independent_focused_tests": 17,
+  "independent_original_receipts_checked": 256,
+  "root_spotcheck_tests": 21,
+  "raw_numerical_audit": "256 calls and 320 predictions reconciled",
+  "original_replay": "predictions.json, calls.json, summary.json byte-identical",
+  "final_runner_sha256": "42fe647e60d5424e9888d7cbb64bc3593daebc53b745d296e506b4dc65240b2f",
+  "final_tests_sha256": "f7f59327afae05bb0372993873e1d6480ada495b005067fbae7321c19465c6ba",
+  "original_live_runner_sha256": "8020c00ba15f487695961ffa5ad8761d015a52b331ef6e3ad78c66c44a37f96a",
+  "remaining_limits": [
+    "No fully supported multi-assertion candidates",
+    "Synthetic plain reflection only; no procedures, projected or long evidence",
+    "Source support is not the complete semantic critic",
+    "Confidence is uncalibrated; no decision cutoff fitted"
+  ]
+}
