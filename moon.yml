@@ -2014,3 +2014,40 @@ tasks:
       - tools/installer/**/*.py
     options:
       cache: false
+
+  jev-revalidation:
+    command: uv run --locked --package sibyl-core python -m benchmarks.jev_revalidation.runner
+    inputs:
+      - benchmarks/jev_revalidation/**/*
+      - packages/python/sibyl-core/src/sibyl_core/ai/decisions.py
+      - packages/python/sibyl-core/src/sibyl_core/ai/openrouter_decisions.py
+    options:
+      cache: false
+
+  jev-revalidation-test:
+    command: uv run --locked --package sibyl-core pytest benchmarks/jev_revalidation/test_runner.py -v
+    inputs:
+      - benchmarks/jev_revalidation/**/*
+    options:
+      cache: false
+
+  jev-revalidation-lint:
+    script: |
+      uv run --locked --package sibyl-core ruff check benchmarks/jev_revalidation
+      uv run --locked --package sibyl-core ruff format --check benchmarks/jev_revalidation
+    inputs:
+      - benchmarks/jev_revalidation/**/*
+
+  jev-revalidation-format:
+    command: uv run --locked --package sibyl-core ruff format benchmarks/jev_revalidation
+    inputs:
+      - benchmarks/jev_revalidation/**/*
+    options:
+      cache: false
+
+  jev-revalidation-typecheck:
+    script: >-
+      uv run --locked --package sibyl-core ty check benchmarks/jev_revalidation
+      --config 'src.include=["benchmarks/jev_revalidation/**/*.py"]'
+    inputs:
+      - benchmarks/jev_revalidation/**/*
