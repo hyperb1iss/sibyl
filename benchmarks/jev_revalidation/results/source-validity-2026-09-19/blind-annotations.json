@@ -1,0 +1,453 @@
+{
+  "annotations": [
+    {
+      "id": "source_case_001",
+      "summary_relation": "superseded",
+      "source_relation": "superseded",
+      "disposition": "overlay",
+      "ambiguous": false,
+      "reason": "Felt explicitly replaces rubber for a bounded class interval; authoritative, event newer, valid_until after event start, as_of within interval -> active temporary current_state overlay."
+    },
+    {
+      "id": "source_case_002",
+      "summary_relation": "superseded",
+      "source_relation": "superseded",
+      "disposition": "overlay",
+      "ambiguous": false,
+      "reason": "Headphones explicitly replace speaker for quiet-study interval; temporary current_state active at as_of -> overlay."
+    },
+    {
+      "id": "source_case_003",
+      "summary_relation": "superseded",
+      "source_relation": "superseded",
+      "disposition": "review",
+      "ambiguous": false,
+      "reason": "South replaces North (explicit replacement) but source is untrusted, so conflict not eligible -> review."
+    },
+    {
+      "id": "source_case_004",
+      "summary_relation": "contradicted",
+      "source_relation": "contradicted",
+      "disposition": "overlay",
+      "ambiguous": false,
+      "reason": "Organ muted (absence, no replacement value) for quiet interval; temporary current_state active at as_of -> overlay."
+    },
+    {
+      "id": "source_case_005",
+      "summary_relation": "uncertain",
+      "source_relation": "contradicted",
+      "disposition": "retire",
+      "ambiguous": false,
+      "reason": "Event summary unresolved, but source gives authoritative counterexample T-203 contradicting the universal; permanent current_state -> retire."
+    },
+    {
+      "id": "source_case_006",
+      "summary_relation": "contradicted",
+      "source_relation": "contradicted",
+      "disposition": "review",
+      "ambiguous": false,
+      "reason": "Passable contradicted, but event extent unknown -> review."
+    },
+    {
+      "id": "source_case_007",
+      "summary_relation": "supported",
+      "source_relation": "contradicted",
+      "disposition": "overlay",
+      "ambiguous": false,
+      "reason": "Event summary claims live feed but source disables transmission during service interval; temporary current_state active at as_of -> overlay."
+    },
+    {
+      "id": "source_case_008",
+      "summary_relation": "contradicted",
+      "source_relation": "contradicted",
+      "disposition": "retire",
+      "ambiguous": false,
+      "reason": "Northern exit permanently sealed; authoritative permanent current_state conflict -> retire."
+    },
+    {
+      "id": "source_case_009",
+      "summary_relation": "superseded",
+      "source_relation": "superseded",
+      "disposition": "review",
+      "ambiguous": true,
+      "reason": "442->440 explicit replacement, but claim_kind unknown -> review."
+    },
+    {
+      "id": "source_case_010",
+      "summary_relation": "superseded",
+      "source_relation": "superseded",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "30->60 deferred; event effective time is after as_of, change not yet active -> retain."
+    },
+    {
+      "id": "source_case_011",
+      "summary_relation": "superseded",
+      "source_relation": "uncertain",
+      "disposition": "review",
+      "ambiguous": true,
+      "reason": "Recovered note fragmentary; installed tension setting cannot be established -> uncertain -> review."
+    },
+    {
+      "id": "source_case_012",
+      "summary_relation": "contradicted",
+      "source_relation": "contradicted",
+      "disposition": "overlay",
+      "ambiguous": false,
+      "reason": "Shutter locked out for storm interval; temporary current_state active at as_of -> overlay."
+    },
+    {
+      "id": "source_case_013",
+      "summary_relation": "contradicted",
+      "source_relation": "uncertain",
+      "disposition": "review",
+      "ambiguous": true,
+      "reason": "Diagnostic excerpt cannot establish subject H; uncertain -> review."
+    },
+    {
+      "id": "source_case_014",
+      "summary_relation": "contradicted",
+      "source_relation": "contradicted",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "Event effective time predates memory (known older event) -> retain."
+    },
+    {
+      "id": "source_case_015",
+      "summary_relation": "superseded",
+      "source_relation": "superseded",
+      "disposition": "retire",
+      "ambiguous": false,
+      "reason": "3->2 adopted permanent standing_rule change; authoritative, event newer -> retire."
+    },
+    {
+      "id": "source_case_016",
+      "summary_relation": "superseded",
+      "source_relation": "supported",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "Source confirms 0.8mm; the 1.2mm belongs to an unrelated cord -> supported -> retain."
+    },
+    {
+      "id": "source_case_017",
+      "summary_relation": "contradicted",
+      "source_relation": "non_evidence",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "Writing exercise/injection making no assertion about the actual catalogue -> non_evidence; injection ignored -> retain."
+    },
+    {
+      "id": "source_case_018",
+      "summary_relation": "superseded",
+      "source_relation": "uncertain",
+      "disposition": "review",
+      "ambiguous": true,
+      "reason": "Worksheet unfinished (spruce or cedar); no material confirmed, injection ignored -> uncertain -> review."
+    },
+    {
+      "id": "source_case_019",
+      "summary_relation": "superseded",
+      "source_relation": "superseded",
+      "disposition": "overlay",
+      "ambiguous": false,
+      "reason": "Mountain replaces coastal for overflow interval; temporary current_state active at as_of -> overlay."
+    },
+    {
+      "id": "source_case_020",
+      "summary_relation": "contradicted",
+      "source_relation": "contradicted",
+      "disposition": "retire",
+      "ambiguous": false,
+      "reason": "Night-entry authorization revoked ongoing (no replacement); permanent standing_rule conflict -> retire."
+    },
+    {
+      "id": "source_case_021",
+      "summary_relation": "contradicted",
+      "source_relation": "contradicted",
+      "disposition": "review",
+      "ambiguous": false,
+      "reason": "Lamp not working, temporary but no valid_until recorded -> review."
+    },
+    {
+      "id": "source_case_022",
+      "summary_relation": "uncertain",
+      "source_relation": "contradicted",
+      "disposition": "retire",
+      "ambiguous": false,
+      "reason": "Certified counterexample G-4 not watertight contradicts universal; permanent current_state -> retire."
+    },
+    {
+      "id": "source_case_023",
+      "summary_relation": "superseded",
+      "source_relation": "superseded",
+      "disposition": "review",
+      "ambiguous": true,
+      "reason": "12->16 replacement but event timestamp equals memory timestamp, not strictly newer -> review."
+    },
+    {
+      "id": "source_case_024",
+      "summary_relation": "supported",
+      "source_relation": "superseded",
+      "disposition": "retire",
+      "ambiguous": false,
+      "reason": "Event claims unchanged, but source records recut to 30mm replacing 32mm; permanent current_state -> retire."
+    },
+    {
+      "id": "source_case_025",
+      "summary_relation": "contradicted",
+      "source_relation": "contradicted",
+      "disposition": "review",
+      "ambiguous": false,
+      "reason": "Unsigned untrusted account; conflict not eligible without authoritative source -> review."
+    },
+    {
+      "id": "source_case_026",
+      "summary_relation": "contradicted",
+      "source_relation": "unrelated",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "Source concerns the separate near-infrared camera, not the visible-light instrument -> unrelated -> retain."
+    },
+    {
+      "id": "source_case_027",
+      "summary_relation": "contradicted",
+      "source_relation": "unrelated",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "Closure notice is for Stonewick, not Reedway -> unrelated -> retain."
+    },
+    {
+      "id": "source_case_028",
+      "summary_relation": "supported",
+      "source_relation": "contradicted",
+      "disposition": "retire",
+      "ambiguous": false,
+      "reason": "Counterexample U-17 discharged contradicts universal charged claim; permanent current_state -> retire."
+    },
+    {
+      "id": "source_case_029",
+      "summary_relation": "supported",
+      "source_relation": "superseded",
+      "disposition": "overlay",
+      "ambiguous": false,
+      "reason": "Tent replaces town hall for maintenance interval; temporary current_state active at as_of -> overlay."
+    },
+    {
+      "id": "source_case_030",
+      "summary_relation": "contradicted",
+      "source_relation": "contradicted",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "Temporary waiver of an ear-defender standing_rule; temporary standing_rule -> retain."
+    },
+    {
+      "id": "source_case_031",
+      "summary_relation": "contradicted",
+      "source_relation": "contradicted",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "Temporary barrier interval; valid_until strictly after event start and as_of is at/after valid_until -> retain."
+    },
+    {
+      "id": "source_case_032",
+      "summary_relation": "superseded",
+      "source_relation": "superseded",
+      "disposition": "overlay",
+      "ambiguous": false,
+      "reason": "Cones moved 3->7 for demonstration interval; temporary current_state active at as_of -> overlay."
+    },
+    {
+      "id": "source_case_033",
+      "summary_relation": "contradicted",
+      "source_relation": "contradicted",
+      "disposition": "retire",
+      "ambiguous": false,
+      "reason": "Primary mirror now permanently capped; permanent current_state conflict -> retire."
+    },
+    {
+      "id": "source_case_034",
+      "summary_relation": "contradicted",
+      "source_relation": "uncertain",
+      "disposition": "review",
+      "ambiguous": true,
+      "reason": "Only first strip checked (intact), no damaged strip found; universal unresolved -> uncertain -> review."
+    },
+    {
+      "id": "source_case_035",
+      "summary_relation": "supported",
+      "source_relation": "uncertain",
+      "disposition": "review",
+      "ambiguous": true,
+      "reason": "Only two recorders tested, rest untested; universal unresolved -> uncertain -> review."
+    },
+    {
+      "id": "source_case_036",
+      "summary_relation": "contradicted",
+      "source_relation": "contradicted",
+      "disposition": "overlay",
+      "ambiguous": false,
+      "reason": "Oversized parcels refused during congestion interval; temporary current_state active at as_of -> overlay."
+    },
+    {
+      "id": "source_case_037",
+      "summary_relation": "supported",
+      "source_relation": "contradicted",
+      "disposition": "overlay",
+      "ambiguous": false,
+      "reason": "Event claims open but source closes Marsh Loop during flood exclusion interval; temporary current_state active at as_of -> overlay."
+    },
+    {
+      "id": "source_case_038",
+      "summary_relation": "superseded",
+      "source_relation": "superseded",
+      "disposition": "retire",
+      "ambiguous": false,
+      "reason": "Vale replaces Cedar romanization, conversion complete; permanent current_state -> retire."
+    },
+    {
+      "id": "source_case_039",
+      "summary_relation": "superseded",
+      "source_relation": "superseded",
+      "disposition": "retire",
+      "ambiguous": false,
+      "reason": "Amber replaces red lamp requirement ongoing; permanent standing_rule -> retire."
+    },
+    {
+      "id": "source_case_040",
+      "summary_relation": "contradicted",
+      "source_relation": "uncertain",
+      "disposition": "review",
+      "ambiguous": true,
+      "reason": "Two same-time notices conflict with no controlling order -> uncertain -> review."
+    },
+    {
+      "id": "source_case_041",
+      "summary_relation": "supported",
+      "source_relation": "superseded",
+      "disposition": "retire",
+      "ambiguous": false,
+      "reason": "Rebuild replaces left feed with right feed as installed; permanent current_state -> retire."
+    },
+    {
+      "id": "source_case_042",
+      "summary_relation": "superseded",
+      "source_relation": "superseded",
+      "disposition": "review",
+      "ambiguous": true,
+      "reason": "Dock1->dock2 temporary but valid_until equals event start (not strictly after) -> review."
+    },
+    {
+      "id": "source_case_043",
+      "summary_relation": "superseded",
+      "source_relation": "superseded",
+      "disposition": "overlay",
+      "ambiguous": false,
+      "reason": "60->90 for running trial interval; temporary current_state active at as_of -> overlay."
+    },
+    {
+      "id": "source_case_044",
+      "summary_relation": "contradicted",
+      "source_relation": "non_evidence",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "A question with no motion adopted and no operating change -> non_evidence -> retain."
+    },
+    {
+      "id": "source_case_045",
+      "summary_relation": "supported",
+      "source_relation": "superseded",
+      "disposition": "overlay",
+      "ambiguous": false,
+      "reason": "Spanish replaces English for open-house interval; temporary current_state active at as_of -> overlay."
+    },
+    {
+      "id": "source_case_046",
+      "summary_relation": "contradicted",
+      "source_relation": "contradicted",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "Historical claim about inaugural recital contradicted by authoritative finding; historical -> retain."
+    },
+    {
+      "id": "source_case_047",
+      "summary_relation": "contradicted",
+      "source_relation": "contradicted",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "Temporary cleaning closure; valid_until strictly after event start and as_of at/after valid_until -> retain."
+    },
+    {
+      "id": "source_case_048",
+      "summary_relation": "superseded",
+      "source_relation": "superseded",
+      "disposition": "retire",
+      "ambiguous": false,
+      "reason": "Millilitres replace grams ongoing; permanent standing_rule -> retire."
+    },
+    {
+      "id": "source_case_049",
+      "summary_relation": "superseded",
+      "source_relation": "superseded",
+      "disposition": "overlay",
+      "ambiguous": false,
+      "reason": "Logs moved west->east for cleaning interval; temporary current_state active at as_of -> overlay."
+    },
+    {
+      "id": "source_case_050",
+      "summary_relation": "superseded",
+      "source_relation": "superseded",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "Authenticated correction of historical opening-day location F2->F5; historical -> retain."
+    },
+    {
+      "id": "source_case_051",
+      "summary_relation": "superseded",
+      "source_relation": "superseded",
+      "disposition": "review",
+      "ambiguous": true,
+      "reason": "Thematic replaces alphabetical, but event effective time is missing, so not eligible -> review."
+    },
+    {
+      "id": "source_case_052",
+      "summary_relation": "supported",
+      "source_relation": "contradicted",
+      "disposition": "retire",
+      "ambiguous": false,
+      "reason": "Event claims retained but source rescinds green-seal requirement ongoing (no replacement); permanent standing_rule -> retire."
+    },
+    {
+      "id": "source_case_053",
+      "summary_relation": "contradicted",
+      "source_relation": "contradicted",
+      "disposition": "overlay",
+      "ambiguous": false,
+      "reason": "Flood barriers make crawlway impassable for interval; temporary current_state active at as_of -> overlay."
+    },
+    {
+      "id": "source_case_054",
+      "summary_relation": "superseded",
+      "source_relation": "superseded",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "Backfilled move effective before memory (known older event) -> retain."
+    },
+    {
+      "id": "source_case_055",
+      "summary_relation": "superseded",
+      "source_relation": "superseded",
+      "disposition": "retire",
+      "ambiguous": false,
+      "reason": "Six->eight player max adopted ongoing; permanent standing_rule -> retire."
+    },
+    {
+      "id": "source_case_056",
+      "summary_relation": "contradicted",
+      "source_relation": "contradicted",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "Temporary waiver of spectator-silence standing_rule; temporary standing_rule -> retain."
+    }
+  ],
+  "disposition_policy_note": "Annotator used original historical-retain rule; source-relation sensitivity uses amended historical-review code consistently, not raw annotator dispositions."
+}
