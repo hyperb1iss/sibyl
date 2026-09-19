@@ -1,0 +1,342 @@
+{
+  "annotations": [
+    {
+      "id": "kind_case_001",
+      "source_relation": "compatible",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "A bounded stock outage is an exception to the stated general availability rule."
+    },
+    {
+      "id": "kind_case_002",
+      "source_relation": "non_evidence",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "The quoted removal and imperative occur only in a writing exercise reporting no inventory facts."
+    },
+    {
+      "id": "kind_case_003",
+      "source_relation": "superseded",
+      "disposition": "overlay",
+      "ambiguous": false,
+      "reason": "The actual current routing changed from strip 2 to strip 6 during an active bounded interval."
+    },
+    {
+      "id": "kind_case_004",
+      "source_relation": "superseded",
+      "disposition": "retire",
+      "ambiguous": false,
+      "reason": "An effective permanent rule revision replaces the thirty-minute interval with twenty minutes."
+    },
+    {
+      "id": "kind_case_005",
+      "source_relation": "superseded",
+      "disposition": "review",
+      "ambiguous": true,
+      "reason": "The source explicitly replaces M with N, but the intended temporal interpretation of the memory is unspecified."
+    },
+    {
+      "id": "kind_case_006",
+      "source_relation": "compatible",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "The south-up demonstration is explicitly temporary and the north-up convention remains adopted."
+    },
+    {
+      "id": "kind_case_007",
+      "source_relation": "compatible",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "The bell trial is a temporary exception to the whistle rule; the embedded imperative has no authority."
+    },
+    {
+      "id": "kind_case_008",
+      "source_relation": "supported",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "Inspection directly confirms extraction operating at the same bench; missing chronology does not negate support."
+    },
+    {
+      "id": "kind_case_009",
+      "source_relation": "compatible",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "The temporary lesson exception leaves the ordinary open-port rule intact."
+    },
+    {
+      "id": "kind_case_010",
+      "source_relation": "superseded",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "Pulsing replaces steady illumination, but the temporary interval has expired at as_of."
+    },
+    {
+      "id": "kind_case_011",
+      "source_relation": "superseded",
+      "disposition": "review",
+      "ambiguous": false,
+      "reason": "Counterclockwise rotation replaces clockwise rotation; unknown duration requires review."
+    },
+    {
+      "id": "kind_case_012",
+      "source_relation": "contradicted",
+      "disposition": "overlay",
+      "ambiguous": false,
+      "reason": "Actual adhesive in the current demonstration is explicitly not animal-free during the active interval."
+    },
+    {
+      "id": "kind_case_013",
+      "source_relation": "superseded",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "The record reports a paper-for-buckram replacement, but its effective time predates the memory."
+    },
+    {
+      "id": "kind_case_014",
+      "source_relation": "supported",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "The adopted linen requirement is expressly reaffirmed and the contrary proposal was rejected."
+    },
+    {
+      "id": "kind_case_015",
+      "source_relation": "compatible",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "A bounded exception does not revoke the standing animal-free adhesive rule."
+    },
+    {
+      "id": "kind_case_016",
+      "source_relation": "superseded",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "The adopted replacement is explicit, but the double-chime activation lies after as_of."
+    },
+    {
+      "id": "kind_case_017",
+      "source_relation": "contradicted",
+      "disposition": "review",
+      "ambiguous": false,
+      "reason": "One claimed open member contradicts the universal sealed claim; the untrusted report cannot authorize retirement."
+    },
+    {
+      "id": "kind_case_018",
+      "source_relation": "superseded",
+      "disposition": "retire",
+      "ambiguous": false,
+      "reason": "The completed permanent conversion replaces freshwater configuration with brackish water."
+    },
+    {
+      "id": "kind_case_019",
+      "source_relation": "compatible",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "Blue exhibition lighting is a bounded exception to the white-light default."
+    },
+    {
+      "id": "kind_case_020",
+      "source_relation": "superseded",
+      "disposition": "retire",
+      "ambiguous": false,
+      "reason": "The effective continuing specification replaces 145 millimetres with 150."
+    },
+    {
+      "id": "kind_case_021",
+      "source_relation": "superseded",
+      "disposition": "overlay",
+      "ambiguous": false,
+      "reason": "The currently applied stop signal is bell instead of whistle during the active trial."
+    },
+    {
+      "id": "kind_case_022",
+      "source_relation": "contradicted",
+      "disposition": "overlay",
+      "ambiguous": false,
+      "reason": "Current map availability is explicitly negated during an active bounded interval."
+    },
+    {
+      "id": "kind_case_023",
+      "source_relation": "contradicted",
+      "disposition": "overlay",
+      "ambiguous": false,
+      "reason": "The current audible beat is absent while the clock is muted during the active interval."
+    },
+    {
+      "id": "kind_case_024",
+      "source_relation": "contradicted",
+      "disposition": "retire",
+      "ambiguous": true,
+      "reason": "Permanent unbolting directly negates immovable attachment; movable could also be treated as an explicit replacement value."
+    },
+    {
+      "id": "kind_case_025",
+      "source_relation": "compatible",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "The bounded recording mute is an exception to the general audible-beat behavior."
+    },
+    {
+      "id": "kind_case_026",
+      "source_relation": "compatible",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "The temporary dispensation explicitly leaves the blind-stamp requirement unrepealed."
+    },
+    {
+      "id": "kind_case_027",
+      "source_relation": "compatible",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "Festival use of Welsh is a bounded exception to the English announcement default."
+    },
+    {
+      "id": "kind_case_028",
+      "source_relation": "uncertain",
+      "disposition": "review",
+      "ambiguous": true,
+      "reason": "The sampled sheets support the claim locally but cannot establish or refute the unexamined universal; a narrow support label is also plausible."
+    },
+    {
+      "id": "kind_case_029",
+      "source_relation": "superseded",
+      "disposition": "review",
+      "ambiguous": false,
+      "reason": "The actual location changed from bench 1 to bench 4, but a zero-length validity interval is invalid."
+    },
+    {
+      "id": "kind_case_030",
+      "source_relation": "contradicted",
+      "disposition": "overlay",
+      "ambiguous": false,
+      "reason": "The current turning state is negated by the active temporary stop."
+    },
+    {
+      "id": "kind_case_031",
+      "source_relation": "contradicted",
+      "disposition": "overlay",
+      "ambiguous": false,
+      "reason": "The tracked current open-port state is explicitly negated during the active exception."
+    },
+    {
+      "id": "kind_case_032",
+      "source_relation": "superseded",
+      "disposition": "overlay",
+      "ambiguous": false,
+      "reason": "The gauges actually moved from the tray to the locked case during the active interval."
+    },
+    {
+      "id": "kind_case_033",
+      "source_relation": "contradicted",
+      "disposition": "review",
+      "ambiguous": false,
+      "reason": "Authenticated evidence negates the blank-board historical assertion; historical correction requires review."
+    },
+    {
+      "id": "kind_case_034",
+      "source_relation": "superseded",
+      "disposition": "retire",
+      "ambiguous": false,
+      "reason": "The permanent operative standard replaces Old Harbour datum with Ridge."
+    },
+    {
+      "id": "kind_case_035",
+      "source_relation": "superseded",
+      "disposition": "overlay",
+      "ambiguous": false,
+      "reason": "The actual current announcement language changed from English to Welsh during the active festival interval."
+    },
+    {
+      "id": "kind_case_036",
+      "source_relation": "compatible",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "The bounded waiver does not revoke the adopted general flash prohibition."
+    },
+    {
+      "id": "kind_case_037",
+      "source_relation": "superseded",
+      "disposition": "overlay",
+      "ambiguous": false,
+      "reason": "The actual current illumination changed from white to blue during the active interval."
+    },
+    {
+      "id": "kind_case_038",
+      "source_relation": "superseded",
+      "disposition": "review",
+      "ambiguous": false,
+      "reason": "The repost asserts courtyard replacing the hall, but its untrusted authority requires review."
+    },
+    {
+      "id": "kind_case_039",
+      "source_relation": "superseded",
+      "disposition": "overlay",
+      "ambiguous": false,
+      "reason": "Current production uses five metres instead of ten during the active trial."
+    },
+    {
+      "id": "kind_case_040",
+      "source_relation": "compatible",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "The temporary cones are an explicit exception and the clear-floor rule remains adopted."
+    },
+    {
+      "id": "kind_case_041",
+      "source_relation": "superseded",
+      "disposition": "retire",
+      "ambiguous": false,
+      "reason": "The same kiln now has gas burners replacing its removed electric heating assembly."
+    },
+    {
+      "id": "kind_case_042",
+      "source_relation": "compatible",
+      "disposition": "retain",
+      "ambiguous": true,
+      "reason": "An explicitly temporary dispensation can coexist with the general marshal rule; the missing end time leaves the exception duration unresolved."
+    },
+    {
+      "id": "kind_case_043",
+      "source_relation": "unrelated",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "The closed hatch belongs to an expressly different facility and excludes Reefglass."
+    },
+    {
+      "id": "kind_case_044",
+      "source_relation": "contradicted",
+      "disposition": "retire",
+      "ambiguous": false,
+      "reason": "The operative permanent rescission negates the alias requirement without adopting a replacement requirement."
+    },
+    {
+      "id": "kind_case_045",
+      "source_relation": "superseded",
+      "disposition": "overlay",
+      "ambiguous": false,
+      "reason": "The actual setting changed from 1:20 to 1:10 for the active bounded demonstration."
+    },
+    {
+      "id": "kind_case_046",
+      "source_relation": "compatible",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "The different transmitter serves simulated emergency announcements, a condition explicitly excluding the ordinary announcements in memory."
+    },
+    {
+      "id": "kind_case_047",
+      "source_relation": "superseded",
+      "disposition": "retire",
+      "ambiguous": false,
+      "reason": "The effective continuing procedure replaces red completion cards with green cards."
+    },
+    {
+      "id": "kind_case_048",
+      "source_relation": "compatible",
+      "disposition": "retain",
+      "ambiguous": false,
+      "reason": "The five-metre trial is a temporary exception to the ten-metre production default."
+    }
+  ],
+  "independence": "Same-family native agent, blinded to gold labels and model results. Read only supplied evidence and policy definitions. Claude cross-family annotation was blocked before output by subscription session limit.",
+  "policy": "Final frozen typed policy, including historical conflict review. Original labels unchanged."
+}

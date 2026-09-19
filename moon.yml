@@ -2059,3 +2059,10 @@ tasks:
       - benchmarks/jev_revalidation/**/*
     options:
       cache: false
+
+  jev-kind-study:
+    command: uv run --locked --package sibyl-core python -m benchmarks.jev_revalidation.kind_study
+    inputs:
+      - benchmarks/jev_revalidation/**/*
+    options:
+      cache: false

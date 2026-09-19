@@ -1,0 +1,31 @@
+{
+  "arms": [
+    "direct"
+  ],
+  "base_git_sha": "b5ea32bc1e7be3834e1294ec4231ec2be4df5486",
+  "batch_size": 1,
+  "case_count": 56,
+  "cases_sha256": "ed2c8f9cbb2190ca4ffcd732b3b3ee7d95882645b32d4fc1c56cd56a5ec31071",
+  "concurrency": 8,
+  "dirty_diff_sha256": "e68bca80fd0385e09a81da511684edfa8af5de16c8a942444c0e4e063b6d5394",
+  "git_status": "M benchmarks/jev_revalidation/runner.py\n M benchmarks/jev_revalidation/source_study.py\n M moon.yml\n?? benchmarks/jev_revalidation/kind_holdout.json\n?? benchmarks/jev_revalidation/kind_study.py\n?? benchmarks/jev_revalidation/prompts_v4.py\n?? benchmarks/jev_revalidation/test_kind_prompts.py\n?? benchmarks/jev_revalidation/test_kind_study.py",
+  "mode": "live",
+  "prompt_dependencies_sha256": {
+    "prompts.py": "fe027646abdb6a14270eef0a6b196abf0c09b0a9d16a6dcbe8f60575cbb900f6"
+  },
+  "prompt_version": "v3",
+  "prompts_sha256": "9b209d4b0f8772123f62f8c707a161b356d303a9dce3bd6239567c6ee3c8e05c",
+  "repeats": 2,
+  "route": {
+    "deadline_seconds": 30.0,
+    "expected_provider": "TypeSafe",
+    "requested_model_id": "typesafe/jev-1.13",
+    "resolved_model_id": "typesafe/jev-1.13-20260917",
+    "route_id": "openrouter/typesafe-jev-1.13"
+  },
+  "route_policy_sha256": "a74c1434b365f754dcc4c10c17dabd70626cb64bc455cdb4859d801e65a9ed2f",
+  "run_id": "c2c06e07255a44809a6c6390161e4c0d",
+  "runner_sha256": "330114c7cd85c9662133724d9bd039f4507c31d64071e1708a50023d8a699d74",
+  "started_at": "2026-09-19T22:40:38.486461+00:00",
+  "synthetic_only": true
+}

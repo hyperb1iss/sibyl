@@ -1,0 +1,5009 @@
+{
+  "accounting": {
+    "typed": {
+      "calls": 96,
+      "input_tokens": 129988,
+      "mode": "live",
+      "observed_cost_usd": 0.005459496,
+      "output_tokens": 12529,
+      "physical_attempts": 96,
+      "unknown_input_tokens_calls": 0,
+      "unknown_observed_cost_usd_calls": 0,
+      "unknown_output_tokens_calls": 0
+    },
+    "unknown": {
+      "calls": 96,
+      "input_tokens": 129892,
+      "mode": "live",
+      "observed_cost_usd": 0.005455464,
+      "output_tokens": 12528,
+      "physical_attempts": 96,
+      "unknown_input_tokens_calls": 0,
+      "unknown_observed_cost_usd_calls": 0,
+      "unknown_output_tokens_calls": 0
+    },
+    "v3": {
+      "calls": 96,
+      "input_tokens": 107812,
+      "mode": "live",
+      "observed_cost_usd": 0.004528104,
+      "output_tokens": 12527,
+      "physical_attempts": 96,
+      "unknown_input_tokens_calls": 0,
+      "unknown_observed_cost_usd_calls": 0,
+      "unknown_output_tokens_calls": 0
+    }
+  },
+  "errors": {
+    "typed": [
+      {
+        "action": null,
+        "case_id": "kind_case_019",
+        "category": "aquarium",
+        "claim_kind": "standing_rule",
+        "event_extent": "temporary",
+        "expected_disposition": "retain",
+        "expected_source_relation": "superseded",
+        "pair_group": "pair_05",
+        "relation": null,
+        "repeat": 1,
+        "status": "measurement_failure"
+      },
+      {
+        "action": "retain",
+        "case_id": "kind_case_023",
+        "category": "clockmaking",
+        "claim_kind": "current_state",
+        "event_extent": "temporary",
+        "expected_disposition": "overlay",
+        "expected_source_relation": "contradicted",
+        "pair_group": "pair_04",
+        "relation": "compatible",
+        "repeat": 0,
+        "status": "completed"
+      },
+      {
+        "action": "retain",
+        "case_id": "kind_case_023",
+        "category": "clockmaking",
+        "claim_kind": "current_state",
+        "event_extent": "temporary",
+        "expected_disposition": "overlay",
+        "expected_source_relation": "contradicted",
+        "pair_group": "pair_04",
+        "relation": "compatible",
+        "repeat": 1,
+        "status": "completed"
+      },
+      {
+        "action": null,
+        "case_id": "kind_case_031",
+        "category": "ceramics",
+        "claim_kind": "current_state",
+        "event_extent": "temporary",
+        "expected_disposition": "overlay",
+        "expected_source_relation": "contradicted",
+        "pair_group": "pair_02",
+        "relation": null,
+        "repeat": 1,
+        "status": "measurement_failure"
+      },
+      {
+        "action": null,
+        "case_id": "kind_case_039",
+        "category": "cartography",
+        "claim_kind": "current_state",
+        "event_extent": "temporary",
+        "expected_disposition": "overlay",
+        "expected_source_relation": "superseded",
+        "pair_group": "pair_03",
+        "relation": null,
+        "repeat": 0,
+        "status": "measurement_failure"
+      },
+      {
+        "action": "retain",
+        "case_id": "kind_case_042",
+        "category": "robotics_club",
+        "claim_kind": "standing_rule",
+        "event_extent": "temporary",
+        "expected_disposition": "review",
+        "expected_source_relation": "contradicted",
+        "pair_group": "kind_case_042",
+        "relation": "compatible",
+        "repeat": 0,
+        "status": "completed"
+      },
+      {
+        "action": "retain",
+        "case_id": "kind_case_042",
+        "category": "robotics_club",
+        "claim_kind": "standing_rule",
+        "event_extent": "temporary",
+        "expected_disposition": "review",
+        "expected_source_relation": "contradicted",
+        "pair_group": "kind_case_042",
+        "relation": "compatible",
+        "repeat": 1,
+        "status": "completed"
+      }
+    ],
+    "unknown": [
+      {
+        "action": null,
+        "case_id": "kind_case_013",
+        "category": "bookbinding",
+        "claim_kind": "standing_rule",
+        "event_extent": "permanent",
+        "expected_disposition": "retain",
+        "expected_source_relation": "superseded",
+        "pair_group": "kind_case_013",
+        "relation": null,
+        "repeat": 0,
+        "status": "measurement_failure"
+      },
+      {
+        "action": "retain",
+        "case_id": "kind_case_021",
+        "category": "robotics_club",
+        "claim_kind": "current_state",
+        "event_extent": "temporary",
+        "expected_disposition": "overlay",
+        "expected_source_relation": "superseded",
+        "pair_group": "pair_07",
+        "relation": "compatible",
+        "repeat": 1,
+        "status": "completed"
+      },
+      {
+        "action": "retain",
+        "case_id": "kind_case_023",
+        "category": "clockmaking",
+        "claim_kind": "current_state",
+        "event_extent": "temporary",
+        "expected_disposition": "overlay",
+        "expected_source_relation": "contradicted",
+        "pair_group": "pair_04",
+        "relation": "compatible",
+        "repeat": 0,
+        "status": "completed"
+      },
+      {
+        "action": "retain",
+        "case_id": "kind_case_023",
+        "category": "clockmaking",
+        "claim_kind": "current_state",
+        "event_extent": "temporary",
+        "expected_disposition": "overlay",
+        "expected_source_relation": "contradicted",
+        "pair_group": "pair_04",
+        "relation": "compatible",
+        "repeat": 1,
+        "status": "completed"
+      },
+      {
+        "action": "retain",
+        "case_id": "kind_case_031",
+        "category": "ceramics",
+        "claim_kind": "current_state",
+        "event_extent": "temporary",
+        "expected_disposition": "overlay",
+        "expected_source_relation": "contradicted",
+        "pair_group": "pair_02",
+        "relation": "compatible",
+        "repeat": 0,
+        "status": "completed"
+      },
+      {
+        "action": "retain",
+        "case_id": "kind_case_031",
+        "category": "ceramics",
+        "claim_kind": "current_state",
+        "event_extent": "temporary",
+        "expected_disposition": "overlay",
+        "expected_source_relation": "contradicted",
+        "pair_group": "pair_02",
+        "relation": "compatible",
+        "repeat": 1,
+        "status": "completed"
+      },
+      {
+        "action": "retain",
+        "case_id": "kind_case_039",
+        "category": "cartography",
+        "claim_kind": "current_state",
+        "event_extent": "temporary",
+        "expected_disposition": "overlay",
+        "expected_source_relation": "superseded",
+        "pair_group": "pair_03",
+        "relation": "compatible",
+        "repeat": 0,
+        "status": "completed"
+      },
+      {
+        "action": "retain",
+        "case_id": "kind_case_039",
+        "category": "cartography",
+        "claim_kind": "current_state",
+        "event_extent": "temporary",
+        "expected_disposition": "overlay",
+        "expected_source_relation": "superseded",
+        "pair_group": "pair_03",
+        "relation": "compatible",
+        "repeat": 1,
+        "status": "completed"
+      },
+      {
+        "action": "retain",
+        "case_id": "kind_case_042",
+        "category": "robotics_club",
+        "claim_kind": "standing_rule",
+        "event_extent": "temporary",
+        "expected_disposition": "review",
+        "expected_source_relation": "contradicted",
+        "pair_group": "kind_case_042",
+        "relation": "compatible",
+        "repeat": 0,
+        "status": "completed"
+      }
+    ],
+    "v3": [
+      {
+        "action": "review",
+        "case_id": "kind_case_002",
+        "category": "modelmaking",
+        "claim_kind": "current_state",
+        "event_extent": "permanent",
+        "expected_disposition": "retain",
+        "expected_source_relation": "non_evidence",
+        "pair_group": "kind_case_002",
+        "relation": "contradicted",
+        "repeat": 0,
+        "status": "completed"
+      },
+      {
+        "action": "review",
+        "case_id": "kind_case_002",
+        "category": "modelmaking",
+        "claim_kind": "current_state",
+        "event_extent": "permanent",
+        "expected_disposition": "retain",
+        "expected_source_relation": "non_evidence",
+        "pair_group": "kind_case_002",
+        "relation": "contradicted",
+        "repeat": 1,
+        "status": "completed"
+      },
+      {
+        "action": "retain",
+        "case_id": "kind_case_023",
+        "category": "clockmaking",
+        "claim_kind": "current_state",
+        "event_extent": "temporary",
+        "expected_disposition": "overlay",
+        "expected_source_relation": "contradicted",
+        "pair_group": "pair_04",
+        "relation": "compatible",
+        "repeat": 0,
+        "status": "completed"
+      },
+      {
+        "action": "retain",
+        "case_id": "kind_case_023",
+        "category": "clockmaking",
+        "claim_kind": "current_state",
+        "event_extent": "temporary",
+        "expected_disposition": "overlay",
+        "expected_source_relation": "contradicted",
+        "pair_group": "pair_04",
+        "relation": "compatible",
+        "repeat": 1,
+        "status": "completed"
+      },
+      {
+        "action": null,
+        "case_id": "kind_case_028",
+        "category": "cartography",
+        "claim_kind": "current_state",
+        "event_extent": "permanent",
+        "expected_disposition": "review",
+        "expected_source_relation": "uncertain",
+        "pair_group": "kind_case_028",
+        "relation": null,
+        "repeat": 0,
+        "status": "measurement_failure"
+      },
+      {
+        "action": "retain",
+        "case_id": "kind_case_031",
+        "category": "ceramics",
+        "claim_kind": "current_state",
+        "event_extent": "temporary",
+        "expected_disposition": "overlay",
+        "expected_source_relation": "contradicted",
+        "pair_group": "pair_02",
+        "relation": "compatible",
+        "repeat": 0,
+        "status": "completed"
+      },
+      {
+        "action": "retain",
+        "case_id": "kind_case_031",
+        "category": "ceramics",
+        "claim_kind": "current_state",
+        "event_extent": "temporary",
+        "expected_disposition": "overlay",
+        "expected_source_relation": "contradicted",
+        "pair_group": "pair_02",
+        "relation": "compatible",
+        "repeat": 1,
+        "status": "completed"
+      },
+      {
+        "action": "retain",
+        "case_id": "kind_case_039",
+        "category": "cartography",
+        "claim_kind": "current_state",
+        "event_extent": "temporary",
+        "expected_disposition": "overlay",
+        "expected_source_relation": "superseded",
+        "pair_group": "pair_03",
+        "relation": "compatible",
+        "repeat": 0,
+        "status": "completed"
+      },
+      {
+        "action": "retain",
+        "case_id": "kind_case_039",
+        "category": "cartography",
+        "claim_kind": "current_state",
+        "event_extent": "temporary",
+        "expected_disposition": "overlay",
+        "expected_source_relation": "superseded",
+        "pair_group": "pair_03",
+        "relation": "compatible",
+        "repeat": 1,
+        "status": "completed"
+      },
+      {
+        "action": "retain",
+        "case_id": "kind_case_042",
+        "category": "robotics_club",
+        "claim_kind": "standing_rule",
+        "event_extent": "temporary",
+        "expected_disposition": "review",
+        "expected_source_relation": "contradicted",
+        "pair_group": "kind_case_042",
+        "relation": "compatible",
+        "repeat": 0,
+        "status": "completed"
+      },
+      {
+        "action": "retain",
+        "case_id": "kind_case_042",
+        "category": "robotics_club",
+        "claim_kind": "standing_rule",
+        "event_extent": "temporary",
+        "expected_disposition": "review",
+        "expected_source_relation": "contradicted",
+        "pair_group": "kind_case_042",
+        "relation": "compatible",
+        "repeat": 1,
+        "status": "completed"
+      }
+    ]
+  },
+  "input_artifact_sha256": {
+    "typed": {
+      "calls.json": "70505d2200036ddc38e8b5f82db1ce985a1b77de991a6e2312abead8af06c249",
+      "manifest.json": "9e729a6e90bf1396545710b3ee9c472a6afeaa52faa3bce2031061cc8eb5d79c",
+      "predictions.json": "0305891c359ea6d657c391fa3b45bcdd257f3656daa40af19812851bf4bb21dc"
+    },
+    "unknown": {
+      "calls.json": "12f048344a6f258556928b03552e0addefa7b6a489fe4b5b98492cd212aed00e",
+      "manifest.json": "ec48525b7d7561dcdf31bbaedae07949a92f3d01f392a023869c2d805cbbdcc2",
+      "predictions.json": "79b9e8c883923773e3a7c2f36d155e1274be4b0022c9f987aaccbec6e62d9d0e"
+    },
+    "v3": {
+      "calls.json": "a8549509a75e8db1b49cb867aa64e723e83efc29369308edf9b0f07a28cbe8ad",
+      "manifest.json": "ce1e91c9654740be9d7f88c04c4baf049e8a2a5b7791b0b9558ea06d98e07678",
+      "predictions.json": "479acd0ce71be6636e4afd9e35fcaa331c1c91df7dc54ddee35510162682ed55"
+    }
+  },
+  "kind_study_sha256": "29c7f21717a7d1541e2ea2eebf3a64142fa5339ca5ef616aec258f70cfbe51c3",
+  "limits": [
+    "Claim kind is supplied by the fixture oracle; kind-extraction accuracy and cost are not measured.",
+    "The same original claim_kind and temporal metadata drive offline policy in every arm.",
+    "The unknown-to-typed comparison isolates the supplied kind; v3-to-unknown also changes the prompt.",
+    "Repeated predictions share cases and scenario families; they are not independent samples.",
+    "Synthetic fixture results do not establish production memory quality or safe automatic retirement.",
+    "Failed measurements remain null and incorrect; accounting records original calls once per run."
+  ],
+  "master_sha256": "f600fb4f46a07556a4d8e1cb98ce203aacd28cfbae2b0afb6786a4994107f484",
+  "methods": {
+    "typed": {
+      "claim_kinds": {
+        "current_state": {
+          "accuracy": 0.9230769230769231,
+          "cases": 52,
+          "correct": 48,
+          "dangerous_retirement_count": 0,
+          "gold_overlay_cases": 24,
+          "gold_retire_cases": 6,
+          "measurement_failures": 2,
+          "overlay_captured": 20,
+          "overlay_errors": 0,
+          "overlay_recall": 0.8333333333333334,
+          "retain_count": 14,
+          "retention_rate": 0.2692307692307692,
+          "retire_captured": 6,
+          "retire_recall": 1.0,
+          "review_count": 10,
+          "review_rate": 0.19230769230769232
+        },
+        "historical": {
+          "accuracy": 1.0,
+          "cases": 2,
+          "correct": 2,
+          "dangerous_retirement_count": 0,
+          "gold_overlay_cases": 0,
+          "gold_retire_cases": 0,
+          "measurement_failures": 0,
+          "overlay_captured": 0,
+          "overlay_errors": 0,
+          "overlay_recall": null,
+          "retain_count": 0,
+          "retention_rate": 0.0,
+          "retire_captured": 0,
+          "retire_recall": null,
+          "review_count": 2,
+          "review_rate": 1.0
+        },
+        "standing_rule": {
+          "accuracy": 0.925,
+          "cases": 40,
+          "correct": 37,
+          "dangerous_retirement_count": 0,
+          "gold_overlay_cases": 0,
+          "gold_retire_cases": 10,
+          "measurement_failures": 1,
+          "overlay_captured": 0,
+          "overlay_errors": 0,
+          "overlay_recall": null,
+          "retain_count": 29,
+          "retention_rate": 0.725,
+          "retire_captured": 10,
+          "retire_recall": 1.0,
+          "review_count": 0,
+          "review_rate": 0.0
+        },
+        "unknown": {
+          "accuracy": 1.0,
+          "cases": 2,
+          "correct": 2,
+          "dangerous_retirement_count": 0,
+          "gold_overlay_cases": 0,
+          "gold_retire_cases": 0,
+          "measurement_failures": 0,
+          "overlay_captured": 0,
+          "overlay_errors": 0,
+          "overlay_recall": null,
+          "retain_count": 0,
+          "retention_rate": 0.0,
+          "retire_captured": 0,
+          "retire_recall": null,
+          "review_count": 2,
+          "review_rate": 1.0
+        }
+      },
+      "joint_group_correctness": {
+        "0": {
+          "groups": 40,
+          "joint_accuracy": 0.925,
+          "joint_correct_groups": 37,
+          "outcomes": {
+            "kind_case_002": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_002",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_003": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_003",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_004": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_004",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_005": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_005",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_006": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_006",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_008": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_008",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_010": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_010",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_011": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_011",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_013": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_013",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_014": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_014",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_016": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_016",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_017": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_017",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_018": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_018",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_020": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_020",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_024": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_024",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_026": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_026",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_028": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_028",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_029": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_029",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_030": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_030",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_032": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_032",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_033": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_033",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_034": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_034",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_036": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_036",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_038": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_038",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_040": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_040",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_041": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_041",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_042": {
+              "cases": 1,
+              "joint_correct": false,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_042",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_043": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_043",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_044": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_044",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_045": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_045",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_046": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_046",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_047": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_047",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_01": {
+              "cases": 2,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_027",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                },
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_035",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_02": {
+              "cases": 2,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_009",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                },
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_031",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_03": {
+              "cases": 2,
+              "joint_correct": false,
+              "outcomes": [
+                {
+                  "action": null,
+                  "case_id": "kind_case_039",
+                  "expected_disposition": "overlay",
+                  "status": "measurement_failure"
+                },
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_048",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_04": {
+              "cases": 2,
+              "joint_correct": false,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_023",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                },
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_025",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_05": {
+              "cases": 2,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_019",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                },
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_037",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_06": {
+              "cases": 2,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_012",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                },
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_015",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_07": {
+              "cases": 2,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_007",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                },
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_021",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_08": {
+              "cases": 2,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_001",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                },
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_022",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            }
+          }
+        },
+        "1": {
+          "groups": 40,
+          "joint_accuracy": 0.9,
+          "joint_correct_groups": 36,
+          "outcomes": {
+            "kind_case_002": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_002",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_003": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_003",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_004": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_004",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_005": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_005",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_006": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_006",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_008": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_008",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_010": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_010",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_011": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_011",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_013": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_013",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_014": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_014",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_016": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_016",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_017": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_017",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_018": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_018",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_020": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_020",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_024": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_024",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_026": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_026",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_028": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_028",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_029": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_029",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_030": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_030",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_032": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_032",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_033": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_033",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_034": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_034",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_036": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_036",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_038": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_038",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_040": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_040",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_041": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_041",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_042": {
+              "cases": 1,
+              "joint_correct": false,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_042",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_043": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_043",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_044": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_044",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_045": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_045",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_046": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_046",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_047": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_047",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_01": {
+              "cases": 2,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_027",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                },
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_035",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_02": {
+              "cases": 2,
+              "joint_correct": false,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_009",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                },
+                {
+                  "action": null,
+                  "case_id": "kind_case_031",
+                  "expected_disposition": "overlay",
+                  "status": "measurement_failure"
+                }
+              ]
+            },
+            "pair_03": {
+              "cases": 2,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_039",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                },
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_048",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_04": {
+              "cases": 2,
+              "joint_correct": false,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_023",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                },
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_025",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_05": {
+              "cases": 2,
+              "joint_correct": false,
+              "outcomes": [
+                {
+                  "action": null,
+                  "case_id": "kind_case_019",
+                  "expected_disposition": "retain",
+                  "status": "measurement_failure"
+                },
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_037",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_06": {
+              "cases": 2,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_012",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                },
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_015",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_07": {
+              "cases": 2,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_007",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                },
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_021",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_08": {
+              "cases": 2,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_001",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                },
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_022",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "pooled": {
+        "accuracy": 0.9270833333333334,
+        "cases": 96,
+        "correct": 89,
+        "dangerous_retirement_count": 0,
+        "gold_overlay_cases": 24,
+        "gold_retire_cases": 16,
+        "measurement_failures": 3,
+        "overlay_captured": 20,
+        "overlay_errors": 0,
+        "overlay_recall": 0.8333333333333334,
+        "retain_count": 43,
+        "retention_rate": 0.4479166666666667,
+        "retire_captured": 16,
+        "retire_recall": 1.0,
+        "review_count": 14,
+        "review_rate": 0.14583333333333334
+      },
+      "repeats": {
+        "0": {
+          "accuracy": 0.9375,
+          "cases": 48,
+          "correct": 45,
+          "dangerous_retirement_count": 0,
+          "gold_overlay_cases": 12,
+          "gold_retire_cases": 8,
+          "measurement_failures": 1,
+          "overlay_captured": 10,
+          "overlay_errors": 0,
+          "overlay_recall": 0.8333333333333334,
+          "retain_count": 22,
+          "retention_rate": 0.4583333333333333,
+          "retire_captured": 8,
+          "retire_recall": 1.0,
+          "review_count": 7,
+          "review_rate": 0.14583333333333334
+        },
+        "1": {
+          "accuracy": 0.9166666666666666,
+          "cases": 48,
+          "correct": 44,
+          "dangerous_retirement_count": 0,
+          "gold_overlay_cases": 12,
+          "gold_retire_cases": 8,
+          "measurement_failures": 2,
+          "overlay_captured": 10,
+          "overlay_errors": 0,
+          "overlay_recall": 0.8333333333333334,
+          "retain_count": 21,
+          "retention_rate": 0.4375,
+          "retire_captured": 8,
+          "retire_recall": 1.0,
+          "review_count": 7,
+          "review_rate": 0.14583333333333334
+        }
+      },
+      "subsets": {
+        "current_state_temporary_gold_overlay": {
+          "pooled": {
+            "accuracy": 0.8333333333333334,
+            "cases": 24,
+            "correct": 20,
+            "dangerous_retirement_count": 0,
+            "gold_overlay_cases": 24,
+            "gold_retire_cases": 0,
+            "measurement_failures": 2,
+            "overlay_captured": 20,
+            "overlay_errors": 0,
+            "overlay_recall": 0.8333333333333334,
+            "retain_count": 2,
+            "retention_rate": 0.08333333333333333,
+            "retire_captured": 0,
+            "retire_recall": null,
+            "review_count": 0,
+            "review_rate": 0.0
+          },
+          "repeats": {
+            "0": {
+              "accuracy": 0.8333333333333334,
+              "cases": 12,
+              "correct": 10,
+              "dangerous_retirement_count": 0,
+              "gold_overlay_cases": 12,
+              "gold_retire_cases": 0,
+              "measurement_failures": 1,
+              "overlay_captured": 10,
+              "overlay_errors": 0,
+              "overlay_recall": 0.8333333333333334,
+              "retain_count": 1,
+              "retention_rate": 0.08333333333333333,
+              "retire_captured": 0,
+              "retire_recall": null,
+              "review_count": 0,
+              "review_rate": 0.0
+            },
+            "1": {
+              "accuracy": 0.8333333333333334,
+              "cases": 12,
+              "correct": 10,
+              "dangerous_retirement_count": 0,
+              "gold_overlay_cases": 12,
+              "gold_retire_cases": 0,
+              "measurement_failures": 1,
+              "overlay_captured": 10,
+              "overlay_errors": 0,
+              "overlay_recall": 0.8333333333333334,
+              "retain_count": 1,
+              "retention_rate": 0.08333333333333333,
+              "retire_captured": 0,
+              "retire_recall": null,
+              "review_count": 0,
+              "review_rate": 0.0
+            }
+          }
+        },
+        "standing_rule_temporary": {
+          "pooled": {
+            "accuracy": 0.8846153846153846,
+            "cases": 26,
+            "correct": 23,
+            "dangerous_retirement_count": 0,
+            "gold_overlay_cases": 0,
+            "gold_retire_cases": 0,
+            "measurement_failures": 1,
+            "overlay_captured": 0,
+            "overlay_errors": 0,
+            "overlay_recall": null,
+            "retain_count": 25,
+            "retention_rate": 0.9615384615384616,
+            "retire_captured": 0,
+            "retire_recall": null,
+            "review_count": 0,
+            "review_rate": 0.0
+          },
+          "repeats": {
+            "0": {
+              "accuracy": 0.9230769230769231,
+              "cases": 13,
+              "correct": 12,
+              "dangerous_retirement_count": 0,
+              "gold_overlay_cases": 0,
+              "gold_retire_cases": 0,
+              "measurement_failures": 0,
+              "overlay_captured": 0,
+              "overlay_errors": 0,
+              "overlay_recall": null,
+              "retain_count": 13,
+              "retention_rate": 1.0,
+              "retire_captured": 0,
+              "retire_recall": null,
+              "review_count": 0,
+              "review_rate": 0.0
+            },
+            "1": {
+              "accuracy": 0.8461538461538461,
+              "cases": 13,
+              "correct": 11,
+              "dangerous_retirement_count": 0,
+              "gold_overlay_cases": 0,
+              "gold_retire_cases": 0,
+              "measurement_failures": 1,
+              "overlay_captured": 0,
+              "overlay_errors": 0,
+              "overlay_recall": null,
+              "retain_count": 12,
+              "retention_rate": 0.9230769230769231,
+              "retire_captured": 0,
+              "retire_recall": null,
+              "review_count": 0,
+              "review_rate": 0.0
+            }
+          }
+        }
+      }
+    },
+    "unknown": {
+      "claim_kinds": {
+        "current_state": {
+          "accuracy": 0.8653846153846154,
+          "cases": 52,
+          "correct": 45,
+          "dangerous_retirement_count": 0,
+          "gold_overlay_cases": 24,
+          "gold_retire_cases": 6,
+          "measurement_failures": 0,
+          "overlay_captured": 17,
+          "overlay_errors": 0,
+          "overlay_recall": 0.7083333333333334,
+          "retain_count": 19,
+          "retention_rate": 0.36538461538461536,
+          "retire_captured": 6,
+          "retire_recall": 1.0,
+          "review_count": 10,
+          "review_rate": 0.19230769230769232
+        },
+        "historical": {
+          "accuracy": 1.0,
+          "cases": 2,
+          "correct": 2,
+          "dangerous_retirement_count": 0,
+          "gold_overlay_cases": 0,
+          "gold_retire_cases": 0,
+          "measurement_failures": 0,
+          "overlay_captured": 0,
+          "overlay_errors": 0,
+          "overlay_recall": null,
+          "retain_count": 0,
+          "retention_rate": 0.0,
+          "retire_captured": 0,
+          "retire_recall": null,
+          "review_count": 2,
+          "review_rate": 1.0
+        },
+        "standing_rule": {
+          "accuracy": 0.95,
+          "cases": 40,
+          "correct": 38,
+          "dangerous_retirement_count": 0,
+          "gold_overlay_cases": 0,
+          "gold_retire_cases": 10,
+          "measurement_failures": 1,
+          "overlay_captured": 0,
+          "overlay_errors": 0,
+          "overlay_recall": null,
+          "retain_count": 28,
+          "retention_rate": 0.7,
+          "retire_captured": 10,
+          "retire_recall": 1.0,
+          "review_count": 1,
+          "review_rate": 0.025
+        },
+        "unknown": {
+          "accuracy": 1.0,
+          "cases": 2,
+          "correct": 2,
+          "dangerous_retirement_count": 0,
+          "gold_overlay_cases": 0,
+          "gold_retire_cases": 0,
+          "measurement_failures": 0,
+          "overlay_captured": 0,
+          "overlay_errors": 0,
+          "overlay_recall": null,
+          "retain_count": 0,
+          "retention_rate": 0.0,
+          "retire_captured": 0,
+          "retire_recall": null,
+          "review_count": 2,
+          "review_rate": 1.0
+        }
+      },
+      "joint_group_correctness": {
+        "0": {
+          "groups": 40,
+          "joint_accuracy": 0.875,
+          "joint_correct_groups": 35,
+          "outcomes": {
+            "kind_case_002": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_002",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_003": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_003",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_004": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_004",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_005": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_005",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_006": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_006",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_008": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_008",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_010": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_010",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_011": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_011",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_013": {
+              "cases": 1,
+              "joint_correct": false,
+              "outcomes": [
+                {
+                  "action": null,
+                  "case_id": "kind_case_013",
+                  "expected_disposition": "retain",
+                  "status": "measurement_failure"
+                }
+              ]
+            },
+            "kind_case_014": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_014",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_016": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_016",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_017": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_017",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_018": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_018",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_020": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_020",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_024": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_024",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_026": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_026",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_028": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_028",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_029": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_029",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_030": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_030",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_032": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_032",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_033": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_033",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_034": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_034",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_036": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_036",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_038": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_038",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_040": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_040",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_041": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_041",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_042": {
+              "cases": 1,
+              "joint_correct": false,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_042",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_043": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_043",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_044": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_044",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_045": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_045",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_046": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_046",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_047": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_047",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_01": {
+              "cases": 2,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_027",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                },
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_035",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_02": {
+              "cases": 2,
+              "joint_correct": false,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_009",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                },
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_031",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_03": {
+              "cases": 2,
+              "joint_correct": false,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_039",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                },
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_048",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_04": {
+              "cases": 2,
+              "joint_correct": false,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_023",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                },
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_025",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_05": {
+              "cases": 2,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_019",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                },
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_037",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_06": {
+              "cases": 2,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_012",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                },
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_015",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_07": {
+              "cases": 2,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_007",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                },
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_021",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_08": {
+              "cases": 2,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_001",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                },
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_022",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            }
+          }
+        },
+        "1": {
+          "groups": 40,
+          "joint_accuracy": 0.9,
+          "joint_correct_groups": 36,
+          "outcomes": {
+            "kind_case_002": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_002",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_003": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_003",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_004": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_004",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_005": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_005",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_006": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_006",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_008": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_008",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_010": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_010",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_011": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_011",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_013": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_013",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_014": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_014",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_016": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_016",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_017": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_017",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_018": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_018",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_020": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_020",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_024": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_024",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_026": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_026",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_028": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_028",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_029": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_029",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_030": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_030",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_032": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_032",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_033": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_033",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_034": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_034",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_036": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_036",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_038": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_038",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_040": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_040",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_041": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_041",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_042": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_042",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_043": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_043",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_044": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_044",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_045": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_045",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_046": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_046",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_047": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_047",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_01": {
+              "cases": 2,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_027",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                },
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_035",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_02": {
+              "cases": 2,
+              "joint_correct": false,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_009",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                },
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_031",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_03": {
+              "cases": 2,
+              "joint_correct": false,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_039",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                },
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_048",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_04": {
+              "cases": 2,
+              "joint_correct": false,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_023",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                },
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_025",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_05": {
+              "cases": 2,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_019",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                },
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_037",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_06": {
+              "cases": 2,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_012",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                },
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_015",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_07": {
+              "cases": 2,
+              "joint_correct": false,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_007",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                },
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_021",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_08": {
+              "cases": 2,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_001",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                },
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_022",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "pooled": {
+        "accuracy": 0.90625,
+        "cases": 96,
+        "correct": 87,
+        "dangerous_retirement_count": 0,
+        "gold_overlay_cases": 24,
+        "gold_retire_cases": 16,
+        "measurement_failures": 1,
+        "overlay_captured": 17,
+        "overlay_errors": 0,
+        "overlay_recall": 0.7083333333333334,
+        "retain_count": 47,
+        "retention_rate": 0.4895833333333333,
+        "retire_captured": 16,
+        "retire_recall": 1.0,
+        "review_count": 15,
+        "review_rate": 0.15625
+      },
+      "repeats": {
+        "0": {
+          "accuracy": 0.8958333333333334,
+          "cases": 48,
+          "correct": 43,
+          "dangerous_retirement_count": 0,
+          "gold_overlay_cases": 12,
+          "gold_retire_cases": 8,
+          "measurement_failures": 1,
+          "overlay_captured": 9,
+          "overlay_errors": 0,
+          "overlay_recall": 0.75,
+          "retain_count": 23,
+          "retention_rate": 0.4791666666666667,
+          "retire_captured": 8,
+          "retire_recall": 1.0,
+          "review_count": 7,
+          "review_rate": 0.14583333333333334
+        },
+        "1": {
+          "accuracy": 0.9166666666666666,
+          "cases": 48,
+          "correct": 44,
+          "dangerous_retirement_count": 0,
+          "gold_overlay_cases": 12,
+          "gold_retire_cases": 8,
+          "measurement_failures": 0,
+          "overlay_captured": 8,
+          "overlay_errors": 0,
+          "overlay_recall": 0.6666666666666666,
+          "retain_count": 24,
+          "retention_rate": 0.5,
+          "retire_captured": 8,
+          "retire_recall": 1.0,
+          "review_count": 8,
+          "review_rate": 0.16666666666666666
+        }
+      },
+      "subsets": {
+        "current_state_temporary_gold_overlay": {
+          "pooled": {
+            "accuracy": 0.7083333333333334,
+            "cases": 24,
+            "correct": 17,
+            "dangerous_retirement_count": 0,
+            "gold_overlay_cases": 24,
+            "gold_retire_cases": 0,
+            "measurement_failures": 0,
+            "overlay_captured": 17,
+            "overlay_errors": 0,
+            "overlay_recall": 0.7083333333333334,
+            "retain_count": 7,
+            "retention_rate": 0.2916666666666667,
+            "retire_captured": 0,
+            "retire_recall": null,
+            "review_count": 0,
+            "review_rate": 0.0
+          },
+          "repeats": {
+            "0": {
+              "accuracy": 0.75,
+              "cases": 12,
+              "correct": 9,
+              "dangerous_retirement_count": 0,
+              "gold_overlay_cases": 12,
+              "gold_retire_cases": 0,
+              "measurement_failures": 0,
+              "overlay_captured": 9,
+              "overlay_errors": 0,
+              "overlay_recall": 0.75,
+              "retain_count": 3,
+              "retention_rate": 0.25,
+              "retire_captured": 0,
+              "retire_recall": null,
+              "review_count": 0,
+              "review_rate": 0.0
+            },
+            "1": {
+              "accuracy": 0.6666666666666666,
+              "cases": 12,
+              "correct": 8,
+              "dangerous_retirement_count": 0,
+              "gold_overlay_cases": 12,
+              "gold_retire_cases": 0,
+              "measurement_failures": 0,
+              "overlay_captured": 8,
+              "overlay_errors": 0,
+              "overlay_recall": 0.6666666666666666,
+              "retain_count": 4,
+              "retention_rate": 0.3333333333333333,
+              "retire_captured": 0,
+              "retire_recall": null,
+              "review_count": 0,
+              "review_rate": 0.0
+            }
+          }
+        },
+        "standing_rule_temporary": {
+          "pooled": {
+            "accuracy": 0.9615384615384616,
+            "cases": 26,
+            "correct": 25,
+            "dangerous_retirement_count": 0,
+            "gold_overlay_cases": 0,
+            "gold_retire_cases": 0,
+            "measurement_failures": 0,
+            "overlay_captured": 0,
+            "overlay_errors": 0,
+            "overlay_recall": null,
+            "retain_count": 25,
+            "retention_rate": 0.9615384615384616,
+            "retire_captured": 0,
+            "retire_recall": null,
+            "review_count": 1,
+            "review_rate": 0.038461538461538464
+          },
+          "repeats": {
+            "0": {
+              "accuracy": 0.9230769230769231,
+              "cases": 13,
+              "correct": 12,
+              "dangerous_retirement_count": 0,
+              "gold_overlay_cases": 0,
+              "gold_retire_cases": 0,
+              "measurement_failures": 0,
+              "overlay_captured": 0,
+              "overlay_errors": 0,
+              "overlay_recall": null,
+              "retain_count": 13,
+              "retention_rate": 1.0,
+              "retire_captured": 0,
+              "retire_recall": null,
+              "review_count": 0,
+              "review_rate": 0.0
+            },
+            "1": {
+              "accuracy": 1.0,
+              "cases": 13,
+              "correct": 13,
+              "dangerous_retirement_count": 0,
+              "gold_overlay_cases": 0,
+              "gold_retire_cases": 0,
+              "measurement_failures": 0,
+              "overlay_captured": 0,
+              "overlay_errors": 0,
+              "overlay_recall": null,
+              "retain_count": 12,
+              "retention_rate": 0.9230769230769231,
+              "retire_captured": 0,
+              "retire_recall": null,
+              "review_count": 1,
+              "review_rate": 0.07692307692307693
+            }
+          }
+        }
+      }
+    },
+    "v3": {
+      "claim_kinds": {
+        "current_state": {
+          "accuracy": 0.8269230769230769,
+          "cases": 52,
+          "correct": 43,
+          "dangerous_retirement_count": 0,
+          "gold_overlay_cases": 24,
+          "gold_retire_cases": 6,
+          "measurement_failures": 1,
+          "overlay_captured": 18,
+          "overlay_errors": 0,
+          "overlay_recall": 0.75,
+          "retain_count": 16,
+          "retention_rate": 0.3076923076923077,
+          "retire_captured": 6,
+          "retire_recall": 1.0,
+          "review_count": 11,
+          "review_rate": 0.21153846153846154
+        },
+        "historical": {
+          "accuracy": 1.0,
+          "cases": 2,
+          "correct": 2,
+          "dangerous_retirement_count": 0,
+          "gold_overlay_cases": 0,
+          "gold_retire_cases": 0,
+          "measurement_failures": 0,
+          "overlay_captured": 0,
+          "overlay_errors": 0,
+          "overlay_recall": null,
+          "retain_count": 0,
+          "retention_rate": 0.0,
+          "retire_captured": 0,
+          "retire_recall": null,
+          "review_count": 2,
+          "review_rate": 1.0
+        },
+        "standing_rule": {
+          "accuracy": 0.95,
+          "cases": 40,
+          "correct": 38,
+          "dangerous_retirement_count": 0,
+          "gold_overlay_cases": 0,
+          "gold_retire_cases": 10,
+          "measurement_failures": 0,
+          "overlay_captured": 0,
+          "overlay_errors": 0,
+          "overlay_recall": null,
+          "retain_count": 30,
+          "retention_rate": 0.75,
+          "retire_captured": 10,
+          "retire_recall": 1.0,
+          "review_count": 0,
+          "review_rate": 0.0
+        },
+        "unknown": {
+          "accuracy": 1.0,
+          "cases": 2,
+          "correct": 2,
+          "dangerous_retirement_count": 0,
+          "gold_overlay_cases": 0,
+          "gold_retire_cases": 0,
+          "measurement_failures": 0,
+          "overlay_captured": 0,
+          "overlay_errors": 0,
+          "overlay_recall": null,
+          "retain_count": 0,
+          "retention_rate": 0.0,
+          "retire_captured": 0,
+          "retire_recall": null,
+          "review_count": 2,
+          "review_rate": 1.0
+        }
+      },
+      "joint_group_correctness": {
+        "0": {
+          "groups": 40,
+          "joint_accuracy": 0.85,
+          "joint_correct_groups": 34,
+          "outcomes": {
+            "kind_case_002": {
+              "cases": 1,
+              "joint_correct": false,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_002",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_003": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_003",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_004": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_004",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_005": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_005",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_006": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_006",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_008": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_008",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_010": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_010",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_011": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_011",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_013": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_013",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_014": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_014",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_016": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_016",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_017": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_017",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_018": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_018",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_020": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_020",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_024": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_024",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_026": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_026",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_028": {
+              "cases": 1,
+              "joint_correct": false,
+              "outcomes": [
+                {
+                  "action": null,
+                  "case_id": "kind_case_028",
+                  "expected_disposition": "review",
+                  "status": "measurement_failure"
+                }
+              ]
+            },
+            "kind_case_029": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_029",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_030": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_030",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_032": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_032",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_033": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_033",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_034": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_034",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_036": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_036",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_038": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_038",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_040": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_040",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_041": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_041",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_042": {
+              "cases": 1,
+              "joint_correct": false,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_042",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_043": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_043",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_044": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_044",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_045": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_045",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_046": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_046",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_047": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_047",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_01": {
+              "cases": 2,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_027",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                },
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_035",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_02": {
+              "cases": 2,
+              "joint_correct": false,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_009",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                },
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_031",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_03": {
+              "cases": 2,
+              "joint_correct": false,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_039",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                },
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_048",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_04": {
+              "cases": 2,
+              "joint_correct": false,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_023",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                },
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_025",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_05": {
+              "cases": 2,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_019",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                },
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_037",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_06": {
+              "cases": 2,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_012",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                },
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_015",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_07": {
+              "cases": 2,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_007",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                },
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_021",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_08": {
+              "cases": 2,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_001",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                },
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_022",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            }
+          }
+        },
+        "1": {
+          "groups": 40,
+          "joint_accuracy": 0.875,
+          "joint_correct_groups": 35,
+          "outcomes": {
+            "kind_case_002": {
+              "cases": 1,
+              "joint_correct": false,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_002",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_003": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_003",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_004": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_004",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_005": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_005",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_006": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_006",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_008": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_008",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_010": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_010",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_011": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_011",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_013": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_013",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_014": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_014",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_016": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_016",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_017": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_017",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_018": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_018",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_020": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_020",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_024": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_024",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_026": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_026",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_028": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_028",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_029": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_029",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_030": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_030",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_032": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_032",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_033": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_033",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_034": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_034",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_036": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_036",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_038": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "review",
+                  "case_id": "kind_case_038",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_040": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_040",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_041": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_041",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_042": {
+              "cases": 1,
+              "joint_correct": false,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_042",
+                  "expected_disposition": "review",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_043": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_043",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_044": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_044",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_045": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_045",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_046": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_046",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "kind_case_047": {
+              "cases": 1,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retire",
+                  "case_id": "kind_case_047",
+                  "expected_disposition": "retire",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_01": {
+              "cases": 2,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_027",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                },
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_035",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_02": {
+              "cases": 2,
+              "joint_correct": false,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_009",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                },
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_031",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_03": {
+              "cases": 2,
+              "joint_correct": false,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_039",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                },
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_048",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_04": {
+              "cases": 2,
+              "joint_correct": false,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_023",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                },
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_025",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_05": {
+              "cases": 2,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_019",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                },
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_037",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_06": {
+              "cases": 2,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_012",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                },
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_015",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_07": {
+              "cases": 2,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_007",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                },
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_021",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            },
+            "pair_08": {
+              "cases": 2,
+              "joint_correct": true,
+              "outcomes": [
+                {
+                  "action": "retain",
+                  "case_id": "kind_case_001",
+                  "expected_disposition": "retain",
+                  "status": "completed"
+                },
+                {
+                  "action": "overlay",
+                  "case_id": "kind_case_022",
+                  "expected_disposition": "overlay",
+                  "status": "completed"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "pooled": {
+        "accuracy": 0.8854166666666666,
+        "cases": 96,
+        "correct": 85,
+        "dangerous_retirement_count": 0,
+        "gold_overlay_cases": 24,
+        "gold_retire_cases": 16,
+        "measurement_failures": 1,
+        "overlay_captured": 18,
+        "overlay_errors": 0,
+        "overlay_recall": 0.75,
+        "retain_count": 46,
+        "retention_rate": 0.4791666666666667,
+        "retire_captured": 16,
+        "retire_recall": 1.0,
+        "review_count": 15,
+        "review_rate": 0.15625
+      },
+      "repeats": {
+        "0": {
+          "accuracy": 0.875,
+          "cases": 48,
+          "correct": 42,
+          "dangerous_retirement_count": 0,
+          "gold_overlay_cases": 12,
+          "gold_retire_cases": 8,
+          "measurement_failures": 1,
+          "overlay_captured": 9,
+          "overlay_errors": 0,
+          "overlay_recall": 0.75,
+          "retain_count": 23,
+          "retention_rate": 0.4791666666666667,
+          "retire_captured": 8,
+          "retire_recall": 1.0,
+          "review_count": 7,
+          "review_rate": 0.14583333333333334
+        },
+        "1": {
+          "accuracy": 0.8958333333333334,
+          "cases": 48,
+          "correct": 43,
+          "dangerous_retirement_count": 0,
+          "gold_overlay_cases": 12,
+          "gold_retire_cases": 8,
+          "measurement_failures": 0,
+          "overlay_captured": 9,
+          "overlay_errors": 0,
+          "overlay_recall": 0.75,
+          "retain_count": 23,
+          "retention_rate": 0.4791666666666667,
+          "retire_captured": 8,
+          "retire_recall": 1.0,
+          "review_count": 8,
+          "review_rate": 0.16666666666666666
+        }
+      },
+      "subsets": {
+        "current_state_temporary_gold_overlay": {
+          "pooled": {
+            "accuracy": 0.75,
+            "cases": 24,
+            "correct": 18,
+            "dangerous_retirement_count": 0,
+            "gold_overlay_cases": 24,
+            "gold_retire_cases": 0,
+            "measurement_failures": 0,
+            "overlay_captured": 18,
+            "overlay_errors": 0,
+            "overlay_recall": 0.75,
+            "retain_count": 6,
+            "retention_rate": 0.25,
+            "retire_captured": 0,
+            "retire_recall": null,
+            "review_count": 0,
+            "review_rate": 0.0
+          },
+          "repeats": {
+            "0": {
+              "accuracy": 0.75,
+              "cases": 12,
+              "correct": 9,
+              "dangerous_retirement_count": 0,
+              "gold_overlay_cases": 12,
+              "gold_retire_cases": 0,
+              "measurement_failures": 0,
+              "overlay_captured": 9,
+              "overlay_errors": 0,
+              "overlay_recall": 0.75,
+              "retain_count": 3,
+              "retention_rate": 0.25,
+              "retire_captured": 0,
+              "retire_recall": null,
+              "review_count": 0,
+              "review_rate": 0.0
+            },
+            "1": {
+              "accuracy": 0.75,
+              "cases": 12,
+              "correct": 9,
+              "dangerous_retirement_count": 0,
+              "gold_overlay_cases": 12,
+              "gold_retire_cases": 0,
+              "measurement_failures": 0,
+              "overlay_captured": 9,
+              "overlay_errors": 0,
+              "overlay_recall": 0.75,
+              "retain_count": 3,
+              "retention_rate": 0.25,
+              "retire_captured": 0,
+              "retire_recall": null,
+              "review_count": 0,
+              "review_rate": 0.0
+            }
+          }
+        },
+        "standing_rule_temporary": {
+          "pooled": {
+            "accuracy": 0.9230769230769231,
+            "cases": 26,
+            "correct": 24,
+            "dangerous_retirement_count": 0,
+            "gold_overlay_cases": 0,
+            "gold_retire_cases": 0,
+            "measurement_failures": 0,
+            "overlay_captured": 0,
+            "overlay_errors": 0,
+            "overlay_recall": null,
+            "retain_count": 26,
+            "retention_rate": 1.0,
+            "retire_captured": 0,
+            "retire_recall": null,
+            "review_count": 0,
+            "review_rate": 0.0
+          },
+          "repeats": {
+            "0": {
+              "accuracy": 0.9230769230769231,
+              "cases": 13,
+              "correct": 12,
+              "dangerous_retirement_count": 0,
+              "gold_overlay_cases": 0,
+              "gold_retire_cases": 0,
+              "measurement_failures": 0,
+              "overlay_captured": 0,
+              "overlay_errors": 0,
+              "overlay_recall": null,
+              "retain_count": 13,
+              "retention_rate": 1.0,
+              "retire_captured": 0,
+              "retire_recall": null,
+              "review_count": 0,
+              "review_rate": 0.0
+            },
+            "1": {
+              "accuracy": 0.9230769230769231,
+              "cases": 13,
+              "correct": 12,
+              "dangerous_retirement_count": 0,
+              "gold_overlay_cases": 0,
+              "gold_retire_cases": 0,
+              "measurement_failures": 0,
+              "overlay_captured": 0,
+              "overlay_errors": 0,
+              "overlay_recall": null,
+              "retain_count": 13,
+              "retention_rate": 1.0,
+              "retire_captured": 0,
+              "retire_recall": null,
+              "review_count": 0,
+              "review_rate": 0.0
+            }
+          }
+        }
+      }
+    }
+  },
+  "pairwise": {
+    "unknown_to_typed": {
+      "both_complete": 92,
+      "cases": 96,
+      "changed": [
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_001",
+          "expected_disposition": "retain",
+          "repeat": 0
+        },
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_001",
+          "expected_disposition": "retain",
+          "repeat": 1
+        },
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_007",
+          "expected_disposition": "retain",
+          "repeat": 0
+        },
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_007",
+          "expected_disposition": "retain",
+          "repeat": 1
+        },
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_009",
+          "expected_disposition": "retain",
+          "repeat": 0
+        },
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": null,
+          "before_status": "measurement_failure",
+          "case_id": "kind_case_013",
+          "expected_disposition": "retain",
+          "repeat": 0
+        },
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_015",
+          "expected_disposition": "retain",
+          "repeat": 0
+        },
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_015",
+          "expected_disposition": "retain",
+          "repeat": 1
+        },
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_019",
+          "expected_disposition": "retain",
+          "repeat": 0
+        },
+        {
+          "after_action": null,
+          "after_status": "measurement_failure",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_019",
+          "expected_disposition": "retain",
+          "repeat": 1
+        },
+        {
+          "after_action": "overlay",
+          "after_status": "completed",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_021",
+          "expected_disposition": "overlay",
+          "repeat": 1
+        },
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_027",
+          "expected_disposition": "retain",
+          "repeat": 0
+        },
+        {
+          "after_action": "overlay",
+          "after_status": "completed",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_031",
+          "expected_disposition": "overlay",
+          "repeat": 0
+        },
+        {
+          "after_action": null,
+          "after_status": "measurement_failure",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_031",
+          "expected_disposition": "overlay",
+          "repeat": 1
+        },
+        {
+          "after_action": null,
+          "after_status": "measurement_failure",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_039",
+          "expected_disposition": "overlay",
+          "repeat": 0
+        },
+        {
+          "after_action": "overlay",
+          "after_status": "completed",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_039",
+          "expected_disposition": "overlay",
+          "repeat": 1
+        },
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": "review",
+          "before_status": "completed",
+          "case_id": "kind_case_042",
+          "expected_disposition": "review",
+          "repeat": 1
+        }
+      ],
+      "improvement_count": 4,
+      "improvements": [
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": null,
+          "before_status": "measurement_failure",
+          "case_id": "kind_case_013",
+          "expected_disposition": "retain",
+          "repeat": 0
+        },
+        {
+          "after_action": "overlay",
+          "after_status": "completed",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_021",
+          "expected_disposition": "overlay",
+          "repeat": 1
+        },
+        {
+          "after_action": "overlay",
+          "after_status": "completed",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_031",
+          "expected_disposition": "overlay",
+          "repeat": 0
+        },
+        {
+          "after_action": "overlay",
+          "after_status": "completed",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_039",
+          "expected_disposition": "overlay",
+          "repeat": 1
+        }
+      ],
+      "regression_count": 2,
+      "regressions": [
+        {
+          "after_action": null,
+          "after_status": "measurement_failure",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_019",
+          "expected_disposition": "retain",
+          "repeat": 1
+        },
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": "review",
+          "before_status": "completed",
+          "case_id": "kind_case_042",
+          "expected_disposition": "review",
+          "repeat": 1
+        }
+      ]
+    },
+    "v3_to_typed": {
+      "both_complete": 92,
+      "cases": 96,
+      "changed": [
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_001",
+          "expected_disposition": "retain",
+          "repeat": 0
+        },
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_001",
+          "expected_disposition": "retain",
+          "repeat": 1
+        },
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": "review",
+          "before_status": "completed",
+          "case_id": "kind_case_002",
+          "expected_disposition": "retain",
+          "repeat": 0
+        },
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": "review",
+          "before_status": "completed",
+          "case_id": "kind_case_002",
+          "expected_disposition": "retain",
+          "repeat": 1
+        },
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_007",
+          "expected_disposition": "retain",
+          "repeat": 0
+        },
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_007",
+          "expected_disposition": "retain",
+          "repeat": 1
+        },
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_015",
+          "expected_disposition": "retain",
+          "repeat": 0
+        },
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_015",
+          "expected_disposition": "retain",
+          "repeat": 1
+        },
+        {
+          "after_action": "review",
+          "after_status": "completed",
+          "before_action": "review",
+          "before_status": "completed",
+          "case_id": "kind_case_017",
+          "expected_disposition": "review",
+          "repeat": 0
+        },
+        {
+          "after_action": "review",
+          "after_status": "completed",
+          "before_action": "review",
+          "before_status": "completed",
+          "case_id": "kind_case_017",
+          "expected_disposition": "review",
+          "repeat": 1
+        },
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_019",
+          "expected_disposition": "retain",
+          "repeat": 0
+        },
+        {
+          "after_action": null,
+          "after_status": "measurement_failure",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_019",
+          "expected_disposition": "retain",
+          "repeat": 1
+        },
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_027",
+          "expected_disposition": "retain",
+          "repeat": 0
+        },
+        {
+          "after_action": "review",
+          "after_status": "completed",
+          "before_action": null,
+          "before_status": "measurement_failure",
+          "case_id": "kind_case_028",
+          "expected_disposition": "review",
+          "repeat": 0
+        },
+        {
+          "after_action": "overlay",
+          "after_status": "completed",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_031",
+          "expected_disposition": "overlay",
+          "repeat": 0
+        },
+        {
+          "after_action": null,
+          "after_status": "measurement_failure",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_031",
+          "expected_disposition": "overlay",
+          "repeat": 1
+        },
+        {
+          "after_action": null,
+          "after_status": "measurement_failure",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_039",
+          "expected_disposition": "overlay",
+          "repeat": 0
+        },
+        {
+          "after_action": "overlay",
+          "after_status": "completed",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_039",
+          "expected_disposition": "overlay",
+          "repeat": 1
+        }
+      ],
+      "improvement_count": 5,
+      "improvements": [
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": "review",
+          "before_status": "completed",
+          "case_id": "kind_case_002",
+          "expected_disposition": "retain",
+          "repeat": 0
+        },
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": "review",
+          "before_status": "completed",
+          "case_id": "kind_case_002",
+          "expected_disposition": "retain",
+          "repeat": 1
+        },
+        {
+          "after_action": "review",
+          "after_status": "completed",
+          "before_action": null,
+          "before_status": "measurement_failure",
+          "case_id": "kind_case_028",
+          "expected_disposition": "review",
+          "repeat": 0
+        },
+        {
+          "after_action": "overlay",
+          "after_status": "completed",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_031",
+          "expected_disposition": "overlay",
+          "repeat": 0
+        },
+        {
+          "after_action": "overlay",
+          "after_status": "completed",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_039",
+          "expected_disposition": "overlay",
+          "repeat": 1
+        }
+      ],
+      "regression_count": 1,
+      "regressions": [
+        {
+          "after_action": null,
+          "after_status": "measurement_failure",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_019",
+          "expected_disposition": "retain",
+          "repeat": 1
+        }
+      ]
+    },
+    "v3_to_unknown": {
+      "both_complete": 94,
+      "cases": 96,
+      "changed": [
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_001",
+          "expected_disposition": "retain",
+          "repeat": 0
+        },
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": "review",
+          "before_status": "completed",
+          "case_id": "kind_case_002",
+          "expected_disposition": "retain",
+          "repeat": 0
+        },
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": "review",
+          "before_status": "completed",
+          "case_id": "kind_case_002",
+          "expected_disposition": "retain",
+          "repeat": 1
+        },
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_009",
+          "expected_disposition": "retain",
+          "repeat": 0
+        },
+        {
+          "after_action": null,
+          "after_status": "measurement_failure",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_013",
+          "expected_disposition": "retain",
+          "repeat": 0
+        },
+        {
+          "after_action": "review",
+          "after_status": "completed",
+          "before_action": "review",
+          "before_status": "completed",
+          "case_id": "kind_case_017",
+          "expected_disposition": "review",
+          "repeat": 0
+        },
+        {
+          "after_action": "review",
+          "after_status": "completed",
+          "before_action": "review",
+          "before_status": "completed",
+          "case_id": "kind_case_017",
+          "expected_disposition": "review",
+          "repeat": 1
+        },
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": "overlay",
+          "before_status": "completed",
+          "case_id": "kind_case_021",
+          "expected_disposition": "overlay",
+          "repeat": 1
+        },
+        {
+          "after_action": "review",
+          "after_status": "completed",
+          "before_action": null,
+          "before_status": "measurement_failure",
+          "case_id": "kind_case_028",
+          "expected_disposition": "review",
+          "repeat": 0
+        },
+        {
+          "after_action": "review",
+          "after_status": "completed",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_042",
+          "expected_disposition": "review",
+          "repeat": 1
+        }
+      ],
+      "improvement_count": 4,
+      "improvements": [
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": "review",
+          "before_status": "completed",
+          "case_id": "kind_case_002",
+          "expected_disposition": "retain",
+          "repeat": 0
+        },
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": "review",
+          "before_status": "completed",
+          "case_id": "kind_case_002",
+          "expected_disposition": "retain",
+          "repeat": 1
+        },
+        {
+          "after_action": "review",
+          "after_status": "completed",
+          "before_action": null,
+          "before_status": "measurement_failure",
+          "case_id": "kind_case_028",
+          "expected_disposition": "review",
+          "repeat": 0
+        },
+        {
+          "after_action": "review",
+          "after_status": "completed",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_042",
+          "expected_disposition": "review",
+          "repeat": 1
+        }
+      ],
+      "regression_count": 2,
+      "regressions": [
+        {
+          "after_action": null,
+          "after_status": "measurement_failure",
+          "before_action": "retain",
+          "before_status": "completed",
+          "case_id": "kind_case_013",
+          "expected_disposition": "retain",
+          "repeat": 0
+        },
+        {
+          "after_action": "retain",
+          "after_status": "completed",
+          "before_action": "overlay",
+          "before_status": "completed",
+          "case_id": "kind_case_021",
+          "expected_disposition": "overlay",
+          "repeat": 1
+        }
+      ]
+    }
+  },
+  "projections_sha256": {
+    "typed": "8726f9c566a71bd2838d96a46f9d1945b6859f2ee0e8d85d7f8d3d8dc15c60a8",
+    "unknown": "dff10e084c965abb7400510c4d35b7d1ae46ebb1d53c29a9d6defced86bd1d4b",
+    "v3": "0937af6ad38b6e493726a91bb7bbd25011d5897383dcb34e20048aec52fea14a"
+  },
+  "repeats": 2,
+  "run_paths": {
+    "typed": "/home/dev/dev/eval-runs/jev-claim-kind-20260919/holdout/typed-run",
+    "unknown": "/home/dev/dev/eval-runs/jev-claim-kind-20260919/holdout/unknown-run",
+    "v3": "/home/dev/dev/eval-runs/jev-claim-kind-20260919/holdout/v3-run"
+  },
+  "source_study_sha256": "63a1c6cd1f4ed7d6264a91a03e3f211124e6df7afd432e7d019c192193697878",
+  "unique_cases": 48
+}

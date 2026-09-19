@@ -1,0 +1,83 @@
+[
+  {
+    "arm": "unknown",
+    "prompt_version": "v4",
+    "launch_utc": "2026-09-19T22:40:41.113432+00:00",
+    "pid": 382115,
+    "command": [
+      "moon",
+      "run",
+      "root:jev-revalidation",
+      "--",
+      "--cases",
+      "/home/dev/dev/eval-runs/jev-claim-kind-20260919/holdout/prepared/unknown.json",
+      "--out",
+      "/home/dev/dev/eval-runs/jev-claim-kind-20260919/holdout/unknown-run",
+      "--prompt-version",
+      "v4",
+      "--arms",
+      "direct",
+      "--batch-size",
+      "1",
+      "--repeats",
+      "2",
+      "--concurrency",
+      "8",
+      "--live"
+    ]
+  },
+  {
+    "arm": "v3",
+    "prompt_version": "v3",
+    "launch_utc": "2026-09-19T22:40:41.113979+00:00",
+    "pid": 382116,
+    "command": [
+      "moon",
+      "run",
+      "root:jev-revalidation",
+      "--",
+      "--cases",
+      "/home/dev/dev/eval-runs/jev-claim-kind-20260919/holdout/prepared/v3.json",
+      "--out",
+      "/home/dev/dev/eval-runs/jev-claim-kind-20260919/holdout/v3-run",
+      "--prompt-version",
+      "v3",
+      "--arms",
+      "direct",
+      "--batch-size",
+      "1",
+      "--repeats",
+      "2",
+      "--concurrency",
+      "8",
+      "--live"
+    ]
+  },
+  {
+    "arm": "typed",
+    "prompt_version": "v4",
+    "launch_utc": "2026-09-19T22:40:41.114397+00:00",
+    "pid": 382117,
+    "command": [
+      "moon",
+      "run",
+      "root:jev-revalidation",
+      "--",
+      "--cases",
+      "/home/dev/dev/eval-runs/jev-claim-kind-20260919/holdout/prepared/typed.json",
+      "--out",
+      "/home/dev/dev/eval-runs/jev-claim-kind-20260919/holdout/typed-run",
+      "--prompt-version",
+      "v4",
+      "--arms",
+      "direct",
+      "--batch-size",
+      "1",
+      "--repeats",
+      "2",
+      "--concurrency",
+      "8",
+      "--live"
+    ]
+  }
+]
