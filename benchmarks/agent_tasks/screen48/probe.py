@@ -1,10 +1,16 @@
 """Probe the floor: does any memory arm lift a task the solver fails cold?
 
 The no-memory screen bands the transfer material by what the solver reaches
-with an empty pack. A task in the floor band is failed at every repetition, and
-the screen cannot say why: the task may be out of the solver's reach entirely,
-or it may be exactly the task a memory arm would carry. This module asks that
-second question directly. It prepares the four memory arms for a handful of
+with an empty pack. A task in the floor band is one the solver does not pass
+reliably, and the screen cannot say why: the task may be out of the solver's
+reach entirely, or it may be exactly the task a memory arm would carry. This
+module asks that second question directly.
+
+It asks it only of a task the screen actually measured. The probe binds every
+task it is given to the screen's ``headroom.json`` and refuses a task whose band
+came from fewer than ``headroom.MINIMUM_REPETITIONS`` known outcomes, or a
+report written before bands carried an interval: the first probe was built on
+a floor band from two repetitions that turned out to be a coin flip. It prepares the four memory arms for a handful of
 catalogued tasks at one checkpoint and runs them against each other, so a lift
 over the ``no_memory`` arm is visible if there is one.
 
@@ -28,6 +34,9 @@ Outputs, all under ``--output``:
 ``preparation.json``
     Every cell asked for, its status and reason, and the catalog digests the
     packs were prepared against.
+``headroom``, inside ``probe.json``
+    The screen report the probed tasks were bound to: its path, digest and the
+    band row of every probed task.
 ``native-inventory.json``
     The checkpoint's authorized native universe and its production receipt.
 ``packs/cp{checkpoint}/{task}/{arm}.json`` and ``{arm}.txt``
@@ -122,6 +131,51 @@ def material_task_source(tasks_root: Path) -> Callable[[str, Path], tuple[str, d
         return prompt_path.read_text(encoding="utf-8"), dict(sorted(workspace.items()))
 
     return read
+
+
+def bound_bands(report: dict[str, Any], tasks: Sequence[str]) -> dict[str, dict[str, Any]]:
+    """The screen's band row for every probed task, or a refusal naming why not.
+
+    A band is only as good as the outcomes under it. The report has to be the
+    interval-banded schema, every probed task has to be in it, and every one
+    has to have reached ``headroom.MINIMUM_REPETITIONS`` known outcomes. The
+    band itself is not adjudicated here: a saturated task can be probed, and
+    the probe's own rows will show the arms had nothing to add.
+    """
+    if not isinstance(report, dict) or report.get("schema") != headroom.SCHEMA:
+        raise ManifestError(
+            f"headroom report is not {headroom.SCHEMA}: bands without an interval are not bands"
+        )
+    if report.get("minimum_repetitions") != headroom.MINIMUM_REPETITIONS:
+        raise ManifestError(
+            "headroom report declares a different minimum repetition count: "
+            f"{report.get('minimum_repetitions')!r} != {headroom.MINIMUM_REPETITIONS}"
+        )
+    rows = report.get("tasks")
+    if not isinstance(rows, list):
+        raise ManifestError("headroom report names no tasks")
+    by_task: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get("task"), str):
+            raise ManifestError("headroom report carries a row without a task")
+        if missing := [field for field in headroom.BAND_FIELDS if field not in row]:
+            raise ManifestError(f"headroom row for {row['task']} lacks {missing}")
+        by_task[row["task"]] = row
+    bound: dict[str, dict[str, Any]] = {}
+    for task in tasks:
+        row = by_task.get(task)
+        if row is None:
+            raise ManifestError(f"task {task} is not in the headroom report")
+        known = row["known"]
+        if type(known) is not int or known < headroom.MINIMUM_REPETITIONS:
+            raise ManifestError(
+                f"task {task} was banded from {known!r} known outcomes; the probe needs at "
+                f"least {headroom.MINIMUM_REPETITIONS}"
+            )
+        if row["headroom_band"] not in headroom.BANDS:
+            raise ManifestError(f"task {task} carries an unknown band: {row['headroom_band']!r}")
+        bound[task] = {field: row[field] for field in headroom.BAND_FIELDS}
+    return bound
 
 
 def _validated(
@@ -537,6 +591,7 @@ def run_cells(
     repetitions: int,
     workers: int,
     api_key_env: str | None = "OPENROUTER_API_KEY",
+    headroom_binding: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run every prepared cell ``repetitions`` times and report the pass rates.
 
@@ -664,6 +719,9 @@ def run_cells(
         "prepared_packs": sum(cell["status"] == "prepared" for cell in preparation["cells"]),
         "executed_cells": len(runnable),
         "refused_manifests": refused,
+        # The screen report the tasks were bound to, so a reader can check the
+        # band each probed task carried and how many outcomes it came from.
+        "headroom": headroom_binding,
         # A pass rate is a pass rate. Neither the memory a pack carried nor the
         # difference between two arms is a learning claim; the frozen schedule
         # owns that, and this module is not one of its cells.
@@ -707,6 +765,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="screen48-probe", description=__doc__)
     parser.add_argument("--tasks-root", type=Path, default=MATERIAL_ROOT)
     parser.add_argument("--task-ids", nargs="+", required=True)
+    parser.add_argument("--headroom", type=Path, required=True)
     parser.add_argument("--arms", nargs="+", default=list(contract.ARMS))
     parser.add_argument("--checkpoint", type=int, default=DEFAULT_CHECKPOINT)
     parser.add_argument("--template", type=Path, required=True)
@@ -735,6 +794,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         arms=list(args.arms),
         tasks_root=args.tasks_root,
     )
+    headroom_bytes = Path(args.headroom).read_bytes()
+    headroom_binding = {
+        "path": str(Path(args.headroom).absolute()),
+        "sha256": digest(headroom_bytes),
+        "bands": bound_bands(strict_json(headroom_bytes), list(args.task_ids)),
+    }
     output = Path(args.output).absolute()
     if output.exists() or output.is_symlink():
         raise ManifestError("probe output already exists")
@@ -760,6 +825,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         repetitions=args.repetitions,
         workers=args.workers,
         api_key_env=args.api_key_env,
+        headroom_binding=headroom_binding,
     )
     sys.stdout.write(table(report))
     sys.stdout.write(f"\n{REPORT_NAME}: {report['root']}/{REPORT_NAME}\n")
