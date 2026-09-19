@@ -1,0 +1,2626 @@
+[
+  {
+    "arm": "singleton",
+    "case_id": "support-005",
+    "key": "case-16-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "238a214ac638528f4311e2049dfc91762f286b01a2be8d088f7a310c984ef067"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-005",
+    "key": "case-16-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "96dd198b2feede26207d1a09bcd66a30a849281bd50ae9cda4d1c5d897e3a983"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-008",
+    "key": "case-28-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "1040a458b9391a61b1eb971f0f6d3ba401959588fdb9ce73f3427b5a0e2fd466"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-008",
+    "key": "case-28-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "225a8893d632a2c52296306546708d13f3e7d12c0735da4f3d2576fd0da877c3"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-024",
+    "key": "case-45-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "5e971b395d1973ae518867c5d686fe6436ecd52e194980ce3828ed526b9bb009"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-024",
+    "key": "case-45-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "529ca1ceb250ca2569f9066ccb845155ea38a3d834424d4b5bac1cd37b159eb8"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-036",
+    "key": "case-46-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "daadbbb1cb9db78aebf8b2c3b36450ef7a030c8bcb85c24d17f608b4d25f8210"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-036",
+    "key": "case-46-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "504bc44faa078629126ff8a313d1a59ec0750f1cd89c54e70a75a2da0fb47289"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-034",
+    "key": "case-38-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "c3ab9c1f4a1f17c473194311217ef16edbce8159d65d069516f1a975fe36d69d"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-034",
+    "key": "case-38-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "a0f944d74f21f93f8372bdbf3dc28356c6d40cbaa7bd2a23a81820babd3e97de"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-040",
+    "key": "case-15-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "62c8b0b799f7b2ae842eb7ce4aec659e7596df0f3170f2026082882f3e5755a9"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-040",
+    "key": "case-15-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "44b445378f13536259738c3a387465cfddf8eaa4425108b36ee81cda77d28bee"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-040",
+    "key": "case-15-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "765c85b4b2692915874598c0007cf625ce5f8315d8bc3311565731552497ace1"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-040",
+    "key": "case-15-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "e244da4a8957c82d2d77d434b9d13a24c486857b7f22df61457e66613c9255d5"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-044",
+    "key": "case-31-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "0d19b0f3b00bcd20c9d4bfd541ad3ebd16cd0f0f07034dfe4cbca29ce1e64997"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-044",
+    "key": "case-31-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "e785ca6c33818bc65360e2f81f9e6efb0100678e00c9031e1502ed17e2f8f4e1"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-039",
+    "key": "case-11-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "6fb7bc55c420730ffd6c112931ce789663d56c79d35f71a24ddc4b0f06012721"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-039",
+    "key": "case-11-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "6d67dc16d570d1e61056a7bd005d8f468cd39fb3328a2289dca05d0b738b5861"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-039",
+    "key": "case-11-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "5e03f81af183cd5448ee6b7e5233de3a3725963a871d84d86cd7ca24de722f2c"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-039",
+    "key": "case-11-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "cc24856974854a6da5bea834ad6d3e09cab783f84997734eb4c0e2b1ff7dc7dd"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-011",
+    "key": "case-40-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "e0556f5ae8e80a3679025bdf895ce75e18b0557e8b88b3fd549e36633ccd3b49"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-011",
+    "key": "case-40-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "0bb997093db1d765754e30d149100cfe9848a65a879d7c4d51fda9c1a02821ce"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-012",
+    "key": "case-44-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "b56c7dc3e2b10fab777ce79e795c575c21cb1d12a5a4a65577a7d47ac5398251"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-012",
+    "key": "case-44-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "f4821cd9f2a334466e4c66bfeb1c5cdb79bf4f65728f75824d628f005d578526"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-025",
+    "key": "case-2-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "7e4507f1d7e3f1b251d258e74cd87f937c3cac35867259ecfc944d355b8dd73f"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-025",
+    "key": "case-2-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "334e9e263b813bbdca33b5e9c6bdf08aadcd7189c73a204385400c692cac39c5"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-025",
+    "key": "case-2-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "36cb95397dcaaae42aef182699b7be7762e51d21647a404632eb6343dd119b52"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-025",
+    "key": "case-2-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "78ffde3706518d894b770ebb1dbfd82e1f8cd5b34b07b2b7661253578080c91e"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-002",
+    "key": "case-4-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "1af0982e77931a5ca5f6be2ac0654a8d89d78479b61849663755a4a58aad9cc9"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-002",
+    "key": "case-4-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "8501aad1c904197bcb98a960f7ad34caf21aec3acabe2ed92a24bc25d26bc76e"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-002",
+    "key": "case-4-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "ff28b9d9e495a27a33d3fa0ec2e2537ad8c35239c611cb0cb95cb500d4a10975"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-002",
+    "key": "case-4-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "0b222dc74f2df963c26473eeaf2d05bd2c8b7967ca9db56024826571f09fcb0f"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-004",
+    "key": "case-12-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "19536ece8ff71bc77956058b2c80b8c90b508d99d4055eab09f65e0410d2b3a9"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-004",
+    "key": "case-12-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "922011ca714c16010e9783637553550c4e50a2fe6a19a138f40b62123cfc8e19"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-004",
+    "key": "case-12-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "8d9eefd1d6208539b4b69007201292ab06c211b1f290f14dad473fd56971afec"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-004",
+    "key": "case-12-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "30a49e156f7b8aaf6b2bb42f13ea1db47c50a7caab7086d07df28c4ef0292cbf"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-046",
+    "key": "case-39-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "f5e2e4c97ea63ee7975da23a630060cf25f07eeb7bc925531210150ad9e6e677"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-046",
+    "key": "case-39-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "5be798cdb089abc54262d0b8f2a29a601cce23806c6858309a81816dc4d93afd"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-013",
+    "key": "case-1-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "c3a66be758085f3488fb98afa920ba4976ba11906a1181cf1132b6851fcbd062"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-013",
+    "key": "case-1-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "55f6ae29ff11129a360d141973dee5ef2abee5d7c267e87db3a36b1b72dc0a2b"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-013",
+    "key": "case-1-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "6456ec3fa2070a584ed4ab10b825e78f42f70fdb5c00b97b565cbb40f797b714"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-013",
+    "key": "case-1-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "6abc6593f6e4c04edd1ab448b494a6d58ce186bf7ba31be35f2b3d95702da48e"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-010",
+    "key": "case-36-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "b89822eb5a556f6a46c16fccb5e23f8de89d9ae7f8ec092e5df34096d0844b5c"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-010",
+    "key": "case-36-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "12031020f27f8c5073ce6da5836b6fb9d0cb562ffa17fac48b1c3bc51c97ca52"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-009",
+    "key": "case-32-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "41036d7cc16ec3f8ecbcfd67a19cb4f1eaff41df60095400a984feaf40174dc9"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-009",
+    "key": "case-32-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "7d521c810bc9a052638d06214dea7d119e6b56480289fd12bf7a44369ed27482"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-006",
+    "key": "case-20-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "3ebac5e6d0c36b3648f161f847a24fb483624482887df6a76056ae9338bcd5db"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-006",
+    "key": "case-20-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "a70d1deb2fc315785bbe28ccb5526c60709ebf93647a3c112e09c77bb3edf19c"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-048",
+    "key": "case-47-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "80921d852f8417a87bbad183ad0c984561a08281603593c2118cd2ea1f122dc4"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-048",
+    "key": "case-47-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "1fd5fc4724cc8e738466c709ccc9147384f04f1c97ced5d6879b3712137652b7"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-018",
+    "key": "case-21-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "3eb21dc0dfa81f954375f7967bf096205cbe627252ffad9924c10b568e748ef0"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-018",
+    "key": "case-21-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "2743eb7ca08c9815091addbc1c671e66a33dcf566e8d5778037b3b96a633ab20"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-018",
+    "key": "case-21-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "bc9b505d732b118e536acdc4e3f57b5506c7b255b04be7ebb82585431e92d104"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-018",
+    "key": "case-21-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "80b8d51566e885980abb7b9b4b838f502e966449681c94c7a18fc2e3a54b5625"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-041",
+    "key": "case-19-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "e28ba5a01020b72cf1fa3d8d1fbceed69edb0789eb9a5bff560b3bfd2dbbc0c8"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-041",
+    "key": "case-19-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "d8c7342dbf164d14c05c0ebe06a418667795da91717f415baa06576fc852759b"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-007",
+    "key": "case-24-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "11387954078e64a4a3a25663885200ce293ed2717115e64ee081600a91bca82a"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-007",
+    "key": "case-24-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "c2642ad3e91c6652529c941cc340e6a9b273616d0444f6cb1e7f6b76dfa08109"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-038",
+    "key": "case-7-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "48499bab2cd09cd53bad0763967d16e2f5631292f700b6a9faa760e873ddefc1"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-038",
+    "key": "case-7-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "231fa0f03966e1ce4e4bd9ab5294e9cc1b3f4b0f0f8de133ec000c4c49641490"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-038",
+    "key": "case-7-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "4d7de8173ffb6485783613735266c711de2feebae47799b59694a4bd3816c4ce"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-038",
+    "key": "case-7-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "1f9b13aa236bd7cf14d4b846af315a255ce953c2d867dec9f307ac90071e574d"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-027",
+    "key": "case-10-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "dd2762c9aa45cf1b22445ccb3b1a8011493c985c73284ef00ec1e753ac4d925a"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-027",
+    "key": "case-10-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "ac5147cb4bad9d0dcee9af8c5b2449e2684fb503a4fc07a64ce9a14cf885ae50"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-027",
+    "key": "case-10-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "5ab943a909cfd37fb16917b1e4a7651aa54f8ab3c5b48a6596568adc3852ec0b"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-027",
+    "key": "case-10-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "ee348311b25f1b240e33e9ec28a784a5d740729aaedf61efa7c817d96086d4d6"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-003",
+    "key": "case-8-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "52cbd87fc6ac0a7acdd3a026b9bf378993e458072bf6093ad841a76b1c2ef794"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-003",
+    "key": "case-8-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "93be128a53008ae56ce1336a63fa81f751adfbca1c6b2ea8cf6f12de07fec0ab"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-003",
+    "key": "case-8-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "5e1941e308a073c11cdfb0ddcc793b5f73f29db5f6c4e21c175dc84d9dbf77aa"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-003",
+    "key": "case-8-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "e21b475cf3bb8deaf41967c3e7332f1afab6e39a2e3550cf7cc380033b301c54"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-017",
+    "key": "case-17-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "a9996eb9f0b81fd062668ea82b23fe39aa915736d23baaf89450204f1726acca"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-017",
+    "key": "case-17-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "5bf8a58af0be7b3c50d4df2d6d0f97ac6ac2cfcdea85f12ef1429a61b265e34f"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-001",
+    "key": "case-0-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "04f0218af179066ace94932baa48aa98a2b10bc5505d4c87d6cd21f4343c46e5"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-001",
+    "key": "case-0-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "92e9437d3372b5422d103c27e349ba13eae0b99765a93a2e4d95716df74e82a0"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-001",
+    "key": "case-0-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "70fe2e779eee26d64c36841feb306cf3e8feb8cc5fc408e58e8052fa1c36e207"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-001",
+    "key": "case-0-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "058f3bb6a2b27407d007f050985dc8e35d3685ba949f9f1967d5fc803e42ad10"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-013",
+    "key": "case-1-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "4b1c672bb6d566ad946a5581e18ec95c9d2564148686585fd9591a3f80870bd2"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-013",
+    "key": "case-1-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "5bddbd31e70661ef6ba7a953a7d8624cfec355102b673b48879f9f3e3f58520f"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-013",
+    "key": "case-1-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "a4fe22f54e9f28f6812e50b01d048096f321d6aea011ce5311b0fe3d01a99f7e"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-013",
+    "key": "case-1-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "e88af623be396333ebcd9f4be0273e16943d63229e651523439eaf2279fdc8c1"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-014",
+    "key": "case-5-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "cfbdce397705ee2d5b2120dc1281c74daa97a5cc88226193543624f6b3967f43"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-014",
+    "key": "case-5-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "1695fbb34cc8fa047c4234019331ff52ff9978a3abba3179ff64a427ccb0b7b8"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-014",
+    "key": "case-5-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "9bb1919bbb20fc795d47223f48c94b4a45455a723847f9a0fec25e917f0911f7"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-014",
+    "key": "case-5-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "5c0e24debe6b0a69f502782099955396978798766034daf8c64fe6e15b0ac94e"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-031",
+    "key": "case-26-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "0f7ff7c3cbfc09642b73e360a0ae50293b16deb5f9aef24c45a98c03e229db2c"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-031",
+    "key": "case-26-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "b2b3b26c3305ca59fc254677afd11baad3c97306f766a30ff52bdcd64c461da6"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-005",
+    "key": "case-16-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "c2447e3c128d9e3be41220ad6078871f98ef631ee418ae44541fec895853e5b4"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-005",
+    "key": "case-16-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "cabd5d02e6beaf34ef08d721e2d37b1cc6efe26faf218a830517eae7bfc1ed61"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-008",
+    "key": "case-28-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "a563580e65f5e6448636f468f6184231efea5e91abe9b3e782f1ce6a6c627dbb"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-008",
+    "key": "case-28-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "7e507801e86855f06315a68a3b5f66b99de94a4b3c67d733f1d3f126fc560dfc"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-035",
+    "key": "case-42-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "52ec08af8b85ab106be5aad3b50cd971525ac987f7d3d70ea12f872b6add04c8"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-035",
+    "key": "case-42-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "da5bb967d7137238f5ffd29b8b2cc131bb18e0e909044fc94965aa5872bb3405"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-047",
+    "key": "case-43-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "7ea3d1a9ae3becf62750c347cabbbad797d8d10c86bd1cb1e63171d43cf7818d"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-047",
+    "key": "case-43-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "1faac5c2f05d668090b545feb01be9691d98d1bd75f6ff1d45dba190516e1d3e"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-002",
+    "key": "case-4-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "882520d93c94f9512d6109601ed6bdd752dbe91da7e9224d32a921c6629ebdca"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-002",
+    "key": "case-4-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "58b03c3f1bbe11a2bd9dcad7d32d784a15ff226308cafd9c39d13ef11abde1a7"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-002",
+    "key": "case-4-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "7206b68b99c0baa672141b9689099b06493c3200c425d92cfdac6420bc5ec6be"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-002",
+    "key": "case-4-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "2a63012ae92451e9f88a2b3ec2ec53fd82254b816b50744d0d6f8bcf8bb9d7b5"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-022",
+    "key": "case-37-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "41548d59baee5a67c57f874cfd138a9f888313398d2aa1f28f6a95649a276b5a"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-022",
+    "key": "case-37-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "cc0f0831eaea0f2b77b913fad34d5abba8ec2bbb2713f5aa095273cb7eb85f47"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-021",
+    "key": "case-33-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "dede33b9b5d5be219f057ca6bbbbb058251ccc76d24ea2dde41704650e4c1c2f"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-021",
+    "key": "case-33-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "23dbbda0d16bb67f82dbba9b33d1107414d4e3d9a66f55038eccff392fbd4dde"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-006",
+    "key": "case-20-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "ce5e2f01a4c21aa9a278427495573deb9d4ffde19dd30147bf035c5053017e3a"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-006",
+    "key": "case-20-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "88206791107bb73d3b68a5e666f0ee01d37f8c662dd3f0513411f2233c920788"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-017",
+    "key": "case-17-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "d727ba18b09b56b649a735b0253476c364b8eeee46c8a24f1f7b3f48ae65d948"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-017",
+    "key": "case-17-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "78c7e5a92dca5d53da6d0d459d993dd13efd8848afb1bdee8ec0b84aabd26ea7"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-034",
+    "key": "case-38-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "e0e030a7553717f3894a335bb044a91ac7b33841da32eecb8b8d54ceca1367c8"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-034",
+    "key": "case-38-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "03f1a130c02112fff48e724a85fb06bdf3f7266e79e6faab42d5326fbdd11815"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-043",
+    "key": "case-27-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "45d4ce29785af05c20388eb7f335aa31cdaaaa0d9e00ef66b57505754d7a8b77"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-043",
+    "key": "case-27-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "9ac8de8fc62a04688d7456052388aeae2bdf24e25ec2c43fffb0d5bbbf4101db"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-014",
+    "key": "case-5-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "4a55cd787f472f1517a52f26c718e10867c2679293bd3405719ff164e19a7fb7"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-014",
+    "key": "case-5-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "b3419dd30ca9355ce5c9318d663fb938ca7e7dcf2bd002001c2577f57a4363ee"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-014",
+    "key": "case-5-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "732167e889de49eac1d2743aaa87ca810840ba4aeeffa70ef06f3a4a3ca4f6d1"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-014",
+    "key": "case-5-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "e63a9b063c8f11ae70ca3968f3ba4ca2538961947b26622518211b8ae812a600"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-026",
+    "key": "case-6-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "7fe1fd34aec77bd5d55bd36c260879c219daab4aa20ba6baa6cd4439bb2e974f"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-026",
+    "key": "case-6-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "c4e552fde8942cd1db1d30bf746eb07ca28a17ebba7286c3c535604580628f68"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-026",
+    "key": "case-6-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "477ee8ebbbcf14a4a267796f65ad5e4a899e275164eb35b6887efb79526e5e4c"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-026",
+    "key": "case-6-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "d24f3bf2fc486c299a1c616a29707c1b36c93ef1ad40a7b842a49f6357d9606a"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-033",
+    "key": "case-34-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "42b8aeb10e50625eb0d337b46728ea91e1a22951a068867ddf0653aba13102dc"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-033",
+    "key": "case-34-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "d21f745b6e17f0eb597b5e361708bb5b8eb69786e59ff6e7337ebf516ce054a3"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-004",
+    "key": "case-12-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "3c597207377d7ae7f8d8da4c339c469acaf83d7d22f2ac1c870fe2bd9ab4753e"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-004",
+    "key": "case-12-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "2b4281ce188e1871e159ad62266af12ae178aef020fde5e0cecfe4ac5b85d413"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-004",
+    "key": "case-12-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "ee9c1b2241ef90911c3993c6598fd0595a8ffbb405ca16129921c20cbf7aa41a"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-004",
+    "key": "case-12-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "eb0660db646b9dc2b5005ec16dd8cbd8a25380b41ddfee78a2a8716756fcbdc1"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-003",
+    "key": "case-8-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "4533924ed13fa7e09f5ac313b3dbf3db3ed7f2a2072b2ce46d6e5fc1233aebfe"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-003",
+    "key": "case-8-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "77fb4020fd29949c0896247f4662716c62e2d5b8318dd542c2b144b8860860fb"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-003",
+    "key": "case-8-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "9fa3fc811d4698ae34bb1c11b014cd99a9c28d27057a3981b731b3addc586127"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-003",
+    "key": "case-8-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "7ce761c2517dbbb17af1a27159311e022c64f5badcd10ac54363748dbb22c3cf"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-032",
+    "key": "case-30-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "b4140766f647cc8e0ac1cedd10a9f0443256a6fdc770197f844e8276e3b1c3ee"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-032",
+    "key": "case-30-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "3b098450c828765b5fa0f24c9ce3a168fe5c1cb7edbaec512e5cedc5681dba72"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-038",
+    "key": "case-7-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "74ad588a4f1bd271cb3f27fed4b32ef73dd9af688112dbd9ab6cf2d2833dd34a"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-038",
+    "key": "case-7-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "71cd3b3fce7f7aa61c6e81506c67fa6a354b7d5eeb773f7fedffa64b1627e10a"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-038",
+    "key": "case-7-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "074a4fdd17f0ab58a9c9ea164f69f3f2e15cc3f2bb9382dc63efcfeb77281831"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-038",
+    "key": "case-7-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "f286b0227f0aca1e8c870ee45fba97193bcd2486b5b642fceb981f46a4a26702"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-016",
+    "key": "case-13-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "962969f3e50fce4d32a937b99f961c0c0f17ef73b5fd3f44b207a7d3e93ee9c3"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-016",
+    "key": "case-13-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "489d0d3116c5fba94354f90d6c9d66fd8136ff7d0f22dfb4f90449e22049b6a1"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-016",
+    "key": "case-13-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "287cdf5e73c3930502437574e413706b14999987a0ed0220b6a84aa7522322f9"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-016",
+    "key": "case-13-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "00e8bfea7111894232789e72a2cb7e93ca27a50604c4a6940cc8a8e6276cbe28"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-045",
+    "key": "case-35-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "345d28aa739a71f80519f90da089526a13381fef7e2a75b1527f10c9cfc96b38"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-045",
+    "key": "case-35-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "aea462fb360f0845b54ef1b3cdd45b2de857c100268f646551acdeab9e82f394"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-023",
+    "key": "case-41-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "573a57a932f46aa6baf3c40c06c2dd4b9ae5e21c6e49db6d29ef3b0e8aaf9b49"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-023",
+    "key": "case-41-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "42056685fd8e22b3aed5c4373ca996464878fd68574db19d283b962e1e25c300"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-040",
+    "key": "case-15-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "0a37015e7cd5c9bee1f0dfdcc572cb160ccb829e1d36c165b84306edff5bc454"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-040",
+    "key": "case-15-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "58fc91b2c4e19b843efdfd7fdbda9b3474fcadb758bcc9f8ae08b064d44de3ae"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-040",
+    "key": "case-15-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "2bd371218b40d17615cf34f9f89c514951e22152cbac88310f5d6a2cfd1e2941"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-040",
+    "key": "case-15-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "9a27f0909bfd9bfbb11d5fbc47d9ff9cc00d66bf1367c9bbe6594d46c669b811"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-047",
+    "key": "case-43-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "e4b8625200a80c9aefd7871ae93c857468847a7aa21a6c7dde1bba5a2c7e0a17"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-047",
+    "key": "case-43-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "850153482f339c6dbb915fbdb852ede664c805c1390dfdbb5b8544f356e51716"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-043",
+    "key": "case-27-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "72952b84bc8ffc7f6743f99689edbbd5acc7a3bd6aa8dbc38a867a2cab2e4e8d"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-043",
+    "key": "case-27-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "ac4cf79acadfbd71f1d88666a3b659a2dadeaa00adffd1d1c1a6d14d6eba8d71"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-028",
+    "key": "case-14-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "0ad17147ef232bd4620affcd1becdaf2aaf43d535ad6be1846760cef79d7fb74"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-028",
+    "key": "case-14-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "03429590c62c80a189aca870e8ec1b7ce92e9d0c747b10b813d5122cf3b675b6"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-028",
+    "key": "case-14-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "cecb6bc446a1938164c225a45644e307a7801fa944a622e0f8003f9443b92fe2"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-028",
+    "key": "case-14-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "bd203c26a168e1a9d56bff38ba9c5c38a31e18fbdf38c552305c75d940d5dca5"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-010",
+    "key": "case-36-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "dc0d74179f8b50e5caeb69abbcb2c37f0d24dd9214b57bee12a79c5a2f8f1300"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-010",
+    "key": "case-36-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "85b70a45080f82a4cfd157213145e3f22573bbba11a15f6feb149683b1a04c77"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-020",
+    "key": "case-29-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "3b269a27ebdea7d8c3685860d3901cbb2bd2a41307aa404e55dea6b6e3c93f58"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-020",
+    "key": "case-29-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "781df7f962fc8f2402423acd94fc229f58b57fe569c7b212d0e043201570dd41"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-015",
+    "key": "case-9-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "c1cde4a6342ee63ea8da56c0f961ba5ffe83609e0156246b92f91cde894bad57"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-015",
+    "key": "case-9-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "243ab1df90ecf36fa4c48d94864ca166afad3f45c18ada77ba404841a0dac918"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-015",
+    "key": "case-9-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "e883a77d50c8b136fa0122840151031e131e6ec537e2b4f5a9b11ffda9f5b43a"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-015",
+    "key": "case-9-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "405c753781959c88c576a80e71574e6fb70eb7c86af5c2d0abe396d2f5efa648"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-048",
+    "key": "case-47-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "73248bb2921b4b1720656b929639b83a8cb90fb0c972164f91e8ac4fd56ada92"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-048",
+    "key": "case-47-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "f04a979027d62fe7ff46ad13ceb470bde5bddad42d0a57f6be3e8f20b6681582"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-046",
+    "key": "case-39-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "75e087cf084bd3a8c775227b2fc0916f32e3d56071bb4e0995722f1bee8dad68"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-046",
+    "key": "case-39-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "469b8621e3c3cc5780420dfa92a90cb92cfe156dccd8b9127dcabec1f6000f82"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-032",
+    "key": "case-30-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "147fc61af243b5a87709ae6f3513449a759e29ea5aff18694ff88ea400825aa3"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-032",
+    "key": "case-30-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "2bccc72546349315c4cc2771073604df50755c26fe3a0b2669de60f3f6349c3d"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-033",
+    "key": "case-34-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "34a66476e2494ecd2b68ae2d865cb2356e866fd6eb4f528aa443e15133a852b2"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-033",
+    "key": "case-34-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "9ab92c4742cf4f8f0822d5d76e7abce25ad79ebdac839522bf95aa5303fad31a"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-030",
+    "key": "case-22-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "4c543d2a895051781af383696ee479228448033902b790a90c275d6d35437c8a"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-030",
+    "key": "case-22-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "288565e7e9fb308a36e95fed03d6b5df61b40be59f366e5ca59ec8fa921b0b2d"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-041",
+    "key": "case-19-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "f0657e5004477e9cf95769e966a707333958782a425915be2460606e510b778e"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-041",
+    "key": "case-19-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "fb4f166ddc279c64d4ad1cfd6a090b96a4e665e8c755c5437b83936f083b61c0"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-007",
+    "key": "case-24-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "7fe5b97cd69a518f8f7540db8170298e735c8d6524b1e15e748b9ac66dde80ee"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-007",
+    "key": "case-24-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "720228fbb46032a28c32e1012edd47e2fd60ceac34371c9e535f2ece4843230b"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-026",
+    "key": "case-6-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "26995e0644a1684da45cbc4c8f401e2f66e5857d0b41d86f72b2f715ea90670f"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-026",
+    "key": "case-6-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "b98eb484ff6818aa60d66d2b44163f56666a606f1040148c2173b560d3190b83"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-026",
+    "key": "case-6-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "c382c2963ae3be1d231c4ed2917c794cc21486dfc5e69b1f03fc7eef13857680"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-026",
+    "key": "case-6-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "04125dcd76b40d79c8770ebdfc8b76876eaa909b21e1147115fb39f8ceaaf4b6"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-037",
+    "key": "case-3-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "f649801471a8359673e3048e6e8098422f5bc2e6db0e337d721dd54d7d3a4990"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-037",
+    "key": "case-3-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "b52a796ff3a8c2f4147ba48b47a38c9be077acc6b4da46fb47b856f8063b875f"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-037",
+    "key": "case-3-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "b21c6488a5a8ff08eeede510c652a8bc453c21ee2fe1d7c4c220075d6b502c11"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-037",
+    "key": "case-3-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "e1b379b20b20db38872e9cdff1b5b6464a5169b040981c2cfabd5366b007d0ff"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-012",
+    "key": "case-44-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "a6259bb9791f6eb1b0a58eac2e432dfae85303d9275f063eeae194186e00331c"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-012",
+    "key": "case-44-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "7a20e9bd5dc2a119c122a23ded45b20bf09aef565bcb4650f27902a0f4aedb41"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-019",
+    "key": "case-25-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "891e7169c2cdf78bc2def36aa2e47739208087085ef00e1b0202c3c762239405"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-019",
+    "key": "case-25-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "b8dd291941e2beb164902cda01e1ae7137d00f7c6d7db213f159effedbc9e313"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-028",
+    "key": "case-14-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "6d4737b26ba6917205deb7f1939b70bddcb31f764addea3407e398a6475376fd"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-028",
+    "key": "case-14-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "41d338c8e29b0124ef6918b305bae898c4a567aa6fdc0bed4db73d9a337b27e3"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-028",
+    "key": "case-14-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "c56490d26c151e59661a95e58e569120be644a018437fa3d1007b7d615fc967d"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-028",
+    "key": "case-14-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "7f89bc975154a5124fa7f493d587e683ca81a6e0eda772601abbafeb0b6a598b"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-011",
+    "key": "case-40-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "24b62618f22f103d67906aaf730504595626e01099dbdf10e58be928426cdd63"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-011",
+    "key": "case-40-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "57d8fed4b57f362986e7f27611a0e971aeb83548446800a4792f5481485aee39"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-022",
+    "key": "case-37-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "43f29ba173f1f1f559a1f479f2845838e06acadbecb896c5bf24ea8473d8bb1f"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-022",
+    "key": "case-37-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "060918e24d7334306170b26593c651ee8a08bff4ca0d48a420edeca6bd257bbd"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-036",
+    "key": "case-46-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "86519c1e27ebe87bfbacd544b22dd4a81bbe15c95aa8683caf408a192ff3f99b"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-036",
+    "key": "case-46-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "06f89bcdb74997fcadd2d81f7ad00e6f292a5057b8955676c401bd761b21a311"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-030",
+    "key": "case-22-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "d3fcb45bf3370b91cd8904f9619d6588512ad010f6323bb7830b29dabcb1fa16"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-030",
+    "key": "case-22-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "83c1fbb967107e6400631c9278825de9169e7624fba497c018ce7136ab06e766"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-019",
+    "key": "case-25-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "bec13f9f7f9d47666708ca46ad1c927441d427f1431633889f9c295cd0257fc3"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-019",
+    "key": "case-25-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "a2e9a649d89d5eee4aea831769cb261b1541fc0594d6cb106c371e0d739d4f0b"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-042",
+    "key": "case-23-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "a6a2f77546909c6cab95d71e641bce3257bcaf5411ebaabb0189e9bf8730167f"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-042",
+    "key": "case-23-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "b52a0e0d24235d0dbd4517b0a350ec17dab96c5e087b8027646a64a42675e8ca"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-024",
+    "key": "case-45-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "d2198e1d5bd31a54fef097b2ef7e4172d40dc21fd8640a8e598c5e0dea77421f"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-024",
+    "key": "case-45-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "fba1f937bb0ed0dbe72a701daf459e0d8d82c5210978341555ed6b49b7293951"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-001",
+    "key": "case-0-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "2826a44ea12a6613c7e7aa39163225d25de943bacebfd6b18bdf4717475816e3"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-001",
+    "key": "case-0-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "728182c08918b71a25a9828643eec069484eb7ef50dd4b4e269c73e1f9da3f5d"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-001",
+    "key": "case-0-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "0a0ad6dd4e4d5d8c96a5ec2f97a2e5217686c2a8789c8d5eb955d7fb810cd3e4"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-001",
+    "key": "case-0-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "ce2641cc8d86ca3a39358ac7f56f9240fee6d0448e36671d5966501afa7e2b18"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-044",
+    "key": "case-31-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "d680a504ab27ff926d32941c7a1f2e5953426d49da64d3ae2d3b53c600d82ec3"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-044",
+    "key": "case-31-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "f7b764e0c729fbcb3810c498bd1ec9091299ff0340f75d5d8339e938cd97a294"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-045",
+    "key": "case-35-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "e840632783b5b90d832fe39b8ebeda0f50d52863f30e2eeded6b4ee231df47cd"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-045",
+    "key": "case-35-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "edb88083b0a1d7db4c7b0178a972f2143dbf7e187b5c8a227c0d38cf4b959f69"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-015",
+    "key": "case-9-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "a9ef273bbddf564d3f50525bd1c9a0c4e8c34ee6b9802000aa99bb734cf4aed4"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-015",
+    "key": "case-9-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "dbb85c35404e1e3b24dc67e0ef75b65b7021200d23477ab3fa4f430eea408e4c"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-015",
+    "key": "case-9-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "2ea50a417e0a13c0216b85f6c2a7254d53378f42a638f77a172e83819250c8b1"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-015",
+    "key": "case-9-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "449b538bbc88cd341e64d6571ae3681f25ad18c15d365ca0664cdd728aa4d860"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-016",
+    "key": "case-13-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "4d41d258691135088e26ae995d7080d91a2e7c3f9ddbf06d2ed90a8442173d94"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-016",
+    "key": "case-13-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "883e2b2d31ff576bc220f7d0a871495cfc535550d55e3a5d37e6057a7842a929"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-016",
+    "key": "case-13-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "c140ad3ec40948c2a0493aa5abb0bd30da194ab0cd8d9f79f64ed3a533a20352"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-016",
+    "key": "case-13-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "7d3d3318dbcf810fbd917d31e4d52fda30e504e8d4909484d5bde62d88c03a8a"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-029",
+    "key": "case-18-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "536d2398b2d61d05689d2dc22d390e230082a287e5a2b612316c1ced537655a0"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-029",
+    "key": "case-18-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "09bdc0d714cc0bafbe5753b99370967dfe4ced756bdd5b706772c94ece9c4683"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-042",
+    "key": "case-23-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "63216dcc08ee5000127dfcbaf3bd1685ac60d16fe63de6e7463c8ac5fbeb9706"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-042",
+    "key": "case-23-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "8bae32aa8410d15cb34eb1e04ea290d17c7d93d3da047b386627312485189046"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-021",
+    "key": "case-33-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "dc56f76456237472cedb7e40b9cc0961fb82a88779d97e5cafe727919d0e1cd3"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-021",
+    "key": "case-33-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "e5a4f04f21dd55f023841b85d15f4f122eabb63a672a05d5469c65a221b202dc"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-029",
+    "key": "case-18-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "a931d2980cce057a88aed8d6ae70842476aa71f1e669e8b84108b20fd64fff8f"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-029",
+    "key": "case-18-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "3934c0adb5b08642bdf5e6001ec98b03952fff353630feb736be3df894eefd77"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-039",
+    "key": "case-11-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "c1a81931c575e1d134e763c138e0f38a4c3bda6846541981de91ad2c616cbf17"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-039",
+    "key": "case-11-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "750a5f89ab8de1472d62aa9d06545e2afb60d26bdc888cdd2e79d42614533754"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-039",
+    "key": "case-11-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "69ee1f5ba9d1c3c26d3a0c77863610e51971d2c11378e26c40282ebe21b5f9c8"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-039",
+    "key": "case-11-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "f0b6e566f158524fe2102488a796dc869e7fda9683fe876331d91e7a689a9a41"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-037",
+    "key": "case-3-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "fefcf805e0ffda2895eabc9469a0489a83f16015624d47ea37b7bd84513ef950"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-037",
+    "key": "case-3-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "8496c75fc1c762583aa1b92cb81064b4aaf398873141aa9f4619b5615467bec4"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-037",
+    "key": "case-3-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "ac2fe46cc9488ce4461d1ac15826cd96137fdd443d854e5b481812b8aa664e29"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-037",
+    "key": "case-3-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "f2ff303b0c707c058a7f8b39325a6887cc4f47f0bc9a8c7d8916de024395ef09"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-035",
+    "key": "case-42-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "13a1786a455e629a63ec030906a2d6fd12a5d5a9973cd7cf5f83dca30ce4161e"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-035",
+    "key": "case-42-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "8612249d46e3c039a73b6746eada6c0eba305759898cf5e2b56a531e3891863f"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-027",
+    "key": "case-10-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "9947cbf5518b443cbec9892d1be3c3fba7bb8367b877b5315ccda304fecea539"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-027",
+    "key": "case-10-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "af54cb1b171d986e39b744840fcb6c4c302911bea24c7e0b7252a6d4f41a22f5"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-027",
+    "key": "case-10-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "0c530731fbcea5e11688b17eff225b30b90fd4363ca9a262ce77b172c2ab5afe"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-027",
+    "key": "case-10-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "75fedaf4547cdcc0075889bbf037f4a8e38289dd18a7011ea7678a95a34e9994"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-020",
+    "key": "case-29-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "88ee72219102a36028ffa155b4c8c007845b19d15c854c5bd086b8231dd2df8d"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-020",
+    "key": "case-29-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "ffa19a3a7467f7c113f2e619840b8d6b217046edb33a404a66349cc8408c748c"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-009",
+    "key": "case-32-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "8f2db03b5eb480729a670323e2befa6869d65b76b650508db953f67ae231bf4b"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-009",
+    "key": "case-32-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "8990d0fb3b67e50a5887a4076d72639ffb63fac9990b32c2e24e5879b568c825"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-031",
+    "key": "case-26-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "3d4a10cc1931321fdae2f63abd8c8800c79bca1acce068f04f830707f2602d28"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-031",
+    "key": "case-26-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "c578edc66fab05cc84eca8783125664f650e0d71886aa67bf28f7609190a60d1"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-025",
+    "key": "case-2-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "ba193c919d409d2f59b136f88dc3dd1dcf78a1d4e50d208700f237797a96f012"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-025",
+    "key": "case-2-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "394178a9b8e9ddf3b8223c29d1a2f8d3064011fd5819db8d1a38c108ed369ae6"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-025",
+    "key": "case-2-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "db56e55bf9b3ed5310c97b2793356046c309e60d5ca1b91f4df70635cf83abe0"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-025",
+    "key": "case-2-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "337d8a4c4165ac4e719ed88604469cabcb592cdfbde431c43d33cabb4e109d79"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "support-023",
+    "key": "case-41-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "34f4b72e163cc76f8d7e828cb47af6cfd1aa4aae457207c7cd900273ed3850c2"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "support-023",
+    "key": "case-41-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "3a9cd1b2909a7ca277d6a198afd22e468cb697bf8d0845908a2f30db99fa603e"
+  }
+]

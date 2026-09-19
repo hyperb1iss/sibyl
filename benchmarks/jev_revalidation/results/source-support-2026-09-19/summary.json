@@ -1,0 +1,3064 @@
+{
+  "arms": {
+    "grouped": {
+      "accounting": {
+        "completed_calls": 96,
+        "dispatch_started_calls": 96,
+        "input_tokens": 114136,
+        "known_physical_attempts": 96,
+        "latency_p50_ms": 136.77682949855807,
+        "latency_p95_ms": 281.96874300192576,
+        "observed_cost_usd": 0.004793712,
+        "output_tokens": 9103,
+        "scheduled_calls": 96,
+        "unknown_attempt_count_calls": 0,
+        "unknown_input_tokens_calls": 0,
+        "unknown_observed_cost_usd_calls": 0,
+        "unknown_output_tokens_calls": 0
+      },
+      "pooled": {
+        "accuracy": 0.95625,
+        "assertions": 160,
+        "candidate_outcomes": [
+          {
+            "case_id": "support-001",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-013",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-025",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-037",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-002",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-014",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-026",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-038",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-003",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-015",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-027",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-039",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-004",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-016",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-028",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-040",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-005",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-017",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-029",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-041",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-006",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-018",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-030",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-042",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-007",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-019",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-031",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-043",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-008",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-020",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-032",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-044",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-009",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-021",
+            "clears": true,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-033",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-045",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-010",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-022",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-034",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-046",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-011",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-023",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-035",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-047",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-012",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-024",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-036",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-048",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-001",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-013",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-025",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-037",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-002",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-014",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-026",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-038",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-003",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-015",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-027",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-039",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-004",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-016",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-028",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-040",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-005",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-017",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-029",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-041",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-006",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-018",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-030",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-042",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-007",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-019",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-031",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-043",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-008",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-020",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-032",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-044",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-009",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-021",
+            "clears": true,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-033",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-045",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-010",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-022",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-034",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-046",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-011",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-023",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-035",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-047",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-012",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-024",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-036",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-048",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          }
+        ],
+        "candidates": 96,
+        "clear_precision": 0.8888888888888888,
+        "cleared_candidates": 18,
+        "complete_candidates": 96,
+        "completed_assertions": 160,
+        "confusion": {
+          "ambiguous": {
+            "ambiguous": 21,
+            "contradicted": 0,
+            "insufficient": 1,
+            "supported": 2
+          },
+          "contradicted": {
+            "ambiguous": 0,
+            "contradicted": 38,
+            "insufficient": 0,
+            "supported": 2
+          },
+          "insufficient": {
+            "ambiguous": 0,
+            "contradicted": 2,
+            "insufficient": 46,
+            "supported": 0
+          },
+          "supported": {
+            "ambiguous": 0,
+            "contradicted": 0,
+            "insufficient": 0,
+            "supported": 48
+          }
+        },
+        "correct": 153,
+        "failed_assertions": 0,
+        "false_clear_rate": 0.025,
+        "false_clears": 2,
+        "false_support": 4,
+        "false_support_rate": 0.03571428571428571,
+        "gold_supported_candidates": 16,
+        "supported_candidate_coverage": 1.0,
+        "unsafe_assertions": 112,
+        "unsafe_candidates": 80
+      },
+      "repeats": {
+        "0": {
+          "accuracy": 0.95,
+          "assertions": 80,
+          "candidate_outcomes": [
+            {
+              "case_id": "support-001",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-013",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-025",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-037",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-002",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-014",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-026",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-038",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-003",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-015",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-027",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-039",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-004",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-016",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-028",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-040",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-005",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-017",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-029",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-041",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-006",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-018",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-030",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-042",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-007",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-019",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-031",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-043",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-008",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-020",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-032",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-044",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-009",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-021",
+              "clears": true,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-033",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-045",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-010",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-022",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-034",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-046",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-011",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-023",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-035",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-047",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-012",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-024",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-036",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-048",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            }
+          ],
+          "candidates": 48,
+          "clear_precision": 0.8888888888888888,
+          "cleared_candidates": 9,
+          "complete_candidates": 48,
+          "completed_assertions": 80,
+          "confusion": {
+            "ambiguous": {
+              "ambiguous": 10,
+              "contradicted": 0,
+              "insufficient": 1,
+              "supported": 1
+            },
+            "contradicted": {
+              "ambiguous": 0,
+              "contradicted": 19,
+              "insufficient": 0,
+              "supported": 1
+            },
+            "insufficient": {
+              "ambiguous": 0,
+              "contradicted": 1,
+              "insufficient": 23,
+              "supported": 0
+            },
+            "supported": {
+              "ambiguous": 0,
+              "contradicted": 0,
+              "insufficient": 0,
+              "supported": 24
+            }
+          },
+          "correct": 76,
+          "failed_assertions": 0,
+          "false_clear_rate": 0.025,
+          "false_clears": 1,
+          "false_support": 2,
+          "false_support_rate": 0.03571428571428571,
+          "gold_supported_candidates": 8,
+          "supported_candidate_coverage": 1.0,
+          "unsafe_assertions": 56,
+          "unsafe_candidates": 40
+        },
+        "1": {
+          "accuracy": 0.9625,
+          "assertions": 80,
+          "candidate_outcomes": [
+            {
+              "case_id": "support-001",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-013",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-025",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-037",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-002",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-014",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-026",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-038",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-003",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-015",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-027",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-039",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-004",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-016",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-028",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-040",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-005",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-017",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-029",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-041",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-006",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-018",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-030",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-042",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-007",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-019",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-031",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-043",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-008",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-020",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-032",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-044",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-009",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-021",
+              "clears": true,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-033",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-045",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-010",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-022",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-034",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-046",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-011",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-023",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-035",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-047",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-012",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-024",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-036",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-048",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            }
+          ],
+          "candidates": 48,
+          "clear_precision": 0.8888888888888888,
+          "cleared_candidates": 9,
+          "complete_candidates": 48,
+          "completed_assertions": 80,
+          "confusion": {
+            "ambiguous": {
+              "ambiguous": 11,
+              "contradicted": 0,
+              "insufficient": 0,
+              "supported": 1
+            },
+            "contradicted": {
+              "ambiguous": 0,
+              "contradicted": 19,
+              "insufficient": 0,
+              "supported": 1
+            },
+            "insufficient": {
+              "ambiguous": 0,
+              "contradicted": 1,
+              "insufficient": 23,
+              "supported": 0
+            },
+            "supported": {
+              "ambiguous": 0,
+              "contradicted": 0,
+              "insufficient": 0,
+              "supported": 24
+            }
+          },
+          "correct": 77,
+          "failed_assertions": 0,
+          "false_clear_rate": 0.025,
+          "false_clears": 1,
+          "false_support": 2,
+          "false_support_rate": 0.03571428571428571,
+          "gold_supported_candidates": 8,
+          "supported_candidate_coverage": 1.0,
+          "unsafe_assertions": 56,
+          "unsafe_candidates": 40
+        }
+      }
+    },
+    "singleton": {
+      "accounting": {
+        "completed_calls": 160,
+        "dispatch_started_calls": 160,
+        "input_tokens": 187772,
+        "known_physical_attempts": 160,
+        "latency_p50_ms": 137.4097760017321,
+        "latency_p95_ms": 265.64053099718876,
+        "observed_cost_usd": 0.007886424,
+        "output_tokens": 9362,
+        "scheduled_calls": 160,
+        "unknown_attempt_count_calls": 0,
+        "unknown_input_tokens_calls": 0,
+        "unknown_observed_cost_usd_calls": 0,
+        "unknown_output_tokens_calls": 0
+      },
+      "pooled": {
+        "accuracy": 0.9625,
+        "assertions": 160,
+        "candidate_outcomes": [
+          {
+            "case_id": "support-001",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-013",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-025",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-037",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-002",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-014",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-026",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-038",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-003",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-015",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-027",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-039",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-004",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-016",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-028",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-040",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-005",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-017",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-029",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-041",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-006",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-018",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-030",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-042",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-007",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-019",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-031",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-043",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-008",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-020",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-032",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-044",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-009",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-021",
+            "clears": true,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-033",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-045",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-010",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-022",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-034",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-046",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-011",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-023",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-035",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-047",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-012",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-024",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-036",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-048",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "support-001",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-013",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-025",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-037",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-002",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-014",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-026",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-038",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-003",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-015",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-027",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-039",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-004",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-016",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-028",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-040",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-005",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-017",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-029",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-041",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-006",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-018",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-030",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-042",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-007",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-019",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-031",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-043",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-008",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-020",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-032",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-044",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-009",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-021",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-033",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-045",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-010",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-022",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-034",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-046",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-011",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-023",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-035",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-047",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-012",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-024",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-036",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "support-048",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          }
+        ],
+        "candidates": 96,
+        "clear_precision": 0.9411764705882353,
+        "cleared_candidates": 17,
+        "complete_candidates": 96,
+        "completed_assertions": 160,
+        "confusion": {
+          "ambiguous": {
+            "ambiguous": 21,
+            "contradicted": 0,
+            "insufficient": 1,
+            "supported": 2
+          },
+          "contradicted": {
+            "ambiguous": 0,
+            "contradicted": 39,
+            "insufficient": 0,
+            "supported": 1
+          },
+          "insufficient": {
+            "ambiguous": 0,
+            "contradicted": 2,
+            "insufficient": 46,
+            "supported": 0
+          },
+          "supported": {
+            "ambiguous": 0,
+            "contradicted": 0,
+            "insufficient": 0,
+            "supported": 48
+          }
+        },
+        "correct": 154,
+        "failed_assertions": 0,
+        "false_clear_rate": 0.0125,
+        "false_clears": 1,
+        "false_support": 3,
+        "false_support_rate": 0.026785714285714284,
+        "gold_supported_candidates": 16,
+        "supported_candidate_coverage": 1.0,
+        "unsafe_assertions": 112,
+        "unsafe_candidates": 80
+      },
+      "repeats": {
+        "0": {
+          "accuracy": 0.9625,
+          "assertions": 80,
+          "candidate_outcomes": [
+            {
+              "case_id": "support-001",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-013",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-025",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-037",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-002",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-014",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-026",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-038",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-003",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-015",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-027",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-039",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-004",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-016",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-028",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-040",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-005",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-017",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-029",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-041",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-006",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-018",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-030",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-042",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-007",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-019",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-031",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-043",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-008",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-020",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-032",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-044",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-009",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-021",
+              "clears": true,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-033",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-045",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-010",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-022",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-034",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-046",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-011",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-023",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-035",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-047",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-012",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-024",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-036",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "support-048",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            }
+          ],
+          "candidates": 48,
+          "clear_precision": 0.8888888888888888,
+          "cleared_candidates": 9,
+          "complete_candidates": 48,
+          "completed_assertions": 80,
+          "confusion": {
+            "ambiguous": {
+              "ambiguous": 11,
+              "contradicted": 0,
+              "insufficient": 0,
+              "supported": 1
+            },
+            "contradicted": {
+              "ambiguous": 0,
+              "contradicted": 19,
+              "insufficient": 0,
+              "supported": 1
+            },
+            "insufficient": {
+              "ambiguous": 0,
+              "contradicted": 1,
+              "insufficient": 23,
+              "supported": 0
+            },
+            "supported": {
+              "ambiguous": 0,
+              "contradicted": 0,
+              "insufficient": 0,
+              "supported": 24
+            }
+          },
+          "correct": 77,
+          "failed_assertions": 0,
+          "false_clear_rate": 0.025,
+          "false_clears": 1,
+          "false_support": 2,
+          "false_support_rate": 0.03571428571428571,
+          "gold_supported_candidates": 8,
+          "supported_candidate_coverage": 1.0,
+          "unsafe_assertions": 56,
+          "unsafe_candidates": 40
+        },
+        "1": {
+          "accuracy": 0.9625,
+          "assertions": 80,
+          "candidate_outcomes": [
+            {
+              "case_id": "support-001",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-013",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-025",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-037",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-002",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-014",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-026",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-038",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-003",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-015",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-027",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-039",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-004",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-016",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-028",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-040",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-005",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-017",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-029",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-041",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-006",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-018",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-030",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-042",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-007",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-019",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-031",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-043",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-008",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-020",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-032",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-044",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-009",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-021",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-033",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-045",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-010",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-022",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-034",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-046",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-011",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-023",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-035",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-047",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-012",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-024",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-036",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "support-048",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            }
+          ],
+          "candidates": 48,
+          "clear_precision": 1.0,
+          "cleared_candidates": 8,
+          "complete_candidates": 48,
+          "completed_assertions": 80,
+          "confusion": {
+            "ambiguous": {
+              "ambiguous": 10,
+              "contradicted": 0,
+              "insufficient": 1,
+              "supported": 1
+            },
+            "contradicted": {
+              "ambiguous": 0,
+              "contradicted": 20,
+              "insufficient": 0,
+              "supported": 0
+            },
+            "insufficient": {
+              "ambiguous": 0,
+              "contradicted": 1,
+              "insufficient": 23,
+              "supported": 0
+            },
+            "supported": {
+              "ambiguous": 0,
+              "contradicted": 0,
+              "insufficient": 0,
+              "supported": 24
+            }
+          },
+          "correct": 77,
+          "failed_assertions": 0,
+          "false_clear_rate": 0.0,
+          "false_clears": 0,
+          "false_support": 1,
+          "false_support_rate": 0.017857142857142856,
+          "gold_supported_candidates": 8,
+          "supported_candidate_coverage": 1.0,
+          "unsafe_assertions": 56,
+          "unsafe_candidates": 40
+        }
+      }
+    }
+  },
+  "limits": [
+    "Original synthetic diagnostics, not human gold or a public benchmark.",
+    "Repeated assertions within candidates are correlated, not independent samples.",
+    "All scheduled assertions remain in accuracy denominators, including failed calls.",
+    "Candidate clears are diagnostic labels only, without publication authority.",
+    "Observed provider usage is retained on replay; replay has no new billed usage.",
+    "Source support does not replace proposal generation or the complete semantic critic.",
+    "The fresh fixture has only mixed-label multi-assertion candidates; positive clear coverage measures single-assertion candidates."
+  ],
+  "paired": {
+    "both_complete": 160,
+    "failure_pairs": [],
+    "incomplete_pairs": 0,
+    "scheduled_assertion_pairs": 160,
+    "semantic_difference_count": 3,
+    "semantic_differences": [
+      {
+        "both_complete": true,
+        "case_id": "support-041",
+        "expected": "ambiguous",
+        "grouped_prediction": "insufficient",
+        "grouped_status": "completed",
+        "question_id": "/content",
+        "repeat": 0,
+        "singleton_prediction": "ambiguous",
+        "singleton_status": "completed"
+      },
+      {
+        "both_complete": true,
+        "case_id": "support-041",
+        "expected": "ambiguous",
+        "grouped_prediction": "ambiguous",
+        "grouped_status": "completed",
+        "question_id": "/content",
+        "repeat": 1,
+        "singleton_prediction": "insufficient",
+        "singleton_status": "completed"
+      },
+      {
+        "both_complete": true,
+        "case_id": "support-021",
+        "expected": "contradicted",
+        "grouped_prediction": "supported",
+        "grouped_status": "completed",
+        "question_id": "/content",
+        "repeat": 1,
+        "singleton_prediction": "contradicted",
+        "singleton_status": "completed"
+      }
+    ],
+    "semantic_disagreement_rate": 0.01875
+  }
+}

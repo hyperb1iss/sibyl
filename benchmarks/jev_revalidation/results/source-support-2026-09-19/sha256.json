@@ -1,0 +1,15 @@
+{
+  "annotation-comparison.json": "87f30af9e51a6e36c4e081dafaa4327a8fcb00bf1cc3aa447e61388fbf18d000",
+  "blind-annotations.json": "11e66a501d121e3e0819269af01a59f79ea2de400350fc96d3d2477dce941d11",
+  "calls.json": "1a5f48b169a14ae41abb7db9812c5ec6a9ec1c7e1b012629860426bfb76ee75f",
+  "code-freeze.json": "d8a44f28396f2526589176103dc7eddd70b7fd9410765d10658d3feffcb22b21",
+  "completion.json": "bee44c127026a592f7c8f7c976ac4e39322066cf1b12604ea71ab75ede9a8861",
+  "executed-runner.py.txt": "8020c00ba15f487695961ffa5ad8761d015a52b331ef6e3ad78c66c44a37f96a",
+  "manifest.json": "b498cd6dc6ccbf6ea693e0334ad07b4886f447d969df675ebcebf9b7071de155",
+  "numerical-audit.json": "f28e71d17e928c63f64de4245cbc2ebaa35800f37c0a3452c8b6050d962773c5",
+  "predictions.json": "62c7fb303ef85dd4e7b0dd262fb8d33275aef3925a268c33d7ea37967a8796e2",
+  "prompt-freeze.json": "c927bbca585f685a20b586664a70d3918253c55288b35ab6a8d8dbe3262f2536",
+  "schedule.json": "144c5366a1b562f381bf4a67c79c1e079ed76ac671a72c09bfac8f4c9357bac3",
+  "summary.json": "44c41626c8b799d4217887fe980883a8c5f4edf1f5eb51a7e43972e0017deb1f",
+  "verification.json": "26ca7565a69813e1e658213284f968648fb7baad8e35d649194d120230245f62"
+}

@@ -1,0 +1,746 @@
+{
+  "arms": {
+    "grouped": {
+      "multi": {
+        "accuracy": 0.9583333333333334,
+        "assertions": 96,
+        "candidates": 32,
+        "cleared_candidates": 0,
+        "completed": 96,
+        "confusion": {
+          "ambiguous": {
+            "ambiguous": 6,
+            "supported": 2
+          },
+          "contradicted": {
+            "contradicted": 24
+          },
+          "insufficient": {
+            "contradicted": 2,
+            "insufficient": 30
+          },
+          "supported": {
+            "supported": 32
+          }
+        },
+        "correct": 92,
+        "false_cleared_candidates": 0,
+        "false_clears": [],
+        "false_support": 2,
+        "non_supported_gold": 64,
+        "safe_candidates": 0,
+        "true_cleared_candidates": 0
+      },
+      "pooled": {
+        "accuracy": 0.95625,
+        "assertions": 160,
+        "candidates": 96,
+        "cleared_candidates": 18,
+        "completed": 160,
+        "confusion": {
+          "ambiguous": {
+            "ambiguous": 21,
+            "insufficient": 1,
+            "supported": 2
+          },
+          "contradicted": {
+            "contradicted": 38,
+            "supported": 2
+          },
+          "insufficient": {
+            "contradicted": 2,
+            "insufficient": 46
+          },
+          "supported": {
+            "supported": 48
+          }
+        },
+        "correct": 153,
+        "false_cleared_candidates": 2,
+        "false_clears": [
+          [
+            1,
+            "support-021"
+          ],
+          [
+            0,
+            "support-021"
+          ]
+        ],
+        "false_support": 4,
+        "non_supported_gold": 112,
+        "safe_candidates": 16,
+        "true_cleared_candidates": 16
+      },
+      "repeats": {
+        "0": {
+          "accuracy": 0.95,
+          "assertions": 80,
+          "candidates": 48,
+          "cleared_candidates": 9,
+          "completed": 80,
+          "confusion": {
+            "ambiguous": {
+              "ambiguous": 10,
+              "insufficient": 1,
+              "supported": 1
+            },
+            "contradicted": {
+              "contradicted": 19,
+              "supported": 1
+            },
+            "insufficient": {
+              "contradicted": 1,
+              "insufficient": 23
+            },
+            "supported": {
+              "supported": 24
+            }
+          },
+          "correct": 76,
+          "false_cleared_candidates": 1,
+          "false_clears": [
+            [
+              0,
+              "support-021"
+            ]
+          ],
+          "false_support": 2,
+          "non_supported_gold": 56,
+          "safe_candidates": 8,
+          "true_cleared_candidates": 8
+        },
+        "1": {
+          "accuracy": 0.9625,
+          "assertions": 80,
+          "candidates": 48,
+          "cleared_candidates": 9,
+          "completed": 80,
+          "confusion": {
+            "ambiguous": {
+              "ambiguous": 11,
+              "supported": 1
+            },
+            "contradicted": {
+              "contradicted": 19,
+              "supported": 1
+            },
+            "insufficient": {
+              "contradicted": 1,
+              "insufficient": 23
+            },
+            "supported": {
+              "supported": 24
+            }
+          },
+          "correct": 77,
+          "false_cleared_candidates": 1,
+          "false_clears": [
+            [
+              1,
+              "support-021"
+            ]
+          ],
+          "false_support": 2,
+          "non_supported_gold": 56,
+          "safe_candidates": 8,
+          "true_cleared_candidates": 8
+        }
+      },
+      "single": {
+        "accuracy": 0.953125,
+        "assertions": 64,
+        "candidates": 64,
+        "cleared_candidates": 18,
+        "completed": 64,
+        "confusion": {
+          "ambiguous": {
+            "ambiguous": 15,
+            "insufficient": 1
+          },
+          "contradicted": {
+            "contradicted": 14,
+            "supported": 2
+          },
+          "insufficient": {
+            "insufficient": 16
+          },
+          "supported": {
+            "supported": 16
+          }
+        },
+        "correct": 61,
+        "false_cleared_candidates": 2,
+        "false_clears": [
+          [
+            1,
+            "support-021"
+          ],
+          [
+            0,
+            "support-021"
+          ]
+        ],
+        "false_support": 2,
+        "non_supported_gold": 48,
+        "safe_candidates": 16,
+        "true_cleared_candidates": 16
+      },
+      "usage": {
+        "calls": 96,
+        "input_tokens": 114136,
+        "observed_cost_usd": "0.004793712",
+        "output_tokens": 9103,
+        "physical_attempts": 96,
+        "unknown_usage_calls": 0
+      },
+      "usage_by_repeat": {
+        "0": {
+          "calls": 48,
+          "input_tokens": 57068,
+          "observed_cost_usd": "0.002396856",
+          "output_tokens": 4552,
+          "physical_attempts": 48,
+          "unknown_usage_calls": 0
+        },
+        "1": {
+          "calls": 48,
+          "input_tokens": 57068,
+          "observed_cost_usd": "0.002396856",
+          "output_tokens": 4551,
+          "physical_attempts": 48,
+          "unknown_usage_calls": 0
+        }
+      },
+      "usage_multi": {
+        "calls": 32,
+        "input_tokens": 56082,
+        "observed_cost_usd": "0.002355444",
+        "output_tokens": 5460,
+        "physical_attempts": 32,
+        "unknown_usage_calls": 0
+      },
+      "usage_single": {
+        "calls": 64,
+        "input_tokens": 58054,
+        "observed_cost_usd": "0.002438268",
+        "output_tokens": 3643,
+        "physical_attempts": 64,
+        "unknown_usage_calls": 0
+      }
+    },
+    "singleton": {
+      "multi": {
+        "accuracy": 0.9583333333333334,
+        "assertions": 96,
+        "candidates": 32,
+        "cleared_candidates": 0,
+        "completed": 96,
+        "confusion": {
+          "ambiguous": {
+            "ambiguous": 6,
+            "supported": 2
+          },
+          "contradicted": {
+            "contradicted": 24
+          },
+          "insufficient": {
+            "contradicted": 2,
+            "insufficient": 30
+          },
+          "supported": {
+            "supported": 32
+          }
+        },
+        "correct": 92,
+        "false_cleared_candidates": 0,
+        "false_clears": [],
+        "false_support": 2,
+        "non_supported_gold": 64,
+        "safe_candidates": 0,
+        "true_cleared_candidates": 0
+      },
+      "pooled": {
+        "accuracy": 0.9625,
+        "assertions": 160,
+        "candidates": 96,
+        "cleared_candidates": 17,
+        "completed": 160,
+        "confusion": {
+          "ambiguous": {
+            "ambiguous": 21,
+            "insufficient": 1,
+            "supported": 2
+          },
+          "contradicted": {
+            "contradicted": 39,
+            "supported": 1
+          },
+          "insufficient": {
+            "contradicted": 2,
+            "insufficient": 46
+          },
+          "supported": {
+            "supported": 48
+          }
+        },
+        "correct": 154,
+        "false_cleared_candidates": 1,
+        "false_clears": [
+          [
+            0,
+            "support-021"
+          ]
+        ],
+        "false_support": 3,
+        "non_supported_gold": 112,
+        "safe_candidates": 16,
+        "true_cleared_candidates": 16
+      },
+      "repeats": {
+        "0": {
+          "accuracy": 0.9625,
+          "assertions": 80,
+          "candidates": 48,
+          "cleared_candidates": 9,
+          "completed": 80,
+          "confusion": {
+            "ambiguous": {
+              "ambiguous": 11,
+              "supported": 1
+            },
+            "contradicted": {
+              "contradicted": 19,
+              "supported": 1
+            },
+            "insufficient": {
+              "contradicted": 1,
+              "insufficient": 23
+            },
+            "supported": {
+              "supported": 24
+            }
+          },
+          "correct": 77,
+          "false_cleared_candidates": 1,
+          "false_clears": [
+            [
+              0,
+              "support-021"
+            ]
+          ],
+          "false_support": 2,
+          "non_supported_gold": 56,
+          "safe_candidates": 8,
+          "true_cleared_candidates": 8
+        },
+        "1": {
+          "accuracy": 0.9625,
+          "assertions": 80,
+          "candidates": 48,
+          "cleared_candidates": 8,
+          "completed": 80,
+          "confusion": {
+            "ambiguous": {
+              "ambiguous": 10,
+              "insufficient": 1,
+              "supported": 1
+            },
+            "contradicted": {
+              "contradicted": 20
+            },
+            "insufficient": {
+              "contradicted": 1,
+              "insufficient": 23
+            },
+            "supported": {
+              "supported": 24
+            }
+          },
+          "correct": 77,
+          "false_cleared_candidates": 0,
+          "false_clears": [],
+          "false_support": 1,
+          "non_supported_gold": 56,
+          "safe_candidates": 8,
+          "true_cleared_candidates": 8
+        }
+      },
+      "single": {
+        "accuracy": 0.96875,
+        "assertions": 64,
+        "candidates": 64,
+        "cleared_candidates": 17,
+        "completed": 64,
+        "confusion": {
+          "ambiguous": {
+            "ambiguous": 15,
+            "insufficient": 1
+          },
+          "contradicted": {
+            "contradicted": 15,
+            "supported": 1
+          },
+          "insufficient": {
+            "insufficient": 16
+          },
+          "supported": {
+            "supported": 16
+          }
+        },
+        "correct": 62,
+        "false_cleared_candidates": 1,
+        "false_clears": [
+          [
+            0,
+            "support-021"
+          ]
+        ],
+        "false_support": 1,
+        "non_supported_gold": 48,
+        "safe_candidates": 16,
+        "true_cleared_candidates": 16
+      },
+      "usage": {
+        "calls": 160,
+        "input_tokens": 187772,
+        "observed_cost_usd": "0.007886424",
+        "output_tokens": 9362,
+        "physical_attempts": 160,
+        "unknown_usage_calls": 0
+      },
+      "usage_by_repeat": {
+        "0": {
+          "calls": 80,
+          "input_tokens": 93886,
+          "observed_cost_usd": "0.003943212",
+          "output_tokens": 4679,
+          "physical_attempts": 80,
+          "unknown_usage_calls": 0
+        },
+        "1": {
+          "calls": 80,
+          "input_tokens": 93886,
+          "observed_cost_usd": "0.003943212",
+          "output_tokens": 4683,
+          "physical_attempts": 80,
+          "unknown_usage_calls": 0
+        }
+      },
+      "usage_multi": {
+        "calls": 96,
+        "input_tokens": 129718,
+        "observed_cost_usd": "0.005448156",
+        "output_tokens": 5716,
+        "physical_attempts": 96,
+        "unknown_usage_calls": 0
+      },
+      "usage_single": {
+        "calls": 64,
+        "input_tokens": 58054,
+        "observed_cost_usd": "0.002438268",
+        "output_tokens": 3646,
+        "physical_attempts": 64,
+        "unknown_usage_calls": 0
+      }
+    }
+  },
+  "artifact_sha256": {
+    "calls.json": "1a5f48b169a14ae41abb7db9812c5ec6a9ec1c7e1b012629860426bfb76ee75f",
+    "manifest.json": "b498cd6dc6ccbf6ea693e0334ad07b4886f447d969df675ebcebf9b7071de155",
+    "predictions.json": "62c7fb303ef85dd4e7b0dd262fb8d33275aef3925a268c33d7ea37967a8796e2",
+    "schedule.json": "144c5366a1b562f381bf4a67c79c1e079ed76ac671a72c09bfac8f4c9357bac3"
+  },
+  "audit_script_sha256": "709e7381daeed67f1ef4f40259156a61d612fdd14898977ee871e8d10d0efd71",
+  "checks": {
+    "all_completed": true,
+    "all_known_usage": true,
+    "matched_state_and_question_pairs": 160,
+    "observations_equal_call_fields": 256,
+    "predictions_reconstructed": 320,
+    "receipts": 256,
+    "request_digest_and_semantic_digest_checks": 256,
+    "scheduled_order_verified": true,
+    "summary_json_read": false
+  },
+  "conclusions": [
+    "All 256 original receipts match scheduled identities, exact request and semantic digests, and every corresponding observation field in calls.json. All 320 prediction rows reproduce exactly.",
+    "Grouped scores 153/160; singleton scores 154/160. Every one of the three label differences is a single-question case with identical complete provider input, so the difference cannot be attributed to question grouping.",
+    "All 96 multi-assertion predictions match across arms: both score 92/96 with two false-support assertions and zero cleared candidates. All such candidates contain unsafe gold, so this is not evidence about accepting safe multi-assertion candidates.",
+    "Grouped multi-assertion calls cost 0.002355444 USD versus 0.005448156 USD for singleton, a 56.77 percent reduction. Overall grouped cost is 39.22 percent lower.",
+    "Arithmetic case support-021 causes two grouped and one singleton false candidate clears; conflict case support-038 causes false-support assertions in both arms but another unsupported assertion prevents candidate clearance.",
+    "False-support provider confidence ranges from 0.51 to 0.66. These observed errors do not authorize a post-hoc cutoff or establish calibration."
+  ],
+  "cost_reduction": {
+    "all_cases": 0.3921564450503803,
+    "multi_assertion_cases": 0.5676621594535839
+  },
+  "false_support_details": [
+    {
+      "arm": "singleton",
+      "call": "case-7-repeat-1-singleton-2",
+      "case_id": "support-038",
+      "category": "conflicting_reports",
+      "expected": "ambiguous",
+      "multi": true,
+      "prediction": "supported",
+      "probabilities": [
+        {
+          "label": "contradicted",
+          "probability": 0.01
+        },
+        {
+          "label": "ambiguous",
+          "probability": 0.34
+        },
+        {
+          "label": "insufficient",
+          "probability": 0.0
+        },
+        {
+          "label": "supported",
+          "probability": 0.65
+        }
+      ],
+      "provider_confidence": 0.52,
+      "question_id": "/content",
+      "repeat": 1,
+      "status": "completed"
+    },
+    {
+      "arm": "grouped",
+      "call": "case-7-repeat-1-grouped-0",
+      "case_id": "support-038",
+      "category": "conflicting_reports",
+      "expected": "ambiguous",
+      "multi": true,
+      "prediction": "supported",
+      "probabilities": [
+        {
+          "label": "insufficient",
+          "probability": 0.0
+        },
+        {
+          "label": "contradicted",
+          "probability": 0.01
+        },
+        {
+          "label": "ambiguous",
+          "probability": 0.23
+        },
+        {
+          "label": "supported",
+          "probability": 0.76
+        }
+      ],
+      "provider_confidence": 0.66,
+      "question_id": "/content",
+      "repeat": 1,
+      "status": "completed"
+    },
+    {
+      "arm": "grouped",
+      "call": "case-33-repeat-1-grouped-0",
+      "case_id": "support-021",
+      "category": "numerical_counts",
+      "expected": "contradicted",
+      "multi": false,
+      "prediction": "supported",
+      "probabilities": [
+        {
+          "label": "contradicted",
+          "probability": 0.36
+        },
+        {
+          "label": "insufficient",
+          "probability": 0.01
+        },
+        {
+          "label": "supported",
+          "probability": 0.63
+        },
+        {
+          "label": "ambiguous",
+          "probability": 0.0
+        }
+      ],
+      "provider_confidence": 0.51,
+      "question_id": "/content",
+      "repeat": 1,
+      "status": "completed"
+    },
+    {
+      "arm": "singleton",
+      "call": "case-7-repeat-0-singleton-2",
+      "case_id": "support-038",
+      "category": "conflicting_reports",
+      "expected": "ambiguous",
+      "multi": true,
+      "prediction": "supported",
+      "probabilities": [
+        {
+          "label": "ambiguous",
+          "probability": 0.27
+        },
+        {
+          "label": "insufficient",
+          "probability": 0.0
+        },
+        {
+          "label": "contradicted",
+          "probability": 0.01
+        },
+        {
+          "label": "supported",
+          "probability": 0.72
+        }
+      ],
+      "provider_confidence": 0.62,
+      "question_id": "/content",
+      "repeat": 0,
+      "status": "completed"
+    },
+    {
+      "arm": "grouped",
+      "call": "case-7-repeat-0-grouped-0",
+      "case_id": "support-038",
+      "category": "conflicting_reports",
+      "expected": "ambiguous",
+      "multi": true,
+      "prediction": "supported",
+      "probabilities": [
+        {
+          "label": "contradicted",
+          "probability": 0.01
+        },
+        {
+          "label": "ambiguous",
+          "probability": 0.3
+        },
+        {
+          "label": "insufficient",
+          "probability": 0.0
+        },
+        {
+          "label": "supported",
+          "probability": 0.69
+        }
+      ],
+      "provider_confidence": 0.59,
+      "question_id": "/content",
+      "repeat": 0,
+      "status": "completed"
+    },
+    {
+      "arm": "grouped",
+      "call": "case-33-repeat-0-grouped-0",
+      "case_id": "support-021",
+      "category": "numerical_counts",
+      "expected": "contradicted",
+      "multi": false,
+      "prediction": "supported",
+      "probabilities": [
+        {
+          "label": "ambiguous",
+          "probability": 0.0
+        },
+        {
+          "label": "contradicted",
+          "probability": 0.35
+        },
+        {
+          "label": "supported",
+          "probability": 0.64
+        },
+        {
+          "label": "insufficient",
+          "probability": 0.01
+        }
+      ],
+      "provider_confidence": 0.51,
+      "question_id": "/content",
+      "repeat": 0,
+      "status": "completed"
+    },
+    {
+      "arm": "singleton",
+      "call": "case-33-repeat-0-singleton-0",
+      "case_id": "support-021",
+      "category": "numerical_counts",
+      "expected": "contradicted",
+      "multi": false,
+      "prediction": "supported",
+      "probabilities": [
+        {
+          "label": "insufficient",
+          "probability": 0.01
+        },
+        {
+          "label": "supported",
+          "probability": 0.65
+        },
+        {
+          "label": "ambiguous",
+          "probability": 0.0
+        },
+        {
+          "label": "contradicted",
+          "probability": 0.34
+        }
+      ],
+      "provider_confidence": 0.52,
+      "question_id": "/content",
+      "repeat": 0,
+      "status": "completed"
+    }
+  ],
+  "fixture_sha256": "5aacc4845f174314620ac3d04a50717e14d9dc7032f1d83bda0005f7c58270bb",
+  "limits": [
+    "Synthetic author-labelled fixtures; no independent production-quality claim.",
+    "All multi-assertion candidates contain at least one unsafe assertion, so no fully supported multi-assertion control exists.",
+    "Repeated observations are clustered by case and do not create independent cases.",
+    "No confidence threshold is fitted or recommended by this audit."
+  ],
+  "semantic_differences": [
+    {
+      "case_id": "support-041",
+      "expected": "ambiguous",
+      "grouped": "insufficient",
+      "identical_complete_provider_input": true,
+      "multi": false,
+      "question_id": "/content",
+      "repeat": 0,
+      "singleton": "ambiguous"
+    },
+    {
+      "case_id": "support-041",
+      "expected": "ambiguous",
+      "grouped": "ambiguous",
+      "identical_complete_provider_input": true,
+      "multi": false,
+      "question_id": "/content",
+      "repeat": 1,
+      "singleton": "insufficient"
+    },
+    {
+      "case_id": "support-021",
+      "expected": "contradicted",
+      "grouped": "supported",
+      "identical_complete_provider_input": true,
+      "multi": false,
+      "question_id": "/content",
+      "repeat": 1,
+      "singleton": "contradicted"
+    }
+  ],
+  "source_run": "/home/dev/dev/eval-runs/jev-support-qualification-20260919/live",
+  "total_usage": {
+    "calls": 256,
+    "input_tokens": 301908,
+    "observed_cost_usd": "0.012680136",
+    "output_tokens": 18465,
+    "physical_attempts": 256,
+    "unknown_usage_calls": 0
+  },
+  "verdict": "PASS: integrity and numerical reconstruction of this frozen synthetic run"
+}

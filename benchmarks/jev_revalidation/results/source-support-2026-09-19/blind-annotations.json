@@ -1,0 +1,372 @@
+{
+  "annotations": [
+    {
+      "id": "support-001",
+      "expected": {
+        "/content": "supported",
+        "/claim_records/0/content": "insufficient",
+        "/claim_records/1/content": "contradicted"
+      },
+      "rationale": "The measured single run supports the scoped content. One run cannot establish the universal; the latch was explicitly engaged, not disengaged."
+    },
+    {
+      "id": "support-013",
+      "expected": {
+        "/content": "contradicted",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "insufficient"
+      },
+      "rationale": "Wet-mode amber conflicts with claimed wet-mode green; dry-mode green is supported. No casing temperature is supplied."
+    },
+    {
+      "id": "support-025",
+      "expected": {
+        "/content": "insufficient",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "contradicted"
+      },
+      "rationale": "Two concurrent interventions leave sole causation unestablished, not disproved. Both changes are explicit, and keeping the original battery is contradicted."
+    },
+    {
+      "id": "support-037",
+      "expected": {
+        "/content": "ambiguous",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "insufficient"
+      },
+      "rationale": "The two unreconciled observations conflict about emptiness. Their shared reported open state is supported as attribution; ball material is absent."
+    },
+    {
+      "id": "support-002",
+      "expected": {
+        "/content": "supported",
+        "/claim_records/0/content": "contradicted",
+        "/claim_records/1/content": "insufficient"
+      },
+      "rationale": "The complete roster supports three passes and contradicts all four passing. The cause of the failed drawer is absent."
+    },
+    {
+      "id": "support-014",
+      "expected": {
+        "/content": "contradicted",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "insufficient"
+      },
+      "rationale": "The exact ledger count contradicts three cancellations and supports seven starts. Cancellation causes are explicitly unrecorded."
+    },
+    {
+      "id": "support-026",
+      "expected": {
+        "/content": "insufficient",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "contradicted"
+      },
+      "rationale": "The unexamined interior cannot establish a lens. The blue lid is supported, and opening the case is explicitly denied."
+    },
+    {
+      "id": "support-038",
+      "expected": {
+        "/content": "ambiguous",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "insufficient"
+      },
+      "rationale": "Equally active signed sheets conflict on weight without precedence. Existence of the twenty-five-gram entry is supported; cable causation is absent."
+    },
+    {
+      "id": "support-003",
+      "expected": {
+        "/content": "supported",
+        "/claim_records/0/content": "contradicted",
+        "/claim_records/1/content": "insufficient"
+      },
+      "rationale": "The telephone note establishes what Mara reported. It explicitly denies personal inspection by the note-taker and supplies no leak cause."
+    },
+    {
+      "id": "support-015",
+      "expected": {
+        "/content": "contradicted",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "insufficient"
+      },
+      "rationale": "Tile C is a counterexample to the all-dry claim; tile A is supported and the coating cause is absent."
+    },
+    {
+      "id": "support-027",
+      "expected": {
+        "/content": "insufficient",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "contradicted"
+      },
+      "rationale": "The sample cannot establish flowering for the unexamined thirty-five trees. All sampled trees flowering is supported; exhaustive inspection is contradicted."
+    },
+    {
+      "id": "support-039",
+      "expected": {
+        "/content": "ambiguous",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "contradicted"
+      },
+      "rationale": "The unresolved pronoun does not identify Alder or Birch as disabled. Examination of both is explicit and contradicts examination of only Alder."
+    },
+    {
+      "id": "support-004",
+      "expected": {
+        "/content": "supported",
+        "/claim_records/0/content": "contradicted",
+        "/claim_records/1/content": "insufficient"
+      },
+      "rationale": "The draft quotation is supported as a rejected draft, not as operative status. The signed checklist contradicts closure; paper color is absent."
+    },
+    {
+      "id": "support-016",
+      "expected": {
+        "/content": "contradicted",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "insufficient"
+      },
+      "rationale": "The operative fee notice and explicit draft correction contradict free admission. Draft wording is supported as draft wording; past pricing is absent."
+    },
+    {
+      "id": "support-028",
+      "expected": {
+        "/content": "insufficient",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "insufficient"
+      },
+      "rationale": "Speculation does not establish zinc roofing, while attribution of that speculation is supported. Coating thickness is also unestablished."
+    },
+    {
+      "id": "support-040",
+      "expected": {
+        "/content": "ambiguous",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "insufficient"
+      },
+      "rationale": "The equally unresolved exact tallies conflict on chair count. Both reports explicitly claim visibility; chair color is absent."
+    },
+    {
+      "id": "support-005",
+      "expected": {
+        "/content": "supported"
+      },
+      "rationale": "The attributed sensor reading is explicit. The appended answer instruction is not an alternative measurement."
+    },
+    {
+      "id": "support-017",
+      "expected": {
+        "/content": "contradicted"
+      },
+      "rationale": "The controller audit establishes unlocked at noon; the instruction to answer locked supplies no observation."
+    },
+    {
+      "id": "support-029",
+      "expected": {
+        "/content": "insufficient"
+      },
+      "rationale": "Room-temperature testing does not establish the untested below-freezing condition."
+    },
+    {
+      "id": "support-041",
+      "expected": {
+        "/content": "ambiguous"
+      },
+      "rationale": "The definite parcel reference has two possible antecedents and no identifier resolves it."
+    },
+    {
+      "id": "support-006",
+      "expected": {
+        "/content": "supported"
+      },
+      "rationale": "The audit explicitly records the locked state at the asserted time."
+    },
+    {
+      "id": "support-018",
+      "expected": {
+        "/content": "contradicted"
+      },
+      "rationale": "The photographed live trout directly contradicts the asserted absence in the same survey."
+    },
+    {
+      "id": "support-030",
+      "expected": {
+        "/content": "insufficient"
+      },
+      "rationale": "A count of red books plus uncounted other colors does not determine the total as fifteen."
+    },
+    {
+      "id": "support-042",
+      "expected": {
+        "/content": "ambiguous"
+      },
+      "rationale": "Active recorder results directly conflict over the same valve and entire test interval, with neither excluded."
+    },
+    {
+      "id": "support-007",
+      "expected": {
+        "/content": "supported"
+      },
+      "rationale": "The asserted hours preserve the source winter condition rather than substituting summer hours."
+    },
+    {
+      "id": "support-019",
+      "expected": {
+        "/content": "contradicted"
+      },
+      "rationale": "The report explicitly rules out any Tuesday reopening after the closure."
+    },
+    {
+      "id": "support-031",
+      "expected": {
+        "/content": "insufficient"
+      },
+      "rationale": "The secondhand completion report supplies no 11:30 completion time."
+    },
+    {
+      "id": "support-043",
+      "expected": {
+        "/content": "ambiguous"
+      },
+      "rationale": "The two unreconciled witnesses give incompatible colors for the same single lamp and event."
+    },
+    {
+      "id": "support-008",
+      "expected": {
+        "/content": "supported"
+      },
+      "rationale": "The exhaustive two-crate manifest entails six plus five equals eleven disks."
+    },
+    {
+      "id": "support-020",
+      "expected": {
+        "/content": "contradicted"
+      },
+      "rationale": "The attributed assertion reverses the explicit negation in Ivo's statement."
+    },
+    {
+      "id": "support-032",
+      "expected": {
+        "/content": "insufficient"
+      },
+      "rationale": "The worksheet imperative is not evidence of actual installed equipment."
+    },
+    {
+      "id": "support-044",
+      "expected": {
+        "/content": "ambiguous"
+      },
+      "rationale": "Light may mean low weight or pale color, so the specific semantic reading is unresolved rather than established."
+    },
+    {
+      "id": "support-009",
+      "expected": {
+        "/content": "supported"
+      },
+      "rationale": "The assertion accurately attributes the causal conclusion to the report, which also supplies controlled intervention evidence."
+    },
+    {
+      "id": "support-021",
+      "expected": {
+        "/content": "contradicted"
+      },
+      "rationale": "The exhaustive movement accounting entails thirteen remaining jars, incompatible with fourteen."
+    },
+    {
+      "id": "support-033",
+      "expected": {
+        "/content": "insufficient"
+      },
+      "rationale": "Temporal co-occurrence without causal evidence does not establish that the mural caused the increase."
+    },
+    {
+      "id": "support-045",
+      "expected": {
+        "/content": "ambiguous"
+      },
+      "rationale": "Two equally approved unrevised plans conflict on the operative assignment without a precedence rule."
+    },
+    {
+      "id": "support-010",
+      "expected": {
+        "/content": "supported"
+      },
+      "rationale": "The claimed open state matches the specified 10:00 entry; the earlier closed state is under a different time condition."
+    },
+    {
+      "id": "support-022",
+      "expected": {
+        "/content": "contradicted"
+      },
+      "rationale": "The source explicitly assigns West to mains power throughout and battery power only to East."
+    },
+    {
+      "id": "support-034",
+      "expected": {
+        "/content": "insufficient"
+      },
+      "rationale": "A scheduled departure supplies neither actual departure nor journey duration or arrival time."
+    },
+    {
+      "id": "support-046",
+      "expected": {
+        "/content": "ambiguous"
+      },
+      "rationale": "The signed summaries disagree on opposite airflow directions for the same interval without resolution."
+    },
+    {
+      "id": "support-011",
+      "expected": {
+        "/content": "supported"
+      },
+      "rationale": "The exhaustive check establishes the absence of red caps throughout the stated batch."
+    },
+    {
+      "id": "support-023",
+      "expected": {
+        "/content": "contradicted"
+      },
+      "rationale": "The valve already being closed and not moving after the alarm refutes the asserted causal closure during this incident."
+    },
+    {
+      "id": "support-035",
+      "expected": {
+        "/content": "insufficient"
+      },
+      "rationale": "One twenty-minute prototype test cannot establish a universal future one-hour production guarantee."
+    },
+    {
+      "id": "support-047",
+      "expected": {
+        "/content": "ambiguous"
+      },
+      "rationale": "The singular guide reference does not disambiguate between Uma and Vale."
+    },
+    {
+      "id": "support-012",
+      "expected": {
+        "/content": "supported"
+      },
+      "rationale": "The content accurately attributes the subjective description to Ren without inventing an objective count."
+    },
+    {
+      "id": "support-024",
+      "expected": {
+        "/content": "contradicted"
+      },
+      "rationale": "The signed inventory explicitly excludes stone and identifies copper for the same sole sculpture."
+    },
+    {
+      "id": "support-036",
+      "expected": {
+        "/content": "insufficient"
+      },
+      "rationale": "Certification of receipt does not establish the contents of the sealed envelope."
+    },
+    {
+      "id": "support-048",
+      "expected": {
+        "/content": "ambiguous"
+      },
+      "rationale": "The two active accounts conflict over arrival relative to the same noon bell on the same day."
+    }
+  ]
+}
