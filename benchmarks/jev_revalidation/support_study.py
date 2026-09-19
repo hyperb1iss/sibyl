@@ -1,0 +1,546 @@
+"""Compare grouped and singleton source-support calls on synthetic fixtures only."""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import hashlib
+import json
+import os
+import random
+import statistics
+import sys
+import time
+import uuid
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from sibyl_core.ai import decisions
+from sibyl_core.ai.decisions import DecisionObservation, DecisionRequest
+from sibyl_core.ai.openrouter_decisions import OpenRouterDecisionProvider, OpenRouterDecisionRoute
+from sibyl_core.tasks._evidence_json import canonical, read_json_value
+
+from . import runner, support_inputs
+from .runner import _failed, _percentile, _sha, _write
+
+ARMS = ("grouped", "singleton")
+VERSION = "jev-product-source-support-study-v1"
+
+
+@dataclass(frozen=True)
+class ScheduledCall:
+    key: str
+    case_id: str
+    repeat: int
+    arm: str
+    request: DecisionRequest
+
+    def identity(self) -> dict[str, Any]:
+        return {
+            "key": self.key,
+            "case_id": self.case_id,
+            "repeat": self.repeat,
+            "arm": self.arm,
+            "question_ids": [question.question_id for question in self.request.questions],
+            "request_digest": self.request.request_digest,
+        }
+
+
+def schedule(
+    cases: list[dict[str, Any]], run_id: str, *, repeats: int, seed: int
+) -> list[ScheduledCall]:
+    """Interleave paired arm blocks; singleton calls retain the complete shared state."""
+    if type(repeats) is not int or repeats < 1 or type(seed) is not int:
+        raise ValueError("positive repeats and an integer seed are required")
+    rng = random.Random(seed)  # noqa: S311 - reproducible experimental order, not a secret
+    pairs = [(index, repeat) for index in range(len(cases)) for repeat in range(repeats)]
+    rng.shuffle(pairs)
+    calls = []
+    for index, repeat in pairs:
+        case = cases[index]
+        prefix = f"case-{index}-repeat-{repeat}"
+        base = support_inputs.make_request(case, f"{run_id}:{prefix}")
+        subjects = {subject.claim_path: subject for subject in base.subject_refs}
+        if set(subjects) != {question.question_id for question in base.questions}:
+            raise ValueError("questions must correspond exactly to subjects")
+        blocks = {}
+        for arm in ARMS:
+            selections = [base.questions] if arm == "grouped" else [(q,) for q in base.questions]
+            blocks[arm] = []
+            for offset, questions in enumerate(selections):
+                key = f"{prefix}-{arm}-{offset}"
+                request = DecisionRequest.model_validate(
+                    {
+                        **base.model_dump(),
+                        "request_id": f"{run_id}:{key}",
+                        "questions": tuple(questions),
+                        "source_refs": base.source_refs,
+                        "subject_refs": tuple(subjects[q.question_id] for q in questions),
+                    }
+                )
+                blocks[arm].append(ScheduledCall(key, case["id"], repeat, arm, request))
+        order = list(ARMS)
+        rng.shuffle(order)
+        for arm in order:
+            calls.extend(blocks[arm])
+    return calls
+
+
+def _code_hashes() -> dict[str, str]:
+    product_root = Path(decisions.__file__).resolve().parents[1]
+    hashes = {
+        f"sibyl_core/{path.relative_to(product_root)}": _sha(path)
+        for path in sorted(product_root.rglob("*.py"))
+    }
+    for path in (Path(__file__), Path(runner.__file__), Path(support_inputs.__file__)):
+        hashes[f"benchmark/{path.name}"] = _sha(path)
+    return hashes
+
+
+def _manifest(
+    cases_path: Path,
+    cases: list[dict[str, Any]],
+    calls: list[ScheduledCall],
+    *,
+    run_id: str,
+    repeats: int,
+    seed: int,
+    concurrency: int,
+    mode: str,
+) -> dict[str, Any]:
+    route = OpenRouterDecisionRoute()
+    return {
+        "version": VERSION,
+        "run_id": run_id,
+        "started_at": datetime.now(UTC).isoformat(),
+        "mode": mode,
+        "synthetic_only": True,
+        "cases_sha256": _sha(cases_path),
+        "case_count": len(cases),
+        "assertions_per_repeat_per_arm": sum(len(case["expected"]) for case in cases),
+        "scheduled_calls": len(calls),
+        "repeats": repeats,
+        "seed": seed,
+        "concurrency": concurrency,
+        "arms": list(ARMS),
+        "route": route.model_dump(mode="json"),
+        "route_policy_sha256": route.policy_sha256,
+        "program_hashes": support_inputs.program_hashes(),
+        "code_hashes": _code_hashes(),
+        "schedule_sha256": hashlib.sha256(
+            canonical([c.identity() for c in calls]).encode()
+        ).hexdigest(),
+    }
+
+
+def _validate_replay(current: dict[str, Any], previous: dict[str, Any]) -> None:
+    for key, value in current.items():
+        if key not in {"mode", "started_at"} and previous.get(key) != value:
+            raise ValueError(f"replay manifest mismatch: {key}")
+
+
+def _initial_rows(cases: list[dict[str, Any]], repeats: int) -> list[dict[str, Any]]:
+    return [
+        {
+            "case_id": case["id"],
+            "category": case["category"],
+            "arm": arm,
+            "repeat": repeat,
+            "question_id": path,
+            "expected": expected,
+            "status": "not_executed",
+            "prediction": None,
+        }
+        for arm in ARMS
+        for repeat in range(repeats)
+        for case in cases
+        for path, expected in sorted(case["expected"].items())
+    ]
+
+
+def _score_rows(
+    rows: list[dict[str, Any]], call: ScheduledCall, observation: DecisionObservation
+) -> None:
+    answers = {answer.question_id: answer.value for answer in observation.answers}
+    selected = {question.question_id for question in call.request.questions}
+    for row in rows:
+        if (row["arm"], row["repeat"], row["case_id"]) == (
+            call.arm,
+            call.repeat,
+            call.case_id,
+        ) and row["question_id"] in selected:
+            row.update(
+                status=observation.execution_status,
+                prediction=answers.get(row["question_id"]),
+                call=call.key,
+            )
+
+
+def _ratio(numerator: int, denominator: int) -> float | None:
+    return numerator / denominator if denominator else None
+
+
+def _metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    complete = sum(row["status"] == "completed" for row in rows)
+    correct = sum(row["prediction"] == row["expected"] for row in rows)
+    unsafe = sum(row["expected"] != "supported" for row in rows)
+    false_support = sum(
+        row["prediction"] == "supported" and row["expected"] != "supported" for row in rows
+    )
+    groups: dict[tuple[str, int], list[dict[str, Any]]] = {}
+    for row in rows:
+        groups.setdefault((row["case_id"], row["repeat"]), []).append(row)
+    candidates = []
+    for (case_id, repeat), members in groups.items():
+        candidates.append(
+            {
+                "case_id": case_id,
+                "repeat": repeat,
+                "gold_supported": all(row["expected"] == "supported" for row in members),
+                "complete": all(row["status"] == "completed" for row in members),
+                "clears": all(
+                    row["status"] == "completed" and row["prediction"] == "supported"
+                    for row in members
+                ),
+            }
+        )
+    gold_supported = sum(row["gold_supported"] for row in candidates)
+    clears = sum(row["clears"] for row in candidates)
+    correct_clears = sum(row["clears"] and row["gold_supported"] for row in candidates)
+    return {
+        "assertions": len(rows),
+        "completed_assertions": complete,
+        "failed_assertions": len(rows) - complete,
+        "correct": correct,
+        "accuracy": _ratio(correct, len(rows)),
+        "unsafe_assertions": unsafe,
+        "false_support": false_support,
+        "false_support_rate": _ratio(false_support, unsafe),
+        "confusion": {
+            gold: {
+                pred: sum(row["expected"] == gold and row["prediction"] == pred for row in rows)
+                for pred in sorted(support_inputs.LABELS)
+            }
+            for gold in sorted(support_inputs.LABELS)
+        },
+        "candidates": len(candidates),
+        "complete_candidates": sum(row["complete"] for row in candidates),
+        "gold_supported_candidates": gold_supported,
+        "unsafe_candidates": len(candidates) - gold_supported,
+        "cleared_candidates": clears,
+        "false_clears": clears - correct_clears,
+        "false_clear_rate": _ratio(clears - correct_clears, len(candidates) - gold_supported),
+        "clear_precision": _ratio(correct_clears, clears),
+        "supported_candidate_coverage": _ratio(correct_clears, gold_supported),
+        "candidate_outcomes": candidates,
+    }
+
+
+def _accounting(calls: list[dict[str, Any]]) -> dict[str, Any]:
+    dispatched = [call for call in calls if call["dispatch_started"]]
+    latencies = [call["elapsed_ms"] for call in dispatched]
+    result = {
+        "scheduled_calls": len(calls),
+        "dispatch_started_calls": len(dispatched),
+        "completed_calls": sum(call["execution_status"] == "completed" for call in calls),
+        "known_physical_attempts": sum(
+            call["attempt_count"] for call in calls if call["attempt_count_known"]
+        ),
+        "unknown_attempt_count_calls": sum(not call["attempt_count_known"] for call in calls),
+        "latency_p50_ms": statistics.median(latencies) if latencies else None,
+        "latency_p95_ms": _percentile(latencies, 0.95),
+    }
+    for field in ("input_tokens", "output_tokens", "observed_cost_usd"):
+        known = [call[field] for call in calls if call.get(field) is not None]
+        result[field] = sum(known) if known else None
+        result[f"unknown_{field}_calls"] = len(calls) - len(known)
+    return result
+
+
+def report(rows: list[dict[str, Any]], calls: list[dict[str, Any]]) -> dict[str, Any]:
+    arms = {}
+    for arm in ARMS:
+        selected = [row for row in rows if row["arm"] == arm]
+        arms[arm] = {
+            "pooled": _metrics(selected),
+            "repeats": {
+                str(repeat): _metrics([row for row in selected if row["repeat"] == repeat])
+                for repeat in sorted({row["repeat"] for row in selected})
+            },
+            "accounting": _accounting([call for call in calls if call["arm"] == arm]),
+        }
+    indexed = {(row["arm"], row["case_id"], row["repeat"], row["question_id"]): row for row in rows}
+    pairs = []
+    for row in rows:
+        if row["arm"] != "grouped":
+            continue
+        other = indexed["singleton", row["case_id"], row["repeat"], row["question_id"]]
+        pairs.append(
+            {
+                "case_id": row["case_id"],
+                "repeat": row["repeat"],
+                "question_id": row["question_id"],
+                "expected": row["expected"],
+                "grouped_status": row["status"],
+                "singleton_status": other["status"],
+                "grouped_prediction": row["prediction"],
+                "singleton_prediction": other["prediction"],
+                "both_complete": row["status"] == other["status"] == "completed",
+            }
+        )
+    complete = [pair for pair in pairs if pair["both_complete"]]
+    differences = [
+        pair for pair in complete if pair["grouped_prediction"] != pair["singleton_prediction"]
+    ]
+    return {
+        "arms": arms,
+        "paired": {
+            "scheduled_assertion_pairs": len(pairs),
+            "both_complete": len(complete),
+            "incomplete_pairs": len(pairs) - len(complete),
+            "semantic_differences": differences,
+            "semantic_difference_count": len(differences),
+            "semantic_disagreement_rate": _ratio(len(differences), len(complete)),
+            "failure_pairs": [pair for pair in pairs if not pair["both_complete"]],
+        },
+        "limits": [
+            "Original synthetic diagnostics, not human gold or a public benchmark.",
+            "Repeated assertions within candidates are correlated, not independent samples.",
+            "All scheduled assertions remain in accuracy denominators, including failed calls.",
+            "Candidate clears are diagnostic labels only, without publication authority.",
+            "Observed provider usage is retained on replay; replay has no new billed usage.",
+            "Source support does not replace proposal generation or the complete semantic critic.",
+            "The fresh fixture has only mixed-label multi-assertion candidates; positive clear coverage measures single-assertion candidates.",
+        ],
+    }
+
+
+async def _observe(
+    call: ScheduledCall, provider: Any, archived: dict[str, Any] | None
+) -> tuple[DecisionObservation, bool]:
+    if archived is not None:
+        payload = {key: archived[key] for key in DecisionObservation.model_fields}
+        return DecisionObservation.model_validate_json(canonical(payload)), archived[
+            "attempt_count_known"
+        ]
+    if provider is None:
+        return _failed(call.request, "not_executed"), True
+    started = time.monotonic()
+    try:
+        return await provider.decide(call.request), True
+    except Exception:
+        return _failed(
+            call.request,
+            "provider_exception_usage_unknown",
+            elapsed_ms=(time.monotonic() - started) * 1000,
+        ), False
+
+
+def _validate_replay_receipt(replay: Path, call: ScheduledCall, archived: dict[str, Any]) -> None:
+    """Reject damaged archives before creating output; retain validated bytes in memory."""
+    try:
+        _check_replay_receipt(replay, call, archived)
+    except (OSError, ValueError, KeyError, TypeError):
+        raise ValueError(f"invalid or inconsistent replay receipt: {call.key}") from None
+
+
+def _check_replay_receipt(replay: Path, call: ScheduledCall, archived: dict[str, Any]) -> None:
+    envelope = read_json_value((replay / "receipts" / f"{call.key}.json").read_bytes())
+    if not isinstance(envelope, dict) or set(envelope) != {"request", "observation"}:
+        raise ValueError("invalid envelope")
+    request = DecisionRequest.model_validate_json(canonical(envelope["request"]))
+    if request != call.request:
+        raise ValueError("request mismatch")
+    observation = DecisionObservation.model_validate_json(canonical(envelope["observation"]))
+    observation.validate_for(request, expected_model_id=OpenRouterDecisionRoute().resolved_model_id)
+    archived_observation = DecisionObservation.model_validate_json(
+        canonical({key: archived[key] for key in DecisionObservation.model_fields})
+    )
+    if archived_observation != observation:
+        raise ValueError("observation disagrees with archived call")
+    for field in ("dispatch_started", "attempt_count_known"):
+        if type(archived.get(field)) is not bool:
+            raise ValueError("invalid dispatch metadata")
+    for field in ("dispatch_started_at", "completed_at"):
+        value = archived[field]
+        if value is not None and (
+            not isinstance(value, str) or datetime.fromisoformat(value).tzinfo is None
+        ):
+            raise ValueError("invalid dispatch timestamp")
+
+
+def _replay_calls(replay: Path | None, calls: list[ScheduledCall]) -> dict[str, dict[str, Any]]:
+    if replay is None:
+        return {}
+    archived = read_json_value((replay / "calls.json").read_bytes())
+    result = {row["key"]: row for row in archived}
+    if len(result) != len(archived) or set(result) != {call.key for call in calls}:
+        raise ValueError("replay call grid mismatch")
+    for call in calls:
+        if any(result[call.key].get(k) != v for k, v in call.identity().items()):
+            raise ValueError("replay call identity mismatch")
+        _validate_replay_receipt(replay, call, result[call.key])
+    return result
+
+
+@dataclass
+class _Execution:
+    provider: Any
+    out: Path
+    replay: Path | None
+    records: dict[str, dict[str, Any]]
+    rows: list[dict[str, Any]]
+    replay_calls: dict[str, dict[str, Any]]
+    semaphore: asyncio.Semaphore
+
+    async def execute(self, call: ScheduledCall) -> None:
+        provider, records, rows = self.provider, self.records, self.rows
+        out, replay_calls = self.out, self.replay_calls
+        route = OpenRouterDecisionRoute()
+        async with self.semaphore:
+            started = time.monotonic()
+            records[call.key]["dispatch_started"] = provider is not None
+            if provider is not None:
+                records[call.key]["dispatch_started_at"] = datetime.now(UTC).isoformat()
+            cancelled = False
+            try:
+                observation, known = await _observe(call, provider, replay_calls.get(call.key))
+            except asyncio.CancelledError:
+                observation = _failed(
+                    call.request,
+                    "cancelled_usage_unknown",
+                    elapsed_ms=(time.monotonic() - started) * 1000,
+                )
+                known = provider is None
+                cancelled = True
+            _write(
+                out / "receipts" / f"{call.key}.json",
+                {
+                    "request": call.request.model_dump(mode="json"),
+                    "observation": observation.model_dump(mode="json"),
+                },
+            )
+            records[call.key].update(observation.model_dump(mode="json"), attempt_count_known=known)
+            records[call.key]["completed_at"] = datetime.now(UTC).isoformat()
+            if self.replay:
+                for field in (
+                    "dispatch_started",
+                    "attempt_count_known",
+                    "dispatch_started_at",
+                    "completed_at",
+                ):
+                    records[call.key][field] = replay_calls[call.key][field]
+            try:
+                observation.validate_for(call.request, expected_model_id=route.resolved_model_id)
+            except ValueError:
+                observation = _failed(call.request, "observation_validation_failed")
+                records[call.key].update(
+                    execution_status="invalid_response",
+                    error_category="observation_validation_failed",
+                )
+            _score_rows(rows, call, observation)
+            if cancelled:
+                raise asyncio.CancelledError
+
+
+async def run(args: argparse.Namespace) -> dict[str, Any]:
+    if type(args.concurrency) is not int or args.concurrency < 1:
+        raise ValueError("concurrency must be a positive integer")
+    if args.live and args.replay:
+        raise ValueError("live and replay modes are exclusive")
+    cases = support_inputs.load_cases(args.cases)
+    previous = (
+        read_json_value((args.replay / "manifest.json").read_bytes()) if args.replay else None
+    )
+    run_id = previous["run_id"] if previous else uuid.uuid4().hex
+    calls = schedule(cases, run_id, repeats=args.repeats, seed=args.seed)
+    mode = "live" if args.live else "replay" if args.replay else "prepare"
+    manifest = _manifest(
+        args.cases,
+        cases,
+        calls,
+        run_id=run_id,
+        repeats=args.repeats,
+        seed=args.seed,
+        concurrency=args.concurrency,
+        mode=mode,
+    )
+    if previous is not None:
+        _validate_replay(manifest, previous)
+    replay_calls = _replay_calls(args.replay, calls)
+    key = os.environ.get("SIBYL_DECISION_OPENROUTER_API_KEY") if args.live else None
+    if args.live and not key:
+        raise ValueError("live synthetic execution requires SIBYL_DECISION_OPENROUTER_API_KEY")
+    out = args.output_dir
+    out.mkdir(parents=True, exist_ok=False)
+    (out / "receipts").mkdir()
+    (out / "requests").mkdir()
+    _write(out / "manifest.json", manifest)
+    _write(out / "schedule.json", [call.identity() for call in calls])
+    rows = _initial_rows(cases, args.repeats)
+    records = {
+        call.key: {
+            **call.identity(),
+            **_failed(call.request, "not_executed").model_dump(mode="json"),
+            "dispatch_started": False,
+            "attempt_count_known": True,
+            "dispatch_started_at": None,
+            "completed_at": None,
+        }
+        for call in calls
+    }
+    for call in calls:
+        _write(out / "requests" / f"{call.key}.json", call.request.model_dump(mode="json"))
+    provider = OpenRouterDecisionProvider(key) if key else None
+    semaphore = asyncio.Semaphore(args.concurrency)
+
+    execution = _Execution(provider, out, args.replay, records, rows, replay_calls, semaphore)
+    tasks = [asyncio.create_task(execution.execute(call)) for call in calls]
+    try:
+        await asyncio.gather(*tasks)
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+    finally:
+        try:
+            if provider is not None:
+                await provider.aclose()
+        finally:
+            ordered = [records[call.key] for call in calls]
+            result = report(rows, ordered)
+            _write(out / "predictions.json", rows)
+            _write(out / "calls.json", ordered)
+            _write(out / "summary.json", result)
+            _write(
+                out / "completion.json",
+                {
+                    "finished_at": datetime.now(UTC).isoformat(),
+                    "scheduled_calls": len(calls),
+                    "recorded_receipts": len(list((out / "receipts").glob("*.json"))),
+                    "mode": mode,
+                },
+            )
+    return result
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--cases", type=Path, default=Path(__file__).with_name("support_cases.json")
+    )
+    parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--repeats", type=int, default=2)
+    parser.add_argument("--seed", type=int, default=1729)
+    parser.add_argument("--concurrency", type=int, default=8)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--live", action="store_true")
+    mode.add_argument("--replay", type=Path)
+    sys.stdout.write(json.dumps(asyncio.run(run(parser.parse_args())), indent=2) + "\n")
+
+
+if __name__ == "__main__":
+    main()
