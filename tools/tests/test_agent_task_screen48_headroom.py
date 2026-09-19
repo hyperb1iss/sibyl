@@ -31,6 +31,7 @@ FAILED_ELAPSED_SECONDS = 3.0
 MIXED_MEAN_ELAPSED = 7.75
 PER_TASK_CELLS = 2
 FIVE = headroom.MINIMUM_REPETITIONS
+TEN = 10
 #: Wilson 95% bounds at n=5, to six places, checked against a hand calculation.
 WILSON_0_OF_5_UPPER = 0.434482
 WILSON_3_OF_5 = (0.230724, 0.882379)
@@ -326,6 +327,9 @@ def test_bands_are_read_from_the_interval_not_the_rate() -> None:
     # [0.31, 0.83]. Saturated needs the whole interval above 0.9, which
     # thirty-five straight passes is the first count to reach.
     assert headroom.band(6, 10) == headroom.HEADROOM
+    assert headroom.band(7, 10) == headroom.HEADROOM
+    assert headroom.band(8, 10) == headroom.UNDETERMINED
+    assert headroom.band(5, 10) == headroom.FLOOR
     assert headroom.band(30, 30) == headroom.UNDETERMINED
     assert headroom.band(35, 35) == headroom.SATURATED
     assert headroom.band(0, 10) == headroom.FLOOR
@@ -395,10 +399,12 @@ def test_bands_and_cost_follow_the_measured_rates(
     assert "0.00-0.43" in rendered
 
 
-def test_the_cli_defaults_to_the_minimum_repetitions(
+def test_the_cli_defaults_to_ten_repetitions_where_headroom_is_reachable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    fake = FakeRunner({task: [True] * FIVE for task in TASKS})
+    assert headroom.DEFAULT_REPETITIONS == TEN
+    assert headroom.DEFAULT_REPETITIONS >= headroom.MINIMUM_REPETITIONS
+    fake = FakeRunner({task: [True] * TEN for task in TASKS})
     monkeypatch.setattr(runner, "run_task", fake)
     template = write_template(tmp_path / "artifacts")
     path = tmp_path / "template.json"
@@ -416,7 +422,7 @@ def test_the_cli_defaults_to_the_minimum_repetitions(
         ]
     )
     assert exit_code == 0
-    assert len(fake.calls) == len(TASKS) * FIVE
+    assert len(fake.calls) == len(TASKS) * TEN
 
 
 def test_a_task_outside_the_catalog_is_refused(

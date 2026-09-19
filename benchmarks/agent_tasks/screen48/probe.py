@@ -139,8 +139,11 @@ def bound_bands(report: dict[str, Any], tasks: Sequence[str]) -> dict[str, dict[
     A band is only as good as the outcomes under it. The report has to be the
     interval-banded schema, every probed task has to be in it, and every one
     has to have reached ``headroom.MINIMUM_REPETITIONS`` known outcomes. The
-    band itself is not adjudicated here: a saturated task can be probed, and
-    the probe's own rows will show the arms had nothing to add.
+    stored counts, interval and band are recomputed here rather than trusted:
+    a report is a file, and a file can be edited. Which band a task carries is
+    not adjudicated: undetermined means the screen could not place the task,
+    not that it is ineligible, and a saturated task can be probed too; the
+    probe's own rows will show whether an arm added anything.
     """
     if not isinstance(report, dict) or report.get("schema") != headroom.SCHEMA:
         raise ManifestError(
@@ -166,16 +169,34 @@ def bound_bands(report: dict[str, Any], tasks: Sequence[str]) -> dict[str, dict[
         row = by_task.get(task)
         if row is None:
             raise ManifestError(f"task {task} is not in the headroom report")
-        known = row["known"]
-        if type(known) is not int or known < headroom.MINIMUM_REPETITIONS:
-            raise ManifestError(
-                f"task {task} was banded from {known!r} known outcomes; the probe needs at "
-                f"least {headroom.MINIMUM_REPETITIONS}"
-            )
-        if row["headroom_band"] not in headroom.BANDS:
-            raise ManifestError(f"task {task} carries an unknown band: {row['headroom_band']!r}")
-        bound[task] = {field: row[field] for field in headroom.BAND_FIELDS}
+        bound[task] = _recomputed_band(task, row)
     return bound
+
+
+def _recomputed_band(task: str, row: dict[str, Any]) -> dict[str, Any]:
+    """The band fields of one row, after every derived value is recomputed."""
+    known = row["known"]
+    if type(known) is not int or known < headroom.MINIMUM_REPETITIONS:
+        raise ManifestError(
+            f"task {task} was banded from {known!r} known outcomes; the probe needs at "
+            f"least {headroom.MINIMUM_REPETITIONS}"
+        )
+    passes, failures = row["passes"], row["failures"]
+    if type(passes) is not int or type(failures) is not int or passes + failures != known:
+        raise ManifestError(
+            f"task {task} counts do not add up: {passes!r} passes + {failures!r} failures "
+            f"!= {known} known"
+        )
+    if row["pass_rate"] != round(passes / known, 6):
+        raise ManifestError(f"task {task} pass rate does not match its counts")
+    if row["interval"] != headroom.wilson_interval(passes, known):
+        raise ManifestError(f"task {task} interval does not match its counts")
+    if row["headroom_band"] != headroom.band(passes, known):
+        raise ManifestError(
+            f"task {task} band {row['headroom_band']!r} does not match its counts: "
+            f"{headroom.band(passes, known)}"
+        )
+    return {field: row[field] for field in headroom.BAND_FIELDS}
 
 
 def _validated(

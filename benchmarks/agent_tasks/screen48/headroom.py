@@ -62,9 +62,20 @@ SATURATED_AT = 0.9
 FLOOR_BELOW = 0.3
 BANDS = (SATURATED, HEADROOM, FLOOR, UNDETERMINED)
 #: Known outcomes (a task pass or a task failure, never a controller failure)
-#: a task needs before any band is assigned. Two cannot tell a floor task from
-#: a coin flip; five is the smallest count at which 0/5 excludes saturation.
+#: a task needs before any band is assigned. This is a policy floor, not a
+#: derived minimum: 0/1 already excludes saturation (upper bound 0.79). Five
+#: is where 0/5 has an upper bound of 0.43, clear of ``FLOOR_BELOW`` with
+#: margin, so a floor band means the solver was given a fair number of tries
+#: and not that one attempt happened to fail. Five cannot reach headroom or
+#: saturated at all; see ``DEFAULT_REPETITIONS``.
 MINIMUM_REPETITIONS = 5
+#: What a default run asks for. At five known outcomes only floor and
+#: undetermined are reachable (4/5 and 5/5 cannot exclude saturation). Ten is
+#: the first round count at which 6/10 and 7/10 read as headroom, so a default
+#: run can place a task in the band the memory arms are spent on. Saturated
+#: stays out of reach until 35/35; a task that passes every cold attempt at ten
+#: reads undetermined, and retiring it as saturated is a larger, separate ask.
+DEFAULT_REPETITIONS = 10
 #: Two-sided confidence of the Wilson score interval the bands are read from.
 CONFIDENCE = 0.95
 _Z = 1.959964
@@ -119,7 +130,10 @@ def band(passes: int, known: int) -> str:
     saturation while it cannot exclude the floor: the solver does not pass this
     reliably, and how often it passes at all is what the floor probe measures
     against. Anything else, including every task under ``MINIMUM_REPETITIONS``
-    known outcomes, is undetermined and buys no memory arm.
+    known outcomes, is undetermined: the screen could not place it. That is a
+    statement about the measurement, not about eligibility; the floor probe
+    accepts any task with enough known outcomes and lets its own rows say
+    whether an arm added anything.
     """
     if known < MINIMUM_REPETITIONS:
         return UNDETERMINED
@@ -490,7 +504,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tasks-root", type=Path, default=MATERIAL_ROOT)
     parser.add_argument("--task-ids", nargs="+", default=None)
     parser.add_argument("--template", required=True, type=Path)
-    parser.add_argument("--repetitions", type=int, default=MINIMUM_REPETITIONS)
+    parser.add_argument("--repetitions", type=int, default=DEFAULT_REPETITIONS)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--workers", type=int, default=6)
     parser.add_argument("--api-key-env", default="OPENROUTER_API_KEY")

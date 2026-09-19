@@ -694,13 +694,47 @@ def test_the_probe_refuses_a_report_without_interval_bands() -> None:
         )
     with pytest.raises(ManifestError, match=f"task {TASKS[1]} is not in the headroom report"):
         probe.bound_bands(headroom_report([headroom_row(TASKS[0], 0, five)]), [TASKS[1]])
-    with pytest.raises(ManifestError, match="unknown band"):
+    with pytest.raises(ManifestError, match="band 'lifted' does not match its counts: floor"):
         probe.bound_bands(
             headroom_report([headroom_row(TASKS[0], 0, five, headroom_band="lifted")]),
             [TASKS[0]],
         )
     with pytest.raises(ManifestError, match="names no tasks"):
         probe.bound_bands(headroom_report([], tasks=None), [TASKS[0]])
+
+
+def test_the_probe_recomputes_a_hand_edited_row_instead_of_trusting_it() -> None:
+    five = headroom.MINIMUM_REPETITIONS
+    honest = headroom_row(TASKS[0], 0, five)
+    assert probe.bound_bands(headroom_report([honest]), [TASKS[0]])[TASKS[0]] == {
+        field: honest[field] for field in headroom.BAND_FIELDS
+    }
+    # A band promoted by hand while the counts still say floor.
+    with pytest.raises(ManifestError, match=f"task {TASKS[0]} band 'headroom' does not match"):
+        probe.bound_bands(
+            headroom_report([headroom_row(TASKS[0], 0, five, headroom_band="headroom")]),
+            [TASKS[0]],
+        )
+    # Counts inflated to clear the minimum without the failures to back them.
+    with pytest.raises(ManifestError, match=f"task {TASKS[0]} counts do not add up"):
+        probe.bound_bands(
+            headroom_report([headroom_row(TASKS[0], 0, five, failures=2)]), [TASKS[0]]
+        )
+    with pytest.raises(ManifestError, match="pass rate does not match"):
+        probe.bound_bands(
+            headroom_report([headroom_row(TASKS[0], 0, five, pass_rate=0.4)]), [TASKS[0]]
+        )
+    with pytest.raises(ManifestError, match="interval does not match"):
+        probe.bound_bands(
+            headroom_report(
+                [headroom_row(TASKS[0], 0, five, interval=headroom.wilson_interval(3, five))]
+            ),
+            [TASKS[0]],
+        )
+    typed = headroom_row(TASKS[0], 0, five)
+    typed["passes"] = "0"
+    with pytest.raises(ManifestError, match="counts do not add up"):
+        probe.bound_bands(headroom_report([typed]), [TASKS[0]])
 
 
 def test_the_cli_refuses_an_under_repeated_band_before_making_any_directory(
