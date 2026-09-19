@@ -350,32 +350,49 @@ async def _raw_memory_scope_lacks_embeddings(
     *,
     where_clause: str,
     params: Mapping[str, object],
+    as_of: datetime | None,
+    limit: int,
     organization_id: str,
 ) -> bool:
-    """True when the scope holds captures but none of them carries a vector.
+    """True when the scope has recall-eligible captures and none carries a vector.
 
     A KNN read over such a scope returns nothing and looks identical to a scope
     with no matches, so the raw arm would degrade to BM25 alone without anyone
     noticing. Captures restored from an archive, or written while no embedding
     provider was configured, land here until the embedding repair runs.
-    """
 
-    async def any_row(extra_clause: str) -> bool:
+    Eligibility is judged exactly as recall judges it, through the lifecycle
+    and as-of filters, so an archived or not-yet-valid row can neither mask a
+    missing vector nor raise the report on its own. Each probe reads the same
+    bounded pool the vector lane would, newest first.
+    """
+    coverage_limit = max(limit * content_client.LIFECYCLE_FILTER_OVERFETCH_FACTOR, limit)
+
+    async def eligible(extra_clause: str) -> bool:
         rows = await with_timeout(
             content_client.select_many_raw(
                 client,
-                f"SELECT uuid FROM raw_captures WHERE {where_clause}{extra_clause} LIMIT 1;",
+                f"SELECT {_RAW_MEMORY_RECALL_FIELDS} FROM raw_captures "
+                f"WHERE {where_clause}{extra_clause} "
+                "ORDER BY captured_at DESC LIMIT $coverage_limit;",
                 **params,
+                coverage_limit=coverage_limit,
             ),
             timeout_seconds=content_client.DIRECT_SEARCH_QUERY_TIMEOUT_SECONDS,
             operation_name="surreal_raw_memory_embedding_coverage",
         )
-        return bool(rows)
+        return bool(
+            models.recallable_memories(
+                [models.raw_memory_from_record(row) for row in rows],
+                limit=coverage_limit,
+                as_of=as_of,
+            )
+        )
 
     try:
-        if await any_row(" AND embedding != NONE"):
+        if await eligible(" AND embedding != NONE"):
             return False
-        return await any_row("")
+        return await eligible(" AND embedding = NONE")
     except Exception as exc:
         # The probe is diagnostic only; a failed probe must not turn an empty
         # vector read into a failed recall.
@@ -659,6 +676,8 @@ async def _recall_raw_memory_result(
                     client,
                     where_clause=where_clause,
                     params=params,
+                    as_of=effective_as_of,
+                    limit=limit,
                     organization_id=organization_id,
                 ):
                     log.warning(

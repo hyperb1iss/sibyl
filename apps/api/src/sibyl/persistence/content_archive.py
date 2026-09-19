@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass, field
+from collections.abc import Mapping, Sequence
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
 from uuid import UUID
@@ -266,6 +267,49 @@ class ContentArchiveRestoreResult:
     dropped_fields: dict[str, list[str]] = field(default_factory=dict)
     integrity_conflicts: list[dict[str, str]] = field(default_factory=list)
     quarantined: list[dict[str, str]] = field(default_factory=list)
+    embedding_repair: dict[str, dict[str, int | str]] = field(default_factory=dict)
+
+
+async def _repair_restored_capture_embeddings(
+    organizations: Sequence[str],
+) -> dict[str, dict[str, int | str]]:
+    """Give restored raw captures their vector before the scheduler's next pass.
+
+    Archived rows carry no embedding, so without this a restore leaves raw
+    recall lexical-only until the lifecycle job happens to run. A repair
+    failure is recorded per organization and never fails the restore itself.
+    """
+    from sibyl_core.services.content_raw_embedding_repair import repair_raw_capture_embeddings
+
+    receipts: dict[str, dict[str, int | str]] = {}
+    for organization_id in organizations:
+        try:
+            result = await repair_raw_capture_embeddings(organization_id)
+        except Exception as exc:
+            log.warning(
+                "content_archive_restore_embedding_repair_failed",
+                organization_id=organization_id,
+                error_type=type(exc).__name__,
+            )
+            receipts[organization_id] = {"error": type(exc).__name__}
+        else:
+            receipts[organization_id] = dict(asdict(result))
+    return receipts
+
+
+def _restored_capture_organizations(
+    tables: Mapping[str, object], scope: Sequence[str] | None
+) -> list[str]:
+    rows = tables.get("raw_captures")
+    seen: dict[str, None] = {}
+    for row in rows if isinstance(rows, list) else []:
+        organization_id = row.get("organization_id") if isinstance(row, dict) else None
+        if isinstance(organization_id, str) and organization_id.strip():
+            seen.setdefault(organization_id.strip(), None)
+    if scope is not None:
+        allowed = {str(item) for item in scope}
+        return [organization_id for organization_id in seen if organization_id in allowed]
+    return list(seen)
 
 
 def build_surreal_content_client() -> SurrealContentClient:
@@ -979,6 +1023,13 @@ async def restore_content_archive_payload(
             dropped_fields={
                 table: sorted(names) for table, names in sorted(dropped_fields.items())
             },
+            embedding_repair=(
+                await _repair_restored_capture_embeddings(
+                    _restored_capture_organizations(tables, scope)
+                )
+                if not errors and restored_ids
+                else {}
+            ),
         )
     finally:
         await client.close()

@@ -228,7 +228,7 @@ async def test_vector_lane_keeps_its_result_when_the_coverage_probe_fails(
     select_many_raw = content_client.select_many_raw
 
     async def failing_coverage_probe(client, query, **params):
-        if "LIMIT 1;" in query and "embedding <|" not in query:
+        if "$coverage_limit" in query:
             raise RuntimeError("coverage probe unavailable")
         return await select_many_raw(client, query, **params)
 
@@ -243,3 +243,51 @@ async def test_vector_lane_keeps_its_result_when_the_coverage_probe_fails(
     assert lanes["raw_vector"].candidates == ()
     assert result.degraded is False
     assert len(result.memories) == 1
+
+
+async def test_coverage_judges_eligibility_the_way_recall_does(content_store, monkeypatch):
+    """An ineligible row can neither mask a missing vector nor raise the report alone."""
+    org = str(uuid4())
+    query_provider = provider("eligibility")
+    monkeypatch.setattr(
+        content_raw_recall,
+        "raw_memory_query_embedding",
+        AsyncMock(
+            return_value=(await query_provider.embed_texts(["percent"], input_kind="query"))[0]
+        ),
+    )
+    ineligible_embedded = await remember(
+        org,
+        "superseded-with-vector",
+        embedding_provider=query_provider,
+        metadata={"superseded_by_source_id": "another-source"},
+    )
+    eligible_unembedded = await remember(org, "eligible-without-vector")
+
+    async def recall(organization_id: str):
+        return await recall_raw_memory_with_sources(
+            organization_id=organization_id,
+            principal_id="owner",
+            query="percent escape",
+            limit=5,
+        )
+
+    result = await recall(org)
+    lanes = {source.source: source for source in result.sources}
+    assert lanes["raw_vector"].failure is not None
+    assert lanes["raw_vector"].failure.error_type == RAW_VECTOR_EMBEDDINGS_MISSING
+    assert {memory.id for memory in result.memories} == {eligible_unembedded.id}
+    assert ineligible_embedded.id not in {memory.id for memory in result.memories}
+
+    only_ineligible = str(uuid4())
+    await remember(
+        only_ineligible,
+        "superseded-without-vector",
+        metadata={"superseded_by_source_id": "another-source"},
+    )
+    result = await recall(only_ineligible)
+    lanes = {source.source: source for source in result.sources}
+    assert lanes["raw_vector"].failure is None
+    assert lanes["raw_vector"].candidates == ()
+    assert result.memories == ()
+    assert result.degraded is False
