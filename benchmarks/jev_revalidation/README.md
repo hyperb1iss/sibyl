@@ -1,0 +1,44 @@
+# Claim revalidation experiment
+
+Measure whether Jev recognizes changes to an existing claim, and whether a separate policy would allow retirement. The harness writes experiment receipts only. It does not access Sibyl memory or apply lifecycle changes.
+
+The fixture contains 84 original synthetic pairs authored separately from the prompts. The prompts and scoring protocol were frozen before the prompt author opened the cases. Labels are agent-authored diagnostic expectations, not human annotations or a public benchmark. A separate blind annotation checks agreement without seeing the original labels or Jev answers.
+
+The comparison includes:
+
+- The existing pairwise reflection heuristic, invoked with an incoming claim and one prior memory. Its outputs are proposals, and its semantic coverage is narrower than the model arms.
+- One seven-way Choice question per pair.
+- Four Choice questions per pair (event form, scope, effect, replacement), combined by fixed code.
+
+The decomposed arm uses Choice labels. It does not reproduce Invalidate's Noul probabilities or import its thresholds. Source authority and effective timestamps stay outside the model request. Ground-truth labels, categories, and rationales never enter provider input.
+
+A proposed contradiction or replacement permits simulated retirement only when the event is authoritative and demonstrably newer. An older event retains the memory. Missing, equal, or untrusted chronology routes the proposal to review. The first experiment compares singleton and seven-pair batches, each repeated twice, without tuning prompts against the results.
+
+## Run
+
+All tasks run from the workspace root through Moon:
+
+```sh
+moon run root:jev-revalidation-test
+moon run root:jev-revalidation-lint root:jev-revalidation-typecheck
+moon run root:jev-revalidation -- --help
+```
+
+Live runs require the dedicated `SIBYL_DECISION_OPENROUTER_API_KEY` environment variable and the explicit `--live` switch. Use a new output directory for each run. The adapter retains its pinned model, provider, privacy routing preferences, deadline, and no-retry behavior.
+
+```sh
+moon run root:jev-revalidation -- \
+  --cases benchmarks/jev_revalidation/cases.json \
+  --out /absolute/path/to/new-run \
+  --arms direct,decomposed --batch-size 1 --repeats 2 --live
+```
+
+Preserve the manifest, requests, observations, predictions, and reports together. Failed requests remain in case denominators. Usage fields absent from provider responses remain unknown. Call latency describes the chosen request geometry, not end-to-end search latency. Repeated observations of the same case are not independent samples.
+
+## Evidence limits
+
+The pairwise heuristic invocation is a controlled comparison. It bypasses extraction and supplies `kind="claim"` to make that heuristic eligible; it is not a deployed end-to-end baseline. Duplicate detection concerns the incoming candidate, while contradiction findings ask for review. Neither is an automatic retirement of the prior memory.
+
+Even a perfect score on these cases would not establish calibration or a benefit to reader answers. A later study must measure lost historical evidence, retrieval of replacement evidence, and downstream answer accuracy on independent data. Real-data activation still requires provider/account privacy acceptance and explicit cohort authorization.
+
+The inspiration is [Invalidate](https://github.com/chopratejas/invalidate/tree/d6ade60108b8064bafaee425fd8f9e78683dbd82). Its event cursors and isolated retirement rechecks are useful experiments; Sibyl keeps its existing correction and source-integrity owners.
