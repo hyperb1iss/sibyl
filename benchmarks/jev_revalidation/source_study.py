@@ -14,7 +14,7 @@ from typing import Any
 
 from sibyl_core.tasks._evidence_json import read_json_value
 
-from .runner import RELATIONS, policy_action, select_prompts, timestamp
+from .runner import RELATIONS, policy_action, prompt_dependencies, select_prompts, timestamp
 
 _CONFLICTS = frozenset({"contradicted", "superseded"})
 _DISPOSITIONS = frozenset({"retain", "review", "retire", "overlay"})
@@ -139,7 +139,7 @@ def prepare(cases_path: Path, out: Path) -> dict[str, Any]:
 def _validate_prompt_program(manifest: dict[str, Any], version: str) -> None:
     program = select_prompts(version)
     expected = _digest(Path(str(program.__file__)).read_bytes())
-    dependencies = {"prompts.py": _digest(Path(str(select_prompts("v1").__file__)).read_bytes())}
+    dependencies = prompt_dependencies(version)
     if manifest.get("prompts_sha256") != expected:
         raise ValueError("run prompt hash does not match the pinned program")
     if manifest.get("prompt_dependencies_sha256") != dependencies:

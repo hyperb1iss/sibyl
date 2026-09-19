@@ -27,8 +27,6 @@ from sibyl_core.models.reflection import ReflectionCandidate
 from sibyl_core.services.reflection import apply_reflection_lifecycle_decisions
 from sibyl_core.tasks._evidence_json import read_json_value
 
-from . import prompts
-
 RELATIONS = frozenset(
     {
         "supported",
@@ -296,10 +294,21 @@ def _load_cases(path: Path) -> list[dict[str, Any]]:
 
 def select_prompts(version: str) -> ModuleType:
     """Select an explicit frozen prompt program without changing historical v1."""
-    names = {"v1": ".prompts", "v2": ".prompts_v2", "v3": ".prompts_v3"}
+    names = {"v1": ".prompts", "v2": ".prompts_v2", "v3": ".prompts_v3", "v4": ".prompts_v4"}
     if version not in names:
         raise ValueError("unknown prompt version")
     return import_module(names[version], package=__package__)
+
+
+def prompt_dependencies(version: str) -> dict[str, str]:
+    """Bind every imported prompt program while retaining historical manifests."""
+    names = {"v1": (), "v2": ("v1",), "v3": ("v1",), "v4": ("v1", "v3")}
+    return {
+        Path(str(select_prompts(name).__file__)).name: _sha(
+            Path(str(select_prompts(name).__file__))
+        )
+        for name in names[version]
+    }
 
 
 def _validate_replay_manifest(current: dict[str, Any], original: dict[str, Any]) -> None:
@@ -340,8 +349,8 @@ def _prepare_run(
     route = OpenRouterDecisionRoute()
     prompt_version = getattr(args, "prompt_version", "v1")
     program = select_prompts(prompt_version)
-    if prompt_version == "v3" and arms != ["direct"]:
-        raise ValueError("source v3 supports only --arms direct")
+    if prompt_version in {"v3", "v4"} and arms != ["direct"]:
+        raise ValueError("source prompts support only --arms direct")
     prompt_path = Path(str(program.__file__))
     manifest = {
         "run_id": run_id,
@@ -350,9 +359,7 @@ def _prepare_run(
         "cases_sha256": _sha(args.cases),
         "prompts_sha256": _sha(prompt_path),
         "prompt_version": prompt_version,
-        "prompt_dependencies_sha256": {"prompts.py": _sha(Path(prompts.__file__))}
-        if prompt_version in {"v2", "v3"}
-        else {},
+        "prompt_dependencies_sha256": prompt_dependencies(prompt_version),
         "runner_sha256": _sha(Path(__file__)),
         "base_git_sha": _git("rev-parse", "HEAD"),
         "dirty_diff_sha256": hashlib.sha256(_git("diff", "HEAD").encode()).hexdigest(),
@@ -568,7 +575,7 @@ def main() -> None:
     parser.add_argument("--cases", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--arms", default="direct,decomposed")
-    parser.add_argument("--prompt-version", choices=("v1", "v2", "v3"), default="v1")
+    parser.add_argument("--prompt-version", choices=("v1", "v2", "v3", "v4"), default="v1")
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--concurrency", type=int, default=8)
