@@ -296,7 +296,7 @@ def _load_cases(path: Path) -> list[dict[str, Any]]:
 
 def select_prompts(version: str) -> ModuleType:
     """Select an explicit frozen prompt program without changing historical v1."""
-    names = {"v1": ".prompts", "v2": ".prompts_v2"}
+    names = {"v1": ".prompts", "v2": ".prompts_v2", "v3": ".prompts_v3"}
     if version not in names:
         raise ValueError("unknown prompt version")
     return import_module(names[version], package=__package__)
@@ -340,6 +340,8 @@ def _prepare_run(
     route = OpenRouterDecisionRoute()
     prompt_version = getattr(args, "prompt_version", "v1")
     program = select_prompts(prompt_version)
+    if prompt_version == "v3" and arms != ["direct"]:
+        raise ValueError("source v3 supports only --arms direct")
     prompt_path = Path(str(program.__file__))
     manifest = {
         "run_id": run_id,
@@ -349,7 +351,7 @@ def _prepare_run(
         "prompts_sha256": _sha(prompt_path),
         "prompt_version": prompt_version,
         "prompt_dependencies_sha256": {"prompts.py": _sha(Path(prompts.__file__))}
-        if prompt_version == "v2"
+        if prompt_version in {"v2", "v3"}
         else {},
         "runner_sha256": _sha(Path(__file__)),
         "base_git_sha": _git("rev-parse", "HEAD"),
@@ -566,7 +568,7 @@ def main() -> None:
     parser.add_argument("--cases", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--arms", default="direct,decomposed")
-    parser.add_argument("--prompt-version", choices=("v1", "v2"), default="v1")
+    parser.add_argument("--prompt-version", choices=("v1", "v2", "v3"), default="v1")
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--concurrency", type=int, default=8)
