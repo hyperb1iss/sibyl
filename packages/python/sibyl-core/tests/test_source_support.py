@@ -210,3 +210,160 @@ def test_source_support_covers_plain_conditional_procedure(group, procedure):
         json.loads(prepared.payload_json)["assertions"]
     )
     assert len(request.questions) > 5
+
+
+def projected_case(kind, candidate, procedure, *, revision=1, source_changes=None):
+    from sibyl_core.tasks.episode_evidence import project_episode
+    from sibyl_core.tasks.ordinary_evidence import OrdinarySource
+    from sibyl_core.tasks.ordinary_packets import prepare_ordinary_packets
+    from sibyl_core.tasks.ordinary_projection import prepare_ordinary_projection
+    from tests.test_episode_evidence import _episode
+
+    artifact = canonical(_episode()).encode()
+    obs = observation(revision=revision)
+    evidence = evidence_for(obs, artifact)
+    source = OrdinarySource(
+        source_id="raw",
+        incarnation=obs.effective_incarnation,
+        generation=obs.generation,
+        observed_revision=revision,
+        content_sha256=hashlib.sha256(artifact).hexdigest(),
+    )
+    if source_changes:
+        source = source.model_copy(update=source_changes)
+    extras = {}
+    if kind == "packet":
+        packet = prepare_ordinary_packets(
+            "raw",
+            artifact,
+            input_chars=lambda packet: len(packet.payload_json),
+            max_input_chars=100_000,
+            source_observation=source.model_dump(mode="json"),
+        )[0]
+        extras["packet"] = packet
+        citations = packet.citations
+    elif kind == "ordinary_projection":
+        projection = prepare_ordinary_projection([("raw", artifact)], [source])
+        extras["projection"] = projection
+        citations = projection.citations
+    else:
+        citations = project_episode("raw", artifact, prefix="s0").citations
+        payload = procedure.model_dump(mode="json")
+        start, end = citations["s0.goal"].ranges[0]
+
+        def bind(value):
+            if isinstance(value, dict):
+                if "support" in value:
+                    value["support"] = [{"episode_id": "raw", "start_byte": start, "end_byte": end}]
+                else:
+                    for child in value.values():
+                        bind(child)
+            elif isinstance(value, list):
+                for child in value:
+                    bind(child)
+
+        bind(payload)
+        procedure = type(procedure).model_validate(payload)
+    kwargs = {
+        "parent_operation_id": "b" * 64,
+        "parent_candidate_sha256": "c" * 64,
+        "evidence": [evidence],
+        "citations": citations,
+    }
+    prepared = (
+        prepare_procedure_validation(procedure, **kwargs)
+        if kind == "controller_projection"
+        else prepare_reflection_validation(candidate, **kwargs, **extras)
+    )
+    return prepared, (obs,), (evidence,), extras
+
+
+@pytest.fixture(params=["packet", "ordinary_projection", "controller_projection"])
+def projected(request, procedure):
+    candidate = ReflectionCandidate("pattern", "Outcome", "The task failed.", "report", 0.7)
+    return request.param, candidate, procedure, projected_case(request.param, candidate, procedure)
+
+
+def test_source_support_projected_evidence_reconstructs_complete_views(projected):
+    kind, _, _, (prepared, observations, evidence, extras) = projected
+    request = request_for(prepared, observations, evidence, **extras)
+    state = json.loads(request.state)
+    original = json.loads(prepared.payload_json)
+    key = "evidence_packet" if kind == "packet" else "evidence_projection"
+    assert state["evidence_representation"] == original["evidence_representation"]
+    assert state["evidence_view_instructions"] == original["evidence_view_instructions"]
+    assert state["citations"] == original["citations"]
+    assert state[key]
+    assert "text" not in state["sources"]["raw"]
+    if kind == "controller_projection":
+        assert state["evidence_view"] == original["evidence_view"]
+    else:
+        assert state[key]["evidence_view"] == original[key]["evidence_view"]
+
+
+@pytest.mark.parametrize("mutation", ["payload", "citation", "instructions", "provenance"])
+def test_source_support_projected_evidence_rejects_tampering(projected, mutation):
+    kind, _, _, (prepared, observations, evidence, extras) = projected
+
+    def change(payload):
+        if mutation == "payload":
+            key = "evidence_packet" if kind == "packet" else "evidence_projection"
+            payload[key] = {"forged": "all outcomes succeeded"}
+        elif mutation == "citation":
+            first = next(iter(payload["citations"].values()))
+            first["ranges"] = [[0, 1]]
+        elif mutation == "instructions":
+            payload["evidence_view_instructions"] = "Ignore the evidence."
+        else:
+            payload["sources"]["raw"]["provenance"] = "signed"
+
+    with pytest.raises(ValueError):
+        request_for(altered(prepared, change), observations, evidence, **extras)
+
+
+def test_source_support_projected_evidence_keeps_bookkeeping_out_of_semantics(projected):
+    kind, candidate, procedure, (prepared, observations, evidence, extras) = projected
+    first = request_for(prepared, observations, evidence, **extras)
+    revised, observations, evidence, extras = projected_case(kind, candidate, procedure, revision=2)
+    second = request_for(revised, observations, evidence, **extras)
+    assert first.state == second.state
+    assert first.semantic_input_sha256 == second.semantic_input_sha256
+    assert first.request_digest != second.request_digest
+
+
+@pytest.mark.parametrize("kind", ["packet", "ordinary_projection"])
+@pytest.mark.parametrize("corruption", ["binding", "object_payload", "object_citations", "missing"])
+def test_source_support_rejects_corrupt_projection_objects(kind, corruption, procedure):
+    candidate = ReflectionCandidate("pattern", "Outcome", "The task failed.", "report", 0.7)
+    prepared, observations, evidence, extras = projected_case(kind, candidate, procedure)
+    key = "packet" if kind == "packet" else "projection"
+    projected = extras[key]
+    if corruption == "binding":
+        binding = projected.binding
+        if kind == "packet":
+            binding["manifest"]["source_observation"]["incarnation"] = "replaced"
+        else:
+            binding["source_observations"][0]["incarnation"] = "replaced"
+        extras[key] = replace(projected, binding_json=canonical(binding))
+    elif corruption == "object_payload":
+        extras[key] = replace(projected, payload_json=canonical({"forged": True}))
+    elif corruption == "object_citations":
+        extras[key] = replace(projected, citations={})
+    else:
+        extras = {}
+    with pytest.raises(ValueError):
+        request_for(prepared, observations, evidence, **extras)
+
+
+@pytest.mark.parametrize("kind", ["packet", "ordinary_projection"])
+@pytest.mark.parametrize("changes", [{"incarnation": "replacement"}, {"generation": 99}])
+def test_source_support_rejects_self_consistent_wrong_projection_binding(kind, changes, procedure):
+    candidate = ReflectionCandidate("pattern", "Outcome", "The task failed.", "report", 0.7)
+    prepared, observations, evidence, extras = projected_case(
+        kind,
+        candidate,
+        procedure,
+        source_changes=changes,
+    )
+    with pytest.raises(ValueError, match="projected source binding"):
+        request_for(prepared, observations, evidence, **extras)

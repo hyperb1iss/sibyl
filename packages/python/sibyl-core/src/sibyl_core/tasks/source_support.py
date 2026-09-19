@@ -1,7 +1,7 @@
 """Prepare offline source-support questions without review or publication authority.
 
-Plain reflection and procedure evidence are supported. Projected evidence is
-rejected until its original reconstruction binding is available to this adapter.
+Plain and projected evidence are reconstructed through the critic preparation
+owner before any source-support question is produced.
 """
 
 from __future__ import annotations
@@ -18,12 +18,18 @@ from sibyl_core.ai.decisions import (
 )
 from sibyl_core.memory_pipeline.observations import SourceKind, SourceObservation
 from sibyl_core.tasks._evidence_json import canonical, read_json_value
+from sibyl_core.tasks.consolidation import DraftConditionalProcedure
+from sibyl_core.tasks.episode_evidence import EvidenceCitation
 from sibyl_core.tasks.memory_validation import (
     VALIDATION_VERSION,
     OriginalValidationEvidence,
     PreparedMemoryValidation,
+    _prepare,
+    prepare_procedure_validation,
     validation_assertion_index,
 )
+from sibyl_core.tasks.ordinary_packets import OrdinaryEvidencePacket
+from sibyl_core.tasks.ordinary_projection import OrdinaryEvidenceProjection
 from sibyl_core.tasks.procedure_review import review_digest
 
 SOURCE_SUPPORT_VERSION = "sibyl-source-support-v1"
@@ -73,14 +79,14 @@ def _payload(
     observations: tuple[SourceObservation, ...],
     original_evidence: tuple[OriginalValidationEvidence, ...],
     org_id: str,
+    packet: OrdinaryEvidencePacket | None,
+    projection: OrdinaryEvidenceProjection | None,
 ) -> dict[str, Any]:
     payload = read_json_value(prepared.payload_json.encode("utf-8"))
     if not isinstance(payload, dict) or payload.get("version") != VALIDATION_VERSION:
         raise ValueError("unsupported prepared validation version")
     representation = payload.get("evidence_representation")
-    if representation is not None:
-        raise ValueError("projected evidence requires its original reconstruction binding")
-    if set(payload) != _BASE_FIELDS:
+    if not set(payload) >= _BASE_FIELDS:
         raise ValueError("incomplete or unexpected prepared validation fields")
     for key in ("parent_operation_id", "parent_candidate_sha256", "candidate_view_sha256"):
         value = payload[key]
@@ -129,7 +135,11 @@ def _payload(
         observation_sha256 = review_digest(asdict(by_id[source_id]))
         if (
             not isinstance(source, dict)
-            or set(source) != {"text", "sha256", "observation_sha256", "provenance"}
+            or set(source)
+            != (
+                {"sha256", "observation_sha256", "provenance"}
+                | ({"text"} if representation is None else set())
+            )
             or source["observation_sha256"] != observation_sha256
             or evidence.observation_sha256 != observation_sha256
         ):
@@ -140,9 +150,8 @@ def _payload(
         ):
             raise ValueError("invalid evidence provenance")
         if (
-            source["text"] != evidence.content.decode("utf-8")
-            or source["sha256"] != hashlib.sha256(evidence.content).hexdigest()
-        ):
+            representation is None and source["text"] != evidence.content.decode("utf-8")
+        ) or source["sha256"] != hashlib.sha256(evidence.content).hexdigest():
             raise ValueError("prepared source bytes differ from original evidence")
     citations = payload["citations"]
     if not isinstance(citations, dict) or not citations:
@@ -170,7 +179,84 @@ def _payload(
             if span[1] > len(content):
                 raise ValueError("original evidence byte range exceeds source")
             content[span[0] : span[1]].decode("utf-8")
+    preparation = {
+        "parent_operation_id": payload["parent_operation_id"],
+        "parent_candidate_sha256": payload["parent_candidate_sha256"],
+        "evidence": list(original_evidence),
+        "citations": {
+            key: EvidenceCitation(
+                value["source_id"], tuple(tuple(span) for span in value["ranges"])
+            )
+            for key, value in citations.items()
+        },
+    }
+    if payload["kind"] == "conditional_procedure":
+        if packet is not None or projection is not None:
+            raise ValueError("procedure evidence cannot use ordinary reflection bindings")
+        reconstructed = prepare_procedure_validation(
+            DraftConditionalProcedure.model_validate(payload["candidate"]), **preparation
+        )
+    else:
+        reconstructed = _prepare(
+            **preparation,
+            candidate=payload["candidate"],
+            assertions=assertions,
+            kind=payload["kind"],
+            packet=packet,
+            projection=projection,
+        )
+    if canonical(payload) != reconstructed.payload_json:
+        raise ValueError("prepared evidence differs from its original reconstruction")
+    if packet is not None:
+        bindings = [packet.binding["manifest"]["source_observation"]]
+    elif projection is not None:
+        bindings = projection.binding["source_observations"]
+    else:
+        bindings = []
+    for binding in bindings:
+        if (
+            not isinstance(binding, dict)
+            or set(binding)
+            != {
+                "source_kind",
+                "source_id",
+                "incarnation",
+                "generation",
+                "observed_revision",
+                "content_sha256",
+            }
+            or not isinstance(binding.get("source_id"), str)
+            or binding["source_id"] not in by_id
+        ):
+            raise ValueError("projected source binding differs from source observations")
+        observed = by_id[binding["source_id"]]
+        if (
+            binding.get("source_kind") != observed.source.kind.value
+            or type(binding.get("generation")) is not int
+            or binding.get("generation") != observed.generation
+            or binding.get("incarnation") != observed.effective_incarnation
+            or binding.get("content_sha256") != sources[observed.source.id]["sha256"]
+            or type(binding.get("observed_revision")) is not int
+            or binding["observed_revision"] < 1
+        ):
+            raise ValueError("projected source binding differs from source observations")
     return payload
+
+
+def _semantic_evidence(payload: dict[str, Any]) -> None:
+    """Remove validated ledger bookkeeping while retaining complete semantic views."""
+    for source in payload["sources"].values():
+        source.pop("observation_sha256")
+    representation = payload.get("evidence_representation")
+    if representation == "ordinary_evidence_packet_v1":
+        packet = payload["evidence_packet"]
+        packet["source_observation"].pop("observed_revision")
+        # The manifest hash includes the bookkeeping revision; its source, page,
+        # view and projection identities remain in this validated packet.
+        packet.pop("manifest_sha256")
+    elif representation == "ordinary_complete_controller_projection_v1":
+        for source in payload["evidence_projection"]["binding"]["source_observations"]:
+            source.pop("observed_revision")
 
 
 def prepare_source_support(
@@ -188,19 +274,20 @@ def prepare_source_support(
     request_id: str,
     caller_policy_version: str,
     policy_epoch: int,
+    packet: OrdinaryEvidencePacket | None = None,
+    projection: OrdinaryEvidenceProjection | None = None,
 ) -> DecisionRequest:
     """Reuse caller-authorized preparation; do not resolve authority or invoke a provider.
 
     Original evidence bytes, citations and observation bindings are rechecked.
-    Projected evidence needs its reconstruction binding and is rejected here.
+    Projected evidence is rebuilt with its original packet or projection binding.
     Source ledger digests and parent execution metadata are binding checks, not
     semantic evidence, so they are omitted from the model-facing state.
     """
-    payload = _payload(prepared, observations, original_evidence, org_id)
+    payload = _payload(prepared, observations, original_evidence, org_id, packet, projection)
     operation_id = payload.pop("parent_operation_id")
     payload.pop("parent_candidate_sha256")
-    for source in payload["sources"].values():
-        source.pop("observation_sha256")
+    _semantic_evidence(payload)
     paths = sorted(payload["assertions"])
     return DecisionRequest(
         application="source_support",
