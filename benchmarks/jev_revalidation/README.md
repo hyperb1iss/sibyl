@@ -6,6 +6,8 @@ Read the [measured results](RESULTS.md) before selecting a prompt. The first 84 
 
 The [original-source and validity study](SOURCE_VALIDITY_RESULTS.md) adds 56 cases with full source passages and typed temporal policy. Source-only assessment scored 98/112 dispositions; summary agreement reduced that to 64/112. Those scores use supplied authority, claim kind, and validity metadata. The study provides preparation and analysis commands, preserved failures, and per-call accounting.
 
+The [claim-kind ablation](CLAIM_KIND_RESULTS.md) isolates one supplied metadata value with an otherwise identical prompt. On 48 fresh cases repeated twice, correct kind raised temporary-overlay recall from 17/24 to 20/24 and policy agreement from 87/96 to 89/96. The study includes matched evidence pairs, annotation sensitivity, and a separate diagnostic replication.
+
 The fixture contains 84 original synthetic pairs authored separately from the prompts. The prompts and scoring protocol were frozen before the prompt author opened the cases. Labels are agent-authored diagnostic expectations, not human annotations or a public benchmark. A separate blind annotation checks agreement without seeing the original labels or Jev answers.
 
 The comparison includes:
