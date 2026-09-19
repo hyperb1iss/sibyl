@@ -568,7 +568,10 @@ async def test_public_input_drift_remains_in_missing_grid(setup, monkeypatch):
     def changed(*args):
         raise ValueError("bound public prompt changed")
 
+    # The adapter holds its task reader, so the drift has to be applied there
+    # as well as on the module the default was taken from.
     monkeypatch.setattr(a, "public_task", changed)
+    monkeypatch.setattr(setup.adapter, "task_source", changed)
     pack = await setup.adapter.prepare(checkpoint=0, task=c.TASKS[0], arm="native")
     assert pack["status"] == "missing_pack"
     assert pack["memory"] is None
@@ -1359,3 +1362,104 @@ async def test_inventory_refuses_a_graph_row_whose_derivation_flag_moved(invento
     assert scoped == archived
     with pytest.raises(w.MissingPack, match="available_graph_row_changed"):
         await enumerate_graph()
+
+
+# ---------------------------------------------------------------------------
+# The task contract the adapter prepares under
+# ---------------------------------------------------------------------------
+
+
+PROBE_TASK = "cdn-batch-map"
+
+
+def probe_adapter(setup, *, task_source, allowed_tasks=(PROBE_TASK,)):
+    """The same collaborators, under a caller-supplied task contract."""
+    return a.RecallAdapter(
+        catalog=setup.adapter.catalog,
+        reader=setup.adapter.reader,
+        counter=setup.adapter.counter,
+        resolve_authority=setup.adapter.resolve_authority,
+        verify_owners=setup.adapter.verify_owners,
+        verify_native_inventory=setup.adapter.verify_native_inventory,
+        validate_summary_library=setup.adapter.validate_summary_library,
+        allowed_tasks=allowed_tasks,
+        task_source=task_source,
+        carry_checkpoint_zero=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_adapter_defaults_are_the_study_contract(setup):
+    """Constructed the way the study constructs it, nothing about it moved."""
+    assert tuple(setup.adapter.allowed_tasks) == c.TASKS
+    assert setup.adapter.task_source is c.public_task
+    assert setup.adapter.carry_checkpoint_zero is True
+
+    pack = await setup.adapter.prepare(checkpoint=0, task=c.TASKS[0], arm="no_memory")
+
+    assert pack["status"] == "prepared"
+    assert pack["allowed_tasks"] == sorted(c.TASKS)
+    assert pack["task_source"] == "public_task"
+    assert pack["carry_checkpoint_zero"] is True
+    with pytest.raises(ValueError, match="Unknown preparation cell"):
+        await setup.adapter.prepare(checkpoint=0, task=PROBE_TASK, arm="no_memory")
+
+
+@pytest.mark.asyncio
+async def test_a_supplied_task_contract_admits_its_own_tasks_and_material(setup):
+    """A task outside the preselected six, read through a caller's own source."""
+    prompt, workspace = c.public_task(c.TASKS[0])
+    seen = []
+
+    def source(task, policy_root):
+        seen.append((task, policy_root))
+        return prompt, workspace
+
+    pack = await probe_adapter(setup, task_source=source).prepare(
+        checkpoint=0, task=PROBE_TASK, arm="no_memory"
+    )
+
+    assert pack["status"] == "prepared", pack
+    assert seen == [(PROBE_TASK, setup.catalog.policy_root)]
+    assert pack["task"] == PROBE_TASK
+    assert pack["allowed_tasks"] == [PROBE_TASK]
+    assert pack["task_source"].endswith("<locals>.source")
+    assert pack["carry_checkpoint_zero"] is False
+
+
+@pytest.mark.asyncio
+async def test_without_the_carry_a_checkpoint_one_raw_cell_needs_no_prior(setup, monkeypatch):
+    """A probe cell has no checkpoint-0 twin, so it derives rather than carries.
+
+    The study's checkpoint-1 raw and summary cells must carry their
+    checkpoint-0 bytes, and a cell handed no prior is refused with
+    `qualified_checkpoint_zero_pack_missing`. A probe prepares one checkpoint
+    only, so that premise is absent rather than relaxed: the cell is a fresh
+    derivation and carries nothing.
+    """
+    memories = [snapshot.memory for snapshot in list(setup.snapshots.values())[:3]]
+
+    async def raw(*, capture_ids, **kwargs):
+        return RawMemoryRecallResult(
+            tuple(memories),
+            (
+                CandidateSourceResult.success("raw_fulltext", memories),
+                CandidateSourceResult.success("raw_vector", memories),
+            ),
+        )
+
+    monkeypatch.setattr(a, "recall_raw_memory_with_sources", raw)
+    prompt, workspace = c.public_task(c.TASKS[0])
+    adapter = probe_adapter(setup, task_source=lambda task, root: (prompt, workspace))
+
+    pack = await adapter.prepare(checkpoint=1, task=PROBE_TASK, arm="raw_retrieval")
+
+    assert pack["status"] == "prepared", pack
+    assert pack["reason"] is None
+    assert "reused_checkpoint_zero_sha256" not in pack
+    assert "reuse_mode" not in pack
+    assert "prior_before" not in pack
+
+    # The study's own contract is untouched: no prior, no pack.
+    denied = await setup.adapter.prepare(checkpoint=1, task=c.TASKS[0], arm="raw_retrieval")
+    assert denied["reason"] == "qualified_checkpoint_zero_pack_missing"

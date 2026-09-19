@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import asdict, dataclass
+from typing import TYPE_CHECKING
 
 from benchmarks.agent_tasks.screen48.contract import (
     ARMS,
@@ -41,6 +42,10 @@ from sibyl_core.embeddings.providers import configured_embedding_provider
 from sibyl_core.retrieval._search_plan import build_context_retrieval_plan
 from sibyl_core.retrieval.search import context_search
 from sibyl_core.services.content_raw_recall import recall_raw_memory_with_sources
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Collection
+    from pathlib import Path
 
 # The native arm reads the product search surface at its own ranked ceiling; the
 # raw arm enumerates the complete retained catalog instead of a ranked window.
@@ -128,6 +133,9 @@ class RecallAdapter:
         verify_owners,
         verify_native_inventory,
         validate_summary_library,
+        allowed_tasks: Collection[str] = TASKS,
+        task_source: Callable[[str, Path], tuple[str, dict[str, bytes]]] = public_task,
+        carry_checkpoint_zero: bool = True,
     ):
         self.catalog = catalog
         self.reader = reader
@@ -136,6 +144,15 @@ class RecallAdapter:
         self.verify_owners = verify_owners
         self.verify_native_inventory = verify_native_inventory
         self.validate_summary_library = validate_summary_library
+        # The study's six tasks read through the frozen policy inputs and carry
+        # their checkpoint-0 bytes at checkpoint 1. All three defaults are that
+        # contract, so an adapter constructed the way the study constructs it
+        # behaves exactly as it did before these parameters existed. A caller
+        # preparing packs for other catalogued tasks supplies its own task
+        # contract instead, and every pack records which one produced it.
+        self.allowed_tasks = allowed_tasks
+        self.task_source = task_source
+        self.carry_checkpoint_zero = carry_checkpoint_zero
 
     def prior_bytes(self, prior: dict, *, prompt: str, workspace: dict[str, bytes]) -> dict:
         """The qualified checkpoint-0 pack's own fields, re-counted by this run.
@@ -191,7 +208,7 @@ class RecallAdapter:
             type(checkpoint) is not int
             or checkpoint not in CHECKPOINTS
             or arm not in ARMS
-            or task not in TASKS
+            or task not in self.allowed_tasks
         ):
             raise ValueError("Unknown preparation cell")
         base = {
@@ -206,15 +223,20 @@ class RecallAdapter:
             "reservation_changes": 0,
             "study": "engine_level_diagnostic",
             "reader": asdict(self.reader),
+            # Which task contract produced this pack, so a receipt says so
+            # rather than leaving a reader to infer it from the task ID.
+            "allowed_tasks": sorted(self.allowed_tasks),
+            "task_source": self.task_source.__qualname__,
+            "carry_checkpoint_zero": self.carry_checkpoint_zero,
         }
         diagnostics = {}
         try:
-            prompt, workspace = public_task(task, self.catalog.policy_root)
+            prompt, workspace = self.task_source(task, self.catalog.policy_root)
             query = " ".join(prompt.strip().split())
             base.update(query_sha256=sha(query.encode()), prompt_sha256=sha(prompt.encode()))
             authority, snapshots, before = await self.boundary()
             base["before"] = before
-            reuse = checkpoint == 1 and arm in CP0_BYTE_ARMS
+            reuse = checkpoint == 1 and arm in CP0_BYTE_ARMS and self.carry_checkpoint_zero
             if reuse:
                 if (
                     prior is None
