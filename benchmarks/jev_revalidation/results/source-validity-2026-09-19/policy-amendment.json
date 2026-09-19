@@ -1,0 +1,11 @@
+{
+  "reason": "Authoritative retrospective corrections must enter review; preserving raw history does not mean retaining disproven historical claims as valid.",
+  "timing": "Before Jev calls, after inspecting historical fixture cases. This is not blind policy validation.",
+  "changed_case_ids": ["source_case_046", "source_case_050"],
+  "previous_disposition": "retain",
+  "amended_disposition": "review",
+  "original_corpus_sha256": "9f4c291f5187e674ae8160d1389403216e7661e4d3367104c79eee8662a594f4",
+  "amended_corpus_sha256": "27c8d09eae042535316448c9806dec8f9dd6c9e969b22ef3f9c82fa6c315ec5c",
+  "semantic_labels_changed": false,
+  "prompt_wording_changed": false
+}

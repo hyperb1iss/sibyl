@@ -1,0 +1,1852 @@
+{
+  "accounting": {
+    "source": {
+      "calls": 112,
+      "input_tokens": 125754,
+      "mode": "live",
+      "observed_cost_usd": 0.005281668,
+      "output_tokens": 14659,
+      "physical_attempts": 112,
+      "unknown_input_tokens_calls": 0,
+      "unknown_observed_cost_usd_calls": 0,
+      "unknown_output_tokens_calls": 0
+    },
+    "summary": {
+      "calls": 112,
+      "input_tokens": 166066,
+      "mode": "live",
+      "observed_cost_usd": 0.006974772,
+      "output_tokens": 20468,
+      "physical_attempts": 112,
+      "unknown_input_tokens_calls": 0,
+      "unknown_observed_cost_usd_calls": 0,
+      "unknown_output_tokens_calls": 0
+    }
+  },
+  "baseline_gaps": [
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_001",
+      "expected_disposition": "overlay",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "overlay"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_001",
+      "expected_disposition": "overlay",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "overlay"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_002",
+      "expected_disposition": "overlay",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "retain"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_002",
+      "expected_disposition": "overlay",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "retain"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_003",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_003",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_004",
+      "expected_disposition": "overlay",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": null
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_004",
+      "expected_disposition": "overlay",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "retain"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_005",
+      "expected_disposition": "retire",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "retire"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_005",
+      "expected_disposition": "retire",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "retire"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_006",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_006",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_007",
+      "expected_disposition": "overlay",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "overlay"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_007",
+      "expected_disposition": "overlay",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "overlay"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_008",
+      "expected_disposition": "retire",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "retire"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_008",
+      "expected_disposition": "retire",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "retire"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_009",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_009",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_011",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_011",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_012",
+      "expected_disposition": "overlay",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "retain"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_012",
+      "expected_disposition": "overlay",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "retain"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_013",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_013",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_015",
+      "expected_disposition": "retire",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "retire"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_015",
+      "expected_disposition": "retire",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "retire"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_018",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_018",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_019",
+      "expected_disposition": "overlay",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "overlay"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_019",
+      "expected_disposition": "overlay",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": null
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_020",
+      "expected_disposition": "retire",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "retire"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_020",
+      "expected_disposition": "retire",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "retire"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_021",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_021",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_022",
+      "expected_disposition": "retire",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "retire"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_022",
+      "expected_disposition": "retire",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "retire"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_023",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_023",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_024",
+      "expected_disposition": "retire",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "retire"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_024",
+      "expected_disposition": "retire",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "retire"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_025",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_025",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_028",
+      "expected_disposition": "retire",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "retire"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_028",
+      "expected_disposition": "retire",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "retire"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_029",
+      "expected_disposition": "overlay",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "overlay"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_029",
+      "expected_disposition": "overlay",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "overlay"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_032",
+      "expected_disposition": "overlay",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "overlay"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_032",
+      "expected_disposition": "overlay",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "overlay"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_033",
+      "expected_disposition": "retire",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "retire"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_033",
+      "expected_disposition": "retire",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "retire"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_034",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_034",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_035",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_035",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_036",
+      "expected_disposition": "overlay",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "overlay"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_036",
+      "expected_disposition": "overlay",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "overlay"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_037",
+      "expected_disposition": "overlay",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "overlay"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_037",
+      "expected_disposition": "overlay",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "overlay"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_038",
+      "expected_disposition": "retire",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "retire"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_038",
+      "expected_disposition": "retire",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "retire"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_039",
+      "expected_disposition": "retire",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "retire"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_039",
+      "expected_disposition": "retire",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "retire"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_040",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_040",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_041",
+      "expected_disposition": "retire",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "retire"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_041",
+      "expected_disposition": "retire",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "retire"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_042",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_042",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_043",
+      "expected_disposition": "overlay",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "retain"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_043",
+      "expected_disposition": "overlay",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "retain"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_045",
+      "expected_disposition": "overlay",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": null
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_045",
+      "expected_disposition": "overlay",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "overlay"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_046",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_046",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_048",
+      "expected_disposition": "retire",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "retire"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_048",
+      "expected_disposition": "retire",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "retire"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_049",
+      "expected_disposition": "overlay",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "retain"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_049",
+      "expected_disposition": "overlay",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "retain"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_050",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_050",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_051",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_051",
+      "expected_disposition": "review",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "review"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_052",
+      "expected_disposition": "retire",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "retire"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_052",
+      "expected_disposition": "retire",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "retire"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_053",
+      "expected_disposition": "overlay",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "retain"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_053",
+      "expected_disposition": "overlay",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "retain"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_055",
+      "expected_disposition": "retire",
+      "proposal": "no_signal",
+      "repeat": 0,
+      "source_typed_action": "retire"
+    },
+    {
+      "baseline_action": "retain",
+      "case_id": "source_case_055",
+      "expected_disposition": "retire",
+      "proposal": "no_signal",
+      "repeat": 1,
+      "source_typed_action": "retire"
+    }
+  ],
+  "disagreements": [
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "retain",
+        "summary_legacy": "retire",
+        "summary_typed": "overlay"
+      },
+      "case_id": "source_case_002",
+      "expected_disposition": "overlay",
+      "repeat": 0,
+      "source_relation": "compatible",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "retain",
+        "summary_legacy": "retire",
+        "summary_typed": "overlay"
+      },
+      "case_id": "source_case_002",
+      "expected_disposition": "overlay",
+      "repeat": 1,
+      "source_relation": "compatible",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": null,
+        "source_typed": null,
+        "summary_legacy": "retire",
+        "summary_typed": "overlay"
+      },
+      "case_id": "source_case_004",
+      "expected_disposition": "overlay",
+      "repeat": 0,
+      "source_relation": null,
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "retain",
+        "summary_legacy": "retire",
+        "summary_typed": "overlay"
+      },
+      "case_id": "source_case_004",
+      "expected_disposition": "overlay",
+      "repeat": 1,
+      "source_relation": "compatible",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "retain",
+        "source_typed": "retire",
+        "summary_legacy": "retain",
+        "summary_typed": "retain"
+      },
+      "case_id": "source_case_005",
+      "expected_disposition": "retire",
+      "repeat": 0,
+      "source_relation": "contradicted",
+      "summary_relation": "unrelated"
+    },
+    {
+      "actions": {
+        "gated_typed": "retain",
+        "source_typed": "retire",
+        "summary_legacy": "retain",
+        "summary_typed": "retain"
+      },
+      "case_id": "source_case_005",
+      "expected_disposition": "retire",
+      "repeat": 1,
+      "source_relation": "contradicted",
+      "summary_relation": "unrelated"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "review",
+        "summary_legacy": "retire",
+        "summary_typed": "review"
+      },
+      "case_id": "source_case_006",
+      "expected_disposition": "review",
+      "repeat": 0,
+      "source_relation": "contradicted",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "retain",
+        "source_typed": "overlay",
+        "summary_legacy": "retain",
+        "summary_typed": "retain"
+      },
+      "case_id": "source_case_007",
+      "expected_disposition": "overlay",
+      "repeat": 0,
+      "source_relation": "superseded",
+      "summary_relation": "supported"
+    },
+    {
+      "actions": {
+        "gated_typed": "retain",
+        "source_typed": "overlay",
+        "summary_legacy": "retain",
+        "summary_typed": "retain"
+      },
+      "case_id": "source_case_007",
+      "expected_disposition": "overlay",
+      "repeat": 1,
+      "source_relation": "superseded",
+      "summary_relation": "supported"
+    },
+    {
+      "actions": {
+        "gated_typed": "retain",
+        "source_typed": "retain",
+        "summary_legacy": "retire",
+        "summary_typed": "retain"
+      },
+      "case_id": "source_case_010",
+      "expected_disposition": "retain",
+      "repeat": 0,
+      "source_relation": "compatible",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "retain",
+        "source_typed": "retain",
+        "summary_legacy": "retire",
+        "summary_typed": "retain"
+      },
+      "case_id": "source_case_010",
+      "expected_disposition": "retain",
+      "repeat": 1,
+      "source_relation": "compatible",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "review",
+        "summary_legacy": "retire",
+        "summary_typed": "retire"
+      },
+      "case_id": "source_case_011",
+      "expected_disposition": "review",
+      "repeat": 0,
+      "source_relation": "uncertain",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "review",
+        "summary_legacy": "retire",
+        "summary_typed": "retire"
+      },
+      "case_id": "source_case_011",
+      "expected_disposition": "review",
+      "repeat": 1,
+      "source_relation": "uncertain",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "retain",
+        "summary_legacy": "retire",
+        "summary_typed": "overlay"
+      },
+      "case_id": "source_case_012",
+      "expected_disposition": "overlay",
+      "repeat": 0,
+      "source_relation": "compatible",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "retain",
+        "summary_legacy": "retire",
+        "summary_typed": "overlay"
+      },
+      "case_id": "source_case_012",
+      "expected_disposition": "overlay",
+      "repeat": 1,
+      "source_relation": "compatible",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "review",
+        "summary_legacy": "review",
+        "summary_typed": "review"
+      },
+      "case_id": "source_case_013",
+      "expected_disposition": "review",
+      "repeat": 0,
+      "source_relation": "uncertain",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "review",
+        "summary_legacy": "review",
+        "summary_typed": "review"
+      },
+      "case_id": "source_case_013",
+      "expected_disposition": "review",
+      "repeat": 1,
+      "source_relation": "uncertain",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "retain",
+        "source_typed": "retain",
+        "summary_legacy": "retain",
+        "summary_typed": "retain"
+      },
+      "case_id": "source_case_014",
+      "expected_disposition": "retain",
+      "repeat": 0,
+      "source_relation": "contradicted",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "retain",
+        "source_typed": "retain",
+        "summary_legacy": "retain",
+        "summary_typed": "retain"
+      },
+      "case_id": "source_case_014",
+      "expected_disposition": "retain",
+      "repeat": 1,
+      "source_relation": "contradicted",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "retain",
+        "summary_legacy": "retire",
+        "summary_typed": "retire"
+      },
+      "case_id": "source_case_016",
+      "expected_disposition": "retain",
+      "repeat": 0,
+      "source_relation": "supported",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "retain",
+        "summary_legacy": "retire",
+        "summary_typed": "retire"
+      },
+      "case_id": "source_case_016",
+      "expected_disposition": "retain",
+      "repeat": 1,
+      "source_relation": "supported",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "retain",
+        "summary_legacy": "review",
+        "summary_typed": "review"
+      },
+      "case_id": "source_case_017",
+      "expected_disposition": "retain",
+      "repeat": 0,
+      "source_relation": "non_evidence",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "retain",
+        "summary_legacy": "review",
+        "summary_typed": "review"
+      },
+      "case_id": "source_case_017",
+      "expected_disposition": "retain",
+      "repeat": 1,
+      "source_relation": "non_evidence",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "review",
+        "summary_legacy": "review",
+        "summary_typed": "review"
+      },
+      "case_id": "source_case_018",
+      "expected_disposition": "review",
+      "repeat": 0,
+      "source_relation": "uncertain",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "review",
+        "summary_legacy": "review",
+        "summary_typed": "review"
+      },
+      "case_id": "source_case_018",
+      "expected_disposition": "review",
+      "repeat": 1,
+      "source_relation": "uncertain",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": null,
+        "source_typed": null,
+        "summary_legacy": "retire",
+        "summary_typed": "overlay"
+      },
+      "case_id": "source_case_019",
+      "expected_disposition": "overlay",
+      "repeat": 1,
+      "source_relation": null,
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "retain",
+        "source_typed": "review",
+        "summary_legacy": "retain",
+        "summary_typed": "retain"
+      },
+      "case_id": "source_case_021",
+      "expected_disposition": "review",
+      "repeat": 0,
+      "source_relation": "superseded",
+      "summary_relation": "compatible"
+    },
+    {
+      "actions": {
+        "gated_typed": "retain",
+        "source_typed": "review",
+        "summary_legacy": "retain",
+        "summary_typed": "retain"
+      },
+      "case_id": "source_case_021",
+      "expected_disposition": "review",
+      "repeat": 1,
+      "source_relation": "superseded",
+      "summary_relation": "compatible"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "retire",
+        "summary_legacy": "review",
+        "summary_typed": "review"
+      },
+      "case_id": "source_case_022",
+      "expected_disposition": "retire",
+      "repeat": 0,
+      "source_relation": "contradicted",
+      "summary_relation": "uncertain"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "retire",
+        "summary_legacy": "review",
+        "summary_typed": "review"
+      },
+      "case_id": "source_case_022",
+      "expected_disposition": "retire",
+      "repeat": 1,
+      "source_relation": "contradicted",
+      "summary_relation": "uncertain"
+    },
+    {
+      "actions": {
+        "gated_typed": null,
+        "source_typed": "retire",
+        "summary_legacy": null,
+        "summary_typed": null
+      },
+      "case_id": "source_case_024",
+      "expected_disposition": "retire",
+      "repeat": 0,
+      "source_relation": "superseded",
+      "summary_relation": null
+    },
+    {
+      "actions": {
+        "gated_typed": "retain",
+        "source_typed": "retire",
+        "summary_legacy": "retain",
+        "summary_typed": "retain"
+      },
+      "case_id": "source_case_024",
+      "expected_disposition": "retire",
+      "repeat": 1,
+      "source_relation": "superseded",
+      "summary_relation": "supported"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "review",
+        "summary_legacy": "review",
+        "summary_typed": "review"
+      },
+      "case_id": "source_case_025",
+      "expected_disposition": "review",
+      "repeat": 0,
+      "source_relation": "contradicted",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "review",
+        "summary_legacy": "review",
+        "summary_typed": "review"
+      },
+      "case_id": "source_case_025",
+      "expected_disposition": "review",
+      "repeat": 1,
+      "source_relation": "contradicted",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "retain",
+        "summary_legacy": "retire",
+        "summary_typed": "retire"
+      },
+      "case_id": "source_case_026",
+      "expected_disposition": "retain",
+      "repeat": 0,
+      "source_relation": "unrelated",
+      "summary_relation": "contradicted"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "retain",
+        "summary_legacy": "retire",
+        "summary_typed": "retire"
+      },
+      "case_id": "source_case_026",
+      "expected_disposition": "retain",
+      "repeat": 1,
+      "source_relation": "unrelated",
+      "summary_relation": "contradicted"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "retain",
+        "summary_legacy": "retire",
+        "summary_typed": "retire"
+      },
+      "case_id": "source_case_027",
+      "expected_disposition": "retain",
+      "repeat": 0,
+      "source_relation": "unrelated",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "retain",
+        "summary_legacy": "retire",
+        "summary_typed": "retire"
+      },
+      "case_id": "source_case_027",
+      "expected_disposition": "retain",
+      "repeat": 1,
+      "source_relation": "unrelated",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "retain",
+        "source_typed": "retire",
+        "summary_legacy": "retain",
+        "summary_typed": "retain"
+      },
+      "case_id": "source_case_028",
+      "expected_disposition": "retire",
+      "repeat": 0,
+      "source_relation": "superseded",
+      "summary_relation": "supported"
+    },
+    {
+      "actions": {
+        "gated_typed": "retain",
+        "source_typed": "retire",
+        "summary_legacy": "retain",
+        "summary_typed": "retain"
+      },
+      "case_id": "source_case_028",
+      "expected_disposition": "retire",
+      "repeat": 1,
+      "source_relation": "superseded",
+      "summary_relation": "supported"
+    },
+    {
+      "actions": {
+        "gated_typed": "retain",
+        "source_typed": "overlay",
+        "summary_legacy": "retain",
+        "summary_typed": "retain"
+      },
+      "case_id": "source_case_029",
+      "expected_disposition": "overlay",
+      "repeat": 0,
+      "source_relation": "superseded",
+      "summary_relation": "supported"
+    },
+    {
+      "actions": {
+        "gated_typed": "retain",
+        "source_typed": "overlay",
+        "summary_legacy": "retain",
+        "summary_typed": "retain"
+      },
+      "case_id": "source_case_029",
+      "expected_disposition": "overlay",
+      "repeat": 1,
+      "source_relation": "superseded",
+      "summary_relation": "supported"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "review",
+        "summary_legacy": "retire",
+        "summary_typed": "retire"
+      },
+      "case_id": "source_case_034",
+      "expected_disposition": "review",
+      "repeat": 0,
+      "source_relation": "uncertain",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "review",
+        "summary_legacy": "retire",
+        "summary_typed": "retire"
+      },
+      "case_id": "source_case_034",
+      "expected_disposition": "review",
+      "repeat": 1,
+      "source_relation": "uncertain",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "retain",
+        "source_typed": "review",
+        "summary_legacy": "retain",
+        "summary_typed": "retain"
+      },
+      "case_id": "source_case_035",
+      "expected_disposition": "review",
+      "repeat": 0,
+      "source_relation": "uncertain",
+      "summary_relation": "supported"
+    },
+    {
+      "actions": {
+        "gated_typed": "retain",
+        "source_typed": "review",
+        "summary_legacy": "retain",
+        "summary_typed": "retain"
+      },
+      "case_id": "source_case_035",
+      "expected_disposition": "review",
+      "repeat": 1,
+      "source_relation": "uncertain",
+      "summary_relation": "supported"
+    },
+    {
+      "actions": {
+        "gated_typed": "overlay",
+        "source_typed": "overlay",
+        "summary_legacy": "retire",
+        "summary_typed": "overlay"
+      },
+      "case_id": "source_case_036",
+      "expected_disposition": "overlay",
+      "repeat": 0,
+      "source_relation": "contradicted",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "overlay",
+        "source_typed": "overlay",
+        "summary_legacy": "retire",
+        "summary_typed": "overlay"
+      },
+      "case_id": "source_case_036",
+      "expected_disposition": "overlay",
+      "repeat": 1,
+      "source_relation": "contradicted",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "retain",
+        "source_typed": "overlay",
+        "summary_legacy": "retain",
+        "summary_typed": "retain"
+      },
+      "case_id": "source_case_037",
+      "expected_disposition": "overlay",
+      "repeat": 0,
+      "source_relation": "superseded",
+      "summary_relation": "supported"
+    },
+    {
+      "actions": {
+        "gated_typed": "retain",
+        "source_typed": "overlay",
+        "summary_legacy": "retain",
+        "summary_typed": "retain"
+      },
+      "case_id": "source_case_037",
+      "expected_disposition": "overlay",
+      "repeat": 1,
+      "source_relation": "superseded",
+      "summary_relation": "supported"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "review",
+        "summary_legacy": "retire",
+        "summary_typed": "retire"
+      },
+      "case_id": "source_case_040",
+      "expected_disposition": "review",
+      "repeat": 0,
+      "source_relation": "uncertain",
+      "summary_relation": "contradicted"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "review",
+        "summary_legacy": "retire",
+        "summary_typed": "retire"
+      },
+      "case_id": "source_case_040",
+      "expected_disposition": "review",
+      "repeat": 1,
+      "source_relation": "uncertain",
+      "summary_relation": "contradicted"
+    },
+    {
+      "actions": {
+        "gated_typed": "retain",
+        "source_typed": "retire",
+        "summary_legacy": "retain",
+        "summary_typed": "retain"
+      },
+      "case_id": "source_case_041",
+      "expected_disposition": "retire",
+      "repeat": 0,
+      "source_relation": "superseded",
+      "summary_relation": "supported"
+    },
+    {
+      "actions": {
+        "gated_typed": "retain",
+        "source_typed": "retire",
+        "summary_legacy": "retain",
+        "summary_typed": "retain"
+      },
+      "case_id": "source_case_041",
+      "expected_disposition": "retire",
+      "repeat": 1,
+      "source_relation": "superseded",
+      "summary_relation": "supported"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "retain",
+        "summary_legacy": "retire",
+        "summary_typed": "overlay"
+      },
+      "case_id": "source_case_043",
+      "expected_disposition": "overlay",
+      "repeat": 0,
+      "source_relation": "compatible",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "retain",
+        "summary_legacy": "retire",
+        "summary_typed": "overlay"
+      },
+      "case_id": "source_case_043",
+      "expected_disposition": "overlay",
+      "repeat": 1,
+      "source_relation": "compatible",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "retain",
+        "summary_legacy": "retire",
+        "summary_typed": "retire"
+      },
+      "case_id": "source_case_044",
+      "expected_disposition": "retain",
+      "repeat": 0,
+      "source_relation": "supported",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "retain",
+        "summary_legacy": "retire",
+        "summary_typed": "retire"
+      },
+      "case_id": "source_case_044",
+      "expected_disposition": "retain",
+      "repeat": 1,
+      "source_relation": "supported",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "retain",
+        "source_typed": null,
+        "summary_legacy": "retain",
+        "summary_typed": "retain"
+      },
+      "case_id": "source_case_045",
+      "expected_disposition": "overlay",
+      "repeat": 0,
+      "source_relation": null,
+      "summary_relation": "supported"
+    },
+    {
+      "actions": {
+        "gated_typed": "retain",
+        "source_typed": "overlay",
+        "summary_legacy": "retain",
+        "summary_typed": "retain"
+      },
+      "case_id": "source_case_045",
+      "expected_disposition": "overlay",
+      "repeat": 1,
+      "source_relation": "superseded",
+      "summary_relation": "supported"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "retain",
+        "summary_legacy": "retire",
+        "summary_typed": "overlay"
+      },
+      "case_id": "source_case_049",
+      "expected_disposition": "overlay",
+      "repeat": 0,
+      "source_relation": "compatible",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "retain",
+        "summary_legacy": "retire",
+        "summary_typed": "overlay"
+      },
+      "case_id": "source_case_049",
+      "expected_disposition": "overlay",
+      "repeat": 1,
+      "source_relation": "compatible",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "retain",
+        "source_typed": "retire",
+        "summary_legacy": "retain",
+        "summary_typed": "retain"
+      },
+      "case_id": "source_case_052",
+      "expected_disposition": "retire",
+      "repeat": 0,
+      "source_relation": "contradicted",
+      "summary_relation": "supported"
+    },
+    {
+      "actions": {
+        "gated_typed": "retain",
+        "source_typed": "retire",
+        "summary_legacy": "retain",
+        "summary_typed": "retain"
+      },
+      "case_id": "source_case_052",
+      "expected_disposition": "retire",
+      "repeat": 1,
+      "source_relation": "contradicted",
+      "summary_relation": "supported"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "retain",
+        "summary_legacy": "retire",
+        "summary_typed": "overlay"
+      },
+      "case_id": "source_case_053",
+      "expected_disposition": "overlay",
+      "repeat": 0,
+      "source_relation": "compatible",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "review",
+        "source_typed": "retain",
+        "summary_legacy": "retire",
+        "summary_typed": "overlay"
+      },
+      "case_id": "source_case_053",
+      "expected_disposition": "overlay",
+      "repeat": 1,
+      "source_relation": "compatible",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": "retain",
+        "source_typed": "retain",
+        "summary_legacy": "retire",
+        "summary_typed": "retain"
+      },
+      "case_id": "source_case_056",
+      "expected_disposition": "retain",
+      "repeat": 0,
+      "source_relation": "compatible",
+      "summary_relation": "superseded"
+    },
+    {
+      "actions": {
+        "gated_typed": null,
+        "source_typed": "retain",
+        "summary_legacy": null,
+        "summary_typed": null
+      },
+      "case_id": "source_case_056",
+      "expected_disposition": "retain",
+      "repeat": 1,
+      "source_relation": "compatible",
+      "summary_relation": null
+    }
+  ],
+  "input_artifact_sha256": {
+    "source": {
+      "calls.json": "2ae455ae8e5e17462be13b54416605a774aeed9a87c37095c3ee05a601a61add",
+      "manifest.json": "455770edd1db4393f769887c9f909c783bfdbe231545bba1f3be15d72bdec193",
+      "predictions.json": "fd518f394b260bac0da624f068b94a549776e49fd8be60f8e0fa5a2a013f600f"
+    },
+    "summary": {
+      "calls.json": "c1fd085d8396966a4e364293ebb663a1cf528921991b795036d692284223b012",
+      "manifest.json": "97d3a3b9716d8c924a15fa2e1e0936a1b9e69519bee91b2e5f4f3296ce21d6fc",
+      "predictions.json": "53cb12d60a9736e4675db96141bda7108f46fef7ee1970a850012f29db82b1c8"
+    }
+  },
+  "master_sha256": "27c8d09eae042535316448c9806dec8f9dd6c9e969b22ef3f9c82fa6c315ec5c",
+  "methods": {
+    "gated_typed": {
+      "pooled": {
+        "accuracy": 0.5714285714285714,
+        "cases": 112,
+        "correct": 64,
+        "dangerous_retirement_count": 0,
+        "gold_overlay_cases": 28,
+        "gold_retire_cases": 28,
+        "measurement_failures": 4,
+        "overlay_captured": 7,
+        "overlay_errors": 0,
+        "overlay_recall": 0.25,
+        "retire_captured": 16,
+        "retire_recall": 0.5714285714285714,
+        "review_count": 51,
+        "review_rate": 0.45535714285714285
+      },
+      "repeats": {
+        "0": {
+          "accuracy": 0.5892857142857143,
+          "cases": 56,
+          "correct": 33,
+          "dangerous_retirement_count": 0,
+          "gold_overlay_cases": 14,
+          "gold_retire_cases": 14,
+          "measurement_failures": 2,
+          "overlay_captured": 4,
+          "overlay_errors": 0,
+          "overlay_recall": 0.2857142857142857,
+          "retire_captured": 8,
+          "retire_recall": 0.5714285714285714,
+          "review_count": 25,
+          "review_rate": 0.44642857142857145
+        },
+        "1": {
+          "accuracy": 0.5535714285714286,
+          "cases": 56,
+          "correct": 31,
+          "dangerous_retirement_count": 0,
+          "gold_overlay_cases": 14,
+          "gold_retire_cases": 14,
+          "measurement_failures": 2,
+          "overlay_captured": 3,
+          "overlay_errors": 0,
+          "overlay_recall": 0.21428571428571427,
+          "retire_captured": 8,
+          "retire_recall": 0.5714285714285714,
+          "review_count": 26,
+          "review_rate": 0.4642857142857143
+        }
+      }
+    },
+    "source_typed": {
+      "pooled": {
+        "accuracy": 0.875,
+        "cases": 112,
+        "correct": 98,
+        "dangerous_retirement_count": 0,
+        "gold_overlay_cases": 28,
+        "gold_retire_cases": 28,
+        "measurement_failures": 3,
+        "overlay_captured": 14,
+        "overlay_errors": 0,
+        "overlay_recall": 0.5,
+        "retire_captured": 28,
+        "retire_recall": 1.0,
+        "review_count": 32,
+        "review_rate": 0.2857142857142857
+      },
+      "repeats": {
+        "0": {
+          "accuracy": 0.875,
+          "cases": 56,
+          "correct": 49,
+          "dangerous_retirement_count": 0,
+          "gold_overlay_cases": 14,
+          "gold_retire_cases": 14,
+          "measurement_failures": 2,
+          "overlay_captured": 7,
+          "overlay_errors": 0,
+          "overlay_recall": 0.5,
+          "retire_captured": 14,
+          "retire_recall": 1.0,
+          "review_count": 16,
+          "review_rate": 0.2857142857142857
+        },
+        "1": {
+          "accuracy": 0.875,
+          "cases": 56,
+          "correct": 49,
+          "dangerous_retirement_count": 0,
+          "gold_overlay_cases": 14,
+          "gold_retire_cases": 14,
+          "measurement_failures": 1,
+          "overlay_captured": 7,
+          "overlay_errors": 0,
+          "overlay_recall": 0.5,
+          "retire_captured": 14,
+          "retire_recall": 1.0,
+          "review_count": 16,
+          "review_rate": 0.2857142857142857
+        }
+      }
+    },
+    "summary_legacy": {
+      "pooled": {
+        "accuracy": 0.3392857142857143,
+        "cases": 112,
+        "correct": 38,
+        "dangerous_retirement_count": 47,
+        "gold_overlay_cases": 28,
+        "gold_retire_cases": 28,
+        "measurement_failures": 2,
+        "overlay_captured": 0,
+        "overlay_errors": 0,
+        "overlay_recall": 0.0,
+        "retire_captured": 16,
+        "retire_recall": 0.5714285714285714,
+        "review_count": 16,
+        "review_rate": 0.14285714285714285
+      },
+      "repeats": {
+        "0": {
+          "accuracy": 0.3392857142857143,
+          "cases": 56,
+          "correct": 19,
+          "dangerous_retirement_count": 24,
+          "gold_overlay_cases": 14,
+          "gold_retire_cases": 14,
+          "measurement_failures": 1,
+          "overlay_captured": 0,
+          "overlay_errors": 0,
+          "overlay_recall": 0.0,
+          "retire_captured": 8,
+          "retire_recall": 0.5714285714285714,
+          "review_count": 8,
+          "review_rate": 0.14285714285714285
+        },
+        "1": {
+          "accuracy": 0.3392857142857143,
+          "cases": 56,
+          "correct": 19,
+          "dangerous_retirement_count": 23,
+          "gold_overlay_cases": 14,
+          "gold_retire_cases": 14,
+          "measurement_failures": 1,
+          "overlay_captured": 0,
+          "overlay_errors": 0,
+          "overlay_recall": 0.0,
+          "retire_captured": 8,
+          "retire_recall": 0.5714285714285714,
+          "review_count": 8,
+          "review_rate": 0.14285714285714285
+        }
+      }
+    },
+    "summary_typed": {
+      "pooled": {
+        "accuracy": 0.6339285714285714,
+        "cases": 112,
+        "correct": 71,
+        "dangerous_retirement_count": 14,
+        "gold_overlay_cases": 28,
+        "gold_retire_cases": 28,
+        "measurement_failures": 2,
+        "overlay_captured": 20,
+        "overlay_errors": 0,
+        "overlay_recall": 0.7142857142857143,
+        "retire_captured": 16,
+        "retire_recall": 0.5714285714285714,
+        "review_count": 26,
+        "review_rate": 0.23214285714285715
+      },
+      "repeats": {
+        "0": {
+          "accuracy": 0.6428571428571429,
+          "cases": 56,
+          "correct": 36,
+          "dangerous_retirement_count": 7,
+          "gold_overlay_cases": 14,
+          "gold_retire_cases": 14,
+          "measurement_failures": 1,
+          "overlay_captured": 10,
+          "overlay_errors": 0,
+          "overlay_recall": 0.7142857142857143,
+          "retire_captured": 8,
+          "retire_recall": 0.5714285714285714,
+          "review_count": 13,
+          "review_rate": 0.23214285714285715
+        },
+        "1": {
+          "accuracy": 0.625,
+          "cases": 56,
+          "correct": 35,
+          "dangerous_retirement_count": 7,
+          "gold_overlay_cases": 14,
+          "gold_retire_cases": 14,
+          "measurement_failures": 1,
+          "overlay_captured": 10,
+          "overlay_errors": 0,
+          "overlay_recall": 0.7142857142857143,
+          "retire_captured": 8,
+          "retire_recall": 0.5714285714285714,
+          "review_count": 13,
+          "review_rate": 0.23214285714285715
+        }
+      }
+    }
+  },
+  "notes": [
+    "Metadata is an oracle fixture, not a model prediction.",
+    "Failed measurements remain incorrect in all denominators.",
+    "Baseline findings are proposals, not production retirement.",
+    "Accounting reflects original requests and is not multiplied by scoring methods."
+  ],
+  "source_projection_sha256": "ed2c8f9cbb2190ca4ffcd732b3b3ee7d95882645b32d4fc1c56cd56a5ec31071",
+  "source_run": "/home/dev/dev/eval-runs/jev-source-validity-20260919/source-run",
+  "source_study_sha256": "5bd473b11b16d3a3d11663f014fbd5d50bee966ca041446aa03954e3c0e43070",
+  "summary_projection_sha256": "40c2755940cc1f07f4ad0f2c96352c4ec75ea450e97c15369ad139d9997ceace",
+  "summary_run": "/home/dev/dev/eval-runs/jev-source-validity-20260919/summary-run"
+}

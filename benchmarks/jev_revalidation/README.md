@@ -4,6 +4,8 @@ Measure whether Jev recognizes changes to an existing claim, and whether a separ
 
 Read the [measured results](RESULTS.md) before selecting a prompt. The first 84 cases favored direct Choice; a prospective 56-case comparison improved decomposition and exposed a false retirement in both direct prompts. The committed evidence includes per-case predictions and call accounting.
 
+The [original-source and validity study](SOURCE_VALIDITY_RESULTS.md) adds 56 cases with full source passages and typed temporal policy. Source-only assessment scored 98/112 dispositions; summary agreement reduced that to 64/112. Those scores use supplied authority, claim kind, and validity metadata. The study provides preparation and analysis commands, preserved failures, and per-call accounting.
+
 The fixture contains 84 original synthetic pairs authored separately from the prompts. The prompts and scoring protocol were frozen before the prompt author opened the cases. Labels are agent-authored diagnostic expectations, not human annotations or a public benchmark. A separate blind annotation checks agreement without seeing the original labels or Jev answers.
 
 The comparison includes:

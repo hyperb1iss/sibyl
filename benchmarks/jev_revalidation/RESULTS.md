@@ -1,6 +1,6 @@
 # Claim revalidation results: 19 September 2026
 
-The revised decomposed Choice prompt is the next candidate for shadow evaluation. On a fresh synthetic set, it matched direct Choice's 87.5% action accuracy and avoided the direct arm's false retirement. Neither arm qualifies for automatic forgetting: temporary changes remain ambiguous, one partial-evidence case caused repeated false retirement proposals, and live responses sometimes violate the probability contract.
+The revised decomposed Choice prompt is the next candidate for shadow evaluation. On a fresh synthetic set, it matched direct Choice's 87.5% action accuracy and avoided the direct arm's false retirement. Neither arm qualifies for automatic forgetting: temporary changes remain ambiguous, one partial-evidence case caused repeated false retirement proposals, and live responses sometimes fail Sibyl's strict probability-sum policy.
 
 All retirement actions below are simulated. No memory was changed. The experiments ran on `stef-gradial-com-main` against `typesafe/jev-1.13`, using the existing pinned OpenRouter Decisions route. These results test semantic decisions and a deterministic authority/time policy, not downstream answer quality. Expected actions apply that same policy to the annotated relation, so action accuracy is not an independent end-to-end quality measure.
 
@@ -50,7 +50,7 @@ On the second set, agreement was 52/56 relations and 53/56 actions; 16 cases wer
 
 The main experiments made 832 calls. Fifteen returned responses rejected by the strict schema, invalidating 57 case observations. Seven failed batch requests account for 49 of those cases. Request latency reflects the chosen geometry; it is not end-to-end search latency.
 
-A separate diagnostic reran the nine failed requests from the first experiment, preserving the original failures. Eight diagnostic responses passed; one reproduced a distribution summing to 0.99 (`c3.relation`: 0.81, 0.09, 0.05, 0.03, 0.01, 0, 0). The [Choice documentation](https://docs.typesafe.ai/primitives/choice) says probabilities sum to one. The adapter rejected that response as designed. No normalization or relaxed tolerance was added, and the exact causes of the other original failures remain unconfirmed.
+A separate diagnostic reran the nine failed requests from the first experiment, preserving the original failures. Eight diagnostic responses passed; one reproduced a distribution summing to 0.99 (`c3.relation`: 0.81, 0.09, 0.05, 0.03, 0.01, 0, 0). The [Choice documentation](https://docs.typesafe.ai/primitives/choice) says probabilities sum to one. The adapter rejected that response under its strict normalization policy. A subsequent check of the [official TypeSafe schema](https://github.com/typesafe-ai/typesafe-sdk-python/blob/2ce5c65f13646cab6e6f782328194c9d85f3300a/src/typesafe_sdk/_schemas/models.py#L25-L29) found an approximate-sum contract without a numeric tolerance. The rejection alone does not establish a provider defect. No normalization or relaxed tolerance was added, and the exact causes of the other original failures remain unconfirmed.
 
 | Run | Calls | Reported Jev cost |
 | --- | ---: | ---: |

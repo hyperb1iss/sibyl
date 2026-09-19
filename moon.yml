@@ -2025,7 +2025,7 @@ tasks:
       cache: false
 
   jev-revalidation-test:
-    command: uv run --locked --package sibyl-core pytest benchmarks/jev_revalidation/test_runner.py -v
+    command: uv run --locked --package sibyl-core pytest benchmarks/jev_revalidation -v
     inputs:
       - benchmarks/jev_revalidation/**/*
     options:
@@ -2033,6 +2033,7 @@ tasks:
 
   jev-revalidation-lint:
     script: |
+      set -e
       uv run --locked --package sibyl-core ruff check benchmarks/jev_revalidation
       uv run --locked --package sibyl-core ruff format --check benchmarks/jev_revalidation
     inputs:
@@ -2051,3 +2052,10 @@ tasks:
       --config 'src.include=["benchmarks/jev_revalidation/**/*.py"]'
     inputs:
       - benchmarks/jev_revalidation/**/*
+
+  jev-source-study:
+    command: uv run --locked --package sibyl-core python -m benchmarks.jev_revalidation.source_study
+    inputs:
+      - benchmarks/jev_revalidation/**/*
+    options:
+      cache: false
