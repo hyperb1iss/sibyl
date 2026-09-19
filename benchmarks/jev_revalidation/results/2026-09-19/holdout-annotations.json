@@ -1,0 +1,396 @@
+{
+  "annotations": [
+    {
+      "id": "holdout_001",
+      "relation": "uncertain",
+      "action": "review",
+      "ambiguous": true,
+      "reason": "Raspberry jar provenance unestablished, may not be current stock."
+    },
+    {
+      "id": "holdout_002",
+      "relation": "uncertain",
+      "action": "review",
+      "ambiguous": true,
+      "reason": "Conflicting forms with no curtain identity or date."
+    },
+    {
+      "id": "holdout_003",
+      "relation": "compatible",
+      "action": "retain",
+      "ambiguous": true,
+      "reason": "No route only during temporary ramp repair, a different condition."
+    },
+    {
+      "id": "holdout_004",
+      "relation": "unrelated",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Heated group differs from untreated group."
+    },
+    {
+      "id": "holdout_005",
+      "relation": "supported",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Audit confirms no sesame ingredients."
+    },
+    {
+      "id": "holdout_006",
+      "relation": "superseded",
+      "action": "review",
+      "ambiguous": false,
+      "reason": "Explicit 90s replacement but timestamps equal, not strictly newer."
+    },
+    {
+      "id": "holdout_007",
+      "relation": "unrelated",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Wind reading unrelated to tape labeling."
+    },
+    {
+      "id": "holdout_008",
+      "relation": "unrelated",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "North Dock berth differs from East Dock berth."
+    },
+    {
+      "id": "holdout_009",
+      "relation": "contradicted",
+      "action": "review",
+      "ambiguous": true,
+      "reason": "Anonymous untrusted contradiction, not authoritative to retire."
+    },
+    {
+      "id": "holdout_010",
+      "relation": "supported",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Handbook confirms cumulative score as first tiebreak."
+    },
+    {
+      "id": "holdout_011",
+      "relation": "contradicted",
+      "action": "retire",
+      "ambiguous": false,
+      "reason": "Accredited report detects peanut, event newer and authoritative."
+    },
+    {
+      "id": "holdout_012",
+      "relation": "contradicted",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Crack contradicts but event predates memory."
+    },
+    {
+      "id": "holdout_013",
+      "relation": "supported",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Rules explicitly permit bicycles as remembered."
+    },
+    {
+      "id": "holdout_014",
+      "relation": "unrelated",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Muddy path named Brass Bell is not the club bell."
+    },
+    {
+      "id": "holdout_015",
+      "relation": "compatible",
+      "action": "retain",
+      "ambiguous": true,
+      "reason": "Junior drill differs from senior drill by actor."
+    },
+    {
+      "id": "holdout_016",
+      "relation": "compatible",
+      "action": "retain",
+      "ambiguous": true,
+      "reason": "Closure only during temporary debris clearing."
+    },
+    {
+      "id": "holdout_017",
+      "relation": "contradicted",
+      "action": "review",
+      "ambiguous": false,
+      "reason": "Authenticity denied but event effective date missing."
+    },
+    {
+      "id": "holdout_018",
+      "relation": "uncertain",
+      "action": "review",
+      "ambiguous": true,
+      "reason": "Copied sheet lists both venues without selection."
+    },
+    {
+      "id": "holdout_019",
+      "relation": "superseded",
+      "action": "retire",
+      "ambiguous": false,
+      "reason": "Explicit 19:30 replacement, event newer and authoritative."
+    },
+    {
+      "id": "holdout_020",
+      "relation": "unrelated",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Refrigerated van unrelated to spoon storage."
+    },
+    {
+      "id": "holdout_021",
+      "relation": "compatible",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Summer routine differs from winter condition."
+    },
+    {
+      "id": "holdout_022",
+      "relation": "uncertain",
+      "action": "review",
+      "ambiguous": true,
+      "reason": "Only one corner sampled, repairs unidentified for entirely-linen claim."
+    },
+    {
+      "id": "holdout_023",
+      "relation": "uncertain",
+      "action": "review",
+      "ambiguous": true,
+      "reason": "Torn notice fragment could be time, date or room."
+    },
+    {
+      "id": "holdout_024",
+      "relation": "compatible",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Performers use different entrance than spectators."
+    },
+    {
+      "id": "holdout_025",
+      "relation": "uncertain",
+      "action": "review",
+      "ambiguous": true,
+      "reason": "Restricted deck designation cut off, may not be upper deck."
+    },
+    {
+      "id": "holdout_026",
+      "relation": "supported",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Inventory confirms twelve coins each tagged."
+    },
+    {
+      "id": "holdout_027",
+      "relation": "supported",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Full inspection confirms incubator empty."
+    },
+    {
+      "id": "holdout_028",
+      "relation": "supported",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Signed checklist confirms atlases locked in cabinets."
+    },
+    {
+      "id": "holdout_029",
+      "relation": "unrelated",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Band named Painted Moon differs from the theater prop."
+    },
+    {
+      "id": "holdout_030",
+      "relation": "non_evidence",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Director poses a question, no change asserted."
+    },
+    {
+      "id": "holdout_031",
+      "relation": "compatible",
+      "action": "retain",
+      "ambiguous": true,
+      "reason": "Children's card limit differs from adult limit by actor."
+    },
+    {
+      "id": "holdout_032",
+      "relation": "non_evidence",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Injection directive with no reported actual move."
+    },
+    {
+      "id": "holdout_033",
+      "relation": "compatible",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Staff tasting cups differ from customer service bowls."
+    },
+    {
+      "id": "holdout_034",
+      "relation": "uncertain",
+      "action": "review",
+      "ambiguous": true,
+      "reason": "Label matches but chemical identification inconclusive."
+    },
+    {
+      "id": "holdout_035",
+      "relation": "non_evidence",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Training sample text, explicitly not a service menu."
+    },
+    {
+      "id": "holdout_036",
+      "relation": "non_evidence",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Proposal to replace mulch with no decision made."
+    },
+    {
+      "id": "holdout_037",
+      "relation": "contradicted",
+      "action": "retire",
+      "ambiguous": false,
+      "reason": "Specialist correction, event newer and authoritative."
+    },
+    {
+      "id": "holdout_038",
+      "relation": "superseded",
+      "action": "retire",
+      "ambiguous": false,
+      "reason": "Explicit 21-day replacement, event newer and authoritative."
+    },
+    {
+      "id": "holdout_039",
+      "relation": "contradicted",
+      "action": "retire",
+      "ambiguous": false,
+      "reason": "Certified not watertight, event newer and authoritative."
+    },
+    {
+      "id": "holdout_040",
+      "relation": "compatible",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "After-hours conservators use different exit than visitors."
+    },
+    {
+      "id": "holdout_041",
+      "relation": "compatible",
+      "action": "retain",
+      "ambiguous": true,
+      "reason": "Temporary detour until repairs, standing terminus unchanged."
+    },
+    {
+      "id": "holdout_042",
+      "relation": "unrelated",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Orchestra named Three Crates unrelated to the crates."
+    },
+    {
+      "id": "holdout_043",
+      "relation": "non_evidence",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Unvoted motion to ban photography."
+    },
+    {
+      "id": "holdout_044",
+      "relation": "superseded",
+      "action": "retire",
+      "ambiguous": false,
+      "reason": "Explicit 27C replacement, event newer and authoritative."
+    },
+    {
+      "id": "holdout_045",
+      "relation": "superseded",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Explicit replacement but event predates memory."
+    },
+    {
+      "id": "holdout_046",
+      "relation": "supported",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Confirmed repeated reading of pH 6.2."
+    },
+    {
+      "id": "holdout_047",
+      "relation": "unrelated",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Full-size college vessel unrelated to museum miniature."
+    },
+    {
+      "id": "holdout_048",
+      "relation": "non_evidence",
+      "action": "retain",
+      "ambiguous": true,
+      "reason": "Draft checklist unsigned, relocation not executed."
+    },
+    {
+      "id": "holdout_049",
+      "relation": "uncertain",
+      "action": "review",
+      "ambiguous": true,
+      "reason": "Only four confirmed alive, two marks illegible."
+    },
+    {
+      "id": "holdout_050",
+      "relation": "superseded",
+      "action": "retire",
+      "ambiguous": false,
+      "reason": "Explicit dusk replacement, event newer and authoritative."
+    },
+    {
+      "id": "holdout_051",
+      "relation": "non_evidence",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Request to prohibit strollers, no change enacted."
+    },
+    {
+      "id": "holdout_052",
+      "relation": "unrelated",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Fence painting unrelated to herb bed contents."
+    },
+    {
+      "id": "holdout_053",
+      "relation": "supported",
+      "action": "retain",
+      "ambiguous": true,
+      "reason": "Copy agrees but is not independent corroboration."
+    },
+    {
+      "id": "holdout_054",
+      "relation": "superseded",
+      "action": "retire",
+      "ambiguous": false,
+      "reason": "Completed move to N4 recorded, event newer and authoritative."
+    },
+    {
+      "id": "holdout_055",
+      "relation": "compatible",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Sunday timetable differs from weekday schedule."
+    },
+    {
+      "id": "holdout_056",
+      "relation": "non_evidence",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Suggestion in comment box, no policy change."
+    }
+  ]
+}

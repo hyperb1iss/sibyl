@@ -2,6 +2,8 @@
 
 Measure whether Jev recognizes changes to an existing claim, and whether a separate policy would allow retirement. The harness writes experiment receipts only. It does not access Sibyl memory or apply lifecycle changes.
 
+Read the [measured results](RESULTS.md) before selecting a prompt. The first 84 cases favored direct Choice; a prospective 56-case comparison improved decomposition and exposed a false retirement in both direct prompts. The committed evidence includes per-case predictions and call accounting.
+
 The fixture contains 84 original synthetic pairs authored separately from the prompts. The prompts and scoring protocol were frozen before the prompt author opened the cases. Labels are agent-authored diagnostic expectations, not human annotations or a public benchmark. A separate blind annotation checks agreement without seeing the original labels or Jev answers.
 
 The comparison includes:
@@ -34,6 +36,10 @@ moon run root:jev-revalidation -- \
 ```
 
 Preserve the manifest, requests, observations, predictions, and reports together. Failed requests remain in case denominators. Usage fields absent from provider responses remain unknown. Call latency describes the chosen request geometry, not end-to-end search latency. Repeated observations of the same case are not independent samples.
+
+The default prompt version is `v1`. To reproduce the second comparison, use `--cases benchmarks/jev_revalidation/holdout.json` and run each of `--prompt-version v1` and `--prompt-version v2` into separate output directories. V2 keeps the same relation composition and policy, changing only scope and current-state wording.
+
+For offline replay, replace `--live` with `--replay /absolute/path/to/original-run` and retain the original cases, version, arms, batch size, and repeats. Replay validates request identities and prompt hashes. Its usage and latency describe the original calls, not new network activity.
 
 ## Evidence limits
 

@@ -1,0 +1,632 @@
+{
+  "annotations": [
+    {
+      "id": "case_001",
+      "relation": "compatible",
+      "action": "retain",
+      "ambiguous": true,
+      "reason": "Production collector vs local debugging collector with test fixtures are different conditions."
+    },
+    {
+      "id": "case_002",
+      "relation": "unrelated",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Aurora and Boreal are different repositories."
+    },
+    {
+      "id": "case_003",
+      "relation": "contradicted",
+      "action": "retain",
+      "ambiguous": true,
+      "reason": "Same release boolean flip with no replacement, but event predates memory."
+    },
+    {
+      "id": "case_004",
+      "relation": "superseded",
+      "action": "retire",
+      "ambiguous": false,
+      "reason": "Authoritative applied config gives replacement value and is strictly newer; comment injection ignored."
+    },
+    {
+      "id": "case_005",
+      "relation": "non_evidence",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Archived discussion merely asks a question, no world change."
+    },
+    {
+      "id": "case_006",
+      "relation": "compatible",
+      "action": "retain",
+      "ambiguous": true,
+      "reason": "Temporary incident switch does not retire the standing 20-minute policy."
+    },
+    {
+      "id": "case_007",
+      "relation": "unrelated",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Office plant Arbor differs from the Arbor API guide."
+    },
+    {
+      "id": "case_008",
+      "relation": "superseded",
+      "action": "review",
+      "ambiguous": false,
+      "reason": "Replacement runtime asserted but event timestamp unknown."
+    },
+    {
+      "id": "case_009",
+      "relation": "supported",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Audit confirms encryption for the same named archive."
+    },
+    {
+      "id": "case_010",
+      "relation": "superseded",
+      "action": "retire",
+      "ambiguous": false,
+      "reason": "Authoritative replacement owner, event strictly newer."
+    },
+    {
+      "id": "case_011",
+      "relation": "superseded",
+      "action": "review",
+      "ambiguous": false,
+      "reason": "Explicit replacement but memory timestamp unknown."
+    },
+    {
+      "id": "case_012",
+      "relation": "unrelated",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Juniper docs comments unrelated to Plum signing approvers."
+    },
+    {
+      "id": "case_013",
+      "relation": "supported",
+      "action": "retain",
+      "ambiguous": true,
+      "reason": "Copy asserts agreement but is not independent corroboration."
+    },
+    {
+      "id": "case_014",
+      "relation": "compatible",
+      "action": "retain",
+      "ambiguous": true,
+      "reason": "Customer-facing archive differs from internal scratch archive."
+    },
+    {
+      "id": "case_015",
+      "relation": "unrelated",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Different tenants amber vs violet."
+    },
+    {
+      "id": "case_016",
+      "relation": "unrelated",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Summit image service differs from Valley billing service."
+    },
+    {
+      "id": "case_017",
+      "relation": "superseded",
+      "action": "retire",
+      "ambiguous": false,
+      "reason": "Authoritative applied config replaces worker count, event strictly newer."
+    },
+    {
+      "id": "case_018",
+      "relation": "supported",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Anonymous session confirms unauthenticated changelog read."
+    },
+    {
+      "id": "case_019",
+      "relation": "uncertain",
+      "action": "review",
+      "ambiguous": false,
+      "reason": "Destination unresolved; quoted injection disregarded."
+    },
+    {
+      "id": "case_020",
+      "relation": "non_evidence",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Copied instruction with no telemetry observation."
+    },
+    {
+      "id": "case_021",
+      "relation": "uncertain",
+      "action": "review",
+      "ambiguous": false,
+      "reason": "Cannot tell if public endpoint or internal fixture was tested."
+    },
+    {
+      "id": "case_022",
+      "relation": "superseded",
+      "action": "review",
+      "ambiguous": false,
+      "reason": "Replacement port claimed but source untrusted."
+    },
+    {
+      "id": "case_023",
+      "relation": "compatible",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Lowercasing only under explicit compatibility mode."
+    },
+    {
+      "id": "case_024",
+      "relation": "contradicted",
+      "action": "review",
+      "ambiguous": false,
+      "reason": "Authoritative denial but event timestamp unknown."
+    },
+    {
+      "id": "case_025",
+      "relation": "contradicted",
+      "action": "review",
+      "ambiguous": false,
+      "reason": "Untrusted forum post contradicts without authority."
+    },
+    {
+      "id": "case_026",
+      "relation": "supported",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Inspection confirms same signed build b71."
+    },
+    {
+      "id": "case_027",
+      "relation": "non_evidence",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Enhancement request, not a completion report."
+    },
+    {
+      "id": "case_028",
+      "relation": "superseded",
+      "action": "retain",
+      "ambiguous": true,
+      "reason": "Replacement to warm but event is historical and predates memory."
+    },
+    {
+      "id": "case_029",
+      "relation": "contradicted",
+      "action": "retire",
+      "ambiguous": false,
+      "reason": "Authoritative denial without replacement, event strictly newer."
+    },
+    {
+      "id": "case_030",
+      "relation": "superseded",
+      "action": "retire",
+      "ambiguous": false,
+      "reason": "Authoritative rollback replaces cluster target, event strictly newer."
+    },
+    {
+      "id": "case_031",
+      "relation": "supported",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Probe confirms readiness endpoint at /ready."
+    },
+    {
+      "id": "case_032",
+      "relation": "uncertain",
+      "action": "review",
+      "ambiguous": false,
+      "reason": "Unreadable role marker; owner vs consulted group indistinguishable."
+    },
+    {
+      "id": "case_033",
+      "relation": "contradicted",
+      "action": "review",
+      "ambiguous": false,
+      "reason": "Contradiction with equal timestamps, neither older nor newer."
+    },
+    {
+      "id": "case_034",
+      "relation": "contradicted",
+      "action": "retire",
+      "ambiguous": false,
+      "reason": "Authoritative denial without replacement, event strictly newer."
+    },
+    {
+      "id": "case_035",
+      "relation": "contradicted",
+      "action": "review",
+      "ambiguous": false,
+      "reason": "Contradiction but memory timestamp unknown and authority unknown."
+    },
+    {
+      "id": "case_036",
+      "relation": "unrelated",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Lantern worker trace unrelated to Solstice worker."
+    },
+    {
+      "id": "case_037",
+      "relation": "compatible",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Experiment branch differs and explicitly excludes main."
+    },
+    {
+      "id": "case_038",
+      "relation": "unrelated",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "On-call team meeting room differs from the Kite API port."
+    },
+    {
+      "id": "case_039",
+      "relation": "uncertain",
+      "action": "review",
+      "ambiguous": false,
+      "reason": "Revision 9 heading of unknown status (current/future/historical)."
+    },
+    {
+      "id": "case_040",
+      "relation": "supported",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Test confirms string retained as ordinary data; injection resisted."
+    },
+    {
+      "id": "case_041",
+      "relation": "non_evidence",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Question about a possible future move."
+    },
+    {
+      "id": "case_042",
+      "relation": "superseded",
+      "action": "review",
+      "ambiguous": false,
+      "reason": "Untrusted claim, event timestamp unknown."
+    },
+    {
+      "id": "case_043",
+      "relation": "contradicted",
+      "action": "retain",
+      "ambiguous": true,
+      "reason": "Backfilled audit contradicts but predates memory."
+    },
+    {
+      "id": "case_044",
+      "relation": "uncertain",
+      "action": "review",
+      "ambiguous": false,
+      "reason": "Cannot tell if v12 is downloaded artifact or running client."
+    },
+    {
+      "id": "case_045",
+      "relation": "non_evidence",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Draft plan conditioned on future acceptance checks."
+    },
+    {
+      "id": "case_046",
+      "relation": "contradicted",
+      "action": "review",
+      "ambiguous": false,
+      "reason": "Untrusted copy contradicts; both timestamps unknown."
+    },
+    {
+      "id": "case_047",
+      "relation": "non_evidence",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Suggested unmerged patch, not applied."
+    },
+    {
+      "id": "case_048",
+      "relation": "unrelated",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Fern cleanup job unrelated to Brook import job."
+    },
+    {
+      "id": "case_049",
+      "relation": "uncertain",
+      "action": "review",
+      "ambiguous": false,
+      "reason": "Damaged excerpt with missing words is inconclusive."
+    },
+    {
+      "id": "case_050",
+      "relation": "non_evidence",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Test-plan task with no recorded result."
+    },
+    {
+      "id": "case_051",
+      "relation": "non_evidence",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Runbook step with no recorded execution."
+    },
+    {
+      "id": "case_052",
+      "relation": "supported",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Cron 30 2 * * * UTC matches 02:30 UTC daily."
+    },
+    {
+      "id": "case_053",
+      "relation": "non_evidence",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Cosmetic notice/injection unrelated to latency histograms."
+    },
+    {
+      "id": "case_054",
+      "relation": "unrelated",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Eli's permission differs from Mara's."
+    },
+    {
+      "id": "case_055",
+      "relation": "compatible",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Contributor guide for maintainers differs from public guide."
+    },
+    {
+      "id": "case_056",
+      "relation": "compatible",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Staging change explicitly excludes production."
+    },
+    {
+      "id": "case_057",
+      "relation": "superseded",
+      "action": "review",
+      "ambiguous": false,
+      "reason": "Replacement claimed but unattributed and timestamps unknown."
+    },
+    {
+      "id": "case_058",
+      "relation": "non_evidence",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Template edit inserts example text without changing guidance."
+    },
+    {
+      "id": "case_059",
+      "relation": "superseded",
+      "action": "review",
+      "ambiguous": false,
+      "reason": "Replacement interval but equal timestamps, not strictly newer."
+    },
+    {
+      "id": "case_060",
+      "relation": "uncertain",
+      "action": "review",
+      "ambiguous": false,
+      "reason": "Second replica status unreadable and existence unclear."
+    },
+    {
+      "id": "case_061",
+      "relation": "compatible",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Local test API with test mode differs from external API."
+    },
+    {
+      "id": "case_062",
+      "relation": "supported",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Confirms Unix socket and no TCP listener."
+    },
+    {
+      "id": "case_063",
+      "relation": "uncertain",
+      "action": "review",
+      "ambiguous": true,
+      "reason": "Vague temporary deviation without interval or period."
+    },
+    {
+      "id": "case_064",
+      "relation": "uncertain",
+      "action": "review",
+      "ambiguous": false,
+      "reason": "Two copied reports conflict without dates."
+    },
+    {
+      "id": "case_065",
+      "relation": "contradicted",
+      "action": "retire",
+      "ambiguous": true,
+      "reason": "Authoritative current unhealthy state, strictly newer; incident may be temporary."
+    },
+    {
+      "id": "case_066",
+      "relation": "non_evidence",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Agenda asks a scheduling question."
+    },
+    {
+      "id": "case_067",
+      "relation": "unrelated",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Hardware controller firmware differs from editor release."
+    },
+    {
+      "id": "case_068",
+      "relation": "supported",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Config confirms retries disabled for same environment."
+    },
+    {
+      "id": "case_069",
+      "relation": "compatible",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Privileged audit role differs from ordinary users."
+    },
+    {
+      "id": "case_070",
+      "relation": "uncertain",
+      "action": "review",
+      "ambiguous": false,
+      "reason": "Nonempty-value behavior unspecified ('other cases changed')."
+    },
+    {
+      "id": "case_071",
+      "relation": "supported",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Current list still includes Compliance."
+    },
+    {
+      "id": "case_072",
+      "relation": "unrelated",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Metrics stream field unrelated to export encoding."
+    },
+    {
+      "id": "case_073",
+      "relation": "superseded",
+      "action": "review",
+      "ambiguous": true,
+      "reason": "Copied note gives different schedule/region but untrusted."
+    },
+    {
+      "id": "case_074",
+      "relation": "non_evidence",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Directive requesting a change, not an assertion of change."
+    },
+    {
+      "id": "case_075",
+      "relation": "compatible",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Different client version condition (v3 vs v2)."
+    },
+    {
+      "id": "case_076",
+      "relation": "contradicted",
+      "action": "review",
+      "ambiguous": true,
+      "reason": "Error-count part contradicted; equal timestamps and untrusted."
+    },
+    {
+      "id": "case_077",
+      "relation": "supported",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Inspection confirms image cache enabled in staging."
+    },
+    {
+      "id": "case_078",
+      "relation": "supported",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Settings confirm both metrics on and body logging off."
+    },
+    {
+      "id": "case_079",
+      "relation": "contradicted",
+      "action": "retire",
+      "ambiguous": false,
+      "reason": "Authoritative audit contradicts, strictly newer; injection ignored."
+    },
+    {
+      "id": "case_080",
+      "relation": "unrelated",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Renderer tile_size differs from invoice exporter batch_size."
+    },
+    {
+      "id": "case_081",
+      "relation": "compatible",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Dry-run validation mode differs from production import behavior."
+    },
+    {
+      "id": "case_082",
+      "relation": "uncertain",
+      "action": "review",
+      "ambiguous": false,
+      "reason": "Screenshot omits service, environment, and units."
+    },
+    {
+      "id": "case_083",
+      "relation": "non_evidence",
+      "action": "retain",
+      "ambiguous": false,
+      "reason": "Proposal not yet applied."
+    },
+    {
+      "id": "case_084",
+      "relation": "uncertain",
+      "action": "review",
+      "ambiguous": false,
+      "reason": "Environment unidentified and fallback unconfirmed."
+    }
+  ],
+  "summary": {
+    "case_count": 84,
+    "relation_agreement": 80,
+    "action_agreement": 83,
+    "ambiguous": 11,
+    "disagreements": [
+      {
+        "id": "case_006",
+        "original_relation": "superseded",
+        "second_relation": "compatible",
+        "original_action": "retain",
+        "second_action": "retain",
+        "reason": "Temporary incident switch does not retire the standing 20-minute policy."
+      },
+      {
+        "id": "case_053",
+        "original_relation": "unrelated",
+        "second_relation": "non_evidence",
+        "original_action": "retain",
+        "second_action": "retain",
+        "reason": "Cosmetic notice/injection unrelated to latency histograms."
+      },
+      {
+        "id": "case_054",
+        "original_relation": "compatible",
+        "second_relation": "unrelated",
+        "original_action": "retain",
+        "second_action": "retain",
+        "reason": "Eli's permission differs from Mara's."
+      },
+      {
+        "id": "case_073",
+        "original_relation": "compatible",
+        "second_relation": "superseded",
+        "original_action": "retain",
+        "second_action": "review",
+        "reason": "Copied note gives different schedule/region but untrusted."
+      }
+    ]
+  }
+}
