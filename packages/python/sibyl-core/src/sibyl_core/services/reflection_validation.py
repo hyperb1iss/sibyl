@@ -1,5 +1,7 @@
 """Resolve ordinary stored reflection evidence for automatic semantic review."""
 
+import asyncio
+from contextlib import suppress
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -336,16 +338,33 @@ async def validate_reflection_stage(
         from sibyl_core.tasks.memory_progress import ProgressCriticOutput
 
         extractor, policy = await _validation_extractor(ProgressCriticOutput)
+    from sibyl_core.config import settings
+
+    shadow = None
+    if settings.source_support_shadow_enabled and review is None and progress_context is None:
+        from sibyl_core.services.semantic_decisions import observe_reflection_source_support
+
+        shadow = asyncio.create_task(observe_reflection_source_support(original, resolver))
     try:
-        return await _validate_prepared_reflection(
-            original,
-            resolver,
-            extractor,
-            policy,
-            review,
-            progress_context=progress_context,
-            review_execution_id=review_execution_id,
-        )
+        try:
+            result = await _validate_prepared_reflection(
+                original,
+                resolver,
+                extractor,
+                policy,
+                review,
+                progress_context=progress_context,
+                review_execution_id=review_execution_id,
+            )
+        except BaseException:
+            if shadow is not None:
+                shadow.cancel()
+                with suppress(asyncio.CancelledError):
+                    await shadow
+            raise
+        if shadow is not None:
+            await shadow
+        return result
     finally:
         if isinstance(extractor, _OwnedValidationExtractor):
             await _close_resources(extractor.resources)

@@ -156,6 +156,54 @@ objects rather than mutating `os.environ`. `Extractor[T]` handles structured out
 LLM errors. `Generator` handles text generation and streaming. Surface-specific config is resolved
 through an `LLMConfigSource` so the API can supply database-backed settings while core stays pure.
 
+### Source Support Shadow Decisions
+
+The optional source-support observer runs beside the ordinary reflection critic. It asks one
+Choice question per indexed claim and records the answer in private content storage. Critic
+results, publication rules, and generated memory stay unchanged. Corrections and progress critiques
+continue through their existing paths without a shadow call.
+
+The observer is disabled by default. A call requires all of the following:
+
+- The worker setting `SIBYL_SOURCE_SUPPORT_SHADOW_ENABLED=true`.
+- A dedicated `SIBYL_DECISION_OPENROUTER_API_KEY` secret.
+- An enabled durable policy for the exact organization, principal, and project.
+- Fresh authorization for the candidate and every original evidence source.
+
+Trusted server-side operators can enroll a cohort with
+`services.decision_receipts.configure_policy`. Supply the exact organization, principal, project
+(or `None`), `enabled=True`, a policy version, and
+`OpenRouterDecisionRoute().policy_sha256`. Use `expected_epoch=0` for a new cohort. Later changes
+must supply the current epoch; every update increments it. Retire a cohort by setting
+`enabled=False` through the same function. Policy retirement blocks delayed completions and
+normal receipt reads across workers, including workers whose local enable setting remains true.
+There is no public enrollment or receipt API.
+
+The adapter uses OpenRouter's dedicated alpha Decisions endpoint, with the TypeSafe provider,
+no alternate routes, and explicit privacy routing requirements. It expects the canonical response
+model `typesafe/jev-1.13-20260917`. Qualify the implemented adapter with synthetic input and verify
+account terms before enrolling real source data. Routing parameters do not establish vendor
+retention compliance. The route's 32,000-token context limit is enforced by the provider; its
+catalog exposes no tokenizer or request token-budget parameter. Oversized input produces an
+unavailable observation rather than truncated evidence.
+
+An enabled shadow call runs concurrently with the critic and is joined before the stage returns.
+The adapter has a 30-second total deadline; a slow call can therefore add stage latency. Provider
+failures leave the critic result intact. Cancelling the stage cancels the observer and preserves
+its committed dispatch intent with unknown usage unless measured usage was received.
+
+Private receipts retain request digests, typed answers, and provider accounting, without storing
+raw request bodies. Missing token counts and cost remain unknown. Normal reads reconstruct the
+request and recheck current source authority and cohort policy. Source deletion removes answers;
+late completions retain only accounting. Shadow observations never satisfy the critic's execution
+or promotion contracts. Offline tests establish these contracts, not classifier quality or live
+provider qualification.
+
+Server transaction regressions use an isolated SurrealDB WebSocket server. Set
+`SIBYL_TEST_SURREAL_URL`, `SIBYL_TEST_SURREAL_USERNAME`, and `SIBYL_TEST_SURREAL_PASSWORD`, then
+run `moon run --force core:test -- -k test_decision_receipts_native`. Each test creates a unique
+namespace. Without a server URL, these three transaction tests skip.
+
 ## Entity Types
 
 Sibyl models 33 entity types so memory stays structured. The registry lives in `models/entities.py`

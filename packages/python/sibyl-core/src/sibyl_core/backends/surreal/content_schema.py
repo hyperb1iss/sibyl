@@ -11,6 +11,12 @@ from sibyl_core.backends.surreal.schema import (
     render_fulltext_compatible_sql,
     render_surreal_compatible_sql,
 )
+from sibyl_core.backends.surreal.schema_decisions import (
+    DECISION_PURGE_EVENT,
+    DECISION_SCHEMA,
+    DECISION_SOURCE_FENCE_BACKFILL,
+    DECISION_SOURCE_FENCE_CREATE_EVENT,
+)
 from sibyl_core.backends.surreal.schema_derivations import DERIVATION_DEFINITIONS
 from sibyl_core.backends.surreal.schema_helpers import is_missing_table_error, split_statements
 from sibyl_core.backends.surreal.schema_invariants import (
@@ -90,6 +96,9 @@ CONTENT_TABLES = (
     "dream_source_cursors",
     "memory_validation_executions",
     "memory_validation_attempts",
+    "semantic_decision_policies",
+    "semantic_decision_receipts",
+    "semantic_decision_source_fences",
     "memory_usage_events",
     "api_idempotency_records",
     "source_imports",
@@ -100,7 +109,7 @@ CONTENT_TABLES = (
     "backups",
     "reflection_supersessions",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 45
+CONTENT_SCHEMA_CURRENT_VERSION = 46
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -155,6 +164,7 @@ CONTENT_SCHEMA_DEFINITIONS = (
     + CONTENT_REFLECTION_SUPERSESSION_DEFINITIONS
     + VALIDATION_EXECUTION_SCHEMA
     + VALIDATION_DEPENDENCY_SCHEMA
+    + DECISION_SCHEMA
 )
 
 
@@ -279,6 +289,9 @@ DEFINE FIELD OVERWRITE status ON backups TYPE string DEFAULT 'pending'
 """
 
 CONTENT_PERMISSION_MIGRATION_DEFINITIONS = """
+ALTER TABLE IF EXISTS semantic_decision_policies PERMISSIONS NONE;
+ALTER TABLE IF EXISTS semantic_decision_receipts PERMISSIONS NONE;
+ALTER TABLE IF EXISTS semantic_decision_source_fences PERMISSIONS NONE;
 ALTER TABLE IF EXISTS memory_validation_executions PERMISSIONS NONE;
 ALTER TABLE IF EXISTS memory_validation_attempts PERMISSIONS NONE;
 ALTER TABLE IF EXISTS dream_source_checkpoints PERMISSIONS NONE;
@@ -1083,6 +1096,16 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             version=45,
             name="content_reflection_supersessions",
             statements=tuple(split_statements(CONTENT_REFLECTION_SUPERSESSION_DEFINITIONS)),
+        ),
+        SchemaMigration(
+            version=46,
+            name="content_semantic_decision_shadow",
+            statements=(
+                *split_statements(DECISION_SCHEMA),
+                DECISION_SOURCE_FENCE_CREATE_EVENT,
+                DECISION_PURGE_EVENT,
+                DECISION_SOURCE_FENCE_BACKFILL,
+            ),
         ),
     )
 

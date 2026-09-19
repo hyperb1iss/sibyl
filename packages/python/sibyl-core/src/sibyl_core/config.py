@@ -155,6 +155,15 @@ class CoreConfig(BaseSettings):
         description="Complete consolidation system, user, and output-schema character budget",
     )
 
+    source_support_shadow_enabled: bool = Field(
+        default=False,
+        description="Allow source-support shadow calls for explicitly enrolled cohorts",
+    )
+    decision_openrouter_api_key: SecretStr = Field(
+        default=SecretStr(""),
+        description="OpenRouter credential dedicated to the Decisions endpoint",
+    )
+
     # Anthropic configuration
     anthropic_api_key: SecretStr = Field(
         default=SecretStr(""),
