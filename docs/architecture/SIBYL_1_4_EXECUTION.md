@@ -1,6 +1,67 @@
 # Sibyl 1.4 execution receipts
 
-## Current checkpoint: September 18, 2026, screen48 executed
+## Current checkpoint: September 19, 2026, floor probe executed
+
+The no-memory headroom screen ([PR 625](https://github.com/hyperb1iss/sibyl/pull/625)) banded the 18
+remaining transfer tasks at two repetitions each: 14 saturated, 2 headroom, 2 floor. The two floor
+tasks, cdn-batch-map and tenant-download-plan, each failed one hidden case, and both cases are the
+decoded-root-routing mechanism: an invalid percent escape that `urllib.parse.unquote` leaves
+literal, and a double escape that must survive one decoding pass as a literal. Ten captured learning
+episodes of that family are in the catalog, so these two tasks were the first place a memory arm
+could show a lift the saturated 48-cell screen could not.
+
+[PR 627](https://github.com/hyperb1iss/sibyl/pull/627) added the floor probe: every arm prepared for
+a catalogued task at one checkpoint through the same adapter, inventory and summary library the
+checkpoint phase uses, then run against each other. It ran on the devbox at commit 6a0e1bcc0e3d
+against the checkpoint-one database between 05:51 and 06:12 UTC on September 19, two tasks, four
+arms, three repetitions, on Qwen coder through OpenRouter, at $2.97 total.
+
+| Task                 | native | raw_retrieval | strong_summary | no_memory |
+| -------------------- | ------ | ------------- | -------------- | --------- |
+| cdn-batch-map        | 0/2    | 2/2           | 1/3            | 3/3       |
+| tenant-download-plan | 3/3    | 2/3           | 3/3            | 1/2       |
+
+Denominators exclude three controller failures (cdn-batch-map native and raw_retrieval,
+tenant-download-plan no_memory), all code 3: the model emitted malformed tool-call JSON, the call
+was refused, and the 8000 output-token budget ran out. Pooled, the memory arms passed 11 of 16 known
+outcomes and no_memory passed 4 of 5. There is no lift signal at this size, and
+learning_benefit_established is false.
+
+The probe's value is in what the packs held, which was read before any cell ran:
+
+- The floor band was noise. cdn-batch-map failed both headroom repetitions on September 18 and
+  passed all three no-memory repetitions on September 19. Banding at two repetitions cannot separate
+  a floor task from a coin flip; five or more are needed before a task is called floor.
+- Consolidation dropped the mechanism. Of the 34 procedures promoted by the cycle, 33 are variants
+  of read every source file, run public_checks.py, probe app.py, rewrite the module, re-run. One
+  carries domain content (largest-remainder apportionment). None mentions percent escapes, one-pass
+  decoding or unquote. The native pack for either task cannot carry a rule the graph does not hold.
+- Raw retrieval did not reach the family. The raw_vector lane returned zero candidates on both
+  tasks, so the raw arm is BM25 alone. For cdn-batch-map that ranked the ten decoded-root-routing
+  episodes 53rd through 226th of 233, and whole-item packing fit two unrelated controller
+  transcripts at 70,522 tokens. For tenant-download-plan the vocabulary overlapped, the family
+  ranked 2nd through 17th, and the pack fit one unrelated episode and two of the family's.
+- The native pack caused a new failure mode. It held ten generic procedures and one raw episode from
+  augmenting-worker-matching at 76,561 tokens. In two of three cdn-batch-map cells the solver ran
+  public_checks.py once, saw it pass, and answered that the task had been completed by replacing the
+  greedy matching algorithm in matching.py, a file that does not exist in this workspace. It mistook
+  the historical controller view in the pack for its own earlier work and stopped after one tool
+  call.
+- The authored summary library did carry the rule, and strong_summary passed tenant-download-plan
+  three times, but it passed cdn-batch-map once against no_memory's three.
+
+The product findings filed from this checkpoint: procedures must retain the decision rules and the
+input that broke, not only the repair choreography; packs must not render raw controller transcripts
+in a shape the solver reads as its own history; raw captures need embeddings for the vector lane to
+return anything; and the headroom screen needs more repetitions before it names a floor. The probe
+re-runs after those land, on the same two tasks, before any further spend on the sealed study.
+
+Receipts: [retention index](/Users/bliss/dev/eval-artifacts/sibyl/screen48-probe-20260919/INDEX.md),
+[probe report](/Users/bliss/dev/eval-artifacts/sibyl/screen48-probe-20260919/probe-20260919T055119Z/probe.json),
+[pack preparation](/Users/bliss/dev/eval-artifacts/sibyl/screen48-probe-20260919/probe-20260919T055119Z/preparation.json),
+[headroom screen](/Users/bliss/dev/eval-artifacts/sibyl/screen48-headroom-20260918/headroom.json).
+
+## Earlier checkpoint: September 18, 2026, screen48 executed
 
 The screen48 harness is entirely in git, across
 [PR 612](https://github.com/hyperb1iss/sibyl/pull/612),
