@@ -2646,7 +2646,17 @@ class TestSurrealContentHelpers:
         # Raw memory recall overfetches 4x the request, so limit 50 asks for a
         # 200-row pool; an HNSW read returns at most `ef` rows, so the effort
         # has to follow the pool or the lane silently reads 40.
-        fake_client = FakeClient([_query_result([]), _raw_query_result([]), _query_result([])])
+        # Fulltext, vector, the two embedding-coverage probes an empty vector
+        # read triggers, then the lexical fallback.
+        fake_client = FakeClient(
+            [
+                _query_result([]),
+                _raw_query_result([]),
+                _raw_query_result([]),
+                _raw_query_result([]),
+                _query_result([]),
+            ]
+        )
 
         @asynccontextmanager
         async def fake_session():

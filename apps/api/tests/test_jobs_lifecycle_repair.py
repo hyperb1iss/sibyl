@@ -29,19 +29,30 @@ async def test_scheduled_repair_continues_after_org_failure(monkeypatch):
     monkeypatch.setattr(lifecycle_repair, "repair_graph_lifecycle", repair)
     raw_repair = AsyncMock(return_value=LifecycleRepairResult(checked=1, recovered=1))
     monkeypatch.setattr(lifecycle_repair, "repair_raw_source_lifecycle", raw_repair)
+    monkeypatch.setattr(
+        lifecycle_repair,
+        "repair_promoted_embeddings",
+        AsyncMock(return_value=LifecycleRepairResult()),
+    )
+    embedding_repair = AsyncMock(
+        return_value=LifecycleRepairResult(checked=2, recovered=1, failed=1)
+    )
+    monkeypatch.setattr(lifecycle_repair, "repair_raw_capture_embeddings", embedding_repair)
     result = await lifecycle_repair.repair_lifecycle_all_orgs({})
     assert result == {
         "organizations": 2,
         "failed_organizations": 1,
-        "checked": 5,
-        "recovered": 4,
+        "checked": 9,
+        "recovered": 6,
         "pending": 1,
-        "failed": 0,
+        "failed": 2,
     }
     repair.assert_awaited_once_with(runtime)
     assert entered == ["a", "b"]
     assert closed == ["b"]
     assert raw_repair.await_count == 2
+    assert embedding_repair.await_count == 2
+    assert {call.args for call in embedding_repair.await_args_list} == {("a",), ("b",)}
 
 
 def test_repair_uses_shared_local_and_redis_schedule():

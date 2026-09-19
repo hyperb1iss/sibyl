@@ -44,6 +44,9 @@ _EMBEDDED_SURREAL_SCHEMES = ("memory://", "surrealkv://", "rocksdb://", "file://
 
 log = structlog.get_logger()
 
+# Reported by the raw_vector lane when the scope has captures but no vectors.
+RAW_VECTOR_EMBEDDINGS_MISSING = "RawEmbeddingsMissing"
+
 _RAW_MEMORY_RECALL_FIELDS = ", ".join(
     (
         "id AS record_id",
@@ -342,6 +345,48 @@ async def _recall_raw_memory_vector(
     )
 
 
+async def _raw_memory_scope_lacks_embeddings(
+    client: SurrealContentClient,
+    *,
+    where_clause: str,
+    params: Mapping[str, object],
+    organization_id: str,
+) -> bool:
+    """True when the scope holds captures but none of them carries a vector.
+
+    A KNN read over such a scope returns nothing and looks identical to a scope
+    with no matches, so the raw arm would degrade to BM25 alone without anyone
+    noticing. Captures restored from an archive, or written while no embedding
+    provider was configured, land here until the embedding repair runs.
+    """
+
+    async def any_row(extra_clause: str) -> bool:
+        rows = await with_timeout(
+            content_client.select_many_raw(
+                client,
+                f"SELECT uuid FROM raw_captures WHERE {where_clause}{extra_clause} LIMIT 1;",
+                **params,
+            ),
+            timeout_seconds=content_client.DIRECT_SEARCH_QUERY_TIMEOUT_SECONDS,
+            operation_name="surreal_raw_memory_embedding_coverage",
+        )
+        return bool(rows)
+
+    try:
+        if await any_row(" AND embedding != NONE"):
+            return False
+        return await any_row("")
+    except Exception as exc:
+        # The probe is diagnostic only; a failed probe must not turn an empty
+        # vector read into a failed recall.
+        log.warning(
+            "raw_memory_embedding_coverage_probe_failed",
+            organization_id=organization_id,
+            error_type=type(exc).__name__,
+        )
+        return False
+
+
 async def raw_memory_query_embedding(query: str) -> list[float] | None:
     provider: EmbeddingProvider | None = None
     try:
@@ -610,7 +655,25 @@ async def _recall_raw_memory_result(
                     CandidateSourceResult.failed("raw_vector", type(exc).__name__)
                 )
             else:
-                source_results.append(CandidateSourceResult.success("raw_vector", vector_memories))
+                if not vector_memories and await _raw_memory_scope_lacks_embeddings(
+                    client,
+                    where_clause=where_clause,
+                    params=params,
+                    organization_id=organization_id,
+                ):
+                    log.warning(
+                        "raw_memory_vector_recall_unembedded_scope",
+                        organization_id=organization_id,
+                        memory_scope=normalized_scope.value,
+                        has_scope_key=scope_key is not None,
+                    )
+                    source_results.append(
+                        CandidateSourceResult.failed("raw_vector", RAW_VECTOR_EMBEDDINGS_MISSING)
+                    )
+                else:
+                    source_results.append(
+                        CandidateSourceResult.success("raw_vector", vector_memories)
+                    )
         from sibyl_core.services.memory_source_validation import SourceReadAuthority
 
         authority = source_authority or SourceReadAuthority(
