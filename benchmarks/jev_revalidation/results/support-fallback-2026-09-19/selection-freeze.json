@@ -1,0 +1,8 @@
+{
+  "selection_file_sha256": "62f7559ebc56f15d8dec2e647ffef705ac8f548c7d2f62d2d77c5ec1d37fe257",
+  "selection_sha256": "6a34a79207ca00fc930bb26acbdf93c5d0a586d10ffd80c4262d07421c533a12",
+  "threshold": 0.99,
+  "policy_sha256": "b482f63ea506521c585e0ec6b07f595d45fa9207cd35b574308d1839c749fbb8",
+  "analysis_sha256": "a380521b6d6877ccadb8a3c2e35ad17282535146a87aee7c3facc3677f1064b7",
+  "heldout_cases_sha256": "3c0fa1d0050751f8ea96a84f38e8d5aa5daaf04527bbe3d3c6006430957f7b08"
+}

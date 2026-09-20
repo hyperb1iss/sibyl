@@ -1,0 +1,288 @@
+import copy
+import hashlib
+import json
+import math
+import random
+import re
+from collections import Counter, defaultdict
+from decimal import Decimal
+from pathlib import Path
+
+def unique(pairs):
+    d = {}
+    for k,v in pairs:
+        assert k not in d, ('duplicate_json_key',k)
+        d[k] = v
+    return d
+def load(p):
+    return json.loads(p.read_text(), object_pairs_hook=unique, parse_constant=lambda v: (_ for _ in ()).throw(ValueError(v)))
+def canonical(v):
+    return json.dumps(v,sort_keys=True,separators=(',', ':'),ensure_ascii=False,allow_nan=False)
+def sha(v):
+    return hashlib.sha256(canonical(v).encode()).hexdigest()
+
+def audit_run(base, fixture):
+    cases = load(fixture)
+    by_id = {c['id']:c for c in cases}
+    manifest = load(base/'manifest.json')
+    schedule = load(base/'schedule.json')
+    calls = load(base/'calls.json')
+    predictions = load(base/'predictions.json')
+    assert hashlib.sha256(fixture.read_bytes()).hexdigest() == manifest['cases_sha256']
+    assert manifest['case_count'] == len(cases)
+    assert manifest['repeats'] == 2
+    assert manifest['assertions_per_repeat_per_arm'] == sum(len(c['expected']) for c in cases) 
+    assert manifest['scheduled_calls'] == len(schedule) == len(calls)
+    assert sha(schedule) == manifest['schedule_sha256']
+    sc = {r['key']:r for r in schedule}
+    ca = {r['key']:r for r in calls}
+    assert len(sc) == len(schedule) and len(ca) == len(calls) and set(sc) == set(ca)
+    assert {p.stem for p in (base/'receipts').glob('*.json')} == set(sc)
+    assert {p.stem for p in (base/'requests').glob('*.json')} == set(sc)
+    # Reconstruct the seeded arm-block schedule independently from the frozen fixture.
+    rng = random.Random(manifest['seed'])
+    pairs = [(i,r) for i in range(len(cases)) for r in range(manifest['repeats'])]
+    rng.shuffle(pairs)
+    expected_order = []
+    for index,repeat in pairs:
+        arms=['grouped','singleton']; rng.shuffle(arms)
+        for arm in arms:
+            count = 1 if arm == 'grouped' else len(cases[index]['expected'])
+            expected_order.extend(f'case-{index}-repeat-{repeat}-{arm}-{offset}' for offset in range(count))
+    assert [r['key'] for r in schedule] == expected_order
+    requests={}
+    observations={}
+    rows={}
+    confidence_errors=[]
+    for key,scheduled in sc.items():
+        receipt=load(base/'receipts'/f'{key}.json')
+        assert set(receipt)=={'request','observation'}
+        request=receipt['request']; observation=receipt['observation']; call=ca[key]
+        assert request == load(base/'requests'/f'{key}.json')
+        digest=sha(request)
+        assert digest==scheduled['request_digest']==call['request_digest']==observation['request_digest']
+        semantic=copy.deepcopy(request)
+        del semantic['request_id']; del semantic['operation_id']
+        for source in semantic['source_refs']:
+            assert source['incarnation'] == 'synthetic-first'
+            del source['revision']
+        assert sha(semantic)==observation['semantic_input_sha256']==call['semantic_input_sha256']
+        for field,value in observation.items():
+            assert call[field]==value, ('observation_call_mismatch',key,field)
+        for field in ('arm','case_id','repeat','question_ids','request_digest'):
+            assert call[field]==scheduled[field]
+        assert request['requested_model_id']==manifest['route']['requested_model_id']
+        assert request['provider_route_id']==manifest['route']['route_id']
+        assert request['route_policy_sha256']==manifest['route_policy_sha256']
+        assert observation['resolved_model_id']==manifest['route']['resolved_model_id']
+        assert observation['observed_provider']==manifest['route']['expected_provider']
+        assert observation['attempt_count']==1 and call['attempt_count_known'] is True
+        assert observation['usage_status']=='observed'
+        for field in ('input_tokens','output_tokens'):
+            assert type(observation[field]) is int and observation[field]>=0
+        assert type(observation['observed_cost_usd']) in (int,float) and observation['observed_cost_usd']>=0
+        assert math.isfinite(observation['elapsed_ms']) and observation['elapsed_ms']>=0
+        case=by_id[scheduled['case_id']]
+        qids=[q['question_id'] for q in request['questions']]
+        assert qids==scheduled['question_ids'] and len(set(qids))==len(qids)
+        assert set(qids)=={s['claim_path'] for s in request['subject_refs']}
+        if scheduled['arm']=='grouped': assert set(qids)==set(case['expected'])
+        else: assert len(qids)==1 and qids[0] in case['expected']
+        state=json.loads(request['state'])
+        assert set(state['sources'])=={s['id'] for s in case['sources']}
+        for source in case['sources']:
+            actual=state['sources'][source['id']]
+            assert actual['text']==source['text'] and actual['provenance']==source['provenance']
+            assert actual['sha256']==hashlib.sha256(source['text'].encode()).hexdigest()
+        assert state['assertions']=={'/content':{'statement':case['content']},**{f'/claim_records/{i}/content':{'statement':t} for i,t in enumerate(case['claims'])}}
+        answers={a['question_id']:a for a in observation['answers']}
+        assert len(answers)==len(observation['answers']) and set(answers)==set(qids)
+        assert observation['execution_status']=='completed'
+        for question in request['questions']:
+            answer=answers[question['question_id']]
+            labels={option['label'] for option in question['options']}
+            assert answer['primitive']=='choice' and answer['value'] in labels
+            if answer['probabilities'] is not None:
+                probabilities=answer['probabilities']
+                assert len(probabilities)==len(labels) and {p['label'] for p in probabilities}==labels
+                assert all(type(p['probability']) in (int,float) and 0<=p['probability']<=1 for p in probabilities)
+                assert math.isclose(sum(p['probability'] for p in probabilities),1,abs_tol=1e-6,rel_tol=0)
+            index=(scheduled['arm'],scheduled['repeat'],scheduled['case_id'],question['question_id'])
+            assert index not in rows
+            gold=case['expected'][question['question_id']]
+            rows[index]={'arm':scheduled['arm'],'repeat':scheduled['repeat'],'case_id':case['id'],'question_id':question['question_id'],
+                         'expected':gold,'prediction':answer['value'],'status':observation['execution_status'],'call':key,
+                         'category':case['category'],'multi':bool(case['claims'])}
+            if answer['value']=='supported' and gold!='supported':
+                confidence_errors.append({**rows[index],'provider_confidence':answer['provider_confidence'],'probabilities':answer['probabilities']})
+        requests[key]=request;observations[key]=observation
+    expected_grid={(arm,repeat,c['id'],q) for arm in ('grouped','singleton') for repeat in range(2) for c in cases for q in c['expected']}
+    assert set(rows)==expected_grid and len(rows)==sum(len(c['expected']) for c in cases)*4
+    assert len(predictions)==len(rows)
+    seen=set()
+    for prediction in predictions:
+        index=tuple(prediction[k] for k in ('arm','repeat','case_id','question_id'))
+        assert index not in seen;seen.add(index)
+        assert prediction=={k:v for k,v in rows[index].items() if k!='multi'}
+    assert seen==expected_grid
+
+    return {"cases":cases,"manifest":manifest,"calls":calls,"schedule":schedule,"rows":rows,"requests":requests,"observations":observations,"false_support":confidence_errors}
+
+ROOT=Path('/tmp/jev-support-fallback-20260919')
+REPO=Path('/Users/bliss/dev/worktrees/sibyl/nova/jev-support-fallback')
+heldout=audit_run(ROOT/'raw', REPO/'benchmarks/jev_revalidation/support_fallback_holdout.json')
+calibration=audit_run(Path('/tmp/jev-support-qualification-20260919-audit/live'), REPO/'benchmarks/jev_revalidation/support_cases.json')
+# Independently construct the literal-token guard, without importing the policy.
+number_words='zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty thirty forty fifty sixty seventy eighty ninety hundred thousand million billion trillion dozen half quarter double triple pair couple once twice'.split()
+numeric=re.compile(r'\d|\b(?:'+ '|'.join(number_words)+r')\b', re.IGNORECASE)
+def number_matches(case):
+    return sorted({m.group(0).lower() for text in [case['content'],*case['claims'],*(s['text'] for s in case['sources'])] for m in numeric.finditer(text)})
+def candidates(data):
+    reduced=[]
+    for arm in ('grouped','singleton'):
+        for case in data['cases']:
+            for repeat in range(2):
+                matching=[s for s in data['schedule'] if (s['arm'],s['case_id'],s['repeat'])==(arm,case['id'],repeat)]
+                observed=[data['observations'][s['key']] for s in matching]
+                answers=[a for o in observed for a in o['answers']]
+                assert {a['question_id'] for a in answers}==set(case['expected']) and len(answers)==len(case['expected'])
+                confidence=[a['provider_confidence'] for a in answers]
+                complete=all(o['execution_status']=='completed' for o in observed)
+                known=complete and all(type(c) in (int,float) and math.isfinite(c) and 0<=c<=1 for c in confidence)
+                reduced.append({'case_id':case['id'],'repeat':repeat,'arm':arm,
+                                'gold_supported':all(v=='supported' for v in case['expected'].values()),
+                                'assertion_count':len(case['expected']),'numeric_text':bool(number_matches(case)),
+                                'complete':complete,'all_supported':complete and all(a['value']=='supported' for a in answers),
+                                'confidence':min(confidence) if known else None})
+    return reduced
+
+def decision(row,threshold,guard=True):
+    if threshold is None:return 'fallback','reject_all'
+    if not row['complete']:return 'fallback','incomplete'
+    if not row['all_supported']:return 'fallback','unsupported'
+    if row['confidence'] is None:return 'fallback','missing_confidence'
+    if guard and row['numeric_text']:return 'fallback','numeric_text'
+    if row['confidence']<threshold:return 'fallback','low_confidence'
+    return 'bypass','qualified'
+calrows=candidates(calibration)
+heldrows=candidates(heldout)
+calgrouped=[r for r in calrows if r['arm']=='grouped']
+index=defaultdict(list)
+for row in calgrouped:index[row['case_id']].append(row)
+assert len(index)==48 and all(len(v)==2 and {r['repeat'] for r in v}=={0,1} for v in index.values())
+threshold_table=[]
+for step in range(101):
+    threshold=step/100
+    safe_both=sum(group[0]['gold_supported'] and all(decision(row,threshold)[0]=='bypass' for row in group) for group in index.values())
+    unsafe_any=sum(not group[0]['gold_supported'] and any(decision(row,threshold)[0]=='bypass' for row in group) for group in index.values())
+    threshold_table.append({'threshold':threshold,'safe_candidates_bypassed_both':safe_both,'unsafe_candidates_bypassed_any':unsafe_any})
+eligible=[r for r in threshold_table if r['unsafe_candidates_bypassed_any']==0 and r['safe_candidates_bypassed_both']>0]
+best=max(eligible,key=lambda r:(r['safe_candidates_bypassed_both'],r['threshold'])) if eligible else None
+selection=load(ROOT/'selection.json');freeze=load(ROOT/'selection-freeze.json')
+assert calrows==selection['candidate_rows']
+assert threshold_table==selection['threshold_table']
+assert best['threshold']==selection['threshold']==freeze['threshold']==0.99
+assert sha({k:v for k,v in selection.items() if k!='selection_sha256'})==selection['selection_sha256']==freeze['selection_sha256']
+assert hashlib.sha256((ROOT/'selection.json').read_bytes()).hexdigest()==freeze['selection_file_sha256']
+assert hashlib.sha256((REPO/'benchmarks/jev_revalidation/support_fallback_policy.py').read_bytes()).hexdigest()==freeze['policy_sha256']==selection['policy_sha256']
+assert heldout['manifest']['cases_sha256']==selection['holdout_cases_sha256']==freeze['heldout_cases_sha256']
+assert calibration['manifest']['route_policy_sha256']==heldout['manifest']['route_policy_sha256']
+assert calibration['manifest']['program_hashes']==heldout['manifest']['program_hashes']
+assert {c['id'] for c in calibration['cases']}.isdisjoint({c['id'] for c in heldout['cases']})
+assert heldout['manifest']['scheduled_calls']==384 and len(heldout['rows'])==512
+
+
+def metrics(rows):
+    bypass=[r for r in rows if r['action']=='bypass']
+    safe=[r for r in rows if r['gold_supported']]
+    false=[r for r in bypass if not r['gold_supported']]
+    unsafe=len(rows)-len(safe)
+    return {'candidate_evaluations':len(rows),'safe_evaluations':len(safe),'unsafe_evaluations':unsafe,
+            'bypassed':len(bypass),'fallback':len(rows)-len(bypass),'false_bypass':len(false),
+            'false_bypass_rate':len(false)/unsafe if unsafe else None,
+            'safe_bypass_coverage':(len(bypass)-len(false))/len(safe) if safe else None,
+            'bypass_precision':1-len(false)/len(bypass) if bypass else None,
+            'fallback_reasons':dict(Counter(r['reason'] for r in rows if r['action']=='fallback'))}
+def distinct(rows):
+    groups=defaultdict(list)
+    for row in rows:groups[row['case_id']].append(row)
+    assert all(len(v)==2 and {r['repeat'] for r in v}=={0,1} for v in groups.values())
+    return {'cases':len(groups),'safe_cases':sum(g[0]['gold_supported'] for g in groups.values()),
+            'unsafe_cases':sum(not g[0]['gold_supported'] for g in groups.values()),
+            'safe_bypass_both':sum(g[0]['gold_supported'] and all(r['action']=='bypass' for r in g) for g in groups.values()),
+            'safe_bypass_any':sum(g[0]['gold_supported'] and any(r['action']=='bypass' for r in g) for g in groups.values()),
+            'false_bypass_any':sum(not g[0]['gold_supported'] and any(r['action']=='bypass' for r in g) for g in groups.values()),
+            'false_bypass_both':sum(not g[0]['gold_supported'] and all(r['action']=='bypass' for r in g) for g in groups.values())}
+
+def usage(data,arm=None):
+    selected=[o for k,o in data['observations'].items() if arm is None or next(s['arm'] for s in data['schedule'] if s['key']==k)==arm]
+    return {'calls':len(selected),'physical_attempts':sum(o['attempt_count'] for o in selected),
+            'input_tokens':sum(o['input_tokens'] for o in selected),'output_tokens':sum(o['output_tokens'] for o in selected),
+            'observed_cost_usd':str(sum(Decimal(str(o['observed_cost_usd'])) for o in selected)),
+            'unknown_usage_calls':sum(any(o[k] is None for k in ('input_tokens','output_tokens','observed_cost_usd')) for o in selected)}
+
+methods={};unsafe_examples={}
+for arm in ('grouped','singleton'):
+    for guard in (True,False):
+        name=arm+('_guarded' if guard else '_confidence_only')
+        routed=[]
+        for row in heldrows:
+            if row['arm']==arm:
+                action,reason=decision(row,0.99,guard)
+                routed.append({**row,'action':action,'reason':reason})
+        multi=[r for r in routed if r['assertion_count']>1]
+        methods[name]={'pooled':metrics(routed),'distinct':distinct(routed),
+                       'repeats':{str(repeat):metrics([r for r in routed if r['repeat']==repeat]) for repeat in range(2)},
+                       'multi':metrics(multi),'multi_distinct':distinct(multi),
+                       'multi_repeats':{str(repeat):metrics([r for r in multi if r['repeat']==repeat]) for repeat in range(2)}}
+        unsafe_examples[name]=[]
+        for row in routed:
+            if row['action']=='bypass' and not row['gold_supported']:
+                case=next(c for c in heldout['cases'] if c['id']==row['case_id'])
+                unsafe_examples[name].append({**row,'content':case['content'],'claims':case['claims'],
+                                              'expected':case['expected'],'category':case['category'],
+                                              'numeric_matches':number_matches(case)})
+
+assertion_stats={}
+for arm in ('grouped','singleton'):
+    rows=[r for r in heldout['rows'].values() if r['arm']==arm]
+    assertion_stats[arm]={'assertions':len(rows),'correct':sum(r['prediction']==r['expected'] for r in rows),
+                          'false_support':sum(r['prediction']=='supported' and r['expected']!='supported' for r in rows),
+                          'confusion':{gold:dict(Counter(r['prediction'] for r in rows if r['expected']==gold)) for gold in ('supported','contradicted','insufficient','ambiguous')}}
+lexical=[{'case_id':c['id'],'gold_supported':all(v=='supported' for v in c['expected'].values()),'category':c['category'],
+          'matched':number_matches(c)} for c in heldout['cases'] if number_matches(c)]
+# These are policy capability probes, not model calls or new accuracy measurements.
+lexical_probes={s:bool(numeric.search(s)) for s in ('Both applicants qualify.','A majority of voters agreed.','No more than a handful attended.','III medals were awarded.','Dozens of guests arrived.','Half the team attended.','The one-piece garment was folded.','The dossier discusses one example.')}
+report={'verdict':'PASS for receipt integrity and independent policy reconstruction; safety findings below',
+        'checks':{'heldout_receipts':len(heldout['observations']),'calibration_receipts':len(calibration['observations']),
+                  'heldout_assertions':len(heldout['rows']),'request_and_semantic_digests_verified':True,
+                  'all_observation_fields_match_calls':True,'all_prediction_rows_reconstructed':True,
+                  'schedules_seeded_and_complete':True,'evaluation_json_read':False,'summary_json_read':False,
+                  'calibration_candidate_rows_equal_frozen_selection':True,'all_101_threshold_rows_match':True},
+        'calibration_selection':{**best,'distinct_safe_calibration_candidates':sum(g[0]['gold_supported'] for g in index.values()),
+                                'guard_eligible_safe_ids':[cid for cid,g in index.items() if g[0]['gold_supported'] and all(decision(r,0.99)[0]=='bypass' for r in g)],
+                                'selection_sha256':selection['selection_sha256'],'holdout_sha256':selection['holdout_cases_sha256']},
+        'fixture':{'cases':len(heldout['cases']),'assertions_per_repeat':sum(len(c['expected']) for c in heldout['cases']),
+                   'safe_cases':sum(all(v=='supported' for v in c['expected'].values()) for c in heldout['cases']),
+                   'safe_multi_cases':sum(bool(c['claims']) and all(v=='supported' for v in c['expected'].values()) for c in heldout['cases']),
+                   'unsafe_multi_cases':sum(bool(c['claims']) and any(v!='supported' for v in c['expected'].values()) for c in heldout['cases'])},
+        'methods':methods,'unsafe_bypass_examples':unsafe_examples,'assertion_stats':assertion_stats,
+        'false_support_assertions':heldout['false_support'],
+        'unthresholded_all_supported':{arm:{'safe_pass':sum(r['arm']==arm and r['gold_supported'] and r['all_supported'] for r in heldrows),
+                                            'unsafe_pass':sum(r['arm']==arm and not r['gold_supported'] and r['all_supported'] for r in heldrows)} for arm in ('grouped','singleton')},
+        'costs':{arm:usage(heldout,arm) for arm in ('grouped','singleton')},'total_usage':usage(heldout),
+        'numeric_guard_matches':lexical,'lexical_capability_probes':lexical_probes,
+        'limits':['The inherited raw summary statement that all multi-assertion candidates are mixed is stale for this heldout fixture; 16 fully supported multi-assertion cases exist and are measured here.',
+                  'The threshold was chosen on prior calibration before heldout labels/results; this audit does not refit it.',
+                  'Only two distinct safe calibration candidates bypassed on both repeats at the selected threshold.',
+                  'The unthresholded all-assertions-supported gate already rejects every unsafe heldout candidate. This heldout therefore does not demonstrate incremental safety from the confidence threshold or numeric guard.',
+                  'The literal token guard is not a detector of all arithmetic or logical inference: it misses unlisted quantity words, plurals and Roman numerals and can defer incidental numeric wording.',
+                  'Bypass measures source-support fallback routing only, not all-critic coverage or publication authorization.',
+                  'No generative fallback was run: its cost, quality and end-to-end savings are unmeasured.',
+                  'Two repeats share the same 64 cases; candidate evaluations are not independent corpus samples.',
+                  'The independent annotation disagreement for fh-042 is contradicted versus insufficient; either gold keeps this candidate unsafe, so the routing safety classification is unchanged.'],
+        'artifact_sha256':{name:hashlib.sha256((ROOT/'raw'/name).read_bytes()).hexdigest() for name in ('manifest.json','schedule.json','calls.json','predictions.json','completion.json')},
+        'audit_script_sha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
+(ROOT/'live-audit.json').write_text(json.dumps(report,indent=2,sort_keys=True)+'\n')
+print(json.dumps({'checks':report['checks'],'selection':report['calibration_selection'],'methods':methods,'unsafe_examples':unsafe_examples,
+                  'assertions':assertion_stats,'costs':report['costs'],'total':report['total_usage'],'numeric_candidates':len(lexical)},indent=2))

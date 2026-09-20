@@ -1,0 +1,15 @@
+{
+  "cases": 64,
+  "assertions": 128,
+  "differences": [
+    {
+      "id": "fh-042",
+      "path": "/content",
+      "gold": "contradicted",
+      "blind": "insufficient"
+    }
+  ],
+  "candidate_supported_disagreements": [],
+  "annotation_sha256": "2f1ca49ec85625425cb4c01203b85fd6817c6e8337c8eff584416e0389d014af",
+  "independence": "native same-family, blind to gold/rationale/categories/results; label comparison after threshold selection"
+}

@@ -1,0 +1,12 @@
+{
+  "hashes": {
+    "benchmarks/jev_revalidation/support_fallback_policy.py": "e8004bb95e811cd549841ec879a73fe96c4c731a4a6acc84a6130a5948d0f653",
+    "benchmarks/jev_revalidation/support_fallback_holdout.json": "3c0fa1d0050751f8ea96a84f38e8d5aa5daaf04527bbe3d3c6006430957f7b08",
+    "benchmarks/jev_revalidation/support_inputs.py": "014b9314bb2106070df2d3be6d1a457930eca931487758d0c10370e3af527c67",
+    "packages/python/sibyl-core/src/sibyl_core/tasks/source_support.py": "574eea72b226cdd4f62569cd9e4ae4b727055ea6f27cb6bd13dfcd324a8dfb41"
+  },
+  "calibration": "PR633 grouped receipts only; two repeats; observed before this experiment",
+  "selection": "zero unsafe candidate bypasses on either repeat, maximize distinct safe candidates bypassed both repeats, highest tied threshold on0.00..1.00 grid; rejectall ifnone",
+  "heldout": "64 fresh authored candidates; labels not opened by policy author; guarded grouped primary, same threshold confidence-only ablation and singleton diagnostics",
+  "activation": false
+}

@@ -1,0 +1,516 @@
+{
+  "annotations": [
+    {
+      "id": "fh-008",
+      "expected": {
+        "/content": "supported",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "supported"
+      },
+      "rationale": "The content preserves attribution of the subjective assessment to Pema; participant status and interviewer non-evaluation are explicit."
+    },
+    {
+      "id": "fh-045",
+      "expected": {
+        "/content": "insufficient"
+      },
+      "rationale": "The training command is not evidence of roof material."
+    },
+    {
+      "id": "fh-049",
+      "expected": {
+        "/content": "contradicted"
+      },
+      "rationale": "The investigation expressly rules out the winch, which was disconnected and started after the tear."
+    },
+    {
+      "id": "fh-038",
+      "expected": {
+        "/content": "insufficient",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "contradicted"
+      },
+      "rationale": "A still-air test cannot establish every wind condition. The tested setting is supported; a recorded windy trial is explicitly absent."
+    },
+    {
+      "id": "fh-004",
+      "expected": {
+        "/content": "supported",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "supported"
+      },
+      "rationale": "Nine plus five plus four equals eighteen with no further adjustments; the middle-round score and absence of bonuses are explicit."
+    },
+    {
+      "id": "fh-047",
+      "expected": {
+        "/content": "contradicted"
+      },
+      "rationale": "Permanently attached cuffs contradict removable cuffs in the same approved order."
+    },
+    {
+      "id": "fh-034",
+      "expected": {
+        "/content": "ambiguous",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "insufficient"
+      },
+      "rationale": "Active assays conflict on the same entire fiber with no precedence. Elm's attributed classification is supported; pigment use is absent."
+    },
+    {
+      "id": "fh-051",
+      "expected": {
+        "/content": "ambiguous"
+      },
+      "rationale": "Equally active inspections conflict over whether the same entire glaze layer is original or replaced."
+    },
+    {
+      "id": "fh-010",
+      "expected": {
+        "/content": "supported",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "supported"
+      },
+      "rationale": "The inspection supports the undamaged hem and velvet fabric; the conflicting command is explicitly an instruction example, not evidence."
+    },
+    {
+      "id": "fh-057",
+      "expected": {
+        "/content": "insufficient"
+      },
+      "rationale": "Receipt of a latched case does not establish its unexamined contents or working condition."
+    },
+    {
+      "id": "fh-039",
+      "expected": {
+        "/content": "ambiguous",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "insufficient"
+      },
+      "rationale": "Both people qualify as the unresolved officer reference. Their shared role description is supported; a mayoral gift is absent."
+    },
+    {
+      "id": "fh-037",
+      "expected": {
+        "/content": "contradicted",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "insufficient"
+      },
+      "rationale": "The source explicitly distinguishes rush seat from oak back. Oak back is supported; maker status is absent."
+    },
+    {
+      "id": "fh-011",
+      "expected": {
+        "/content": "supported",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "supported"
+      },
+      "rationale": "The completed dispatches support the full amber-bicycle statement and both separately scoped indigo-bicycle claims."
+    },
+    {
+      "id": "fh-058",
+      "expected": {
+        "/content": "ambiguous"
+      },
+      "rationale": "The witness reports conflict about gloves versus bare hands throughout the same uninterrupted application."
+    },
+    {
+      "id": "fh-052",
+      "expected": {
+        "/content": "contradicted"
+      },
+      "rationale": "The approved replacement explicitly rejects the wolf interpretation and identifies a jackal."
+    },
+    {
+      "id": "fh-061",
+      "expected": {
+        "/content": "insufficient"
+      },
+      "rationale": "Audible humming supplies no evidence for the asserted relative temperature."
+    },
+    {
+      "id": "fh-056",
+      "expected": {
+        "/content": "ambiguous"
+      },
+      "rationale": "Unresolved whole-plant reports conflict about mutually exclusive blossom colors at the same inspection."
+    },
+    {
+      "id": "fh-042",
+      "expected": {
+        "/content": "insufficient"
+      },
+      "rationale": "The program attributes grinding to the miller, but never expressly excludes the baker also participating. I use insufficient rather than contradicted without an exhaustive or exclusive presenter statement; this is a contested distinction."
+    },
+    {
+      "id": "fh-041",
+      "expected": {
+        "/content": "insufficient"
+      },
+      "rationale": "Temporal association without causal assessment does not establish template causation."
+    },
+    {
+      "id": "fh-022",
+      "expected": {
+        "/content": "supported"
+      },
+      "rationale": "The assertion preserves the specimen identity for the recorded waxy leaves."
+    },
+    {
+      "id": "fh-031",
+      "expected": {
+        "/content": "insufficient",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "contradicted"
+      },
+      "rationale": "Concurrent changes and subsequent sales do not establish playlist causation. Extended hours are explicit and unchanged hours are contradicted."
+    },
+    {
+      "id": "fh-043",
+      "expected": {
+        "/content": "ambiguous"
+      },
+      "rationale": "Equally active records identify incompatible sole recipients for the same single transfer without resolution."
+    },
+    {
+      "id": "fh-032",
+      "expected": {
+        "/content": "contradicted",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "insufficient"
+      },
+      "rationale": "The guide explicitly assigns a different noninterchangeable herb to lentil stew. Parsley for bean stew is supported; pot material is absent."
+    },
+    {
+      "id": "fh-046",
+      "expected": {
+        "/content": "contradicted"
+      },
+      "rationale": "The label assigns amber to the amulet and carnelian to a distinct bead, contradicting the swapped material attribution."
+    },
+    {
+      "id": "fh-033",
+      "expected": {
+        "/content": "insufficient",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "supported"
+      },
+      "rationale": "A fictional character line supplies no evidence of the actor owning property. The fictional role and actual script quotation are supported."
+    },
+    {
+      "id": "fh-062",
+      "expected": {
+        "/content": "ambiguous"
+      },
+      "rationale": "The wooden-piece reference has two possible antecedents and does not identify the lectern."
+    },
+    {
+      "id": "fh-048",
+      "expected": {
+        "/content": "ambiguous"
+      },
+      "rationale": "The writer explicitly leaves the relevant sense of dry unresolved, so low sweetness cannot be selected determinately."
+    },
+    {
+      "id": "fh-059",
+      "expected": {
+        "/content": "contradicted"
+      },
+      "rationale": "The rule explicitly denies sufficiency of an invitation alone and requires an escort."
+    },
+    {
+      "id": "fh-025",
+      "expected": {
+        "/content": "contradicted",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "contradicted"
+      },
+      "rationale": "Four tickets at seven credits total twenty-eight, contradicting twenty-seven; morning travel is explicit and the booking fee is expressly absent."
+    },
+    {
+      "id": "fh-050",
+      "expected": {
+        "/content": "insufficient"
+      },
+      "rationale": "Successful bonding on dry wood does not establish untested wet-metal performance."
+    },
+    {
+      "id": "fh-012",
+      "expected": {
+        "/content": "supported",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "supported"
+      },
+      "rationale": "The complete declaration explicitly excludes dairy and stock and includes lentils in the served batch."
+    },
+    {
+      "id": "fh-017",
+      "expected": {
+        "/content": "supported"
+      },
+      "rationale": "The photograph and caption identify the asserted location at the asserted unveiling."
+    },
+    {
+      "id": "fh-026",
+      "expected": {
+        "/content": "contradicted",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "insufficient"
+      },
+      "rationale": "Five packets of six with no loose masks total thirty, contradicting thirty-two; workshop marking is explicit and manufacturing town is absent."
+    },
+    {
+      "id": "fh-055",
+      "expected": {
+        "/content": "contradicted"
+      },
+      "rationale": "The rule explicitly prohibits visiting artisans from operating the loom."
+    },
+    {
+      "id": "fh-044",
+      "expected": {
+        "/content": "insufficient"
+      },
+      "rationale": "A discussed proposal without approval or completion evidence does not establish an installed skylight."
+    },
+    {
+      "id": "fh-019",
+      "expected": {
+        "/content": "supported"
+      },
+      "rationale": "The assertion preserves the polishing-area condition and does not transfer the welding requirement."
+    },
+    {
+      "id": "fh-060",
+      "expected": {
+        "/content": "ambiguous"
+      },
+      "rationale": "Equally current catalogs conflict about exclusive paint medium for the same accession item."
+    },
+    {
+      "id": "fh-064",
+      "expected": {
+        "/content": "ambiguous"
+      },
+      "rationale": "Unamended records conflict over the presence of the bow in the same package at the same handover moment."
+    },
+    {
+      "id": "fh-021",
+      "expected": {
+        "/content": "supported"
+      },
+      "rationale": "The checklist explicitly records the asserted old-to-new heading change."
+    },
+    {
+      "id": "fh-013",
+      "expected": {
+        "/content": "supported",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "supported"
+      },
+      "rationale": "The report explicitly describes the crane, green wax, and absence of recorded inscription text."
+    },
+    {
+      "id": "fh-036",
+      "expected": {
+        "/content": "insufficient",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "contradicted"
+      },
+      "rationale": "The sealed unexamined interior cannot establish a parchment map. The intact cord is supported; opening the tube is expressly denied."
+    },
+    {
+      "id": "fh-018",
+      "expected": {
+        "/content": "supported"
+      },
+      "rationale": "The statement accurately attributes a personal route preference without asserting objective safety."
+    },
+    {
+      "id": "fh-014",
+      "expected": {
+        "/content": "supported",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "supported"
+      },
+      "rationale": "The content attributes a controlled, recipe-limited causal finding to its report; fixed temperature and limited scope are also explicit."
+    },
+    {
+      "id": "fh-005",
+      "expected": {
+        "/content": "supported",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "supported"
+      },
+      "rationale": "Removing three three-meter lengths from fourteen leaves five; the removed total is nine and the continuous remainder is explicit."
+    },
+    {
+      "id": "fh-063",
+      "expected": {
+        "/content": "contradicted"
+      },
+      "rationale": "The source expressly identifies high tide as impassable, contradicting the claimed high-tide access."
+    },
+    {
+      "id": "fh-029",
+      "expected": {
+        "/content": "contradicted",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "contradicted"
+      },
+      "rationale": "Tavi is expressly excluded from the complete admitted roster, contradicting both admission claims; purple walls are explicit."
+    },
+    {
+      "id": "fh-054",
+      "expected": {
+        "/content": "insufficient"
+      },
+      "rationale": "The diary provides no construction-date evidence for the asserted jubilee."
+    },
+    {
+      "id": "fh-030",
+      "expected": {
+        "/content": "insufficient",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "contradicted"
+      },
+      "rationale": "A nonrandom volunteer sample cannot establish an exact preference fraction for all customers. The sample count is explicit and exhaustive customer surveying is excluded."
+    },
+    {
+      "id": "fh-020",
+      "expected": {
+        "/content": "supported"
+      },
+      "rationale": "The assertion accurately attributes the release location to the rescue log."
+    },
+    {
+      "id": "fh-023",
+      "expected": {
+        "/content": "supported"
+      },
+      "rationale": "The screening record expressly establishes continuous screening without intermission."
+    },
+    {
+      "id": "fh-040",
+      "expected": {
+        "/content": "contradicted",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "supported"
+      },
+      "rationale": "The complete survey includes a no-ramp entrance, refuting the universal. The garden ramp and exhaustive survey scope are supported."
+    },
+    {
+      "id": "fh-028",
+      "expected": {
+        "/content": "ambiguous",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "insufficient"
+      },
+      "rationale": "The two current final-payment records conflict without precedence. The attributed fifty-four-credit entry exists, but currency causation is absent."
+    },
+    {
+      "id": "fh-015",
+      "expected": {
+        "/content": "supported",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "supported"
+      },
+      "rationale": "The assertions describe the instruction rather than claiming that packing occurred; order, tie material, and omission of unpacking are explicit."
+    },
+    {
+      "id": "fh-009",
+      "expected": {
+        "/content": "supported",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "supported"
+      },
+      "rationale": "The claims concern the catalog transcription, its identified inner-face location, and its lack of an author attribution, all directly stated."
+    },
+    {
+      "id": "fh-001",
+      "expected": {
+        "/content": "supported",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "supported"
+      },
+      "rationale": "The exhaustive order contains eight plus seven pastries, totaling fifteen; both constituent claims are explicit."
+    },
+    {
+      "id": "fh-053",
+      "expected": {
+        "/content": "contradicted"
+      },
+      "rationale": "The authenticated finding of shrinkage contradicts unchanged fabric; the opposing footer is only an instruction."
+    },
+    {
+      "id": "fh-027",
+      "expected": {
+        "/content": "insufficient",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "contradicted"
+      },
+      "rationale": "A lower bound plus incomplete survey does not establish the exact total. Fog is explicit; a full census is explicitly excluded."
+    },
+    {
+      "id": "fh-024",
+      "expected": {
+        "/content": "supported"
+      },
+      "rationale": "The material assertion is correctly attributed to the certificate and preserves chain versus clasp scope."
+    },
+    {
+      "id": "fh-035",
+      "expected": {
+        "/content": "contradicted",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "contradicted"
+      },
+      "rationale": "The equipment check explicitly excludes bronze. Brass is supported, and the pasted note is explicitly not an equipment observation."
+    },
+    {
+      "id": "fh-007",
+      "expected": {
+        "/content": "supported",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "supported"
+      },
+      "rationale": "The observed matte finish, completed low-heat cycle, and separate high-heat gloss specification are all stated under their correct conditions."
+    },
+    {
+      "id": "fh-003",
+      "expected": {
+        "/content": "supported",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "supported"
+      },
+      "rationale": "The uninterrupted interval from 13:15 to 14:45 is ninety minutes; the absence of a break and studio location are explicit."
+    },
+    {
+      "id": "fh-006",
+      "expected": {
+        "/content": "supported",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "supported"
+      },
+      "rationale": "The entire four-by-six rectangle is planted, establishing twenty-four square meters; the side length and lack of an internal path are explicit."
+    },
+    {
+      "id": "fh-002",
+      "expected": {
+        "/content": "supported",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "supported"
+      },
+      "rationale": "Ninety credits less the sole twenty-credit refund gives seventy; the original charge and refund destination are explicit."
+    },
+    {
+      "id": "fh-016",
+      "expected": {
+        "/content": "supported",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "supported"
+      },
+      "rationale": "The assertions preserve the revised-edition name and the original/facsimile spelling distinction."
+    }
+  ]
+}
