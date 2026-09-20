@@ -92,6 +92,7 @@ async def repair_lifecycle_all_orgs(ctx: dict[str, Any]) -> dict[str, int]:  # n
                 )
             else:
                 for key, value in asdict(result).items():
-                    summary[key] += value
+                    if key in summary and isinstance(value, int):
+                        summary[key] += value
     log.info("lifecycle_repair_completed", **summary)
     return summary

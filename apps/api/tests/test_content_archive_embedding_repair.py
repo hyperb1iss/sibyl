@@ -79,7 +79,15 @@ async def test_restore_embeds_the_restored_captures_on_its_own_client(
     assert result.success is True
     assert result.rows_restored == 2
     assert result.embedding_repair == {
-        org: {"checked": 2, "recovered": 2, "pending": 0, "failed": 0}
+        org: {
+            "checked": 2,
+            "recovered": 2,
+            "pending": 0,
+            "failed": 0,
+            "status": "completed",
+            "provider_dimensions": None,
+            "schema_dimensions": None,
+        }
     }
     elsewhere.assert_not_called()
     rows = _normalize_records(

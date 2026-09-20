@@ -58,6 +58,7 @@ async def test_repair_is_a_no_op_without_a_configured_provider(monkeypatch):
     forbidden = AsyncMock(side_effect=AssertionError("must not touch the store"))
     monkeypatch.setattr(content_client, "surreal_content_client", forbidden)
     result = await repair_raw_capture_embeddings("org")
+    assert result.status == repair_module.REPAIR_SKIPPED_NO_PROVIDER
     assert (result.checked, result.recovered, result.pending, result.failed) == (0, 0, 0, 0)
     forbidden.assert_not_called()
 
@@ -397,3 +398,78 @@ async def test_coverage_walk_never_reads_past_its_row_cap(monkeypatch):
     assert verdict is None
     assert requested == [128, 128, 44]
     assert sum(requested) == 300
+
+
+async def test_walk_leaves_text_and_vectors_on_the_server(content_store, monkeypatch):
+    """The per-minute walk projects only decision columns and fetches text for candidates."""
+    org = str(uuid4())
+    current = provider("lean")
+    await remember(org, "needs-vector")
+    await remember(org, "has-vector", embedding_provider=current)
+    queries: list[str] = []
+    select_many = content_client.select_many
+
+    async def recording(client, query, **params):
+        queries.append(query)
+        return await select_many(client, query, **params)
+
+    monkeypatch.setattr(content_client, "select_many", recording)
+
+    result = await repair_raw_capture_embeddings(org, embedding_provider=current)
+
+    assert (result.checked, result.recovered) == (1, 1)
+    walks = [q for q in queries if "uuid > $cursor" in q]
+    assert walks
+    for walk in walks:
+        projection = walk.split(" FROM ", 1)[0]
+        assert "raw_content" not in projection
+        assert "embedding" not in projection
+        assert "embedding = NONE OR metadata.embedding_metadata != $expected_metadata" in walk
+    fetches = [q for q in queries if "uuid IN $ids" in q]
+    assert len(fetches) == 1
+    assert "raw_content" in fetches[0]
+
+
+async def test_fully_current_org_issues_no_embed_call(content_store, monkeypatch):
+    org = str(uuid4())
+    current = provider("settled")
+    for index in range(3):
+        await remember(org, f"settled-{index}", embedding_provider=current)
+    embed = AsyncMock(side_effect=AssertionError("nothing to embed"))
+    monkeypatch.setattr(repair_module, "_raw_memories_with_embeddings", embed)
+    fetch = AsyncMock(side_effect=AssertionError("nothing to fetch"))
+    monkeypatch.setattr(repair_module, "_repair_page", fetch)
+
+    result = await repair_raw_capture_embeddings(org, embedding_provider=current)
+
+    assert result.status == repair_module.REPAIR_COMPLETED
+    assert (result.checked, result.recovered, result.pending, result.failed) == (0, 0, 0, 0)
+    embed.assert_not_called()
+    fetch.assert_not_called()
+
+
+async def test_repair_refuses_a_provider_whose_dimensions_do_not_fit_the_schema(monkeypatch):
+    mismatched = DeterministicEmbeddingProvider(
+        EmbeddingMetadata(
+            provider="deterministic",
+            model="narrow",
+            dimensions=EMBEDDING_DIM // 2,
+            cache_namespace="raw-repair-narrow",
+            tokenizer_estimate_method="utf8-byte-length",
+        )
+    )
+    forbidden = AsyncMock(side_effect=AssertionError("must not touch the store"))
+    monkeypatch.setattr(content_client, "surreal_content_client", forbidden)
+    embed = AsyncMock(side_effect=AssertionError("must not embed"))
+    monkeypatch.setattr(repair_module, "_raw_memories_with_embeddings", embed)
+
+    result = await repair_raw_capture_embeddings("org", embedding_provider=mismatched)
+
+    assert result.status == repair_module.REPAIR_SKIPPED_DIMENSION_MISMATCH
+    assert (result.provider_dimensions, result.schema_dimensions) == (
+        EMBEDDING_DIM // 2,
+        EMBEDDING_DIM,
+    )
+    assert (result.checked, result.recovered, result.pending, result.failed) == (0, 0, 0, 0)
+    forbidden.assert_not_called()
+    embed.assert_not_called()
