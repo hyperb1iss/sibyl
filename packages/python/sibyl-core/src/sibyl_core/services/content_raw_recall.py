@@ -46,6 +46,9 @@ log = structlog.get_logger()
 
 # Reported by the raw_vector lane when the scope has captures but no vectors.
 RAW_VECTOR_EMBEDDINGS_MISSING = "RawEmbeddingsMissing"
+# Noted on an empty raw_vector result when the coverage walk hit its row cap
+# before it could tell a scope without vectors from one with no matches.
+RAW_VECTOR_COVERAGE_UNKNOWN = "embedding_coverage_unknown"
 
 _RAW_MEMORY_RECALL_FIELDS = ", ".join(
     (
@@ -368,6 +371,8 @@ async def _eligible_rows_present(
     cursor = ""
     seen = 0
     while seen < _COVERAGE_ROW_CAP:
+        # Never read past the cap: the last page is clamped to what remains.
+        page = min(page_size, _COVERAGE_ROW_CAP - seen)
         rows = await with_timeout(
             content_client.select_many_raw(
                 client,
@@ -376,7 +381,7 @@ async def _eligible_rows_present(
                 "ORDER BY uuid ASC LIMIT $coverage_limit;",
                 **params,
                 coverage_cursor=cursor,
-                coverage_limit=page_size,
+                coverage_limit=page,
             ),
             timeout_seconds=content_client.DIRECT_SEARCH_QUERY_TIMEOUT_SECONDS,
             operation_name="surreal_raw_memory_embedding_coverage",
@@ -387,7 +392,7 @@ async def _eligible_rows_present(
             [models.raw_memory_from_record(row) for row in rows], limit=1, as_of=as_of
         ):
             return True
-        if len(rows) < page_size:
+        if len(rows) < page:
             return False
         seen += len(rows)
         cursor = str(rows[-1]["uuid"])
@@ -402,8 +407,8 @@ async def _raw_memory_scope_lacks_embeddings(
     as_of: datetime | None,
     limit: int,
     organization_id: str,
-) -> bool:
-    """True when the scope has recall-eligible captures and none carries a vector.
+) -> bool | None:
+    """Tell whether the scope has recall-eligible captures and none carries a vector.
 
     A KNN read over such a scope returns nothing and looks identical to a scope
     with no matches, so the raw arm would degrade to BM25 alone without anyone
@@ -413,8 +418,10 @@ async def _raw_memory_scope_lacks_embeddings(
     Eligibility is judged exactly as recall judges it, through the lifecycle
     and as-of filters, so an archived or not-yet-valid row can neither mask a
     missing vector nor raise the report on its own. Each side of the scope is
-    walked in uuid order to a fixed row cap; an inconclusive walk reports
-    healthy rather than missing.
+    walked in uuid order to a fixed row cap. True means vectors are missing,
+    False means coverage is fine or the scope is empty, and None means the
+    walk hit its cap without a verdict, which the lane reports as unknown
+    rather than asserting either way.
     """
     page_size = max(limit * content_client.LIFECYCLE_FILTER_OVERFETCH_FACTOR, 128)
 
@@ -429,9 +436,10 @@ async def _raw_memory_scope_lacks_embeddings(
         )
 
     try:
-        if await present(" AND embedding != NONE") is not False:
-            return False
-        return await present(" AND embedding = NONE") is True
+        embedded = await present(" AND embedding != NONE")
+        if embedded is not False:
+            return None if embedded is None else False
+        return await present(" AND embedding = NONE")
     except Exception as exc:
         # The probe is diagnostic only; a failed probe must not turn an empty
         # vector read into a failed recall.
@@ -711,14 +719,19 @@ async def _recall_raw_memory_result(
                     CandidateSourceResult.failed("raw_vector", type(exc).__name__)
                 )
             else:
-                if not vector_memories and await _raw_memory_scope_lacks_embeddings(
-                    client,
-                    where_clause=where_clause,
-                    params=params,
-                    as_of=effective_as_of,
-                    limit=limit,
-                    organization_id=organization_id,
-                ):
+                coverage = (
+                    await _raw_memory_scope_lacks_embeddings(
+                        client,
+                        where_clause=where_clause,
+                        params=params,
+                        as_of=effective_as_of,
+                        limit=limit,
+                        organization_id=organization_id,
+                    )
+                    if not vector_memories
+                    else False
+                )
+                if coverage is True:
                     log.warning(
                         "raw_memory_vector_recall_unembedded_scope",
                         organization_id=organization_id,
@@ -727,6 +740,12 @@ async def _recall_raw_memory_result(
                     )
                     source_results.append(
                         CandidateSourceResult.failed("raw_vector", RAW_VECTOR_EMBEDDINGS_MISSING)
+                    )
+                elif coverage is None:
+                    source_results.append(
+                        CandidateSourceResult.noted(
+                            "raw_vector", vector_memories, RAW_VECTOR_COVERAGE_UNKNOWN
+                        )
                     )
                 else:
                     source_results.append(

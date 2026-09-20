@@ -11,7 +11,10 @@ from sibyl_core.services import content_client, content_raw_recall
 from sibyl_core.services import content_raw_embedding_repair as repair_module
 from sibyl_core.services.content_models import raw_memory_embedding_metadata
 from sibyl_core.services.content_raw_embedding_repair import repair_raw_capture_embeddings
-from sibyl_core.services.content_raw_recall import RAW_VECTOR_EMBEDDINGS_MISSING
+from sibyl_core.services.content_raw_recall import (
+    RAW_VECTOR_COVERAGE_UNKNOWN,
+    RAW_VECTOR_EMBEDDINGS_MISSING,
+)
 from sibyl_core.services.surreal_content import recall_raw_memory_with_sources, remember_raw_memory
 from tests.test_reflection_identity import content_store as content_store
 
@@ -325,8 +328,8 @@ async def test_coverage_walks_past_ineligible_rows_before_judging(content_store,
     assert lanes["raw_vector"].failure.error_type == RAW_VECTOR_EMBEDDINGS_MISSING
 
 
-async def test_coverage_reports_healthy_when_its_walk_is_inconclusive(content_store, monkeypatch):
-    """A walk that hits its row cap without a verdict must not raise the report."""
+async def test_coverage_reports_unknown_when_its_walk_is_inconclusive(content_store, monkeypatch):
+    """A walk that hits its row cap without a verdict neither asserts missing nor certifies healthy."""
     org = str(uuid4())
     query_provider = provider("capped")
     monkeypatch.setattr(
@@ -353,3 +356,44 @@ async def test_coverage_reports_healthy_when_its_walk_is_inconclusive(content_st
     assert sides == [" AND embedding != NONE", " AND embedding = NONE"]
     assert lanes["raw_vector"].failure is None
     assert lanes["raw_vector"].candidates == ()
+    assert lanes["raw_vector"].note == RAW_VECTOR_COVERAGE_UNKNOWN
+    assert result.degraded is False
+    assert result.as_metadata()["raw_recall_notes"] == {"raw_vector": RAW_VECTOR_COVERAGE_UNKNOWN}
+
+
+async def test_coverage_walk_never_reads_past_its_row_cap(monkeypatch):
+    """Every page is clamped to the remaining budget, and the walk stops at the cap."""
+    monkeypatch.setattr(content_raw_recall, "_COVERAGE_ROW_CAP", 300)
+    requested: list[int] = []
+
+    def ineligible_row(index: int) -> dict[str, object]:
+        return {
+            "uuid": f"{index:08d}",
+            "organization_id": "org",
+            "source_id": f"source-{index}",
+            "principal_id": "owner",
+            "raw_content": "archived",
+            "revision": 1,
+            "metadata": {"superseded_by_source_id": "another-source"},
+        }
+
+    async def full_pages(client, query, **params):
+        limit = int(params["coverage_limit"])
+        requested.append(limit)
+        start = len(requested) * 1000
+        return [ineligible_row(start + index) for index in range(limit)]
+
+    monkeypatch.setattr(content_client, "select_many_raw", full_pages)
+
+    verdict = await content_raw_recall._eligible_rows_present(
+        object(),
+        where_clause="organization_id = $organization_id",
+        params={"organization_id": "org"},
+        as_of=None,
+        extra_clause=" AND embedding = NONE",
+        page_size=128,
+    )
+
+    assert verdict is None
+    assert requested == [128, 128, 44]
+    assert sum(requested) == 300
