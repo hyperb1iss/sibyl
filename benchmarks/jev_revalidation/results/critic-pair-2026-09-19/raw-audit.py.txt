@@ -1,0 +1,351 @@
+"""Independent stdlib audit. No experiment scorer imports, provider calls, or summaries."""
+import argparse
+import ast
+import base64
+import copy
+import hashlib
+import json
+import math
+import re
+from collections import Counter
+from decimal import Decimal
+from pathlib import Path
+
+
+def unique(items):
+    result = {}
+    for key, value in items:
+        assert key not in result, ('duplicate JSON key', key)
+        result[key] = value
+    return result
+
+
+def parse(data):
+    def finite(value):
+        number = float(value)
+        assert math.isfinite(number)
+        return number
+    return json.loads(data, object_pairs_hook=unique, parse_float=finite,
+                      parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)))
+
+
+def load(path):
+    return parse(path.read_bytes())
+
+
+def canonical(value):
+    return json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False, allow_nan=False)
+
+
+def text_sha(value):
+    return hashlib.sha256(value.encode()).hexdigest()
+
+
+def sha(value):
+    return text_sha(canonical(value))
+
+
+def file_sha(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def literal(path, name):
+    for node in ast.parse(path.read_text()).body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
+            return ast.literal_eval(node.value)
+    raise AssertionError(('missing product literal', name))
+
+
+WORDS = 'zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty thirty forty fifty sixty seventy eighty ninety hundred thousand million billion trillion dozen half quarter double triple pair couple once twice'.split()
+NUMERIC = re.compile(r'\d|\b(?:' + '|'.join(WORDS) + r')\b', re.I)
+BASIS = {'factual_contradiction', 'unsupported_generalization', 'unsupported_causality', 'missing_condition', 'misleading_certainty'}
+DISPOSITION = {'reconsider', 'qualify', 'relabel_inference', 'remove', 'abstain'}
+
+
+def schema_check(schema):
+    """Check request schema against the product contracts inspected independently."""
+    assert schema['type'] == 'object' and schema['additionalProperties'] is False
+    assert set(schema['properties']) == {'findings', 'abstention_reason'}
+    assert schema.get('required', []) == []
+    finding_array = schema['properties']['findings']
+    assert finding_array['type'] == 'array' and finding_array['items'] == {'$ref': '#/$defs/ReviewFinding'}
+    assert schema['properties']['abstention_reason']['anyOf'] == [{'type': 'string'}, {'type': 'null'}]
+    defs = schema['$defs']
+    assert set(defs) == {'EvidenceRef', 'ReviewFinding'}
+    finding = defs['ReviewFinding']
+    fields = {'claim_path', 'claim_sha256', 'evidence_refs', 'basis', 'disposition', 'critique'}
+    assert finding['type'] == 'object' and finding['additionalProperties'] is False
+    assert set(finding['required']) == set(finding['properties']) == fields
+    props = finding['properties']
+    for field in ('claim_path', 'critique'):
+        assert props[field]['type'] == 'string' and props[field]['minLength'] == 1
+    assert props['claim_sha256']['pattern'] == '^[0-9a-f]{64}$'
+    assert set(props['basis']['enum']) == BASIS
+    assert set(props['disposition']['enum']) == DISPOSITION
+    assert props['evidence_refs']['type'] == 'array' and props['evidence_refs']['minItems'] == 1
+    assert props['evidence_refs']['items'] == {'$ref': '#/$defs/EvidenceRef'}
+    ref = defs['EvidenceRef']
+    assert ref['type'] == 'object' and ref['additionalProperties'] is False
+    assert set(ref['properties']) == set(ref['required']) == {'evidence_id'}
+    assert ref['properties']['evidence_id']['type'] == 'string' and ref['properties']['evidence_id']['minLength'] == 1
+
+
+def validate_output(output, payload):
+    assert type(output) is dict and set(output) <= {'findings', 'abstention_reason'}
+    findings = output.get('findings', [])
+    reason = output.get('abstention_reason')
+    assert type(findings) is list and (reason is None or type(reason) is str)
+    normalized = []
+    mechanical = True
+    for finding in findings:
+        assert type(finding) is dict and set(finding) == {'claim_path', 'claim_sha256', 'evidence_refs', 'basis', 'disposition', 'critique'}
+        row = dict(finding)
+        for field in ('claim_path', 'critique'):
+            assert type(row[field]) is str and row[field].strip()
+            row[field] = row[field].strip()
+        assert type(row['claim_sha256']) is str and re.fullmatch('[0-9a-f]{64}', row['claim_sha256'])
+        assert row['basis'] in BASIS and row['disposition'] in DISPOSITION
+        refs = row['evidence_refs']
+        assert type(refs) is list and refs
+        normalized_refs = []
+        for ref in refs:
+            assert type(ref) is dict and set(ref) == {'evidence_id'}
+            assert type(ref['evidence_id']) is str and ref['evidence_id'].strip()
+            normalized_refs.append({'evidence_id': ref['evidence_id'].strip()})
+        row['evidence_refs'] = normalized_refs
+        identifiers = [r['evidence_id'] for r in normalized_refs]
+        assertion = payload['assertions'].get(row['claim_path'])
+        mechanical &= assertion is not None and sha(assertion) == row['claim_sha256']
+        mechanical &= len(identifiers) == len(set(identifiers)) and all(i in payload['citations'] for i in identifiers)
+        normalized.append(row)
+    if not mechanical or (reason is not None and not reason.strip()):
+        return 'abstain', 'critic_output_failed_mechanical_validation', None
+    status = 'abstain' if reason is not None else 'reconsider' if findings else 'no_findings'
+    submission = {'parent_operation_id': payload['parent_operation_id'],
+                  'parent_candidate_sha256': payload['parent_candidate_sha256'],
+                  'prior_review_id': None, 'findings': normalized} if findings else None
+    return status, reason, submission
+
+
+def run(args):
+    root = args.out
+    archive = args.live
+    plan = load(archive / 'plan.json')
+    manifest = load(archive / 'manifest.json')
+    completion = load(archive / 'completion.json')
+    entries = load(archive / 'requests.json')
+    calls = load(archive / 'calls.json')
+    selection = load(args.selection)
+    cases = load(args.cases)
+    case_index = {c['id']: (i, c) for i, c in enumerate(cases)}
+    assert len(case_index) == len(cases) == 64
+    assert file_sha(args.cases) == selection['holdout_cases_sha256']
+    assert file_sha(args.selection) == plan['selection_file_sha256']
+    assert selection['selection_sha256'] == plan['selection_sha256']
+    assert sha({k:v for k,v in selection.items() if k != 'selection_sha256'}) == selection['selection_sha256']
+    assert selection['threshold'] == 0.99
+    assert sha({k:v for k,v in plan.items() if k != 'plan_sha256'}) == plan['plan_sha256'] == manifest['plan_sha256']
+    assert plan['plan_sha256'] == '908a1a2fb5485b15d415b63ff49c2d94a24a168f8d3f42a9b24ba49b7417951e'
+    assert manifest['controls'] == plan['controls']
+    assert plan['controls']['retries'] == 0 and plan['controls']['endpoint'] == 'https://openrouter.ai/api/v1/chat/completions'
+    core = args.repo / 'packages/python/sibyl-core/src/sibyl_core'
+    for name, digest in manifest['code_hashes'].items():
+        path = core / name.removeprefix('sibyl_core/') if name.startswith('sibyl_core/') else args.repo / 'benchmarks/jev_revalidation' / name.removeprefix('benchmark/')
+        assert file_sha(path) == digest, ('code hash drift', name)
+    instructions = literal(core / 'tasks/memory_validation.py', 'VALIDATION_INSTRUCTIONS')
+    prior_manifest = load(args.prior / 'manifest.json')
+    schedule = load(args.prior / 'schedule.json')
+    prior_calls = {c['key']:c for c in load(args.prior / 'calls.json')}
+    selected = []
+    grouped_cost = Decimal(0)
+    grouped = 0
+    prior_receipts = {}
+    for item in schedule:
+        if item['arm'] != 'grouped':
+            continue
+        grouped += 1
+        receipt = load(args.prior / 'receipts' / (item['key'] + '.json'))
+        request, observed = receipt['request'], receipt['observation']
+        assert sha(request) == item['request_digest'] == observed['request_digest']
+        assert request == load(args.prior / 'requests' / (item['key'] + '.json'))
+        assert all(prior_calls[item['key']][k] == v for k,v in observed.items())
+        cost = observed['observed_cost_usd']
+        assert type(cost) in (int,float) and math.isfinite(cost) and cost >= 0
+        grouped_cost += Decimal(str(cost))
+        answers = observed['answers']
+        index, case = case_index[item['case_id']]
+        assert {a['question_id'] for a in answers} == set(case['expected']) and len(answers) == len(case['expected'])
+        supported = observed['execution_status'] == 'completed' and all(a['value'] == 'supported' for a in answers)
+        confidence = [a['provider_confidence'] for a in answers]
+        known = all(type(c) in (int,float) and math.isfinite(c) and 0 <= c <= 1 for c in confidence)
+        numeric = any(NUMERIC.search(t) for t in [case['content'], *case['claims'], *(s['text'] for s in case['sources'])])
+        if supported and known and not numeric and min(confidence) >= 0.99:
+            selected.append(item)
+            prior_receipts[item['key']] = receipt
+    assert grouped == plan['routing_calls'] == 128
+    assert grouped_cost == Decimal('0.007106484') == Decimal(str(plan['routing_cost_usd']))
+    assert len(selected) == len(plan['calls']) == len(entries) == len(calls) == 33
+    assert len({s['case_id'] for s in selected}) == 17
+    ids = [s['key'] for s in selected]
+    assert ids == [c['id'] for c in plan['calls']] == [e['id'] for e in entries] == [c['id'] for c in calls]
+    assert len(set(ids)) == len(ids)
+    for directory in ('receipts', 'dispatch'):
+        assert {p.name for p in (archive / directory).iterdir()} == {i+'.json' for i in ids}
+    outcomes = []
+    total = Decimal(0)
+    unknown = 0
+    token_totals = Counter()
+    schema_hashes = set()
+    for item, planned, entry, call in zip(selected, plan['calls'], entries, calls, strict=True):
+        key = item['key']
+        assert (planned['case_id'],planned['repeat']) == (item['case_id'],item['repeat'])
+        index, case = case_index[item['case_id']]
+        assert planned['case'] == case
+        assert planned['preparation_run_id'] == f"{prior_manifest['run_id']}:case-{index}-repeat-{item['repeat']}"
+        raw = load(archive / 'receipts' / (key+'.json'))
+        assert all(call[k] == v for k,v in raw.items() if k != 'error_code')
+        request = entry['request']
+        assert raw['request'] == request and sha(request) == raw['request_sha256'] == entry['request_sha256'] == planned['request_sha256']
+        dispatch = {**raw, 'http_status':None, 'response_body':None, 'response_body_base64':None, 'completed_at':None, 'elapsed_ms':None, 'error_code':None}
+        assert load(archive / 'dispatch' / (key+'.json')) == dispatch
+        payload_text = entry['prepared_payload']
+        payload = parse(payload_text)
+        assert canonical(payload) == payload_text and text_sha(payload_text) == planned['prepared_payload_sha256']
+        prompt = instructions + '\n\n' + payload_text
+        assert text_sha(prompt) == planned['prompt_sha256']
+        assert request['messages'] == [{'role':'user', 'content':prompt}]
+        semantic = copy.deepcopy(payload)
+        assert semantic.pop('parent_operation_id') == sha(planned['preparation_run_id'])
+        assert semantic.pop('parent_candidate_sha256') == sha(payload['candidate']) == payload['candidate_view_sha256']
+        for source in semantic['sources'].values():
+            assert re.fullmatch('[0-9a-f]{64}', source.pop('observation_sha256'))
+        prior_state = prior_receipts[key]['request']['state']
+        assert canonical(semantic) == prior_state and text_sha(prior_state) == planned['expected_jev_state_sha256']
+        assert payload['assertion_hashes'] == {path:sha(assertion) for path,assertion in payload['assertions'].items()}
+        for source_index, source in enumerate(case['sources']):
+            evidence = payload['sources'][source['id']]
+            assert evidence['text'] == source['text'] and evidence['provenance'] == source['provenance']
+            assert evidence['sha256'] == text_sha(source['text'])
+            observation = {'source':{'organization_id':'synthetic-source-support','kind':'raw_capture','id':source['id']},
+                           'generation':1,'content_sha256':text_sha(source['text']),'revision':1,'durable':True,'incarnation':'synthetic-first'}
+            assert evidence['observation_sha256'] == sha(observation)
+            assert payload['citations'][f's{source_index}'] == {'source_id':source['id'],'ranges':[[0,len(source['text'].encode())]]}
+        assert set(request) == {'model','provider','max_tokens','messages','tools','tool_choice'}
+        assert request['model'] == 'anthropic/claude-opus-5' and request['max_tokens'] == 4096
+        assert request['provider'] == {'only':['anthropic'],'allow_fallbacks':False,'require_parameters':True}
+        assert request['tool_choice'] == {'type':'function','function':{'name':'CriticOutput'}}
+        assert len(request['tools']) == 1 and request['tools'][0]['type'] == 'function'
+        function = request['tools'][0]['function']
+        assert function['name'] == 'CriticOutput'
+        schema = function['parameters']
+        schema_check(schema)
+        schema_hashes.add(sha(schema))
+        body = None
+        response_parse_error = None
+        if raw['response_body_base64'] is not None:
+            try:
+                body = parse(base64.b64decode(raw['response_body_base64'],validate=True))
+            except (AssertionError,ValueError,UnicodeError) as error:
+                response_parse_error = type(error).__name__
+        if body is not None:
+            assert base64.b64decode(raw['response_body_base64']).decode('utf-8',errors='replace') == raw['response_body']
+        usage = body.get('usage',{}) if isinstance(body,dict) else {}
+        cost = usage.get('cost')
+        known_cost = type(cost) in (int,float) and math.isfinite(cost) and cost >= 0
+        if known_cost: total += Decimal(str(cost))
+        else: unknown += 1
+        assert call['usage']['observed_cost_usd'] == (cost if known_cost else None)
+        assert call['usage']['model'] == (body.get('model') if isinstance(body,dict) else None)
+        assert call['usage']['provider'] == (body.get('provider') if isinstance(body,dict) else None)
+        responded = raw['http_status'] is not None
+        dispatched = raw['dispatch_started_at'] is not None
+        assert call['usage']['attempt_count'] == (1 if responded else None if dispatched else 0)
+        assert call['usage']['attempt_count_known'] == (responded or not dispatched)
+        for provider_key, local_key in [('prompt_tokens','input_tokens'),('completion_tokens','output_tokens'),('total_tokens','total_tokens')]:
+            number = usage.get(provider_key)
+            valid = type(number) is int and number >= 0
+            assert call['usage'][local_key] == (number if valid else None)
+            if valid: token_totals[local_key] += number
+        status = 'failed'
+        reason = None
+        raw_abstention = None
+        mechanical_issues = []
+        findings = []
+        validation_error = None
+        try:
+            assert raw['error_code'] is None and response_parse_error is None and raw['http_status'] == 200
+            assert body['model'] in {'anthropic/claude-opus-5','anthropic/claude-opus-5-20260723'}
+            assert body['provider'] == 'Anthropic'
+            assert len(body['choices']) == 1
+            choice = body['choices'][0]
+            assert choice['finish_reason'] == 'tool_calls'
+            tools = choice['message']['tool_calls']
+            assert len(tools) == 1 and tools[0]['type'] == 'function' and tools[0]['function']['name'] == 'CriticOutput'
+            output = parse(tools[0]['function']['arguments'])
+            assert all(type(usage.get(t)) is int and usage[t] >= 0 for t in ('prompt_tokens','completion_tokens','total_tokens'))
+            status, reason, submission = validate_output(output,payload)
+            findings = output.get('findings',[])
+            raw_abstention = output.get('abstention_reason')
+            for finding in findings:
+                claim = payload['assertions'].get(finding['claim_path'])
+                if claim is None or sha(claim) != finding['claim_sha256']:
+                    mechanical_issues.append('claim_hash_mismatch')
+                for ref in finding['evidence_refs']:
+                    if ref['evidence_id'] not in payload['citations']:
+                        mechanical_issues.append('unknown_citation_id:' + ref['evidence_id'])
+        except (AssertionError,KeyError,TypeError,ValueError) as error:
+            validation_error = type(error).__name__
+        if validation_error is None:
+            assert call['execution_status'] == 'completed' and call['error_code'] is None
+            result = call['result']
+            assert result['status'] == status and result['reason'] == reason and result['submission'] == submission
+            assert result['input_sha256'] == text_sha(prompt) and result['schema_sha256'] == sha(schema)
+            configured = parse(result['configured_policy_json'])
+            assert configured['output_schema'] == schema and configured['model_override'] == request['model']
+            assert configured['max_tokens'] == 4096 and configured['output_retries'] == 0
+        else:
+            assert call['execution_status'] == 'failed' and call['result'] is None
+        outcomes.append({'id':key,'case_id':item['case_id'],'repeat':item['repeat'],'status':status,
+                         'findings':findings,'raw_abstention_reason':raw_abstention,'mechanical_issues':mechanical_issues,
+                         'result_reason':reason,'observed_cost_usd':cost if known_cost else None,'validation_error':validation_error})
+    assert len(schema_hashes) == 1
+    statuses = dict(Counter(o['status'] for o in outcomes))
+    qualified = statuses == {'no_findings':33} and unknown == 0
+    difference = total - grouped_cost if unknown == 0 else None
+    assert completion['scheduled'] == 33 and completion['completed'] == sum(o['status'] != 'failed' for o in outcomes)
+    assert completion['failed'] == sum(o['status'] == 'failed' for o in outcomes)
+    report = {'audit':'PASS: independent receipt, binding, selection and accounting reconstruction',
+              'qualification':'conditional_agreement' if qualified and difference > 0 else 'not_qualified',
+              'selected_evaluations':33,'distinct_candidates':17,'statuses':statuses,
+              'known_critic_cost_usd':str(total),'unknown_cost_calls':unknown,
+              'all_grouped_jev_calls':grouped,'all_grouped_jev_cost_usd':str(grouped_cost),
+              'unqualified_difference_usd':str(difference) if difference is not None else None,
+              'conditional_avoided_cost_usd':str(difference) if qualified and difference > 0 else None,
+              'raw_finding_calls':sum(bool(o['findings']) for o in outcomes),
+              'raw_finding_count':sum(len(o['findings']) for o in outcomes),
+              'nonempty_abstention_with_no_findings':sum(o['raw_abstention_reason'] is not None and not o['findings'] for o in outcomes),
+              'mechanically_rejected_finding_calls':sum(bool(o['findings']) and bool(o['mechanical_issues']) for o in outcomes),
+              'by_repeat':{str(r):dict(Counter(o['status'] for o in outcomes if o['repeat']==r)) for r in (0,1)},
+              'tokens':dict(token_totals),'outcomes':outcomes,'schema_sha256':next(iter(schema_hashes)),
+              'plan_sha256':plan['plan_sha256'],'audit_script_sha256':file_sha(Path(__file__)),
+              'checks':{'selection_from_all_prior_grouped_receipts':True,'request_prompt_evidence_binding':True,
+                        'raw_bytes_tool_schema_claim_hashes_citations':True,'summary_read':False,'scorer_imported':False},
+              'limits':['Retrospective selection after inspection, synthetic plain reflections only.',
+                        'Same-family critic agreement is not truth or independent safety proof.',
+                        'OpenRouter transport differs from direct Anthropic production.',
+                        'The 95 unchanged fallback and correction paths are an untested counterfactual assumption.',
+                        'No production activation, full-run savings percentage, or end-to-end latency claim.']}
+    root.mkdir(parents=True,exist_ok=True)
+    (root/'raw-audit.json').write_text(json.dumps(report,indent=2,sort_keys=True)+'\n')
+    print(json.dumps({k:v for k,v in report.items() if k != 'outcomes'},indent=2))
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--live',type=Path,default=Path('/tmp/jev-critic-pair-20260919/live'))
+    parser.add_argument('--prior',type=Path,default=Path('/tmp/jev-support-fallback-20260919/raw'))
+    parser.add_argument('--selection',type=Path,default=Path('/tmp/jev-support-fallback-20260919/selection.json'))
+    parser.add_argument('--repo',type=Path,default=Path('/Users/bliss/dev/worktrees/sibyl/nova/jev-critic-pair'))
+    parser.add_argument('--cases',type=Path,default=Path('/Users/bliss/dev/worktrees/sibyl/nova/jev-critic-pair/benchmarks/jev_revalidation/support_fallback_holdout.json'))
+    parser.add_argument('--out',type=Path,default=Path('/tmp/jev-critic-pair-20260919'))
+    run(parser.parse_args())
