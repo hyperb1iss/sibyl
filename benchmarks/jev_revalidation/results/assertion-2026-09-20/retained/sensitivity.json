@@ -1,0 +1,35 @@
+{
+  "scope": "Only alternatives explicitly frozen by blinded reviewer; no primary annotations altered.",
+  "arms": {
+    "assertion_direct": {
+      "primary_passes": 2,
+      "alternative_passes": 3,
+      "alternative_covered_concerns": 4
+    },
+    "assertion_live_jev": {
+      "primary_passes": 5,
+      "alternative_passes": 5,
+      "alternative_covered_concerns": 3
+    },
+    "assertion_misleading": {
+      "primary_passes": 4,
+      "alternative_passes": 4,
+      "alternative_covered_concerns": 2
+    },
+    "baseline_direct": {
+      "primary_passes": 2,
+      "alternative_passes": 3,
+      "alternative_covered_concerns": 4
+    },
+    "baseline_live_jev": {
+      "primary_passes": 5,
+      "alternative_passes": 5,
+      "alternative_covered_concerns": 4
+    },
+    "baseline_misleading": {
+      "primary_passes": 2,
+      "alternative_passes": 2,
+      "alternative_covered_concerns": 2
+    }
+  }
+}

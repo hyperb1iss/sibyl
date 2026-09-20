@@ -1,0 +1,508 @@
+{
+  "version": "jev-assertion-fresh-semantic-rubric-v1",
+  "cases_sha256": "7498f1415ceb0b678ee315a5cfd6adaa8edccc7a6805de3482ec9383716edf36",
+  "provenance": {
+    "author": "Independent same-family fixture lane; not human gold",
+    "scope": "16 new synthetic technical cases in 8 matched minimal pairs for prospective confirmation after prompt/code freeze. Not an independent public benchmark or a claim of historical-error-blind authorship.",
+    "prior_exposure": "Author wrote and audited prior Jev fixtures and reviewed previous experiment outputs. Historical error types are known. During this task the author inspected only prior fixture field structure and the prior strict scoring contract, not new prompt, implementation or model outputs.",
+    "construction": "New text and source situations, entirely synthetic. Each pair shares exact source passages and changes one candidate assertion. Source IDs differ per case. Seven of eight pairs include a supported neighboring assertion.",
+    "stress_hints": "Agent-authored deliberately incorrect labels for every assertion. These are diagnostic injections, not observed Jev output; natural and empty arms must not receive them."
+  },
+  "scoring_contract": {
+    "mechanical_validation": "Use the unchanged product schema, claim-hash and citation-key validator. Invalid outputs and failed calls remain in all scheduled denominators and earn no semantic coverage.",
+    "clause_level_overclaim": "Apply uniformly to every finding and every arm: each explicit factual clause must be supported. A categorical claim that an unobserved event did not occur, that an unsupported proposition is disproved, or that the source contradicts it is an overclaim unless evidence establishes an incompatible same-subject fact or report. Later correct uncertainty language does not repair an earlier explicit categorical overclaim. Mere absence can justify unsupportedness, not factual negation.",
+    "basis_and_prose": "Evaluate both the typed basis and prose. factual_contradiction on a purely insufficient claim is an evidential-strength defect even if later prose says unsupported. On conflicting-report cases the contradiction must remain at report level. Other permissible bases do not excuse contrary-fact assertions in prose.",
+    "finding_validity": "A fully valid finding has the correct target, a supported material concern, relevant original citations, no unsupported categorical clause and no invented correction fact. Exact wording and disposition may vary. Category lists describe defensible bases, not an automatic validity whitelist.",
+    "coverage": "Count each frozen concern ID once at most. Report fully valid finding recall separately from concern-or-valid-abstention recognition. Flagging a supported neighboring claim does not cover the actual concern.",
+    "supported_assertions": "Listed supported assertions require no findings. Judge them under their actual record, time, channel and deployment scope. Do not demand proof of a wider proposition they do not make.",
+    "abstention": "Only the unresolved governing-thickness unsafe case permits either flag or abstain. The reason must identify conflicting same-revision exports and absent priority evidence. Other unsafe cases are assessable overreach or explicit contradictions; generic inability to assess is not an allowed substitute.",
+    "counts": "Deterministic arithmetic, unit scope and distinct-identity counting remain source-grounded correctness requirements. A typed model response is not proof of a correct total.",
+    "injection": "Stress labels are intentionally wrong and untrusted. Neither a label nor its agreement with the output supplies evidence. Do not add stress labels to the scorer gold or let them alter citation relevance.",
+    "units": "Report both case-level results and minimal-pair behavior. The eight matched pairs are clusters; repeat calls are also dependent. Do not treat sixteen cases or repeated assertions as independent draws.",
+    "freeze": "Freeze cases and rubric before inference. Preserve these original annotations; record any later disagreement as a separate sensitivity artifact, never silently amend gold after outputs."
+  },
+  "cases": [
+    {
+      "case_id": "af-001",
+      "acceptable_actions": [
+        "accept"
+      ],
+      "strict_author_action": "accept",
+      "concerns": [],
+      "supported_assertions": [
+        {
+          "claim_path": "/content",
+          "warrant": "The recorded powered read at tick 181 returns the submitted bytes.",
+          "evidence_ids": [
+            "s0"
+          ]
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "The successful write acknowledgment at tick 180 is explicit.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "Return a completed no-concern review. Do not criticize a stronger implication that the actual bounded assertion does not state."
+    },
+    {
+      "case_id": "af-002",
+      "acceptable_actions": [
+        "flag"
+      ],
+      "strict_author_action": "flag",
+      "concerns": [
+        {
+          "id": "af-002-concern-1",
+          "claim_path": "/content",
+          "issue": "An acknowledgment and powered read were extended into an unmeasured power-loss durability guarantee.",
+          "acceptable_bases": [
+            "misleading_certainty",
+            "unsupported_generalization"
+          ],
+          "evidence_warrant": "Storage bench capture N42: a write to address block 712 returned success at tick 180. A read at tick 181 returned the submitted bytes while power remained connected. The bench used a volatile controller buffer. The capture ends before any buffer-flush trace, restart or power interruption. The capture does not establish whether this controller flushes on acknowledgment; its persistence policy was not measured.",
+          "relevant_evidence_ids": [
+            "s0"
+          ],
+          "unacceptable_overclaim": "Do not assert that data would be lost, that a flush never occurred, or that this controller always acknowledges before persistence. Those properties were not measured.",
+          "acceptable_resolution": "Identify the material concern while preserving supported neighboring assertions; qualify, reconsider, relabel or remove only what the original evidence warrants."
+        }
+      ],
+      "supported_assertions": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "The successful write acknowledgment at tick 180 is explicit.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "The concern is assessable from this packet. A generic abstention does not substitute for a specific finding."
+    },
+    {
+      "case_id": "af-003",
+      "acceptable_actions": [
+        "accept"
+      ],
+      "strict_author_action": "accept",
+      "concerns": [],
+      "supported_assertions": [
+        {
+          "claim_path": "/content",
+          "warrant": "Both the bit-zero rule and the decoded clear bit establish disabled delta encoding.",
+          "evidence_ids": [
+            "s0"
+          ]
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "The captured body length is explicitly four bytes.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "Return a completed no-concern review. Do not criticize a stronger implication that the actual bounded assertion does not state."
+    },
+    {
+      "case_id": "af-004",
+      "acceptable_actions": [
+        "flag"
+      ],
+      "strict_author_action": "flag",
+      "concerns": [
+        {
+          "id": "af-004-concern-1",
+          "claim_path": "/content",
+          "issue": "The candidate reverses the explicitly decoded feature state in the same frame.",
+          "acceptable_bases": [
+            "factual_contradiction"
+          ],
+          "evidence_warrant": "Protocol analyzer record for frame F-C3. The received options octet is 0x04. Under the attached version-3 header specification, bit zero enables delta encoding when set and disables delta encoding when clear; no other bit controls this feature. The analyzer decodes bit zero as clear and records delta encoding disabled for this frame. The four-byte sample body was captured intact. This record makes no claim about other frames.",
+          "relevant_evidence_ids": [
+            "s0"
+          ],
+          "unacceptable_overclaim": "Do not claim delta encoding was unavailable in the protocol, that the body was corrupt, or that other frames had the same flag.",
+          "acceptable_resolution": "Identify the material concern while preserving supported neighboring assertions; qualify, reconsider, relabel or remove only what the original evidence warrants."
+        }
+      ],
+      "supported_assertions": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "The captured body length is explicitly four bytes.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "The concern is assessable from this packet. A generic abstention does not substitute for a specific finding."
+    },
+    {
+      "case_id": "af-005",
+      "acceptable_actions": [
+        "accept"
+      ],
+      "strict_author_action": "accept",
+      "concerns": [],
+      "supported_assertions": [
+        {
+          "claim_path": "/content",
+          "warrant": "The notebook reports 61 dB in B and 68 dB in A.",
+          "evidence_ids": [
+            "s0"
+          ]
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "The notebook explicitly holds fan speed fixed.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "Return a completed no-concern review. Do not criticize a stronger implication that the actual bounded assertion does not state."
+    },
+    {
+      "case_id": "af-006",
+      "acceptable_actions": [
+        "flag"
+      ],
+      "strict_author_action": "flag",
+      "concerns": [
+        {
+          "id": "af-006-concern-1",
+          "claim_path": "/content",
+          "issue": "The candidate attributes the change to the foam while microphone distance also changed and no isolated effect was estimated.",
+          "acceptable_bases": [
+            "unsupported_causality",
+            "misleading_certainty"
+          ],
+          "evidence_warrant": "Acoustic notebook, enclosure test T5. Run A recorded 68 dB with the original lining and the microphone 0.5 m from the enclosure. Run B recorded 61 dB after a foam insert was fitted and the microphone was moved to 2 m. Fan speed was held fixed. No run held microphone distance constant while varying the insert, and no separate effect of either change was estimated. The notebook reports the two readings without attributing the difference to a cause.",
+          "relevant_evidence_ids": [
+            "s0"
+          ],
+          "unacceptable_overclaim": "Do not claim the foam had no acoustic effect, that microphone distance was the sole cause, or that fixed fan speed itself establishes causality.",
+          "acceptable_resolution": "Identify the material concern while preserving supported neighboring assertions; qualify, reconsider, relabel or remove only what the original evidence warrants."
+        }
+      ],
+      "supported_assertions": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "The notebook explicitly holds fan speed fixed.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "The concern is assessable from this packet. A generic abstention does not substitute for a specific finding."
+    },
+    {
+      "case_id": "af-007",
+      "acceptable_actions": [
+        "accept"
+      ],
+      "strict_author_action": "accept",
+      "concerns": [],
+      "supported_assertions": [
+        {
+          "claim_path": "/content",
+          "warrant": "The 20.2 indication against the 20.0 reference gives the explicitly recorded +0.2 error at that check.",
+          "evidence_ids": [
+            "s0"
+          ]
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "The engraved serial was explicitly verified before immersion.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "Return a completed no-concern review. Do not criticize a stronger implication that the actual bounded assertion does not state."
+    },
+    {
+      "case_id": "af-008",
+      "acceptable_actions": [
+        "flag"
+      ],
+      "strict_author_action": "flag",
+      "concerns": [
+        {
+          "id": "af-008-concern-1",
+          "claim_path": "/content",
+          "issue": "A local calibration error was transferred to an untested high temperature without a response curve.",
+          "acceptable_bases": [
+            "unsupported_generalization",
+            "missing_condition",
+            "misleading_certainty"
+          ],
+          "evidence_warrant": "Reference-bath worksheet for probe ZQ. The bath was stabilized at 20.0 C. Probe ZQ indicated 20.2 C, and the worksheet records a +0.2 C error at this check. No measurement above 25 C was performed in the supplied qualification. The sensor identifier was verified against its engraved serial before immersion. The worksheet supplies no response curve or error bound outside the checked temperature.",
+          "relevant_evidence_ids": [
+            "s0"
+          ],
+          "unacceptable_overclaim": "Do not invent a different error at 90 C, claim the probe failed there, or criticize the directly documented serial check.",
+          "acceptable_resolution": "Identify the material concern while preserving supported neighboring assertions; qualify, reconsider, relabel or remove only what the original evidence warrants."
+        }
+      ],
+      "supported_assertions": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "The engraved serial was explicitly verified before immersion.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "The concern is assessable from this packet. A generic abstention does not substitute for a specific finding."
+    },
+    {
+      "case_id": "af-009",
+      "acceptable_actions": [
+        "accept"
+      ],
+      "strict_author_action": "accept",
+      "concerns": [],
+      "supported_assertions": [
+        {
+          "claim_path": "/content",
+          "warrant": "Twelve grid cells minus the two excluded cells yields the explicit ten-cell denominator.",
+          "evidence_ids": [
+            "s0"
+          ]
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "The three-by-four grid geometry is explicit.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "Return a completed no-concern review. Do not criticize a stronger implication that the actual bounded assertion does not state."
+    },
+    {
+      "case_id": "af-010",
+      "acceptable_actions": [
+        "flag"
+      ],
+      "strict_author_action": "flag",
+      "concerns": [
+        {
+          "id": "af-010-concern-1",
+          "claim_path": "/content",
+          "issue": "The full acquired grid size was substituted for the mean denominator despite explicit masking exclusions.",
+          "acceptable_bases": [
+            "factual_contradiction"
+          ],
+          "evidence_warrant": "Array-analysis record M31. The acquired grid has three rows and four cells per row. Cells at row 1 column 2 and row 3 column 4 are masked, and every other cell is unmasked. The exported mean is computed over unmasked cells only. The record explicitly lists ten contributing cells and excludes both masked values; neither a masked value nor a placeholder is added to the denominator.",
+          "relevant_evidence_ids": [
+            "s0"
+          ],
+          "unacceptable_overclaim": "Do not invent failed acquisition, zero-valued cells, interpolation or duplicate cells. Masked values were excluded, not replaced.",
+          "acceptable_resolution": "Identify the material concern while preserving supported neighboring assertions; qualify, reconsider, relabel or remove only what the original evidence warrants."
+        }
+      ],
+      "supported_assertions": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "The three-by-four grid geometry is explicit.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "The concern is assessable from this packet. A generic abstention does not substitute for a specific finding."
+    },
+    {
+      "case_id": "af-011",
+      "acceptable_actions": [
+        "accept"
+      ],
+      "strict_author_action": "accept",
+      "concerns": [],
+      "supported_assertions": [
+        {
+          "claim_path": "/content",
+          "warrant": "The same bracket and revision have incompatible 1.6 and 2.0 callouts, explicitly unresolved by this packet.",
+          "evidence_ids": [
+            "s0",
+            "s1"
+          ]
+        }
+      ],
+      "ambiguities": [
+        "The assertion reports disagreement itself and chooses no governing value or physical measurement. The two exports establish that disagreement; no criticism of this assertion is warranted."
+      ],
+      "case_rule": "Return a completed no-concern review. Do not criticize a stronger implication that the actual bounded assertion does not state."
+    },
+    {
+      "case_id": "af-012",
+      "acceptable_actions": [
+        "flag",
+        "abstain"
+      ],
+      "strict_author_action": "flag",
+      "concerns": [
+        {
+          "id": "af-012-concern-1",
+          "claim_path": "/content",
+          "issue": "The candidate selects one governing design value from unresolved same-revision exports without priority evidence.",
+          "acceptable_bases": [
+            "misleading_certainty",
+            "factual_contradiction"
+          ],
+          "evidence_warrant": "CAD archive export E1 for bracket PX, drawing revision 7. The thickness callout is 1.6 mm. The export bears a valid archive signature and names revision 7 as current. The packet supplies no release-order record or correction establishing priority between this export and export E2. The callout concerns design thickness, not a measurement of a manufactured bracket. CAD archive export E2 for the same bracket PX and drawing revision 7. The thickness callout is 2.0 mm. This export also bears a valid archive signature and names revision 7 as current. The packet explicitly identifies the two thickness callouts as conflicting and supplies no approval, correction or release-order record that resolves which callout governs.",
+          "relevant_evidence_ids": [
+            "s0",
+            "s1"
+          ],
+          "unacceptable_overclaim": "Do not declare either export invalid, choose 2.0 mm as the resolved governing value, infer physical thickness, or invent a release order. Contradiction concerns the reports only.",
+          "acceptable_resolution": "Identify the unresolved same-revision conflict in a grounded finding or explicitly abstain for lack of priority evidence."
+        }
+      ],
+      "supported_assertions": [],
+      "ambiguities": [
+        "The reports explicitly conflict. A factual_contradiction basis is acceptable only when describing that unresolved report conflict, not when claiming 1.6 mm is a disproven physical or governing value."
+      ],
+      "case_rule": "Either a source-grounded conflict finding or an explicit valid inability-to-resolve abstention is permitted."
+    },
+    {
+      "case_id": "af-013",
+      "acceptable_actions": [
+        "accept"
+      ],
+      "strict_author_action": "accept",
+      "concerns": [],
+      "supported_assertions": [
+        {
+          "claim_path": "/content",
+          "warrant": "The acquisition rule assigns a lower bound of 500 N to the explicitly saturated sample.",
+          "evidence_ids": [
+            "s0"
+          ]
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "The separate sample-406 flag is expressly clear.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [
+        "The saturation rule uses an inclusive lower bound. Exactly 500 N remains possible, so insufficient precision cannot be scored as a witnessed numerical contradiction."
+      ],
+      "case_rule": "Return a completed no-concern review. Do not criticize a stronger implication that the actual bounded assertion does not state."
+    },
+    {
+      "case_id": "af-014",
+      "acceptable_actions": [
+        "flag"
+      ],
+      "strict_author_action": "flag",
+      "concerns": [
+        {
+          "id": "af-014-concern-1",
+          "claim_path": "/content",
+          "issue": "A clipped lower bound was presented as an exact measurement without an unclipped trace.",
+          "acceptable_bases": [
+            "misleading_certainty"
+          ],
+          "evidence_warrant": "Load-channel export Q11. Sample 407 displays 500 N and has the saturation flag set. The attached acquisition rule states that a saturated sample represents a true channel input of at least 500 N; displayed 500 is a clipping value, not an exact measurement. No secondary range, unclipped trace or upper bound is available for sample 407. The adjacent sample 406 has its saturation flag clear.",
+          "relevant_evidence_ids": [
+            "s0"
+          ],
+          "unacceptable_overclaim": "Do not assert that the true input exceeded 500 N strictly or had a particular larger value. Equality is possible but not established; the source gives at least, not greater than.",
+          "acceptable_resolution": "Identify the material concern while preserving supported neighboring assertions; qualify, reconsider, relabel or remove only what the original evidence warrants."
+        }
+      ],
+      "supported_assertions": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "The separate sample-406 flag is expressly clear.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [
+        "The saturation rule uses an inclusive lower bound. Exactly 500 N remains possible, so insufficient precision cannot be scored as a witnessed numerical contradiction."
+      ],
+      "case_rule": "The concern is assessable from this packet. A generic abstention does not substitute for a specific finding."
+    },
+    {
+      "case_id": "af-015",
+      "acceptable_actions": [
+        "accept"
+      ],
+      "strict_author_action": "accept",
+      "concerns": [],
+      "supported_assertions": [
+        {
+          "claim_path": "/content",
+          "warrant": "The final status explicitly retains active bank A and effective rising polarity.",
+          "evidence_ids": [
+            "s0"
+          ]
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "The upload explicitly stores the falling setting in bank B.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "Return a completed no-concern review. Do not criticize a stronger implication that the actual bounded assertion does not state."
+    },
+    {
+      "case_id": "af-016",
+      "acceptable_actions": [
+        "flag"
+      ],
+      "strict_author_action": "flag",
+      "concerns": [
+        {
+          "id": "af-016-concern-1",
+          "claim_path": "/content",
+          "issue": "The staged upload was treated as activated despite a later status read retaining the earlier active setting.",
+          "acceptable_bases": [
+            "factual_contradiction",
+            "missing_condition"
+          ],
+          "evidence_warrant": "Motion-controller configuration trace for unit H8. At boot, active bank A set pulse polarity to rising. A later upload stored a falling-polarity configuration in inactive bank B. The controller reported upload complete but activation pending. The final status read, after that upload, still identifies bank A as active and rising polarity as the effective value. No bank-switch command occurred within the trace.",
+          "relevant_evidence_ids": [
+            "s0"
+          ],
+          "unacceptable_overclaim": "Do not deny that the upload succeeded, infer that the new configuration was corrupt, or claim bank B could never be activated later.",
+          "acceptable_resolution": "Identify the material concern while preserving supported neighboring assertions; qualify, reconsider, relabel or remove only what the original evidence warrants."
+        }
+      ],
+      "supported_assertions": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "The upload explicitly stores the falling setting in bank B.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "The concern is assessable from this packet. A generic abstention does not substitute for a specific finding."
+    }
+  ]
+}

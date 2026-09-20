@@ -8,6 +8,7 @@ import base64
 import os
 import random
 import time
+from collections.abc import Awaitable, Callable
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -37,6 +38,15 @@ VERSION = "jev-heldout-fast-critic-v1"
 REPEATS = 2
 CONCURRENCY = 8
 SEED = 20260922
+RequestBuilder = Callable[[PreparedMemoryValidation, list[dict[str, str]]], dict[str, Any]]
+Interpreter = Callable[[dict[str, Any], dict[str, Any]], Awaitable[dict[str, Any]]]
+Executor = Callable[..., Awaitable[dict[str, Any]]]
+Summarizer = Callable[
+    [list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]], dict[str, Any]
+]
+Preparer = Callable[
+    [Path, Path], Awaitable[tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]]
+]
 
 
 def stress_labels(case: dict[str, Any], prepared: PreparedMemoryValidation) -> list[dict[str, str]]:
@@ -54,14 +64,20 @@ def stress_labels(case: dict[str, Any], prepared: PreparedMemoryValidation) -> l
     ]
 
 
-def entries(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    rng = random.Random(SEED)  # noqa: S311 - frozen randomized experiment schedule
-    pairs = [(index, repeat) for index in range(len(cases)) for repeat in range(REPEATS)]
+def entries(
+    cases: list[dict[str, Any]],
+    *,
+    repeats: int = REPEATS,
+    seed: int = SEED,
+    version: str = VERSION,
+) -> list[dict[str, Any]]:
+    rng = random.Random(seed)  # noqa: S311 - frozen randomized experiment schedule
+    pairs = [(index, repeat) for index in range(len(cases)) for repeat in range(repeats)]
     rng.shuffle(pairs)
     schedule = []
     for index, repeat in pairs:
         case = cases[index]
-        run_id = f"{VERSION}:case-{index}:repeat-{repeat}"
+        run_id = f"{version}:case-{index}:repeat-{repeat}"
         prepared = critic_pair.prepare_case(case, run_id)
         decision = support_inputs.make_request(case, run_id)
         direct = fast_critic.critic_request(prepared, [])
@@ -168,6 +184,8 @@ async def execute(
     client: httpx.AsyncClient | None,
     out: Path | None,
     archive: Path | None = None,
+    request_builder: RequestBuilder = fast_critic.critic_request,
+    interpreter: Interpreter = fast_critic.interpret,
 ) -> dict[str, Any]:
     start, started_at = time.monotonic(), critic_pair._now()
     # Reconstruct inside the measured path, never reuse the preflight's detached preparation.
@@ -187,8 +205,11 @@ async def execute(
         )
 
     hints, observation = [], None
-    if entry["arm"] == "live_jev":
+    mode = entry.get("hint_mode", entry["arm"])
+    if mode == "live_jev":
         request = support_inputs.make_request(case, entry["run_id"])
+        if "decision_request_id" in entry:
+            request = request.model_copy(update={"request_id": entry["decision_request_id"]})
         if (
             request.model_dump(mode="json") != entry["jev_request"]
             or quality_speed.wire_request(request) != entry["jev_wire"]
@@ -196,15 +217,12 @@ async def execute(
             raise ValueError("Jev preparation changed")
         observation = await _decision(request, entry["jev_wire"], observe)
         hints = fast_critic_study.hint_labels(entry, {"jev_observation": observation})
-    elif entry["arm"] == "misleading":
+    elif mode == "misleading":
         hints = stress_labels(case, prepared)
-    elif entry["arm"] != "direct":
+    elif mode != "direct":
         raise ValueError("unknown experiment arm")
-    wire = fast_critic.critic_request(prepared, hints)
-    if (
-        entry["arm"] != "live_jev"
-        and wire != entry["stress_request" if hints else "direct_request"]
-    ):
+    wire = request_builder(prepared, hints)
+    if mode != "live_jev" and wire != entry["stress_request" if hints else "direct_request"]:
         raise ValueError("frozen critic request changed")
     invocation = {
         "prepared_payload": prepared.payload_json,
@@ -212,6 +230,8 @@ async def execute(
         "request": wire,
         "request_sha256": quality_speed.digest(wire),
     }
+    if "contract" in entry:
+        invocation["contract"] = entry["contract"]
     if archive is not None:
         saved = await asyncio.to_thread(
             (archive / "invocations" / f"{entry['id']}.json").read_bytes
@@ -222,11 +242,15 @@ async def execute(
         assert out is not None
         _write(out / "invocations" / f"{entry['id']}.json", invocation)
     raw = await observe("critic", fast_critic.CONTROLS["endpoint"], wire)
-    critic = await fast_critic.interpret(invocation, raw)
+    critic = await interpreter(invocation, raw)
     costs = [critic["usage"]["observed_cost_usd"]]
     if observation is not None:
         costs.append(observation["observed_cost_usd"])
-    return {k: entry[k] for k in ("id", "case_id", "repeat", "arm")} | {
+    return {
+        k: entry[k]
+        for k in ("id", "case_id", "repeat", "arm", "contract", "hint_mode")
+        if k in entry
+    } | {
         "action": quality_speed.critic_action(critic),
         "hints": hints,
         "jev_observation": observation,
@@ -271,7 +295,9 @@ def _replay_inputs(archive, schedule, current):
     names = {
         f"{e['id']}.{stage}{suffix}.json"
         for e in schedule
-        for stage in (["jev", "critic"] if e["arm"] == "live_jev" else ["critic"])
+        for stage in (
+            ["jev", "critic"] if e.get("hint_mode", e["arm"]) == "live_jev" else ["critic"]
+        )
         for suffix in ("", ".dispatch")
     }
     if {p.name for p in (archive / "raw").iterdir()} != names:
@@ -289,10 +315,13 @@ async def replay(
     schedule: list[dict[str, Any]],
     current: dict[str, Any],
     cases: list[dict[str, Any]],
+    *,
+    execute_fn: Executor | None = None,
+    summarize_fn: Summarizer = heldout_fast_analysis.summarize,
 ) -> list[dict[str, Any]]:
     prior = await asyncio.to_thread(_replay_inputs, archive, schedule, current)
     for entry, old in zip(schedule, prior, strict=True):
-        row = await execute(
+        row = await (execute_fn or execute)(
             entry, cases[entry["case_index"]], client=None, out=None, archive=archive
         )
         for key in ("service_ms", "started_at", "completed_at", "queue_ms", "total_ms"):
@@ -312,13 +341,18 @@ async def replay(
         if row != old or saved != old:
             raise ValueError("replay derived row mismatch")
     saved_summary = read_json_value(await asyncio.to_thread((archive / "summary.json").read_bytes))
-    if heldout_fast_analysis.summarize(cases, schedule, prior) != saved_summary:
+    if summarize_fn(cases, schedule, prior) != saved_summary:
         raise ValueError("replay summary mismatch")
     return prior
 
 
 async def live_calls(
-    cases: list[dict[str, Any]], schedule: list[dict[str, Any]], out: Path, key: str
+    cases: list[dict[str, Any]],
+    schedule: list[dict[str, Any]],
+    out: Path,
+    key: str,
+    *,
+    execute_fn: Executor | None = None,
 ) -> list[dict[str, Any]]:
     semaphore, records = asyncio.Semaphore(CONCURRENCY), {}
     async with httpx.AsyncClient(
@@ -333,7 +367,9 @@ async def live_calls(
             queued = time.monotonic()
             async with semaphore:
                 queue_ms = (time.monotonic() - queued) * 1000
-                row = await execute(entry, cases[entry["case_index"]], client=client, out=out)
+                row = await (execute_fn or execute)(
+                    entry, cases[entry["case_index"]], client=client, out=out
+                )
                 row.update(queue_ms=queue_ms, total_ms=(time.monotonic() - queued) * 1000)
                 records[entry["id"]] = row
                 _write(out / "paths" / f"{entry['id']}.json", row)
@@ -376,24 +412,33 @@ async def run(
     freeze: Path | None = None,
     live: bool = False,
     replay_path: Path | None = None,
+    prepare_fn: Preparer | None = None,
+    execute_fn: Executor | None = None,
+    summarize_fn: Summarizer = heldout_fast_analysis.summarize,
 ) -> dict[str, Any] | None:
     if live and replay_path is not None:
         raise ValueError("choose live or replay")
-    cases, schedule, current = await prepare(cases_path, rubric_path)
+    cases, schedule, current = await (prepare_fn or prepare)(cases_path, rubric_path)
     if live and (
         freeze is None or read_json_value(await asyncio.to_thread(freeze.read_bytes)) != current
     ):
         raise ValueError("live calls require exact frozen manifest")
-    rows = await replay(replay_path, schedule, current, cases) if replay_path is not None else None
+    rows = (
+        await replay(
+            replay_path, schedule, current, cases, execute_fn=execute_fn, summarize_fn=summarize_fn
+        )
+        if replay_path is not None
+        else None
+    )
     key = os.environ.get("SIBYL_JEV_CRITIC_OPENROUTER_API_KEY", "") if live else ""
     if live and not key:
         raise ValueError("dedicated synthetic key required")
     await asyncio.to_thread(_initialize, out, current, schedule, rubric_path, replay_path)
     if live:
-        rows = await live_calls(cases, schedule, out, key)
+        rows = await live_calls(cases, schedule, out, key, execute_fn=execute_fn)
     if rows is None:
         return None
-    summary = heldout_fast_analysis.summarize(cases, schedule, rows)
+    summary = summarize_fn(cases, schedule, rows)
     _write(out / "rows.json", rows)
     _write(out / "summary.json", summary)
     _write(out / "completion.json", {"mode": "live" if live else "replay", "paths": len(rows)})

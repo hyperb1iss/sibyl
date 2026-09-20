@@ -1,0 +1,3876 @@
+{
+  "metadata": {
+    "reviewer": "Native same-family contextual independent reviewer; not human gold or cross-family validation.",
+    "blinding": "Read only the four fresh blind packet files. No mapping, raw archive, plan, timing, cost, cohort aggregate, or arm results read. Output prose occasionally mentions advisory labels; no arm assignment inferred or used.",
+    "prior_exposure": "Reviewed source-only fresh fixture and implementation before inference, and retained blinded outputs under the same rubric. Earlier experiments and historical failure patterns were already known. Both current cohorts remain arm-blind until this file freezes.",
+    "rule": "Frozen strict clause-level rubric; all explicit factual clauses and exact targets judged against original sources. Later correct qualification does not repair categorical overclaim. Fully valid findings alone count concern coverage. Mechanical errors remain failures, never repaired into abstentions.",
+    "field_definitions": {
+      "core_concern_supported": "The selected exact target has the frozen material concern, independently of extra defects.",
+      "citations_relevant": "The cited original source addresses the proposition; relevance does not validate spurious criticism.",
+      "basis_overstates_evidence": "Typed basis or prose asserts contradiction/disproof beyond evidence; factual_contradiction against a supported target is an overstatement.",
+      "unsupported_replacement": "Proposed correction or auxiliary factual claim is unsupported, including invented measured effects or numeric errors.",
+      "concern_ids": "Frozen concerns addressed by the selected target core, even when another defect invalidates the finding.",
+      "covered_concern_ids": "Unique concerns covered by fully valid findings in a mechanically valid response.",
+      "missed_concern_ids": "Frozen concerns minus fully valid finding coverage, separate from any valid abstention."
+    },
+    "input_bindings": {
+      "cases.json": "fb14fd520483f04baef0911dee681f32f75d8e578daf963da3e1603e950ee05d",
+      "rubric.json": "a37c43b506f8f083b07c079dfe4ab3e5ce5b0a437b23aa1f6f2f7e66d7174f04",
+      "responses.json": "63165d98d10a486a4c0b823768aee98bf60c7543f53b991231587f27c9f36fa0",
+      "binding.json": "645b14f6780a7c5d4efd51571dbaf41f2f68339f321c2fbb2f620e030c1d0bd5"
+    },
+    "supplied_binding": {
+      "rows_sha256": "ce6887d9ba870d4f5c4ebf393f89bcd7ca956f44be43bf51dcaaecf5fc8a1e67",
+      "files_sha256": {
+        "rubric.json": "a37c43b506f8f083b07c079dfe4ab3e5ce5b0a437b23aa1f6f2f7e66d7174f04",
+        "responses.json": "63165d98d10a486a4c0b823768aee98bf60c7543f53b991231587f27c9f36fa0",
+        "cases.json": "fb14fd520483f04baef0911dee681f32f75d8e578daf963da3e1603e950ee05d"
+      },
+      "blind_map_sha256": "fba4b5bc8ebc3226dd8c3d09bc79b0e28861697cea8e97eb8a490535f6a1c49f"
+    },
+    "ambiguous_items": [
+      {
+        "blind_id": "2bea1895d0d31819",
+        "finding_index": 0,
+        "primary_semantic_pass": false,
+        "alternative_semantic_pass": true,
+        "alternative_covered_concern_ids": [
+          "af-002-concern-1"
+        ],
+        "rationale": "A contextual reading treats buffer language as a description of the bench environment. Primary strict reading rejects explicit claims that the bytes were established resident or persisted within that buffer; the powered read does not locate them.",
+        "primary_preserved": true
+      },
+      {
+        "blind_id": "80d19dd7e3c7c286",
+        "finding_index": 0,
+        "primary_semantic_pass": false,
+        "alternative_semantic_pass": false,
+        "alternative_covered_concern_ids": [
+          "af-002-concern-1"
+        ],
+        "rationale": "A contextual reading treats buffer language as a description of the bench environment. Primary strict reading rejects explicit claims that the bytes were established resident or persisted within that buffer; the powered read does not locate them.",
+        "primary_preserved": true
+      },
+      {
+        "blind_id": "fe6b0beb7d5c1ee6",
+        "finding_index": 0,
+        "primary_semantic_pass": false,
+        "alternative_semantic_pass": true,
+        "alternative_covered_concern_ids": [
+          "af-006-concern-1"
+        ],
+        "rationale": "A contextual reading treats negates/contradicts as shorthand for evidence does not warrant asserting. Primary clause-level rubric does not allow an explicit categorical contradiction to be repaired by surrounding uncertainty language.",
+        "primary_preserved": true
+      },
+      {
+        "blind_id": "fa7621842ac14741",
+        "finding_index": 0,
+        "primary_semantic_pass": false,
+        "alternative_semantic_pass": true,
+        "alternative_covered_concern_ids": [
+          "af-002-concern-1"
+        ],
+        "rationale": "A contextual reading treats negates/contradicts as shorthand for evidence does not warrant asserting. Primary clause-level rubric does not allow an explicit categorical contradiction to be repaired by surrounding uncertainty language.",
+        "primary_preserved": true
+      },
+      {
+        "blind_id": "7acc8aee6b5bd760",
+        "finding_index": 0,
+        "primary_semantic_pass": false,
+        "alternative_semantic_pass": true,
+        "alternative_covered_concern_ids": [
+          "af-012-concern-1"
+        ],
+        "rationale": "A contextual reading treats negates/contradicts as shorthand for evidence does not warrant asserting. Primary clause-level rubric does not allow an explicit categorical contradiction to be repaired by surrounding uncertainty language.",
+        "primary_preserved": true
+      },
+      {
+        "blind_id": "261478a041bf0d58",
+        "finding_index": 0,
+        "primary_semantic_pass": false,
+        "alternative_semantic_pass": true,
+        "alternative_covered_concern_ids": [
+          "af-008-concern-1"
+        ],
+        "rationale": "A contextual reading treats negates/contradicts as shorthand for evidence does not warrant asserting. Primary clause-level rubric does not allow an explicit categorical contradiction to be repaired by surrounding uncertainty language.",
+        "primary_preserved": true
+      },
+      {
+        "blind_id": "9457099fde4c35c1",
+        "finding_index": 1,
+        "primary_semantic_pass": false,
+        "alternative_semantic_pass": false,
+        "alternative_covered_concern_ids": [
+          "af-014-concern-1"
+        ],
+        "rationale": "A contextual reading treats not exactly or contradicts exactness as not known exactly. Primary strict reading preserves equality as possible and rejects categorical contrary-value or contradiction clauses. Other spurious findings still prevent semantic pass.",
+        "primary_preserved": true
+      },
+      {
+        "blind_id": "69c71f8dcec2ea3b",
+        "finding_index": 1,
+        "primary_semantic_pass": false,
+        "alternative_semantic_pass": false,
+        "alternative_covered_concern_ids": [
+          "af-014-concern-1"
+        ],
+        "rationale": "A contextual reading treats not exactly or contradicts exactness as not known exactly. Primary strict reading preserves equality as possible and rejects categorical contrary-value or contradiction clauses. Other spurious findings still prevent semantic pass.",
+        "primary_preserved": true
+      },
+      {
+        "blind_id": "925919e25826b6a1",
+        "finding_index": 1,
+        "primary_semantic_pass": false,
+        "alternative_semantic_pass": false,
+        "alternative_covered_concern_ids": [
+          "af-014-concern-1"
+        ],
+        "rationale": "A contextual reading treats not exactly or contradicts exactness as not known exactly. Primary strict reading preserves equality as possible and rejects categorical contrary-value or contradiction clauses. Other spurious findings still prevent semantic pass.",
+        "primary_preserved": true
+      },
+      {
+        "blind_id": "e0f6056eb68bfdb9",
+        "finding_index": 0,
+        "primary_semantic_pass": false,
+        "alternative_semantic_pass": true,
+        "alternative_covered_concern_ids": [
+          "af-012-concern-1"
+        ],
+        "rationale": "A contextual reading treats measured value as a loose synonym for numerical design callout. Primary strict rubric preserves the source distinction between design specifications and physical measurements.",
+        "primary_preserved": true
+      }
+    ],
+    "additional_boundary_notes": [
+      "All outputs and findings were read case-by-case before annotation construction. Assembly rules encode those individual judgments and exact target checks, not an automatic model judge.",
+      "Statements that the source rejects or disclaims causal attribution are read as refusing to attribute, while directly negates a causal claim is categorical disproof under the strict rubric.",
+      "Potential distance effects framed as could are permissible uncertainty; definite independent effects or numeric acoustic predictions are not established by this source.",
+      "Inactive-bank never activated language in af-016 is read within the explicitly final trace scope; no output asserts impossible future activation.",
+      "The rubric permits factual_contradiction for af-012 only at conflicting-report level. Other imprecise permitted categories are not an automatic rejection when target and prose remain correct.",
+      "No model output is treated as arithmetic or source-truth authority."
+    ],
+    "coverage": {
+      "responses": 192,
+      "cases": 16,
+      "unique_blind_ids": 192,
+      "all_findings_reviewed": 127,
+      "scheduled_material_concern_instances": 96,
+      "mechanical_errors_retained": 1,
+      "arm_mapping_read": false
+    }
+  },
+  "annotations": [
+    {
+      "blind_id": "60debbf95ceb065c",
+      "case_id": "af-013",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "9984d7bbdbbe2326",
+      "case_id": "af-004",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-004-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "3f76716e88047337",
+      "case_id": "af-013",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "3b91b7756829ab63",
+      "case_id": "af-004",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-004-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "357850d7963aeb71",
+      "case_id": "af-007",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "e3eda51a972fc34d",
+      "case_id": "af-005",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "295dcebe14c2fbb5",
+      "case_id": "af-002",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-002-concern-1"
+          ],
+          "note": "A powered read and acknowledgment do not establish power-loss durability; no contrary loss outcome is established. The causality category is imprecise, but the prose identifies the actual unsupported guarantee or extrapolation without requiring that category as an automatic whitelist."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-002-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "9457099fde4c35c1",
+      "case_id": "af-014",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-014-concern-1"
+          ],
+          "note": "Identifies the lower-bound concern and preserves equality explicitly, but then says the actual-value claim contradicts lack of an exact measurement. The categorical contradiction clause exceeds the evidence."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-014-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "16a977287b566f4d",
+      "case_id": "af-006",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-006-concern-1"
+          ],
+          "note": "Both insert and microphone distance changed; the source measures no separate effect and permits no causal assignment."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-006-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "e1ac35d3043856d1",
+      "case_id": "af-007",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "7c83b2e5cbbc08c8",
+      "case_id": "af-001",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "858b798a3c5e2d99",
+      "case_id": "af-006",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": true,
+          "concern_ids": [
+            "af-006-concern-1"
+          ],
+          "note": "Correct confounding concern, but categorical distance significantly affects measurements asserts an unmeasured causal effect in this enclosure rather than possibility."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-006-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "dea338584df35d80",
+      "case_id": "af-010",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-010-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "cd37e6a7d6f2e3e9",
+      "case_id": "af-008",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-008-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "96c1a7c3ef67c6d5",
+      "case_id": "af-002",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-002-concern-1"
+          ],
+          "note": "A powered read and acknowledgment do not establish power-loss durability; no contrary loss outcome is established. The causality category is imprecise, but the prose identifies the actual unsupported guarantee or extrapolation without requiring that category as an automatic whitelist."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-002-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "dc9746c9243bd938",
+      "case_id": "af-015",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "25bc189f95e04e74",
+      "case_id": "af-005",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "70861fdff80768b2",
+      "case_id": "af-011",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "33edb6ee768359e0",
+      "case_id": "af-011",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "1ca4a919c34bc86b",
+      "case_id": "af-016",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-016-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "False acceptance leaves the explicit final-status contradiction unaddressed."
+    },
+    {
+      "blind_id": "2bea1895d0d31819",
+      "case_id": "af-002",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": true,
+          "concern_ids": [
+            "af-002-concern-1"
+          ],
+          "note": "Correct durability concern, but the source says the bench used a volatile buffer, not that the successful read establishes these bytes resided there. The categorical buffer-location statement exceeds the capture."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-002-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "a29ab8c770014a95",
+      "case_id": "af-006",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": true,
+          "concern_ids": [
+            "af-006-concern-1"
+          ],
+          "note": "Correct confounding concern, but 68 minus 61 is 7 dB, not the stated 9 dB."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-006-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "a9c018e62c00009b",
+      "case_id": "af-009",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "e0f6056eb68bfdb9",
+      "case_id": "af-012",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": true,
+          "concern_ids": [
+            "af-012-concern-1"
+          ],
+          "note": "Correct unresolved design-callout concern, but calls the selected design callout a measured value. The source explicitly distinguishes design thickness from physical measurement."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-012-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "eba7d5be57ba67e9",
+      "case_id": "af-016",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-016-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "False acceptance leaves the explicit final-status contradiction unaddressed."
+    },
+    {
+      "blind_id": "e44494063877d24f",
+      "case_id": "af-012",
+      "mechanical_action": "error",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-012-concern-1"
+          ],
+          "note": "Two signed current-revision reports conflict without priority evidence; neither governing value is resolved."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-012-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Mechanical error earns no semantic credit or concern coverage. Raw prose identifies the unresolved conflict, but unsupported_certainty is not a valid product basis; no repair performed."
+    },
+    {
+      "blind_id": "14552e5f4b670e15",
+      "case_id": "af-006",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-006-concern-1"
+          ],
+          "note": "Both insert and microphone distance changed; the source measures no separate effect and permits no causal assignment."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-006-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "f055bacae9c88d29",
+      "case_id": "af-003",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "e213d757f14d3f78",
+      "case_id": "af-006",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-006-concern-1"
+          ],
+          "note": "Both insert and microphone distance changed; the source measures no separate effect and permits no causal assignment."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-006-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "57e1265872724c28",
+      "case_id": "af-014",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-014-concern-1"
+          ],
+          "note": "An inclusive lower bound establishes at least 500 N, not a measured exact value; equality remains possible."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-014-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "adbf70636fe8a48c",
+      "case_id": "af-016",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-016-concern-1"
+          ],
+          "note": "Final status explicitly retains active bank A and rising polarity despite the completed inactive-bank upload."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-016-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "9e46239f389f57bf",
+      "case_id": "af-002",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-002-concern-1"
+          ],
+          "note": "A powered read and acknowledgment do not establish power-loss durability; no contrary loss outcome is established. The causality category is imprecise, but the prose identifies the actual unsupported guarantee or extrapolation without requiring that category as an automatic whitelist."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-002-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "093dad23f67eae67",
+      "case_id": "af-008",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-008-concern-1"
+          ],
+          "note": "The measured error at 20 C cannot establish error at unmeasured 90 C."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-008-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "666d757b557a2bf7",
+      "case_id": "af-001",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "2c55d3eef6622bfc",
+      "case_id": "af-006",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-006-concern-1"
+          ],
+          "note": "Both insert and microphone distance changed; the source measures no separate effect and permits no causal assignment."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-006-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "bb24f0fc30788cca",
+      "case_id": "af-016",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-016-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "550d52042ce82a8d",
+      "case_id": "af-006",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-006-concern-1"
+          ],
+          "note": "Both insert and microphone distance changed; the source measures no separate effect and permits no causal assignment."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-006-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "f9aa5672a5b3564b",
+      "case_id": "af-014",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-014-concern-1"
+          ],
+          "note": "An inclusive lower bound establishes at least 500 N, not a measured exact value; equality remains possible."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-014-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "3d8443ee0d9e3b35",
+      "case_id": "af-016",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-016-concern-1"
+          ],
+          "note": "Final status explicitly retains active bank A and rising polarity despite the completed inactive-bank upload."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-016-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "0dc612db430900c5",
+      "case_id": "af-009",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "630f653c6ac2766c",
+      "case_id": "af-001",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "433c30f9d832d3ca",
+      "case_id": "af-016",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-016-concern-1"
+          ],
+          "note": "Final status explicitly retains active bank A and rising polarity despite the completed inactive-bank upload."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-016-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "289b402dea69fa6c",
+      "case_id": "af-005",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": true,
+          "concern_ids": [],
+          "note": "Criticizes a supported recorded comparison and additionally claims the lower reading resulted from both changes, which the source never establishes."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "93c9aa0744a58aba",
+      "case_id": "af-003",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "d6c03270fe895d23",
+      "case_id": "af-011",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "dc147695d1c71a90",
+      "case_id": "af-014",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-014-concern-1"
+          ],
+          "note": "An inclusive lower bound establishes at least 500 N, not a measured exact value; equality remains possible. The factual_contradiction basis incorrectly turns insufficient evidence into disproof."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-014-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "4190a5e2a8c8106c",
+      "case_id": "af-009",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "9813f073f77c061d",
+      "case_id": "af-005",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "52ea22ebba2a1311",
+      "case_id": "af-008",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-008-concern-1"
+          ],
+          "note": "The measured error at 20 C cannot establish error at unmeasured 90 C. The causality category is imprecise, but the prose identifies the actual unsupported guarantee or extrapolation without requiring that category as an automatic whitelist."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-008-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "d8edb3b3cd184ce1",
+      "case_id": "af-006",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": true,
+          "concern_ids": [
+            "af-006-concern-1"
+          ],
+          "note": "Invents an expected 7 dB distance-only effect and an inapplicable numeric derivation; no separate effect was measured."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-006-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "b983204cd7881880",
+      "case_id": "af-015",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "80d19dd7e3c7c286",
+      "case_id": "af-002",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": true,
+          "concern_ids": [
+            "af-002-concern-1"
+          ],
+          "note": "Correct guarantee concern, but the claimed evidence establishes persistence within the volatile buffer rather than only a powered read; exact data residency is not established."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-002-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "adf606c1f6463634",
+      "case_id": "af-007",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "69c71f8dcec2ea3b",
+      "case_id": "af-014",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-014-concern-1"
+          ],
+          "note": "Correct certainty concern, but explicitly says the true value is not exactly 500 N. Equality remains possible under the inclusive lower bound."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-014-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "9a9d8c0ec3d1cd5e",
+      "case_id": "af-007",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "7890e98bdeb8293f",
+      "case_id": "af-001",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "34b9f6d999fe68d9",
+      "case_id": "af-011",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "6aa858b55722478a",
+      "case_id": "af-004",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-004-concern-1"
+          ],
+          "note": "The explicit bit-zero rule and decoded state establish delta encoding disabled for this frame."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-004-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "cd602f8a36d1dd2a",
+      "case_id": "af-013",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "53ca571dcfcad8e0",
+      "case_id": "af-010",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-010-concern-1"
+          ],
+          "note": "Twelve grid cells minus two masked cells yields ten contributors, expressly confirmed in the source."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-010-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "42f697225c3ae8da",
+      "case_id": "af-014",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-014-concern-1"
+          ],
+          "note": "An inclusive lower bound establishes at least 500 N, not a measured exact value; equality remains possible."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-014-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "b6009d9f8e9ae8c6",
+      "case_id": "af-009",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "5390552534079cbc",
+      "case_id": "af-009",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "ec9bd039a73c603c",
+      "case_id": "af-015",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "0b5f3ed8f44b864b",
+      "case_id": "af-016",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-016-concern-1"
+          ],
+          "note": "Final status explicitly retains active bank A and rising polarity despite the completed inactive-bank upload."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-016-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "35a4a1d69a126d3e",
+      "case_id": "af-010",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-010-concern-1"
+          ],
+          "note": "Twelve grid cells minus two masked cells yields ten contributors, expressly confirmed in the source."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-010-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "57014fef81d6064d",
+      "case_id": "af-009",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "830f184d08962510",
+      "case_id": "af-001",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "0fd3b560a4351c71",
+      "case_id": "af-016",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-016-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "46a764a09904d5ea",
+      "case_id": "af-003",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "fbbfe8da0df332aa",
+      "case_id": "af-005",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "5c09d64cd92b74db",
+      "case_id": "af-002",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-002-concern-1"
+          ],
+          "note": "A powered read and acknowledgment do not establish power-loss durability; no contrary loss outcome is established. The causality category is imprecise, but the prose identifies the actual unsupported guarantee or extrapolation without requiring that category as an automatic whitelist."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-002-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "3cd3e90f77552be3",
+      "case_id": "af-002",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-002-concern-1"
+          ],
+          "note": "A powered read and acknowledgment do not establish power-loss durability; no contrary loss outcome is established. The causality category is imprecise, but the prose identifies the actual unsupported guarantee or extrapolation without requiring that category as an automatic whitelist."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-002-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "9e9056732a6ad70e",
+      "case_id": "af-007",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "5cd1248c6809f51b",
+      "case_id": "af-014",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-014-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "9c9c3f8aca83614b",
+      "case_id": "af-012",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-012-concern-1"
+          ],
+          "note": "Two signed current-revision reports conflict without priority evidence; neither governing value is resolved."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-012-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "406b5f758484d700",
+      "case_id": "af-011",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "024645914b8dd760",
+      "case_id": "af-008",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-008-concern-1"
+          ],
+          "note": "The measured error at 20 C cannot establish error at unmeasured 90 C. The factual_contradiction basis incorrectly turns insufficient evidence into disproof."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-008-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "af4bed4485cbc9a6",
+      "case_id": "af-013",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "47991a62cb6f57e0",
+      "case_id": "af-014",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-014-concern-1"
+          ],
+          "note": "An inclusive lower bound establishes at least 500 N, not a measured exact value; equality remains possible. The factual_contradiction basis incorrectly turns insufficient evidence into disproof."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-014-concern-1"
+          ],
+          "note": "An inclusive lower bound establishes at least 500 N, not a measured exact value; equality remains possible."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-014-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "2cb77eaeaed51421",
+      "case_id": "af-009",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "df84588e1bbee816",
+      "case_id": "af-016",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-016-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "False acceptance leaves the explicit final-status contradiction unaddressed."
+    },
+    {
+      "blind_id": "787b6463f4d0c0f1",
+      "case_id": "af-008",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-008-concern-1"
+          ],
+          "note": "The measured error at 20 C cannot establish error at unmeasured 90 C."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-008-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "60d21cba0cc94cd7",
+      "case_id": "af-009",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "89439f9712c27568",
+      "case_id": "af-003",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "5c99b5bea7e9eeab",
+      "case_id": "af-013",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "8234a36dc2879869",
+      "case_id": "af-013",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "925919e25826b6a1",
+      "case_id": "af-014",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-014-concern-1"
+          ],
+          "note": "Correct certainty concern, but explicitly says the true input is not exactly 500 N, excluding equality that the acquisition rule allows."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-014-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "ba28ff86fce6b513",
+      "case_id": "af-005",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "fd0736878fa440b2",
+      "case_id": "af-015",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "fddccd52057175c9",
+      "case_id": "af-004",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-004-concern-1"
+          ],
+          "note": "The explicit bit-zero rule and decoded state establish delta encoding disabled for this frame."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-004-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "fd3313c20457bb49",
+      "case_id": "af-011",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "d2a432f2b83511b0",
+      "case_id": "af-006",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-006-concern-1"
+          ],
+          "note": "Both insert and microphone distance changed; the source measures no separate effect and permits no causal assignment."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-006-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "4714eaae8b358bc3",
+      "case_id": "af-012",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-012-concern-1"
+          ],
+          "note": "Two signed current-revision reports conflict without priority evidence; neither governing value is resolved."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-012-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "e4ed4c0e6450b451",
+      "case_id": "af-015",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "9279811bc68e5b34",
+      "case_id": "af-014",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-014-concern-1"
+          ],
+          "note": "An inclusive lower bound establishes at least 500 N, not a measured exact value; equality remains possible. The factual_contradiction basis incorrectly turns insufficient evidence into disproof."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-014-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "358fd9a517df6bc8",
+      "case_id": "af-010",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-010-concern-1"
+          ],
+          "note": "Twelve grid cells minus two masked cells yields ten contributors, expressly confirmed in the source."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-010-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "0d71572c69dd6e92",
+      "case_id": "af-007",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "82a21a5847e68c9b",
+      "case_id": "af-007",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "7acc8aee6b5bd760",
+      "case_id": "af-012",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-012-concern-1"
+          ],
+          "note": "The reports conflict, but the final clause says asserting 1.6 as governing contradicts absent resolution evidence. Absence of priority makes that selection unsupported, not disproven; contradiction must remain at report level."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-012-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "ca56850ff1c188c7",
+      "case_id": "af-001",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "dd891c18dfc56df7",
+      "case_id": "af-004",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-004-concern-1"
+          ],
+          "note": "The explicit bit-zero rule and decoded state establish delta encoding disabled for this frame."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-004-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "1db72554bedfa552",
+      "case_id": "af-009",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "b490e04d09586124",
+      "case_id": "af-004",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-004-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "90f0620e70396643",
+      "case_id": "af-012",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-012-concern-1"
+          ],
+          "note": "Two signed current-revision reports conflict without priority evidence; neither governing value is resolved."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-012-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "f944b135560b735f",
+      "case_id": "af-015",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "ab0282e3032f4c2f",
+      "case_id": "af-005",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "51b7d5f7fe52e9a4",
+      "case_id": "af-005",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "d19504f85b2e8afd",
+      "case_id": "af-008",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-008-concern-1"
+          ],
+          "note": "The measured error at 20 C cannot establish error at unmeasured 90 C."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-008-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "a526c6476d60be70",
+      "case_id": "af-009",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "dcfc69b6b1aa021a",
+      "case_id": "af-015",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "1fa44350a85fc3ca",
+      "case_id": "af-013",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "b1847f28cf2ceeb0",
+      "case_id": "af-003",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "37a55405bf56ffb1",
+      "case_id": "af-015",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "f97c2f1f66bd0a26",
+      "case_id": "af-008",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-008-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "a544764f5a147766",
+      "case_id": "af-012",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-012-concern-1"
+          ],
+          "note": "Two signed current-revision reports conflict without priority evidence; neither governing value is resolved."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-012-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "6ee0fec0c2fc1261",
+      "case_id": "af-004",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-004-concern-1"
+          ],
+          "note": "The explicit bit-zero rule and decoded state establish delta encoding disabled for this frame."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-004-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "5dd44fd47b7d8052",
+      "case_id": "af-013",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "5b17f8275a97bad5",
+      "case_id": "af-006",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-006-concern-1"
+          ],
+          "note": "Both insert and microphone distance changed; the source measures no separate effect and permits no causal assignment."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-006-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "b73d7a43c33cbf01",
+      "case_id": "af-011",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "cff5cb960afc751c",
+      "case_id": "af-002",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-002-concern-1"
+          ],
+          "note": "A powered read and acknowledgment do not establish power-loss durability; no contrary loss outcome is established. The causality category is imprecise, but the prose identifies the actual unsupported guarantee or extrapolation without requiring that category as an automatic whitelist."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-002-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "5e5d4ef4c1ceea5f",
+      "case_id": "af-002",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-002-concern-1"
+          ],
+          "note": "A powered read and acknowledgment do not establish power-loss durability; no contrary loss outcome is established. The causality category is imprecise, but the prose identifies the actual unsupported guarantee or extrapolation without requiring that category as an automatic whitelist."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-002-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "0417f24dc41b9fb3",
+      "case_id": "af-008",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-008-concern-1"
+          ],
+          "note": "The measured error at 20 C cannot establish error at unmeasured 90 C."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-008-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "b85cb2d92d5a0719",
+      "case_id": "af-012",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-012-concern-1"
+          ],
+          "note": "Two signed current-revision reports conflict without priority evidence; neither governing value is resolved."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-012-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "83d1a321b5a3e651",
+      "case_id": "af-001",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "498fc18e7cd29f18",
+      "case_id": "af-010",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-010-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "2fdf6c2d07c70293",
+      "case_id": "af-002",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-002-concern-1"
+          ],
+          "note": "A powered read and acknowledgment do not establish power-loss durability; no contrary loss outcome is established. The causality category is imprecise, but the prose identifies the actual unsupported guarantee or extrapolation without requiring that category as an automatic whitelist."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-002-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "53f7caa02f58e521",
+      "case_id": "af-010",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-010-concern-1"
+          ],
+          "note": "Twelve grid cells minus two masked cells yields ten contributors, expressly confirmed in the source."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-010-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "2e86168fd80ffbba",
+      "case_id": "af-007",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "b8ba58f33e777716",
+      "case_id": "af-012",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-012-concern-1"
+          ],
+          "note": "Two signed current-revision reports conflict without priority evidence; neither governing value is resolved."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-012-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "d93be5edec42bd09",
+      "case_id": "af-005",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": true,
+          "concern_ids": [],
+          "note": "Invents causal framing for a supported comparison, a 3.5x distance increase (actual ratio 4), and a known independent distance effect."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "c952897f315d64a8",
+      "case_id": "af-004",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-004-concern-1"
+          ],
+          "note": "The explicit bit-zero rule and decoded state establish delta encoding disabled for this frame."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-004-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "74638bf811f067ef",
+      "case_id": "af-001",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "6654edf33f03886e",
+      "case_id": "af-014",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-014-concern-1"
+          ],
+          "note": "An inclusive lower bound establishes at least 500 N, not a measured exact value; equality remains possible."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-014-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "02f6b696a6b81180",
+      "case_id": "af-007",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "fca9f9a070485f41",
+      "case_id": "af-005",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "c5f2c84db3633fc3",
+      "case_id": "af-011",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "260788fa41d9a019",
+      "case_id": "af-005",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": true,
+          "concern_ids": [],
+          "note": "Supported recorded comparison needs no causal qualification; additionally asserts distance itself would reduce sound independently without source evidence."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "cdbffd271df8ff45",
+      "case_id": "af-003",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "fe6b0beb7d5c1ee6",
+      "case_id": "af-006",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-006-concern-1"
+          ],
+          "note": "'The source directly negates any causal attribution' treats unestimated causation as negated, despite later accurate uncertainty language."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-006-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "466e8e3edbb837c9",
+      "case_id": "af-009",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "998f809c551709dc",
+      "case_id": "af-004",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-004-concern-1"
+          ],
+          "note": "The explicit bit-zero rule and decoded state establish delta encoding disabled for this frame."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-004-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "261478a041bf0d58",
+      "case_id": "af-008",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-008-concern-1"
+          ],
+          "note": "Correct extrapolation concern, but applicability at 90 C does not contradict the absence of high-temperature measurements. The clause upgrades insufficiency into contradiction."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-008-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "88f475c2374545ef",
+      "case_id": "af-010",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-010-concern-1"
+          ],
+          "note": "Twelve grid cells minus two masked cells yields ten contributors, expressly confirmed in the source."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-010-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "55827baf10f4fff5",
+      "case_id": "af-015",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "2c0e355b485ce2fc",
+      "case_id": "af-010",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-010-concern-1"
+          ],
+          "note": "Twelve grid cells minus two masked cells yields ten contributors, expressly confirmed in the source."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-010-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "bfdeb9764317d3f4",
+      "case_id": "af-013",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "0b78d0b8d7dde196",
+      "case_id": "af-008",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-008-concern-1"
+          ],
+          "note": "The measured error at 20 C cannot establish error at unmeasured 90 C."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-008-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "ae9b80cae5e5c587",
+      "case_id": "af-010",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-010-concern-1"
+          ],
+          "note": "Twelve grid cells minus two masked cells yields ten contributors, expressly confirmed in the source."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-010-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "c1cdfad59f710192",
+      "case_id": "af-016",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-016-concern-1"
+          ],
+          "note": "Final status explicitly retains active bank A and rising polarity despite the completed inactive-bank upload."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-016-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "f0ebd43e168d901c",
+      "case_id": "af-004",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-004-concern-1"
+          ],
+          "note": "The explicit bit-zero rule and decoded state establish delta encoding disabled for this frame."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-004-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "371cb76d857febd2",
+      "case_id": "af-013",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "1ce769d398cf42a0",
+      "case_id": "af-011",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "1cea58ba452ad3a2",
+      "case_id": "af-002",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-002-concern-1"
+          ],
+          "note": "A powered read and acknowledgment do not establish power-loss durability; no contrary loss outcome is established. The causality category is imprecise, but the prose identifies the actual unsupported guarantee or extrapolation without requiring that category as an automatic whitelist."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-002-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "8626b5848dc01ccc",
+      "case_id": "af-012",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-012-concern-1"
+          ],
+          "note": "Two signed current-revision reports conflict without priority evidence; neither governing value is resolved."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-012-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "0b535c65487b723d",
+      "case_id": "af-011",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "08b52e3d0a77cc78",
+      "case_id": "af-001",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "d629ff415e015358",
+      "case_id": "af-005",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": true,
+          "concern_ids": [],
+          "note": "Supported recorded comparison contains no causal attribution; critic invents candidate framing and asserts the decrease attributable to both changes."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "407b7c8bb65e76c7",
+      "case_id": "af-007",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "8f8c26f188ea4f7c",
+      "case_id": "af-016",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-016-concern-1"
+          ],
+          "note": "Final status explicitly retains active bank A and rising polarity despite the completed inactive-bank upload."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-016-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "28124d52f43aed98",
+      "case_id": "af-009",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "abbe6668ccfe3dfe",
+      "case_id": "af-008",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-008-concern-1"
+          ],
+          "note": "The measured error at 20 C cannot establish error at unmeasured 90 C."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-008-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "5b64b70bd51f4555",
+      "case_id": "af-015",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "c2b641178725f64b",
+      "case_id": "af-007",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "f4643c6824bf76fd",
+      "case_id": "af-016",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-016-concern-1"
+          ],
+          "note": "Final status explicitly retains active bank A and rising polarity despite the completed inactive-bank upload."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-016-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "e923d12136120a43",
+      "case_id": "af-011",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "79025c274ff177f1",
+      "case_id": "af-003",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "c15958003eb3174d",
+      "case_id": "af-003",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "ed5019aeb5472a0c",
+      "case_id": "af-012",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-012-concern-1"
+          ],
+          "note": "Two signed current-revision reports conflict without priority evidence; neither governing value is resolved."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-012-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "a1a2b0b6cae30a12",
+      "case_id": "af-004",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-004-concern-1"
+          ],
+          "note": "The explicit bit-zero rule and decoded state establish delta encoding disabled for this frame."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-004-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "ada599f0f1df7360",
+      "case_id": "af-015",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "6a5cc3f629f43b17",
+      "case_id": "af-010",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": true,
+          "concern_ids": [],
+          "note": "Targets the supported grid dimensions and additionally says 2 of 4 cells per row are masked. Only two distinct cells across the entire grid are masked."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-010-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "9d159a869cc5b6af",
+      "case_id": "af-006",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-006-concern-1"
+          ],
+          "note": "Both insert and microphone distance changed; the source measures no separate effect and permits no causal assignment."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-006-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "60a26dde900d477b",
+      "case_id": "af-010",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-010-concern-1"
+          ],
+          "note": "Twelve grid cells minus two masked cells yields ten contributors, expressly confirmed in the source."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-010-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "a80bb6d067912658",
+      "case_id": "af-010",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-010-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "8c70d4c97cf3a8a6",
+      "case_id": "af-007",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "69f70bf703594046",
+      "case_id": "af-014",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-014-concern-1"
+          ],
+          "note": "An inclusive lower bound establishes at least 500 N, not a measured exact value; equality remains possible. The factual_contradiction basis incorrectly turns insufficient evidence into disproof."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-014-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "f04c84651ee5f2ca",
+      "case_id": "af-013",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "749e54b54bc820b5",
+      "case_id": "af-001",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "fa7621842ac14741",
+      "case_id": "af-002",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-002-concern-1"
+          ],
+          "note": "The explicit clause 'source directly negates the causal claim' converts absent durability evidence into disproof. Later uncertainty does not repair it."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-002-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "850aca9602b63268",
+      "case_id": "af-011",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "4d1b1ee98a6f7fa7",
+      "case_id": "af-001",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "5e672617cc539f23",
+      "case_id": "af-001",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "58286713b70db71b",
+      "case_id": "af-003",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "722073f98f830f28",
+      "case_id": "af-008",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The selected assertion is explicitly supported. A concern about another assertion, hypothetical wider scope, or advisory disagreement does not warrant this finding."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-008-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Fails strict semantic review because of wrong targets, unsupported extra findings, unsupported factual clauses, or missed concern coverage; see each finding."
+    },
+    {
+      "blind_id": "f34a8d73a40f32d7",
+      "case_id": "af-013",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "b792667993cc20bc",
+      "case_id": "af-003",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "dfaec1ef8b018499",
+      "case_id": "af-004",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-004-concern-1"
+          ],
+          "note": "The explicit bit-zero rule and decoded state establish delta encoding disabled for this frame."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-004-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "24555f24fe013a89",
+      "case_id": "af-015",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "94d3c802a1a3dd86",
+      "case_id": "af-003",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    },
+    {
+      "blind_id": "38938099625b995e",
+      "case_id": "af-012",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-012-concern-1"
+          ],
+          "note": "Two signed current-revision reports conflict without priority evidence; neither governing value is resolved."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-012-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "All frozen material concerns covered by valid findings; no supported neighboring assertion is criticized."
+    },
+    {
+      "blind_id": "485182d23c7faf6a",
+      "case_id": "af-003",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern review preserves the exact supported assertion(s)."
+    }
+  ]
+}

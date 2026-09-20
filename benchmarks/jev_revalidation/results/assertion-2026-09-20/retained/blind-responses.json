@@ -1,0 +1,1105 @@
+[
+  {
+    "blind_id": "00c1d14bda60f41b",
+    "case_id": "hf-024",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "08bf05164740624e9c793a8d000a9821a5c640c7cbdcb99a9a26a824ac868142",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'The complete upload U19, including its manifest, totaled twenty-four KiB.' However, the source evidence explicitly states: 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' The claimed total of twenty-four KiB contradicts the source's explicit reporting of twenty-seven KiB. The source provides signed provenance confirming this direct observation of the byte counter."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'The four data frames carried twenty-four KiB of payload.' However, the source evidence states: 'Four data frames carry six KiB of payload each,' which totals 24 KiB of payload. This appears consistent on the surface. However, when examined against the complete upload claim, the source further specifies that 'A single separate three-KiB manifest is sent in addition to those frames' and 'The byte counter explicitly reports twenty-seven KiB for the complete upload.' The calculation is: 4 frames \u00d7 6 KiB = 24 KiB payload, plus 3 KiB manifest = 27 KiB total. While the payload figure of twenty-four KiB for the four data frames is technically supported, the parent claim contradicts the source's explicit total, creating an inconsistency in how these related figures are being used."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "b9ee16bf197657d1",
+    "case_id": "hf-023",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The source text explicitly states 'Four data frames carry six KiB of payload each', which totals 24 KiB of payload across the four frames. However, the candidate claim states this is true. The factual contradiction arises when examining the complete upload claim: the source confirms 'twenty-seven KiB for the complete upload, including that manifest', with the manifest being 3 KiB. This means the four frames carry exactly 24 KiB as stated in the candidate's first claim. However, this claim is presented in isolation in the claim_records without the necessary context that there is also a 3 KiB manifest. When evaluated against the full source accounting, the 24 KiB figure is accurate but incomplete as a standalone characterization of the upload payload structure.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "a3ca8b6010650fcf68b6d6a16ed5e98a8fbe9c010a3c4d366e1bfadbaeff0fc5",
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'The complete upload U19, including its manifest, totaled twenty-seven KiB.' The source text states 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest'. This represents exact agreement with the source. However, there is a critical issue with the arithmetic implicit in the source: if four frames carry 6 KiB each (24 KiB total) plus a 3 KiB manifest, that equals 27 KiB, which matches the source's explicit byte counter report. The claim is factually correct per the source.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "95dc91bf25f40384",
+    "case_id": "hf-018",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "2b4b815eb152feced19135a701089eaf16167c90eb1e46c3bae72f0e42e3cdd8",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The claim makes a universal assertion that 'No write to repository Delta occurred through any client during the interval,' but the evidence explicitly qualifies this by stating that the audit export 'contains every write event recorded through the web editor' and that 'Command-line and service-token clients write through separate audit channels omitted from this export.' The evidence provides no observations about those omitted channels and makes no claim about the total number of repository writes. The claim overgeneralizes from partial evidence (web editor only) to a universal conclusion about all clients. The evidence supports only that no writes occurred through the web editor, not through all possible clients."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "529be1fdf6b3370d",
+    "case_id": "hf-018",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "2b4b815eb152feced19135a701089eaf16167c90eb1e46c3bae72f0e42e3cdd8",
+          "basis": "unsupported_generalization",
+          "disposition": "qualify",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The assertion claims 'No write to repository Delta occurred through any client during the interval,' but the source explicitly states that the audit export covers only the web editor and omits separate audit channels for command-line and service-token clients. The source provides no observations about those omitted channels and makes no claim about total writes. The assertion improperly generalizes from the absence of observed writes in one channel to the absence of writes across all clients."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "28527e64692c6ab1",
+    "case_id": "hf-023",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'The four data frames carried twenty-four KiB of payload.' However, the source evidence explicitly states 'Four data frames carry six KiB of payload each,' which totals 24 KiB. While the arithmetic checks out, the source further specifies this is in addition to 'a single separate three-KiB manifest' for a total of twenty-seven KiB. The claim as stated is technically correct for the frames alone, but omits the manifest and may mislead about the complete upload composition. The source establishes the complete context: 4 frames \u00d7 6 KiB = 24 KiB (frames only), plus 3 KiB (manifest) = 27 KiB total. The claim's isolation of the frame payload without acknowledging the additional manifest component warrants reconsideration in light of the fuller source narrative."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "a3ca8b6010650fcf68b6d6a16ed5e98a8fbe9c010a3c4d366e1bfadbaeff0fc5",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "critique": "The candidate claims 'The complete upload U19, including its manifest, totaled twenty-seven KiB.' The source evidence directly supports this: 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' However, the source is an observation (provenance: signed) reporting a measured byte counter result. The candidate presents this as a direct claim, but the source establishes it is a reported measurement from an instrument, not a derived conclusion. The claim should be relabeled to clarify it is a reported observation with signed provenance rather than an inference or independent calculation."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "3cf8e750210f4c09",
+    "case_id": "hf-009",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "5ef88d919e4b985ecfc26678771ec178c946605f071e4f07d2e33a7e1eaa61dd",
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The assertion states background compaction was enabled in the staging namespace at the checkpoint. The evidence (s0) attests the staging namespace ran release r9 with background compaction enabled, which supports this assertion. However, this finding concerns the claimed scope: the assertion must identify that this applies to the staging namespace specifically, not production. The evidence is consistent with the stated assertion as written.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "3d5ee183a5dc0b85",
+    "case_id": "hf-009",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The source attestation states 'Production ran release r8 with background compaction disabled.' The candidate claim asserts 'Production ran release r8 at that checkpoint.' While the release version (r8) matches the source, the source explicitly attaches a specific condition about compaction being disabled in production. The claim omits this condition and is therefore incomplete as a representation of the source attestation."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "176ca68dd5643a67",
+    "case_id": "hf-009",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "5ef88d919e4b985ecfc26678771ec178c946605f071e4f07d2e33a7e1eaa61dd",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The candidate claim states 'At the checkpoint, background compaction was enabled in the staging namespace.' The source evidence (s0) contradicts this by stating: 'At the recorded checkpoint, the staging namespace ran release r9 with background compaction enabled.' While the candidate correctly identifies that background compaction was enabled in staging, it omits the critical detail that the staging namespace ran release r9, not r8. More problematically, the candidate's main content claim overlooks that the source explicitly states 'Production ran release r8 with background compaction disabled'\u2014meaning the production-level claim about background compaction is factually inaccurate. The candidate conflates staging namespace configuration with production-level claims without proper qualification."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The claim record states 'Production ran release r8 at that checkpoint.' The source evidence (s0) confirms this specific fact, stating 'Production ran release r8 with background compaction disabled.' However, the claim is incomplete and potentially misleading because it fails to note the critical condition that production had background compaction disabled. Additionally, the source includes the statement that 'there was no production rollout in this checkpoint,' which qualifies the entire claim about production's state. The bare assertion lacks necessary contextual conditions that are present in the evidence."
+        }
+      ]
+    }
+  },
+  {
+    "blind_id": "4bc22dd11fd40d00",
+    "case_id": "hf-017",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "22460737b8d148e6",
+    "case_id": "hf-023",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "critique": "The assertion states the four data frames carried twenty-four KiB of payload. The source evidence states 'Four data frames carry six KiB of payload each,' which totals 24 KiB. However, the source also explicitly distinguishes this from the complete upload total: 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' The assertion conflates payload within frames (24 KiB) with a separate claim about total upload size, but the assertion's scope (payload in frames alone) is technically supported by the source's 6 KiB \u00d7 4 frames calculation. Upon closer reading, the assertion as stated is consistent with the source's payload figure. The error lies not in this claim but in its distinction from the complete upload figure. This claim should be marked as supported within its stated scope.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "a3ca8b6010650fcf68b6d6a16ed5e98a8fbe9c010a3c4d366e1bfadbaeff0fc5",
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "critique": "The assertion states the complete upload U19, including its manifest, totaled twenty-seven KiB. The source explicitly confirms: 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' This assertion is directly supported by the signed evidence and contains no material defect.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "571d3d8106021102",
+    "case_id": "hf-024",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The assertion states the four data frames carried twenty-four KiB of payload. However, the signed source explicitly states 'Four data frames carry six KiB of payload each,' which totals twenty-four KiB only for the frames alone. The source further specifies the complete upload, including the three-KiB manifest, totals twenty-seven KiB. The assertion's scope (payload in frames only) matches the source, but the quantity is incorrect: six KiB \u00d7 four frames = twenty-four KiB, not stated as payload. The source affirms the frames carry six KiB each, making the total payload in frames twenty-four KiB, which matches the assertion's quantity claim. Upon reexamination: the assertion's quantity is arithmetically correct for frame payload alone. However, the source's explicit statement that the complete upload (frames plus manifest) totals twenty-seven KiB, not twenty-four KiB, establishes that if frames carry twenty-four KiB, the manifest is three KiB, confirming frame payload is twenty-four KiB. This assertion is actually supported by the source.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "867b2cfcc04a313f",
+    "case_id": "hf-017",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "48370d48fec747ce",
+    "case_id": "hf-017",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "594dfd15e80dedc9",
+    "case_id": "hf-009",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The claim states 'Production ran release r8 at that checkpoint.' The source text (s0) confirms this: 'Production ran release r8 with background compaction disabled.' This claim is factually supported by the evidence and contains no contradiction."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "5ef88d919e4b985ecfc26678771ec178c946605f071e4f07d2e33a7e1eaa61dd",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The claim states 'At the checkpoint, background compaction was enabled in the staging namespace.' The source text (s0) states: 'the staging namespace ran release r9 with background compaction enabled.' The claim is accurate and factually supported by the signed observation in the evidence."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "604088d66a7934d7",
+    "case_id": "hf-006",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "e6021785052c69f52c0c6ee8f1816bdae4390d97bdf3782299ce2421bfdf9424",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The assertion claims the parser upgrade caused the lower median response time. The source reports that median response time was lower after the upgrade, but explicitly states the diary contains 'no matched-load test, rollback comparison or causal attribution.' The source identifies three co-occurring changes (upgrade, query mix shift, worker count doubling) with their separate effects unmeasured. Co-occurrence does not establish causation. The supported fact is that response time was lower during a window when the upgrade occurred alongside other changes; the causal attribution to the upgrade specifically is unsupported."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "92a0251f83423ac2",
+    "case_id": "hf-005",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "f3c27a5c8e33a12529af1aa83b741333358753449524d0dd7046e19d6aa5251e",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "missing_condition",
+          "disposition": "qualify",
+          "critique": "The source explicitly states that 'the query mix shifted toward short queries' during the same monitoring window in which the median response time decreased. Shorter queries would naturally reduce response time independent of the parser upgrade. The claim attributes the lower response time to the parser upgrade without acknowledging this confounding factor that the source itself identifies."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "4d94f0eac2e690142fedd6ef8c63f9652d110498348f8a8bc3cc72acd8399669",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "missing_condition",
+          "disposition": "qualify",
+          "critique": "The source confirms the worker count doubled during the same monitoring window. However, the source also explicitly notes that the diary 'contains no matched-load test, rollback comparison or causal attribution' and that 'their separate effects [are] unmeasured.' The claim presents a factual count change but lacks acknowledgment that its relationship to other changes (including the parser upgrade) remains causally unattributed in the source itself."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "434285d22323a121",
+    "case_id": "hf-024",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "08bf05164740624e9c793a8d000a9821a5c640c7cbdcb99a9a26a824ac868142",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'The complete upload U19, including its manifest, totaled twenty-four KiB.' However, the source evidence explicitly states 'the byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' This is a direct factual contradiction: the candidate asserts 24 KiB while the signed source observation documents 27 KiB. The source further clarifies the accounting structure (four frames of 6 KiB each = 24 KiB payload, plus 3 KiB manifest = 27 KiB total), making the discrepancy clear and material."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The claim record asserts 'The four data frames carried twenty-four KiB of payload.' while the source states 'Four data frames carry six KiB of payload each,' which totals 24 KiB payload. This specific claim is actually supported by the evidence. However, the parent claim in /content contradicts the source's explicit statement that the complete upload totaled 27 KiB, not 24 KiB. The distinction between payload (24 KiB) and complete upload including manifest (27 KiB) is critical, and the candidate's parent claim incorrectly conflates these figures."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "8412b2694e76f02b",
+    "case_id": "hf-018",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "2b4b815eb152feced19135a701089eaf16167c90eb1e46c3bae72f0e42e3cdd8",
+          "basis": "unsupported_generalization",
+          "disposition": "qualify",
+          "critique": "The assertion claims 'No write to repository Delta occurred through any client during the interval,' but the source explicitly states: 'Command-line and service-token clients write through separate audit channels omitted from this export. The export provides no observations about those channels and makes no claim about the total number of repository writes.' The evidence covers only web-editor writes, which are reported as absent. The assertion's universal scope ('any client') extends beyond the observed evidence, which addresses only one client type. A qualified statement would be: 'No write to repository Delta occurred through the web editor during the interval,' or 'The web-editor audit export contains no write events for the interval, though command-line and service-token activity is not covered by this export.'",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "3348fce41fcc241e",
+    "case_id": "hf-009",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The assertion states 'Production ran release r8 at that checkpoint.' The cited evidence explicitly states: 'Production ran release r8 with background compaction disabled.' This confirms the release version but is paired with a specific condition (compaction disabled). More critically, the evidence states 'there was no production rollout in this checkpoint,' which directly contradicts the implication that production was actively running at this checkpoint. The assertion's framing overstates the operational status."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "5ef88d919e4b985ecfc26678771ec178c946605f071e4f07d2e33a7e1eaa61dd",
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The assertion states 'At the checkpoint, background compaction was enabled in the staging namespace.' The evidence confirms that background compaction was enabled, but specifies it was enabled in the staging namespace with release r9. However, this assertion lacks scope precision regarding which release or deployment version applied. The assertion is factually supported for the staging namespace condition, but when read as a standalone claim without the qualified release context (r9), it risks incomplete representation of the configuration state."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "4ab446c0434243bf",
+    "case_id": "hf-017",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "0800362abe375743",
+    "case_id": "hf-023",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "critique": "The assertion states 'The four data frames carried twenty-four KiB of payload,' but the evidence explicitly states 'Four data frames carry six KiB of payload each,' which totals twenty-four KiB only for those frames alone. The evidence then states 'A single separate three-KiB manifest is sent in addition to those frames' and 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' The assertion omits the three-KiB manifest and mischaracterizes the scope. If the claim intends to specify payload in frames only (excluding the manifest), it should be qualified as such; as stated, it conflates frame-only payload with total upload content."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "d9f285f034ac6ef5",
+    "case_id": "hf-010",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "7880e49c9bf5adacf3863eab8632be518979bd02a397c1968d9dc8848193e076",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "critique": "The candidate's main claim states 'At the checkpoint, background compaction was enabled in the production namespace.' However, the source evidence (hf-010-source-1) explicitly states: 'Production ran release r8 with background compaction disabled.' This is a direct factual contradiction. The source is signed, providing authenticated provenance that production had background compaction disabled, not enabled."
+        }
+      ]
+    }
+  },
+  {
+    "blind_id": "a51badd4017382a0",
+    "case_id": "hf-024",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "08bf05164740624e9c793a8d000a9821a5c640c7cbdcb99a9a26a824ac868142",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The source states the complete upload U19, including its manifest, totaled twenty-seven KiB (not twenty-four KiB). The source explicitly reports: 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.'"
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "5f2ef8d37d034416",
+    "case_id": "hf-018",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "2b4b815eb152feced19135a701089eaf16167c90eb1e46c3bae72f0e42e3cdd8",
+          "basis": "unsupported_generalization",
+          "disposition": "reconsider",
+          "critique": "The assertion claims no write to repository Delta occurred through *any* client during the interval. However, the cited evidence explicitly states that the audit export contains observations only of web-editor writes and omits separate audit channels for command-line and service-token clients. The evidence therefore provides no basis for a universal claim covering all clients\u2014it affirmatively disclaims coverage of those channels and thus cannot support the assertion that writes through those clients did not occur.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "d6e07cd1960b6379",
+    "case_id": "hf-010",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The assertion states 'Production ran release r8 at that checkpoint.' The source confirms this fact for production's release version (r8). However, the source explicitly states 'Production ran release r8 with background compaction disabled,' not enabled. The assertion correctly identifies the release but is embedded in a candidate claim about background compaction being enabled in production, which the source contradicts. The release statement itself is accurate to the cited evidence."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "7880e49c9bf5adacf3863eab8632be518979bd02a397c1968d9dc8848193e076",
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The assertion claims 'At the checkpoint, background compaction was enabled in the production namespace.' The source directly contradicts this: 'Production ran release r8 with background compaction disabled.' The assertion incorrectly states the compaction status was enabled when the evidence establishes it was disabled in the production namespace."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "69987030dd25d0ad",
+    "case_id": "hf-005",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "9b4de91ad7ab6d28",
+    "case_id": "hf-010",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The assertion states 'Production ran release r8 at that checkpoint.' The evidence (s0) confirms this fact. However, the assertion does not state the necessary condition present in the source: 'background compaction disabled' in production. The evidence shows background compaction was disabled in production, not enabled. The claim as stated is factually accurate, but the accompanying candidate assertion about background compaction being enabled in production contradicts the evidence."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "431e1080314778d1",
+    "case_id": "hf-023",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The claim asserts that 'The four data frames carried twenty-four KiB of payload.' However, the signed source evidence (s0) explicitly states: 'Four data frames carry six KiB of payload each.' This yields 4 \u00d7 6 = 24 KiB for the frames alone. The source then states 'A single separate three-KiB manifest is sent in addition to those frames.' The source further confirms: 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' The claim correctly states 24 KiB for the four data frames' payload, but this requires careful qualification: the 24 KiB is frames only, and does not include the 3 KiB manifest. The claim as stated is technically accurate on the frame payload count but lacks the necessary condition that this excludes the manifest."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "a3ca8b6010650fcf68b6d6a16ed5e98a8fbe9c010a3c4d366e1bfadbaeff0fc5",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "qualify",
+          "critique": "The claim asserts that 'The complete upload U19, including its manifest, totaled twenty-seven KiB.' The signed source evidence (s0) directly supports this: 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' However, the source specifies that this 27 KiB total comprises four data frames at six KiB each (24 KiB) plus one three-KiB manifest. The claim is factually correct but should be qualified to clarify the composition: 24 KiB from frames + 3 KiB manifest = 27 KiB total. The claim as stated is accurate but lacks the supporting detail of how that total is composed."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "45c9e16f1d36f229",
+    "case_id": "hf-006",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "e6021785052c69f52c0c6ee8f1816bdae4390d97bdf3782299ce2421bfdf9424",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The source documents that median response time was lower after the parser upgrade and that several changes occurred in the same monitoring window (parser upgrade, query mix shift, worker count doubling), but explicitly states 'The diary contains no matched-load test, rollback comparison or causal attribution.' The source describes these as co-occurring changes with 'their separate effects unmeasured.' The claim asserts the parser upgrade caused the lower response time, but the source provides no basis for isolating the parser upgrade as the causal factor from among the multiple concurrent changes. This represents an unsupported causal attribution that goes beyond what the source evidence establishes."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "32dbac301816f71c",
+    "case_id": "hf-009",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The assertion states 'Production ran release r8 at that checkpoint.' The source evidence explicitly states 'Production ran release r8 with background compaction disabled.' This is compatible and supported. However, the assertion also implicitly relies on the checkpoint context. The source further states 'the staging namespace ran release r9 with background compaction enabled,' which is correct for staging. The claim as stated\u2014that production ran r8\u2014is factually accurate according to the source. No defect identified for this claim alone."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "b465c4f67048fcb3",
+    "case_id": "hf-023",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The assertion states 'The four data frames carried twenty-four KiB of payload,' but the source explicitly states 'Four data frames carry six KiB of payload each,' which totals 6 \u00d7 4 = 24 KiB only if counting payload alone. However, the source then specifies 'A single separate three-KiB manifest is sent in addition to those frames,' and 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' The assertion's claim of twenty-four KiB for the payload of the four frames alone is contradicted by the source's clear accounting: four frames at six KiB each = 24 KiB payload, plus a three-KiB manifest = 27 KiB total. The assertion omits the manifest requirement and misattributes the twenty-four KiB figure."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "e10f35e34f6058b5",
+    "case_id": "hf-006",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "e6021785052c69f52c0c6ee8f1816bdae4390d97bdf3782299ce2421bfdf9424",
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The assertion claims the parser upgrade caused the lower median response time. The source reports these as co-occurring changes within the same monitoring window, but explicitly states that the diary contains no matched-load test, rollback comparison, or causal attribution. The author measured no separate effects to establish causality. The lower response time coincided with both the parser upgrade and a shift toward short queries (which independently reduce response time). Causality is not established by co-occurrence alone.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "090955929224eaa7",
+    "case_id": "hf-010",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "7880e49c9bf5adacf3863eab8632be518979bd02a397c1968d9dc8848193e076",
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The assertion claims background compaction was enabled in the production namespace at the checkpoint. The cited source explicitly states: 'Production ran release r8 with background compaction disabled.' This is a direct contradiction of the same fact in the same namespace and time scope."
+        }
+      ]
+    }
+  },
+  {
+    "blind_id": "395cf0e81557a31f",
+    "case_id": "hf-018",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "2b4b815eb152feced19135a701089eaf16167c90eb1e46c3bae72f0e42e3cdd8",
+          "basis": "unsupported_generalization",
+          "disposition": "qualify",
+          "critique": "The candidate claims 'No write to repository Delta occurred through any client during the interval,' asserting a universal negative about all clients. However, the source explicitly states: 'Command-line and service-token clients write through separate audit channels omitted from this export. The export provides no observations about those channels and makes no claim about the total number of repository writes.' The signed observation only covers writes through the web editor and contains no data about command-line or service-token clients. The claim overgeneralizes from partial evidence about one client type to an unsubstantiated universal claim covering all clients.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "d781dd6b66c90263",
+    "case_id": "hf-017",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "8de040a8630899ca",
+    "case_id": "hf-018",
+    "mechanical_action": "error",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "2b4b815eb152feced19135a701089eaf16167c90eb1e46c3bae72f0e42e3cdd8",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_universality",
+          "disposition": "qualify",
+          "critique": "The claim asserts 'No write to repository Delta occurred through any client during the interval.' However, the source explicitly states: 'The export contains every write event recorded through the web editor in that interval, and there are none. Command-line and service-token clients write through separate audit channels omitted from this export. The export provides no observations about those channels and makes no claim about the total number of repository writes.' The source supports only the absence of web-editor writes, not the universal claim about all clients. The claim overgeneralizes from partial evidence, asserting certainty about channels (command-line and service-token) where the source provides no observations."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "a96a14d1b0d32efa",
+    "case_id": "hf-006",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "e6021785052c69f52c0c6ee8f1816bdae4390d97bdf3782299ce2421bfdf9424",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The source explicitly states that the diary 'contains no matched-load test, rollback comparison or causal attribution' and describes the parser upgrade, response time change, query mix shift, and worker count doubling as 'co-occurring changes' with 'their separate effects unmeasured.' The candidate asserts direct causation ('caused') between the parser upgrade and lower median response time, but the source provides only temporal co-occurrence, not causal evidence. The causality claim exceeds what the evidence supports."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "a57c2f05379f80f9",
+    "case_id": "hf-010",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "7880e49c9bf5adacf3863eab8632be518979bd02a397c1968d9dc8848193e076",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The candidate claims that 'At the checkpoint, background compaction was enabled in the production namespace.' However, the source evidence explicitly states: 'Production ran release r8 with background compaction disabled.' This is a direct factual contradiction. The evidence signs off on the attestation showing that production had background compaction disabled, not enabled."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "qualify",
+          "critique": "The nested claim states 'Production ran release r8 at that checkpoint,' which is consistent with the source evidence. However, the source evidence provides additional context that must be preserved: production had background compaction disabled (not enabled as claimed in the parent assertion). The claim as stated is factually accurate but incomplete regarding the critical configuration detail. Consider qualifying this claim to include the full configuration state."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "a36c8a63fa82d10b",
+    "case_id": "hf-024",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The assertion states that four data frames carried twenty-four KiB of payload. The source directly states: 'Four data frames carry six KiB of payload each,' which totals 24 KiB of payload alone. However, the source also reports that 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' The assertion's 24 KiB refers to payload only, which is supported by the source (4 \u00d7 6 KiB). However, the assertion does not acknowledge that the complete upload is 27 KiB, not 24 KiB\u2014that difference matters for claims about the total upload.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "08bf05164740624e9c793a8d000a9821a5c640c7cbdcb99a9a26a824ac868142",
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The assertion states that the complete upload U19, including its manifest, totaled twenty-four KiB. The source explicitly contradicts this: 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' The assertion's count (24 KiB) does not match the reported complete total (27 KiB). The 24 KiB figure applies only to payload from the four frames; the manifest adds three additional KiB, bringing the total to 27 KiB.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "ce06fe8553f0c25c",
+    "case_id": "hf-006",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "e6021785052c69f52c0c6ee8f1816bdae4390d97bdf3782299ce2421bfdf9424",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "relabel_inference",
+          "critique": "The assertion claims the parser upgrade caused the lower median response time. The evidence (s0) explicitly states the diary 'contains no matched-load test, rollback comparison or causal attribution' and describes the parser upgrade, response time improvement, query mix shift, and worker count doubling as 'co-occurring changes' with 'separate effects unmeasured.' Co-occurrence of events does not establish causation; this claim exceeds what the source evidence supports."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "4d94f0eac2e690142fedd6ef8c63f9652d110498348f8a8bc3cc72acd8399669",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The assertion states 'the worker count doubled during the same monitoring window.' The evidence (s0) reports 'the worker count doubled' without qualification regarding whether this doubling occurred entirely within the window, before it, or spanning across its boundary. The assertion assumes completion of the doubling event within the window boundaries, which the evidence does not establish."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "fb6284d7ec9b275a",
+    "case_id": "hf-005",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "ceb362d9082d7579",
+    "case_id": "hf-005",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "bbf80b890d92b897",
+    "case_id": "hf-006",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "e6021785052c69f52c0c6ee8f1816bdae4390d97bdf3782299ce2421bfdf9424",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The source explicitly states 'The diary contains no matched-load test, rollback comparison or causal attribution. The author describes these as co-occurring changes and leaves their separate effects unmeasured.' The claim attributes causality ('caused') to the parser upgrade, but the source only documents co-occurrence. The lower median response time coincided with both the parser upgrade AND a query mix shift toward short queries AND a doubled worker count. The source provides no evidence isolating the parser upgrade as the causal factor. This claim should be qualified to reflect reported correlation rather than demonstrated causation."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "5ed6c3d83c561f9d",
+    "case_id": "hf-017",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "0f4027c5cf51f4fe7e4e814b7f8601cb8c77643377d542464fe541c581c41a12",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "qualify",
+          "critique": "The candidate claims 'No web-editor write event was recorded for repository Delta during the interval.' The source (s0) confirms this observation for web-editor events specifically. However, the source explicitly qualifies this finding: 'Command-line and service-token clients write through separate audit channels omitted from this export. The export provides no observations about those channels and makes no claim about the total number of repository writes.' The candidate's claim makes an absolute assertion about the interval without acknowledging this critical limitation. The evidence supports the narrower claim about web-editor writes specifically, but the candidate presents it as a universal claim about the interval without the necessary qualification about other write channels that may have occurred but were not audited in this export."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "af7e2afc7feb1ca4",
+    "case_id": "hf-024",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "critique": "The claim states 'The four data frames carried twenty-four KiB of payload.' However, the source explicitly states: 'Four data frames carry six KiB of payload each' (totaling 24 KiB for frames alone) plus 'A single separate three-KiB manifest is sent in addition to those frames.' The complete upload totals twenty-seven KiB, not twenty-four KiB. The claim conflates the payload of the four frames alone (24 KiB) with a statement about what 'the four data frames carried,' which is correct, but the parent claim and overall context suggest this was offered as support for the total being twenty-four KiB, which contradicts the source's explicit statement that the complete upload is twenty-seven KiB."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "08bf05164740624e9c793a8d000a9821a5c640c7cbdcb99a9a26a824ac868142",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'The complete upload U19, including its manifest, totaled twenty-four KiB.' The source directly contradicts this: 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' This is a straightforward factual contradiction. The source provides signed provenance for the observation that the total is twenty-seven KiB, not twenty-four KiB."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "2397c975d1406c16",
+    "case_id": "hf-010",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The source attestation explicitly states 'Production ran release r8 with background compaction disabled.' However, the claim asserts 'Production ran release r8 at that checkpoint' without specifying the compaction status. More critically, the nested claim within claim_records/0 is presented as a standalone proposition, but the evidence indicates this statement is incomplete and misleading in isolation. The full attestation distinguishes production (r8, disabled) from staging (r9, enabled), and the claim omits the compaction context that is integral to the checkpoint configuration. This presents a factual contradiction regarding the complete state of the system.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "91abea669dae9a4d",
+    "case_id": "hf-005",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "e5783e113b9bb7fe",
+    "case_id": "hf-005",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  }
+]

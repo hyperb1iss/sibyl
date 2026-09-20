@@ -1,0 +1,485 @@
+[
+  {
+    "id": "af-001",
+    "category": "volatile_acknowledgment_durability",
+    "pair_group": "af-pair-01",
+    "sources": [
+      {
+        "id": "af-001-source-1",
+        "text": "Storage bench capture N42: a write to address block 712 returned success at tick 180. A read at tick 181 returned the submitted bytes while power remained connected. The bench used a volatile controller buffer. The capture ends before any buffer-flush trace, restart or power interruption. The capture does not establish whether this controller flushes on acknowledgment; its persistence policy was not measured.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "The bytes submitted to block 712 were read back successfully while power remained connected.",
+    "claims": [
+      "The write returned success at tick 180."
+    ],
+    "expected": {
+      "/content": "supported",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "accept",
+    "rationale": "The recorded powered read at tick 181 returns the submitted bytes. The successful write acknowledgment at tick 180 is explicit.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "accept"
+    ],
+    "stress_hints": {
+      "/content": "contradicted",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  {
+    "id": "af-002",
+    "category": "volatile_acknowledgment_durability",
+    "pair_group": "af-pair-01",
+    "sources": [
+      {
+        "id": "af-002-source-1",
+        "text": "Storage bench capture N42: a write to address block 712 returned success at tick 180. A read at tick 181 returned the submitted bytes while power remained connected. The bench used a volatile controller buffer. The capture ends before any buffer-flush trace, restart or power interruption. The capture does not establish whether this controller flushes on acknowledgment; its persistence policy was not measured.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "The bytes submitted to block 712 were guaranteed to survive a power interruption after acknowledgment.",
+    "claims": [
+      "The write returned success at tick 180."
+    ],
+    "expected": {
+      "/content": "insufficient",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "flag",
+    "rationale": "An acknowledgment and powered read were extended into an unmeasured power-loss durability guarantee. Do not assert that data would be lost, that a flush never occurred, or that this controller always acknowledges before persistence. Those properties were not measured.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "flag"
+    ],
+    "stress_hints": {
+      "/content": "supported",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  {
+    "id": "af-003",
+    "category": "header_flag_interpretation",
+    "pair_group": "af-pair-02",
+    "sources": [
+      {
+        "id": "af-003-source-1",
+        "text": "Protocol analyzer record for frame F-C3. The received options octet is 0x04. Under the attached version-3 header specification, bit zero enables delta encoding when set and disables delta encoding when clear; no other bit controls this feature. The analyzer decodes bit zero as clear and records delta encoding disabled for this frame. The four-byte sample body was captured intact. This record makes no claim about other frames.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "Delta encoding was disabled in frame F-C3.",
+    "claims": [
+      "The analyzer captured a four-byte sample body for this frame."
+    ],
+    "expected": {
+      "/content": "supported",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "accept",
+    "rationale": "Both the bit-zero rule and the decoded clear bit establish disabled delta encoding. The captured body length is explicitly four bytes.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "accept"
+    ],
+    "stress_hints": {
+      "/content": "contradicted",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  {
+    "id": "af-004",
+    "category": "header_flag_interpretation",
+    "pair_group": "af-pair-02",
+    "sources": [
+      {
+        "id": "af-004-source-1",
+        "text": "Protocol analyzer record for frame F-C3. The received options octet is 0x04. Under the attached version-3 header specification, bit zero enables delta encoding when set and disables delta encoding when clear; no other bit controls this feature. The analyzer decodes bit zero as clear and records delta encoding disabled for this frame. The four-byte sample body was captured intact. This record makes no claim about other frames.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "Delta encoding was enabled in frame F-C3.",
+    "claims": [
+      "The analyzer captured a four-byte sample body for this frame."
+    ],
+    "expected": {
+      "/content": "contradicted",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "flag",
+    "rationale": "The candidate reverses the explicitly decoded feature state in the same frame. Do not claim delta encoding was unavailable in the protocol, that the body was corrupt, or that other frames had the same flag.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "flag"
+    ],
+    "stress_hints": {
+      "/content": "supported",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  {
+    "id": "af-005",
+    "category": "acoustic_test_confounding",
+    "pair_group": "af-pair-03",
+    "sources": [
+      {
+        "id": "af-005-source-1",
+        "text": "Acoustic notebook, enclosure test T5. Run A recorded 68 dB with the original lining and the microphone 0.5 m from the enclosure. Run B recorded 61 dB after a foam insert was fitted and the microphone was moved to 2 m. Fan speed was held fixed. No run held microphone distance constant while varying the insert, and no separate effect of either change was estimated. The notebook reports the two readings without attributing the difference to a cause.",
+        "provenance": "reported"
+      }
+    ],
+    "content": "The recorded sound level was lower in run B than in run A.",
+    "claims": [
+      "Fan speed was held fixed between the two runs."
+    ],
+    "expected": {
+      "/content": "supported",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "accept",
+    "rationale": "The notebook reports 61 dB in B and 68 dB in A. The notebook explicitly holds fan speed fixed.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "accept"
+    ],
+    "stress_hints": {
+      "/content": "contradicted",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  {
+    "id": "af-006",
+    "category": "acoustic_test_confounding",
+    "pair_group": "af-pair-03",
+    "sources": [
+      {
+        "id": "af-006-source-1",
+        "text": "Acoustic notebook, enclosure test T5. Run A recorded 68 dB with the original lining and the microphone 0.5 m from the enclosure. Run B recorded 61 dB after a foam insert was fitted and the microphone was moved to 2 m. Fan speed was held fixed. No run held microphone distance constant while varying the insert, and no separate effect of either change was estimated. The notebook reports the two readings without attributing the difference to a cause.",
+        "provenance": "reported"
+      }
+    ],
+    "content": "The foam insert caused the lower recorded sound level in run B.",
+    "claims": [
+      "Fan speed was held fixed between the two runs."
+    ],
+    "expected": {
+      "/content": "insufficient",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "flag",
+    "rationale": "The candidate attributes the change to the foam while microphone distance also changed and no isolated effect was estimated. Do not claim the foam had no acoustic effect, that microphone distance was the sole cause, or that fixed fan speed itself establishes causality.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "flag"
+    ],
+    "stress_hints": {
+      "/content": "supported",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  {
+    "id": "af-007",
+    "category": "calibration_temperature_scope",
+    "pair_group": "af-pair-04",
+    "sources": [
+      {
+        "id": "af-007-source-1",
+        "text": "Reference-bath worksheet for probe ZQ. The bath was stabilized at 20.0 C. Probe ZQ indicated 20.2 C, and the worksheet records a +0.2 C error at this check. No measurement above 25 C was performed in the supplied qualification. The sensor identifier was verified against its engraved serial before immersion. The worksheet supplies no response curve or error bound outside the checked temperature.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "Probe ZQ had a +0.2 C error in the recorded 20.0 C reference-bath check.",
+    "claims": [
+      "The probe serial was checked before immersion."
+    ],
+    "expected": {
+      "/content": "supported",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "accept",
+    "rationale": "The 20.2 indication against the 20.0 reference gives the explicitly recorded +0.2 error at that check. The engraved serial was explicitly verified before immersion.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "accept"
+    ],
+    "stress_hints": {
+      "/content": "contradicted",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  {
+    "id": "af-008",
+    "category": "calibration_temperature_scope",
+    "pair_group": "af-pair-04",
+    "sources": [
+      {
+        "id": "af-008-source-1",
+        "text": "Reference-bath worksheet for probe ZQ. The bath was stabilized at 20.0 C. Probe ZQ indicated 20.2 C, and the worksheet records a +0.2 C error at this check. No measurement above 25 C was performed in the supplied qualification. The sensor identifier was verified against its engraved serial before immersion. The worksheet supplies no response curve or error bound outside the checked temperature.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "Probe ZQ has a +0.2 C error at 90.0 C.",
+    "claims": [
+      "The probe serial was checked before immersion."
+    ],
+    "expected": {
+      "/content": "insufficient",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "flag",
+    "rationale": "A local calibration error was transferred to an untested high temperature without a response curve. Do not invent a different error at 90 C, claim the probe failed there, or criticize the directly documented serial check.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "flag"
+    ],
+    "stress_hints": {
+      "/content": "supported",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  {
+    "id": "af-009",
+    "category": "masked_sample_count",
+    "pair_group": "af-pair-05",
+    "sources": [
+      {
+        "id": "af-009-source-1",
+        "text": "Array-analysis record M31. The acquired grid has three rows and four cells per row. Cells at row 1 column 2 and row 3 column 4 are masked, and every other cell is unmasked. The exported mean is computed over unmasked cells only. The record explicitly lists ten contributing cells and excludes both masked values; neither a masked value nor a placeholder is added to the denominator.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "The exported mean used ten contributing cells.",
+    "claims": [
+      "The acquired grid has three rows and four cells per row."
+    ],
+    "expected": {
+      "/content": "supported",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "accept",
+    "rationale": "Twelve grid cells minus the two excluded cells yields the explicit ten-cell denominator. The three-by-four grid geometry is explicit.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "accept"
+    ],
+    "stress_hints": {
+      "/content": "contradicted",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  {
+    "id": "af-010",
+    "category": "masked_sample_count",
+    "pair_group": "af-pair-05",
+    "sources": [
+      {
+        "id": "af-010-source-1",
+        "text": "Array-analysis record M31. The acquired grid has three rows and four cells per row. Cells at row 1 column 2 and row 3 column 4 are masked, and every other cell is unmasked. The exported mean is computed over unmasked cells only. The record explicitly lists ten contributing cells and excludes both masked values; neither a masked value nor a placeholder is added to the denominator.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "The exported mean used twelve contributing cells.",
+    "claims": [
+      "The acquired grid has three rows and four cells per row."
+    ],
+    "expected": {
+      "/content": "contradicted",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "flag",
+    "rationale": "The full acquired grid size was substituted for the mean denominator despite explicit masking exclusions. Do not invent failed acquisition, zero-valued cells, interpolation or duplicate cells. Masked values were excluded, not replaced.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "flag"
+    ],
+    "stress_hints": {
+      "/content": "supported",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  {
+    "id": "af-011",
+    "category": "conflicting_drawing_revision",
+    "pair_group": "af-pair-06",
+    "sources": [
+      {
+        "id": "af-011-source-1",
+        "text": "CAD archive export E1 for bracket PX, drawing revision 7. The thickness callout is 1.6 mm. The export bears a valid archive signature and names revision 7 as current. The packet supplies no release-order record or correction establishing priority between this export and export E2. The callout concerns design thickness, not a measurement of a manufactured bracket.",
+        "provenance": "signed"
+      },
+      {
+        "id": "af-011-source-2",
+        "text": "CAD archive export E2 for the same bracket PX and drawing revision 7. The thickness callout is 2.0 mm. This export also bears a valid archive signature and names revision 7 as current. The packet explicitly identifies the two thickness callouts as conflicting and supplies no approval, correction or release-order record that resolves which callout governs.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "The two supplied revision-7 exports disagree on the design thickness of bracket PX.",
+    "claims": [],
+    "expected": {
+      "/content": "supported"
+    },
+    "expected_action": "accept",
+    "rationale": "The same bracket and revision have incompatible 1.6 and 2.0 callouts, explicitly unresolved by this packet.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "accept"
+    ],
+    "stress_hints": {
+      "/content": "contradicted"
+    }
+  },
+  {
+    "id": "af-012",
+    "category": "conflicting_drawing_revision",
+    "pair_group": "af-pair-06",
+    "sources": [
+      {
+        "id": "af-012-source-1",
+        "text": "CAD archive export E1 for bracket PX, drawing revision 7. The thickness callout is 1.6 mm. The export bears a valid archive signature and names revision 7 as current. The packet supplies no release-order record or correction establishing priority between this export and export E2. The callout concerns design thickness, not a measurement of a manufactured bracket.",
+        "provenance": "signed"
+      },
+      {
+        "id": "af-012-source-2",
+        "text": "CAD archive export E2 for the same bracket PX and drawing revision 7. The thickness callout is 2.0 mm. This export also bears a valid archive signature and names revision 7 as current. The packet explicitly identifies the two thickness callouts as conflicting and supplies no approval, correction or release-order record that resolves which callout governs.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "The governing revision-7 design thickness of bracket PX is 1.6 mm.",
+    "claims": [],
+    "expected": {
+      "/content": "ambiguous"
+    },
+    "expected_action": "flag",
+    "rationale": "The candidate selects one governing design value from unresolved same-revision exports without priority evidence. Do not declare either export invalid, choose 2.0 mm as the resolved governing value, infer physical thickness, or invent a release order. Contradiction concerns the reports only.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "flag",
+      "abstain"
+    ],
+    "stress_hints": {
+      "/content": "supported"
+    }
+  },
+  {
+    "id": "af-013",
+    "category": "saturated_measurement_bound",
+    "pair_group": "af-pair-07",
+    "sources": [
+      {
+        "id": "af-013-source-1",
+        "text": "Load-channel export Q11. Sample 407 displays 500 N and has the saturation flag set. The attached acquisition rule states that a saturated sample represents a true channel input of at least 500 N; displayed 500 is a clipping value, not an exact measurement. No secondary range, unclipped trace or upper bound is available for sample 407. The adjacent sample 406 has its saturation flag clear.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "The true load-channel input at sample 407 was at least 500 N.",
+    "claims": [
+      "The saturation flag was clear for adjacent sample 406."
+    ],
+    "expected": {
+      "/content": "supported",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "accept",
+    "rationale": "The acquisition rule assigns a lower bound of 500 N to the explicitly saturated sample. The separate sample-406 flag is expressly clear.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "accept"
+    ],
+    "stress_hints": {
+      "/content": "contradicted",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  {
+    "id": "af-014",
+    "category": "saturated_measurement_bound",
+    "pair_group": "af-pair-07",
+    "sources": [
+      {
+        "id": "af-014-source-1",
+        "text": "Load-channel export Q11. Sample 407 displays 500 N and has the saturation flag set. The attached acquisition rule states that a saturated sample represents a true channel input of at least 500 N; displayed 500 is a clipping value, not an exact measurement. No secondary range, unclipped trace or upper bound is available for sample 407. The adjacent sample 406 has its saturation flag clear.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "The true load-channel input at sample 407 was exactly 500 N.",
+    "claims": [
+      "The saturation flag was clear for adjacent sample 406."
+    ],
+    "expected": {
+      "/content": "insufficient",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "flag",
+    "rationale": "A clipped lower bound was presented as an exact measurement without an unclipped trace. Do not assert that the true input exceeded 500 N strictly or had a particular larger value. Equality is possible but not established; the source gives at least, not greater than.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "flag"
+    ],
+    "stress_hints": {
+      "/content": "supported",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  {
+    "id": "af-015",
+    "category": "activated_vs_staged_settings",
+    "pair_group": "af-pair-08",
+    "sources": [
+      {
+        "id": "af-015-source-1",
+        "text": "Motion-controller configuration trace for unit H8. At boot, active bank A set pulse polarity to rising. A later upload stored a falling-polarity configuration in inactive bank B. The controller reported upload complete but activation pending. The final status read, after that upload, still identifies bank A as active and rising polarity as the effective value. No bank-switch command occurred within the trace.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "At the final status read, unit H8 still used rising pulse polarity.",
+    "claims": [
+      "The falling-polarity configuration was stored in inactive bank B."
+    ],
+    "expected": {
+      "/content": "supported",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "accept",
+    "rationale": "The final status explicitly retains active bank A and effective rising polarity. The upload explicitly stores the falling setting in bank B.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "accept"
+    ],
+    "stress_hints": {
+      "/content": "contradicted",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  {
+    "id": "af-016",
+    "category": "activated_vs_staged_settings",
+    "pair_group": "af-pair-08",
+    "sources": [
+      {
+        "id": "af-016-source-1",
+        "text": "Motion-controller configuration trace for unit H8. At boot, active bank A set pulse polarity to rising. A later upload stored a falling-polarity configuration in inactive bank B. The controller reported upload complete but activation pending. The final status read, after that upload, still identifies bank A as active and rising polarity as the effective value. No bank-switch command occurred within the trace.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "At the final status read, unit H8 used the uploaded falling pulse polarity.",
+    "claims": [
+      "The falling-polarity configuration was stored in inactive bank B."
+    ],
+    "expected": {
+      "/content": "contradicted",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "flag",
+    "rationale": "The staged upload was treated as activated despite a later status read retaining the earlier active setting. Do not deny that the upload succeeded, infer that the new configuration was corrupt, or claim bank B could never be activated later.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "flag"
+    ],
+    "stress_hints": {
+      "/content": "supported",
+      "/claim_records/0/content": "contradicted"
+    }
+  }
+]

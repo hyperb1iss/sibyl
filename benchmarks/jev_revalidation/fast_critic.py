@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from http import HTTPStatus
@@ -139,9 +140,11 @@ class _RecordedExtractor(Extractor[CriticOutput]):
         return self.recorded
 
 
-def _bound_invocation(entry: dict[str, Any], raw: dict[str, Any]) -> _Invocation:
+def _bound_invocation(
+    entry: dict[str, Any], raw: dict[str, Any], request_builder: Callable[..., dict[str, Any]]
+) -> _Invocation:
     prepared = PreparedMemoryValidation(entry["prepared_payload"])
-    expected = critic_request(prepared, entry.get("hints"))
+    expected = request_builder(prepared, entry.get("hints"))
     digest = critic_pair.digest(canonical(expected))
     if (
         raw.get("endpoint") != CONTROLS["endpoint"]
@@ -192,7 +195,12 @@ def _output(body: Any, status: int | None, usage: dict[str, Any]) -> CriticOutpu
     return output
 
 
-async def interpret(entry: dict[str, Any], raw: dict[str, Any]) -> dict[str, Any]:
+async def interpret(
+    entry: dict[str, Any],
+    raw: dict[str, Any],
+    *,
+    request_builder: Callable[..., dict[str, Any]] = critic_request,
+) -> dict[str, Any]:
     """Recheck the actual wire request before applying unchanged product mechanics."""
     body = None
     transport_error = raw.get("error_code")
@@ -212,7 +220,7 @@ async def interpret(entry: dict[str, Any], raw: dict[str, Any]) -> dict[str, Any
     )
     result = None
     try:
-        prepared = _bound_invocation(entry, raw)
+        prepared = _bound_invocation(entry, raw, request_builder)
         if error is None:
             output = _output(body, raw.get("http_status"), usage)
             recorded_usage = ExtractionUsage(

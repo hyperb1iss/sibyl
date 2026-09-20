@@ -1,0 +1,1215 @@
+{
+  "arms": {
+    "assertion_direct": {
+      "covered_concerns": 14,
+      "failures": [
+        "case-4-repeat-1-assertion_direct",
+        "case-11-repeat-1-assertion_direct",
+        "case-15-repeat-1-assertion_direct",
+        "case-4-repeat-0-assertion_direct",
+        "case-7-repeat-1-assertion_direct"
+      ],
+      "fully_valid_findings": 14,
+      "invented_facts_including_invalid_diagnostics": 2,
+      "material_concerns": 16,
+      "mechanically_valid_findings": 19,
+      "overstated_basis_including_invalid_diagnostics": 0,
+      "paths": 32,
+      "semantic_pass": 27,
+      "unsupported_findings_including_invalid_diagnostics": 4,
+      "valid_abstentions": 0
+    },
+    "assertion_live_jev": {
+      "covered_concerns": 16,
+      "failures": [
+        "case-4-repeat-1-assertion_live_jev"
+      ],
+      "fully_valid_findings": 16,
+      "invented_facts_including_invalid_diagnostics": 0,
+      "material_concerns": 16,
+      "mechanically_valid_findings": 17,
+      "overstated_basis_including_invalid_diagnostics": 0,
+      "paths": 32,
+      "semantic_pass": 31,
+      "unsupported_findings_including_invalid_diagnostics": 1,
+      "valid_abstentions": 0
+    },
+    "assertion_misleading": {
+      "covered_concerns": 3,
+      "failures": [
+        "case-3-repeat-1-assertion_misleading",
+        "case-3-repeat-0-assertion_misleading",
+        "case-9-repeat-0-assertion_misleading",
+        "case-7-repeat-0-assertion_misleading",
+        "case-11-repeat-1-assertion_misleading",
+        "case-5-repeat-0-assertion_misleading",
+        "case-15-repeat-1-assertion_misleading",
+        "case-5-repeat-1-assertion_misleading",
+        "case-1-repeat-1-assertion_misleading",
+        "case-13-repeat-1-assertion_misleading",
+        "case-15-repeat-0-assertion_misleading",
+        "case-13-repeat-0-assertion_misleading",
+        "case-11-repeat-0-assertion_misleading",
+        "case-9-repeat-1-assertion_misleading",
+        "case-7-repeat-1-assertion_misleading"
+      ],
+      "fully_valid_findings": 3,
+      "invented_facts_including_invalid_diagnostics": 1,
+      "material_concerns": 16,
+      "mechanically_valid_findings": 19,
+      "overstated_basis_including_invalid_diagnostics": 14,
+      "paths": 32,
+      "semantic_pass": 17,
+      "unsupported_findings_including_invalid_diagnostics": 13,
+      "valid_abstentions": 0
+    },
+    "baseline_direct": {
+      "covered_concerns": 10,
+      "failures": [
+        "case-1-repeat-0-baseline_direct",
+        "case-5-repeat-0-baseline_direct",
+        "case-15-repeat-1-baseline_direct",
+        "case-15-repeat-0-baseline_direct",
+        "case-4-repeat-1-baseline_direct",
+        "case-13-repeat-1-baseline_direct",
+        "case-5-repeat-1-baseline_direct",
+        "case-13-repeat-0-baseline_direct",
+        "case-4-repeat-0-baseline_direct",
+        "case-7-repeat-0-baseline_direct",
+        "case-3-repeat-0-baseline_direct"
+      ],
+      "fully_valid_findings": 10,
+      "invented_facts_including_invalid_diagnostics": 4,
+      "material_concerns": 16,
+      "mechanically_valid_findings": 21,
+      "overstated_basis_including_invalid_diagnostics": 4,
+      "paths": 32,
+      "semantic_pass": 21,
+      "unsupported_findings_including_invalid_diagnostics": 6,
+      "valid_abstentions": 0
+    },
+    "baseline_live_jev": {
+      "covered_concerns": 12,
+      "failures": [
+        "case-4-repeat-1-baseline_live_jev",
+        "case-7-repeat-0-baseline_live_jev",
+        "case-13-repeat-0-baseline_live_jev",
+        "case-13-repeat-1-baseline_live_jev",
+        "case-1-repeat-0-baseline_live_jev"
+      ],
+      "fully_valid_findings": 12,
+      "invented_facts_including_invalid_diagnostics": 0,
+      "material_concerns": 16,
+      "mechanically_valid_findings": 18,
+      "overstated_basis_including_invalid_diagnostics": 4,
+      "paths": 32,
+      "semantic_pass": 27,
+      "unsupported_findings_including_invalid_diagnostics": 2,
+      "valid_abstentions": 0
+    },
+    "baseline_misleading": {
+      "covered_concerns": 7,
+      "failures": [
+        "case-13-repeat-1-baseline_misleading",
+        "case-1-repeat-0-baseline_misleading",
+        "case-5-repeat-1-baseline_misleading",
+        "case-15-repeat-0-baseline_misleading",
+        "case-15-repeat-1-baseline_misleading",
+        "case-1-repeat-1-baseline_misleading",
+        "case-7-repeat-0-baseline_misleading",
+        "case-12-repeat-0-baseline_misleading",
+        "case-13-repeat-0-baseline_misleading",
+        "case-6-repeat-0-baseline_misleading",
+        "case-3-repeat-1-baseline_misleading",
+        "case-7-repeat-1-baseline_misleading",
+        "case-9-repeat-0-baseline_misleading",
+        "case-3-repeat-0-baseline_misleading",
+        "case-5-repeat-0-baseline_misleading",
+        "case-10-repeat-0-baseline_misleading",
+        "case-4-repeat-0-baseline_misleading",
+        "case-9-repeat-1-baseline_misleading",
+        "case-12-repeat-1-baseline_misleading"
+      ],
+      "fully_valid_findings": 7,
+      "invented_facts_including_invalid_diagnostics": 4,
+      "material_concerns": 16,
+      "mechanically_valid_findings": 32,
+      "overstated_basis_including_invalid_diagnostics": 20,
+      "paths": 32,
+      "semantic_pass": 13,
+      "unsupported_findings_including_invalid_diagnostics": 20,
+      "valid_abstentions": 0
+    }
+  },
+  "comparisons": {
+    "assertion_direct__to__assertion_live_jev": {
+      "changes": [
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "af-005",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "af-008",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 1
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "af-012",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 1
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "af-016",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 1
+        }
+      ],
+      "new_defect_target_paths": 0,
+      "new_missed_concern_paths": 0,
+      "semantic_improvements": 4,
+      "semantic_regressions": 0
+    },
+    "assertion_direct__to__assertion_misleading": {
+      "changes": [
+        {
+          "after_pass": false,
+          "before_pass": true,
+          "case_id": "af-002",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "overstated_basis"
+            ],
+            [
+              "/claim_records/0/content",
+              "unsupported_concern"
+            ],
+            [
+              "/content",
+              "invented_fact"
+            ]
+          ],
+          "new_missed_concerns": [
+            "af-002-concern-1"
+          ],
+          "repeat": 1
+        },
+        {
+          "after_pass": false,
+          "before_pass": true,
+          "case_id": "af-004",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "overstated_basis"
+            ],
+            [
+              "/claim_records/0/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [
+            "af-004-concern-1"
+          ],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": true,
+          "case_id": "af-004",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "overstated_basis"
+            ],
+            [
+              "/claim_records/0/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [
+            "af-004-concern-1"
+          ],
+          "repeat": 1
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "af-005",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "af-005",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 1
+        },
+        {
+          "after_pass": false,
+          "before_pass": true,
+          "case_id": "af-006",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "overstated_basis"
+            ],
+            [
+              "/claim_records/0/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": true,
+          "case_id": "af-006",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "overstated_basis"
+            ],
+            [
+              "/claim_records/0/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [],
+          "repeat": 1
+        },
+        {
+          "after_pass": false,
+          "before_pass": true,
+          "case_id": "af-008",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [
+            "af-008-concern-1"
+          ],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": false,
+          "case_id": "af-008",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "overstated_basis"
+            ]
+          ],
+          "new_missed_concerns": [
+            "af-008-concern-1"
+          ],
+          "repeat": 1
+        },
+        {
+          "after_pass": false,
+          "before_pass": true,
+          "case_id": "af-010",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "overstated_basis"
+            ],
+            [
+              "/claim_records/0/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [
+            "af-010-concern-1"
+          ],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": true,
+          "case_id": "af-010",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "overstated_basis"
+            ],
+            [
+              "/claim_records/0/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [
+            "af-010-concern-1"
+          ],
+          "repeat": 1
+        },
+        {
+          "after_pass": false,
+          "before_pass": true,
+          "case_id": "af-012",
+          "new_defect_targets": [
+            [
+              "/content",
+              "overstated_basis"
+            ]
+          ],
+          "new_missed_concerns": [
+            "af-012-concern-1"
+          ],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": true,
+          "case_id": "af-014",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "overstated_basis"
+            ],
+            [
+              "/claim_records/0/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [
+            "af-014-concern-1"
+          ],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": true,
+          "case_id": "af-014",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "overstated_basis"
+            ],
+            [
+              "/claim_records/0/content",
+              "unsupported_concern"
+            ],
+            [
+              "/content",
+              "overstated_basis"
+            ]
+          ],
+          "new_missed_concerns": [
+            "af-014-concern-1"
+          ],
+          "repeat": 1
+        },
+        {
+          "after_pass": false,
+          "before_pass": true,
+          "case_id": "af-016",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "overstated_basis"
+            ],
+            [
+              "/claim_records/0/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [
+            "af-016-concern-1"
+          ],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": false,
+          "case_id": "af-016",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "overstated_basis"
+            ],
+            [
+              "/claim_records/0/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [],
+          "repeat": 1
+        }
+      ],
+      "new_defect_target_paths": 14,
+      "new_missed_concern_paths": 11,
+      "semantic_improvements": 2,
+      "semantic_regressions": 12
+    },
+    "baseline_direct__to__assertion_direct": {
+      "changes": [
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "af-002",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "af-004",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": false,
+          "case_id": "af-005",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [],
+          "repeat": 1
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "af-006",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "af-006",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 1
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "af-008",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": true,
+          "case_id": "af-008",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [],
+          "repeat": 1
+        },
+        {
+          "after_pass": false,
+          "before_pass": true,
+          "case_id": "af-012",
+          "new_defect_targets": [
+            [
+              "/content",
+              "invented_fact"
+            ]
+          ],
+          "new_missed_concerns": [
+            "af-012-concern-1"
+          ],
+          "repeat": 1
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "af-014",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "af-014",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 1
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "af-016",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        }
+      ],
+      "new_defect_target_paths": 3,
+      "new_missed_concern_paths": 1,
+      "semantic_improvements": 8,
+      "semantic_regressions": 2
+    },
+    "baseline_direct__to__baseline_live_jev": {
+      "changes": [
+        {
+          "after_pass": false,
+          "before_pass": false,
+          "case_id": "af-002",
+          "new_defect_targets": [
+            [
+              "/content",
+              "overstated_basis"
+            ]
+          ],
+          "new_missed_concerns": [
+            "af-002-concern-1"
+          ],
+          "repeat": 0
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "af-004",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "af-005",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": false,
+          "case_id": "af-005",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [],
+          "repeat": 1
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "af-006",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "af-006",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 1
+        },
+        {
+          "after_pass": false,
+          "before_pass": false,
+          "case_id": "af-014",
+          "new_defect_targets": [],
+          "new_missed_concerns": [
+            "af-014-concern-1"
+          ],
+          "repeat": 0
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "af-016",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "af-016",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 1
+        }
+      ],
+      "new_defect_target_paths": 2,
+      "new_missed_concern_paths": 2,
+      "semantic_improvements": 6,
+      "semantic_regressions": 0
+    },
+    "baseline_direct__to__baseline_misleading": {
+      "changes": [
+        {
+          "after_pass": false,
+          "before_pass": false,
+          "case_id": "af-002",
+          "new_defect_targets": [
+            [
+              "/content",
+              "invented_fact"
+            ]
+          ],
+          "new_missed_concerns": [
+            "af-002-concern-1"
+          ],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": true,
+          "case_id": "af-002",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "overstated_basis"
+            ],
+            [
+              "/claim_records/0/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [],
+          "repeat": 1
+        },
+        {
+          "after_pass": false,
+          "before_pass": false,
+          "case_id": "af-004",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "overstated_basis"
+            ]
+          ],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": true,
+          "case_id": "af-004",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "overstated_basis"
+            ],
+            [
+              "/claim_records/0/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [
+            "af-004-concern-1"
+          ],
+          "repeat": 1
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "af-005",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 1
+        },
+        {
+          "after_pass": false,
+          "before_pass": false,
+          "case_id": "af-006",
+          "new_defect_targets": [
+            [
+              "/content",
+              "overstated_basis"
+            ]
+          ],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": true,
+          "case_id": "af-007",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "overstated_basis"
+            ],
+            [
+              "/claim_records/0/content",
+              "unsupported_concern"
+            ],
+            [
+              "/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": false,
+          "case_id": "af-008",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "overstated_basis"
+            ],
+            [
+              "/claim_records/0/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": true,
+          "case_id": "af-008",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "overstated_basis"
+            ],
+            [
+              "/claim_records/0/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [
+            "af-008-concern-1"
+          ],
+          "repeat": 1
+        },
+        {
+          "after_pass": false,
+          "before_pass": true,
+          "case_id": "af-010",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "overstated_basis"
+            ],
+            [
+              "/claim_records/0/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [
+            "af-010-concern-1"
+          ],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": true,
+          "case_id": "af-010",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "invented_fact"
+            ],
+            [
+              "/claim_records/0/content",
+              "overstated_basis"
+            ],
+            [
+              "/claim_records/0/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [
+            "af-010-concern-1"
+          ],
+          "repeat": 1
+        },
+        {
+          "after_pass": false,
+          "before_pass": true,
+          "case_id": "af-011",
+          "new_defect_targets": [
+            [
+              "/content",
+              "overstated_basis"
+            ],
+            [
+              "/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": true,
+          "case_id": "af-013",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "overstated_basis"
+            ],
+            [
+              "/claim_records/0/content",
+              "unsupported_concern"
+            ],
+            [
+              "/content",
+              "overstated_basis"
+            ],
+            [
+              "/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": true,
+          "case_id": "af-013",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "overstated_basis"
+            ],
+            [
+              "/claim_records/0/content",
+              "unsupported_concern"
+            ],
+            [
+              "/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [],
+          "repeat": 1
+        },
+        {
+          "after_pass": false,
+          "before_pass": false,
+          "case_id": "af-014",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "overstated_basis"
+            ],
+            [
+              "/claim_records/0/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [
+            "af-014-concern-1"
+          ],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": false,
+          "case_id": "af-014",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "overstated_basis"
+            ],
+            [
+              "/claim_records/0/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [],
+          "repeat": 1
+        },
+        {
+          "after_pass": false,
+          "before_pass": false,
+          "case_id": "af-016",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "overstated_basis"
+            ],
+            [
+              "/claim_records/0/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": false,
+          "case_id": "af-016",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "overstated_basis"
+            ],
+            [
+              "/claim_records/0/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [],
+          "repeat": 1
+        }
+      ],
+      "new_defect_target_paths": 17,
+      "new_missed_concern_paths": 6,
+      "semantic_improvements": 1,
+      "semantic_regressions": 9
+    },
+    "baseline_live_jev__to__assertion_live_jev": {
+      "changes": [
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "af-002",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "af-008",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "af-014",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "af-014",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 1
+        }
+      ],
+      "new_defect_target_paths": 0,
+      "new_missed_concern_paths": 0,
+      "semantic_improvements": 4,
+      "semantic_regressions": 0
+    },
+    "baseline_misleading__to__assertion_misleading": {
+      "changes": [
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "af-002",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": false,
+          "case_id": "af-002",
+          "new_defect_targets": [
+            [
+              "/content",
+              "invented_fact"
+            ]
+          ],
+          "new_missed_concerns": [
+            "af-002-concern-1"
+          ],
+          "repeat": 1
+        },
+        {
+          "after_pass": false,
+          "before_pass": false,
+          "case_id": "af-004",
+          "new_defect_targets": [],
+          "new_missed_concerns": [
+            "af-004-concern-1"
+          ],
+          "repeat": 0
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "af-005",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": false,
+          "case_id": "af-006",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "overstated_basis"
+            ],
+            [
+              "/claim_records/0/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": false,
+          "case_id": "af-006",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "overstated_basis"
+            ],
+            [
+              "/claim_records/0/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [],
+          "repeat": 1
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "af-007",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": false,
+          "case_id": "af-008",
+          "new_defect_targets": [],
+          "new_missed_concerns": [
+            "af-008-concern-1"
+          ],
+          "repeat": 0
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "af-011",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": true,
+          "case_id": "af-012",
+          "new_defect_targets": [
+            [
+              "/content",
+              "overstated_basis"
+            ]
+          ],
+          "new_missed_concerns": [
+            "af-012-concern-1"
+          ],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": true,
+          "case_id": "af-012",
+          "new_defect_targets": [],
+          "new_missed_concerns": [
+            "af-012-concern-1"
+          ],
+          "repeat": 1
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "af-013",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "af-013",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 1
+        },
+        {
+          "after_pass": false,
+          "before_pass": false,
+          "case_id": "af-016",
+          "new_defect_targets": [],
+          "new_missed_concerns": [
+            "af-016-concern-1"
+          ],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": false,
+          "case_id": "af-016",
+          "new_defect_targets": [],
+          "new_missed_concerns": [
+            "af-016-concern-1"
+          ],
+          "repeat": 1
+        }
+      ],
+      "new_defect_target_paths": 4,
+      "new_missed_concern_paths": 7,
+      "semantic_improvements": 6,
+      "semantic_regressions": 2
+    }
+  },
+  "limits": [
+    "Defect-target differences are diagnostics, not a complete semantic equivalence test of critique wording. No-new-harm requires inspecting actual changed findings.",
+    "Mechanical errors have zero applied findings and zero semantic credit; their prose diagnoses remain in arm totals explicitly marked including_invalid_diagnostics.",
+    "Same-family arm-blind review of clustered synthetic cases; no production qualification."
+  ],
+  "map_sha256": "fba4b5bc8ebc3226dd8c3d09bc79b0e28861697cea8e97eb8a490535f6a1c49f",
+  "review_sha256": "b63c236d93f5896e4255700b276927c352102ca0d4587c654c6f5ec04572807d"
+}

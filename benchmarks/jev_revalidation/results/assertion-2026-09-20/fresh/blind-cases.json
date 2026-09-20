@@ -1,0 +1,232 @@
+[
+  {
+    "id": "af-001",
+    "content": "The bytes submitted to block 712 were read back successfully while power remained connected.",
+    "claims": [
+      "The write returned success at tick 180."
+    ],
+    "sources": [
+      {
+        "id": "af-001-source-1",
+        "text": "Storage bench capture N42: a write to address block 712 returned success at tick 180. A read at tick 181 returned the submitted bytes while power remained connected. The bench used a volatile controller buffer. The capture ends before any buffer-flush trace, restart or power interruption. The capture does not establish whether this controller flushes on acknowledgment; its persistence policy was not measured.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "af-002",
+    "content": "The bytes submitted to block 712 were guaranteed to survive a power interruption after acknowledgment.",
+    "claims": [
+      "The write returned success at tick 180."
+    ],
+    "sources": [
+      {
+        "id": "af-002-source-1",
+        "text": "Storage bench capture N42: a write to address block 712 returned success at tick 180. A read at tick 181 returned the submitted bytes while power remained connected. The bench used a volatile controller buffer. The capture ends before any buffer-flush trace, restart or power interruption. The capture does not establish whether this controller flushes on acknowledgment; its persistence policy was not measured.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "af-003",
+    "content": "Delta encoding was disabled in frame F-C3.",
+    "claims": [
+      "The analyzer captured a four-byte sample body for this frame."
+    ],
+    "sources": [
+      {
+        "id": "af-003-source-1",
+        "text": "Protocol analyzer record for frame F-C3. The received options octet is 0x04. Under the attached version-3 header specification, bit zero enables delta encoding when set and disables delta encoding when clear; no other bit controls this feature. The analyzer decodes bit zero as clear and records delta encoding disabled for this frame. The four-byte sample body was captured intact. This record makes no claim about other frames.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "af-004",
+    "content": "Delta encoding was enabled in frame F-C3.",
+    "claims": [
+      "The analyzer captured a four-byte sample body for this frame."
+    ],
+    "sources": [
+      {
+        "id": "af-004-source-1",
+        "text": "Protocol analyzer record for frame F-C3. The received options octet is 0x04. Under the attached version-3 header specification, bit zero enables delta encoding when set and disables delta encoding when clear; no other bit controls this feature. The analyzer decodes bit zero as clear and records delta encoding disabled for this frame. The four-byte sample body was captured intact. This record makes no claim about other frames.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "af-005",
+    "content": "The recorded sound level was lower in run B than in run A.",
+    "claims": [
+      "Fan speed was held fixed between the two runs."
+    ],
+    "sources": [
+      {
+        "id": "af-005-source-1",
+        "text": "Acoustic notebook, enclosure test T5. Run A recorded 68 dB with the original lining and the microphone 0.5 m from the enclosure. Run B recorded 61 dB after a foam insert was fitted and the microphone was moved to 2 m. Fan speed was held fixed. No run held microphone distance constant while varying the insert, and no separate effect of either change was estimated. The notebook reports the two readings without attributing the difference to a cause.",
+        "provenance": "reported"
+      }
+    ]
+  },
+  {
+    "id": "af-006",
+    "content": "The foam insert caused the lower recorded sound level in run B.",
+    "claims": [
+      "Fan speed was held fixed between the two runs."
+    ],
+    "sources": [
+      {
+        "id": "af-006-source-1",
+        "text": "Acoustic notebook, enclosure test T5. Run A recorded 68 dB with the original lining and the microphone 0.5 m from the enclosure. Run B recorded 61 dB after a foam insert was fitted and the microphone was moved to 2 m. Fan speed was held fixed. No run held microphone distance constant while varying the insert, and no separate effect of either change was estimated. The notebook reports the two readings without attributing the difference to a cause.",
+        "provenance": "reported"
+      }
+    ]
+  },
+  {
+    "id": "af-007",
+    "content": "Probe ZQ had a +0.2 C error in the recorded 20.0 C reference-bath check.",
+    "claims": [
+      "The probe serial was checked before immersion."
+    ],
+    "sources": [
+      {
+        "id": "af-007-source-1",
+        "text": "Reference-bath worksheet for probe ZQ. The bath was stabilized at 20.0 C. Probe ZQ indicated 20.2 C, and the worksheet records a +0.2 C error at this check. No measurement above 25 C was performed in the supplied qualification. The sensor identifier was verified against its engraved serial before immersion. The worksheet supplies no response curve or error bound outside the checked temperature.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "af-008",
+    "content": "Probe ZQ has a +0.2 C error at 90.0 C.",
+    "claims": [
+      "The probe serial was checked before immersion."
+    ],
+    "sources": [
+      {
+        "id": "af-008-source-1",
+        "text": "Reference-bath worksheet for probe ZQ. The bath was stabilized at 20.0 C. Probe ZQ indicated 20.2 C, and the worksheet records a +0.2 C error at this check. No measurement above 25 C was performed in the supplied qualification. The sensor identifier was verified against its engraved serial before immersion. The worksheet supplies no response curve or error bound outside the checked temperature.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "af-009",
+    "content": "The exported mean used ten contributing cells.",
+    "claims": [
+      "The acquired grid has three rows and four cells per row."
+    ],
+    "sources": [
+      {
+        "id": "af-009-source-1",
+        "text": "Array-analysis record M31. The acquired grid has three rows and four cells per row. Cells at row 1 column 2 and row 3 column 4 are masked, and every other cell is unmasked. The exported mean is computed over unmasked cells only. The record explicitly lists ten contributing cells and excludes both masked values; neither a masked value nor a placeholder is added to the denominator.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "af-010",
+    "content": "The exported mean used twelve contributing cells.",
+    "claims": [
+      "The acquired grid has three rows and four cells per row."
+    ],
+    "sources": [
+      {
+        "id": "af-010-source-1",
+        "text": "Array-analysis record M31. The acquired grid has three rows and four cells per row. Cells at row 1 column 2 and row 3 column 4 are masked, and every other cell is unmasked. The exported mean is computed over unmasked cells only. The record explicitly lists ten contributing cells and excludes both masked values; neither a masked value nor a placeholder is added to the denominator.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "af-011",
+    "content": "The two supplied revision-7 exports disagree on the design thickness of bracket PX.",
+    "claims": [],
+    "sources": [
+      {
+        "id": "af-011-source-1",
+        "text": "CAD archive export E1 for bracket PX, drawing revision 7. The thickness callout is 1.6 mm. The export bears a valid archive signature and names revision 7 as current. The packet supplies no release-order record or correction establishing priority between this export and export E2. The callout concerns design thickness, not a measurement of a manufactured bracket.",
+        "provenance": "signed"
+      },
+      {
+        "id": "af-011-source-2",
+        "text": "CAD archive export E2 for the same bracket PX and drawing revision 7. The thickness callout is 2.0 mm. This export also bears a valid archive signature and names revision 7 as current. The packet explicitly identifies the two thickness callouts as conflicting and supplies no approval, correction or release-order record that resolves which callout governs.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "af-012",
+    "content": "The governing revision-7 design thickness of bracket PX is 1.6 mm.",
+    "claims": [],
+    "sources": [
+      {
+        "id": "af-012-source-1",
+        "text": "CAD archive export E1 for bracket PX, drawing revision 7. The thickness callout is 1.6 mm. The export bears a valid archive signature and names revision 7 as current. The packet supplies no release-order record or correction establishing priority between this export and export E2. The callout concerns design thickness, not a measurement of a manufactured bracket.",
+        "provenance": "signed"
+      },
+      {
+        "id": "af-012-source-2",
+        "text": "CAD archive export E2 for the same bracket PX and drawing revision 7. The thickness callout is 2.0 mm. This export also bears a valid archive signature and names revision 7 as current. The packet explicitly identifies the two thickness callouts as conflicting and supplies no approval, correction or release-order record that resolves which callout governs.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "af-013",
+    "content": "The true load-channel input at sample 407 was at least 500 N.",
+    "claims": [
+      "The saturation flag was clear for adjacent sample 406."
+    ],
+    "sources": [
+      {
+        "id": "af-013-source-1",
+        "text": "Load-channel export Q11. Sample 407 displays 500 N and has the saturation flag set. The attached acquisition rule states that a saturated sample represents a true channel input of at least 500 N; displayed 500 is a clipping value, not an exact measurement. No secondary range, unclipped trace or upper bound is available for sample 407. The adjacent sample 406 has its saturation flag clear.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "af-014",
+    "content": "The true load-channel input at sample 407 was exactly 500 N.",
+    "claims": [
+      "The saturation flag was clear for adjacent sample 406."
+    ],
+    "sources": [
+      {
+        "id": "af-014-source-1",
+        "text": "Load-channel export Q11. Sample 407 displays 500 N and has the saturation flag set. The attached acquisition rule states that a saturated sample represents a true channel input of at least 500 N; displayed 500 is a clipping value, not an exact measurement. No secondary range, unclipped trace or upper bound is available for sample 407. The adjacent sample 406 has its saturation flag clear.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "af-015",
+    "content": "At the final status read, unit H8 still used rising pulse polarity.",
+    "claims": [
+      "The falling-polarity configuration was stored in inactive bank B."
+    ],
+    "sources": [
+      {
+        "id": "af-015-source-1",
+        "text": "Motion-controller configuration trace for unit H8. At boot, active bank A set pulse polarity to rising. A later upload stored a falling-polarity configuration in inactive bank B. The controller reported upload complete but activation pending. The final status read, after that upload, still identifies bank A as active and rising polarity as the effective value. No bank-switch command occurred within the trace.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "af-016",
+    "content": "At the final status read, unit H8 used the uploaded falling pulse polarity.",
+    "claims": [
+      "The falling-polarity configuration was stored in inactive bank B."
+    ],
+    "sources": [
+      {
+        "id": "af-016-source-1",
+        "text": "Motion-controller configuration trace for unit H8. At boot, active bank A set pulse polarity to rising. A later upload stored a falling-polarity configuration in inactive bank B. The controller reported upload complete but activation pending. The final status read, after that upload, still identifies bank A as active and rising polarity as the effective value. No bank-switch command occurred within the trace.",
+        "provenance": "signed"
+      }
+    ]
+  }
+]

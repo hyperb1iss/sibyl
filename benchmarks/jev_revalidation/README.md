@@ -78,3 +78,13 @@ improved blind semantic passes from 22/48 to 38/48 at nearly unchanged latency
 and cost, with one paired semantic regression. Wrong hints reduced supported
 acceptance sharply. The separate quality, speed and robustness gates prevent
 treating the aggregate improvement as production qualification.
+
+## Assertion precision and separate Jev contribution
+
+The [assertion-contract study](results/assertion-2026-09-20/report.md) crosses
+original and revised critic instructions with direct, live-Jev and wrong-hint
+paths. Fresh semantic passes rise from 21/32 for the original direct critic to
+27/32 with revised instructions and 31/32 with revised instructions plus Jev.
+Retained failures, two direct-prompt regressions and poor wrong-hint finding
+quality still prevent activation. Both cohorts retain the same frozen prompt,
+complete acquisition costs and separate blind reviews.

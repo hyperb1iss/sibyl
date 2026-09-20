@@ -1,0 +1,143 @@
+{
+  "assertion_contract_sha256": "c7a934677d6ba55de2ff8ff89dc6f27326db91ff7f0561f95a982b14cbe0c37d",
+  "classification": "strict contract rejections of provider output; no repaired responses",
+  "cohorts": {
+    "fresh": {
+      "critic_calls": 192,
+      "http_route_transport_failures": 0,
+      "jev_calls": 64,
+      "known_call_cost_usd": "0.695284232",
+      "manifest_sha256": "17645adf7cae33632a341e57777d199784734da8a8aa6333595ca1539e1c7e0c",
+      "paths": 192,
+      "rows_sha256": "ce6887d9ba870d4f5c4ebf393f89bcd7ca956f44be43bf51dcaaecf5fc8a1e67"
+    },
+    "retained": {
+      "critic_calls": 48,
+      "http_route_transport_failures": 0,
+      "jev_calls": 16,
+      "known_call_cost_usd": "0.194381488",
+      "manifest_sha256": "600e30aacd46b4e2c956ad2d15a4bf1d49953e81cbb0257dc7b65a39ec404cd7",
+      "paths": 48,
+      "rows_sha256": "9cc950905d064a58df7bcca1e1a61ad74f1bd5e8c97f23aad263c2dc67674912"
+    }
+  },
+  "failed_critic_cost_usd": "0.007781",
+  "failed_stage_cost_usd": "0.00783875",
+  "failures": [
+    {
+      "action": "error",
+      "arm": "baseline_misleading",
+      "case_id": "hf-018",
+      "cohort": "retained",
+      "cost_usd": 0.003603,
+      "error": [
+        {
+          "ctx": {
+            "expected": "'factual_contradiction', 'unsupported_generalization', 'unsupported_causality', 'missing_condition' or 'misleading_certainty'"
+          },
+          "loc": [
+            "findings",
+            0,
+            "basis"
+          ],
+          "msg": "Input should be 'factual_contradiction', 'unsupported_generalization', 'unsupported_causality', 'missing_condition' or 'misleading_certainty'",
+          "type": "literal_error"
+        }
+      ],
+      "id": "case-5-repeat-0-baseline_misleading",
+      "invalid_value": "unsupported_universality",
+      "path_known_cost_usd": "0.003603",
+      "provider_request_id": "gen-1789925489-D7ZFiZmHoUmSys90l05N",
+      "raw_path": "/home/dev/dev/eval-runs/jev-assertion-20260920/retained/live/raw/case-5-repeat-0-baseline_misleading.critic.json",
+      "raw_sha256": "184d5fe9ca8a67b720c001d85e563b2cdf30733f66a8d2e9e90142573deb439c",
+      "request_binding_valid": true,
+      "request_sha256": "96f245fa30a8d9361071a4cd87d82e3a4809707c7c1c4ef0b2fde0c5a15abefa",
+      "schema_matches_wire": true,
+      "stage": "critic",
+      "usage": {
+        "attempt_count": 1,
+        "attempt_count_known": true,
+        "input_tokens": 2103,
+        "model": "anthropic/claude-haiku-4.5",
+        "observed_cost_usd": 0.003603,
+        "output_tokens": 300,
+        "provider": "Anthropic",
+        "total_tokens": 2403,
+        "usage_complete": true
+      }
+    },
+    {
+      "action": "error",
+      "arm": "assertion_misleading",
+      "case_id": "af-012",
+      "cohort": "fresh",
+      "cost_usd": 0.004178,
+      "error": [
+        {
+          "ctx": {
+            "expected": "'factual_contradiction', 'unsupported_generalization', 'unsupported_causality', 'missing_condition' or 'misleading_certainty'"
+          },
+          "loc": [
+            "findings",
+            0,
+            "basis"
+          ],
+          "msg": "Input should be 'factual_contradiction', 'unsupported_generalization', 'unsupported_causality', 'missing_condition' or 'misleading_certainty'",
+          "type": "literal_error"
+        }
+      ],
+      "id": "case-11-repeat-1-assertion_misleading",
+      "invalid_value": "unsupported_certainty",
+      "path_known_cost_usd": "0.004178",
+      "provider_request_id": "gen-1789925537-DnqFL1VrEHDN0ih5bQqg",
+      "raw_path": "/home/dev/dev/eval-runs/jev-assertion-20260920/fresh/live/raw/case-11-repeat-1-assertion_misleading.critic.json",
+      "raw_sha256": "f8210ef53f440a50fcfc72581ddd7e6d02d6c8fca1e03ab9ed9ddbe438dcb533",
+      "request_binding_valid": true,
+      "request_sha256": "ae593892a46489a61e3969de48c5b58bc2dd26bd983badee8f77353050ed6d5c",
+      "schema_matches_wire": true,
+      "stage": "critic",
+      "usage": {
+        "attempt_count": 1,
+        "attempt_count_known": true,
+        "input_tokens": 2773,
+        "model": "anthropic/claude-haiku-4.5",
+        "observed_cost_usd": 0.004178,
+        "output_tokens": 281,
+        "provider": "Anthropic",
+        "total_tokens": 3054,
+        "usage_complete": true
+      }
+    },
+    {
+      "action": "flag",
+      "arm": "assertion_live_jev",
+      "case_id": "af-005",
+      "cohort": "fresh",
+      "cost_usd": 5.775e-05,
+      "error": [
+        {
+          "loc": [],
+          "msg": "Value error, probabilities must sum to one",
+          "type": "value_error"
+        }
+      ],
+      "fallback_empty_hints": true,
+      "id": "case-4-repeat-1-assertion_live_jev",
+      "invalid_probability_sum": "0.99",
+      "path_known_cost_usd": "0.00433475",
+      "probabilities": {
+        "ambiguous": 0.01,
+        "contradicted": 0.0,
+        "insufficient": 0.05,
+        "supported": 0.93
+      },
+      "provider_request_id": "gen-dec-1789925555-H692EPYHP1WOhCTbsyNx",
+      "raw_path": "/home/dev/dev/eval-runs/jev-assertion-20260920/fresh/live/raw/case-4-repeat-1-assertion_live_jev.jev.json",
+      "raw_sha256": "fe7a855d0d6d22c45ff9d3bc3fda557adab625adb1f104dc3cb10911da03e08c",
+      "request_sha256": "352f63f5a10540ee19cf859928d5dbf395aa5cf88e4bbd9ffaf5c3926e91da4a",
+      "stage": "jev"
+    }
+  ],
+  "interpreter_sha256": "ba9f58c9f3db7b53ba915b045de5b50798071ed0423b6cbbc9b5c4a23ff15a39",
+  "probe_sha256": "d28017cdfe5d040b402aa5e8b0d56aa24d9987125884d7ae606f654303373b8c"
+}
