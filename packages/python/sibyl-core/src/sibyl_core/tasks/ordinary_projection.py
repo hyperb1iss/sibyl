@@ -79,7 +79,7 @@ class OrdinaryEvidenceProjection:
 
 
 class ProjectionReuse:
-    """Retain one validated projection within a synchronous preparation lifetime."""
+    """Retain one validated projection within a sequential preparation lifetime."""
 
     def __init__(self) -> None:
         self._key: str | None = None
