@@ -864,3 +864,83 @@ async def test_checkpoint_zero_refuses_a_derived_native_inventory(
     assert sealed["native_inventory"]["raw_original_only"] is False
     assert sealed["cells"] == []
     assert (output / checkpoints.INVENTORY_NAME).is_file()
+
+
+# --- premature completion: stopped on its own, changed nothing ---------------
+
+
+def _trace(path: Path, *, reason: str, edits: int) -> Path:
+    events: list[dict[str, Any]] = [{"kind": "start", "payload": {}}]
+    for index in range(2):
+        before = [{"path": "app.py", "sha256": "a" * 64}]
+        after = [{"path": "app.py", "sha256": ("b" if index < edits else "a") * 64}]
+        events.append({"kind": "tool_call", "payload": {"index": index, "name": "shell"}})
+        events.append(
+            {
+                "kind": "tool_result",
+                "payload": {"index": index, "workspace_before": before, "workspace_after": after},
+            }
+        )
+    events.append({"kind": "terminal", "payload": {"reason": reason, "exit": 0}})
+    path.write_text("".join(json.dumps(event) + "\n" for event in events))
+    return path
+
+
+def test_premature_completion_is_a_voluntary_stop_without_a_workspace_change(tmp_path: Path):
+    assert (
+        headroom.premature_completion(_trace(tmp_path / "a.jsonl", reason="stop", edits=0)) is True
+    )
+    assert (
+        headroom.premature_completion(_trace(tmp_path / "b.jsonl", reason="stop", edits=1)) is False
+    )
+    assert (
+        headroom.premature_completion(_trace(tmp_path / "c.jsonl", reason="budget", edits=0))
+        is False
+    )
+    assert headroom.premature_completion(tmp_path / "missing.jsonl") is None
+    (tmp_path / "empty.jsonl").write_text("")
+    assert headroom.premature_completion(tmp_path / "empty.jsonl") is None
+    (tmp_path / "broken.jsonl").write_text("{not json\n")
+    assert headroom.premature_completion(tmp_path / "broken.jsonl") is None
+
+
+class _StoppingRunner(FakeRunner):
+    """A runner whose native cells stop after one look and change nothing."""
+
+    def __call__(
+        self, manifest_path: Path, *, task_id: str, arm_id: str, output: Path, attempt_id=None
+    ):
+        result = super().__call__(
+            manifest_path, task_id=task_id, arm_id=arm_id, output=output, attempt_id=attempt_id
+        )
+        _trace(
+            output / headroom.TRACE_NAME,
+            reason="stop" if arm_id == "native" else "budget",
+            edits=0 if arm_id == "native" else 1,
+        )
+        return result
+
+
+def test_the_probe_counts_premature_completions_per_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(runner, "run_task", _StoppingRunner(all_pass()))
+    output = tmp_path / "out"
+    report = probe.run_cells(
+        preparation=write_preparation(output),
+        template=write_template(tmp_path / "artifacts"),
+        tasks_root=write_material(tmp_path / "material"),
+        output=output,
+        repetitions=REPETITIONS,
+        workers=2,
+    )
+    rows = {(row["task"], row["arm"]): row for row in report["rows"]}
+    assert rows[(TASKS[0], "native")]["premature_completions"] == REPETITIONS
+    assert rows[(TASKS[0], probe.NO_MEMORY_ARM)]["premature_completions"] == 0
+    native = [cell for cell in report["cells"] if cell["arm"] == "native"]
+    assert all(cell["premature_completion"] is True for cell in native)
+    assert all(
+        cell["premature_completion"] is False for cell in report["cells"] if cell["arm"] != "native"
+    )
+    # A pass is still a pass; the flag is recorded beside it, not instead of it.
+    assert rows[(TASKS[0], "native")]["passes"] == REPETITIONS

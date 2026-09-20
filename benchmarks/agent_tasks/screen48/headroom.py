@@ -24,6 +24,7 @@ have said; it decides nothing.
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import os
 import sys
@@ -216,6 +217,37 @@ def _elapsed(receipt: dict[str, Any]) -> float | None:
     return float(elapsed) if isinstance(elapsed, int | float) else None
 
 
+TRACE_NAME = "controller-trace.jsonl"
+
+
+def premature_completion(trace_path: Path) -> bool | None:
+    """Did the solver stop on its own without ever changing the workspace?
+
+    The floor probe watched a solver read a rendered historical episode as its
+    own earlier turns, run one check, and declare finished work that happened
+    in another container. That shape is mechanical: the run ends on the model's
+    own stop, and no tool result records a workspace that differs from the one
+    before it. ``None`` means the trace was absent or unreadable, which is an
+    unknown rather than a clean run.
+    """
+    try:
+        events = [json.loads(line) for line in trace_path.read_text().splitlines() if line]
+    except (OSError, ValueError):
+        return None
+    if not events:
+        return None
+    terminal = [event for event in events if event.get("kind") == "terminal"]
+    if not terminal or terminal[-1].get("payload", {}).get("reason") != "stop":
+        return False
+    edited = any(
+        event.get("kind") == "tool_result"
+        and event.get("payload", {}).get("workspace_before")
+        != event.get("payload", {}).get("workspace_after")
+        for event in events
+    )
+    return not edited
+
+
 def _outcome(receipt: dict[str, Any]) -> bool | None:
     outcome = receipt.get("outcome")
     if isinstance(outcome, dict) and isinstance(outcome.get("passed"), bool):
@@ -252,6 +284,7 @@ def run_cell(
         "status": "runner_error",
         "success": False,
         "passed": None,
+        "premature_completion": None,
         "usage": dict.fromkeys(USAGE_FIELDS),
         "elapsed_seconds": None,
         "receipt": None,
@@ -274,6 +307,7 @@ def run_cell(
             status=receipt.get("status"),
             success=bool(receipt.get("success")),
             passed=_outcome(receipt),
+            premature_completion=premature_completion(cell_root / TRACE_NAME),
             usage=_usage(receipt),
             elapsed_seconds=_elapsed(receipt),
             receipt=f"{relative}/receipt.json",
