@@ -1,0 +1,184 @@
+{
+  "verdict": "PASS",
+  "scope": "Independent stdlib numerical and structural receipt audit; no semantic adjudication or provider calls. PASS validates recorded numbers, not a speed or production qualification.",
+  "checks": {
+    "complete_128_unique": 1,
+    "exact_32x2x2_grid": 1,
+    "row_schedule_order": 1,
+    "exact_raw_artifact_inventory": 1,
+    "exact_path_inventory": 1,
+    "completion": 1,
+    "plan_live_manifest.json": 1,
+    "plan_live_schedule.json": 1,
+    "plan_live_rubric.json": 1,
+    "schedule_hash": 1,
+    "cases_hash": 1,
+    "rubric_hash": 1,
+    "fresh_code_hash": 4,
+    "prior_manifest_identical": 1,
+    "transitive_code_hash": 316,
+    "old_artifact_inventory": 1,
+    "prior_artifact_hash": 476,
+    "seeded_interleaved_schedule": 1,
+    "per_path_equals_row": 128,
+    "identity": 128,
+    "wire_binding": 128,
+    "raw_success": 128,
+    "response_byte_binding": 128,
+    "dispatch_receipt": 128,
+    "raw_transport_fields_embedded_unchanged": 128,
+    "interpreter_error_classification": 128,
+    "request_route": 128,
+    "response_route": 128,
+    "forced_single_tool": 128,
+    "raw_cost_known": 128,
+    "cost_from_raw": 128,
+    "tokens_from_raw": 384,
+    "attempt_count": 128,
+    "valid_output_completed": 126,
+    "result_status": 126,
+    "augmented_prompt_result_binding": 126,
+    "derived_action": 128,
+    "timings_finite": 384,
+    "timing_bounds": 128,
+    "timestamp_order": 128,
+    "same_case_original_preparation": 128,
+    "original_decision_request_binding": 128,
+    "semantic_request_digest": 128,
+    "exact_jev_state_matches_critic": 128,
+    "prior_wire_match": 128,
+    "prior_observed_route": 128,
+    "prior_raw_tokens": 128,
+    "prior_observation_labels_from_raw": 128,
+    "prior_cost_from_raw": 128,
+    "complete_hint_questions": 128,
+    "hint_labels_from_raw": 128,
+    "wire_hint_slot": 128,
+    "paired_only_hint_difference": 128,
+    "claim_mechanical_binding": 76,
+    "citation_key_binding": 76,
+    "result_findings_unchanged": 73,
+    "invalid_output_fail_closed": 2,
+    "summary_paths": 2,
+    "summary_actions": 2,
+    "summary_safe_accepted": 2,
+    "summary_false_accepts": 2,
+    "summary_strict_correct": 2,
+    "summary_rubric_correct": 2,
+    "summary_fresh_known_cost_usd": 2,
+    "summary_service_p50_ms": 2,
+    "summary_service_p95_ms": 2,
+    "summary_output_tokens": 2,
+    "summary_execution_failures": 2,
+    "64_unique_attributed_jev_calls": 1,
+    "total_prior_jev_attribution": 1
+  },
+  "failures": [],
+  "metrics": {
+    "direct": {
+      "paths": 64,
+      "actions": {
+        "accept": 29,
+        "flag": 33,
+        "error": 2
+      },
+      "safe_accepted": 24,
+      "false_accepts": 5,
+      "strict_correct": 47,
+      "rubric_correct": 57,
+      "fresh_known_cost_usd": "0.278300",
+      "service_p50_ms": 2254.751973989187,
+      "service_p95_ms": 4305.258139997022,
+      "output_tokens": 11181,
+      "execution_failures": 2,
+      "completed_only_p50_ms": 2206.000808997487,
+      "completed_only_p95_ms": 3956.7481510021025
+    },
+    "hinted": {
+      "paths": 64,
+      "actions": {
+        "accept": 24,
+        "flag": 40
+      },
+      "safe_accepted": 24,
+      "false_accepts": 0,
+      "strict_correct": 52,
+      "rubric_correct": 64,
+      "fresh_known_cost_usd": "0.288742",
+      "service_p50_ms": 2322.4974065014976,
+      "service_p95_ms": 3722.2845689975657,
+      "output_tokens": 12188,
+      "execution_failures": 0,
+      "completed_only_p50_ms": 2322.4974065014976,
+      "completed_only_p95_ms": 3722.2845689975657
+    }
+  },
+  "ratios": {
+    "p50_change_percent": 3.004562510370179,
+    "p95_change_percent": -13.540966697988976
+  },
+  "fresh_paid_total_usd": "0.567042",
+  "prior_jev_cost_usd": "0.006124356",
+  "total_including_attributed_prior_jev_usd": "0.573166356",
+  "invalid_outputs": [
+    {
+      "id": "case-15-repeat-1-direct",
+      "invalid_basis": [
+        "unsupported_universal_claim"
+      ],
+      "cost_usd": "0.005596"
+    },
+    {
+      "id": "case-15-repeat-0-direct",
+      "invalid_basis": [
+        "unsupported_universal_claim"
+      ],
+      "cost_usd": "0.005615"
+    }
+  ],
+  "response_models": {
+    "anthropic/claude-haiku-4.5": 128
+  },
+  "providers": {
+    "Anthropic": 128
+  },
+  "max_wall_vs_monotonic_residual_ms": 0.016136992067913525,
+  "evidence_hashes": {
+    "manifest.json": "4e1f77300089be6582c182bc018c466cb22b41a7330334559b28446168235e6d",
+    "schedule.json": "189b0ca4a0de7299082a6235652331f390c37c3675dcbffb73e8316e63580ac4",
+    "rows.json": "ca383f8f0e5ac322be3233762acbf03db7a337676638f04fb665b168c16e2a7f",
+    "summary.json": "92ee769a8032d506dfa13c485d8493c788e5fe51acfef0f18fdd1f83bee161e0",
+    "rubric.json": "a3e96b87d0d25e66de2b3ce126c97e282aa696e96314384f6b4421971ffebe22"
+  },
+  "limits": [
+    "Both invalid direct responses remain in all64 direct action/latency/cost denominators; known billing retained.",
+    "Median did not improve; a joint median-and-p95 nonincrease hypothesis is not met.",
+    "Hints were already available; this does not measure live acquisition, source reauthorization, receipt finalization or complete production-path latency.",
+    "Action correctness does not establish semantic finding correctness; separate blinded review remains required.",
+    "32 exposed synthetic cases with two clustered repeats cannot establish generalization or powered safety noninferiority.",
+    "Local artifacts and declared hashes are internally consistent; no independent provider invoice was queried."
+  ],
+  "direct_false_accept_pairs": [
+    {
+      "case_id": "qs-019",
+      "repeat": 1
+    },
+    {
+      "case_id": "qs-031",
+      "repeat": 0
+    },
+    {
+      "case_id": "qs-022",
+      "repeat": 0
+    },
+    {
+      "case_id": "qs-024",
+      "repeat": 0
+    },
+    {
+      "case_id": "qs-031",
+      "repeat": 1
+    }
+  ],
+  "audit_script_sha256": "924acf6e9075a943e83d0ebbbece12015a1c142d6ada1a72a987074139476b3c"
+}

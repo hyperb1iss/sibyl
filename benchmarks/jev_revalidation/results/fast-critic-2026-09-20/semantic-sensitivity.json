@@ -1,0 +1,458 @@
+{
+  "blind_input_binding": {
+    "blind_map_sha256": "734132b91f9ebc7b1a0b8ebba0f2fdfaffbea6ad821600a2add984bb904c7d76",
+    "files_sha256": {
+      "cases.json": "4f348f89593fe6fbbf981a4e1ad75308ec897119035d17705633d1c1f1007e4b",
+      "responses.json": "3fefabdfa988b20bb5a50415ddba1ec14e11fe92ebbc52d9ff5f929710776f29",
+      "rubric.json": "a3e96b87d0d25e66de2b3ce126c97e282aa696e96314384f6b4421971ffebe22"
+    },
+    "rows_sha256": "ca383f8f0e5ac322be3233762acbf03db7a337676638f04fb665b168c16e2a7f"
+  },
+  "blinding": "Only the original four-file blind packet was used. No arm map, aggregate arm metric, timing, cost, plan or live artifact was inspected. The original annotation file was not overwritten.",
+  "clarification": {
+    "consistency": "A full response may explain an imprecise relation word, but it must not leave an additional categorical physical/event assertion unsupported. The qs015 continuation explicitly defines the alleged contradiction as lack of causal support. Unknown contents in qs021 do not, by themselves, qualify a categorical statement that no inspection occurred.",
+    "interpretation_limit": "Do not claim comparative superiority based only on the qs021 one-versus-three lexical distinction. Report the original frozen scoring and both coherent alternatives. Do not select an alternative after observing which arm benefits.",
+    "qs015": "Contextual qualification is sufficient for the frozen judgment. The whole critique explicitly says causality cannot be established, and its basis encodes unsupported causality. It does not infer an opposite causal fact. The opening contradiction phrase remains a wording defect and receives a failure under the separately recorded stricter literal alternative.",
+    "qs021": "The original boundary distinguishes rejecting a compound evidential-status claim from adding the independent proposition that no inspection occurred. Three responses explicitly add that proposition; one can be read as denying only established inspection evidence. The boundary is defensible but linguistically narrow and therefore sensitivity-worthy."
+  },
+  "judgments": [
+    {
+      "blind_id": "06ca469f5101bac1",
+      "case_id": "qs-015",
+      "contextual_record_scope_alternative": {
+        "basis_overstates_evidence": false,
+        "citations_relevant": true,
+        "concern_ids": [
+          "qs-015-concern-1"
+        ],
+        "core_concern_supported": true,
+        "covered_concern_ids": [
+          "qs-015-concern-1"
+        ],
+        "finding_index": 0,
+        "missed_concern_ids": [],
+        "semantic_pass": true,
+        "unsupported_replacement": false,
+        "valid_abstention": false
+      },
+      "mechanical_action": "flag",
+      "original_frozen_judgment": {
+        "basis_overstates_evidence": false,
+        "citations_relevant": true,
+        "concern_ids": [
+          "qs-015-concern-1"
+        ],
+        "core_concern_supported": true,
+        "covered_concern_ids": [
+          "qs-015-concern-1"
+        ],
+        "finding_index": 0,
+        "missed_concern_ids": [],
+        "semantic_pass": true,
+        "unsupported_replacement": false,
+        "valid_abstention": false
+      },
+      "rationale": "Retain the frozen pass under a full-response reading. The opening 'explicitly contradicts this causal assertion' is imprecise, but subsequent sentences explicitly explain that the diary cannot establish causality and does not support the claim. The typed basis is unsupported_causality. The critique never asserts that the banner did not cause the increase or that the school group did. A stricter clause-local standard can flag the opening as a contradiction overclaim; that alternative is recorded rather than silently substituted.",
+      "strict_clause_local_alternative": {
+        "basis_overstates_evidence": true,
+        "citations_relevant": true,
+        "concern_ids": [
+          "qs-015-concern-1"
+        ],
+        "core_concern_supported": true,
+        "covered_concern_ids": [],
+        "finding_index": 0,
+        "missed_concern_ids": [
+          "qs-015-concern-1"
+        ],
+        "semantic_pass": false,
+        "unsupported_replacement": false,
+        "valid_abstention": false
+      }
+    },
+    {
+      "blind_id": "35736ca5242cb5fe",
+      "case_id": "qs-015",
+      "contextual_record_scope_alternative": {
+        "basis_overstates_evidence": false,
+        "citations_relevant": true,
+        "concern_ids": [
+          "qs-015-concern-1"
+        ],
+        "core_concern_supported": true,
+        "covered_concern_ids": [
+          "qs-015-concern-1"
+        ],
+        "finding_index": 0,
+        "missed_concern_ids": [],
+        "semantic_pass": true,
+        "unsupported_replacement": false,
+        "valid_abstention": false
+      },
+      "mechanical_action": "flag",
+      "original_frozen_judgment": {
+        "basis_overstates_evidence": false,
+        "citations_relevant": true,
+        "concern_ids": [
+          "qs-015-concern-1"
+        ],
+        "core_concern_supported": true,
+        "covered_concern_ids": [
+          "qs-015-concern-1"
+        ],
+        "finding_index": 0,
+        "missed_concern_ids": [],
+        "semantic_pass": true,
+        "unsupported_replacement": false,
+        "valid_abstention": false
+      },
+      "rationale": "No alternative issue found. The full response describes a temporal association, the concurrent school-group arrival and absent causal investigation, without asserting that the banner had no causal effect. Both contextual and strict clause-local readings retain the pass.",
+      "strict_clause_local_alternative": {
+        "basis_overstates_evidence": false,
+        "citations_relevant": true,
+        "concern_ids": [
+          "qs-015-concern-1"
+        ],
+        "core_concern_supported": true,
+        "covered_concern_ids": [
+          "qs-015-concern-1"
+        ],
+        "finding_index": 0,
+        "missed_concern_ids": [],
+        "semantic_pass": true,
+        "unsupported_replacement": false,
+        "valid_abstention": false
+      }
+    },
+    {
+      "blind_id": "7384679b4b02b2eb",
+      "case_id": "qs-021",
+      "contextual_record_scope_alternative": {
+        "basis_overstates_evidence": false,
+        "citations_relevant": true,
+        "concern_ids": [
+          "qs-021-concern-1"
+        ],
+        "core_concern_supported": true,
+        "covered_concern_ids": [
+          "qs-021-concern-1"
+        ],
+        "finding_index": 0,
+        "missed_concern_ids": [],
+        "semantic_pass": true,
+        "unsupported_replacement": false,
+        "valid_abstention": false
+      },
+      "mechanical_action": "flag",
+      "original_frozen_judgment": {
+        "basis_overstates_evidence": true,
+        "citations_relevant": true,
+        "concern_ids": [
+          "qs-021-concern-1"
+        ],
+        "core_concern_supported": true,
+        "covered_concern_ids": [],
+        "finding_index": 0,
+        "missed_concern_ids": [
+          "qs-021-concern-1"
+        ],
+        "semantic_pass": false,
+        "unsupported_replacement": true,
+        "valid_abstention": false
+      },
+      "rationale": "The frozen failure treats the explicit categorical no-inspection sentence as a new negative event assertion, stronger than 'the packet supplies no inspection' or 'Nalin did not open the crate.' Later references to unknown contents or misrepresented evidential status do not logically retract that assertion. Under a more contextual reading confined to the recorded Nalin account, the same wording can be understood as 'no inspection is documented here,' yielding a pass. That is an explicitly softer reading, not newly discovered source evidence.",
+      "strict_clause_local_alternative": {
+        "basis_overstates_evidence": true,
+        "citations_relevant": true,
+        "concern_ids": [
+          "qs-021-concern-1"
+        ],
+        "core_concern_supported": true,
+        "covered_concern_ids": [],
+        "finding_index": 0,
+        "missed_concern_ids": [
+          "qs-021-concern-1"
+        ],
+        "semantic_pass": false,
+        "unsupported_replacement": true,
+        "valid_abstention": false
+      }
+    },
+    {
+      "blind_id": "5db018d6db7314f2",
+      "case_id": "qs-021",
+      "contextual_record_scope_alternative": {
+        "basis_overstates_evidence": false,
+        "citations_relevant": true,
+        "concern_ids": [
+          "qs-021-concern-1"
+        ],
+        "core_concern_supported": true,
+        "covered_concern_ids": [
+          "qs-021-concern-1"
+        ],
+        "finding_index": 0,
+        "missed_concern_ids": [],
+        "semantic_pass": true,
+        "unsupported_replacement": false,
+        "valid_abstention": false
+      },
+      "mechanical_action": "flag",
+      "original_frozen_judgment": {
+        "basis_overstates_evidence": false,
+        "citations_relevant": true,
+        "concern_ids": [
+          "qs-021-concern-1"
+        ],
+        "core_concern_supported": true,
+        "covered_concern_ids": [
+          "qs-021-concern-1"
+        ],
+        "finding_index": 0,
+        "missed_concern_ids": [],
+        "semantic_pass": true,
+        "unsupported_replacement": false,
+        "valid_abstention": false
+      },
+      "rationale": "The frozen pass reads the conclusion as rejection of the compound claim of an established inspection result: the packet records a guess, not an established finding. Denying that the record establishes 'inspection performed and contents established' need not deny every possible inspection. Unlike the other three, this response does not add a standalone categorical 'no inspection occurred' proposition. The distinction is narrow: a clause-local reading of 'directly contradicts ... an inspection was performed' can reasonably score an overstatement here too.",
+      "strict_clause_local_alternative": {
+        "basis_overstates_evidence": true,
+        "citations_relevant": true,
+        "concern_ids": [
+          "qs-021-concern-1"
+        ],
+        "core_concern_supported": true,
+        "covered_concern_ids": [],
+        "finding_index": 0,
+        "missed_concern_ids": [
+          "qs-021-concern-1"
+        ],
+        "semantic_pass": false,
+        "unsupported_replacement": false,
+        "valid_abstention": false
+      }
+    },
+    {
+      "blind_id": "b63a67bd22bb83e6",
+      "case_id": "qs-015",
+      "contextual_record_scope_alternative": {
+        "basis_overstates_evidence": false,
+        "citations_relevant": true,
+        "concern_ids": [
+          "qs-015-concern-1"
+        ],
+        "core_concern_supported": true,
+        "covered_concern_ids": [
+          "qs-015-concern-1"
+        ],
+        "finding_index": 0,
+        "missed_concern_ids": [],
+        "semantic_pass": true,
+        "unsupported_replacement": false,
+        "valid_abstention": false
+      },
+      "mechanical_action": "flag",
+      "original_frozen_judgment": {
+        "basis_overstates_evidence": false,
+        "citations_relevant": true,
+        "concern_ids": [
+          "qs-015-concern-1"
+        ],
+        "core_concern_supported": true,
+        "covered_concern_ids": [
+          "qs-015-concern-1"
+        ],
+        "finding_index": 0,
+        "missed_concern_ids": [],
+        "semantic_pass": true,
+        "unsupported_replacement": false,
+        "valid_abstention": false
+      },
+      "rationale": "No alternative issue found. The full response describes a temporal association, the concurrent school-group arrival and absent causal investigation, without asserting that the banner had no causal effect. Both contextual and strict clause-local readings retain the pass.",
+      "strict_clause_local_alternative": {
+        "basis_overstates_evidence": false,
+        "citations_relevant": true,
+        "concern_ids": [
+          "qs-015-concern-1"
+        ],
+        "core_concern_supported": true,
+        "covered_concern_ids": [
+          "qs-015-concern-1"
+        ],
+        "finding_index": 0,
+        "missed_concern_ids": [],
+        "semantic_pass": true,
+        "unsupported_replacement": false,
+        "valid_abstention": false
+      }
+    },
+    {
+      "blind_id": "c1475fe4aae7a680",
+      "case_id": "qs-021",
+      "contextual_record_scope_alternative": {
+        "basis_overstates_evidence": false,
+        "citations_relevant": true,
+        "concern_ids": [
+          "qs-021-concern-1"
+        ],
+        "core_concern_supported": true,
+        "covered_concern_ids": [
+          "qs-021-concern-1"
+        ],
+        "finding_index": 0,
+        "missed_concern_ids": [],
+        "semantic_pass": true,
+        "unsupported_replacement": false,
+        "valid_abstention": false
+      },
+      "mechanical_action": "flag",
+      "original_frozen_judgment": {
+        "basis_overstates_evidence": true,
+        "citations_relevant": true,
+        "concern_ids": [
+          "qs-021-concern-1"
+        ],
+        "core_concern_supported": true,
+        "covered_concern_ids": [],
+        "finding_index": 0,
+        "missed_concern_ids": [
+          "qs-021-concern-1"
+        ],
+        "semantic_pass": false,
+        "unsupported_replacement": true,
+        "valid_abstention": false
+      },
+      "rationale": "The frozen failure treats the explicit categorical no-inspection sentence as a new negative event assertion, stronger than 'the packet supplies no inspection' or 'Nalin did not open the crate.' Later references to unknown contents or misrepresented evidential status do not logically retract that assertion. Under a more contextual reading confined to the recorded Nalin account, the same wording can be understood as 'no inspection is documented here,' yielding a pass. That is an explicitly softer reading, not newly discovered source evidence.",
+      "strict_clause_local_alternative": {
+        "basis_overstates_evidence": true,
+        "citations_relevant": true,
+        "concern_ids": [
+          "qs-021-concern-1"
+        ],
+        "core_concern_supported": true,
+        "covered_concern_ids": [],
+        "finding_index": 0,
+        "missed_concern_ids": [
+          "qs-021-concern-1"
+        ],
+        "semantic_pass": false,
+        "unsupported_replacement": true,
+        "valid_abstention": false
+      }
+    },
+    {
+      "blind_id": "9bb0645479799329",
+      "case_id": "qs-021",
+      "contextual_record_scope_alternative": {
+        "basis_overstates_evidence": false,
+        "citations_relevant": true,
+        "concern_ids": [
+          "qs-021-concern-1"
+        ],
+        "core_concern_supported": true,
+        "covered_concern_ids": [
+          "qs-021-concern-1"
+        ],
+        "finding_index": 0,
+        "missed_concern_ids": [],
+        "semantic_pass": true,
+        "unsupported_replacement": false,
+        "valid_abstention": false
+      },
+      "mechanical_action": "flag",
+      "original_frozen_judgment": {
+        "basis_overstates_evidence": true,
+        "citations_relevant": true,
+        "concern_ids": [
+          "qs-021-concern-1"
+        ],
+        "core_concern_supported": true,
+        "covered_concern_ids": [],
+        "finding_index": 0,
+        "missed_concern_ids": [
+          "qs-021-concern-1"
+        ],
+        "semantic_pass": false,
+        "unsupported_replacement": true,
+        "valid_abstention": false
+      },
+      "rationale": "The frozen failure treats the explicit categorical no-inspection sentence as a new negative event assertion, stronger than 'the packet supplies no inspection' or 'Nalin did not open the crate.' Later references to unknown contents or misrepresented evidential status do not logically retract that assertion. Under a more contextual reading confined to the recorded Nalin account, the same wording can be understood as 'no inspection is documented here,' yielding a pass. That is an explicitly softer reading, not newly discovered source evidence.",
+      "strict_clause_local_alternative": {
+        "basis_overstates_evidence": true,
+        "citations_relevant": true,
+        "concern_ids": [
+          "qs-021-concern-1"
+        ],
+        "core_concern_supported": true,
+        "covered_concern_ids": [],
+        "finding_index": 0,
+        "missed_concern_ids": [
+          "qs-021-concern-1"
+        ],
+        "semantic_pass": false,
+        "unsupported_replacement": true,
+        "valid_abstention": false
+      }
+    },
+    {
+      "blind_id": "2ba29a12375d40e3",
+      "case_id": "qs-015",
+      "contextual_record_scope_alternative": {
+        "basis_overstates_evidence": false,
+        "citations_relevant": true,
+        "concern_ids": [
+          "qs-015-concern-1"
+        ],
+        "core_concern_supported": true,
+        "covered_concern_ids": [
+          "qs-015-concern-1"
+        ],
+        "finding_index": 0,
+        "missed_concern_ids": [],
+        "semantic_pass": true,
+        "unsupported_replacement": false,
+        "valid_abstention": false
+      },
+      "mechanical_action": "flag",
+      "original_frozen_judgment": {
+        "basis_overstates_evidence": false,
+        "citations_relevant": true,
+        "concern_ids": [
+          "qs-015-concern-1"
+        ],
+        "core_concern_supported": true,
+        "covered_concern_ids": [
+          "qs-015-concern-1"
+        ],
+        "finding_index": 0,
+        "missed_concern_ids": [],
+        "semantic_pass": true,
+        "unsupported_replacement": false,
+        "valid_abstention": false
+      },
+      "rationale": "No alternative issue found. The full response describes a temporal association, the concurrent school-group arrival and absent causal investigation, without asserting that the banner had no causal effect. Both contextual and strict clause-local readings retain the pass.",
+      "strict_clause_local_alternative": {
+        "basis_overstates_evidence": false,
+        "citations_relevant": true,
+        "concern_ids": [
+          "qs-015-concern-1"
+        ],
+        "core_concern_supported": true,
+        "covered_concern_ids": [
+          "qs-015-concern-1"
+        ],
+        "finding_index": 0,
+        "missed_concern_ids": [],
+        "semantic_pass": true,
+        "unsupported_replacement": false,
+        "valid_abstention": false
+      }
+    }
+  ],
+  "original_annotations_sha256": "986ce8d55e7877e6ed0ac6e9839959f756823c9913e5994e558692e793c135d9",
+  "sensitivity_policies": {
+    "contextual_record_scope_alternative": "Read all four qs021 statements as shorthand restricted to the supplied Nalin record rather than claims about every inspection. All eight reviewed responses pass. This is deliberately permissive about categorical no-inspection wording.",
+    "strict_clause_local_alternative": "Treat an explicit contradiction assertion from absent evidence as an overclaim even when surrounding prose explains unsupportedness. The singled-out qs015 opening and all four qs021 responses fail; the other three qs015 responses pass. This is deliberately stricter than the frozen full-response treatment."
+  },
+  "version": "jev-fast-semantic-sensitivity-v1"
+}

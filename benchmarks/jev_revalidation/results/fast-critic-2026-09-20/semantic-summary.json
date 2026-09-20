@@ -1,0 +1,152 @@
+{
+  "arms": {
+    "direct": {
+      "covered_concerns": 30,
+      "fully_valid_findings": 30,
+      "invented_factual_additions": 2,
+      "material_concerns": 40,
+      "mechanically_valid_findings": 34,
+      "overstated_basis": 2,
+      "paths": 64,
+      "raw_findings": 36,
+      "relaxed_qs021_semantic_pass": 54,
+      "semantic_failures": [
+        "case-31-repeat-0-direct",
+        "case-26-repeat-0-direct",
+        "case-21-repeat-0-direct",
+        "case-15-repeat-1-direct",
+        "case-30-repeat-1-direct",
+        "case-23-repeat-0-direct",
+        "case-18-repeat-1-direct",
+        "case-30-repeat-0-direct",
+        "case-20-repeat-1-direct",
+        "case-13-repeat-1-direct",
+        "case-15-repeat-0-direct"
+      ],
+      "semantic_pass": 53,
+      "unsupported_findings": 1,
+      "valid_abstentions": 0
+    },
+    "hinted": {
+      "covered_concerns": 37,
+      "fully_valid_findings": 37,
+      "invented_factual_additions": 3,
+      "material_concerns": 40,
+      "mechanically_valid_findings": 40,
+      "overstated_basis": 2,
+      "paths": 64,
+      "raw_findings": 40,
+      "relaxed_qs021_semantic_pass": 63,
+      "semantic_failures": [
+        "case-23-repeat-1-hinted",
+        "case-20-repeat-1-hinted",
+        "case-20-repeat-0-hinted"
+      ],
+      "semantic_pass": 61,
+      "unsupported_findings": 0,
+      "valid_abstentions": 0
+    }
+  },
+  "map_sha256": "734132b91f9ebc7b1a0b8ebba0f2fdfaffbea6ad821600a2add984bb904c7d76",
+  "paired_semantic_changes": [
+    {
+      "case_id": "qs-014",
+      "direct": false,
+      "hinted": true,
+      "repeat": 1
+    },
+    {
+      "case_id": "qs-016",
+      "direct": false,
+      "hinted": true,
+      "repeat": 0
+    },
+    {
+      "case_id": "qs-016",
+      "direct": false,
+      "hinted": true,
+      "repeat": 1
+    },
+    {
+      "case_id": "qs-019",
+      "direct": false,
+      "hinted": true,
+      "repeat": 1
+    },
+    {
+      "case_id": "qs-021",
+      "direct": true,
+      "hinted": false,
+      "repeat": 0
+    },
+    {
+      "case_id": "qs-022",
+      "direct": false,
+      "hinted": true,
+      "repeat": 0
+    },
+    {
+      "case_id": "qs-024",
+      "direct": false,
+      "hinted": true,
+      "repeat": 0
+    },
+    {
+      "case_id": "qs-024",
+      "direct": true,
+      "hinted": false,
+      "repeat": 1
+    },
+    {
+      "case_id": "qs-027",
+      "direct": false,
+      "hinted": true,
+      "repeat": 0
+    },
+    {
+      "case_id": "qs-031",
+      "direct": false,
+      "hinted": true,
+      "repeat": 0
+    },
+    {
+      "case_id": "qs-031",
+      "direct": false,
+      "hinted": true,
+      "repeat": 1
+    },
+    {
+      "case_id": "qs-032",
+      "direct": false,
+      "hinted": true,
+      "repeat": 0
+    }
+  ],
+  "review_sha256": "986ce8d55e7877e6ed0ac6e9839959f756823c9913e5994e558692e793c135d9",
+  "sensitivity": {
+    "alternatives": {
+      "contextual_record_scope_alternative": {
+        "direct": {
+          "covered_concerns": 31,
+          "semantic_pass": 54
+        },
+        "hinted": {
+          "covered_concerns": 39,
+          "semantic_pass": 63
+        }
+      },
+      "strict_clause_local_alternative": {
+        "direct": {
+          "covered_concerns": 29,
+          "semantic_pass": 52
+        },
+        "hinted": {
+          "covered_concerns": 36,
+          "semantic_pass": 60
+        }
+      }
+    },
+    "annotations_sha256": "9f22fcd89bf8a1458e69b85f2dd075cfc2121cbb931f4aded1aadb1435f4ca11"
+  },
+  "status": "same-family arm-blind review complete; post-review sensitivities separate"
+}
