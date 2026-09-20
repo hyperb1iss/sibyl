@@ -1,6 +1,27 @@
 # Sibyl 1.4: Dream It
 
-### Evidence checkpoint (September 18, 2026, screen48 executed)
+### Evidence checkpoint (September 20, 2026, instrument repaired, first directional signal)
+
+The four defects the September 19 floor probe surfaced are merged as
+[PR 630](https://github.com/hyperb1iss/sibyl/pull/630) (Wilson-interval banding, minimum five
+repetitions), [PR 631](https://github.com/hyperb1iss/sibyl/pull/631) (raw-capture embedding repair
+and a visible unembedded-lane status), [PR 635](https://github.com/hyperb1iss/sibyl/pull/635)
+(episodes rendered as quoted evidence, premature_completion flag) and
+[PR 636](https://github.com/hyperb1iss/sibyl/pull/636) (devbox repair phase). The no-memory screen
+at ten repetitions found real headroom on three tasks (cdn-batch-map 5/9, stock-adjustment-log 7/9,
+department-unit-budget 8/10). The re-probe on those tasks, 60 cells at five repetitions over a
+database whose 233 raw captures now carry vectors, passed 12/15 native, 13/15 raw_retrieval, 12/14
+strong_summary and 6/11 no_memory on known outcomes. Memory of any kind lifts these tasks; the
+native arm does not beat raw retrieval or the summary library. Five repetitions support no interval,
+the task-transfer gate is untested at this size, and learning_benefit_established stays false.
+
+On September 19 the product decision was recorded to cut 1.4.0 with the learning claim withheld and
+carry the proof into 1.4.x. The remaining proof path is reflection retention of decision rules, a
+fresh consolidation cycle under the new renderer (the September 17 checkpoint-zero packs cannot seed
+a study run under it), and a sealed study at ten or more repetitions. Full receipts are in
+[SIBYL_1_4_EXECUTION.md](SIBYL_1_4_EXECUTION.md).
+
+### Historical checkpoint (September 18, 2026, screen48 executed)
 
 The screen48 harness is entirely in git. Merged harness work covers
 [PR 612](https://github.com/hyperb1iss/sibyl/pull/612),
