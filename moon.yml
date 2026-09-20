@@ -2101,6 +2101,14 @@ tasks:
     options:
       cache: false
 
+  jev-fast-critic:
+    command: uv run --locked --package sibyl-core python -m benchmarks.jev_revalidation.fast_critic_study
+    inputs:
+      - benchmarks/jev_revalidation/**/*
+      - packages/python/sibyl-core/src/sibyl_core/tasks/memory_validation.py
+    options:
+      cache: false
+
   jev-background-readiness:
     command: uv run --locked --package sibyl-core python -m benchmarks.jev_revalidation.background_readiness
     inputs:
