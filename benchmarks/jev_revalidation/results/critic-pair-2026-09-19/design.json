@@ -1,0 +1,10 @@
+{
+  "version": "jev-critic-pair-design-v1",
+  "question": "Does the complete critic find concerns in decisions the frozen Jev policy would bypass, and what is the conditional avoided call cost?",
+  "selection": "All 33 grouped_guarded bypass candidate/repeat rows from PR634, 17 distinct candidates; no new fitting or resampling",
+  "critic": "Exact product PreparedMemoryValidation.prompt and CriticOutput schema, mechanically validated by run_memory_validation",
+  "transport": "OpenRouter chat completions, anthropic/claude-opus-5, only anthropic provider tag, no provider fallback, no retries, forced CriticOutput function, max_tokens4096; temperature omitted because endpoint does not advertise support",
+  "cost": "Sum all original critic usage.cost fields, including failed/invalid output when available. Subtract all128 grouped Jev calls. Missing cost remains unknown. Conditional avoided cost requires every selected call valid no_findings and all cost known.",
+  "disqualification": "Any finding, abstention, unavailable call, malformed output, or missing cost disqualifies the conditional savings qualification; preserve observations and inspect disagreements without relabeling the verdict",
+  "limits": "Retrospective synthetic plain reflections selected after Jev inspection. Same-family critique is not truth. OpenRouter transport differs from direct Anthropic production. Unchanged95 fallbacks and correction behavior are an untested counterfactual assumption. No production activation, private data, full-run savings percentage, or end-to-end latency claim."
+}

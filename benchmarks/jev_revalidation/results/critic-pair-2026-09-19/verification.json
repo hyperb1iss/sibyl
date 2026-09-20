@@ -1,0 +1,39 @@
+{
+  "devbox": "stef-gradial-com-main",
+  "exact_replay": {
+    "calls.json": "e934138072c61623046bd6b8ec7574db649805550e94d46e7b0c96c7e8c8587a",
+    "requests.json": "e30f1603de491e076e1e7eafba517cfe371d912db44f0627c86aa296a5e90bfd",
+    "summary.json": "fa5a83a948ce016ff8593a0df2cac5ef548adeabda6ed874fd2814bc9dce3bbb"
+  },
+  "experiment_qualification": "not_qualified",
+  "implementation_commit": "7f5e304bae1b56a1f8eda06a96827648513743a6",
+  "implementation_review": "pass",
+  "independent_review": {
+    "deselected": 193,
+    "moon_receipt": "90a85c59",
+    "review": "code-review.md",
+    "same_model_family": true,
+    "tests_passed": 38
+  },
+  "integrated": {
+    "lint": "pass",
+    "log": "gates.log",
+    "tests_passed": 231,
+    "typecheck": "pass"
+  },
+  "raw_audit": {
+    "independent": "pass",
+    "results": "raw-audit.json",
+    "root_reproduced": true,
+    "script": "raw-audit.py.txt"
+  },
+  "raw_evidence_directory": "/home/dev/dev/eval-runs/jev-critic-pair-20260919",
+  "root_spotchecks": {
+    "deselected": 216,
+    "lint": "pass",
+    "log": "root-spotchecks.log",
+    "tests_passed": 15,
+    "typecheck": "pass"
+  },
+  "version": "jev-critic-pair-verification-v1"
+}

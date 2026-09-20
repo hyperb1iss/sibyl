@@ -1,0 +1,11 @@
+{
+  "plan_file_sha256": "a959b87ea3c2cc6aa3d4cc8eb4fa65d8493328a3db722d0044a4a98a52a4e7c6",
+  "plan_sha256": "908a1a2fb5485b15d415b63ff49c2d94a24a168f8d3f42a9b24ba49b7417951e",
+  "code_hashes": {
+    "benchmarks/jev_revalidation/critic_pair.py": "0b022fb08afafe855db5fe5bf0224f841a00f56343b508ff39c44081bf942b9d",
+    "benchmarks/jev_revalidation/critic_pair_analysis.py": "59e89c07e4089a9192070fcf0c2ba58c804435502f7dd7e13051d76a1f348d52",
+    "benchmarks/jev_revalidation/test_critic_pair.py": "019ff9cbee7a811822952cc39702531cccf5aa215e5dcfc1f803a45ba09eb346",
+    "benchmarks/jev_revalidation/test_critic_pair_analysis.py": "bfe9dfc4379eed2b4710c0dad892e761b4dd095f5b6157607279f5b3fa18d6cb",
+    "moon.yml": "6bf007ea659d34d5c6da6478fd509296063441b0c971bdd20f7c665c6ff921ed"
+  }
+}

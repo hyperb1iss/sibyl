@@ -2084,3 +2084,19 @@ tasks:
       - packages/python/sibyl-core/src/sibyl_core/tasks/memory_validation.py
     options:
       cache: false
+
+  jev-critic-pair:
+    command: uv run --locked --package sibyl-core python -m benchmarks.jev_revalidation.critic_pair
+    inputs:
+      - benchmarks/jev_revalidation/**/*
+      - packages/python/sibyl-core/src/sibyl_core/tasks/memory_validation.py
+    options:
+      cache: false
+
+  jev-critic-pair-plan:
+    command: uv run --locked --package sibyl-core python -m benchmarks.jev_revalidation.critic_pair_analysis
+    inputs:
+      - benchmarks/jev_revalidation/**/*
+      - packages/python/sibyl-core/src/sibyl_core/tasks/memory_validation.py
+    options:
+      cache: false
