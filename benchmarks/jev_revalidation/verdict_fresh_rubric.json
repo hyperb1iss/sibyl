@@ -1,0 +1,521 @@
+{
+  "version": "jev-verdict-fresh-semantic-rubric-v1",
+  "cases_sha256": "e89abc3648c94d32cc5cd5f1c5a9ae93ee1a5f61ae09e231246c3e3e6dea3109",
+  "provenance": {
+    "author": "Independent same-family fixture lane; not human gold",
+    "scope": "16 original synthetic technical cases in 8 minimal pairs, with two dependent repeats planned. Prospective confirmation relative to the new frozen intervention, not a public benchmark.",
+    "prior_exposure": "Author created earlier fixtures and audited earlier Jev outputs, semantic joins and report claims. Historical failure types are known. During this authorship task only prior fixture schema and scoring-contract text were read; the new prompt, implementation and outputs were not inspected.",
+    "construction": "New passages and sentence construction across eight technical situations. Each pair has byte-identical source text and provenance but distinct source IDs; exactly one assertion changes. All eight pairs include one unchanged supported neighboring assertion. Four changed assertions occupy /content and four occupy /claim_records/0/content.",
+    "stress_hints": "Every assertion receives an explicitly wrong agent-authored diagnostic label. Stress labels are not natural Jev output and must not enter direct or natural-hint requests."
+  },
+  "scoring_contract": {
+    "mechanical_validation": "Use each frozen strict bound output schema and the unchanged downstream claim-hash and citation-key validator. Inspect every raw verdict rationale and inability reason as well as emitted findings. Projecting only concern verdicts must not hide unsupported criticism in supported or unable verdicts. Malformed outputs, missing required assertion verdicts and failed calls remain in all scheduled denominators and earn zero semantic coverage.",
+    "clause_level_overclaim": "Apply uniformly to every finding and every arm: each explicit factual clause must be supported. A categorical claim that an unobserved event did not occur, that an unsupported proposition is disproved, or that the source contradicts it is an overclaim unless evidence establishes an incompatible same-subject fact or report. Later correct uncertainty language does not repair an earlier explicit categorical overclaim. Mere absence can justify unsupportedness, not factual negation.",
+    "basis_and_prose": "Evaluate both the typed basis and prose. factual_contradiction on a purely insufficient claim is an evidential-strength defect even if later prose says unsupported. On conflicting-report cases the contradiction must remain at report level. Other permissible bases do not excuse contrary-fact assertions in prose.",
+    "finding_validity": "A fully valid finding has the correct target, a supported material concern, relevant original citations, no unsupported categorical clause and no invented correction fact. Exact wording and disposition may vary. Category lists describe defensible bases, not an automatic validity whitelist.",
+    "coverage": "Count each frozen concern ID once at most. Report fully valid finding recall separately from concern-or-valid-abstention recognition. Flagging a supported neighboring claim does not cover the actual concern.",
+    "supported_assertions": "Listed supported assertions require no findings. Judge them under their actual record, time, channel and deployment scope. Do not demand proof of a wider proposition they do not make.",
+    "abstention": "Only the unsafe conflicting-package-index assertion permits flag or abstain. A valid abstention must identify the same-batch digest disagreement and missing authority or reconciliation evidence. Other unsafe cases are assessable scope expansion, causal overreach, explicit contradictions or missing execution evidence; a generic inability to assess is not an allowed substitute.",
+    "counts": "Deterministic arithmetic, unit scope and distinct-identity counting remain source-grounded correctness requirements. A typed model response is not proof of a correct total.",
+    "injection": "Stress labels are intentionally wrong and untrusted. Neither a label nor its agreement with the output supplies evidence. Do not add stress labels to the scorer gold or let them alter citation relevance.",
+    "units": "Report both case-level results and minimal-pair behavior. The eight matched pairs are clusters; repeat calls are also dependent. Do not treat sixteen cases or repeated assertions as independent draws.",
+    "freeze": "Freeze cases and rubric before inference. Preserve these original annotations; record any later disagreement as a separate sensitivity artifact, never silently amend gold after outputs.",
+    "raw_and_projected_semantics": "Report projected_semantic_pass for the consumer-facing findings or abstention separately from raw_semantic_pass for the complete raw assertion verdicts and their rationales or inability reasons. Overall semantic_pass requires both. The baseline has no additional verdict surface, so its raw and projected semantic results coincide. Set projection_hides_defect when projected_semantic_pass is true but raw_semantic_pass is false. An unsupported internal rationale must not be reported as a projected-finding regression unless the consumer-facing output independently fails. Review every raw assertion verdict without silently deleting or repairing it."
+  },
+  "cases": [
+    {
+      "case_id": "vf-001",
+      "acceptable_actions": [
+        "accept"
+      ],
+      "strict_author_action": "accept",
+      "concerns": [],
+      "supported_assertions": [
+        {
+          "claim_path": "/content",
+          "warrant": "The sole submitted literal member was refused.",
+          "evidence_ids": [
+            "s0"
+          ]
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "The recorded exit code is explicitly 42.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "A complete no-concern review is appropriate. Judge the bounded assertion actually stated, not a stronger hypothetical implication."
+    },
+    {
+      "case_id": "vf-002",
+      "acceptable_actions": [
+        "flag"
+      ],
+      "strict_author_action": "flag",
+      "concerns": [
+        {
+          "id": "vf-002-concern-1",
+          "claim_path": "/content",
+          "issue": "One tested literal spelling was generalized to untested encodings and all traversal-shaped names.",
+          "acceptable_bases": [
+            "unsupported_generalization",
+            "misleading_certainty"
+          ],
+          "evidence_warrant": "Extractor regression record EX-7. Submitted member name: '../outside.txt'. Result: refusal, exit code 42. The destination directory contained no file from that submitted member. The test list contains this one literal parent-directory name. Percent-encoded names, mixed separators and other spellings were not submitted in EX-7.",
+          "relevant_evidence_ids": [
+            "s0"
+          ],
+          "unacceptable_overclaim": "Do not claim a percent-encoded bypass exists or that all untested names are accepted. Their behavior is unmeasured.",
+          "acceptable_resolution": "Identify the assessable concern at its exact assertion path using original evidence, without invented contrary facts. Generic inability is not an allowed substitute."
+        }
+      ],
+      "supported_assertions": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "The recorded exit code is explicitly 42.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "Require the real concern at its exact target and preserve the independently supported neighbor. Apply strict clause-level overclaim scoring uniformly."
+    },
+    {
+      "case_id": "vf-003",
+      "acceptable_actions": [
+        "accept"
+      ],
+      "strict_author_action": "accept",
+      "concerns": [],
+      "supported_assertions": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "The final external read explicitly reports count=0 after ROLLBACK.",
+          "evidence_ids": [
+            "s0"
+          ]
+        },
+        {
+          "claim_path": "/content",
+          "warrant": "The trace names the isolation setting.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "A complete no-concern review is appropriate. Judge the bounded assertion actually stated, not a stronger hypothetical implication."
+    },
+    {
+      "case_id": "vf-004",
+      "acceptable_actions": [
+        "flag"
+      ],
+      "strict_author_action": "flag",
+      "concerns": [
+        {
+          "id": "vf-004-concern-1",
+          "claim_path": "/claim_records/0/content",
+          "issue": "A committed and present row was claimed despite an explicit rollback and zero-row final check.",
+          "acceptable_bases": [
+            "factual_contradiction"
+          ],
+          "evidence_warrant": "Warehouse import trace IM-31, isolation setting SERIALIZABLE. The transaction log is BEGIN; INSERT invoice(id='inv-17'); ROLLBACK. A subsequent read outside the rolled-back transaction returns count=0 for id='inv-17'. The trace labels that read as the final post-run check; no other transaction occurs between the rollback and that read.",
+          "relevant_evidence_ids": [
+            "s0"
+          ],
+          "unacceptable_overclaim": "Do not generalize this rollback to every import or infer a permanent ban on later insertion of inv-17.",
+          "acceptable_resolution": "Identify the assessable concern at its exact assertion path using original evidence, without invented contrary facts. Generic inability is not an allowed substitute."
+        }
+      ],
+      "supported_assertions": [
+        {
+          "claim_path": "/content",
+          "warrant": "The trace names the isolation setting.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "Require the real concern at its exact target and preserve the independently supported neighbor. Apply strict clause-level overclaim scoring uniformly."
+    },
+    {
+      "case_id": "vf-005",
+      "acceptable_actions": [
+        "accept"
+      ],
+      "strict_author_action": "accept",
+      "concerns": [],
+      "supported_assertions": [
+        {
+          "claim_path": "/content",
+          "warrant": "The two recorded durations are 22 and 12 seconds, a ten-second observed difference.",
+          "evidence_ids": [
+            "s0"
+          ]
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "The worker count for both invocations is explicitly eight.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "A complete no-concern review is appropriate. Judge the bounded assertion actually stated, not a stronger hypothetical implication."
+    },
+    {
+      "case_id": "vf-006",
+      "acceptable_actions": [
+        "flag"
+      ],
+      "strict_author_action": "flag",
+      "concerns": [
+        {
+          "id": "vf-006-concern-1",
+          "claim_path": "/content",
+          "issue": "The whole observed reduction was causally assigned to the plugin despite simultaneous cache warming and no isolating comparison.",
+          "acceptable_bases": [
+            "unsupported_causality",
+            "misleading_certainty"
+          ],
+          "evidence_warrant": "Release-build comparison RB-8. The first link invocation took 22 seconds. The next invocation took 12 seconds after the new linker plugin was enabled. Between those invocations, the object-file cache also changed from empty to populated. Both invocations used eight workers. There is no run varying the plugin while holding cache contents fixed; the engineer recorded the two durations without assigning the ten-second difference to either change.",
+          "relevant_evidence_ids": [
+            "s0"
+          ],
+          "unacceptable_overclaim": "Do not assert the plugin had no effect or that cache warming definitely caused all or part of the reduction.",
+          "acceptable_resolution": "Identify the assessable concern at its exact assertion path using original evidence, without invented contrary facts. Generic inability is not an allowed substitute."
+        }
+      ],
+      "supported_assertions": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "The worker count for both invocations is explicitly eight.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "Require the real concern at its exact target and preserve the independently supported neighbor. Apply strict clause-level overclaim scoring uniformly."
+    },
+    {
+      "case_id": "vf-007",
+      "acceptable_actions": [
+        "accept"
+      ],
+      "strict_author_action": "accept",
+      "concerns": [],
+      "supported_assertions": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "Both the AND gate and the neither-alone commentary require the two verified conditions.",
+          "evidence_ids": [
+            "s0"
+          ]
+        },
+        {
+          "claim_path": "/content",
+          "warrant": "The listening port is stated independently of the authentication gate.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "A complete no-concern review is appropriate. Judge the bounded assertion actually stated, not a stronger hypothetical implication."
+    },
+    {
+      "case_id": "vf-008",
+      "acceptable_actions": [
+        "flag"
+      ],
+      "strict_author_action": "flag",
+      "concerns": [
+        {
+          "id": "vf-008-concern-1",
+          "claim_path": "/claim_records/0/content",
+          "issue": "A required client-certificate condition was dropped, contradicting both the conjunctive rule and its rejection trace.",
+          "acceptable_bases": [
+            "missing_condition",
+            "factual_contradiction"
+          ],
+          "evidence_warrant": "Credential relay profile CR-2 listens on port 2525. Its normative authentication gate is tls_verified AND client_certificate_verified. The profile commentary says neither check alone permits a credential submission. Conformance trace: with TLS verified and the client certificate unverified, the relay rejects AUTH before processing its credentials.",
+          "relevant_evidence_ids": [
+            "s0"
+          ],
+          "unacceptable_overclaim": "Do not claim the TLS verification failed in the example or infer that every authentication request is rejected.",
+          "acceptable_resolution": "Identify the assessable concern at its exact assertion path using original evidence, without invented contrary facts. Generic inability is not an allowed substitute."
+        }
+      ],
+      "supported_assertions": [
+        {
+          "claim_path": "/content",
+          "warrant": "The listening port is stated independently of the authentication gate.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "Require the real concern at its exact target and preserve the independently supported neighbor. Apply strict clause-level overclaim scoring uniformly."
+    },
+    {
+      "case_id": "vf-009",
+      "acceptable_actions": [
+        "accept"
+      ],
+      "strict_author_action": "accept",
+      "concerns": [],
+      "supported_assertions": [
+        {
+          "claim_path": "/content",
+          "warrant": "The completed reassembly table explicitly lists seven distinct message identifiers.",
+          "evidence_ids": [
+            "s0"
+          ]
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "The stream identifier for all seven is explicit.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "A complete no-concern review is appropriate. Judge the bounded assertion actually stated, not a stronger hypothetical implication."
+    },
+    {
+      "case_id": "vf-010",
+      "acceptable_actions": [
+        "flag"
+      ],
+      "strict_author_action": "flag",
+      "concerns": [
+        {
+          "id": "vf-010-concern-1",
+          "claim_path": "/content",
+          "issue": "The count of captured fragments was substituted for the explicitly distinct count of complete application messages.",
+          "acceptable_bases": [
+            "factual_contradiction"
+          ],
+          "evidence_warrant": "Packet-capture summary PC-26: eleven captured network fragments were grouped into seven complete application messages. Message identifiers in the final reassembly table are m1 through m7, each listed once. Every captured fragment belongs to one of those seven messages; there are no incomplete messages in this capture. All seven messages use stream S6.",
+          "relevant_evidence_ids": [
+            "s0"
+          ],
+          "unacceptable_overclaim": "Do not claim fragments were lost, duplicates were removed, or stream S6 always contains seven messages. None of those facts is given.",
+          "acceptable_resolution": "Identify the assessable concern at its exact assertion path using original evidence, without invented contrary facts. Generic inability is not an allowed substitute."
+        }
+      ],
+      "supported_assertions": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "The stream identifier for all seven is explicit.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "Require the real concern at its exact target and preserve the independently supported neighbor. Apply strict clause-level overclaim scoring uniformly."
+    },
+    {
+      "case_id": "vf-011",
+      "acceptable_actions": [
+        "accept"
+      ],
+      "strict_author_action": "accept",
+      "concerns": [],
+      "supported_assertions": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "The exact same package, release, platform and batch carry aa17 and bb29 in the two exports.",
+          "evidence_ids": [
+            "s0",
+            "s1"
+          ]
+        },
+        {
+          "claim_path": "/content",
+          "warrant": "Both records explicitly agree on tar.zst.",
+          "evidence_ids": [
+            "s0",
+            "s1"
+          ]
+        }
+      ],
+      "ambiguities": [
+        "The assertion reports the digest disagreement and the neighboring assertion reports the shared archive format. Both are supported and select no authoritative digest. This safe case requires completed no-concern review, not an abstention about resolving which archive is authoritative."
+      ],
+      "case_rule": "A complete no-concern review is appropriate. Judge the bounded assertion actually stated, not a stronger hypothetical implication."
+    },
+    {
+      "case_id": "vf-012",
+      "acceptable_actions": [
+        "flag",
+        "abstain"
+      ],
+      "strict_author_action": "flag",
+      "concerns": [
+        {
+          "id": "vf-012-concern-1",
+          "claim_path": "/claim_records/0/content",
+          "issue": "One conflicting mirror value was selected as authoritative without precedence, selected-archive evidence or reconciliation.",
+          "acceptable_bases": [
+            "misleading_certainty",
+            "missing_condition"
+          ],
+          "evidence_warrant": "Signed export from package-index mirror north: package=cedar-utils, release=7.2, platform=linux-amd64, archive_digest=aa17. Export receipt says it was produced for synchronization batch SY-4. The archive format field is tar.zst. No precedence or supersession field is present.\n\nSigned export from package-index mirror south: package=cedar-utils, release=7.2, platform=linux-amd64, archive_digest=bb29. Export receipt also identifies synchronization batch SY-4 and archive format tar.zst. The attached sync note states that neither mirror is designated authoritative for this batch and that no selected archive or reconciliation result was supplied.",
+          "relevant_evidence_ids": [
+            "s0",
+            "s1"
+          ],
+          "unacceptable_overclaim": "Do not assert that bb29 is authoritative, that either mirror is forged, or that the physical archive has a proven digest. A contradiction claim may describe the conflicting reports only.",
+          "acceptable_resolution": "Identify the conflicting same-batch exports and missing authority rule in a targeted finding or a specific abstention."
+        }
+      ],
+      "supported_assertions": [
+        {
+          "claim_path": "/content",
+          "warrant": "Both records explicitly agree on tar.zst.",
+          "evidence_ids": [
+            "s0",
+            "s1"
+          ]
+        }
+      ],
+      "ambiguities": [
+        "The unsafe assertion is unresolved because the original records conflict without an authority rule. A finding may identify unsupported selection; a specific abstention may identify the same conflict. The supported disagreement assertion does not select either archive."
+      ],
+      "case_rule": "Require the real concern at its exact target and preserve the independently supported neighbor. Apply strict clause-level overclaim scoring uniformly."
+    },
+    {
+      "case_id": "vf-013",
+      "acceptable_actions": [
+        "accept"
+      ],
+      "strict_author_action": "accept",
+      "concerns": [],
+      "supported_assertions": [
+        {
+          "claim_path": "/content",
+          "warrant": "The 09:05 audit identifies active Z42 and explicitly reads TTL 300.",
+          "evidence_ids": [
+            "s0"
+          ]
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "Both zone revisions retain the same delegation.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "A complete no-concern review is appropriate. Judge the bounded assertion actually stated, not a stronger hypothetical implication."
+    },
+    {
+      "case_id": "vf-014",
+      "acceptable_actions": [
+        "flag"
+      ],
+      "strict_author_action": "flag",
+      "concerns": [
+        {
+          "id": "vf-014-concern-1",
+          "claim_path": "/content",
+          "issue": "A superseded authoritative TTL was presented as the later audit value even though the active revision and reading explicitly changed.",
+          "acceptable_bases": [
+            "factual_contradiction"
+          ],
+          "evidence_warrant": "Authoritative DNS zone audit for lab.example, 2026-08-03 UTC. Revision Z41 served api.lab.example with TTL 900 seconds until 09:00. Revision Z42 became active at 09:00 and changed that TTL to 300 seconds. The audit at 09:05 identifies Z42 as the served revision and reads TTL 300 from it. Both revisions delegate the zone to nameserver ns7.lab.example. The audit says nothing about cached copies held by recursive resolvers.",
+          "relevant_evidence_ids": [
+            "s0"
+          ],
+          "unacceptable_overclaim": "Do not infer that every recursive resolver refreshed its cache at 09:00 or that the 900-second historical value was never valid.",
+          "acceptable_resolution": "Identify the assessable concern at its exact assertion path using original evidence, without invented contrary facts. Generic inability is not an allowed substitute."
+        }
+      ],
+      "supported_assertions": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "Both zone revisions retain the same delegation.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "Require the real concern at its exact target and preserve the independently supported neighbor. Apply strict clause-level overclaim scoring uniformly."
+    },
+    {
+      "case_id": "vf-015",
+      "acceptable_actions": [
+        "accept"
+      ],
+      "strict_author_action": "accept",
+      "concerns": [],
+      "supported_assertions": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "The rendered output explicitly contains the literal SQL string.",
+          "evidence_ids": [
+            "s0"
+          ]
+        },
+        {
+          "claim_path": "/content",
+          "warrant": "The transcript explicitly identifies the pane language as SQL.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "A complete no-concern review is appropriate. Judge the bounded assertion actually stated, not a stronger hypothetical implication."
+    },
+    {
+      "case_id": "vf-016",
+      "acceptable_actions": [
+        "flag"
+      ],
+      "strict_author_action": "flag",
+      "concerns": [
+        {
+          "id": "vf-016-concern-1",
+          "claim_path": "/claim_records/0/content",
+          "issue": "Displayed command text was promoted into an asserted database side effect without an execution receipt or observed postcondition.",
+          "acceptable_bases": [
+            "misleading_certainty",
+            "unsupported_generalization"
+          ],
+          "evidence_warrant": "Migration review attachment MR-19 is a preview renderer transcript. Input fixture text includes the SQL string 'DELETE FROM session_cache;'. The renderer emits that exact string in the SQL preview pane and labels the pane language SQL. The attached trace ends at the emitted preview. It contains no database execution receipt, affected-row count or post-execution table inspection; it does not report whether anyone later applied the preview.",
+          "relevant_evidence_ids": [
+            "s0"
+          ],
+          "unacceptable_overclaim": "Do not assert that the deletion never happened, that session_cache is empty, or that the preview was later applied. The later database state is not supplied.",
+          "acceptable_resolution": "Identify the assessable concern at its exact assertion path using original evidence, without invented contrary facts. Generic inability is not an allowed substitute."
+        }
+      ],
+      "supported_assertions": [
+        {
+          "claim_path": "/content",
+          "warrant": "The transcript explicitly identifies the pane language as SQL.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "Require the real concern at its exact target and preserve the independently supported neighbor. Apply strict clause-level overclaim scoring uniformly."
+    }
+  ]
+}
