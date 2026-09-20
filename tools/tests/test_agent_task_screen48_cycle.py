@@ -1332,7 +1332,14 @@ def test_apply_environment_stamps_the_study_allowance() -> None:
 
 
 def test_phase_registry_carries_the_cycle_both_checkpoints_preflight_and_probe() -> None:
-    assert sorted(run_phase.PHASES) == ["checkpoint0", "checkpoint1", "cycle", "preflight", "probe"]
+    assert sorted(run_phase.PHASES) == [
+        "checkpoint0",
+        "checkpoint1",
+        "cycle",
+        "preflight",
+        "probe",
+        "repair_raw_embeddings",
+    ]
 
 
 def test_long_context_rows_bill_at_the_doubled_tier() -> None:
