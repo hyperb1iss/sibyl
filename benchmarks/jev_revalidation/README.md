@@ -52,3 +52,12 @@ The pairwise heuristic invocation is a controlled comparison. It bypasses extrac
 Even a perfect score on these cases would not establish calibration or a benefit to reader answers. A later study must measure lost historical evidence, retrieval of replacement evidence, and downstream answer accuracy on independent data. Real-data activation still requires provider/account privacy acceptance and explicit cohort authorization.
 
 The inspiration is [Invalidate](https://github.com/chopratejas/invalidate/tree/d6ade60108b8064bafaee425fd8f9e78683dbd82). Its event cursors and isolated retirement rechecks are useful experiments; Sibyl keeps its existing correction and source-integrity owners.
+
+## Background readiness
+
+The [offline background experiment](BACKGROUND_READINESS_RESULTS.md) asks how much
+speed the frozen quality-speed routing rule could gain if Jev answers were ready
+before validation. Even its ideal ceiling improves median latency only 4.88% on
+that corpus. The runner validates the retained archive, uses paired baseline
+critic samples for misses and accounts for late background calls. It has no live
+mode and does not enable product bypass.
