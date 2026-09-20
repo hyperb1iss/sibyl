@@ -196,6 +196,7 @@ def _repair_raw_embeddings_phase(output: Path, extra: Sequence[str], record: dic
 
     from benchmarks.agent_tasks.screen48 import contract
 
+    from sibyl_core.services.content_client import close_shared_surreal_content_client
     from sibyl_core.services.content_models import configured_raw_memory_embedding_provider
     from sibyl_core.services.content_raw_embedding_repair import (
         REPAIR_COMPLETED,
@@ -210,15 +211,33 @@ def _repair_raw_embeddings_phase(output: Path, extra: Sequence[str], record: dic
         "provider": None if provider is None else asdict(provider.metadata),
         "started_at": datetime.now(UTC).isoformat(),
     }
-    result = asyncio.run(repair_raw_capture_embeddings(contract.ORGANIZATION_ID))
+
+    async def run() -> Any:
+        try:
+            return await repair_raw_capture_embeddings(contract.ORGANIZATION_ID)
+        finally:
+            # The repair rides the shared client; leave no pool socket open on
+            # a closed loop when main() stops the container right after this.
+            await close_shared_surreal_content_client()
+
+    result = asyncio.run(run())
     receipt["result"] = asdict(result)
+    # Completed is the repair's word for "the walk finished", not "every row
+    # now carries a vector": a revoked key or a rejected write lands in
+    # failed, a contended row in pending, and status stays completed. The
+    # lane is only fair when nothing is left behind; a walk that had nothing
+    # to do is fine.
+    embedded_everything = (
+        result.status == REPAIR_COMPLETED and result.failed == 0 and result.pending == 0
+    )
+    receipt["embedded_everything"] = embedded_everything
     receipt["finished_at"] = datetime.now(UTC).isoformat()
     record["repair_raw_embeddings"] = receipt
     output.mkdir(parents=True, exist_ok=True)
     (output / "repair.json").write_text(
         json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
-    return 0 if result.status == REPAIR_COMPLETED else 1
+    return 0 if embedded_everything else 1
 
 
 def _checkpoint_phase(checkpoint: int) -> PhaseRunner:

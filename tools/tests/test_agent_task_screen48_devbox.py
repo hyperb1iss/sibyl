@@ -41,7 +41,7 @@ from benchmarks.agent_tasks.screen48.recall.owners import runtime_pin
 
 from sibyl_core.ai.llm.config import MEMORY_TIMEOUT_SECONDS
 from sibyl_core.embeddings.providers import EmbeddingMetadata
-from sibyl_core.services import content_models, content_raw_embedding_repair
+from sibyl_core.services import content_client, content_models, content_raw_embedding_repair
 from sibyl_core.services.content_raw_embedding_repair import RawEmbeddingRepairResult
 
 
@@ -860,8 +860,8 @@ def test_phase_environment_overrides_an_ambient_memory_timeout() -> None:
     assert "SIBYL_LLM_MEMORY_TIMEOUT_SECONDS" in names
 
 
-def _stub_repair_result(status: str) -> Any:
-    return RawEmbeddingRepairResult(status=status)
+def _stub_repair_result(status: str, **counts: int) -> Any:
+    return RawEmbeddingRepairResult(status=status, **counts)
 
 
 def _stub_provider() -> Any:
@@ -894,6 +894,12 @@ def test_repair_raw_embeddings_phase_keeps_the_receipt_and_completes(
 
     monkeypatch.setattr(content_raw_embedding_repair, "repair_raw_capture_embeddings", repair)
     monkeypatch.setattr(content_models, "configured_raw_memory_embedding_provider", _stub_provider)
+    closed: list[bool] = []
+
+    async def close() -> None:
+        closed.append(True)
+
+    monkeypatch.setattr(content_client, "close_shared_surreal_content_client", close)
     record: dict[str, Any] = {}
     output = root_dir / "repair"
 
@@ -904,17 +910,27 @@ def test_repair_raw_embeddings_phase_keeps_the_receipt_and_completes(
     assert receipt["organization_id"] == screen48_contract.ORGANIZATION_ID
     assert receipt["provider"]["model"] == "stub-model"
     assert receipt["result"]["status"] == content_raw_embedding_repair.REPAIR_COMPLETED
+    assert receipt["embedded_everything"] is True
     assert record["repair_raw_embeddings"] == receipt
+    assert closed == [True]
 
 
-@pytest.mark.parametrize("status", ["skipped_no_provider", "skipped_dimension_mismatch"])
-def test_repair_raw_embeddings_phase_fails_when_the_repair_did_no_work(
-    root_dir: Path, monkeypatch: pytest.MonkeyPatch, status: str
+@pytest.mark.parametrize(
+    ("status", "counts"),
+    [
+        ("skipped_no_provider", {}),
+        ("skipped_dimension_mismatch", {}),
+        (content_raw_embedding_repair.REPAIR_COMPLETED, {"checked": 233, "failed": 233}),
+        (content_raw_embedding_repair.REPAIR_COMPLETED, {"checked": 233, "pending": 1}),
+    ],
+)
+def test_repair_raw_embeddings_phase_fails_when_rows_were_left_behind(
+    root_dir: Path, monkeypatch: pytest.MonkeyPatch, status: str, counts: dict[str, int]
 ) -> None:
-    """A pass that left the lane unembedded is a failed phase, not a quiet success."""
+    """A walk that finished with rows still unembedded is a failed phase, not a quiet success."""
 
     async def repair(organization_id: str, **_: Any) -> Any:
-        return _stub_repair_result(status)
+        return _stub_repair_result(status, **counts)
 
     monkeypatch.setattr(content_raw_embedding_repair, "repair_raw_capture_embeddings", repair)
     monkeypatch.setattr(content_models, "configured_raw_memory_embedding_provider", lambda: None)
@@ -925,6 +941,7 @@ def test_repair_raw_embeddings_phase_fails_when_the_repair_did_no_work(
     assert exit_code == 1
     assert record["repair_raw_embeddings"]["provider"] is None
     assert record["repair_raw_embeddings"]["result"]["status"] == status
+    assert record["repair_raw_embeddings"]["embedded_everything"] is False
 
 
 def test_repair_raw_embeddings_phase_refuses_flags(root_dir: Path) -> None:
