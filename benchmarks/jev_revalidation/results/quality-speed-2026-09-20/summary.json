@@ -1,0 +1,686 @@
+{
+  "arms": {
+    "critic": {
+      "action_correct": 52,
+      "actions": {
+        "accept": 24,
+        "flag": 40
+      },
+      "cost_per_strict_correct_action_usd": "0.03410125",
+      "false_accepts": 0,
+      "known_cost_usd": "1.773265",
+      "paths": 64,
+      "queue_p95_ms": 59022.48234000581,
+      "routes": {
+        "fallback": 64
+      },
+      "rubric_correct": 64,
+      "safe_accepted": 24,
+      "safe_candidates": 24,
+      "service_p50_ms": 4463.886467499833,
+      "service_p95_ms": 6931.711616998655,
+      "total_p95_ms": 63646.89109301253,
+      "unknown_cost_calls": 0,
+      "unsafe_assertions_exposed": 0,
+      "unsafe_or_insufficient": 40,
+      "useful_assertions_available": 42
+    },
+    "jev_then_critic": {
+      "action_correct": 52,
+      "actions": {
+        "accept": 24,
+        "flag": 40
+      },
+      "cost_per_strict_correct_action_usd": "0.02377575684615384615384615385",
+      "false_accepts": 0,
+      "known_cost_usd": "1.236339356",
+      "paths": 64,
+      "queue_p95_ms": 59059.77171601262,
+      "routes": {
+        "bypass": 21,
+        "fallback": 43
+      },
+      "rubric_correct": 64,
+      "safe_accepted": 24,
+      "safe_candidates": 24,
+      "service_p50_ms": 4456.4866139990045,
+      "service_p95_ms": 7822.884263005108,
+      "total_p95_ms": 63196.45442100591,
+      "unknown_cost_calls": 0,
+      "unsafe_assertions_exposed": 0,
+      "unsafe_or_insufficient": 40,
+      "useful_assertions_available": 42
+    }
+  },
+  "diagnostic_target_met": false,
+  "gates": {
+    "action_quality_not_worse": true,
+    "all_cost_known": true,
+    "cost_not_worse": true,
+    "median_20_percent_faster": false,
+    "no_execution_failures": true,
+    "no_paired_safe_loss": true,
+    "p95_not_worse": false,
+    "safe_coverage_not_worse": true,
+    "zero_false_accepts": true
+  },
+  "limits": [
+    "Synthetic plain reflections, no end-task QA, publication or recall execution.",
+    "Evidence availability is a deterministic accept/withhold diagnostic, not an executed retriever.",
+    "Two repeats per candidate are correlated; small-sample p95 is descriptive.",
+    "Service timing excludes harness queue; total timing includes it. Neither measures interactive recall.",
+    "No correction generation or deployment. Prior .99 threshold unchanged, not refit."
+  ],
+  "pairs": [
+    {
+      "baseline": "accept",
+      "case_id": "qs-001",
+      "repeat": 0,
+      "routed": "accept",
+      "service_delta_ms": -1184.106062995852
+    },
+    {
+      "baseline": "accept",
+      "case_id": "qs-001",
+      "repeat": 1,
+      "routed": "accept",
+      "service_delta_ms": -1524.4106680038385
+    },
+    {
+      "baseline": "accept",
+      "case_id": "qs-002",
+      "repeat": 0,
+      "routed": "accept",
+      "service_delta_ms": -1583.6270230065566
+    },
+    {
+      "baseline": "accept",
+      "case_id": "qs-002",
+      "repeat": 1,
+      "routed": "accept",
+      "service_delta_ms": -1344.786573012243
+    },
+    {
+      "baseline": "accept",
+      "case_id": "qs-003",
+      "repeat": 0,
+      "routed": "accept",
+      "service_delta_ms": -1786.4631610136712
+    },
+    {
+      "baseline": "accept",
+      "case_id": "qs-003",
+      "repeat": 1,
+      "routed": "accept",
+      "service_delta_ms": -1493.937122009811
+    },
+    {
+      "baseline": "accept",
+      "case_id": "qs-004",
+      "repeat": 0,
+      "routed": "accept",
+      "service_delta_ms": 872.9606160050025
+    },
+    {
+      "baseline": "accept",
+      "case_id": "qs-004",
+      "repeat": 1,
+      "routed": "accept",
+      "service_delta_ms": 607.1312309941277
+    },
+    {
+      "baseline": "accept",
+      "case_id": "qs-005",
+      "repeat": 0,
+      "routed": "accept",
+      "service_delta_ms": -1524.1256070003146
+    },
+    {
+      "baseline": "accept",
+      "case_id": "qs-005",
+      "repeat": 1,
+      "routed": "accept",
+      "service_delta_ms": -1596.8875360122183
+    },
+    {
+      "baseline": "accept",
+      "case_id": "qs-006",
+      "repeat": 0,
+      "routed": "accept",
+      "service_delta_ms": -1579.9378869996872
+    },
+    {
+      "baseline": "accept",
+      "case_id": "qs-006",
+      "repeat": 1,
+      "routed": "accept",
+      "service_delta_ms": -6386.149211000884
+    },
+    {
+      "baseline": "accept",
+      "case_id": "qs-007",
+      "repeat": 0,
+      "routed": "accept",
+      "service_delta_ms": -5438.870735990349
+    },
+    {
+      "baseline": "accept",
+      "case_id": "qs-007",
+      "repeat": 1,
+      "routed": "accept",
+      "service_delta_ms": 160.7984540023608
+    },
+    {
+      "baseline": "accept",
+      "case_id": "qs-008",
+      "repeat": 0,
+      "routed": "accept",
+      "service_delta_ms": -1629.9875219992828
+    },
+    {
+      "baseline": "accept",
+      "case_id": "qs-008",
+      "repeat": 1,
+      "routed": "accept",
+      "service_delta_ms": -2204.426580996369
+    },
+    {
+      "baseline": "accept",
+      "case_id": "qs-009",
+      "repeat": 0,
+      "routed": "accept",
+      "service_delta_ms": -4752.932390998467
+    },
+    {
+      "baseline": "accept",
+      "case_id": "qs-009",
+      "repeat": 1,
+      "routed": "accept",
+      "service_delta_ms": -1523.1915839976864
+    },
+    {
+      "baseline": "accept",
+      "case_id": "qs-010",
+      "repeat": 0,
+      "routed": "accept",
+      "service_delta_ms": -1514.9471969925798
+    },
+    {
+      "baseline": "accept",
+      "case_id": "qs-010",
+      "repeat": 1,
+      "routed": "accept",
+      "service_delta_ms": -4253.20804999501
+    },
+    {
+      "baseline": "accept",
+      "case_id": "qs-011",
+      "repeat": 0,
+      "routed": "accept",
+      "service_delta_ms": -1605.6514969968703
+    },
+    {
+      "baseline": "accept",
+      "case_id": "qs-011",
+      "repeat": 1,
+      "routed": "accept",
+      "service_delta_ms": -1762.5151550164446
+    },
+    {
+      "baseline": "accept",
+      "case_id": "qs-012",
+      "repeat": 0,
+      "routed": "accept",
+      "service_delta_ms": -1790.6644040049287
+    },
+    {
+      "baseline": "accept",
+      "case_id": "qs-012",
+      "repeat": 1,
+      "routed": "accept",
+      "service_delta_ms": -1667.2625840001274
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-013",
+      "repeat": 0,
+      "routed": "flag",
+      "service_delta_ms": -3099.7052430029726
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-013",
+      "repeat": 1,
+      "routed": "flag",
+      "service_delta_ms": 190.44808199396357
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-014",
+      "repeat": 0,
+      "routed": "flag",
+      "service_delta_ms": -2738.555150994216
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-014",
+      "repeat": 1,
+      "routed": "flag",
+      "service_delta_ms": 164.8243109957548
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-015",
+      "repeat": 0,
+      "routed": "flag",
+      "service_delta_ms": -686.0687660082476
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-015",
+      "repeat": 1,
+      "routed": "flag",
+      "service_delta_ms": 489.5495170057984
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-016",
+      "repeat": 0,
+      "routed": "flag",
+      "service_delta_ms": 891.1726460064529
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-016",
+      "repeat": 1,
+      "routed": "flag",
+      "service_delta_ms": 105.34253000514582
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-017",
+      "repeat": 0,
+      "routed": "flag",
+      "service_delta_ms": -7.347789010964334
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-017",
+      "repeat": 1,
+      "routed": "flag",
+      "service_delta_ms": 60.96115200489294
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-018",
+      "repeat": 0,
+      "routed": "flag",
+      "service_delta_ms": 491.26801900274586
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-018",
+      "repeat": 1,
+      "routed": "flag",
+      "service_delta_ms": 245.4220339859603
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-019",
+      "repeat": 0,
+      "routed": "flag",
+      "service_delta_ms": 720.4106289864285
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-019",
+      "repeat": 1,
+      "routed": "flag",
+      "service_delta_ms": 435.96397699730005
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-020",
+      "repeat": 0,
+      "routed": "flag",
+      "service_delta_ms": 284.5478499948513
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-020",
+      "repeat": 1,
+      "routed": "flag",
+      "service_delta_ms": 1499.2571449984098
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-021",
+      "repeat": 0,
+      "routed": "flag",
+      "service_delta_ms": 193.34753100702073
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-021",
+      "repeat": 1,
+      "routed": "flag",
+      "service_delta_ms": 559.9714780109935
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-022",
+      "repeat": 0,
+      "routed": "flag",
+      "service_delta_ms": 913.0262450053124
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-022",
+      "repeat": 1,
+      "routed": "flag",
+      "service_delta_ms": 836.7532069969457
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-023",
+      "repeat": 0,
+      "routed": "flag",
+      "service_delta_ms": 859.5837269822368
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-023",
+      "repeat": 1,
+      "routed": "flag",
+      "service_delta_ms": 1419.5545969996601
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-024",
+      "repeat": 0,
+      "routed": "flag",
+      "service_delta_ms": 369.69585801125504
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-024",
+      "repeat": 1,
+      "routed": "flag",
+      "service_delta_ms": -109.4759479892673
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-025",
+      "repeat": 0,
+      "routed": "flag",
+      "service_delta_ms": 410.978422005428
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-025",
+      "repeat": 1,
+      "routed": "flag",
+      "service_delta_ms": 255.1632359973155
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-026",
+      "repeat": 0,
+      "routed": "flag",
+      "service_delta_ms": -209.7369960101787
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-026",
+      "repeat": 1,
+      "routed": "flag",
+      "service_delta_ms": 231.80677999334875
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-027",
+      "repeat": 0,
+      "routed": "flag",
+      "service_delta_ms": 1240.6525959959254
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-027",
+      "repeat": 1,
+      "routed": "flag",
+      "service_delta_ms": 964.9037439958192
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-028",
+      "repeat": 0,
+      "routed": "flag",
+      "service_delta_ms": 391.1698590090964
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-028",
+      "repeat": 1,
+      "routed": "flag",
+      "service_delta_ms": 346.95133999048267
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-029",
+      "repeat": 0,
+      "routed": "flag",
+      "service_delta_ms": 107.58698100107722
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-029",
+      "repeat": 1,
+      "routed": "flag",
+      "service_delta_ms": -110.26780599786434
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-030",
+      "repeat": 0,
+      "routed": "flag",
+      "service_delta_ms": 440.7513930054847
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-030",
+      "repeat": 1,
+      "routed": "flag",
+      "service_delta_ms": 480.2528300206177
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-031",
+      "repeat": 0,
+      "routed": "flag",
+      "service_delta_ms": 831.3724290055688
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-031",
+      "repeat": 1,
+      "routed": "flag",
+      "service_delta_ms": 179.31460600811988
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-032",
+      "repeat": 0,
+      "routed": "flag",
+      "service_delta_ms": 503.16448499506805
+    },
+    {
+      "baseline": "flag",
+      "case_id": "qs-032",
+      "repeat": 1,
+      "routed": "flag",
+      "service_delta_ms": 1020.1441289973445
+    }
+  ],
+  "production_qualified": false,
+  "strata": {
+    "1KB": {
+      "critic": {
+        "action_correct": 34,
+        "actions": {
+          "accept": 14,
+          "flag": 26
+        },
+        "cost_per_strict_correct_action_usd": "0.02208308823529411764705882353",
+        "false_accepts": 0,
+        "known_cost_usd": "0.750825",
+        "paths": 40,
+        "queue_p95_ms": 55976.4309010061,
+        "routes": {
+          "fallback": 40
+        },
+        "rubric_correct": 40,
+        "safe_accepted": 14,
+        "safe_candidates": 14,
+        "service_p50_ms": 4463.886467499833,
+        "service_p95_ms": 6739.313316997141,
+        "total_p95_ms": 62715.76115800417,
+        "unknown_cost_calls": 0,
+        "unsafe_assertions_exposed": 0,
+        "unsafe_or_insufficient": 26,
+        "useful_assertions_available": 24
+      },
+      "jev_then_critic": {
+        "action_correct": 34,
+        "actions": {
+          "accept": 14,
+          "flag": 26
+        },
+        "cost_per_strict_correct_action_usd": "0.01794104282352941176470588235",
+        "false_accepts": 0,
+        "known_cost_usd": "0.609995456",
+        "paths": 40,
+        "queue_p95_ms": 55216.450802006875,
+        "routes": {
+          "bypass": 11,
+          "fallback": 29
+        },
+        "rubric_correct": 40,
+        "safe_accepted": 14,
+        "safe_candidates": 14,
+        "service_p50_ms": 4695.838985498995,
+        "service_p95_ms": 7131.694338997477,
+        "total_p95_ms": 63196.45442100591,
+        "unknown_cost_calls": 0,
+        "unsafe_assertions_exposed": 0,
+        "unsafe_or_insufficient": 26,
+        "useful_assertions_available": 24
+      }
+    },
+    "24KB": {
+      "critic": {
+        "action_correct": 6,
+        "actions": {
+          "accept": 4,
+          "flag": 4
+        },
+        "cost_per_strict_correct_action_usd": "0.08246166666666666666666666667",
+        "false_accepts": 0,
+        "known_cost_usd": "0.494770",
+        "paths": 8,
+        "queue_p95_ms": 53121.60237799981,
+        "routes": {
+          "fallback": 8
+        },
+        "rubric_correct": 8,
+        "safe_accepted": 4,
+        "safe_candidates": 4,
+        "service_p50_ms": 3458.8132289936766,
+        "service_p95_ms": 11106.771562001086,
+        "total_p95_ms": 62107.58469600114,
+        "unknown_cost_calls": 0,
+        "unsafe_assertions_exposed": 0,
+        "unsafe_or_insufficient": 4,
+        "useful_assertions_available": 8
+      },
+      "jev_then_critic": {
+        "action_correct": 6,
+        "actions": {
+          "accept": 4,
+          "flag": 4
+        },
+        "cost_per_strict_correct_action_usd": "0.04447877133333333333333333333",
+        "false_accepts": 0,
+        "known_cost_usd": "0.266872628",
+        "paths": 8,
+        "queue_p95_ms": 52904.93687900016,
+        "routes": {
+          "bypass": 4,
+          "fallback": 4
+        },
+        "rubric_correct": 8,
+        "safe_accepted": 4,
+        "safe_candidates": 4,
+        "service_p50_ms": 2563.278159002948,
+        "service_p95_ms": 11938.143991006655,
+        "total_p95_ms": 61346.1639599991,
+        "unknown_cost_calls": 0,
+        "unsafe_assertions_exposed": 0,
+        "unsafe_or_insufficient": 4,
+        "useful_assertions_available": 8
+      }
+    },
+    "8KB": {
+      "critic": {
+        "action_correct": 12,
+        "actions": {
+          "accept": 6,
+          "flag": 10
+        },
+        "cost_per_strict_correct_action_usd": "0.0439725",
+        "false_accepts": 0,
+        "known_cost_usd": "0.527670",
+        "paths": 16,
+        "queue_p95_ms": 61986.87489599979,
+        "routes": {
+          "fallback": 16
+        },
+        "rubric_correct": 16,
+        "safe_accepted": 6,
+        "safe_candidates": 6,
+        "service_p50_ms": 4763.413325999863,
+        "service_p95_ms": 6931.711616998655,
+        "total_p95_ms": 64969.268772998475,
+        "unknown_cost_calls": 0,
+        "unsafe_assertions_exposed": 0,
+        "unsafe_or_insufficient": 10,
+        "useful_assertions_available": 10
+      },
+      "jev_then_critic": {
+        "action_correct": 12,
+        "actions": {
+          "accept": 6,
+          "flag": 10
+        },
+        "cost_per_strict_correct_action_usd": "0.02995593933333333333333333333",
+        "false_accepts": 0,
+        "known_cost_usd": "0.359471272",
+        "paths": 16,
+        "queue_p95_ms": 62108.22564001137,
+        "routes": {
+          "bypass": 6,
+          "fallback": 10
+        },
+        "rubric_correct": 16,
+        "safe_accepted": 6,
+        "safe_candidates": 6,
+        "service_p50_ms": 4318.071380002948,
+        "service_p95_ms": 7822.884263005108,
+        "total_p95_ms": 64896.31104900036,
+        "unknown_cost_calls": 0,
+        "unsafe_assertions_exposed": 0,
+        "unsafe_or_insufficient": 10,
+        "useful_assertions_available": 10
+      }
+    }
+  }
+}

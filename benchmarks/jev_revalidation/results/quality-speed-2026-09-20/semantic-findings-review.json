@@ -1,0 +1,1476 @@
+{
+  "scope": "Every raw finding in all80 flag responses; same-family independent descriptive semantic adjudication, not gold revision.",
+  "rows_sha256": "80ebcb053977532cfb09f55d51407b79ef79c6abf3a40c3b07de267b56104105",
+  "findings": [
+    {
+      "path_id": "case-21-repeat-1-critic",
+      "case_id": "qs-022",
+      "repeat": 1,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-21-repeat-1-jev_then_critic",
+      "case_id": "qs-022",
+      "repeat": 1,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-19-repeat-0-jev_then_critic",
+      "case_id": "qs-020",
+      "repeat": 0,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "qualify",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-19-repeat-0-critic",
+      "case_id": "qs-020",
+      "repeat": 0,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "qualify",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-29-repeat-0-critic",
+      "case_id": "qs-030",
+      "repeat": 0,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "misleading_certainty",
+      "disposition": "qualify",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-29-repeat-0-jev_then_critic",
+      "case_id": "qs-030",
+      "repeat": 0,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "misleading_certainty",
+      "disposition": "qualify",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-22-repeat-0-critic",
+      "case_id": "qs-023",
+      "repeat": 0,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-22-repeat-0-jev_then_critic",
+      "case_id": "qs-023",
+      "repeat": 0,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-28-repeat-0-jev_then_critic",
+      "case_id": "qs-029",
+      "repeat": 0,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "qualify",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        },
+        {
+          "evidence_id": "s1"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-28-repeat-0-critic",
+      "case_id": "qs-029",
+      "repeat": 0,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "qualify",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        },
+        {
+          "evidence_id": "s1"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-18-repeat-1-critic",
+      "case_id": "qs-019",
+      "repeat": 1,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "reconsider",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-18-repeat-1-jev_then_critic",
+      "case_id": "qs-019",
+      "repeat": 1,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "reconsider",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-23-repeat-1-critic",
+      "case_id": "qs-024",
+      "repeat": 1,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-23-repeat-1-jev_then_critic",
+      "case_id": "qs-024",
+      "repeat": 1,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-27-repeat-1-critic",
+      "case_id": "qs-028",
+      "repeat": 1,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "misleading_certainty",
+      "disposition": "qualify",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-27-repeat-1-jev_then_critic",
+      "case_id": "qs-028",
+      "repeat": 1,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "misleading_certainty",
+      "disposition": "qualify",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-20-repeat-0-jev_then_critic",
+      "case_id": "qs-021",
+      "repeat": 0,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-20-repeat-0-critic",
+      "case_id": "qs-021",
+      "repeat": 0,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "reconsider",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-24-repeat-1-critic",
+      "case_id": "qs-025",
+      "repeat": 1,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/claim_records/1/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-24-repeat-1-jev_then_critic",
+      "case_id": "qs-025",
+      "repeat": 1,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/claim_records/1/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-29-repeat-1-critic",
+      "case_id": "qs-030",
+      "repeat": 1,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "misleading_certainty",
+      "disposition": "qualify",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-29-repeat-1-jev_then_critic",
+      "case_id": "qs-030",
+      "repeat": 1,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "reconsider",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": true,
+      "review_note": "Withholding or qualifying the claim is justified by missing or ambiguous support. The evidence does not establish the opposite factual state; factual_contradiction overstates the basis."
+    },
+    {
+      "path_id": "case-21-repeat-0-critic",
+      "case_id": "qs-022",
+      "repeat": 0,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-21-repeat-0-jev_then_critic",
+      "case_id": "qs-022",
+      "repeat": 0,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-17-repeat-0-critic",
+      "case_id": "qs-018",
+      "repeat": 0,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "reconsider",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-17-repeat-0-jev_then_critic",
+      "case_id": "qs-018",
+      "repeat": 0,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "reconsider",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-25-repeat-0-jev_then_critic",
+      "case_id": "qs-026",
+      "repeat": 0,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "reconsider",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-25-repeat-0-critic",
+      "case_id": "qs-026",
+      "repeat": 0,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "reconsider",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-18-repeat-0-critic",
+      "case_id": "qs-019",
+      "repeat": 0,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "reconsider",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-18-repeat-0-jev_then_critic",
+      "case_id": "qs-019",
+      "repeat": 0,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "reconsider",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-20-repeat-1-critic",
+      "case_id": "qs-021",
+      "repeat": 1,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "reconsider",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-20-repeat-1-jev_then_critic",
+      "case_id": "qs-021",
+      "repeat": 1,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "reconsider",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-22-repeat-1-jev_then_critic",
+      "case_id": "qs-023",
+      "repeat": 1,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-22-repeat-1-critic",
+      "case_id": "qs-023",
+      "repeat": 1,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-26-repeat-1-critic",
+      "case_id": "qs-027",
+      "repeat": 1,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": true,
+      "review_note": "Withholding or qualifying the claim is justified by missing or ambiguous support. The evidence does not establish the opposite factual state; factual_contradiction overstates the basis."
+    },
+    {
+      "path_id": "case-26-repeat-1-jev_then_critic",
+      "case_id": "qs-027",
+      "repeat": 1,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": true,
+      "review_note": "Withholding or qualifying the claim is justified by missing or ambiguous support. The evidence does not establish the opposite factual state; factual_contradiction overstates the basis."
+    },
+    {
+      "path_id": "case-25-repeat-1-critic",
+      "case_id": "qs-026",
+      "repeat": 1,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "reconsider",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-25-repeat-1-jev_then_critic",
+      "case_id": "qs-026",
+      "repeat": 1,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "reconsider",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-14-repeat-1-critic",
+      "case_id": "qs-015",
+      "repeat": 1,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "unsupported_causality",
+      "disposition": "qualify",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-14-repeat-1-jev_then_critic",
+      "case_id": "qs-015",
+      "repeat": 1,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "unsupported_causality",
+      "disposition": "qualify",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-27-repeat-0-critic",
+      "case_id": "qs-028",
+      "repeat": 0,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "misleading_certainty",
+      "disposition": "qualify",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-27-repeat-0-jev_then_critic",
+      "case_id": "qs-028",
+      "repeat": 0,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "misleading_certainty",
+      "disposition": "qualify",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-19-repeat-1-critic",
+      "case_id": "qs-020",
+      "repeat": 1,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "qualify",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-19-repeat-1-jev_then_critic",
+      "case_id": "qs-020",
+      "repeat": 1,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "qualify",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-16-repeat-1-jev_then_critic",
+      "case_id": "qs-017",
+      "repeat": 1,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "reconsider",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-16-repeat-1-critic",
+      "case_id": "qs-017",
+      "repeat": 1,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "reconsider",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-31-repeat-1-critic",
+      "case_id": "qs-032",
+      "repeat": 1,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": true,
+      "review_note": "Withholding or qualifying the claim is justified by missing or ambiguous support. The evidence does not establish the opposite factual state; factual_contradiction overstates the basis."
+    },
+    {
+      "path_id": "case-31-repeat-1-jev_then_critic",
+      "case_id": "qs-032",
+      "repeat": 1,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": true,
+      "review_note": "Withholding or qualifying the claim is justified by missing or ambiguous support. The evidence does not establish the opposite factual state; factual_contradiction overstates the basis."
+    },
+    {
+      "path_id": "case-24-repeat-0-jev_then_critic",
+      "case_id": "qs-025",
+      "repeat": 0,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/claim_records/1/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-24-repeat-0-critic",
+      "case_id": "qs-025",
+      "repeat": 0,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/claim_records/1/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-15-repeat-1-critic",
+      "case_id": "qs-016",
+      "repeat": 1,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "unsupported_generalization",
+      "disposition": "qualify",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-15-repeat-1-jev_then_critic",
+      "case_id": "qs-016",
+      "repeat": 1,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "unsupported_generalization",
+      "disposition": "qualify",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-12-repeat-0-critic",
+      "case_id": "qs-013",
+      "repeat": 0,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-12-repeat-0-jev_then_critic",
+      "case_id": "qs-013",
+      "repeat": 0,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-13-repeat-1-jev_then_critic",
+      "case_id": "qs-014",
+      "repeat": 1,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "reconsider",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-13-repeat-1-critic",
+      "case_id": "qs-014",
+      "repeat": 1,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "reconsider",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-12-repeat-1-critic",
+      "case_id": "qs-013",
+      "repeat": 1,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-12-repeat-1-jev_then_critic",
+      "case_id": "qs-013",
+      "repeat": 1,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-15-repeat-0-jev_then_critic",
+      "case_id": "qs-016",
+      "repeat": 0,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "unsupported_generalization",
+      "disposition": "qualify",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-15-repeat-0-critic",
+      "case_id": "qs-016",
+      "repeat": 0,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "unsupported_generalization",
+      "disposition": "qualify",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-16-repeat-0-critic",
+      "case_id": "qs-017",
+      "repeat": 0,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "reconsider",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-16-repeat-0-jev_then_critic",
+      "case_id": "qs-017",
+      "repeat": 0,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "reconsider",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-23-repeat-0-jev_then_critic",
+      "case_id": "qs-024",
+      "repeat": 0,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-23-repeat-0-critic",
+      "case_id": "qs-024",
+      "repeat": 0,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-31-repeat-0-critic",
+      "case_id": "qs-032",
+      "repeat": 0,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": true,
+      "review_note": "Withholding or qualifying the claim is justified by missing or ambiguous support. The evidence does not establish the opposite factual state; factual_contradiction overstates the basis."
+    },
+    {
+      "path_id": "case-31-repeat-0-jev_then_critic",
+      "case_id": "qs-032",
+      "repeat": 0,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": true,
+      "review_note": "Withholding or qualifying the claim is justified by missing or ambiguous support. The evidence does not establish the opposite factual state; factual_contradiction overstates the basis."
+    },
+    {
+      "path_id": "case-30-repeat-0-jev_then_critic",
+      "case_id": "qs-031",
+      "repeat": 0,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": true,
+      "review_note": "Withholding or qualifying the claim is justified by missing or ambiguous support. The evidence does not establish the opposite factual state; factual_contradiction overstates the basis."
+    },
+    {
+      "path_id": "case-30-repeat-0-critic",
+      "case_id": "qs-031",
+      "repeat": 0,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": true,
+      "review_note": "Withholding or qualifying the claim is justified by missing or ambiguous support. The evidence does not establish the opposite factual state; factual_contradiction overstates the basis."
+    },
+    {
+      "path_id": "case-30-repeat-1-critic",
+      "case_id": "qs-031",
+      "repeat": 1,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": true,
+      "review_note": "Withholding or qualifying the claim is justified by missing or ambiguous support. The evidence does not establish the opposite factual state; factual_contradiction overstates the basis."
+    },
+    {
+      "path_id": "case-30-repeat-1-jev_then_critic",
+      "case_id": "qs-031",
+      "repeat": 1,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": true,
+      "review_note": "Withholding or qualifying the claim is justified by missing or ambiguous support. The evidence does not establish the opposite factual state; factual_contradiction overstates the basis."
+    },
+    {
+      "path_id": "case-13-repeat-0-jev_then_critic",
+      "case_id": "qs-014",
+      "repeat": 0,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "missing_condition",
+      "disposition": "reconsider",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-13-repeat-0-critic",
+      "case_id": "qs-014",
+      "repeat": 0,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "reconsider",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-13-repeat-0-critic",
+      "case_id": "qs-014",
+      "repeat": 0,
+      "arm": "critic",
+      "finding_index": 1,
+      "claim_path": "/claim_records/0/content",
+      "basis": "missing_condition",
+      "disposition": "qualify",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": false,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The lined subclaim preserves the liner condition, and surrounding candidate context identifies the Dovetail test. Requiring every subclaim to repeat the object name is not in the archive scope."
+    },
+    {
+      "path_id": "case-26-repeat-0-jev_then_critic",
+      "case_id": "qs-027",
+      "repeat": 0,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": true,
+      "review_note": "Withholding or qualifying the claim is justified by missing or ambiguous support. The evidence does not establish the opposite factual state; factual_contradiction overstates the basis."
+    },
+    {
+      "path_id": "case-26-repeat-0-critic",
+      "case_id": "qs-027",
+      "repeat": 0,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": true,
+      "review_note": "Withholding or qualifying the claim is justified by missing or ambiguous support. The evidence does not establish the opposite factual state; factual_contradiction overstates the basis."
+    },
+    {
+      "path_id": "case-28-repeat-1-critic",
+      "case_id": "qs-029",
+      "repeat": 1,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "qualify",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        },
+        {
+          "evidence_id": "s1"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-28-repeat-1-jev_then_critic",
+      "case_id": "qs-029",
+      "repeat": 1,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "qualify",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        },
+        {
+          "evidence_id": "s1"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-14-repeat-0-jev_then_critic",
+      "case_id": "qs-015",
+      "repeat": 0,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "unsupported_causality",
+      "disposition": "qualify",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-14-repeat-0-critic",
+      "case_id": "qs-015",
+      "repeat": 0,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "unsupported_causality",
+      "disposition": "qualify",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-17-repeat-1-critic",
+      "case_id": "qs-018",
+      "repeat": 1,
+      "arm": "critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "reconsider",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    },
+    {
+      "path_id": "case-17-repeat-1-jev_then_critic",
+      "case_id": "qs-018",
+      "repeat": 1,
+      "arm": "jev_then_critic",
+      "finding_index": 0,
+      "claim_path": "/content",
+      "basis": "factual_contradiction",
+      "disposition": "remove",
+      "evidence_refs": [
+        {
+          "evidence_id": "s0"
+        }
+      ],
+      "supported_core_concern": true,
+      "basis_overstates_missing_evidence_as_contradiction": false,
+      "review_note": "The cited evidence supports a relevant concern against the targeted assertion."
+    }
+  ]
+}

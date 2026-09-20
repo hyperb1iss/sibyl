@@ -2100,3 +2100,11 @@ tasks:
       - packages/python/sibyl-core/src/sibyl_core/tasks/memory_validation.py
     options:
       cache: false
+
+  jev-quality-speed:
+    command: uv run --locked --package sibyl-core python -m benchmarks.jev_revalidation.quality_speed
+    inputs:
+      - benchmarks/jev_revalidation/**/*
+      - packages/python/sibyl-core/src/sibyl_core/tasks/memory_validation.py
+    options:
+      cache: false

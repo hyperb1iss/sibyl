@@ -1,0 +1,20 @@
+{
+  "audit-probes.py.txt": "ad3d652cd2bd693ce1ba5246b91fdf457ee3fe5dedf9b57da3d55ec7dd231127",
+  "blind-annotations.json": "63fa93327acb803f40ac5df9f9858a7df2e4e98fef89ae11677667c6c297271e",
+  "blind-review.md": "466fce00809b9e6c3e0822574559d2f40f9590400ed6da7876615dc67837745a",
+  "code-review.md": "08081883502e0a6936c9edfcde46237d3c26fbcac13e26cd3a8587f2ea937ed1",
+  "completion.json": "36f31de40bcec5486a69d6d4623064a4093eeb63bb9b39a3414fb63674309dbe",
+  "interpretation-review.md": "1a30be16938008e5e84e63da9f68f6fff1089b8ba6fa69f131c781d7124676bc",
+  "launch-freeze.json": "bfbf212d7477376bce722d1e3473b6ce3e93dae4655c325a1c429d4295071c00",
+  "manifest.json": "63dbe3d67510473fbc3a68e723d4fd95ba1542abb016990a66ec858c1307e960",
+  "outcomes.json": "7aaa8cb673dc27eba509e64ee6b08aae052c2a2446e82908cc1045ad3db1cf24",
+  "protocol.json": "9eecddcbd6a3b6c36672ab55394e007cb59b58f811c0e4f4d2583ee10aadd936",
+  "raw-artifact-hashes.json": "a9db1bd0c49baf15fbf2104077ed4784d4df840b30734664932b2df89d2bf7dc",
+  "raw-audit.json": "d2fcdbf78f62a7252f6d9e80414be711f6debe69fa89204803cb6674c7c444e4",
+  "raw-audit.md": "2d1b7259f52bf1c3a0834d8a93036d8401ff3003b0f99d8476dbe9e0ec65520a",
+  "raw-audit.py.txt": "a95be785f086c6f6ecc8eb5fe557e5331bd162e2310b0a3fb8faf676d7417605",
+  "report-review.md": "e755f5965062bb9fa97f9f18c88b2a1fc99137399d5abdb3faf36ee2647f8df3",
+  "semantic-findings-review.json": "5b8dc056758ab330375ca094bdc75b5c63edf5557e2f44faa41076368f6bbd1c",
+  "summary.json": "ca0a3587dfd13c885bd4e19a1d31ad513009fe875feb56b026b036e82758d522",
+  "verification.json": "da5b4be263977feb64f62760b51a8e9b1bd26bbb1c30960ec261dadc8d597acc"
+}

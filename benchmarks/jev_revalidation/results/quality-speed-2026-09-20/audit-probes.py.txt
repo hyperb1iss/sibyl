@@ -1,0 +1,27 @@
+"""In-memory corruption probes for the independent audit, with no archive mutation."""
+import copy
+import runpy
+from pathlib import Path
+
+root=Path('/tmp/jev-quality-speed-20260920')
+audit=runpy.run_path(str(root/'raw_audit.py'))
+load=audit['load'];archive=root/'live'
+entries=load(archive/'schedule.json');rows=load(archive/'rows.json')
+index=next(i for i,e in enumerate(entries) if e['arm']=='critic')
+entry=entries[index];row=rows[index]
+raw=load(archive/'raw'/f"{entry['id']}.critic.json")
+audit['critic_output'](raw,entry,row['critic'])
+changed=copy.deepcopy(row['critic']);changed['usage']['observed_cost_usd']+=1
+try:audit['critic_output'](raw,entry,changed)
+except AssertionError:pass
+else:raise AssertionError('cost corruption escaped')
+index=next(i for i,e in enumerate(entries) if e['arm']=='jev_then_critic')
+entry=entries[index];row=rows[index]
+raw=load(archive/'raw'/f"{entry['id']}.jev.json")
+assert audit['decision_output'](raw,entry['jev_request'])==row['jev_observation']
+changed=copy.deepcopy(entry['jev_request']);changed['state']+=' altered'
+assert audit['decision_output'](raw,changed)!=row['jev_observation']
+try:audit['parse']('{"cost":0,"cost":1}')
+except AssertionError:pass
+else:raise AssertionError('duplicate key escaped')
+print('PASS: valid receipt controls; altered cost, altered semantic request and duplicate-key corruption detected')
