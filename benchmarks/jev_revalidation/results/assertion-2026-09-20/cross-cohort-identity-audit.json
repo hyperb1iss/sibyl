@@ -1,0 +1,8 @@
+{
+  "verdict": "PASS",
+  "scope": "Cross-cohort physical response identity only, no pooled quality or speed metrics",
+  "raw_receipts": 320,
+  "unique_endpoint_provider_response_ids": 320,
+  "jev_request_ids_reused_between_cohort_namespaces": 16,
+  "identity_scope": "Scheduled and DecisionRequest IDs are cohort-local. Bind manifests, cohort paths and exact request digests; do not join on local ID alone. All 320 provider response identities are unique."
+}

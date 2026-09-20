@@ -1,0 +1,9 @@
+{
+  "rows_sha256": "ce6887d9ba870d4f5c4ebf393f89bcd7ca956f44be43bf51dcaaecf5fc8a1e67",
+  "files_sha256": {
+    "rubric.json": "a37c43b506f8f083b07c079dfe4ab3e5ce5b0a437b23aa1f6f2f7e66d7174f04",
+    "responses.json": "63165d98d10a486a4c0b823768aee98bf60c7543f53b991231587f27c9f36fa0",
+    "cases.json": "fb14fd520483f04baef0911dee681f32f75d8e578daf963da3e1603e950ee05d"
+  },
+  "blind_map_sha256": "fba4b5bc8ebc3226dd8c3d09bc79b0e28861697cea8e97eb8a490535f6a1c49f"
+}

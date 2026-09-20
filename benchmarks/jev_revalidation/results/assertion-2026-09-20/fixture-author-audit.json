@@ -1,0 +1,234 @@
+{
+  "verdict": "PASS",
+  "scope": "Author structural audit only; independent source-only semantic review still required. No new prompt, implementation or outputs inspected; no provider calls.",
+  "counts": {
+    "cases": 16,
+    "pairs": 8,
+    "supported_cases": 8,
+    "unsafe_cases": 8,
+    "assertions": 30,
+    "supported_neighbor_pairs": 7,
+    "relations": {
+      "supported": 22,
+      "insufficient": 4,
+      "contradicted": 3,
+      "ambiguous": 1
+    },
+    "stress_labels": 30
+  },
+  "case_ids": [
+    "af-001",
+    "af-002",
+    "af-003",
+    "af-004",
+    "af-005",
+    "af-006",
+    "af-007",
+    "af-008",
+    "af-009",
+    "af-010",
+    "af-011",
+    "af-012",
+    "af-013",
+    "af-014",
+    "af-015",
+    "af-016"
+  ],
+  "pairs": [
+    {
+      "pair_group": "af-pair-01",
+      "case_ids": [
+        "af-001",
+        "af-002"
+      ],
+      "changed_assertions": 1,
+      "identical_source_text_and_provenance": true
+    },
+    {
+      "pair_group": "af-pair-02",
+      "case_ids": [
+        "af-003",
+        "af-004"
+      ],
+      "changed_assertions": 1,
+      "identical_source_text_and_provenance": true
+    },
+    {
+      "pair_group": "af-pair-03",
+      "case_ids": [
+        "af-005",
+        "af-006"
+      ],
+      "changed_assertions": 1,
+      "identical_source_text_and_provenance": true
+    },
+    {
+      "pair_group": "af-pair-04",
+      "case_ids": [
+        "af-007",
+        "af-008"
+      ],
+      "changed_assertions": 1,
+      "identical_source_text_and_provenance": true
+    },
+    {
+      "pair_group": "af-pair-05",
+      "case_ids": [
+        "af-009",
+        "af-010"
+      ],
+      "changed_assertions": 1,
+      "identical_source_text_and_provenance": true
+    },
+    {
+      "pair_group": "af-pair-06",
+      "case_ids": [
+        "af-011",
+        "af-012"
+      ],
+      "changed_assertions": 1,
+      "identical_source_text_and_provenance": true
+    },
+    {
+      "pair_group": "af-pair-07",
+      "case_ids": [
+        "af-013",
+        "af-014"
+      ],
+      "changed_assertions": 1,
+      "identical_source_text_and_provenance": true
+    },
+    {
+      "pair_group": "af-pair-08",
+      "case_ids": [
+        "af-015",
+        "af-016"
+      ],
+      "changed_assertions": 1,
+      "identical_source_text_and_provenance": true
+    }
+  ],
+  "checks": {
+    "16_unique_ids": true,
+    "8_two_case_pairs": true,
+    "7_pairs_with_supported_neighbor": true,
+    "af-pair-01_one_assertion_change": true,
+    "af-pair-01_identical_evidence": true,
+    "af-pair-01_safe_unsafe": true,
+    "af-pair-02_one_assertion_change": true,
+    "af-pair-02_identical_evidence": true,
+    "af-pair-02_safe_unsafe": true,
+    "af-pair-03_one_assertion_change": true,
+    "af-pair-03_identical_evidence": true,
+    "af-pair-03_safe_unsafe": true,
+    "af-pair-04_one_assertion_change": true,
+    "af-pair-04_identical_evidence": true,
+    "af-pair-04_safe_unsafe": true,
+    "af-pair-05_one_assertion_change": true,
+    "af-pair-05_identical_evidence": true,
+    "af-pair-05_safe_unsafe": true,
+    "af-pair-06_one_assertion_change": true,
+    "af-pair-06_identical_evidence": true,
+    "af-pair-06_safe_unsafe": true,
+    "af-pair-07_one_assertion_change": true,
+    "af-pair-07_identical_evidence": true,
+    "af-pair-07_safe_unsafe": true,
+    "af-pair-08_one_assertion_change": true,
+    "af-pair-08_identical_evidence": true,
+    "af-pair-08_safe_unsafe": true,
+    "af-001_paths": true,
+    "af-001_all_stress_wrong": true,
+    "af-001_labels": true,
+    "af-001_actions": true,
+    "af-001_size": true,
+    "af-002_paths": true,
+    "af-002_all_stress_wrong": true,
+    "af-002_labels": true,
+    "af-002_actions": true,
+    "af-002_size": true,
+    "af-003_paths": true,
+    "af-003_all_stress_wrong": true,
+    "af-003_labels": true,
+    "af-003_actions": true,
+    "af-003_size": true,
+    "af-004_paths": true,
+    "af-004_all_stress_wrong": true,
+    "af-004_labels": true,
+    "af-004_actions": true,
+    "af-004_size": true,
+    "af-005_paths": true,
+    "af-005_all_stress_wrong": true,
+    "af-005_labels": true,
+    "af-005_actions": true,
+    "af-005_size": true,
+    "af-006_paths": true,
+    "af-006_all_stress_wrong": true,
+    "af-006_labels": true,
+    "af-006_actions": true,
+    "af-006_size": true,
+    "af-007_paths": true,
+    "af-007_all_stress_wrong": true,
+    "af-007_labels": true,
+    "af-007_actions": true,
+    "af-007_size": true,
+    "af-008_paths": true,
+    "af-008_all_stress_wrong": true,
+    "af-008_labels": true,
+    "af-008_actions": true,
+    "af-008_size": true,
+    "af-009_paths": true,
+    "af-009_all_stress_wrong": true,
+    "af-009_labels": true,
+    "af-009_actions": true,
+    "af-009_size": true,
+    "af-010_paths": true,
+    "af-010_all_stress_wrong": true,
+    "af-010_labels": true,
+    "af-010_actions": true,
+    "af-010_size": true,
+    "af-011_paths": true,
+    "af-011_all_stress_wrong": true,
+    "af-011_labels": true,
+    "af-011_actions": true,
+    "af-011_size": true,
+    "af-012_paths": true,
+    "af-012_all_stress_wrong": true,
+    "af-012_labels": true,
+    "af-012_actions": true,
+    "af-012_size": true,
+    "af-013_paths": true,
+    "af-013_all_stress_wrong": true,
+    "af-013_labels": true,
+    "af-013_actions": true,
+    "af-013_size": true,
+    "af-014_paths": true,
+    "af-014_all_stress_wrong": true,
+    "af-014_labels": true,
+    "af-014_actions": true,
+    "af-014_size": true,
+    "af-015_paths": true,
+    "af-015_all_stress_wrong": true,
+    "af-015_labels": true,
+    "af-015_actions": true,
+    "af-015_size": true,
+    "af-016_paths": true,
+    "af-016_all_stress_wrong": true,
+    "af-016_labels": true,
+    "af-016_actions": true,
+    "af-016_size": true,
+    "no_prior_exact_normalized_text_duplicates": true,
+    "strict_clause_rule_preserved": true
+  },
+  "failures": [],
+  "duplicate_prior_text_case_ids": [],
+  "duplication_check_limit": "Exact comparison after whitespace collapse and case folding across prior candidate assertions and full source passages; not proof against every semantic paraphrase. New domain and sentence construction is an author judgment.",
+  "hashes": {
+    "cases.json": "7498f1415ceb0b678ee315a5cfd6adaa8edccc7a6805de3482ec9383716edf36",
+    "rubric.json": "a37c43b506f8f083b07c079dfe4ab3e5ce5b0a437b23aa1f6f2f7e66d7174f04"
+  },
+  "comparison_fixture_hashes": {
+    "quality_speed_cases.json": "aaa9350414374b2d798f4333b3679fe77b304535c7708c911d9a681844f353f6",
+    "heldout_fast_cases.json": "0f1f757c0d2a905676a7f3ae5e17eb65dcaa69b30d16cfb44822d1db44c07208"
+  },
+  "provenance": "Source author knows prior error types and outcomes; the fresh set is prospective relative to the new frozen intervention, not retrospectively uninformed."
+}

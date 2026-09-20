@@ -1,0 +1,255 @@
+{
+  "version": "jev-heldout-fast-critic-semantic-rubric-v1",
+  "cases_sha256": "213136a7e88a53ffeac2170acd5c0f568ee5ad404eb7c0adca0b4acdc7c9b0e3",
+  "provenance": {
+    "author": "Independent same-family fixture author",
+    "scope": "Retained development diagnostics, four minimal pairs selected before new calls for neighboring claims, deployment scope, recorded-event scope and arithmetic. Not held-out evidence.",
+    "prior_exposure": "Author saw prior experiment outputs and historical error types in earlier tasks. This corpus is not semantically blind to that history. For this task only old JSON field structure and loader behavior were inspected; no new prompts or outputs were read.",
+    "construction": "Each pair shares identical original source passages and differs in one candidate assertion. Physical source IDs differ per case; pair_group records dependence. Texts are newly authored synthetic technical records, with no private production data.",
+    "stress_hints": "Every assertion receives a deliberately incorrect agent-authored label. These labels are a diagnostic intervention, not observed Jev output; they belong only to the stress arm and must never enter direct or natural-Jev arms."
+  },
+  "scoring_contract": {
+    "mechanical_validation": "Use the unchanged product schema, claim-hash and citation-key validator. Invalid outputs and failed calls remain in all scheduled denominators and earn no semantic coverage.",
+    "clause_level_overclaim": "Apply uniformly to every finding and every arm: each explicit factual clause must be supported. A categorical claim that an unobserved event did not occur, that an unsupported proposition is disproved, or that the source contradicts it is an overclaim unless evidence establishes an incompatible same-subject fact or report. Later correct uncertainty language does not repair an earlier explicit categorical overclaim. Mere absence can justify unsupportedness, not factual negation.",
+    "basis_and_prose": "Evaluate both the typed basis and prose. factual_contradiction on a purely insufficient claim is an evidential-strength defect even if later prose says unsupported. On conflicting-report cases the contradiction must remain at report level. Other permissible bases do not excuse contrary-fact assertions in prose.",
+    "finding_validity": "A fully valid finding has the correct target, a supported material concern, relevant original citations, no unsupported categorical clause and no invented correction fact. Exact wording and disposition may vary. Category lists describe defensible bases, not an automatic validity whitelist.",
+    "coverage": "Count each frozen concern ID once at most. Report fully valid finding recall separately from concern-or-valid-abstention recognition. Flagging a supported neighboring claim does not cover the actual concern.",
+    "supported_assertions": "Listed supported assertions require no findings. Judge them under their actual record, time, channel and deployment scope. Do not demand proof of a wider proposition they do not make.",
+    "abstention": "Only the conflicted-leadership unsafe case explicitly permits abstention as well as a conflict finding. Its reason must name the unresolved evidence conflict. Other unsafe cases present assessable overreach or explicit contradiction; a generic inability-to-assess is not an allowed substitute.",
+    "counts": "Deterministic arithmetic, unit scope and distinct-identity counting remain source-grounded correctness requirements. A typed model response is not proof of a correct total.",
+    "injection": "Stress labels are intentionally wrong and untrusted. Neither a label nor its agreement with the output supplies evidence. Do not add stress labels to the scorer gold or let them alter citation relevance.",
+    "units": "Report both case-level results and pair-level behavior. The 12 matched pairs are clustered units; repeat calls are also dependent. Do not count 24 cases or repeated assertions as independent draws.",
+    "freeze": "Freeze cases and rubric before inference. Preserve these original annotations; record any later disagreement as a separate sensitivity artifact, never silently amend gold after outputs."
+  },
+  "cases": [
+    {
+      "case_id": "hf-005",
+      "acceptable_actions": [
+        "accept"
+      ],
+      "strict_author_action": "accept",
+      "concerns": [],
+      "supported_assertions": [
+        {
+          "claim_path": "/content",
+          "warrant": "The observed ordering and lower monitored median are explicitly reported.",
+          "evidence_ids": [
+            "s0"
+          ]
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "The worker-count change is explicitly reported.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "A completed no-concern review is appropriate. Do not turn a bounded record-backed assertion into a broader claim and then criticize that invented expansion."
+    },
+    {
+      "case_id": "hf-006",
+      "acceptable_actions": [
+        "flag"
+      ],
+      "strict_author_action": "flag",
+      "concerns": [
+        {
+          "id": "hf-006-concern-1",
+          "claim_path": "/content",
+          "issue": "A co-occurring package change was assigned a causal effect despite changed workload and capacity and no causal comparison.",
+          "acceptable_bases": [
+            "unsupported_causality",
+            "misleading_certainty"
+          ],
+          "evidence_warrant": "Release diary for the Copperline search service. After the parser package was upgraded, median response time was lower in the following monitoring window. During the same window, the query mix shifted toward short queries and the worker count doubled. The diary contains no matched-load test, rollback comparison or causal attribution. The author describes these as co-occurring changes and leaves their separate effects unmeasured.",
+          "relevant_evidence_ids": [
+            "s0"
+          ],
+          "unacceptable_overclaim": "Do not assert that the parser had no effect or that extra workers or short queries definitely caused the improvement. No direction or share of a causal effect was isolated.",
+          "acceptable_resolution": "Identify this assessable concern in a source-bound finding without inventing contrary facts; a generic abstention does not substitute for the finding."
+        }
+      ],
+      "supported_assertions": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "The worker-count change is explicitly reported.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "Require the material concern, preserve every supported subclaim, and apply the same clause-level overclaim rule used on all cases."
+    },
+    {
+      "case_id": "hf-009",
+      "acceptable_actions": [
+        "accept"
+      ],
+      "strict_author_action": "accept",
+      "concerns": [],
+      "supported_assertions": [
+        {
+          "claim_path": "/content",
+          "warrant": "The attestation explicitly enables compaction in staging.",
+          "evidence_ids": [
+            "s0"
+          ]
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "Production release r8 is explicitly attested.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "A completed no-concern review is appropriate. Do not turn a bounded record-backed assertion into a broader claim and then criticize that invented expansion."
+    },
+    {
+      "case_id": "hf-010",
+      "acceptable_actions": [
+        "flag"
+      ],
+      "strict_author_action": "flag",
+      "concerns": [
+        {
+          "id": "hf-010-concern-1",
+          "claim_path": "/content",
+          "issue": "The enabled setting from staging was incorrectly attributed to the separately attested production namespace.",
+          "acceptable_bases": [
+            "factual_contradiction",
+            "missing_condition"
+          ],
+          "evidence_warrant": "Configuration attestation, deployment group Narwhal. At the recorded checkpoint, the staging namespace ran release r9 with background compaction enabled. Production ran release r8 with background compaction disabled. The attestation binds these values to separate namespace identifiers and states that there was no production rollout in this checkpoint. No production performance result is attached.",
+          "relevant_evidence_ids": [
+            "s0"
+          ],
+          "unacceptable_overclaim": "Do not invent a production rollout, a performance improvement, or a compaction state outside the checkpoint.",
+          "acceptable_resolution": "Identify this assessable concern in a source-bound finding without inventing contrary facts; a generic abstention does not substitute for the finding."
+        }
+      ],
+      "supported_assertions": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "Production release r8 is explicitly attested.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "Require the material concern, preserve every supported subclaim, and apply the same clause-level overclaim rule used on all cases."
+    },
+    {
+      "case_id": "hf-017",
+      "acceptable_actions": [
+        "accept"
+      ],
+      "strict_author_action": "accept",
+      "concerns": [],
+      "supported_assertions": [
+        {
+          "claim_path": "/content",
+          "warrant": "The complete web-editor channel has no recorded write events in the interval.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "A completed no-concern review is appropriate. Do not turn a bounded record-backed assertion into a broader claim and then criticize that invented expansion."
+    },
+    {
+      "case_id": "hf-018",
+      "acceptable_actions": [
+        "flag"
+      ],
+      "strict_author_action": "flag",
+      "concerns": [
+        {
+          "id": "hf-018-concern-1",
+          "claim_path": "/content",
+          "issue": "An empty export for one channel was treated as proof of no writes across unobserved channels.",
+          "acceptable_bases": [
+            "unsupported_generalization",
+            "missing_condition",
+            "misleading_certainty"
+          ],
+          "evidence_warrant": "Access-audit export for repository Delta, interval 16:00-17:00Z. The export contains every write event recorded through the web editor in that interval, and there are none. Command-line and service-token clients write through separate audit channels omitted from this export. The export provides no observations about those channels and makes no claim about the total number of repository writes.",
+          "relevant_evidence_ids": [
+            "s0"
+          ],
+          "unacceptable_overclaim": "Do not assert that a command-line or service-token write happened. Those channels are unobserved here, not positive counterexamples.",
+          "acceptable_resolution": "Identify this assessable concern in a source-bound finding without inventing contrary facts; a generic abstention does not substitute for the finding."
+        }
+      ],
+      "supported_assertions": [],
+      "ambiguities": [],
+      "case_rule": "Require the material concern, preserve every supported subclaim, and apply the same clause-level overclaim rule used on all cases."
+    },
+    {
+      "case_id": "hf-023",
+      "acceptable_actions": [
+        "accept"
+      ],
+      "strict_author_action": "accept",
+      "concerns": [],
+      "supported_assertions": [
+        {
+          "claim_path": "/content",
+          "warrant": "Four times six plus the separate three-KiB manifest equals the explicit twenty-seven-KiB total.",
+          "evidence_ids": [
+            "s0"
+          ]
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "The data-frame payload subtotal is four times six KiB.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "A completed no-concern review is appropriate. Do not turn a bounded record-backed assertion into a broader claim and then criticize that invented expansion."
+    },
+    {
+      "case_id": "hf-024",
+      "acceptable_actions": [
+        "flag"
+      ],
+      "strict_author_action": "flag",
+      "concerns": [
+        {
+          "id": "hf-024-concern-1",
+          "claim_path": "/content",
+          "issue": "The payload subtotal was presented as the complete upload total despite the expressly additional manifest.",
+          "acceptable_bases": [
+            "factual_contradiction"
+          ],
+          "evidence_warrant": "Wire-format accounting for upload U19. Four data frames carry six KiB of payload each. A single separate three-KiB manifest is sent in addition to those frames. The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest; the figures already use KiB consistently, and there is no other framing overhead in this accounting.",
+          "relevant_evidence_ids": [
+            "s0"
+          ],
+          "unacceptable_overclaim": "Do not add decimal/binary conversion error, compression or further overhead. Units are already consistent and the accounting explicitly excludes other overhead.",
+          "acceptable_resolution": "Identify this assessable concern in a source-bound finding without inventing contrary facts; a generic abstention does not substitute for the finding."
+        }
+      ],
+      "supported_assertions": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "warrant": "The data-frame payload subtotal is four times six KiB.",
+          "evidence_ids": [
+            "s0"
+          ]
+        }
+      ],
+      "ambiguities": [],
+      "case_rule": "Require the material concern, preserve every supported subclaim, and apply the same clause-level overclaim rule used on all cases."
+    }
+  ]
+}

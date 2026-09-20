@@ -1,0 +1,478 @@
+{
+  "arms": {
+    "assertion_direct": {
+      "covered_concerns": 3,
+      "failures": [
+        "case-5-repeat-0-assertion_direct",
+        "case-6-repeat-0-assertion_direct",
+        "case-3-repeat-0-assertion_direct",
+        "case-2-repeat-0-assertion_direct",
+        "case-7-repeat-0-assertion_direct",
+        "case-1-repeat-0-assertion_direct"
+      ],
+      "fully_valid_findings": 3,
+      "invented_facts_including_invalid_diagnostics": 2,
+      "material_concerns": 4,
+      "mechanically_valid_findings": 9,
+      "overstated_basis_including_invalid_diagnostics": 5,
+      "paths": 8,
+      "semantic_pass": 2,
+      "unsupported_findings_including_invalid_diagnostics": 5,
+      "valid_abstentions": 0
+    },
+    "assertion_live_jev": {
+      "covered_concerns": 3,
+      "failures": [
+        "case-2-repeat-0-assertion_live_jev",
+        "case-6-repeat-0-assertion_live_jev",
+        "case-1-repeat-0-assertion_live_jev"
+      ],
+      "fully_valid_findings": 3,
+      "invented_facts_including_invalid_diagnostics": 1,
+      "material_concerns": 4,
+      "mechanically_valid_findings": 6,
+      "overstated_basis_including_invalid_diagnostics": 2,
+      "paths": 8,
+      "semantic_pass": 5,
+      "unsupported_findings_including_invalid_diagnostics": 2,
+      "valid_abstentions": 0
+    },
+    "assertion_misleading": {
+      "covered_concerns": 2,
+      "failures": [
+        "case-6-repeat-0-assertion_misleading",
+        "case-7-repeat-0-assertion_misleading",
+        "case-2-repeat-0-assertion_misleading",
+        "case-3-repeat-0-assertion_misleading"
+      ],
+      "fully_valid_findings": 2,
+      "invented_facts_including_invalid_diagnostics": 1,
+      "material_concerns": 4,
+      "mechanically_valid_findings": 8,
+      "overstated_basis_including_invalid_diagnostics": 6,
+      "paths": 8,
+      "semantic_pass": 4,
+      "unsupported_findings_including_invalid_diagnostics": 6,
+      "valid_abstentions": 0
+    },
+    "baseline_direct": {
+      "covered_concerns": 3,
+      "failures": [
+        "case-6-repeat-0-baseline_direct",
+        "case-5-repeat-0-baseline_direct",
+        "case-2-repeat-0-baseline_direct",
+        "case-0-repeat-0-baseline_direct",
+        "case-7-repeat-0-baseline_direct",
+        "case-3-repeat-0-baseline_direct"
+      ],
+      "fully_valid_findings": 3,
+      "invented_facts_including_invalid_diagnostics": 2,
+      "material_concerns": 4,
+      "mechanically_valid_findings": 12,
+      "overstated_basis_including_invalid_diagnostics": 7,
+      "paths": 8,
+      "semantic_pass": 2,
+      "unsupported_findings_including_invalid_diagnostics": 8,
+      "valid_abstentions": 0
+    },
+    "baseline_live_jev": {
+      "covered_concerns": 4,
+      "failures": [
+        "case-7-repeat-0-baseline_live_jev",
+        "case-6-repeat-0-baseline_live_jev",
+        "case-2-repeat-0-baseline_live_jev"
+      ],
+      "fully_valid_findings": 4,
+      "invented_facts_including_invalid_diagnostics": 0,
+      "material_concerns": 4,
+      "mechanically_valid_findings": 8,
+      "overstated_basis_including_invalid_diagnostics": 4,
+      "paths": 8,
+      "semantic_pass": 5,
+      "unsupported_findings_including_invalid_diagnostics": 4,
+      "valid_abstentions": 0
+    },
+    "baseline_misleading": {
+      "covered_concerns": 2,
+      "failures": [
+        "case-2-repeat-0-baseline_misleading",
+        "case-6-repeat-0-baseline_misleading",
+        "case-5-repeat-0-baseline_misleading",
+        "case-4-repeat-0-baseline_misleading",
+        "case-7-repeat-0-baseline_misleading",
+        "case-3-repeat-0-baseline_misleading"
+      ],
+      "fully_valid_findings": 2,
+      "invented_facts_including_invalid_diagnostics": 1,
+      "material_concerns": 4,
+      "mechanically_valid_findings": 9,
+      "overstated_basis_including_invalid_diagnostics": 8,
+      "paths": 8,
+      "semantic_pass": 2,
+      "unsupported_findings_including_invalid_diagnostics": 7,
+      "valid_abstentions": 0
+    }
+  },
+  "comparisons": {
+    "assertion_direct__to__assertion_live_jev": {
+      "changes": [
+        {
+          "after_pass": false,
+          "before_pass": false,
+          "case_id": "hf-006",
+          "new_defect_targets": [
+            [
+              "/content",
+              "invented_fact"
+            ]
+          ],
+          "new_missed_concerns": [
+            "hf-006-concern-1"
+          ],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": false,
+          "case_id": "hf-009",
+          "new_defect_targets": [
+            [
+              "/content",
+              "overstated_basis"
+            ],
+            [
+              "/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "hf-010",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "hf-018",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "hf-024",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        }
+      ],
+      "new_defect_target_paths": 2,
+      "new_missed_concern_paths": 1,
+      "semantic_improvements": 3,
+      "semantic_regressions": 0
+    },
+    "assertion_direct__to__assertion_misleading": {
+      "changes": [
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "hf-006",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": false,
+          "case_id": "hf-009",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "invented_fact"
+            ],
+            [
+              "/content",
+              "overstated_basis"
+            ],
+            [
+              "/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": false,
+          "case_id": "hf-010",
+          "new_defect_targets": [],
+          "new_missed_concerns": [
+            "hf-010-concern-1"
+          ],
+          "repeat": 0
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "hf-018",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": false,
+          "case_id": "hf-023",
+          "new_defect_targets": [
+            [
+              "/content",
+              "overstated_basis"
+            ],
+            [
+              "/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": false,
+          "case_id": "hf-024",
+          "new_defect_targets": [],
+          "new_missed_concerns": [
+            "hf-024-concern-1"
+          ],
+          "repeat": 0
+        }
+      ],
+      "new_defect_target_paths": 2,
+      "new_missed_concern_paths": 2,
+      "semantic_improvements": 2,
+      "semantic_regressions": 0
+    },
+    "baseline_direct__to__assertion_direct": {
+      "changes": [
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "hf-005",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": true,
+          "case_id": "hf-006",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "invented_fact"
+            ],
+            [
+              "/claim_records/0/content",
+              "overstated_basis"
+            ],
+            [
+              "/claim_records/0/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [],
+          "repeat": 0
+        }
+      ],
+      "new_defect_target_paths": 1,
+      "new_missed_concern_paths": 0,
+      "semantic_improvements": 1,
+      "semantic_regressions": 1
+    },
+    "baseline_direct__to__baseline_live_jev": {
+      "changes": [
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "hf-005",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "hf-010",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "hf-018",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        }
+      ],
+      "new_defect_target_paths": 0,
+      "new_missed_concern_paths": 0,
+      "semantic_improvements": 3,
+      "semantic_regressions": 0
+    },
+    "baseline_direct__to__baseline_misleading": {
+      "changes": [
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "hf-005",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": false,
+          "case_id": "hf-010",
+          "new_defect_targets": [],
+          "new_missed_concerns": [
+            "hf-010-concern-1"
+          ],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": true,
+          "case_id": "hf-017",
+          "new_defect_targets": [
+            [
+              "/content",
+              "overstated_basis"
+            ],
+            [
+              "/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [],
+          "repeat": 0
+        }
+      ],
+      "new_defect_target_paths": 1,
+      "new_missed_concern_paths": 1,
+      "semantic_improvements": 1,
+      "semantic_regressions": 1
+    },
+    "baseline_live_jev__to__assertion_live_jev": {
+      "changes": [
+        {
+          "after_pass": false,
+          "before_pass": true,
+          "case_id": "hf-006",
+          "new_defect_targets": [
+            [
+              "/content",
+              "invented_fact"
+            ]
+          ],
+          "new_missed_concerns": [
+            "hf-006-concern-1"
+          ],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": false,
+          "case_id": "hf-009",
+          "new_defect_targets": [
+            [
+              "/content",
+              "overstated_basis"
+            ],
+            [
+              "/content",
+              "unsupported_concern"
+            ]
+          ],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "hf-024",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        }
+      ],
+      "new_defect_target_paths": 2,
+      "new_missed_concern_paths": 1,
+      "semantic_improvements": 1,
+      "semantic_regressions": 1
+    },
+    "baseline_misleading__to__assertion_misleading": {
+      "changes": [
+        {
+          "after_pass": false,
+          "before_pass": false,
+          "case_id": "hf-009",
+          "new_defect_targets": [
+            [
+              "/claim_records/0/content",
+              "invented_fact"
+            ]
+          ],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "hf-017",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": true,
+          "before_pass": false,
+          "case_id": "hf-018",
+          "new_defect_targets": [],
+          "new_missed_concerns": [],
+          "repeat": 0
+        },
+        {
+          "after_pass": false,
+          "before_pass": false,
+          "case_id": "hf-024",
+          "new_defect_targets": [],
+          "new_missed_concerns": [
+            "hf-024-concern-1"
+          ],
+          "repeat": 0
+        }
+      ],
+      "new_defect_target_paths": 1,
+      "new_missed_concern_paths": 1,
+      "semantic_improvements": 2,
+      "semantic_regressions": 0
+    }
+  },
+  "limits": [
+    "Defect-target differences are diagnostics, not a complete semantic equivalence test of critique wording. No-new-harm requires inspecting actual changed findings.",
+    "Mechanical errors have zero applied findings and zero semantic credit; their prose diagnoses remain in arm totals explicitly marked including_invalid_diagnostics.",
+    "Same-family arm-blind review of clustered synthetic cases; no production qualification."
+  ],
+  "map_sha256": "4b0fb3f40e7b057789319883b6bb688b71de7fba6dd651f73ffec58aeb2e1375",
+  "review_sha256": "fd3250bf5d8212f9edc13f47527c99d6c8425a0aaac593abf5857cd4dd68b4c5"
+}

@@ -1,0 +1,9 @@
+{
+  "moon.yml": "f7ad4cab0fe7b9f93837c1c4e62716ffb91a519d6e1e3a4cc9d09ab891aae8aa",
+  "benchmarks/jev_revalidation/fast_critic.py": "ba9f58c9f3db7b53ba915b045de5b50798071ed0423b6cbbc9b5c4a23ff15a39",
+  "benchmarks/jev_revalidation/heldout_fast.py": "5d2cd651290f2e88a28b13d05e8f68933985affae50d03b62e575bd7c26dc986",
+  "benchmarks/jev_revalidation/assertion_critic.py": "c7a934677d6ba55de2ff8ff89dc6f27326db91ff7f0561f95a982b14cbe0c37d",
+  "benchmarks/jev_revalidation/assertion_study.py": "86dbea47b99820caa11f69452b05b33f71f18cc56338e813ab8a9d6e3b323aed",
+  "benchmarks/jev_revalidation/test_assertion_critic.py": "97aa89a1ffb5702a84c08e7b1ac6c757d7809d7a53078ba94e31bee24c96dfe3",
+  "benchmarks/jev_revalidation/test_assertion_study.py": "c0cd8004a3c1137feabb56db96958c889c4ea43b505bb17e35ae7f05d3c79f2b"
+}

@@ -1,0 +1,1192 @@
+{
+  "metadata": {
+    "reviewer": "Independent contextual same-family agent, not human gold or cross-family review",
+    "blinding": "Read only retained blind cases, rubric, responses and binding. No new arm map, raw live receipts, summary, timing or costs read; no arm assignment inferred.",
+    "prior_exposure": "Prior experiments and their outputs, current fixture source review and new contract/code preflight were known. The retained corpus is diagnostic, not heldout; the fresh cohort must be reported separately.",
+    "rule": "Unchanged strict clause-level rubric, exact assertion target, supported-neighbor protection, unchanged mechanical errors. Later correct language cannot repair an unsupported categorical clause.",
+    "field_definitions": {
+      "core_concern_supported": "The exact target has the identified frozen material concern; other finding defects are scored separately.",
+      "citations_relevant": "Original citations address the proposition; relevance does not warrant a spurious criticism.",
+      "basis_overstates_evidence": "Typed basis or prose asserts a contradiction/disproof not established by sources.",
+      "unsupported_replacement": "Unsupported proposed correction or auxiliary factual clause.",
+      "concern_ids": "Frozen concerns addressed by the core; only fully valid findings contribute coverage.",
+      "covered_concern_ids": "Unique fully valid concern findings in mechanically valid output, never mechanical-error prose.",
+      "missed_concern_ids": "Frozen concerns not covered by fully valid findings, separate from valid abstention.",
+      "semantic_pass": "Allowed mechanically valid action, complete fully valid concern coverage and no spurious or unsupported findings."
+    },
+    "input_bindings": {
+      "cases.json": "4b0788f9780409c448a7e636d9e89dc050fd9ec8669ef62a986c5116e870324c",
+      "rubric.json": "2fa0bc73a1992cf790273af5fcc16296be4fe2fe69f8c59b261df3e07cd592d1",
+      "responses.json": "9ad82a87cc6305ba7078a10ba68cbf2b9d8ad2e35e3828f35540d5a368c8ba30",
+      "binding.json": "82bb3503d9497fd7448996dc4a082f3ecd8fe69ceaf70bcf56feafb475fb101b"
+    },
+    "supplied_binding": {
+      "rows_sha256": "9cc950905d064a58df7bcca1e1a61ad74f1bd5e8c97f23aad263c2dc67674912",
+      "files_sha256": {
+        "rubric.json": "2fa0bc73a1992cf790273af5fcc16296be4fe2fe69f8c59b261df3e07cd592d1",
+        "responses.json": "9ad82a87cc6305ba7078a10ba68cbf2b9d8ad2e35e3828f35540d5a368c8ba30",
+        "cases.json": "4b0788f9780409c448a7e636d9e89dc050fd9ec8669ef62a986c5116e870324c"
+      },
+      "blind_map_sha256": "4b0fb3f40e7b057789319883b6bb688b71de7fba6dd651f73ffec58aeb2e1375"
+    },
+    "ambiguous_items": [
+      {
+        "case_id": "hf-018",
+        "blind_ids": [
+          "8412b2694e76f02b",
+          "8de040a8630899ca",
+          "95dc91bf25f40384"
+        ],
+        "primary": "Strict recorded-versus-occurred interpretation rejects the dropped qualification.",
+        "alternative": "Treat the web-editor channel as a closed world for actual writes. The two mechanically valid outputs could pass; the mechanical error still receives no coverage or semantic pass."
+      }
+    ],
+    "artifact_notes": [
+      "The unchanged copied rubric mentions twelve pairs/twenty-four cases from its original corpus. This retained subset contains eight cases/four matched pairs; that stale descriptive cardinality is not used for scoring."
+    ],
+    "coverage": {
+      "responses": 48,
+      "cases": 8,
+      "unique_blind_ids": 48,
+      "all_findings_reviewed": 53,
+      "scheduled_material_concern_instances": 24,
+      "mechanical_errors_retained": 1,
+      "arm_mapping_read": false
+    }
+  },
+  "annotations": [
+    {
+      "blind_id": "00c1d14bda60f41b",
+      "case_id": "hf-024",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-024-concern-1"
+          ],
+          "note": "The payload subtotal was presented as the complete upload total despite the expressly additional manifest. The finding identifies that exact defect with original evidence and no unsupported contrary fact."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The separate frame-payload subtotal correctly states twenty-four KiB. The wrong complete-upload total does not invalidate that supported neighboring assertion."
+        }
+      ],
+      "covered_concern_ids": [
+        "hf-024-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "The output contains an unsupported finding or fails to cover every material concern with fully valid findings."
+    },
+    {
+      "blind_id": "b9ee16bf197657d1",
+      "case_id": "hf-023",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The candidate correctly separates the twenty-four-KiB frame payload from the twenty-seven-KiB complete upload. Both counts and scopes are supported."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The candidate correctly separates the twenty-four-KiB frame payload from the twenty-seven-KiB complete upload. Both counts and scopes are supported."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "The output contains an unsupported finding or fails to cover every material concern with fully valid findings."
+    },
+    {
+      "blind_id": "95dc91bf25f40384",
+      "case_id": "hf-018",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": true,
+          "concern_ids": [
+            "hf-018-concern-1"
+          ],
+          "note": "The all-client scope concern is supported. The critique or proposed replacement drops recorded and asserts actual absence of web-editor writes. The source closes the recorded-event export, not necessarily all actual writes. Strict primary scoring rejects this replacement; a closed-channel interpretation is preserved as a sensitivity. An error output remains an error under either interpretation."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "hf-018-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "The output contains an unsupported finding or fails to cover every material concern with fully valid findings."
+    },
+    {
+      "blind_id": "529be1fdf6b3370d",
+      "case_id": "hf-018",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-018-concern-1"
+          ],
+          "note": "An empty export for one channel was treated as proof of no writes across unobserved channels. The finding identifies that exact defect with original evidence and no unsupported contrary fact."
+        }
+      ],
+      "covered_concern_ids": [
+        "hf-018-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Complete source-grounded concern coverage with no unsupported extra findings."
+    },
+    {
+      "blind_id": "28527e64692c6ab1",
+      "case_id": "hf-023",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The candidate correctly separates the twenty-four-KiB frame payload from the twenty-seven-KiB complete upload. Both counts and scopes are supported."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The candidate correctly separates the twenty-four-KiB frame payload from the twenty-seven-KiB complete upload. Both counts and scopes are supported."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "The output contains an unsupported finding or fails to cover every material concern with fully valid findings."
+    },
+    {
+      "blind_id": "3cf8e750210f4c09",
+      "case_id": "hf-009",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "Staging compaction and production release r8 are explicitly and separately scoped. Omitting other configuration details does not contradict either bounded assertion."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "The output contains an unsupported finding or fails to cover every material concern with fully valid findings."
+    },
+    {
+      "blind_id": "3d5ee183a5dc0b85",
+      "case_id": "hf-009",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "Staging compaction and production release r8 are explicitly and separately scoped. Omitting other configuration details does not contradict either bounded assertion."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "The output contains an unsupported finding or fails to cover every material concern with fully valid findings."
+    },
+    {
+      "blind_id": "176ca68dd5643a67",
+      "case_id": "hf-009",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "Staging compaction and production release r8 are explicitly and separately scoped. Omitting other configuration details does not contradict either bounded assertion."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "Staging compaction and production release r8 are explicitly and separately scoped. Omitting other configuration details does not contradict either bounded assertion."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "The output contains an unsupported finding or fails to cover every material concern with fully valid findings."
+    },
+    {
+      "blind_id": "4bc22dd11fd40d00",
+      "case_id": "hf-017",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern output correctly preserves the supported assertions."
+    },
+    {
+      "blind_id": "22460737b8d148e6",
+      "case_id": "hf-023",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The candidate correctly separates the twenty-four-KiB frame payload from the twenty-seven-KiB complete upload. Both counts and scopes are supported."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The candidate correctly separates the twenty-four-KiB frame payload from the twenty-seven-KiB complete upload. Both counts and scopes are supported."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "The output contains an unsupported finding or fails to cover every material concern with fully valid findings."
+    },
+    {
+      "blind_id": "571d3d8106021102",
+      "case_id": "hf-024",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The separate frame-payload subtotal correctly states twenty-four KiB. The wrong complete-upload total does not invalidate that supported neighboring assertion."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "hf-024-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "The output contains an unsupported finding or fails to cover every material concern with fully valid findings."
+    },
+    {
+      "blind_id": "867b2cfcc04a313f",
+      "case_id": "hf-017",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern output correctly preserves the supported assertions."
+    },
+    {
+      "blind_id": "48370d48fec747ce",
+      "case_id": "hf-017",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern output correctly preserves the supported assertions."
+    },
+    {
+      "blind_id": "594dfd15e80dedc9",
+      "case_id": "hf-009",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "Staging compaction and production release r8 are explicitly and separately scoped. Omitting other configuration details does not contradict either bounded assertion."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "Staging compaction and production release r8 are explicitly and separately scoped. Omitting other configuration details does not contradict either bounded assertion."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "The output contains an unsupported finding or fails to cover every material concern with fully valid findings."
+    },
+    {
+      "blind_id": "604088d66a7934d7",
+      "case_id": "hf-006",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-006-concern-1"
+          ],
+          "note": "A co-occurring package change was assigned a causal effect despite changed workload and capacity and no causal comparison. The finding identifies that exact defect with original evidence and no unsupported contrary fact."
+        }
+      ],
+      "covered_concern_ids": [
+        "hf-006-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Complete source-grounded concern coverage with no unsupported extra findings."
+    },
+    {
+      "blind_id": "92a0251f83423ac2",
+      "case_id": "hf-005",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": true,
+          "concern_ids": [],
+          "note": "The candidate reports temporal order and a worker-count observation, not causality. Neither supported assertion requires a finding about imagined causal implications. The additional assertion that shorter queries would naturally reduce time independently of the upgrade is not established by the supplied diary."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The candidate reports temporal order and a worker-count observation, not causality. Neither supported assertion requires a finding about imagined causal implications."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "The output contains an unsupported finding or fails to cover every material concern with fully valid findings."
+    },
+    {
+      "blind_id": "434285d22323a121",
+      "case_id": "hf-024",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-024-concern-1"
+          ],
+          "note": "The payload subtotal was presented as the complete upload total despite the expressly additional manifest. The finding identifies that exact defect with original evidence and no unsupported contrary fact."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The separate frame-payload subtotal correctly states twenty-four KiB. The wrong complete-upload total does not invalidate that supported neighboring assertion."
+        }
+      ],
+      "covered_concern_ids": [
+        "hf-024-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "The output contains an unsupported finding or fails to cover every material concern with fully valid findings."
+    },
+    {
+      "blind_id": "8412b2694e76f02b",
+      "case_id": "hf-018",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": true,
+          "concern_ids": [
+            "hf-018-concern-1"
+          ],
+          "note": "The all-client scope concern is supported. The critique or proposed replacement drops recorded and asserts actual absence of web-editor writes. The source closes the recorded-event export, not necessarily all actual writes. Strict primary scoring rejects this replacement; a closed-channel interpretation is preserved as a sensitivity. An error output remains an error under either interpretation."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "hf-018-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "The output contains an unsupported finding or fails to cover every material concern with fully valid findings."
+    },
+    {
+      "blind_id": "3348fce41fcc241e",
+      "case_id": "hf-009",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": true,
+          "concern_ids": [],
+          "note": "Staging compaction and production release r8 are explicitly and separately scoped. Omitting other configuration details does not contradict either bounded assertion. No production rollout does not imply production was not running; the source explicitly reports it ran r8."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "Staging compaction and production release r8 are explicitly and separately scoped. Omitting other configuration details does not contradict either bounded assertion."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "The output contains an unsupported finding or fails to cover every material concern with fully valid findings."
+    },
+    {
+      "blind_id": "4ab446c0434243bf",
+      "case_id": "hf-017",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern output correctly preserves the supported assertions."
+    },
+    {
+      "blind_id": "0800362abe375743",
+      "case_id": "hf-023",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The candidate correctly separates the twenty-four-KiB frame payload from the twenty-seven-KiB complete upload. Both counts and scopes are supported."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "The output contains an unsupported finding or fails to cover every material concern with fully valid findings."
+    },
+    {
+      "blind_id": "d9f285f034ac6ef5",
+      "case_id": "hf-010",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-010-concern-1"
+          ],
+          "note": "The enabled setting from staging was incorrectly attributed to the separately attested production namespace. The finding identifies that exact defect with original evidence and no unsupported contrary fact."
+        }
+      ],
+      "covered_concern_ids": [
+        "hf-010-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Complete source-grounded concern coverage with no unsupported extra findings."
+    },
+    {
+      "blind_id": "a51badd4017382a0",
+      "case_id": "hf-024",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-024-concern-1"
+          ],
+          "note": "The payload subtotal was presented as the complete upload total despite the expressly additional manifest. The finding identifies that exact defect with original evidence and no unsupported contrary fact."
+        }
+      ],
+      "covered_concern_ids": [
+        "hf-024-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Complete source-grounded concern coverage with no unsupported extra findings."
+    },
+    {
+      "blind_id": "5f2ef8d37d034416",
+      "case_id": "hf-018",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-018-concern-1"
+          ],
+          "note": "An empty export for one channel was treated as proof of no writes across unobserved channels. The finding identifies that exact defect with original evidence and no unsupported contrary fact."
+        }
+      ],
+      "covered_concern_ids": [
+        "hf-018-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Complete source-grounded concern coverage with no unsupported extra findings."
+    },
+    {
+      "blind_id": "d6e07cd1960b6379",
+      "case_id": "hf-010",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The production release r8 claim is independently supported. A wrong production-compaction claim does not justify a finding against this correct neighboring version claim."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-010-concern-1"
+          ],
+          "note": "The enabled setting from staging was incorrectly attributed to the separately attested production namespace. The finding identifies that exact defect with original evidence and no unsupported contrary fact."
+        }
+      ],
+      "covered_concern_ids": [
+        "hf-010-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "The output contains an unsupported finding or fails to cover every material concern with fully valid findings."
+    },
+    {
+      "blind_id": "69987030dd25d0ad",
+      "case_id": "hf-005",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern output correctly preserves the supported assertions."
+    },
+    {
+      "blind_id": "9b4de91ad7ab6d28",
+      "case_id": "hf-010",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The production release r8 claim is independently supported. A wrong production-compaction claim does not justify a finding against this correct neighboring version claim."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "hf-010-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "The output contains an unsupported finding or fails to cover every material concern with fully valid findings."
+    },
+    {
+      "blind_id": "431e1080314778d1",
+      "case_id": "hf-023",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The candidate correctly separates the twenty-four-KiB frame payload from the twenty-seven-KiB complete upload. Both counts and scopes are supported."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The candidate correctly separates the twenty-four-KiB frame payload from the twenty-seven-KiB complete upload. Both counts and scopes are supported."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "The output contains an unsupported finding or fails to cover every material concern with fully valid findings."
+    },
+    {
+      "blind_id": "45c9e16f1d36f229",
+      "case_id": "hf-006",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-006-concern-1"
+          ],
+          "note": "A co-occurring package change was assigned a causal effect despite changed workload and capacity and no causal comparison. The finding identifies that exact defect with original evidence and no unsupported contrary fact."
+        }
+      ],
+      "covered_concern_ids": [
+        "hf-006-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Complete source-grounded concern coverage with no unsupported extra findings."
+    },
+    {
+      "blind_id": "32dbac301816f71c",
+      "case_id": "hf-009",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "Staging compaction and production release r8 are explicitly and separately scoped. Omitting other configuration details does not contradict either bounded assertion."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "The output contains an unsupported finding or fails to cover every material concern with fully valid findings."
+    },
+    {
+      "blind_id": "b465c4f67048fcb3",
+      "case_id": "hf-023",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The candidate correctly separates the twenty-four-KiB frame payload from the twenty-seven-KiB complete upload. Both counts and scopes are supported."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "The output contains an unsupported finding or fails to cover every material concern with fully valid findings."
+    },
+    {
+      "blind_id": "e10f35e34f6058b5",
+      "case_id": "hf-006",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": true,
+          "concern_ids": [
+            "hf-006-concern-1"
+          ],
+          "note": "The causal concern is supported, but the parenthetical that short queries independently reduce response time asserts a separate causal effect that the source leaves unmeasured. The strict clause-level rule invalidates this extra assertion."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "hf-006-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "The output contains an unsupported finding or fails to cover every material concern with fully valid findings."
+    },
+    {
+      "blind_id": "090955929224eaa7",
+      "case_id": "hf-010",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-010-concern-1"
+          ],
+          "note": "The enabled setting from staging was incorrectly attributed to the separately attested production namespace. The finding identifies that exact defect with original evidence and no unsupported contrary fact."
+        }
+      ],
+      "covered_concern_ids": [
+        "hf-010-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Complete source-grounded concern coverage with no unsupported extra findings."
+    },
+    {
+      "blind_id": "395cf0e81557a31f",
+      "case_id": "hf-018",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-018-concern-1"
+          ],
+          "note": "An empty export for one channel was treated as proof of no writes across unobserved channels. The finding identifies that exact defect with original evidence and no unsupported contrary fact."
+        }
+      ],
+      "covered_concern_ids": [
+        "hf-018-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Complete source-grounded concern coverage with no unsupported extra findings."
+    },
+    {
+      "blind_id": "d781dd6b66c90263",
+      "case_id": "hf-017",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern output correctly preserves the supported assertions."
+    },
+    {
+      "blind_id": "8de040a8630899ca",
+      "case_id": "hf-018",
+      "mechanical_action": "error",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": true,
+          "concern_ids": [
+            "hf-018-concern-1"
+          ],
+          "note": "The all-client scope concern is supported. The critique or proposed replacement drops recorded and asserts actual absence of web-editor writes. The source closes the recorded-event export, not necessarily all actual writes. Strict primary scoring rejects this replacement; a closed-channel interpretation is preserved as a sensitivity. An error output remains an error under either interpretation."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "hf-018-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "Mechanical error retained as failure with zero coverage; useful raw prose is diagnostic only and cannot repair the invalid basis."
+    },
+    {
+      "blind_id": "a96a14d1b0d32efa",
+      "case_id": "hf-006",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-006-concern-1"
+          ],
+          "note": "A co-occurring package change was assigned a causal effect despite changed workload and capacity and no causal comparison. The finding identifies that exact defect with original evidence and no unsupported contrary fact."
+        }
+      ],
+      "covered_concern_ids": [
+        "hf-006-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Complete source-grounded concern coverage with no unsupported extra findings."
+    },
+    {
+      "blind_id": "a57c2f05379f80f9",
+      "case_id": "hf-010",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-010-concern-1"
+          ],
+          "note": "The enabled setting from staging was incorrectly attributed to the separately attested production namespace. The finding identifies that exact defect with original evidence and no unsupported contrary fact."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The production release r8 claim is independently supported. A wrong production-compaction claim does not justify a finding against this correct neighboring version claim."
+        }
+      ],
+      "covered_concern_ids": [
+        "hf-010-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "The output contains an unsupported finding or fails to cover every material concern with fully valid findings."
+    },
+    {
+      "blind_id": "a36c8a63fa82d10b",
+      "case_id": "hf-024",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The separate frame-payload subtotal correctly states twenty-four KiB. The wrong complete-upload total does not invalidate that supported neighboring assertion."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-024-concern-1"
+          ],
+          "note": "The payload subtotal was presented as the complete upload total despite the expressly additional manifest. The finding identifies that exact defect with original evidence and no unsupported contrary fact."
+        }
+      ],
+      "covered_concern_ids": [
+        "hf-024-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "The output contains an unsupported finding or fails to cover every material concern with fully valid findings."
+    },
+    {
+      "blind_id": "ce06fe8553f0c25c",
+      "case_id": "hf-006",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-006-concern-1"
+          ],
+          "note": "A co-occurring package change was assigned a causal effect despite changed workload and capacity and no causal comparison. The finding identifies that exact defect with original evidence and no unsupported contrary fact."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": true,
+          "concern_ids": [],
+          "note": "The worker-count doubling is directly reported during the same window. Its separate causal effect being unmeasured does not undermine the count observation. The critique additionally says the evidence does not locate doubling within the window, contrary to the explicit during-the-same-window source wording."
+        }
+      ],
+      "covered_concern_ids": [
+        "hf-006-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "The output contains an unsupported finding or fails to cover every material concern with fully valid findings."
+    },
+    {
+      "blind_id": "fb6284d7ec9b275a",
+      "case_id": "hf-005",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern output correctly preserves the supported assertions."
+    },
+    {
+      "blind_id": "ceb362d9082d7579",
+      "case_id": "hf-005",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern output correctly preserves the supported assertions."
+    },
+    {
+      "blind_id": "bbf80b890d92b897",
+      "case_id": "hf-006",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-006-concern-1"
+          ],
+          "note": "A co-occurring package change was assigned a causal effect despite changed workload and capacity and no causal comparison. The finding identifies that exact defect with original evidence and no unsupported contrary fact."
+        }
+      ],
+      "covered_concern_ids": [
+        "hf-006-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Complete source-grounded concern coverage with no unsupported extra findings."
+    },
+    {
+      "blind_id": "5ed6c3d83c561f9d",
+      "case_id": "hf-017",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The assertion explicitly limits itself to recorded web-editor events. Criticizing an imagined all-client claim discards its actual qualification."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "The output contains an unsupported finding or fails to cover every material concern with fully valid findings."
+    },
+    {
+      "blind_id": "af7e2afc7feb1ca4",
+      "case_id": "hf-024",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The separate frame-payload subtotal correctly states twenty-four KiB. The wrong complete-upload total does not invalidate that supported neighboring assertion."
+        },
+        {
+          "index": 1,
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-024-concern-1"
+          ],
+          "note": "The payload subtotal was presented as the complete upload total despite the expressly additional manifest. The finding identifies that exact defect with original evidence and no unsupported contrary fact."
+        }
+      ],
+      "covered_concern_ids": [
+        "hf-024-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "The output contains an unsupported finding or fails to cover every material concern with fully valid findings."
+    },
+    {
+      "blind_id": "2397c975d1406c16",
+      "case_id": "hf-010",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The production release r8 claim is independently supported. A wrong production-compaction claim does not justify a finding against this correct neighboring version claim."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "hf-010-concern-1"
+      ],
+      "valid_abstention": false,
+      "semantic_pass": false,
+      "note": "The output contains an unsupported finding or fails to cover every material concern with fully valid findings."
+    },
+    {
+      "blind_id": "91abea669dae9a4d",
+      "case_id": "hf-005",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern output correctly preserves the supported assertions."
+    },
+    {
+      "blind_id": "e5783e113b9bb7fe",
+      "case_id": "hf-005",
+      "mechanical_action": "accept",
+      "findings": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "semantic_pass": true,
+      "note": "Completed no-concern output correctly preserves the supported assertions."
+    }
+  ]
+}

@@ -1,0 +1,3753 @@
+[
+  {
+    "id": "case-0-repeat-0-assertion_direct",
+    "case_id": "hf-005",
+    "repeat": 0,
+    "arm": "assertion_direct",
+    "contract": "assertion",
+    "hint_mode": "direct",
+    "action": "accept",
+    "hints": [],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.002958",
+    "unknown_cost_calls": 0,
+    "service_ms": 1262.0516509923618,
+    "queue_ms": 0.006319009116850793,
+    "total_ms": 1262.0866840006784,
+    "started_at": "2026-09-20T17:31:13.654688+00:00",
+    "completed_at": "2026-09-20T17:31:14.916738+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2693,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.002958,
+      "output_tokens": 53,
+      "provider": "Anthropic",
+      "total_tokens": 2746,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "a33805f0df85793d2f80470f0d8df8a4e275a7a8a0622042cc7cbcac6ddc3e20"
+  },
+  {
+    "id": "case-0-repeat-0-baseline_direct",
+    "case_id": "hf-005",
+    "repeat": 0,
+    "arm": "baseline_direct",
+    "contract": "baseline",
+    "hint_mode": "direct",
+    "action": "flag",
+    "hints": [],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.004485",
+    "unknown_cost_calls": 0,
+    "service_ms": 3956.2394589884207,
+    "queue_ms": 0.00648699642624706,
+    "total_ms": 3956.275436998112,
+    "started_at": "2026-09-20T17:31:13.695976+00:00",
+    "completed_at": "2026-09-20T17:31:17.652215+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2245,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.004485,
+      "output_tokens": 448,
+      "provider": "Anthropic",
+      "total_tokens": 2693,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "f3c27a5c8e33a12529af1aa83b741333358753449524d0dd7046e19d6aa5251e",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "missing_condition",
+          "disposition": "qualify",
+          "critique": "The source explicitly states that 'the query mix shifted toward short queries' during the same monitoring window in which the median response time decreased. Shorter queries would naturally reduce response time independent of the parser upgrade. The claim attributes the lower response time to the parser upgrade without acknowledging this confounding factor that the source itself identifies."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "4d94f0eac2e690142fedd6ef8c63f9652d110498348f8a8bc3cc72acd8399669",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "missing_condition",
+          "disposition": "qualify",
+          "critique": "The source confirms the worker count doubled during the same monitoring window. However, the source also explicitly notes that the diary 'contains no matched-load test, rollback comparison or causal attribution' and that 'their separate effects [are] unmeasured.' The claim presents a factual count change but lacks acknowledgment that its relationship to other changes (including the parser upgrade) remains causally unattributed in the source itself."
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "32bc90d0c6d89c37e3af8603ff89e0ebd1484a6ce1fc1386419ddce91b3e029f"
+  },
+  {
+    "id": "case-0-repeat-0-assertion_live_jev",
+    "case_id": "hf-005",
+    "repeat": 0,
+    "arm": "assertion_live_jev",
+    "contract": "assertion",
+    "hint_mode": "live_jev",
+    "action": "accept",
+    "hints": [
+      {
+        "claim_path": "/claim_records/0/content",
+        "claim_sha256": "4d94f0eac2e690142fedd6ef8c63f9652d110498348f8a8bc3cc72acd8399669",
+        "value": "supported"
+      },
+      {
+        "claim_path": "/content",
+        "claim_sha256": "f3c27a5c8e33a12529af1aa83b741333358753449524d0dd7046e19d6aa5251e",
+        "value": "supported"
+      }
+    ],
+    "jev_observation": {
+      "answers": [
+        {
+          "primitive": "choice",
+          "probabilities": [
+            {
+              "label": "contradicted",
+              "probability": 0.0
+            },
+            {
+              "label": "supported",
+              "probability": 0.99
+            },
+            {
+              "label": "insufficient",
+              "probability": 0.01
+            },
+            {
+              "label": "ambiguous",
+              "probability": 0.0
+            }
+          ],
+          "provider_confidence": 0.99,
+          "question_id": "/claim_records/0/content",
+          "value": "supported"
+        },
+        {
+          "primitive": "choice",
+          "probabilities": [
+            {
+              "label": "contradicted",
+              "probability": 0.0
+            },
+            {
+              "label": "supported",
+              "probability": 0.99
+            },
+            {
+              "label": "insufficient",
+              "probability": 0.01
+            },
+            {
+              "label": "ambiguous",
+              "probability": 0.0
+            }
+          ],
+          "provider_confidence": 0.98,
+          "question_id": "/content",
+          "value": "supported"
+        }
+      ],
+      "attempt_count": 1,
+      "error_category": null,
+      "execution_status": "completed",
+      "input_tokens": 1350,
+      "observed_cost_usd": 5.67e-05,
+      "observed_provider": "TypeSafe",
+      "output_tokens": 110,
+      "provider_request_id": "gen-dec-1789925473-AIbk80uuHUXaUuuMeA4T",
+      "request_digest": "7b7c940b7f62ed3e183deb4dc34ab9a4a87504c4e882f17a4f6e55cbd48ea673",
+      "resolved_model_id": "typesafe/jev-1.13-20260917",
+      "schema_version": "sibyl-choice-observation-v1",
+      "semantic_input_sha256": "57b197fa013b6a862e44934dcb7e7f6703569152b5a93f3f935b12abd878feba",
+      "usage_status": "observed"
+    },
+    "stages": [
+      "jev",
+      "critic"
+    ],
+    "known_cost_usd": "0.0031327",
+    "unknown_cost_calls": 0,
+    "service_ms": 1026.9966539926827,
+    "queue_ms": 0.003806999302469194,
+    "total_ms": 1027.0295040099882,
+    "started_at": "2026-09-20T17:31:13.699067+00:00",
+    "completed_at": "2026-09-20T17:31:14.726064+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2811,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.003076,
+      "output_tokens": 53,
+      "provider": "Anthropic",
+      "total_tokens": 2864,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "fbc897159921e4ddf055550afd950ade37225d380f765f7b314dc79dec2074f4"
+  },
+  {
+    "id": "case-0-repeat-0-assertion_misleading",
+    "case_id": "hf-005",
+    "repeat": 0,
+    "arm": "assertion_misleading",
+    "contract": "assertion",
+    "hint_mode": "misleading",
+    "action": "accept",
+    "hints": [
+      {
+        "claim_path": "/claim_records/0/content",
+        "claim_sha256": "4d94f0eac2e690142fedd6ef8c63f9652d110498348f8a8bc3cc72acd8399669",
+        "value": "contradicted"
+      },
+      {
+        "claim_path": "/content",
+        "claim_sha256": "f3c27a5c8e33a12529af1aa83b741333358753449524d0dd7046e19d6aa5251e",
+        "value": "contradicted"
+      }
+    ],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.003078",
+    "unknown_cost_calls": 0,
+    "service_ms": 952.3379430029308,
+    "queue_ms": 0.002764994860626757,
+    "total_ms": 952.3625709989574,
+    "started_at": "2026-09-20T17:31:13.701114+00:00",
+    "completed_at": "2026-09-20T17:31:14.653453+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2813,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.003078,
+      "output_tokens": 53,
+      "provider": "Anthropic",
+      "total_tokens": 2866,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "79d4fec83528e7fedae95f94a088e302fb400600b2888f2d3bfca793f0d39570"
+  },
+  {
+    "id": "case-0-repeat-0-baseline_live_jev",
+    "case_id": "hf-005",
+    "repeat": 0,
+    "arm": "baseline_live_jev",
+    "contract": "baseline",
+    "hint_mode": "live_jev",
+    "action": "accept",
+    "hints": [
+      {
+        "claim_path": "/claim_records/0/content",
+        "claim_sha256": "4d94f0eac2e690142fedd6ef8c63f9652d110498348f8a8bc3cc72acd8399669",
+        "value": "supported"
+      },
+      {
+        "claim_path": "/content",
+        "claim_sha256": "f3c27a5c8e33a12529af1aa83b741333358753449524d0dd7046e19d6aa5251e",
+        "value": "supported"
+      }
+    ],
+    "jev_observation": {
+      "answers": [
+        {
+          "primitive": "choice",
+          "probabilities": [
+            {
+              "label": "contradicted",
+              "probability": 0.0
+            },
+            {
+              "label": "ambiguous",
+              "probability": 0.0
+            },
+            {
+              "label": "supported",
+              "probability": 0.99
+            },
+            {
+              "label": "insufficient",
+              "probability": 0.01
+            }
+          ],
+          "provider_confidence": 0.99,
+          "question_id": "/claim_records/0/content",
+          "value": "supported"
+        },
+        {
+          "primitive": "choice",
+          "probabilities": [
+            {
+              "label": "contradicted",
+              "probability": 0.0
+            },
+            {
+              "label": "ambiguous",
+              "probability": 0.0
+            },
+            {
+              "label": "supported",
+              "probability": 0.99
+            },
+            {
+              "label": "insufficient",
+              "probability": 0.01
+            }
+          ],
+          "provider_confidence": 0.98,
+          "question_id": "/content",
+          "value": "supported"
+        }
+      ],
+      "attempt_count": 1,
+      "error_category": null,
+      "execution_status": "completed",
+      "input_tokens": 1350,
+      "observed_cost_usd": 5.67e-05,
+      "observed_provider": "TypeSafe",
+      "output_tokens": 110,
+      "provider_request_id": "gen-dec-1789925473-7mPcSgSDxirLLgY8MpXM",
+      "request_digest": "87ce51ed964335ca8c86b6c678b8644daaef36f8ef7514713989e99fbe67cdd7",
+      "resolved_model_id": "typesafe/jev-1.13-20260917",
+      "schema_version": "sibyl-choice-observation-v1",
+      "semantic_input_sha256": "57b197fa013b6a862e44934dcb7e7f6703569152b5a93f3f935b12abd878feba",
+      "usage_status": "observed"
+    },
+    "stages": [
+      "jev",
+      "critic"
+    ],
+    "known_cost_usd": "0.0026847",
+    "unknown_cost_calls": 0,
+    "service_ms": 1038.1012600118993,
+    "queue_ms": 0.0032899988582357764,
+    "total_ms": 1038.128628002596,
+    "started_at": "2026-09-20T17:31:13.704366+00:00",
+    "completed_at": "2026-09-20T17:31:14.742468+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2363,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.002628,
+      "output_tokens": 53,
+      "provider": "Anthropic",
+      "total_tokens": 2416,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "553cf31babfca8aeb969573ed3135283a2d27a99802121defea9dc4739e6d94c"
+  },
+  {
+    "id": "case-0-repeat-0-baseline_misleading",
+    "case_id": "hf-005",
+    "repeat": 0,
+    "arm": "baseline_misleading",
+    "contract": "baseline",
+    "hint_mode": "misleading",
+    "action": "accept",
+    "hints": [
+      {
+        "claim_path": "/claim_records/0/content",
+        "claim_sha256": "4d94f0eac2e690142fedd6ef8c63f9652d110498348f8a8bc3cc72acd8399669",
+        "value": "contradicted"
+      },
+      {
+        "claim_path": "/content",
+        "claim_sha256": "f3c27a5c8e33a12529af1aa83b741333358753449524d0dd7046e19d6aa5251e",
+        "value": "contradicted"
+      }
+    ],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.00263",
+    "unknown_cost_calls": 0,
+    "service_ms": 928.1514400063315,
+    "queue_ms": 0.002735003363341093,
+    "total_ms": 928.1779159937287,
+    "started_at": "2026-09-20T17:31:13.706307+00:00",
+    "completed_at": "2026-09-20T17:31:14.634460+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2365,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.00263,
+      "output_tokens": 53,
+      "provider": "Anthropic",
+      "total_tokens": 2418,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "3656b45a7cb7b4802a5227a01ea6c3dcc6ba6b1e7c053c19969dd0640f53ccc6"
+  },
+  {
+    "id": "case-4-repeat-0-assertion_live_jev",
+    "case_id": "hf-017",
+    "repeat": 0,
+    "arm": "assertion_live_jev",
+    "contract": "assertion",
+    "hint_mode": "live_jev",
+    "action": "accept",
+    "hints": [
+      {
+        "claim_path": "/content",
+        "claim_sha256": "0f4027c5cf51f4fe7e4e814b7f8601cb8c77643377d542464fe541c581c41a12",
+        "value": "supported"
+      }
+    ],
+    "jev_observation": {
+      "answers": [
+        {
+          "primitive": "choice",
+          "probabilities": [
+            {
+              "label": "insufficient",
+              "probability": 0.04
+            },
+            {
+              "label": "supported",
+              "probability": 0.95
+            },
+            {
+              "label": "contradicted",
+              "probability": 0.0
+            },
+            {
+              "label": "ambiguous",
+              "probability": 0.01
+            }
+          ],
+          "provider_confidence": 0.93,
+          "question_id": "/content",
+          "value": "supported"
+        }
+      ],
+      "attempt_count": 1,
+      "error_category": null,
+      "execution_status": "completed",
+      "input_tokens": 943,
+      "observed_cost_usd": 3.9606e-05,
+      "observed_provider": "TypeSafe",
+      "output_tokens": 55,
+      "provider_request_id": "gen-dec-1789925473-vSFhIjFAblpuJfrEie1g",
+      "request_digest": "a352e6b71c6557b994dfa6399c1f2d6d2ca412489e276bc3f972afac2ae5ac7d",
+      "resolved_model_id": "typesafe/jev-1.13-20260917",
+      "schema_version": "sibyl-choice-observation-v1",
+      "semantic_input_sha256": "98dd5c5efdf8608ec3a29202fea5b7e049d6df4763ddbbe52b130a68e2923f3f",
+      "usage_status": "observed"
+    },
+    "stages": [
+      "jev",
+      "critic"
+    ],
+    "known_cost_usd": "0.002843606",
+    "unknown_cost_calls": 0,
+    "service_ms": 1025.2556659979746,
+    "queue_ms": 0.003278997610323131,
+    "total_ms": 1025.2812859980622,
+    "started_at": "2026-09-20T17:31:13.709058+00:00",
+    "completed_at": "2026-09-20T17:31:14.734314+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2539,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.002804,
+      "output_tokens": 53,
+      "provider": "Anthropic",
+      "total_tokens": 2592,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "cef6dc38f1a7a6d9efb1ee6854dd0858a8d25b3699b56e90e57af610744b5534"
+  },
+  {
+    "id": "case-4-repeat-0-baseline_misleading",
+    "case_id": "hf-017",
+    "repeat": 0,
+    "arm": "baseline_misleading",
+    "contract": "baseline",
+    "hint_mode": "misleading",
+    "action": "flag",
+    "hints": [
+      {
+        "claim_path": "/content",
+        "claim_sha256": "0f4027c5cf51f4fe7e4e814b7f8601cb8c77643377d542464fe541c581c41a12",
+        "value": "contradicted"
+      }
+    ],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.003642",
+    "unknown_cost_calls": 0,
+    "service_ms": 3059.4229200069094,
+    "queue_ms": 0.0027220085030421615,
+    "total_ms": 3059.447966996231,
+    "started_at": "2026-09-20T17:31:13.710713+00:00",
+    "completed_at": "2026-09-20T17:31:16.770137+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2092,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.003642,
+      "output_tokens": 310,
+      "provider": "Anthropic",
+      "total_tokens": 2402,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "0f4027c5cf51f4fe7e4e814b7f8601cb8c77643377d542464fe541c581c41a12",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "qualify",
+          "critique": "The candidate claims 'No web-editor write event was recorded for repository Delta during the interval.' The source (s0) confirms this observation for web-editor events specifically. However, the source explicitly qualifies this finding: 'Command-line and service-token clients write through separate audit channels omitted from this export. The export provides no observations about those channels and makes no claim about the total number of repository writes.' The candidate's claim makes an absolute assertion about the interval without acknowledging this critical limitation. The evidence supports the narrower claim about web-editor writes specifically, but the candidate presents it as a universal claim about the interval without the necessary qualification about other write channels that may have occurred but were not audited in this export."
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "47c0081854100be70d6dce8d9e4eddfbf10974f15518382fd60bcfb86e1edb00"
+  },
+  {
+    "id": "case-4-repeat-0-baseline_direct",
+    "case_id": "hf-017",
+    "repeat": 0,
+    "arm": "baseline_direct",
+    "contract": "baseline",
+    "hint_mode": "direct",
+    "action": "accept",
+    "hints": [],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.002299",
+    "unknown_cost_calls": 0,
+    "service_ms": 979.3990979960654,
+    "queue_ms": 921.5795759955654,
+    "total_ms": 1901.003794002463,
+    "started_at": "2026-09-20T17:31:14.635003+00:00",
+    "completed_at": "2026-09-20T17:31:15.614403+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2034,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.002299,
+      "output_tokens": 53,
+      "provider": "Anthropic",
+      "total_tokens": 2087,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "1db3ee36ca549cb30d1e8461eaf9eeee1ed6a9edd646b0bc6f46e619dcc26640"
+  },
+  {
+    "id": "case-4-repeat-0-baseline_live_jev",
+    "case_id": "hf-017",
+    "repeat": 0,
+    "arm": "baseline_live_jev",
+    "contract": "baseline",
+    "hint_mode": "live_jev",
+    "action": "accept",
+    "hints": [
+      {
+        "claim_path": "/content",
+        "claim_sha256": "0f4027c5cf51f4fe7e4e814b7f8601cb8c77643377d542464fe541c581c41a12",
+        "value": "supported"
+      }
+    ],
+    "jev_observation": {
+      "answers": [
+        {
+          "primitive": "choice",
+          "probabilities": [
+            {
+              "label": "contradicted",
+              "probability": 0.0
+            },
+            {
+              "label": "ambiguous",
+              "probability": 0.01
+            },
+            {
+              "label": "insufficient",
+              "probability": 0.03
+            },
+            {
+              "label": "supported",
+              "probability": 0.96
+            }
+          ],
+          "provider_confidence": 0.95,
+          "question_id": "/content",
+          "value": "supported"
+        }
+      ],
+      "attempt_count": 1,
+      "error_category": null,
+      "execution_status": "completed",
+      "input_tokens": 943,
+      "observed_cost_usd": 3.9606e-05,
+      "observed_provider": "TypeSafe",
+      "output_tokens": 55,
+      "provider_request_id": "gen-dec-1789925474-68U6Q0HHLyV3WYG7ZCWt",
+      "request_digest": "f1dd182056092784ecae5d990ab9ba64bea43ac91e9a7232a1b50a9fe6e87918",
+      "resolved_model_id": "typesafe/jev-1.13-20260917",
+      "schema_version": "sibyl-choice-observation-v1",
+      "semantic_input_sha256": "98dd5c5efdf8608ec3a29202fea5b7e049d6df4763ddbbe52b130a68e2923f3f",
+      "usage_status": "observed"
+    },
+    "stages": [
+      "jev",
+      "critic"
+    ],
+    "known_cost_usd": "0.002395606",
+    "unknown_cost_calls": 0,
+    "service_ms": 901.0078120045364,
+    "queue_ms": 940.5622409976786,
+    "total_ms": 1841.6006679908605,
+    "started_at": "2026-09-20T17:31:14.653999+00:00",
+    "completed_at": "2026-09-20T17:31:15.555008+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2091,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.002356,
+      "output_tokens": 53,
+      "provider": "Anthropic",
+      "total_tokens": 2144,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "1a0eec2a13104871db18af028de7ae7d36b23ece0fb55eb1398512a9942f5133"
+  },
+  {
+    "id": "case-4-repeat-0-assertion_misleading",
+    "case_id": "hf-017",
+    "repeat": 0,
+    "arm": "assertion_misleading",
+    "contract": "assertion",
+    "hint_mode": "misleading",
+    "action": "accept",
+    "hints": [
+      {
+        "claim_path": "/content",
+        "claim_sha256": "0f4027c5cf51f4fe7e4e814b7f8601cb8c77643377d542464fe541c581c41a12",
+        "value": "contradicted"
+      }
+    ],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.002805",
+    "unknown_cost_calls": 0,
+    "service_ms": 742.2249660012312,
+    "queue_ms": 1013.2471840042854,
+    "total_ms": 1755.4958650143817,
+    "started_at": "2026-09-20T17:31:14.726689+00:00",
+    "completed_at": "2026-09-20T17:31:15.468915+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2540,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.002805,
+      "output_tokens": 53,
+      "provider": "Anthropic",
+      "total_tokens": 2593,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "1c0df20ddec799a8e0f3f8b13da839f8666b70510817e275fda95b7499b7aa93"
+  },
+  {
+    "id": "case-4-repeat-0-assertion_direct",
+    "case_id": "hf-017",
+    "repeat": 0,
+    "arm": "assertion_direct",
+    "contract": "assertion",
+    "hint_mode": "direct",
+    "action": "accept",
+    "hints": [],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.002747",
+    "unknown_cost_calls": 0,
+    "service_ms": 696.6645390057238,
+    "queue_ms": 1021.5564190002624,
+    "total_ms": 1718.2452289998764,
+    "started_at": "2026-09-20T17:31:14.735000+00:00",
+    "completed_at": "2026-09-20T17:31:15.431665+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2482,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.002747,
+      "output_tokens": 53,
+      "provider": "Anthropic",
+      "total_tokens": 2535,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "5f757f225d86c782e294bece9a895db34ed4522dcc2bed87686513cd66123471"
+  },
+  {
+    "id": "case-3-repeat-0-baseline_misleading",
+    "case_id": "hf-010",
+    "repeat": 0,
+    "arm": "baseline_misleading",
+    "contract": "baseline",
+    "hint_mode": "misleading",
+    "action": "flag",
+    "hints": [
+      {
+        "claim_path": "/claim_records/0/content",
+        "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+        "value": "contradicted"
+      },
+      {
+        "claim_path": "/content",
+        "claim_sha256": "7880e49c9bf5adacf3863eab8632be518979bd02a397c1968d9dc8848193e076",
+        "value": "supported"
+      }
+    ],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.003942",
+    "unknown_cost_calls": 0,
+    "service_ms": 4433.246145999874,
+    "queue_ms": 1029.7084199992241,
+    "total_ms": 5462.978630006546,
+    "started_at": "2026-09-20T17:31:14.743152+00:00",
+    "completed_at": "2026-09-20T17:31:19.176400+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2372,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.003942,
+      "output_tokens": 314,
+      "provider": "Anthropic",
+      "total_tokens": 2686,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The source attestation explicitly states 'Production ran release r8 with background compaction disabled.' However, the claim asserts 'Production ran release r8 at that checkpoint' without specifying the compaction status. More critically, the nested claim within claim_records/0 is presented as a standalone proposition, but the evidence indicates this statement is incomplete and misleading in isolation. The full attestation distinguishes production (r8, disabled) from staging (r9, enabled), and the claim omits the compaction context that is integral to the checkpoint configuration. This presents a factual contradiction regarding the complete state of the system.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "8a1c6ac465c83aee8c91981327d566f066a97d89e9022a72c8a32c42b3828ee6"
+  },
+  {
+    "id": "case-3-repeat-0-assertion_direct",
+    "case_id": "hf-010",
+    "repeat": 0,
+    "arm": "assertion_direct",
+    "contract": "assertion",
+    "hint_mode": "direct",
+    "action": "flag",
+    "hints": [],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.004974",
+    "unknown_cost_calls": 0,
+    "service_ms": 3449.843738999334,
+    "queue_ms": 1203.8448649982456,
+    "total_ms": 4653.71311600029,
+    "started_at": "2026-09-20T17:31:14.917293+00:00",
+    "completed_at": "2026-09-20T17:31:18.367138+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2699,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.004974,
+      "output_tokens": 455,
+      "provider": "Anthropic",
+      "total_tokens": 3154,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The assertion states 'Production ran release r8 at that checkpoint.' The source confirms this fact for production's release version (r8). However, the source explicitly states 'Production ran release r8 with background compaction disabled,' not enabled. The assertion correctly identifies the release but is embedded in a candidate claim about background compaction being enabled in production, which the source contradicts. The release statement itself is accurate to the cited evidence."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "7880e49c9bf5adacf3863eab8632be518979bd02a397c1968d9dc8848193e076",
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The assertion claims 'At the checkpoint, background compaction was enabled in the production namespace.' The source directly contradicts this: 'Production ran release r8 with background compaction disabled.' The assertion incorrectly states the compaction status was enabled when the evidence establishes it was disabled in the production namespace."
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "573e427512fc646eccaf2f47b1e456622d42bed8eb39741ff473b05952c2ab57"
+  },
+  {
+    "id": "case-3-repeat-0-assertion_misleading",
+    "case_id": "hf-010",
+    "repeat": 0,
+    "arm": "assertion_misleading",
+    "contract": "assertion",
+    "hint_mode": "misleading",
+    "action": "flag",
+    "hints": [
+      {
+        "claim_path": "/claim_records/0/content",
+        "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+        "value": "contradicted"
+      },
+      {
+        "claim_path": "/content",
+        "claim_sha256": "7880e49c9bf5adacf3863eab8632be518979bd02a397c1968d9dc8848193e076",
+        "value": "supported"
+      }
+    ],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.00401",
+    "unknown_cost_calls": 0,
+    "service_ms": 3095.6656299968017,
+    "queue_ms": 1718.7347579892958,
+    "total_ms": 4814.425741002196,
+    "started_at": "2026-09-20T17:31:15.432184+00:00",
+    "completed_at": "2026-09-20T17:31:18.527851+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2820,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.00401,
+      "output_tokens": 238,
+      "provider": "Anthropic",
+      "total_tokens": 3058,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The assertion states 'Production ran release r8 at that checkpoint.' The evidence (s0) confirms this fact. However, the assertion does not state the necessary condition present in the source: 'background compaction disabled' in production. The evidence shows background compaction was disabled in production, not enabled. The claim as stated is factually accurate, but the accompanying candidate assertion about background compaction being enabled in production contradicts the evidence."
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "cb259e47a12cd3b1e67e7f369fecd68764c92bd4bd8fdd7c50b8833e499f4211"
+  },
+  {
+    "id": "case-3-repeat-0-baseline_direct",
+    "case_id": "hf-010",
+    "repeat": 0,
+    "arm": "baseline_direct",
+    "contract": "baseline",
+    "hint_mode": "direct",
+    "action": "flag",
+    "hints": [],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.004481",
+    "unknown_cost_calls": 0,
+    "service_ms": 3779.845061013475,
+    "queue_ms": 1755.9893029974774,
+    "total_ms": 5535.856736998539,
+    "started_at": "2026-09-20T17:31:15.469440+00:00",
+    "completed_at": "2026-09-20T17:31:19.249286+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2251,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.004481,
+      "output_tokens": 446,
+      "provider": "Anthropic",
+      "total_tokens": 2697,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "7880e49c9bf5adacf3863eab8632be518979bd02a397c1968d9dc8848193e076",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The candidate claims that 'At the checkpoint, background compaction was enabled in the production namespace.' However, the source evidence explicitly states: 'Production ran release r8 with background compaction disabled.' This is a direct factual contradiction. The evidence signs off on the attestation showing that production had background compaction disabled, not enabled."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "qualify",
+          "critique": "The nested claim states 'Production ran release r8 at that checkpoint,' which is consistent with the source evidence. However, the source evidence provides additional context that must be preserved: production had background compaction disabled (not enabled as claimed in the parent assertion). The claim as stated is factually accurate but incomplete regarding the critical configuration detail. Consider qualifying this claim to include the full configuration state."
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "12aa88d41530623bfdbdd71222f25006a9eb14ecbacded8be4e8ce5a7e71b6b5"
+  },
+  {
+    "id": "case-3-repeat-0-baseline_live_jev",
+    "case_id": "hf-010",
+    "repeat": 0,
+    "arm": "baseline_live_jev",
+    "contract": "baseline",
+    "hint_mode": "live_jev",
+    "action": "flag",
+    "hints": [
+      {
+        "claim_path": "/claim_records/0/content",
+        "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+        "value": "supported"
+      },
+      {
+        "claim_path": "/content",
+        "claim_sha256": "7880e49c9bf5adacf3863eab8632be518979bd02a397c1968d9dc8848193e076",
+        "value": "contradicted"
+      }
+    ],
+    "jev_observation": {
+      "answers": [
+        {
+          "primitive": "choice",
+          "probabilities": [
+            {
+              "label": "ambiguous",
+              "probability": 0.0
+            },
+            {
+              "label": "insufficient",
+              "probability": 0.01
+            },
+            {
+              "label": "supported",
+              "probability": 0.97
+            },
+            {
+              "label": "contradicted",
+              "probability": 0.02
+            }
+          ],
+          "provider_confidence": 0.97,
+          "question_id": "/claim_records/0/content",
+          "value": "supported"
+        },
+        {
+          "primitive": "choice",
+          "probabilities": [
+            {
+              "label": "ambiguous",
+              "probability": 0.0
+            },
+            {
+              "label": "insufficient",
+              "probability": 0.0
+            },
+            {
+              "label": "supported",
+              "probability": 0.0
+            },
+            {
+              "label": "contradicted",
+              "probability": 1.0
+            }
+          ],
+          "provider_confidence": 1.0,
+          "question_id": "/content",
+          "value": "contradicted"
+        }
+      ],
+      "attempt_count": 1,
+      "error_category": null,
+      "execution_status": "completed",
+      "input_tokens": 1346,
+      "observed_cost_usd": 5.6532e-05,
+      "observed_provider": "TypeSafe",
+      "output_tokens": 113,
+      "provider_request_id": "gen-dec-1789925475-nJmoNwRZh4y061cJ8ouA",
+      "request_digest": "babc0ea47433db6b52aecd54b0ccd826634bce3f4ffa6353545c34892f40a445",
+      "resolved_model_id": "typesafe/jev-1.13-20260917",
+      "schema_version": "sibyl-choice-observation-v1",
+      "semantic_input_sha256": "0e531349514f1282b31607a5975049cc4d29d3415cf6de89203edc96df74fd9c",
+      "usage_status": "observed"
+    },
+    "stages": [
+      "jev",
+      "critic"
+    ],
+    "known_cost_usd": "0.003598532",
+    "unknown_cost_calls": 0,
+    "service_ms": 2216.8178639985854,
+    "queue_ms": 1842.178746999707,
+    "total_ms": 4059.025595008279,
+    "started_at": "2026-09-20T17:31:15.555631+00:00",
+    "completed_at": "2026-09-20T17:31:17.772450+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2372,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.003542,
+      "output_tokens": 234,
+      "provider": "Anthropic",
+      "total_tokens": 2606,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "7880e49c9bf5adacf3863eab8632be518979bd02a397c1968d9dc8848193e076",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "critique": "The candidate's main claim states 'At the checkpoint, background compaction was enabled in the production namespace.' However, the source evidence (hf-010-source-1) explicitly states: 'Production ran release r8 with background compaction disabled.' This is a direct factual contradiction. The source is signed, providing authenticated provenance that production had background compaction disabled, not enabled."
+        }
+      ]
+    },
+    "critic_request_sha256": "b073066a73609cd2296eac984a8ed577ae0ec20153d66c8c82f1f775550374ef"
+  },
+  {
+    "id": "case-3-repeat-0-assertion_live_jev",
+    "case_id": "hf-010",
+    "repeat": 0,
+    "arm": "assertion_live_jev",
+    "contract": "assertion",
+    "hint_mode": "live_jev",
+    "action": "flag",
+    "hints": [
+      {
+        "claim_path": "/claim_records/0/content",
+        "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+        "value": "supported"
+      },
+      {
+        "claim_path": "/content",
+        "claim_sha256": "7880e49c9bf5adacf3863eab8632be518979bd02a397c1968d9dc8848193e076",
+        "value": "contradicted"
+      }
+    ],
+    "jev_observation": {
+      "answers": [
+        {
+          "primitive": "choice",
+          "probabilities": [
+            {
+              "label": "ambiguous",
+              "probability": 0.0
+            },
+            {
+              "label": "contradicted",
+              "probability": 0.02
+            },
+            {
+              "label": "insufficient",
+              "probability": 0.01
+            },
+            {
+              "label": "supported",
+              "probability": 0.97
+            }
+          ],
+          "provider_confidence": 0.97,
+          "question_id": "/claim_records/0/content",
+          "value": "supported"
+        },
+        {
+          "primitive": "choice",
+          "probabilities": [
+            {
+              "label": "ambiguous",
+              "probability": 0.0
+            },
+            {
+              "label": "contradicted",
+              "probability": 1.0
+            },
+            {
+              "label": "insufficient",
+              "probability": 0.0
+            },
+            {
+              "label": "supported",
+              "probability": 0.0
+            }
+          ],
+          "provider_confidence": 1.0,
+          "question_id": "/content",
+          "value": "contradicted"
+        }
+      ],
+      "attempt_count": 1,
+      "error_category": null,
+      "execution_status": "completed",
+      "input_tokens": 1346,
+      "observed_cost_usd": 5.6532e-05,
+      "observed_provider": "TypeSafe",
+      "output_tokens": 113,
+      "provider_request_id": "gen-dec-1789925475-3YNZSvkRdymqyxWNyopd",
+      "request_digest": "87ebb433fa889d8942782794cc9402d34b013da598732096a0d1fc22c9c312fe",
+      "resolved_model_id": "typesafe/jev-1.13-20260917",
+      "schema_version": "sibyl-choice-observation-v1",
+      "semantic_input_sha256": "0e531349514f1282b31607a5975049cc4d29d3415cf6de89203edc96df74fd9c",
+      "usage_status": "observed"
+    },
+    "stages": [
+      "jev",
+      "critic"
+    ],
+    "known_cost_usd": "0.003886532",
+    "unknown_cost_calls": 0,
+    "service_ms": 2133.7331289978465,
+    "queue_ms": 1901.4971409924328,
+    "total_ms": 4035.2626079984475,
+    "started_at": "2026-09-20T17:31:15.614951+00:00",
+    "completed_at": "2026-09-20T17:31:17.748686+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2820,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.00383,
+      "output_tokens": 202,
+      "provider": "Anthropic",
+      "total_tokens": 3022,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "7880e49c9bf5adacf3863eab8632be518979bd02a397c1968d9dc8848193e076",
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The assertion claims background compaction was enabled in the production namespace at the checkpoint. The cited source explicitly states: 'Production ran release r8 with background compaction disabled.' This is a direct contradiction of the same fact in the same namespace and time scope."
+        }
+      ]
+    },
+    "critic_request_sha256": "4e96f4b7f18a569568b01010ba96bd341e05077e02eb3c5e8fe81d3ee8208128"
+  },
+  {
+    "id": "case-6-repeat-0-assertion_live_jev",
+    "case_id": "hf-023",
+    "repeat": 0,
+    "arm": "assertion_live_jev",
+    "contract": "assertion",
+    "hint_mode": "live_jev",
+    "action": "flag",
+    "hints": [
+      {
+        "claim_path": "/claim_records/0/content",
+        "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+        "value": "supported"
+      },
+      {
+        "claim_path": "/content",
+        "claim_sha256": "a3ca8b6010650fcf68b6d6a16ed5e98a8fbe9c010a3c4d366e1bfadbaeff0fc5",
+        "value": "supported"
+      }
+    ],
+    "jev_observation": {
+      "answers": [
+        {
+          "primitive": "choice",
+          "probabilities": [
+            {
+              "label": "ambiguous",
+              "probability": 0.0
+            },
+            {
+              "label": "supported",
+              "probability": 1.0
+            },
+            {
+              "label": "contradicted",
+              "probability": 0.0
+            },
+            {
+              "label": "insufficient",
+              "probability": 0.0
+            }
+          ],
+          "provider_confidence": 1.0,
+          "question_id": "/claim_records/0/content",
+          "value": "supported"
+        },
+        {
+          "primitive": "choice",
+          "probabilities": [
+            {
+              "label": "ambiguous",
+              "probability": 0.0
+            },
+            {
+              "label": "supported",
+              "probability": 1.0
+            },
+            {
+              "label": "contradicted",
+              "probability": 0.0
+            },
+            {
+              "label": "insufficient",
+              "probability": 0.0
+            }
+          ],
+          "provider_confidence": 1.0,
+          "question_id": "/content",
+          "value": "supported"
+        }
+      ],
+      "attempt_count": 1,
+      "error_category": null,
+      "execution_status": "completed",
+      "input_tokens": 1353,
+      "observed_cost_usd": 5.6826e-05,
+      "observed_provider": "TypeSafe",
+      "output_tokens": 110,
+      "provider_request_id": "gen-dec-1789925476-kf4hA0EXF08RqBE9FmHE",
+      "request_digest": "05fe2aecc347e576710d1e216180192d9de2b6c6929b247f6f7fce64eaa6c9f3",
+      "resolved_model_id": "typesafe/jev-1.13-20260917",
+      "schema_version": "sibyl-choice-observation-v1",
+      "semantic_input_sha256": "80357986a40f393688b42e225e4c9015e297a191940db14c158d772b67ec5e81",
+      "usage_status": "observed"
+    },
+    "stages": [
+      "jev",
+      "critic"
+    ],
+    "known_cost_usd": "0.004587826",
+    "unknown_cost_calls": 0,
+    "service_ms": 3263.6344929924235,
+    "queue_ms": 3057.2533540107543,
+    "total_ms": 6320.920431011473,
+    "started_at": "2026-09-20T17:31:16.770709+00:00",
+    "completed_at": "2026-09-20T17:31:20.034346+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2846,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.004531,
+      "output_tokens": 337,
+      "provider": "Anthropic",
+      "total_tokens": 3183,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The assertion states 'The four data frames carried twenty-four KiB of payload,' but the source explicitly states 'Four data frames carry six KiB of payload each,' which totals 6 \u00d7 4 = 24 KiB only if counting payload alone. However, the source then specifies 'A single separate three-KiB manifest is sent in addition to those frames,' and 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' The assertion's claim of twenty-four KiB for the payload of the four frames alone is contradicted by the source's clear accounting: four frames at six KiB each = 24 KiB payload, plus a three-KiB manifest = 27 KiB total. The assertion omits the manifest requirement and misattributes the twenty-four KiB figure."
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "47c1fbac6471aced0f380ace747e60a59aa61279988831eb148623b5a2a4ff60"
+  },
+  {
+    "id": "case-6-repeat-0-assertion_direct",
+    "case_id": "hf-023",
+    "repeat": 0,
+    "arm": "assertion_direct",
+    "contract": "assertion",
+    "hint_mode": "direct",
+    "action": "flag",
+    "hints": [],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.004406",
+    "unknown_cost_calls": 0,
+    "service_ms": 3038.0407579941675,
+    "queue_ms": 3939.3439489940647,
+    "total_ms": 6977.413187996717,
+    "started_at": "2026-09-20T17:31:17.652801+00:00",
+    "completed_at": "2026-09-20T17:31:20.690844+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2721,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.004406,
+      "output_tokens": 337,
+      "provider": "Anthropic",
+      "total_tokens": 3058,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "critique": "The assertion states 'The four data frames carried twenty-four KiB of payload,' but the evidence explicitly states 'Four data frames carry six KiB of payload each,' which totals twenty-four KiB only for those frames alone. The evidence then states 'A single separate three-KiB manifest is sent in addition to those frames' and 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' The assertion omits the three-KiB manifest and mischaracterizes the scope. If the claim intends to specify payload in frames only (excluding the manifest), it should be qualified as such; as stated, it conflates frame-only payload with total upload content."
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "bc8686a679c0c5d335549eb44c6b530ce55818a2a4f6f44a0c589ddf0f590fc8"
+  },
+  {
+    "id": "case-6-repeat-0-assertion_misleading",
+    "case_id": "hf-023",
+    "repeat": 0,
+    "arm": "assertion_misleading",
+    "contract": "assertion",
+    "hint_mode": "misleading",
+    "action": "flag",
+    "hints": [
+      {
+        "claim_path": "/claim_records/0/content",
+        "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+        "value": "contradicted"
+      },
+      {
+        "claim_path": "/content",
+        "claim_sha256": "a3ca8b6010650fcf68b6d6a16ed5e98a8fbe9c010a3c4d366e1bfadbaeff0fc5",
+        "value": "contradicted"
+      }
+    ],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.005248",
+    "unknown_cost_calls": 0,
+    "service_ms": 5359.736498998245,
+    "queue_ms": 4035.900582995964,
+    "total_ms": 9395.663634000812,
+    "started_at": "2026-09-20T17:31:17.749360+00:00",
+    "completed_at": "2026-09-20T17:31:23.109098+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2848,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.005248,
+      "output_tokens": 480,
+      "provider": "Anthropic",
+      "total_tokens": 3328,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "critique": "The assertion states the four data frames carried twenty-four KiB of payload. The source evidence states 'Four data frames carry six KiB of payload each,' which totals 24 KiB. However, the source also explicitly distinguishes this from the complete upload total: 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' The assertion conflates payload within frames (24 KiB) with a separate claim about total upload size, but the assertion's scope (payload in frames alone) is technically supported by the source's 6 KiB \u00d7 4 frames calculation. Upon closer reading, the assertion as stated is consistent with the source's payload figure. The error lies not in this claim but in its distinction from the complete upload figure. This claim should be marked as supported within its stated scope.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "a3ca8b6010650fcf68b6d6a16ed5e98a8fbe9c010a3c4d366e1bfadbaeff0fc5",
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "critique": "The assertion states the complete upload U19, including its manifest, totaled twenty-seven KiB. The source explicitly confirms: 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' This assertion is directly supported by the signed evidence and contains no material defect.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "8e71a48503a9d4383c552538f163ef35a193c8d06efbf5bb52581984af561c15"
+  },
+  {
+    "id": "case-6-repeat-0-baseline_live_jev",
+    "case_id": "hf-023",
+    "repeat": 0,
+    "arm": "baseline_live_jev",
+    "contract": "baseline",
+    "hint_mode": "live_jev",
+    "action": "flag",
+    "hints": [
+      {
+        "claim_path": "/claim_records/0/content",
+        "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+        "value": "supported"
+      },
+      {
+        "claim_path": "/content",
+        "claim_sha256": "a3ca8b6010650fcf68b6d6a16ed5e98a8fbe9c010a3c4d366e1bfadbaeff0fc5",
+        "value": "supported"
+      }
+    ],
+    "jev_observation": {
+      "answers": [
+        {
+          "primitive": "choice",
+          "probabilities": [
+            {
+              "label": "insufficient",
+              "probability": 0.0
+            },
+            {
+              "label": "ambiguous",
+              "probability": 0.0
+            },
+            {
+              "label": "supported",
+              "probability": 1.0
+            },
+            {
+              "label": "contradicted",
+              "probability": 0.0
+            }
+          ],
+          "provider_confidence": 1.0,
+          "question_id": "/claim_records/0/content",
+          "value": "supported"
+        },
+        {
+          "primitive": "choice",
+          "probabilities": [
+            {
+              "label": "ambiguous",
+              "probability": 0.0
+            },
+            {
+              "label": "insufficient",
+              "probability": 0.0
+            },
+            {
+              "label": "supported",
+              "probability": 1.0
+            },
+            {
+              "label": "contradicted",
+              "probability": 0.0
+            }
+          ],
+          "provider_confidence": 1.0,
+          "question_id": "/content",
+          "value": "supported"
+        }
+      ],
+      "attempt_count": 1,
+      "error_category": null,
+      "execution_status": "completed",
+      "input_tokens": 1353,
+      "observed_cost_usd": 5.6826e-05,
+      "observed_provider": "TypeSafe",
+      "output_tokens": 110,
+      "provider_request_id": "gen-dec-1789925477-aQGK9nYY4rNLCjxmQdEO",
+      "request_digest": "c0ebc0f851dfca872f7fb6ec7411c2672931512bc102f8dcd6432520aef93fa8",
+      "resolved_model_id": "typesafe/jev-1.13-20260917",
+      "schema_version": "sibyl-choice-observation-v1",
+      "semantic_input_sha256": "80357986a40f393688b42e225e4c9015e297a191940db14c158d772b67ec5e81",
+      "usage_status": "observed"
+    },
+    "stages": [
+      "jev",
+      "critic"
+    ],
+    "known_cost_usd": "0.005494826",
+    "unknown_cost_calls": 0,
+    "service_ms": 5392.231534002349,
+    "queue_ms": 4059.636108999257,
+    "total_ms": 9451.900333995582,
+    "started_at": "2026-09-20T17:31:17.773097+00:00",
+    "completed_at": "2026-09-20T17:31:23.165330+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2398,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.005438,
+      "output_tokens": 608,
+      "provider": "Anthropic",
+      "total_tokens": 3006,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'The four data frames carried twenty-four KiB of payload.' However, the source evidence explicitly states 'Four data frames carry six KiB of payload each,' which totals 24 KiB. While the arithmetic checks out, the source further specifies this is in addition to 'a single separate three-KiB manifest' for a total of twenty-seven KiB. The claim as stated is technically correct for the frames alone, but omits the manifest and may mislead about the complete upload composition. The source establishes the complete context: 4 frames \u00d7 6 KiB = 24 KiB (frames only), plus 3 KiB (manifest) = 27 KiB total. The claim's isolation of the frame payload without acknowledging the additional manifest component warrants reconsideration in light of the fuller source narrative."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "a3ca8b6010650fcf68b6d6a16ed5e98a8fbe9c010a3c4d366e1bfadbaeff0fc5",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "critique": "The candidate claims 'The complete upload U19, including its manifest, totaled twenty-seven KiB.' The source evidence directly supports this: 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' However, the source is an observation (provenance: signed) reporting a measured byte counter result. The candidate presents this as a direct claim, but the source establishes it is a reported measurement from an instrument, not a derived conclusion. The claim should be relabeled to clarify it is a reported observation with signed provenance rather than an inference or independent calculation."
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "9dd4afc3ddcc80abf2047c3d001b815bb4c4eb7c739ac16dbc518505187aa631"
+  },
+  {
+    "id": "case-6-repeat-0-baseline_misleading",
+    "case_id": "hf-023",
+    "repeat": 0,
+    "arm": "baseline_misleading",
+    "contract": "baseline",
+    "hint_mode": "misleading",
+    "action": "flag",
+    "hints": [
+      {
+        "claim_path": "/claim_records/0/content",
+        "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+        "value": "contradicted"
+      },
+      {
+        "claim_path": "/content",
+        "claim_sha256": "a3ca8b6010650fcf68b6d6a16ed5e98a8fbe9c010a3c4d366e1bfadbaeff0fc5",
+        "value": "contradicted"
+      }
+    ],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.00566",
+    "unknown_cost_calls": 0,
+    "service_ms": 5724.093062992324,
+    "queue_ms": 4654.368843999691,
+    "total_ms": 10378.486977002467,
+    "started_at": "2026-09-20T17:31:18.367832+00:00",
+    "completed_at": "2026-09-20T17:31:24.091927+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2400,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.00566,
+      "output_tokens": 652,
+      "provider": "Anthropic",
+      "total_tokens": 3052,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The claim asserts that 'The four data frames carried twenty-four KiB of payload.' However, the signed source evidence (s0) explicitly states: 'Four data frames carry six KiB of payload each.' This yields 4 \u00d7 6 = 24 KiB for the frames alone. The source then states 'A single separate three-KiB manifest is sent in addition to those frames.' The source further confirms: 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' The claim correctly states 24 KiB for the four data frames' payload, but this requires careful qualification: the 24 KiB is frames only, and does not include the 3 KiB manifest. The claim as stated is technically accurate on the frame payload count but lacks the necessary condition that this excludes the manifest."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "a3ca8b6010650fcf68b6d6a16ed5e98a8fbe9c010a3c4d366e1bfadbaeff0fc5",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "qualify",
+          "critique": "The claim asserts that 'The complete upload U19, including its manifest, totaled twenty-seven KiB.' The signed source evidence (s0) directly supports this: 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' However, the source specifies that this 27 KiB total comprises four data frames at six KiB each (24 KiB) plus one three-KiB manifest. The claim is factually correct but should be qualified to clarify the composition: 24 KiB from frames + 3 KiB manifest = 27 KiB total. The claim as stated is accurate but lacks the supporting detail of how that total is composed."
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "7106e4066ac61d0e0075874a6cc47c4985d4d8cc0d1b951890493d216dc6bcdd"
+  },
+  {
+    "id": "case-6-repeat-0-baseline_direct",
+    "case_id": "hf-023",
+    "repeat": 0,
+    "arm": "baseline_direct",
+    "contract": "baseline",
+    "hint_mode": "direct",
+    "action": "flag",
+    "hints": [],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.005303",
+    "unknown_cost_calls": 0,
+    "service_ms": 4969.290405992069,
+    "queue_ms": 4814.9646389938425,
+    "total_ms": 9784.28137699666,
+    "started_at": "2026-09-20T17:31:18.528429+00:00",
+    "completed_at": "2026-09-20T17:31:23.497721+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2273,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.005303,
+      "output_tokens": 606,
+      "provider": "Anthropic",
+      "total_tokens": 2879,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The source text explicitly states 'Four data frames carry six KiB of payload each', which totals 24 KiB of payload across the four frames. However, the candidate claim states this is true. The factual contradiction arises when examining the complete upload claim: the source confirms 'twenty-seven KiB for the complete upload, including that manifest', with the manifest being 3 KiB. This means the four frames carry exactly 24 KiB as stated in the candidate's first claim. However, this claim is presented in isolation in the claim_records without the necessary context that there is also a 3 KiB manifest. When evaluated against the full source accounting, the 24 KiB figure is accurate but incomplete as a standalone characterization of the upload payload structure.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "a3ca8b6010650fcf68b6d6a16ed5e98a8fbe9c010a3c4d366e1bfadbaeff0fc5",
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'The complete upload U19, including its manifest, totaled twenty-seven KiB.' The source text states 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest'. This represents exact agreement with the source. However, there is a critical issue with the arithmetic implicit in the source: if four frames carry 6 KiB each (24 KiB total) plus a 3 KiB manifest, that equals 27 KiB, which matches the source's explicit byte counter report. The claim is factually correct per the source.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "74ebfe676f376a4c694ace71b060d7e81e961d6449f5010ff7410f090c57b031"
+  },
+  {
+    "id": "case-7-repeat-0-assertion_live_jev",
+    "case_id": "hf-024",
+    "repeat": 0,
+    "arm": "assertion_live_jev",
+    "contract": "assertion",
+    "hint_mode": "live_jev",
+    "action": "flag",
+    "hints": [
+      {
+        "claim_path": "/claim_records/0/content",
+        "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+        "value": "supported"
+      },
+      {
+        "claim_path": "/content",
+        "claim_sha256": "08bf05164740624e9c793a8d000a9821a5c640c7cbdcb99a9a26a824ac868142",
+        "value": "contradicted"
+      }
+    ],
+    "jev_observation": {
+      "answers": [
+        {
+          "primitive": "choice",
+          "probabilities": [
+            {
+              "label": "contradicted",
+              "probability": 0.02
+            },
+            {
+              "label": "supported",
+              "probability": 0.98
+            },
+            {
+              "label": "insufficient",
+              "probability": 0.0
+            },
+            {
+              "label": "ambiguous",
+              "probability": 0.0
+            }
+          ],
+          "provider_confidence": 0.96,
+          "question_id": "/claim_records/0/content",
+          "value": "supported"
+        },
+        {
+          "primitive": "choice",
+          "probabilities": [
+            {
+              "label": "contradicted",
+              "probability": 1.0
+            },
+            {
+              "label": "supported",
+              "probability": 0.0
+            },
+            {
+              "label": "insufficient",
+              "probability": 0.0
+            },
+            {
+              "label": "ambiguous",
+              "probability": 0.0
+            }
+          ],
+          "provider_confidence": 1.0,
+          "question_id": "/content",
+          "value": "contradicted"
+        }
+      ],
+      "attempt_count": 1,
+      "error_category": null,
+      "execution_status": "completed",
+      "input_tokens": 1360,
+      "observed_cost_usd": 5.712e-05,
+      "observed_provider": "TypeSafe",
+      "output_tokens": 113,
+      "provider_request_id": "gen-dec-1789925479-7MbrN119424NyD3eu1Vk",
+      "request_digest": "fc3f60d2e237e269cc4de8970ba5eaf71734accd7f480f5a4ed78dc489a88096",
+      "resolved_model_id": "typesafe/jev-1.13-20260917",
+      "schema_version": "sibyl-choice-observation-v1",
+      "semantic_input_sha256": "487d36499a0c570205a40981e65f0668baa63c1d7a44d2b08c32a7e10ef7284e",
+      "usage_status": "observed"
+    },
+    "stages": [
+      "jev",
+      "critic"
+    ],
+    "known_cost_usd": "0.00386512",
+    "unknown_cost_calls": 0,
+    "service_ms": 2078.3686979993945,
+    "queue_ms": 5463.525265993667,
+    "total_ms": 7541.929019003874,
+    "started_at": "2026-09-20T17:31:19.176991+00:00",
+    "completed_at": "2026-09-20T17:31:21.255362+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2843,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.003808,
+      "output_tokens": 193,
+      "provider": "Anthropic",
+      "total_tokens": 3036,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "08bf05164740624e9c793a8d000a9821a5c640c7cbdcb99a9a26a824ac868142",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The source states the complete upload U19, including its manifest, totaled twenty-seven KiB (not twenty-four KiB). The source explicitly reports: 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.'"
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "922cbd4663c72cac6899e5fca238d5296c2aa553d2b9d78c605123d9faf42023"
+  },
+  {
+    "id": "case-7-repeat-0-assertion_direct",
+    "case_id": "hf-024",
+    "repeat": 0,
+    "arm": "assertion_direct",
+    "contract": "assertion",
+    "hint_mode": "direct",
+    "action": "flag",
+    "hints": [],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.005514",
+    "unknown_cost_calls": 0,
+    "service_ms": 4109.66985700361,
+    "queue_ms": 5536.421268989216,
+    "total_ms": 9646.118573989952,
+    "started_at": "2026-09-20T17:31:19.249888+00:00",
+    "completed_at": "2026-09-20T17:31:23.359560+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2724,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.005514,
+      "output_tokens": 558,
+      "provider": "Anthropic",
+      "total_tokens": 3282,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The assertion states that four data frames carried twenty-four KiB of payload. The source directly states: 'Four data frames carry six KiB of payload each,' which totals 24 KiB of payload alone. However, the source also reports that 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' The assertion's 24 KiB refers to payload only, which is supported by the source (4 \u00d7 6 KiB). However, the assertion does not acknowledge that the complete upload is 27 KiB, not 24 KiB\u2014that difference matters for claims about the total upload.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "08bf05164740624e9c793a8d000a9821a5c640c7cbdcb99a9a26a824ac868142",
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The assertion states that the complete upload U19, including its manifest, totaled twenty-four KiB. The source explicitly contradicts this: 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' The assertion's count (24 KiB) does not match the reported complete total (27 KiB). The 24 KiB figure applies only to payload from the four frames; the manifest adds three additional KiB, bringing the total to 27 KiB.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "85c3e8b23193fef3f0fa7b8c5ec8aa0973c83a727aa37e419a3c17b81775163d"
+  },
+  {
+    "id": "case-7-repeat-0-assertion_misleading",
+    "case_id": "hf-024",
+    "repeat": 0,
+    "arm": "assertion_misleading",
+    "contract": "assertion",
+    "hint_mode": "misleading",
+    "action": "flag",
+    "hints": [
+      {
+        "claim_path": "/claim_records/0/content",
+        "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+        "value": "contradicted"
+      },
+      {
+        "claim_path": "/content",
+        "claim_sha256": "08bf05164740624e9c793a8d000a9821a5c640c7cbdcb99a9a26a824ac868142",
+        "value": "supported"
+      }
+    ],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.004973",
+    "unknown_cost_calls": 0,
+    "service_ms": 4010.731309012044,
+    "queue_ms": 6321.596943002078,
+    "total_ms": 10332.357702005538,
+    "started_at": "2026-09-20T17:31:20.035066+00:00",
+    "completed_at": "2026-09-20T17:31:24.045799+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2843,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.004973,
+      "output_tokens": 426,
+      "provider": "Anthropic",
+      "total_tokens": 3269,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The assertion states the four data frames carried twenty-four KiB of payload. However, the signed source explicitly states 'Four data frames carry six KiB of payload each,' which totals twenty-four KiB only for the frames alone. The source further specifies the complete upload, including the three-KiB manifest, totals twenty-seven KiB. The assertion's scope (payload in frames only) matches the source, but the quantity is incorrect: six KiB \u00d7 four frames = twenty-four KiB, not stated as payload. The source affirms the frames carry six KiB each, making the total payload in frames twenty-four KiB, which matches the assertion's quantity claim. Upon reexamination: the assertion's quantity is arithmetically correct for frame payload alone. However, the source's explicit statement that the complete upload (frames plus manifest) totals twenty-seven KiB, not twenty-four KiB, establishes that if frames carry twenty-four KiB, the manifest is three KiB, confirming frame payload is twenty-four KiB. This assertion is actually supported by the source.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "065e815653fc00027094c714a71ac75287c4381f2f188a502bce6c1acbb3281d"
+  },
+  {
+    "id": "case-7-repeat-0-baseline_live_jev",
+    "case_id": "hf-024",
+    "repeat": 0,
+    "arm": "baseline_live_jev",
+    "contract": "baseline",
+    "hint_mode": "live_jev",
+    "action": "flag",
+    "hints": [
+      {
+        "claim_path": "/claim_records/0/content",
+        "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+        "value": "supported"
+      },
+      {
+        "claim_path": "/content",
+        "claim_sha256": "08bf05164740624e9c793a8d000a9821a5c640c7cbdcb99a9a26a824ac868142",
+        "value": "contradicted"
+      }
+    ],
+    "jev_observation": {
+      "answers": [
+        {
+          "primitive": "choice",
+          "probabilities": [
+            {
+              "label": "ambiguous",
+              "probability": 0.0
+            },
+            {
+              "label": "insufficient",
+              "probability": 0.0
+            },
+            {
+              "label": "contradicted",
+              "probability": 0.03
+            },
+            {
+              "label": "supported",
+              "probability": 0.97
+            }
+          ],
+          "provider_confidence": 0.96,
+          "question_id": "/claim_records/0/content",
+          "value": "supported"
+        },
+        {
+          "primitive": "choice",
+          "probabilities": [
+            {
+              "label": "ambiguous",
+              "probability": 0.0
+            },
+            {
+              "label": "insufficient",
+              "probability": 0.0
+            },
+            {
+              "label": "contradicted",
+              "probability": 1.0
+            },
+            {
+              "label": "supported",
+              "probability": 0.0
+            }
+          ],
+          "provider_confidence": 1.0,
+          "question_id": "/content",
+          "value": "contradicted"
+        }
+      ],
+      "attempt_count": 1,
+      "error_category": null,
+      "execution_status": "completed",
+      "input_tokens": 1360,
+      "observed_cost_usd": 5.712e-05,
+      "observed_provider": "TypeSafe",
+      "output_tokens": 113,
+      "provider_request_id": "gen-dec-1789925480-53MHY8LXtwibX0N8j7xe",
+      "request_digest": "06fe37cadfde71004fea7d5cbefc2bd2b8c9a8d49e5431b12202720e7e946175",
+      "resolved_model_id": "typesafe/jev-1.13-20260917",
+      "schema_version": "sibyl-choice-observation-v1",
+      "semantic_input_sha256": "487d36499a0c570205a40981e65f0668baa63c1d7a44d2b08c32a7e10ef7284e",
+      "usage_status": "observed"
+    },
+    "stages": [
+      "jev",
+      "critic"
+    ],
+    "known_cost_usd": "0.00541212",
+    "unknown_cost_calls": 0,
+    "service_ms": 4795.6751129968325,
+    "queue_ms": 6978.013271000236,
+    "total_ms": 11773.722604993964,
+    "started_at": "2026-09-20T17:31:20.691484+00:00",
+    "completed_at": "2026-09-20T17:31:25.487161+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2395,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.005355,
+      "output_tokens": 592,
+      "provider": "Anthropic",
+      "total_tokens": 2987,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "08bf05164740624e9c793a8d000a9821a5c640c7cbdcb99a9a26a824ac868142",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'The complete upload U19, including its manifest, totaled twenty-four KiB.' However, the source evidence explicitly states: 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' The claimed total of twenty-four KiB contradicts the source's explicit reporting of twenty-seven KiB. The source provides signed provenance confirming this direct observation of the byte counter."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'The four data frames carried twenty-four KiB of payload.' However, the source evidence states: 'Four data frames carry six KiB of payload each,' which totals 24 KiB of payload. This appears consistent on the surface. However, when examined against the complete upload claim, the source further specifies that 'A single separate three-KiB manifest is sent in addition to those frames' and 'The byte counter explicitly reports twenty-seven KiB for the complete upload.' The calculation is: 4 frames \u00d7 6 KiB = 24 KiB payload, plus 3 KiB manifest = 27 KiB total. While the payload figure of twenty-four KiB for the four data frames is technically supported, the parent claim contradicts the source's explicit total, creating an inconsistency in how these related figures are being used."
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "1be51abf68cc9181cde1a462b507d17fcbaaa213dbcd1b94f7e10ac66f08d55c"
+  },
+  {
+    "id": "case-7-repeat-0-baseline_direct",
+    "case_id": "hf-024",
+    "repeat": 0,
+    "arm": "baseline_direct",
+    "contract": "baseline",
+    "hint_mode": "direct",
+    "action": "flag",
+    "hints": [],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.004771",
+    "unknown_cost_calls": 0,
+    "service_ms": 4348.453029990196,
+    "queue_ms": 7542.620281004929,
+    "total_ms": 11891.0974850005,
+    "started_at": "2026-09-20T17:31:21.256093+00:00",
+    "completed_at": "2026-09-20T17:31:25.604547+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2276,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.004771,
+      "output_tokens": 499,
+      "provider": "Anthropic",
+      "total_tokens": 2775,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "08bf05164740624e9c793a8d000a9821a5c640c7cbdcb99a9a26a824ac868142",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'The complete upload U19, including its manifest, totaled twenty-four KiB.' However, the source evidence explicitly states 'the byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' This is a direct factual contradiction: the candidate asserts 24 KiB while the signed source observation documents 27 KiB. The source further clarifies the accounting structure (four frames of 6 KiB each = 24 KiB payload, plus 3 KiB manifest = 27 KiB total), making the discrepancy clear and material."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The claim record asserts 'The four data frames carried twenty-four KiB of payload.' while the source states 'Four data frames carry six KiB of payload each,' which totals 24 KiB payload. This specific claim is actually supported by the evidence. However, the parent claim in /content contradicts the source's explicit statement that the complete upload totaled 27 KiB, not 24 KiB. The distinction between payload (24 KiB) and complete upload including manifest (27 KiB) is critical, and the candidate's parent claim incorrectly conflates these figures."
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "fc2b8ac95c4f54d919d68b55af2e44916b246fb49dba3f046f94959099d3118a"
+  },
+  {
+    "id": "case-7-repeat-0-baseline_misleading",
+    "case_id": "hf-024",
+    "repeat": 0,
+    "arm": "baseline_misleading",
+    "contract": "baseline",
+    "hint_mode": "misleading",
+    "action": "flag",
+    "hints": [
+      {
+        "claim_path": "/claim_records/0/content",
+        "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+        "value": "contradicted"
+      },
+      {
+        "claim_path": "/content",
+        "claim_sha256": "08bf05164740624e9c793a8d000a9821a5c640c7cbdcb99a9a26a824ac868142",
+        "value": "supported"
+      }
+    ],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.005065",
+    "unknown_cost_calls": 0,
+    "service_ms": 4019.8571880027885,
+    "queue_ms": 9396.247786004096,
+    "total_ms": 13416.133213002468,
+    "started_at": "2026-09-20T17:31:23.109721+00:00",
+    "completed_at": "2026-09-20T17:31:27.129580+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2395,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.005065,
+      "output_tokens": 534,
+      "provider": "Anthropic",
+      "total_tokens": 2929,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "critique": "The claim states 'The four data frames carried twenty-four KiB of payload.' However, the source explicitly states: 'Four data frames carry six KiB of payload each' (totaling 24 KiB for frames alone) plus 'A single separate three-KiB manifest is sent in addition to those frames.' The complete upload totals twenty-seven KiB, not twenty-four KiB. The claim conflates the payload of the four frames alone (24 KiB) with a statement about what 'the four data frames carried,' which is correct, but the parent claim and overall context suggest this was offered as support for the total being twenty-four KiB, which contradicts the source's explicit statement that the complete upload is twenty-seven KiB."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "08bf05164740624e9c793a8d000a9821a5c640c7cbdcb99a9a26a824ac868142",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'The complete upload U19, including its manifest, totaled twenty-four KiB.' The source directly contradicts this: 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' This is a straightforward factual contradiction. The source provides signed provenance for the observation that the total is twenty-seven KiB, not twenty-four KiB."
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "dd54d86e61c119bfaa45dc2347ff6bd580cc871bb395ce05082c2bc34a3a149b"
+  },
+  {
+    "id": "case-2-repeat-0-baseline_live_jev",
+    "case_id": "hf-009",
+    "repeat": 0,
+    "arm": "baseline_live_jev",
+    "contract": "baseline",
+    "hint_mode": "live_jev",
+    "action": "flag",
+    "hints": [
+      {
+        "claim_path": "/claim_records/0/content",
+        "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+        "value": "supported"
+      },
+      {
+        "claim_path": "/content",
+        "claim_sha256": "5ef88d919e4b985ecfc26678771ec178c946605f071e4f07d2e33a7e1eaa61dd",
+        "value": "supported"
+      }
+    ],
+    "jev_observation": {
+      "answers": [
+        {
+          "primitive": "choice",
+          "probabilities": [
+            {
+              "label": "contradicted",
+              "probability": 0.31
+            },
+            {
+              "label": "insufficient",
+              "probability": 0.02
+            },
+            {
+              "label": "ambiguous",
+              "probability": 0.03
+            },
+            {
+              "label": "supported",
+              "probability": 0.64
+            }
+          ],
+          "provider_confidence": 0.52,
+          "question_id": "/claim_records/0/content",
+          "value": "supported"
+        },
+        {
+          "primitive": "choice",
+          "probabilities": [
+            {
+              "label": "contradicted",
+              "probability": 0.01
+            },
+            {
+              "label": "insufficient",
+              "probability": 0.0
+            },
+            {
+              "label": "ambiguous",
+              "probability": 0.0
+            },
+            {
+              "label": "supported",
+              "probability": 0.99
+            }
+          ],
+          "provider_confidence": 0.97,
+          "question_id": "/content",
+          "value": "supported"
+        }
+      ],
+      "attempt_count": 1,
+      "error_category": null,
+      "execution_status": "completed",
+      "input_tokens": 1350,
+      "observed_cost_usd": 5.67e-05,
+      "observed_provider": "TypeSafe",
+      "output_tokens": 110,
+      "provider_request_id": "gen-dec-1789925483-YwLk5tGPDLav3phyaJqs",
+      "request_digest": "a2f80463983625b5a27bccb3c706857bbad3a012ef6ea971ccd47c2e20b134d6",
+      "resolved_model_id": "typesafe/jev-1.13-20260917",
+      "schema_version": "sibyl-choice-observation-v1",
+      "semantic_input_sha256": "70e478c564b7068119e0f03038c62b6bc659528121f9710f6b73bcac3c2ea427",
+      "usage_status": "observed"
+    },
+    "stages": [
+      "jev",
+      "critic"
+    ],
+    "known_cost_usd": "0.0036187",
+    "unknown_cost_calls": 0,
+    "service_ms": 2699.095325995586,
+    "queue_ms": 9452.635016001295,
+    "total_ms": 12151.76555600192,
+    "started_at": "2026-09-20T17:31:23.166111+00:00",
+    "completed_at": "2026-09-20T17:31:25.865208+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2367,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.003562,
+      "output_tokens": 239,
+      "provider": "Anthropic",
+      "total_tokens": 2606,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The source attestation states 'Production ran release r8 with background compaction disabled.' The candidate claim asserts 'Production ran release r8 at that checkpoint.' While the release version (r8) matches the source, the source explicitly attaches a specific condition about compaction being disabled in production. The claim omits this condition and is therefore incomplete as a representation of the source attestation."
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "453da173af81c04032c94cd82ee82a5ae18b2f36be9721e031390ccc2df5375a"
+  },
+  {
+    "id": "case-2-repeat-0-baseline_direct",
+    "case_id": "hf-009",
+    "repeat": 0,
+    "arm": "baseline_direct",
+    "contract": "baseline",
+    "hint_mode": "direct",
+    "action": "flag",
+    "hints": [],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.00499",
+    "unknown_cost_calls": 0,
+    "service_ms": 4684.798465998028,
+    "queue_ms": 9646.735257003456,
+    "total_ms": 14331.559672005824,
+    "started_at": "2026-09-20T17:31:23.360213+00:00",
+    "completed_at": "2026-09-20T17:31:28.045012+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2245,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.00499,
+      "output_tokens": 549,
+      "provider": "Anthropic",
+      "total_tokens": 2794,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "5ef88d919e4b985ecfc26678771ec178c946605f071e4f07d2e33a7e1eaa61dd",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The candidate claim states 'At the checkpoint, background compaction was enabled in the staging namespace.' The source evidence (s0) contradicts this by stating: 'At the recorded checkpoint, the staging namespace ran release r9 with background compaction enabled.' While the candidate correctly identifies that background compaction was enabled in staging, it omits the critical detail that the staging namespace ran release r9, not r8. More problematically, the candidate's main content claim overlooks that the source explicitly states 'Production ran release r8 with background compaction disabled'\u2014meaning the production-level claim about background compaction is factually inaccurate. The candidate conflates staging namespace configuration with production-level claims without proper qualification."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The claim record states 'Production ran release r8 at that checkpoint.' The source evidence (s0) confirms this specific fact, stating 'Production ran release r8 with background compaction disabled.' However, the claim is incomplete and potentially misleading because it fails to note the critical condition that production had background compaction disabled. Additionally, the source includes the statement that 'there was no production rollout in this checkpoint,' which qualifies the entire claim about production's state. The bare assertion lacks necessary contextual conditions that are present in the evidence."
+        }
+      ]
+    },
+    "critic_request_sha256": "d5f86120fd6d8844bb09a45b13df7b91ada72ddc30dce3571a8e326c58a26a6d"
+  },
+  {
+    "id": "case-2-repeat-0-assertion_misleading",
+    "case_id": "hf-009",
+    "repeat": 0,
+    "arm": "assertion_misleading",
+    "contract": "assertion",
+    "hint_mode": "misleading",
+    "action": "flag",
+    "hints": [
+      {
+        "claim_path": "/claim_records/0/content",
+        "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+        "value": "contradicted"
+      },
+      {
+        "claim_path": "/content",
+        "claim_sha256": "5ef88d919e4b985ecfc26678771ec178c946605f071e4f07d2e33a7e1eaa61dd",
+        "value": "contradicted"
+      }
+    ],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.005277",
+    "unknown_cost_calls": 0,
+    "service_ms": 4188.211658998625,
+    "queue_ms": 9784.858140003053,
+    "total_ms": 13973.097056004917,
+    "started_at": "2026-09-20T17:31:23.498336+00:00",
+    "completed_at": "2026-09-20T17:31:27.686549+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2817,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.005277,
+      "output_tokens": 492,
+      "provider": "Anthropic",
+      "total_tokens": 3309,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The assertion states 'Production ran release r8 at that checkpoint.' The cited evidence explicitly states: 'Production ran release r8 with background compaction disabled.' This confirms the release version but is paired with a specific condition (compaction disabled). More critically, the evidence states 'there was no production rollout in this checkpoint,' which directly contradicts the implication that production was actively running at this checkpoint. The assertion's framing overstates the operational status."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "5ef88d919e4b985ecfc26678771ec178c946605f071e4f07d2e33a7e1eaa61dd",
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The assertion states 'At the checkpoint, background compaction was enabled in the staging namespace.' The evidence confirms that background compaction was enabled, but specifies it was enabled in the staging namespace with release r9. However, this assertion lacks scope precision regarding which release or deployment version applied. The assertion is factually supported for the staging namespace condition, but when read as a standalone claim without the qualified release context (r9), it risks incomplete representation of the configuration state."
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "77375e0c3dce6e24e4e9ee21b98d211c4cfa60681839ff65d709b192ffcfa177"
+  },
+  {
+    "id": "case-2-repeat-0-assertion_direct",
+    "case_id": "hf-009",
+    "repeat": 0,
+    "arm": "assertion_direct",
+    "contract": "assertion",
+    "hint_mode": "direct",
+    "action": "flag",
+    "hints": [],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.004108",
+    "unknown_cost_calls": 0,
+    "service_ms": 2732.2918940044474,
+    "queue_ms": 10332.965084002353,
+    "total_ms": 13065.284953991068,
+    "started_at": "2026-09-20T17:31:24.046445+00:00",
+    "completed_at": "2026-09-20T17:31:26.778739+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2693,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.004108,
+      "output_tokens": 283,
+      "provider": "Anthropic",
+      "total_tokens": 2976,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The assertion states 'Production ran release r8 at that checkpoint.' The source evidence explicitly states 'Production ran release r8 with background compaction disabled.' This is compatible and supported. However, the assertion also implicitly relies on the checkpoint context. The source further states 'the staging namespace ran release r9 with background compaction enabled,' which is correct for staging. The claim as stated\u2014that production ran r8\u2014is factually accurate according to the source. No defect identified for this claim alone."
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "d21eb61d6a169276053ff1ec02150aeafbcd8a85cbb238d0fe7e33341d5486dd"
+  },
+  {
+    "id": "case-2-repeat-0-baseline_misleading",
+    "case_id": "hf-009",
+    "repeat": 0,
+    "arm": "baseline_misleading",
+    "contract": "baseline",
+    "hint_mode": "misleading",
+    "action": "flag",
+    "hints": [
+      {
+        "claim_path": "/claim_records/0/content",
+        "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+        "value": "contradicted"
+      },
+      {
+        "claim_path": "/content",
+        "claim_sha256": "5ef88d919e4b985ecfc26678771ec178c946605f071e4f07d2e33a7e1eaa61dd",
+        "value": "contradicted"
+      }
+    ],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.004424",
+    "unknown_cost_calls": 0,
+    "service_ms": 2833.7054299918236,
+    "queue_ms": 10379.051110008731,
+    "total_ms": 13212.784515009844,
+    "started_at": "2026-09-20T17:31:24.092532+00:00",
+    "completed_at": "2026-09-20T17:31:26.926239+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2369,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.004424,
+      "output_tokens": 411,
+      "provider": "Anthropic",
+      "total_tokens": 2780,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The claim states 'Production ran release r8 at that checkpoint.' The source text (s0) confirms this: 'Production ran release r8 with background compaction disabled.' This claim is factually supported by the evidence and contains no contradiction."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "5ef88d919e4b985ecfc26678771ec178c946605f071e4f07d2e33a7e1eaa61dd",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The claim states 'At the checkpoint, background compaction was enabled in the staging namespace.' The source text (s0) states: 'the staging namespace ran release r9 with background compaction enabled.' The claim is accurate and factually supported by the signed observation in the evidence."
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "1042d208759167418b1bffaba0eba517ef11b75077c84edfd2c7a58282b778ae"
+  },
+  {
+    "id": "case-2-repeat-0-assertion_live_jev",
+    "case_id": "hf-009",
+    "repeat": 0,
+    "arm": "assertion_live_jev",
+    "contract": "assertion",
+    "hint_mode": "live_jev",
+    "action": "flag",
+    "hints": [
+      {
+        "claim_path": "/claim_records/0/content",
+        "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+        "value": "supported"
+      },
+      {
+        "claim_path": "/content",
+        "claim_sha256": "5ef88d919e4b985ecfc26678771ec178c946605f071e4f07d2e33a7e1eaa61dd",
+        "value": "supported"
+      }
+    ],
+    "jev_observation": {
+      "answers": [
+        {
+          "primitive": "choice",
+          "probabilities": [
+            {
+              "label": "ambiguous",
+              "probability": 0.03
+            },
+            {
+              "label": "insufficient",
+              "probability": 0.02
+            },
+            {
+              "label": "contradicted",
+              "probability": 0.25
+            },
+            {
+              "label": "supported",
+              "probability": 0.7
+            }
+          ],
+          "provider_confidence": 0.6,
+          "question_id": "/claim_records/0/content",
+          "value": "supported"
+        },
+        {
+          "primitive": "choice",
+          "probabilities": [
+            {
+              "label": "ambiguous",
+              "probability": 0.0
+            },
+            {
+              "label": "contradicted",
+              "probability": 0.04
+            },
+            {
+              "label": "insufficient",
+              "probability": 0.01
+            },
+            {
+              "label": "supported",
+              "probability": 0.95
+            }
+          ],
+          "provider_confidence": 0.93,
+          "question_id": "/content",
+          "value": "supported"
+        }
+      ],
+      "attempt_count": 1,
+      "error_category": null,
+      "execution_status": "completed",
+      "input_tokens": 1350,
+      "observed_cost_usd": 5.67e-05,
+      "observed_provider": "TypeSafe",
+      "output_tokens": 110,
+      "provider_request_id": "gen-dec-1789925485-dVYYtQmbB7MZ4YIzIIyp",
+      "request_digest": "961e96c92935a4c47cedf4d2fdd31bbb0b3f16587fa370b25cfd669b17521451",
+      "resolved_model_id": "typesafe/jev-1.13-20260917",
+      "schema_version": "sibyl-choice-observation-v1",
+      "semantic_input_sha256": "70e478c564b7068119e0f03038c62b6bc659528121f9710f6b73bcac3c2ea427",
+      "usage_status": "observed"
+    },
+    "stages": [
+      "jev",
+      "critic"
+    ],
+    "known_cost_usd": "0.0041317",
+    "unknown_cost_calls": 0,
+    "service_ms": 2695.8571430004667,
+    "queue_ms": 11774.4520399865,
+    "total_ms": 14470.338719998836,
+    "started_at": "2026-09-20T17:31:25.487936+00:00",
+    "completed_at": "2026-09-20T17:31:28.183794+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2815,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.004075,
+      "output_tokens": 252,
+      "provider": "Anthropic",
+      "total_tokens": 3067,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "5ef88d919e4b985ecfc26678771ec178c946605f071e4f07d2e33a7e1eaa61dd",
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The assertion states background compaction was enabled in the staging namespace at the checkpoint. The evidence (s0) attests the staging namespace ran release r9 with background compaction enabled, which supports this assertion. However, this finding concerns the claimed scope: the assertion must identify that this applies to the staging namespace specifically, not production. The evidence is consistent with the stated assertion as written.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "17d1f47312533ac3129e1a6d1e5181c5d542c5455345fc1d06ed3a4b4e2e0b23"
+  },
+  {
+    "id": "case-1-repeat-0-assertion_direct",
+    "case_id": "hf-006",
+    "repeat": 0,
+    "arm": "assertion_direct",
+    "contract": "assertion",
+    "hint_mode": "direct",
+    "action": "flag",
+    "hints": [],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.00498",
+    "unknown_cost_calls": 0,
+    "service_ms": 3854.5966429956025,
+    "queue_ms": 11891.645608993713,
+    "total_ms": 15746.267805996467,
+    "started_at": "2026-09-20T17:31:25.605130+00:00",
+    "completed_at": "2026-09-20T17:31:29.459728+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2690,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.00498,
+      "output_tokens": 458,
+      "provider": "Anthropic",
+      "total_tokens": 3148,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "e6021785052c69f52c0c6ee8f1816bdae4390d97bdf3782299ce2421bfdf9424",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "relabel_inference",
+          "critique": "The assertion claims the parser upgrade caused the lower median response time. The evidence (s0) explicitly states the diary 'contains no matched-load test, rollback comparison or causal attribution' and describes the parser upgrade, response time improvement, query mix shift, and worker count doubling as 'co-occurring changes' with 'separate effects unmeasured.' Co-occurrence of events does not establish causation; this claim exceeds what the source evidence supports."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "4d94f0eac2e690142fedd6ef8c63f9652d110498348f8a8bc3cc72acd8399669",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The assertion states 'the worker count doubled during the same monitoring window.' The evidence (s0) reports 'the worker count doubled' without qualification regarding whether this doubling occurred entirely within the window, before it, or spanning across its boundary. The assertion assumes completion of the doubling event within the window boundaries, which the evidence does not establish."
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "0621effd79609c0a067afb6abcda71552c7538bc0a9f0051a2e12524df2be1c8"
+  },
+  {
+    "id": "case-1-repeat-0-assertion_live_jev",
+    "case_id": "hf-006",
+    "repeat": 0,
+    "arm": "assertion_live_jev",
+    "contract": "assertion",
+    "hint_mode": "live_jev",
+    "action": "flag",
+    "hints": [
+      {
+        "claim_path": "/claim_records/0/content",
+        "claim_sha256": "4d94f0eac2e690142fedd6ef8c63f9652d110498348f8a8bc3cc72acd8399669",
+        "value": "supported"
+      },
+      {
+        "claim_path": "/content",
+        "claim_sha256": "e6021785052c69f52c0c6ee8f1816bdae4390d97bdf3782299ce2421bfdf9424",
+        "value": "insufficient"
+      }
+    ],
+    "jev_observation": {
+      "answers": [
+        {
+          "primitive": "choice",
+          "probabilities": [
+            {
+              "label": "contradicted",
+              "probability": 0.0
+            },
+            {
+              "label": "insufficient",
+              "probability": 0.01
+            },
+            {
+              "label": "ambiguous",
+              "probability": 0.0
+            },
+            {
+              "label": "supported",
+              "probability": 0.99
+            }
+          ],
+          "provider_confidence": 0.98,
+          "question_id": "/claim_records/0/content",
+          "value": "supported"
+        },
+        {
+          "primitive": "choice",
+          "probabilities": [
+            {
+              "label": "supported",
+              "probability": 0.01
+            },
+            {
+              "label": "insufficient",
+              "probability": 0.95
+            },
+            {
+              "label": "contradicted",
+              "probability": 0.03
+            },
+            {
+              "label": "ambiguous",
+              "probability": 0.01
+            }
+          ],
+          "provider_confidence": 0.93,
+          "question_id": "/content",
+          "value": "insufficient"
+        }
+      ],
+      "attempt_count": 1,
+      "error_category": null,
+      "execution_status": "completed",
+      "input_tokens": 1345,
+      "observed_cost_usd": 5.649e-05,
+      "observed_provider": "TypeSafe",
+      "output_tokens": 113,
+      "provider_request_id": "gen-dec-1789925485-mlbggKjKzA6gTElBHAqi",
+      "request_digest": "511db3a62c698e0305cadb28eaef0a952b36402c4b11ca0b0dbbfc7c34cfd656",
+      "resolved_model_id": "typesafe/jev-1.13-20260917",
+      "schema_version": "sibyl-choice-observation-v1",
+      "semantic_input_sha256": "3e86038bfbd57ea5463dbc977d3e35d5d6bd1919575b1ee6de110edd5f88d0de",
+      "usage_status": "observed"
+    },
+    "stages": [
+      "jev",
+      "critic"
+    ],
+    "known_cost_usd": "0.00421449",
+    "unknown_cost_calls": 0,
+    "service_ms": 2570.5418169964105,
+    "queue_ms": 12152.510854008142,
+    "total_ms": 14723.084095006925,
+    "started_at": "2026-09-20T17:31:25.865998+00:00",
+    "completed_at": "2026-09-20T17:31:28.436541+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2808,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.004158,
+      "output_tokens": 270,
+      "provider": "Anthropic",
+      "total_tokens": 3078,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "e6021785052c69f52c0c6ee8f1816bdae4390d97bdf3782299ce2421bfdf9424",
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The assertion claims the parser upgrade caused the lower median response time. The source reports these as co-occurring changes within the same monitoring window, but explicitly states that the diary contains no matched-load test, rollback comparison, or causal attribution. The author measured no separate effects to establish causality. The lower response time coincided with both the parser upgrade and a shift toward short queries (which independently reduce response time). Causality is not established by co-occurrence alone.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "081bf0e3f2a1987ba278cd3014d839a22d109352caf3a4b7c9bdcc599f7a6fc2"
+  },
+  {
+    "id": "case-1-repeat-0-baseline_live_jev",
+    "case_id": "hf-006",
+    "repeat": 0,
+    "arm": "baseline_live_jev",
+    "contract": "baseline",
+    "hint_mode": "live_jev",
+    "action": "flag",
+    "hints": [
+      {
+        "claim_path": "/claim_records/0/content",
+        "claim_sha256": "4d94f0eac2e690142fedd6ef8c63f9652d110498348f8a8bc3cc72acd8399669",
+        "value": "supported"
+      },
+      {
+        "claim_path": "/content",
+        "claim_sha256": "e6021785052c69f52c0c6ee8f1816bdae4390d97bdf3782299ce2421bfdf9424",
+        "value": "insufficient"
+      }
+    ],
+    "jev_observation": {
+      "answers": [
+        {
+          "primitive": "choice",
+          "probabilities": [
+            {
+              "label": "supported",
+              "probability": 0.98
+            },
+            {
+              "label": "ambiguous",
+              "probability": 0.0
+            },
+            {
+              "label": "contradicted",
+              "probability": 0.0
+            },
+            {
+              "label": "insufficient",
+              "probability": 0.02
+            }
+          ],
+          "provider_confidence": 0.97,
+          "question_id": "/claim_records/0/content",
+          "value": "supported"
+        },
+        {
+          "primitive": "choice",
+          "probabilities": [
+            {
+              "label": "supported",
+              "probability": 0.01
+            },
+            {
+              "label": "ambiguous",
+              "probability": 0.01
+            },
+            {
+              "label": "contradicted",
+              "probability": 0.02
+            },
+            {
+              "label": "insufficient",
+              "probability": 0.96
+            }
+          ],
+          "provider_confidence": 0.94,
+          "question_id": "/content",
+          "value": "insufficient"
+        }
+      ],
+      "attempt_count": 1,
+      "error_category": null,
+      "execution_status": "completed",
+      "input_tokens": 1345,
+      "observed_cost_usd": 5.649e-05,
+      "observed_provider": "TypeSafe",
+      "output_tokens": 113,
+      "provider_request_id": "gen-dec-1789925486-Uh51T2CYDVlXUZOkNFra",
+      "request_digest": "57d473fa74d0d301f28f8ba8b1b7fed50c743c4832c4e838d55a7b324513d331",
+      "resolved_model_id": "typesafe/jev-1.13-20260917",
+      "schema_version": "sibyl-choice-observation-v1",
+      "semantic_input_sha256": "3e86038bfbd57ea5463dbc977d3e35d5d6bd1919575b1ee6de110edd5f88d0de",
+      "usage_status": "observed"
+    },
+    "stages": [
+      "jev",
+      "critic"
+    ],
+    "known_cost_usd": "0.00394649",
+    "unknown_cost_calls": 0,
+    "service_ms": 2972.206977006863,
+    "queue_ms": 13065.85791100224,
+    "total_ms": 16038.097875003587,
+    "started_at": "2026-09-20T17:31:26.779345+00:00",
+    "completed_at": "2026-09-20T17:31:29.751554+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2360,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.00389,
+      "output_tokens": 306,
+      "provider": "Anthropic",
+      "total_tokens": 2666,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "e6021785052c69f52c0c6ee8f1816bdae4390d97bdf3782299ce2421bfdf9424",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The source documents that median response time was lower after the parser upgrade and that several changes occurred in the same monitoring window (parser upgrade, query mix shift, worker count doubling), but explicitly states 'The diary contains no matched-load test, rollback comparison or causal attribution.' The source describes these as co-occurring changes with 'their separate effects unmeasured.' The claim asserts the parser upgrade caused the lower response time, but the source provides no basis for isolating the parser upgrade as the causal factor from among the multiple concurrent changes. This represents an unsupported causal attribution that goes beyond what the source evidence establishes."
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "920b7cdc7ce5c6e3289aeef9eba38e91bc9c02107641fb922db029dd8872a258"
+  },
+  {
+    "id": "case-1-repeat-0-baseline_direct",
+    "case_id": "hf-006",
+    "repeat": 0,
+    "arm": "baseline_direct",
+    "contract": "baseline",
+    "hint_mode": "direct",
+    "action": "flag",
+    "hints": [],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.003457",
+    "unknown_cost_calls": 0,
+    "service_ms": 2466.7076600017026,
+    "queue_ms": 13213.422774992068,
+    "total_ms": 15680.156326998258,
+    "started_at": "2026-09-20T17:31:26.926912+00:00",
+    "completed_at": "2026-09-20T17:31:29.393621+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2242,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.003457,
+      "output_tokens": 243,
+      "provider": "Anthropic",
+      "total_tokens": 2485,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "e6021785052c69f52c0c6ee8f1816bdae4390d97bdf3782299ce2421bfdf9424",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The source explicitly states that the diary 'contains no matched-load test, rollback comparison or causal attribution' and describes the parser upgrade, response time change, query mix shift, and worker count doubling as 'co-occurring changes' with 'their separate effects unmeasured.' The candidate asserts direct causation ('caused') between the parser upgrade and lower median response time, but the source provides only temporal co-occurrence, not causal evidence. The causality claim exceeds what the evidence supports."
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "4e806bd275b682ee277de4f2cfbd53c213723ac3da95dad64a1460c8366c219c"
+  },
+  {
+    "id": "case-1-repeat-0-baseline_misleading",
+    "case_id": "hf-006",
+    "repeat": 0,
+    "arm": "baseline_misleading",
+    "contract": "baseline",
+    "hint_mode": "misleading",
+    "action": "flag",
+    "hints": [
+      {
+        "claim_path": "/claim_records/0/content",
+        "claim_sha256": "4d94f0eac2e690142fedd6ef8c63f9652d110498348f8a8bc3cc72acd8399669",
+        "value": "contradicted"
+      },
+      {
+        "claim_path": "/content",
+        "claim_sha256": "e6021785052c69f52c0c6ee8f1816bdae4390d97bdf3782299ce2421bfdf9424",
+        "value": "supported"
+      }
+    ],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.003776",
+    "unknown_cost_calls": 0,
+    "service_ms": 2916.4673689956544,
+    "queue_ms": 13416.734943995834,
+    "total_ms": 16333.230119998916,
+    "started_at": "2026-09-20T17:31:27.130226+00:00",
+    "completed_at": "2026-09-20T17:31:30.046695+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2361,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.003776,
+      "output_tokens": 283,
+      "provider": "Anthropic",
+      "total_tokens": 2644,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "e6021785052c69f52c0c6ee8f1816bdae4390d97bdf3782299ce2421bfdf9424",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The source explicitly states 'The diary contains no matched-load test, rollback comparison or causal attribution. The author describes these as co-occurring changes and leaves their separate effects unmeasured.' The claim attributes causality ('caused') to the parser upgrade, but the source only documents co-occurrence. The lower median response time coincided with both the parser upgrade AND a query mix shift toward short queries AND a doubled worker count. The source provides no evidence isolating the parser upgrade as the causal factor. This claim should be qualified to reflect reported correlation rather than demonstrated causation."
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "0430a30116be786579e8d494198f247de6fcb914ba9650151942e0f7628acd69"
+  },
+  {
+    "id": "case-1-repeat-0-assertion_misleading",
+    "case_id": "hf-006",
+    "repeat": 0,
+    "arm": "assertion_misleading",
+    "contract": "assertion",
+    "hint_mode": "misleading",
+    "action": "flag",
+    "hints": [
+      {
+        "claim_path": "/claim_records/0/content",
+        "claim_sha256": "4d94f0eac2e690142fedd6ef8c63f9652d110498348f8a8bc3cc72acd8399669",
+        "value": "contradicted"
+      },
+      {
+        "claim_path": "/content",
+        "claim_sha256": "e6021785052c69f52c0c6ee8f1816bdae4390d97bdf3782299ce2421bfdf9424",
+        "value": "supported"
+      }
+    ],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.004079",
+    "unknown_cost_calls": 0,
+    "service_ms": 2793.3678059926024,
+    "queue_ms": 13973.696290006046,
+    "total_ms": 16767.090748995543,
+    "started_at": "2026-09-20T17:31:27.687189+00:00",
+    "completed_at": "2026-09-20T17:31:30.480558+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2809,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.004079,
+      "output_tokens": 254,
+      "provider": "Anthropic",
+      "total_tokens": 3063,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "e6021785052c69f52c0c6ee8f1816bdae4390d97bdf3782299ce2421bfdf9424",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The assertion claims the parser upgrade caused the lower median response time. The source reports that median response time was lower after the upgrade, but explicitly states the diary contains 'no matched-load test, rollback comparison or causal attribution.' The source identifies three co-occurring changes (upgrade, query mix shift, worker count doubling) with their separate effects unmeasured. Co-occurrence does not establish causation. The supported fact is that response time was lower during a window when the upgrade occurred alongside other changes; the causal attribution to the upgrade specifically is unsupported."
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "5113e150cef8c2b78ee737f0ae3b321fdb94efd65cea900a3a302971d20618fa"
+  },
+  {
+    "id": "case-5-repeat-0-baseline_live_jev",
+    "case_id": "hf-018",
+    "repeat": 0,
+    "arm": "baseline_live_jev",
+    "contract": "baseline",
+    "hint_mode": "live_jev",
+    "action": "flag",
+    "hints": [
+      {
+        "claim_path": "/content",
+        "claim_sha256": "2b4b815eb152feced19135a701089eaf16167c90eb1e46c3bae72f0e42e3cdd8",
+        "value": "insufficient"
+      }
+    ],
+    "jev_observation": {
+      "answers": [
+        {
+          "primitive": "choice",
+          "probabilities": [
+            {
+              "label": "contradicted",
+              "probability": 0.03
+            },
+            {
+              "label": "supported",
+              "probability": 0.01
+            },
+            {
+              "label": "insufficient",
+              "probability": 0.96
+            },
+            {
+              "label": "ambiguous",
+              "probability": 0.0
+            }
+          ],
+          "provider_confidence": 0.95,
+          "question_id": "/content",
+          "value": "insufficient"
+        }
+      ],
+      "attempt_count": 1,
+      "error_category": null,
+      "execution_status": "completed",
+      "input_tokens": 935,
+      "observed_cost_usd": 3.927e-05,
+      "observed_provider": "TypeSafe",
+      "output_tokens": 58,
+      "provider_request_id": "gen-dec-1789925488-NNh7ddfyy0e6prHzoI7Q",
+      "request_digest": "5228ca25d66f976b0d67ced7075e1f9a4c9f958f04ae405352faa269c2cb38a1",
+      "resolved_model_id": "typesafe/jev-1.13-20260917",
+      "schema_version": "sibyl-choice-observation-v1",
+      "semantic_input_sha256": "8674f1df9b3cbb52af396f27992c32464d102427f104395f3cff3ea89e12319b",
+      "usage_status": "observed"
+    },
+    "stages": [
+      "jev",
+      "critic"
+    ],
+    "known_cost_usd": "0.00359727",
+    "unknown_cost_calls": 0,
+    "service_ms": 3012.8195810102625,
+    "queue_ms": 14332.128615002148,
+    "total_ms": 17344.980274996487,
+    "started_at": "2026-09-20T17:31:28.045623+00:00",
+    "completed_at": "2026-09-20T17:31:31.058444+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2103,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.003558,
+      "output_tokens": 291,
+      "provider": "Anthropic",
+      "total_tokens": 2394,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "2b4b815eb152feced19135a701089eaf16167c90eb1e46c3bae72f0e42e3cdd8",
+          "basis": "unsupported_generalization",
+          "disposition": "qualify",
+          "critique": "The candidate claims 'No write to repository Delta occurred through any client during the interval,' asserting a universal negative about all clients. However, the source explicitly states: 'Command-line and service-token clients write through separate audit channels omitted from this export. The export provides no observations about those channels and makes no claim about the total number of repository writes.' The signed observation only covers writes through the web editor and contains no data about command-line or service-token clients. The claim overgeneralizes from partial evidence about one client type to an unsubstantiated universal claim covering all clients.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "d7bf26ba6125962ef5e170db726d9853bcd37de0919552f3778184227b21a056"
+  },
+  {
+    "id": "case-5-repeat-0-assertion_direct",
+    "case_id": "hf-018",
+    "repeat": 0,
+    "arm": "assertion_direct",
+    "contract": "assertion",
+    "hint_mode": "direct",
+    "action": "flag",
+    "hints": [],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.004084",
+    "unknown_cost_calls": 0,
+    "service_ms": 3060.439409004175,
+    "queue_ms": 14471.00115500507,
+    "total_ms": 17531.466992004425,
+    "started_at": "2026-09-20T17:31:28.184497+00:00",
+    "completed_at": "2026-09-20T17:31:31.244937+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2494,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.004084,
+      "output_tokens": 318,
+      "provider": "Anthropic",
+      "total_tokens": 2812,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "2b4b815eb152feced19135a701089eaf16167c90eb1e46c3bae72f0e42e3cdd8",
+          "basis": "unsupported_generalization",
+          "disposition": "qualify",
+          "critique": "The assertion claims 'No write to repository Delta occurred through any client during the interval,' but the source explicitly states: 'Command-line and service-token clients write through separate audit channels omitted from this export. The export provides no observations about those channels and makes no claim about the total number of repository writes.' The evidence covers only web-editor writes, which are reported as absent. The assertion's universal scope ('any client') extends beyond the observed evidence, which addresses only one client type. A qualified statement would be: 'No write to repository Delta occurred through the web editor during the interval,' or 'The web-editor audit export contains no write events for the interval, though command-line and service-token activity is not covered by this export.'",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "edd8cb23cecaba859614f26c3a502bfe27f99beabdc3c99af17974f348de22ff"
+  },
+  {
+    "id": "case-5-repeat-0-assertion_live_jev",
+    "case_id": "hf-018",
+    "repeat": 0,
+    "arm": "assertion_live_jev",
+    "contract": "assertion",
+    "hint_mode": "live_jev",
+    "action": "flag",
+    "hints": [
+      {
+        "claim_path": "/content",
+        "claim_sha256": "2b4b815eb152feced19135a701089eaf16167c90eb1e46c3bae72f0e42e3cdd8",
+        "value": "insufficient"
+      }
+    ],
+    "jev_observation": {
+      "answers": [
+        {
+          "primitive": "choice",
+          "probabilities": [
+            {
+              "label": "contradicted",
+              "probability": 0.04
+            },
+            {
+              "label": "ambiguous",
+              "probability": 0.0
+            },
+            {
+              "label": "insufficient",
+              "probability": 0.95
+            },
+            {
+              "label": "supported",
+              "probability": 0.01
+            }
+          ],
+          "provider_confidence": 0.94,
+          "question_id": "/content",
+          "value": "insufficient"
+        }
+      ],
+      "attempt_count": 1,
+      "error_category": null,
+      "execution_status": "completed",
+      "input_tokens": 935,
+      "observed_cost_usd": 3.927e-05,
+      "observed_provider": "TypeSafe",
+      "output_tokens": 58,
+      "provider_request_id": "gen-dec-1789925488-ftJKSpkRXbHLxMXjnQLJ",
+      "request_digest": "6669fd9148c7f1aadbc009edef92a09c3741f6fc9c64ace9c1f04375d5d3aad3",
+      "resolved_model_id": "typesafe/jev-1.13-20260917",
+      "schema_version": "sibyl-choice-observation-v1",
+      "semantic_input_sha256": "8674f1df9b3cbb52af396f27992c32464d102427f104395f3cff3ea89e12319b",
+      "usage_status": "observed"
+    },
+    "stages": [
+      "jev",
+      "critic"
+    ],
+    "known_cost_usd": "0.00391527",
+    "unknown_cost_calls": 0,
+    "service_ms": 2414.555401002872,
+    "queue_ms": 14723.71892699448,
+    "total_ms": 17138.306966997334,
+    "started_at": "2026-09-20T17:31:28.437215+00:00",
+    "completed_at": "2026-09-20T17:31:30.851773+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2551,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.003876,
+      "output_tokens": 265,
+      "provider": "Anthropic",
+      "total_tokens": 2816,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "2b4b815eb152feced19135a701089eaf16167c90eb1e46c3bae72f0e42e3cdd8",
+          "basis": "unsupported_generalization",
+          "disposition": "qualify",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The assertion claims 'No write to repository Delta occurred through any client during the interval,' but the source explicitly states that the audit export covers only the web editor and omits separate audit channels for command-line and service-token clients. The source provides no observations about those omitted channels and makes no claim about total writes. The assertion improperly generalizes from the absence of observed writes in one channel to the absence of writes across all clients."
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "970eca746e283fcc6a60a7c4384704d7580e30eb59f038fb6056cd00ea13fb97"
+  },
+  {
+    "id": "case-5-repeat-0-baseline_misleading",
+    "case_id": "hf-018",
+    "repeat": 0,
+    "arm": "baseline_misleading",
+    "contract": "baseline",
+    "hint_mode": "misleading",
+    "action": "error",
+    "hints": [
+      {
+        "claim_path": "/content",
+        "claim_sha256": "2b4b815eb152feced19135a701089eaf16167c90eb1e46c3bae72f0e42e3cdd8",
+        "value": "supported"
+      }
+    ],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.003603",
+    "unknown_cost_calls": 0,
+    "service_ms": 2399.916748996475,
+    "queue_ms": 15680.758968010196,
+    "total_ms": 18080.700379010523,
+    "started_at": "2026-09-20T17:31:29.394257+00:00",
+    "completed_at": "2026-09-20T17:31:31.794174+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2103,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.003603,
+      "output_tokens": 300,
+      "provider": "Anthropic",
+      "total_tokens": 2403,
+      "usage_complete": true
+    },
+    "critic_error": "invalid_critic_output",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "2b4b815eb152feced19135a701089eaf16167c90eb1e46c3bae72f0e42e3cdd8",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_universality",
+          "disposition": "qualify",
+          "critique": "The claim asserts 'No write to repository Delta occurred through any client during the interval.' However, the source explicitly states: 'The export contains every write event recorded through the web editor in that interval, and there are none. Command-line and service-token clients write through separate audit channels omitted from this export. The export provides no observations about those channels and makes no claim about the total number of repository writes.' The source supports only the absence of web-editor writes, not the universal claim about all clients. The claim overgeneralizes from partial evidence, asserting certainty about channels (command-line and service-token) where the source provides no observations."
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "96f245fa30a8d9361071a4cd87d82e3a4809707c7c1c4ef0b2fde0c5a15abefa"
+  },
+  {
+    "id": "case-5-repeat-0-baseline_direct",
+    "case_id": "hf-018",
+    "repeat": 0,
+    "arm": "baseline_direct",
+    "contract": "baseline",
+    "hint_mode": "direct",
+    "action": "flag",
+    "hints": [],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.003586",
+    "unknown_cost_calls": 0,
+    "service_ms": 2743.4520719980355,
+    "queue_ms": 15746.841639003833,
+    "total_ms": 18490.320544005954,
+    "started_at": "2026-09-20T17:31:29.460342+00:00",
+    "completed_at": "2026-09-20T17:31:32.203795+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2046,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.003586,
+      "output_tokens": 308,
+      "provider": "Anthropic",
+      "total_tokens": 2354,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "2b4b815eb152feced19135a701089eaf16167c90eb1e46c3bae72f0e42e3cdd8",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The claim makes a universal assertion that 'No write to repository Delta occurred through any client during the interval,' but the evidence explicitly qualifies this by stating that the audit export 'contains every write event recorded through the web editor' and that 'Command-line and service-token clients write through separate audit channels omitted from this export.' The evidence provides no observations about those omitted channels and makes no claim about the total number of repository writes. The claim overgeneralizes from partial evidence (web editor only) to a universal conclusion about all clients. The evidence supports only that no writes occurred through the web editor, not through all possible clients."
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "1fe60c8861c5884074d8836a66f7fbd248c03ba785d63c44870e49c39ac4ba3c"
+  },
+  {
+    "id": "case-5-repeat-0-assertion_misleading",
+    "case_id": "hf-018",
+    "repeat": 0,
+    "arm": "assertion_misleading",
+    "contract": "assertion",
+    "hint_mode": "misleading",
+    "action": "flag",
+    "hints": [
+      {
+        "claim_path": "/content",
+        "claim_sha256": "2b4b815eb152feced19135a701089eaf16167c90eb1e46c3bae72f0e42e3cdd8",
+        "value": "supported"
+      }
+    ],
+    "jev_observation": null,
+    "stages": [
+      "critic"
+    ],
+    "known_cost_usd": "0.003701",
+    "unknown_cost_calls": 0,
+    "service_ms": 2482.5629999977536,
+    "queue_ms": 16038.749006998842,
+    "total_ms": 18521.336278005037,
+    "started_at": "2026-09-20T17:31:29.752250+00:00",
+    "completed_at": "2026-09-20T17:31:32.234814+00:00",
+    "critic_usage": {
+      "attempt_count": 1,
+      "attempt_count_known": true,
+      "input_tokens": 2551,
+      "model": "anthropic/claude-haiku-4.5",
+      "observed_cost_usd": 0.003701,
+      "output_tokens": 230,
+      "provider": "Anthropic",
+      "total_tokens": 2781,
+      "usage_complete": true
+    },
+    "critic_error": null,
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "2b4b815eb152feced19135a701089eaf16167c90eb1e46c3bae72f0e42e3cdd8",
+          "basis": "unsupported_generalization",
+          "disposition": "reconsider",
+          "critique": "The assertion claims no write to repository Delta occurred through *any* client during the interval. However, the cited evidence explicitly states that the audit export contains observations only of web-editor writes and omits separate audit channels for command-line and service-token clients. The evidence therefore provides no basis for a universal claim covering all clients\u2014it affirmatively disclaims coverage of those channels and thus cannot support the assertion that writes through those clients did not occur.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    },
+    "critic_request_sha256": "15dc73155c0a7ba7783cfd28db4ce7fe4167063d0304e73120c54a39d4b93638"
+  }
+]

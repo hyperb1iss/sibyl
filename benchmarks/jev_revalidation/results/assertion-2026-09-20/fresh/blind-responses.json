@@ -1,0 +1,3387 @@
+[
+  {
+    "blind_id": "60debbf95ceb065c",
+    "case_id": "af-013",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "9984d7bbdbbe2326",
+    "case_id": "af-004",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "dce413e195b006c3f446d87f08e7fd54bfc458bb47f301acb98ed8ce11ae93f9",
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The assertion claims delta encoding was enabled in frame F-C3, but the source evidence explicitly states 'The analyzer decodes bit zero as clear and records delta encoding disabled for this frame.' This is a direct factual contradiction of the same scope and subject matter."
+        }
+      ]
+    }
+  },
+  {
+    "blind_id": "3f76716e88047337",
+    "case_id": "af-013",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "3b91b7756829ab63",
+    "case_id": "af-004",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "dce413e195b006c3f446d87f08e7fd54bfc458bb47f301acb98ed8ce11ae93f9",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The assertion claims delta encoding was enabled in frame F-C3, but the cited source directly states that 'The analyzer decodes bit zero as clear and records delta encoding disabled for this frame.' This is an incompatible same-scope fact: the source explicitly establishes that delta encoding is disabled, not enabled."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "357850d7963aeb71",
+    "case_id": "af-007",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "e3eda51a972fc34d",
+    "case_id": "af-005",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "295dcebe14c2fbb5",
+    "case_id": "af-002",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "d1cf1c2bc880cd682e312798605abfbaf66730e996d77d61e09c8158cc57a378",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "reconsider",
+          "critique": "The candidate claims the bytes were 'guaranteed to survive a power interruption after acknowledgment.' However, the source evidence explicitly states: 'The capture does not establish whether this controller flushes on acknowledgment; its persistence policy was not measured' and 'The capture ends before any buffer-flush trace, restart or power interruption.' The evidence demonstrates only that a read returned the bytes while power remained connected, not that they would survive a power interruption. This represents an unsupported causal conclusion about durability guarantees that the evidence cannot establish."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "280528fb2c6b621adb90ae81c63155187bcbff891f840b9c569884d2a9e24823",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "misleading_certainty",
+          "disposition": "qualify",
+          "critique": "While the source confirms a write to block 712 returned success at tick 180, the claim is presented as a simple fact. However, this observation comes from a volatile controller buffer environment where the persistence policy was not measured, and the capture does not include any power interruption test. The claim should be qualified to clarify it is an observation from a specific test environment with known limitations regarding durability, not a general statement about the system's actual guarantees."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "9457099fde4c35c1",
+    "case_id": "af-014",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "0630b6ff640a7119893c9fbc5dc424a15132dca27f277e4d46b887afcff849f5",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The source evidence explicitly states: 'The adjacent sample 406 has its saturation flag clear.' This directly contradicts the claim that 'The saturation flag was clear for adjacent sample 406.' While the literal statement appears identical, the source evidence confirms this fact as an observation from signed provenance. However, the candidate's presentation of this as a standalone claim without acknowledging it derives from the source context\u2014combined with the advisory hint marking it as 'contradicted'\u2014suggests the claim may be presented in isolation when it should be understood only within the context of the source's broader qualification that sample 407's saturation indicates a true input of 'at least 500 N' rather than exactly 500 N. The claim about sample 406 being clear is factually correct per the source, but is presented as a separate claim when it functions in the source only as contextual detail supporting the qualification about sample 407's measurement uncertainty."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "4aa8dd00fd05070803dd7e2e9901ba7171b147b28b9fad8ddd28fddb2969852a",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "misleading_certainty",
+          "disposition": "qualify",
+          "critique": "The candidate claims 'The true load-channel input at sample 407 was exactly 500 N.' However, the source evidence states: 'a saturated sample represents a true channel input of at least 500 N; displayed 500 is a clipping value, not an exact measurement.' The source explicitly clarifies that 500 N is a displayed clipping value, not an exact true measurement. The actual true input is 'at least 500 N'\u2014an unknown value that exceeds or equals 500 N. The claim's use of 'exactly' contradicts the source's explicit statement that this is not an exact measurement. The claim should be qualified to reflect the uncertainty: the true load-channel input at sample 407 was at least 500 N, with the displayed value of 500 N representing saturation/clipping rather than a precise measurement."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "16a977287b566f4d",
+    "case_id": "af-006",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "c0a2272f6b738933423f4d7b87e38585953b122f4d62fb514fc4a27b1bc8fea5",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The candidate claims 'The foam insert caused the lower recorded sound level in run B.' However, the source explicitly states: 'No run held microphone distance constant while varying the insert, and no separate effect of either change was estimated. The notebook reports the two readings without attributing the difference to a cause.' The source identifies two independent variables that changed between runs: (1) the foam insert was fitted, and (2) the microphone was moved from 0.5 m to 2 m. The observed difference in recorded level (68 dB vs 61 dB) cannot be attributed solely to the foam insert without isolating its effect, which was not done. The source explicitly rejects causal attribution. The claim improperly assigns causality without meeting the conditions required to establish it."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "e1ac35d3043856d1",
+    "case_id": "af-007",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "7c83b2e5cbbc08c8",
+    "case_id": "af-001",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "858b798a3c5e2d99",
+    "case_id": "af-006",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "c0a2272f6b738933423f4d7b87e38585953b122f4d62fb514fc4a27b1bc8fea5",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "reconsider",
+          "critique": "The source explicitly states: 'No run held microphone distance constant while varying the insert, and no separate effect of either change was estimated. The notebook reports the two readings without attributing the difference to a cause.' Two confounding variables changed between runs: (1) foam insert was fitted, and (2) microphone distance changed from 0.5 m to 2 m. The sound level difference (68 dB to 61 dB) cannot be attributed to the foam insert alone because the microphone distance also changed, and distance significantly affects sound level measurements. The source explicitly disclaims causal attribution."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "07a0b33c3a9fefa5d7f3b3aa0120e844a29ed9380db65fe5828b4063c5d917f3",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_generalization",
+          "disposition": "qualify",
+          "critique": "The source states 'Fan speed was held fixed' but does not specify the complete experimental setup or whether this was the only controlled variable across both runs. While the statement itself is supported by the source, presenting it as a standalone claim without acknowledging the two uncontrolled variables (microphone distance and foam insert changing simultaneously) could misleadingly suggest adequate experimental control. This claim should be qualified with context about what was NOT controlled."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "dea338584df35d80",
+    "case_id": "af-010",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "633d7fb0b1bd7b7cbeb3e3ee7184191a1dc7ff725b075d8c9179d1fbb4c7bb21",
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The assertion states the grid has three rows and four cells per row (twelve total cells). The evidence specifies that two cells are masked (row 1 column 2 and row 3 column 4), and explicitly states the record lists ten contributing cells. This is incompatible with the claim of twelve total cells in the grid as described, since if all twelve cells existed unmasked, the contributing count would be twelve, not ten."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "cd37e6a7d6f2e3e9",
+    "case_id": "af-008",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "73954eb688ea0057419c283dafa57e7df8aafd2e9c632df1cc4862bfea0cdbe4",
+          "basis": "unsupported_generalization",
+          "disposition": "qualify",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The assertion states the serial 'was checked' (past tense, universal) before immersion. The evidence supports that the serial was verified against its engraved identifier as a precondition for that specific measurement. The evidence does not establish that a serial check occurred at any other time, for any other probe, or across multiple measurement contexts. The claim should be qualified to reflect the specific verification described in the worksheet."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "96c1a7c3ef67c6d5",
+    "case_id": "af-002",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "d1cf1c2bc880cd682e312798605abfbaf66730e996d77d61e09c8158cc57a378",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The assertion claims bytes were 'guaranteed to survive a power interruption after acknowledgment.' The evidence reports success at tick 180, a read of the data at tick 181 while powered, and explicitly notes: 'The capture ends before any buffer-flush trace, restart or power interruption' and 'does not establish whether this controller flushes on acknowledgment; its persistence policy was not measured.' The evidence does not test or establish power-loss survival or the persistence guarantee. The claim overstates the causal attribution beyond what the volatile-buffer scenario and available trace data can warrant."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "dc9746c9243bd938",
+    "case_id": "af-015",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "25bc189f95e04e74",
+    "case_id": "af-005",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "7924242cfb129face03e275168d650b9323eded8db4313283c5d1616ecd45864",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "missing_condition",
+          "disposition": "qualify",
+          "critique": "The assertion reports that sound level was lower in run B than run A (61 dB vs 68 dB), which the evidence confirms. However, the assertion omits the necessary condition that the microphone distance changed (0.5 m to 2 m) and a foam insert was fitted. The comparison does not hold these variables constant, so the lower reading cannot be attributed to any single factor without additional testing. The assertion should acknowledge these confounded changes."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "07a0b33c3a9fefa5d7f3b3aa0120e844a29ed9380db65fe5828b4063c5d917f3",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "reconsider",
+          "critique": "The assertion states fan speed was held fixed between the two runs. The evidence reports 'Fan speed was held fixed' but this statement occurs in the context of describing two runs where the microphone distance and insert both changed. The evidence explicitly states 'No run held microphone distance constant while varying the insert, and no separate effect of either change was estimated.' The assertion about fan speed being fixed does not establish that it was the independent variable of interest, nor does it support any causal claim about its role. The assertion should clarify whether this was merely a control condition or an unexamined confound."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "70861fdff80768b2",
+    "case_id": "af-011",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "33edb6ee768359e0",
+    "case_id": "af-011",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "1ca4a919c34bc86b",
+    "case_id": "af-016",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "2bea1895d0d31819",
+    "case_id": "af-002",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "d1cf1c2bc880cd682e312798605abfbaf66730e996d77d61e09c8158cc57a378",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The candidate claims 'bytes submitted to block 712 were guaranteed to survive a power interruption after acknowledgment.' The evidence (source af-002-source-1) documents a write returning success at tick 180 and a read at tick 181 that returned the submitted bytes. However, the source explicitly states: 'The capture ends before any buffer-flush trace, restart or power interruption' and 'The capture does not establish whether this controller flushes on acknowledgment; its persistence policy was not measured.' The evidence only demonstrates that bytes were present in a volatile controller buffer while power remained connected\u2014it does not provide any empirical evidence of survival across actual power interruption. The claim of guarantee regarding power interruption survival is an unsupported causal conclusion that exceeds what the signed observation actually establishes."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "a29ab8c770014a95",
+    "case_id": "af-006",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "c0a2272f6b738933423f4d7b87e38585953b122f4d62fb514fc4a27b1bc8fea5",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The source reports two acoustic measurements (68 dB in Run A, 61 dB in Run B) but explicitly states: 'No run held microphone distance constant while varying the insert, and no separate effect of either change was estimated. The notebook reports the two readings without attributing the difference to a cause.' The candidate's claim that 'The foam insert caused the lower recorded sound level in run B' assigns causality to the foam insert, but the source explicitly disavows causal attribution. The 9 dB difference cannot be separated from the confounding variable of microphone distance change (0.5 m to 2 m). This is a causal claim unsupported by the source, which only documents observed readings without establishing cause."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "a9c018e62c00009b",
+    "case_id": "af-009",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "e0f6056eb68bfdb9",
+    "case_id": "af-012",
+    "mechanical_action": "flag",
+    "output": {
+      "abstention_reason": null,
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "9130c824cbfdfc933b0ab74f58eaca9155fb2250afba99152e491dd474ede07d",
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            },
+            {
+              "evidence_id": "s1"
+            }
+          ],
+          "critique": "The assertion states an unqualified governing thickness of 1.6 mm, but the signed CAD exports for revision 7 bracket PX show conflicting thickness callouts: export E1 specifies 1.6 mm and export E2 specifies 2.0 mm. Both exports bear valid archive signatures and identify revision 7 as current. The source explicitly confirms no release-order record, correction, or approval record resolves which callout governs. The assertion presents one measured value as governing fact, while the evidence establishes unresolved conflicting specifications. The assertion overstates certainty by omitting the conflict."
+        }
+      ]
+    }
+  },
+  {
+    "blind_id": "eba7d5be57ba67e9",
+    "case_id": "af-016",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "e44494063877d24f",
+    "case_id": "af-012",
+    "mechanical_action": "error",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "9130c824cbfdfc933b0ab74f58eaca9155fb2250afba99152e491dd474ede07d",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            },
+            {
+              "evidence_id": "s1"
+            }
+          ],
+          "basis": "unsupported_certainty",
+          "disposition": "reconsider",
+          "critique": "The assertion states 'the governing revision-7 design thickness of bracket PX is 1.6 mm' as a definitive fact. However, the evidence establishes conflicting thickness callouts: s0 shows 1.6 mm while s1 shows 2.0 mm, both valid signatures bearing the same revision 7, with s1 explicitly stating 'no approval, correction or release-order record that resolves which callout governs.' The assertion asserts certainty about which value governs without acknowledgment of the documented conflict, exceeding what the evidence warrants."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "14552e5f4b670e15",
+    "case_id": "af-006",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "c0a2272f6b738933423f4d7b87e38585953b122f4d62fb514fc4a27b1bc8fea5",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "relabel_inference",
+          "critique": "The source reports two sound level measurements (68 dB in run A, 61 dB in run B) but explicitly states: 'No run held microphone distance constant while varying the insert, and no separate effect of either change was estimated. The notebook reports the two readings without attributing the difference to a cause.' The assertion attributes the difference to the foam insert alone, but the evidence shows two confounded variables\u2014the foam insert and microphone distance (0.5 m to 2 m)\u2014both changed between runs. The evidence does not isolate or establish the foam insert as the cause of the lower reading."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "f055bacae9c88d29",
+    "case_id": "af-003",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "e213d757f14d3f78",
+    "case_id": "af-006",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "c0a2272f6b738933423f4d7b87e38585953b122f4d62fb514fc4a27b1bc8fea5",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "reconsider",
+          "critique": "The source reports that run A recorded 68 dB and run B recorded 61 dB, with a foam insert fitted and microphone relocated between runs. However, the source explicitly states: 'No run held microphone distance constant while varying the insert, and no separate effect of either change was estimated. The notebook reports the two readings without attributing the difference to a cause.' The assertion attributes the sound level difference to the foam insert, but the source confirms that both the insert and microphone distance changed simultaneously, making the cause of the difference unestablished. The source's own conclusion is that causality was not estimated."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "57e1265872724c28",
+    "case_id": "af-014",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "4aa8dd00fd05070803dd7e2e9901ba7171b147b28b9fad8ddd28fddb2969852a",
+          "basis": "misleading_certainty",
+          "disposition": "qualify",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The assertion states the true load-channel input was 'exactly 500 N,' but the evidence indicates sample 407 displays 500 N as a clipping value, not an exact measurement. The acquisition rule establishes that a saturated sample represents a true channel input of 'at least 500 N'\u2014a lower bound, not a precise value. The evidence explicitly states 'No secondary range, unclipped trace or upper bound is available,' preventing exact measurement. The claim overstates certainty beyond what the evidence supports."
+        }
+      ]
+    }
+  },
+  {
+    "blind_id": "adbf70636fe8a48c",
+    "case_id": "af-016",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "110f573a4754623b578cc0952d29c2acb0fd688cfdd4f891623bfe58a5ea3df6",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The source states that at the final status read, 'bank A [is] active and rising polarity as the effective value.' The assertion claims unit H8 used the uploaded falling pulse polarity at the final status read. The source directly contradicts this: the falling-polarity configuration was stored but not activated; the effective polarity remained rising from bank A."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "9e46239f389f57bf",
+    "case_id": "af-002",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "d1cf1c2bc880cd682e312798605abfbaf66730e996d77d61e09c8158cc57a378",
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The candidate claims the bytes were 'guaranteed to survive a power interruption after acknowledgment.' The source evidence shows a write returned success at tick 180, and a read at tick 181 returned the submitted bytes while power remained connected. However, the source explicitly states: 'The capture ends before any buffer-flush trace, restart or power interruption. The capture does not establish whether this controller flushes on acknowledgment; its persistence policy was not measured.' The evidence does not demonstrate persistence across power interruption\u2014it only shows successful read while power remained connected. The causal claim that acknowledgment guarantees survival of a power interruption is not supported by the evidence provided.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "blind_id": "093dad23f67eae67",
+    "case_id": "af-008",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "75158f3d655cb3d869ddfe37f109ac96dc2403ff2e13e597010790ceb88c605a",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_generalization",
+          "disposition": "qualify",
+          "critique": "The assertion claims Probe ZQ has a +0.2 C error at 90.0 C. The evidence establishes only that the probe showed a +0.2 C error when checked at 20.0 C; the worksheet explicitly states 'No measurement above 25 C was performed in the supplied qualification.' The claim extends a measured value at 20.0 C to an unmeasured temperature (90.0 C) without evidenced basis."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "666d757b557a2bf7",
+    "case_id": "af-001",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "2c55d3eef6622bfc",
+    "case_id": "af-006",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "07a0b33c3a9fefa5d7f3b3aa0120e844a29ed9380db65fe5828b4063c5d917f3",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The evidence states 'Fan speed was held fixed' only in reference to the comparison between the two runs already made (after the microphone distance and insert were both changed). The source explicitly documents that 'No run held microphone distance constant while varying the insert, and no separate effect of either change was estimated.' This confounding experimental design, combined with the source's statement that it 'reports the two readings without attributing the difference to a cause,' contradicts the premise that fan speed consistency across both runs was the controlled baseline. The assertion isolates one control variable as if independently verified, when the source evidence shows the runs were not designed to isolate any single variable."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "c0a2272f6b738933423f4d7b87e38585953b122f4d62fb514fc4a27b1bc8fea5",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "relabel_inference",
+          "critique": "The source reports two sound levels (68 dB in run A, 61 dB in run B) and documents that the foam insert was fitted between runs. However, the microphone distance also changed (from 0.5 m to 2 m). The source explicitly states 'No run held microphone distance constant while varying the insert, and no separate effect of either change was estimated' and 'reports the two readings without attributing the difference to a cause.' The assertion attributes causation to the foam insert alone, but the evidence shows two confounded variables\u2014insert change and microphone distance change\u2014both of which could explain the lower reading. The causal attribution exceeds what the evidence supports."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "bb24f0fc30788cca",
+    "case_id": "af-016",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "9c2363ac1ee3ba9de301a48de0e5315bb4b65a15e907c0669103fec5231d961b",
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The assertion claims the falling-polarity configuration 'was stored' in inactive bank B as a completed state. However, the source indicates the configuration was 'stored' but the upload status was 'activation pending'\u2014not activated. The trace shows 'The final status read, after that upload, still identifies bank A as active and rising polarity as the effective value.' The assertion omits the critical condition that the configuration remained inactive and unapplied, presenting an incomplete account of the stored state.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "blind_id": "550d52042ce82a8d",
+    "case_id": "af-006",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "07a0b33c3a9fefa5d7f3b3aa0120e844a29ed9380db65fe5828b4063c5d917f3",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The evidence states 'the microphone was moved to 2 m' in run B versus '0.5 m from the enclosure' in run A. While the evidence confirms 'Fan speed was held fixed,' it simultaneously shows the microphone distance was not held fixed between runs. The assertion as stated is factually true for fan speed but omits the material change in measurement conditions (microphone distance). However, examining the assertion's exact proposition\u2014'Fan speed was held fixed between the two runs'\u2014this claim is directly supported by the evidence: 'Fan speed was held fixed.' The advisory label marks this as contradicted, but the evidence text does not contradict this specific proposition. The evidence does establish that other conditions varied (microphone distance), but that does not contradict the fan speed claim itself."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "c0a2272f6b738933423f4d7b87e38585953b122f4d62fb514fc4a27b1bc8fea5",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The assertion states 'The foam insert caused the lower recorded sound level in run B.' The evidence reports the acoustic observations (68 dB vs. 61 dB) and notes that 'a foam insert was fitted' in run B, but explicitly states: 'No run held microphone distance constant while varying the insert, and no separate effect of either change was estimated. The notebook reports the two readings without attributing the difference to a cause.' The evidence explicitly declines to attribute causality to either the foam insert or the microphone distance change. The assertion assumes causation from the foam insert alone, when the microphone was also moved from 0.5 m to 2 m. The confounded conditions prevent the evidence from supporting causal attribution to the insert."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "f9aa5672a5b3564b",
+    "case_id": "af-014",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "4aa8dd00fd05070803dd7e2e9901ba7171b147b28b9fad8ddd28fddb2969852a",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "misleading_certainty",
+          "disposition": "qualify",
+          "critique": "The assertion states 'exactly 500 N', but the source establishes that 500 is a clipping value displayed for a saturated sample, not an exact measurement. The true input is characterized as 'at least 500 N', with no upper bound available. The exact value is unknown."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "3d8443ee0d9e3b35",
+    "case_id": "af-016",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "9c2363ac1ee3ba9de301a48de0e5315bb4b65a15e907c0669103fec5231d961b",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The claim states that 'The falling-polarity configuration was stored in inactive bank B.' The evidence confirms this factually: the source text explicitly states 'A later upload stored a falling-polarity configuration in inactive bank B.' This claim is directly supported by the source material and is not contradicted. The advisory label marking this as 'contradicted' does not align with the original evidence."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "110f573a4754623b578cc0952d29c2acb0fd688cfdd4f891623bfe58a5ea3df6",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The claim states 'At the final status read, unit H8 used the uploaded falling pulse polarity.' However, the source evidence directly contradicts this: 'The final status read, after that upload, still identifies bank A as active and rising polarity as the effective value.' The final status read shows rising polarity (bank A active), not the uploaded falling polarity (bank B). This is a factual contradiction between the candidate claim and the signed observation in the source."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "0dc612db430900c5",
+    "case_id": "af-009",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "630f653c6ac2766c",
+    "case_id": "af-001",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "433c30f9d832d3ca",
+    "case_id": "af-016",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "9c2363ac1ee3ba9de301a48de0e5315bb4b65a15e907c0669103fec5231d961b",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The source text states 'A later upload stored a falling-polarity configuration in inactive bank B' (affirming the claim). However, the advisory hint labels this claim as 'contradicted'. This represents a factual contradiction that warrants reconsideration of the advisory assessment. The signed provenance evidence directly supports the claim that the falling-polarity configuration was stored in inactive bank B."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "110f573a4754623b578cc0952d29c2acb0fd688cfdd4f891623bfe58a5ea3df6",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The source explicitly states 'The final status read, after that upload, still identifies bank A as active and rising polarity as the effective value.' This directly contradicts the claim that 'At the final status read, unit H8 used the uploaded falling pulse polarity.' The advisory hint labels this as 'supported', but the signed provenance evidence clearly shows that at the final status read, the effective polarity remained rising (from bank A), not the uploaded falling polarity (which was stored but not activated in bank B)."
+        }
+      ]
+    }
+  },
+  {
+    "blind_id": "289b402dea69fa6c",
+    "case_id": "af-005",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "7924242cfb129face03e275168d650b9323eded8db4313283c5d1616ecd45864",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "relabel_inference",
+          "critique": "The candidate claims 'The recorded sound level was lower in run B than in run A.' The evidence confirms the outcome (68 dB vs 61 dB), but the source explicitly states: 'No run held microphone distance constant while varying the insert, and no separate effect of either change was estimated. The notebook reports the two readings without attributing the difference to a cause.' The lower reading in run B resulted from two simultaneous changes: foam insert fitted AND microphone moved from 0.5 m to 2 m. The source explicitly disclaims causal attribution. Presenting this as a simple factual outcome without acknowledging the confounded conditions and lack of causal analysis misrepresents the evidence."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "93c9aa0744a58aba",
+    "case_id": "af-003",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "d6c03270fe895d23",
+    "case_id": "af-011",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "dc147695d1c71a90",
+    "case_id": "af-014",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "4aa8dd00fd05070803dd7e2e9901ba7171b147b28b9fad8ddd28fddb2969852a",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "critique": "The candidate claims the true load-channel input at sample 407 was 'exactly 500 N.' However, the source explicitly states that sample 407 displays 500 N with the saturation flag set, and that 'displayed 500 is a clipping value, not an exact measurement.' The acquisition rule indicates a saturated sample represents 'at least 500 N,' not exactly 500 N. This is a measurement ambiguity where the true value could be higher; the candidate's claim of exactness contradicts the source's characterization of 500 as a clipping value representing a lower bound."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "4190a5e2a8c8106c",
+    "case_id": "af-009",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "9813f073f77c061d",
+    "case_id": "af-005",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "7924242cfb129face03e275168d650b9323eded8db4313283c5d1616ecd45864",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "relabel_inference",
+          "critique": "The source reports two sound level readings (68 dB in run A, 61 dB in run B) but explicitly states: 'The notebook reports the two readings without attributing the difference to a cause' and notes that 'No run held microphone distance constant while varying the insert, and no separate effect of either change was estimated.' The candidate frames the observation as a simple causal outcome ('The recorded sound level was lower in run B than in run A'), but the source explicitly documents that the difference cannot be attributed to foam insertion alone because two variables changed simultaneously: the foam insert was fitted AND the microphone distance changed from 0.5 m to 2 m. This is a reported observation of outcome counts only, not a causally explained result. The claim should be relabeled as an observation rather than a causal inference."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "07a0b33c3a9fefa5d7f3b3aa0120e844a29ed9380db65fe5828b4063c5d917f3",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The source confirms that 'Fan speed was held fixed' in the experimental design. However, the same source immediately documents two simultaneous confounding changes: the foam insert was fitted AND the microphone distance was moved from 0.5 m to 2 m. While fan speed control is a valid condition met by the evidence, the source explicitly states that 'No run held microphone distance constant while varying the insert, and no separate effect of either change was estimated.' The claim that fan speed was held fixed is accurate but should be qualified with the acknowledgment that this design condition did not isolate the causal factors\u2014microphone distance and insert type both varied between runs."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "52ea22ebba2a1311",
+    "case_id": "af-008",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "75158f3d655cb3d869ddfe37f109ac96dc2403ff2e13e597010790ceb88c605a",
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The candidate claims 'Probe ZQ has a +0.2 C error at 90.0 C.' The source evidence from af-008-source-1 records only a +0.2 C error at 20.0 C, where the probe indicated 20.2 C in the stabilized reference bath. The source explicitly states 'No measurement above 25 C was performed in the supplied qualification' and 'The worksheet supplies no response curve or error bound outside the checked temperature.' The candidate generalizes a single-point calibration at 20.0 C to a claim about error magnitude at 90.0 C without evidence of causality, measurement, or interpolation authority. This constitutes an unsupported universal generalization of a localized observation to a different operating point.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "blind_id": "d8edb3b3cd184ce1",
+    "case_id": "af-006",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "c0a2272f6b738933423f4d7b87e38585953b122f4d62fb514fc4a27b1bc8fea5",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "reconsider",
+          "critique": "The evidence explicitly states that 'No run held microphone distance constant while varying the insert, and no separate effect of either change was estimated. The notebook reports the two readings without attributing the difference to a cause.' The candidate attributes the sound level difference to the foam insert as the causal factor, but the source explicitly disclaims any causal attribution. Run B also changed the microphone distance from 0.5 m to 2 m in addition to adding the foam insert, creating a confounding factor. A 7 dB decrease can be expected from the distance change alone (inverse square law: doubling distance ~6 dB reduction). The source cannot support a causal claim for the foam insert when both variables changed together and no separate effect was estimated."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "b983204cd7881880",
+    "case_id": "af-015",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "80d19dd7e3c7c286",
+    "case_id": "af-002",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "d1cf1c2bc880cd682e312798605abfbaf66730e996d77d61e09c8158cc57a378",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The assertion claims bytes 'were guaranteed to survive a power interruption after acknowledgment.' The evidence reports a successful write at tick 180, a successful read at tick 181 while power remained connected, but explicitly states 'The capture ends before any buffer-flush trace, restart or power interruption' and 'The capture does not establish whether this controller flushes on acknowledgment; its persistence policy was not measured.' The evidence establishes only that data persisted during normal operation within a volatile buffer. It does not establish a guarantee of survival across power interruption, as no power interruption was observed or measured. The claim of post-acknowledgment guarantee exceeds what the evidence supports."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "280528fb2c6b621adb90ae81c63155187bcbff891f840b9c569884d2a9e24823",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The assertion claims 'The write returned success at tick 180.' The evidence states 'a write to address block 712 returned success at tick 180.' These statements are consistent in their core proposition. However, examining the advisory slot, the claim is labeled 'contradicted' while the supporting evidence explicitly reports success at tick 180. The evidence itself contains no contradicting account. The advisory label conflicts with the original signed source. No factual contradiction appears in the evidence itself regarding this specific proposition."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "adf606c1f6463634",
+    "case_id": "af-007",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "69c71f8dcec2ea3b",
+    "case_id": "af-014",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "0630b6ff640a7119893c9fbc5dc424a15132dca27f277e4d46b887afcff849f5",
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The assertion states 'The saturation flag was clear for adjacent sample 406,' but the source explicitly states 'The adjacent sample 406 has its saturation flag clear' is preceded by discussion that sample 407 'has the saturation flag set.' The source text directly establishes that sample 406's saturation flag is clear, which matches the assertion. However, re-reading reveals the source states exactly: 'The adjacent sample 406 has its saturation flag clear.' The assertion's claim is factually supported. Upon reexamination: the source unambiguously confirms 'The adjacent sample 406 has its saturation flag clear,' making the assertion accurate. No contradiction exists. This finding should be withdrawn.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "4aa8dd00fd05070803dd7e2e9901ba7171b147b28b9fad8ddd28fddb2969852a",
+          "basis": "misleading_certainty",
+          "disposition": "qualify",
+          "critique": "The assertion claims 'The true load-channel input at sample 407 was exactly 500 N.' The source establishes that sample 407 displays 500 N with the saturation flag set, and that 'a saturated sample represents a true channel input of at least 500 N; displayed 500 is a clipping value, not an exact measurement.' The source explicitly states that no secondary range, unclipped trace, or upper bound is available. The true value is at least 500 N, not exactly 500 N. The assertion overstates certainty by claiming exactness when the source documents only a lower bound.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "9a9d8c0ec3d1cd5e",
+    "case_id": "af-007",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "7890e98bdeb8293f",
+    "case_id": "af-001",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "34b9f6d999fe68d9",
+    "case_id": "af-011",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "6aa858b55722478a",
+    "case_id": "af-004",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "491b2b55353ede4888d447cf8c9cdfe64263ad4262b795562e5f8b4d627146cc",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'Delta encoding was enabled in frame F-C3.' However, the source evidence explicitly states: 'The analyzer decodes bit zero as clear and records delta encoding disabled for this frame.' Since bit zero controls delta encoding (set enables, clear disables), and the analyzer recorded bit zero as clear, delta encoding was disabled, not enabled. This is a direct factual contradiction."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "cd602f8a36d1dd2a",
+    "case_id": "af-013",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "53ca571dcfcad8e0",
+    "case_id": "af-010",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "bb1c6c62a480af051d21c8d947bbe89100daa9c0b155e610aefa5efb4bc7aae9",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "critique": "The assertion claims the exported mean used twelve contributing cells, but the evidence states the record explicitly lists ten contributing cells. The grid contains 12 total cells (3 rows \u00d7 4 cells per row), with 2 masked cells, leaving 10 unmasked cells. The exported mean is computed over unmasked cells only, which is ten, not twelve."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "42f697225c3ae8da",
+    "case_id": "af-014",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "4aa8dd00fd05070803dd7e2e9901ba7171b147b28b9fad8ddd28fddb2969852a",
+          "basis": "misleading_certainty",
+          "disposition": "qualify",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The assertion states the true load-channel input was 'exactly 500 N', but the source explicitly states that displayed 500 is a clipping value, not an exact measurement, and that the true input is at least 500 N with no upper bound available. The word 'exactly' misrepresents the actual uncertainty documented in the source."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "b6009d9f8e9ae8c6",
+    "case_id": "af-009",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "5390552534079cbc",
+    "case_id": "af-009",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "ec9bd039a73c603c",
+    "case_id": "af-015",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "0b5f3ed8f44b864b",
+    "case_id": "af-016",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "110f573a4754623b578cc0952d29c2acb0fd688cfdd4f891623bfe58a5ea3df6",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The assertion claims that 'at the final status read, unit H8 used the uploaded falling pulse polarity.' However, the evidence states: 'The final status read, after that upload, still identifies bank A as active and rising polarity as the effective value.' The source explicitly confirms that despite the falling-polarity configuration being stored in bank B, the final status read shows bank A (rising polarity) remained active and effective\u2014not the uploaded falling polarity."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "35a4a1d69a126d3e",
+    "case_id": "af-010",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "bb1c6c62a480af051d21c8d947bbe89100daa9c0b155e610aefa5efb4bc7aae9",
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The assertion states the exported mean used twelve contributing cells, but the evidence explicitly reports the record lists ten contributing cells and the exported mean is computed over unmasked cells only, excluding the two masked cells at row 1 column 2 and row 3 column 4.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "blind_id": "57014fef81d6064d",
+    "case_id": "af-009",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "830f184d08962510",
+    "case_id": "af-001",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "0fd3b560a4351c71",
+    "case_id": "af-016",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "9c2363ac1ee3ba9de301a48de0e5315bb4b65a15e907c0669103fec5231d961b",
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The assertion claims the falling-polarity configuration was stored in inactive bank B. The evidence confirms this occurred ('A later upload stored a falling-polarity configuration in inactive bank B'). However, the assertion omits the critical condition that this configuration remained unactivated. The source explicitly states 'The final status read, after that upload, still identifies bank A as active and rising polarity as the effective value. No bank-switch command occurred within the trace.' The assertion presents the storage as a completed state without noting that the configuration never became active, which is material to understanding the system's actual operational behavior."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "46a764a09904d5ea",
+    "case_id": "af-003",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "fbbfe8da0df332aa",
+    "case_id": "af-005",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "5c09d64cd92b74db",
+    "case_id": "af-002",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "d1cf1c2bc880cd682e312798605abfbaf66730e996d77d61e09c8158cc57a378",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The candidate claims bytes 'were guaranteed to survive a power interruption after acknowledgment.' The source evidence shows a write succeeded at tick 180, and a read at tick 181 confirmed the bytes were present while power remained connected. However, the source explicitly states 'The capture ends before any buffer-flush trace, restart or power interruption' and 'does not establish whether this controller flushes on acknowledgment; its persistence policy was not measured.' The evidence does not support the causal claim that acknowledgment guarantees survival across power interruption. The observation is limited to volatile buffer behavior under powered conditions, not to persistence guarantees across power loss. This requires qualification to reflect the actual scope of what the evidence demonstrates."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "280528fb2c6b621adb90ae81c63155187bcbff891f840b9c569884d2a9e24823",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "abstain",
+          "critique": "The candidate claim states 'The write returned success at tick 180.' The source evidence states 'a write to address block 712 returned success at tick 180.' This matches factually. However, this nested claim appears within a parent claim about power interruption guarantees, creating a potential misdirection: using a factually correct sub-claim (the write success) to support an unsupported broader claim (the persistence guarantee). The advisory hints this as 'contradicted,' but the statement itself is factually consistent with source text. Unable to resolve whether the contradiction advisory refers to logical contradiction with the parent claim or factual contradiction with source content. Abstaining on this specific nested claim's assessment pending clarification of the contradiction basis."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "3cd3e90f77552be3",
+    "case_id": "af-002",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "d1cf1c2bc880cd682e312798605abfbaf66730e996d77d61e09c8158cc57a378",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "reconsider",
+          "critique": "The candidate claims that 'bytes submitted to block 712 were guaranteed to survive a power interruption after acknowledgment.' However, the source explicitly states: 'The capture does not establish whether this controller flushes on acknowledgment; its persistence policy was not measured.' The source only documents that a read returned submitted bytes while power remained connected, which does not establish persistence across a power interruption. The causal claim about survival through power interruption is not supported by the evidence, which explicitly disclaims measurement of the relevant persistence policy."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "9e9056732a6ad70e",
+    "case_id": "af-007",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "5cd1248c6809f51b",
+    "case_id": "af-014",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "0630b6ff640a7119893c9fbc5dc424a15132dca27f277e4d46b887afcff849f5",
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The assertion states the saturation flag was clear for sample 406. The source explicitly states: 'The adjacent sample 406 has its saturation flag clear.' This does not contradict the assertion, but the advisory hint labeled this 'contradicted.' Examining the source directly, the assertion matches the source text exactly. The saturation flag was indeed clear for sample 406. No actual defect is present in the assertion itself based on the evidence provided. The assertion is accurate as stated."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "9c9c3f8aca83614b",
+    "case_id": "af-012",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "9130c824cbfdfc933b0ab74f58eaca9155fb2250afba99152e491dd474ede07d",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            },
+            {
+              "evidence_id": "s1"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'The governing revision-7 design thickness of bracket PX is 1.6 mm.' However, the signed evidence presents two conflicting design thickness callouts for the same bracket and revision: source s0 (CAD export E1) specifies 1.6 mm, while source s1 (CAD export E2) specifies 2.0 mm. Both exports are signed and both correctly identify themselves as revision 7. Critically, s1 explicitly states that the packet 'identifies the two thickness callouts as conflicting and supplies no approval, correction or release-order record that resolves which callout governs.' This unresolved conflict means the candidate's assertion of a single 'governing' thickness is not supported by the evidence. The candidate presents one value as definitive when the evidence establishes that two competing values exist with no documented resolution mechanism."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "406b5f758484d700",
+    "case_id": "af-011",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "024645914b8dd760",
+    "case_id": "af-008",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "75158f3d655cb3d869ddfe37f109ac96dc2403ff2e13e597010790ceb88c605a",
+          "basis": "factual_contradiction",
+          "disposition": "qualify",
+          "critique": "The candidate asserts 'Probe ZQ has a +0.2 C error at 90.0 C.' However, the source evidence explicitly states 'No measurement above 25 C was performed in the supplied qualification.' The +0.2 C error documented is specifically at the 20.0 C check point, not at 90.0 C. The claim extrapolates a temperature-specific measurement to a different temperature without justification.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "blind_id": "af4bed4485cbc9a6",
+    "case_id": "af-013",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "47991a62cb6f57e0",
+    "case_id": "af-014",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "4aa8dd00fd05070803dd7e2e9901ba7171b147b28b9fad8ddd28fddb2969852a",
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "critique": "The candidate states 'The true load-channel input at sample 407 was exactly 500 N.' However, the source evidence explicitly contradicts this: 'displayed 500 is a clipping value, not an exact measurement' and 'a saturated sample represents a true channel input of at least 500 N.' The source indicates that 500 is a lower bound, not an exact measurement. The claim misrepresents a clipped/saturated measurement as an exact value.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "4aa8dd00fd05070803dd7e2e9901ba7171b147b28b9fad8ddd28fddb2969852a",
+          "basis": "misleading_certainty",
+          "disposition": "qualify",
+          "critique": "The assertion of an 'exact' value (500 N) for a saturated measurement is misleading. The source evidence establishes that the true input is 'at least 500 N' with no upper bound available, and that the displayed value represents clipping, not a precise measurement. The claim requires qualification to reflect the known uncertainty and lower-bound nature of the measurement.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "2cb77eaeaed51421",
+    "case_id": "af-009",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "df84588e1bbee816",
+    "case_id": "af-016",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "787b6463f4d0c0f1",
+    "case_id": "af-008",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "73954eb688ea0057419c283dafa57e7df8aafd2e9c632df1cc4862bfea0cdbe4",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "qualify",
+          "critique": "The claim states 'The probe serial was checked before immersion' with no temporal qualification. However, the evidence indicates 'The sensor identifier was verified against its engraved serial before immersion,' which confirms the check occurred, but only specifies that it happened before immersion without confirming it was checked 'before' in the sense of prior preparation rather than as part of the immersion procedure. The source text is consistent with the claim. The evidence actually supports this claim rather than contradicts it. However, the claim's presentation as a simple binary fact without acknowledging it was part of a specific worksheet procedure may warrant qualification to note this was documented in the reference-bath worksheet."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "75158f3d655cb3d869ddfe37f109ac96dc2403ff2e13e597010790ceb88c605a",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "missing_condition",
+          "disposition": "qualify",
+          "critique": "The claim 'Probe ZQ has a +0.2 C error at 90.0 C' is only partially supported. The evidence confirms '+0.2 C error' but explicitly only at 20.0 C: 'The bath was stabilized at 20.0 C. Probe ZQ indicated 20.2 C, and the worksheet records a +0.2 C error at this check.' The evidence further states 'No measurement above 25 C was performed in the supplied qualification' and 'The worksheet supplies no response curve or error bound outside the checked temperature.' The claim therefore extrapolates a measurement at 90.0 C that was never performed. The claim should be qualified to specify this error was measured at 20.0 C only, or acknowledge that the 90.0 C error is inferred rather than observed."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "60d21cba0cc94cd7",
+    "case_id": "af-009",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "89439f9712c27568",
+    "case_id": "af-003",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "5c99b5bea7e9eeab",
+    "case_id": "af-013",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "0630b6ff640a7119893c9fbc5dc424a15132dca27f277e4d46b887afcff849f5",
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The claim asserts that the saturation flag was clear for adjacent sample 406. However, the evidence explicitly states 'The adjacent sample 406 has its saturation flag clear' is provided as established context; the claim itself contradicts the source by expressing uncertainty or presenting what the source confirms as a finding that requires scrutiny. Upon closer examination, the source directly confirms the saturation flag for sample 406 is clear, not contradicting the claim. Re-evaluation: The source text states 'The adjacent sample 406 has its saturation flag clear,' which directly supports the claim. No contradiction is present."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "a319ce824504e5924c96ad7cf9735279603fe9069a3357b5b19126889c642773",
+          "basis": "factual_contradiction",
+          "disposition": "qualify",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The claim states 'The true load-channel input at sample 407 was at least 500 N.' The source evidence provides qualified support: it confirms that 'a saturated sample represents a true channel input of at least 500 N' and that sample 407 has the saturation flag set. However, the source explicitly notes 'displayed 500 is a clipping value, not an exact measurement' and 'No secondary range, unclipped trace or upper bound is available.' The claim presents a measurement-based conclusion with potentially misleading certainty. While the conditional statement about saturated samples is documented, the absence of upper-bound data means the actual input could be significantly higher than 500 N. The claim should be qualified to reflect that this represents a minimum value inference from saturation, not a measured or bounded exact assessment."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "8234a36dc2879869",
+    "case_id": "af-013",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "925919e25826b6a1",
+    "case_id": "af-014",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "0630b6ff640a7119893c9fbc5dc424a15132dca27f277e4d46b887afcff849f5",
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The source explicitly states 'The adjacent sample 406 has its saturation flag clear.' This directly contradicts the claim that 'The saturation flag was clear for adjacent sample 406.' Wait\u2014re-reading: the source says the flag IS clear, and the claim says the flag WAS clear. These are consistent. However, the advisory indicates this is 'contradicted'. Upon careful re-examination of the exact wording: the claim asserts a past state ('was clear') while the source describes a current observation ('has its saturation flag clear'). These refer to the same state, so there is no actual contradiction in content. The source observation is signed/provenance-authenticated and directly supports that sample 406's saturation flag is clear. The claim accurately reflects this observation. This finding should be reconsidered.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "4aa8dd00fd05070803dd7e2e9901ba7171b147b28b9fad8ddd28fddb2969852a",
+          "basis": "misleading_certainty",
+          "disposition": "qualify",
+          "critique": "The candidate claims 'The true load-channel input at sample 407 was exactly 500 N.' The source provides a signed observation that sample 407 displays 500 N with saturation flag set, and states the acquisition rule defines a saturated sample as representing 'at least 500 N' with the note that 'displayed 500 is a clipping value, not an exact measurement' and 'No secondary range, unclipped trace or upper bound is available.' The source explicitly indicates the 500 N reading is a clipping/saturation value, not an exact measurement. The true input is at least 500 N, not exactly 500 N. The claim overstates certainty by asserting an exact value when the evidence indicates only a lower bound.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "ba28ff86fce6b513",
+    "case_id": "af-005",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "fd0736878fa440b2",
+    "case_id": "af-015",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "fddccd52057175c9",
+    "case_id": "af-004",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "491b2b55353ede4888d447cf8c9cdfe64263ad4262b795562e5f8b4d627146cc",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The source explicitly states: 'The analyzer decodes bit zero as clear and records delta encoding disabled for this frame.' The candidate claims 'Delta encoding was enabled in frame F-C3,' which directly contradicts the signed observation from the protocol analyzer. The source has signed provenance authenticating this observation."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "fd3313c20457bb49",
+    "case_id": "af-011",
+    "mechanical_action": "accept",
+    "output": {
+      "abstention_reason": null,
+      "findings": []
+    }
+  },
+  {
+    "blind_id": "d2a432f2b83511b0",
+    "case_id": "af-006",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "c0a2272f6b738933423f4d7b87e38585953b122f4d62fb514fc4a27b1bc8fea5",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The source text explicitly states that the notebook 'reports the two readings without attributing the difference to a cause.' The candidate claims causality ('The foam insert caused the lower recorded sound level in run B'), but the source documents that no separate effect of the foam insert change was estimated, because both the insert and microphone distance were changed simultaneously. This is a causal claim unsupported by the evidence. The lower sound level (61 dB vs 68 dB) is observed, but attribution to the foam insert alone cannot be made from the source, which explicitly notes that the microphone distance also changed (from 0.5 m to 2 m) and no experiment isolated the foam insert's effect."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "4714eaae8b358bc3",
+    "case_id": "af-012",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "9130c824cbfdfc933b0ab74f58eaca9155fb2250afba99152e491dd474ede07d",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            },
+            {
+              "evidence_id": "s1"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate asserts that the governing revision-7 design thickness is 1.6 mm. However, the signed evidence presents a direct factual conflict: source s0 (CAD archive export E1) specifies 1.6 mm, while source s1 (CAD archive export E2) specifies 2.0 mm. Both exports are valid, both name revision 7 as current, and the packet explicitly identifies the two thickness callouts as conflicting. The evidence explicitly states that no approval, correction, or release-order record resolves which callout governs. The candidate's definitive assertion of 1.6 mm as 'the governing' thickness cannot be supported when the evidence documents an unresolved conflict between two equally authenticated sources, with no documented resolution mechanism."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "e4ed4c0e6450b451",
+    "case_id": "af-015",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "9279811bc68e5b34",
+    "case_id": "af-014",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "4aa8dd00fd05070803dd7e2e9901ba7171b147b28b9fad8ddd28fddb2969852a",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'The true load-channel input at sample 407 was exactly 500 N.' However, the source evidence explicitly states that sample 407 displays 500 N with the saturation flag set, and that 'a saturated sample represents a true channel input of at least 500 N; displayed 500 is a clipping value, not an exact measurement.' This directly contradicts the claim of an exact 500 N measurement. The source establishes the true input is at least 500 N, not exactly 500 N, and the 500 N display value is explicitly a clipping artifact, not a precise measurement."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "358fd9a517df6bc8",
+    "case_id": "af-010",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "bb1c6c62a480af051d21c8d947bbe89100daa9c0b155e610aefa5efb4bc7aae9",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'The exported mean used twelve contributing cells,' but the source evidence explicitly states 'The record explicitly lists ten contributing cells and excludes both masked values; neither a masked value nor a placeholder is added to the denominator.' The grid has 3 rows \u00d7 4 columns = 12 total cells. Two cells (row 1 column 2 and row 3 column 4) are masked. This leaves 10 unmasked cells, which the source confirms are the ten contributing cells used to compute the mean. The candidate's claim of twelve contributing cells contradicts the source's explicit statement of ten contributing cells."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "0d71572c69dd6e92",
+    "case_id": "af-007",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "73954eb688ea0057419c283dafa57e7df8aafd2e9c632df1cc4862bfea0cdbe4",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "qualify",
+          "critique": "The assertion claims the probe serial was 'checked before immersion,' but the source evidence states the verification occurred with a specific temporal relation: 'The sensor identifier was verified against its engraved serial before immersion.' This is technically consistent, but the evidence does not establish this was a discrete preliminary check\u2014it describes the verification as part of the documented worksheet process at the 20.0 C reference-bath check point. The claim should be qualified to clarify that the verification occurred before immersion but in conjunction with the reference-bath worksheet documentation, not as a separate pre-immersion procedure."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "12bdec4d69e82a6cfb4a076c13e5cd94b6e1ae8d229a18cdc5ba03e0cc3d7726",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_generalization",
+          "disposition": "qualify",
+          "critique": "The candidate claims a +0.2 C error 'in the recorded 20.0 C reference-bath check,' which the source directly supports. However, the evidence explicitly limits the scope: 'No measurement above 25 C was performed in the supplied qualification. The worksheet supplies no response curve or error bound outside the checked temperature.' The candidate's statement, without qualification, risks implying the error characterization applies more broadly than the evidence supports. The claim should be qualified to specify this error is documented only at 20.0 C and that no higher-temperature validation is available."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "82a21a5847e68c9b",
+    "case_id": "af-007",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "7acc8aee6b5bd760",
+    "case_id": "af-012",
+    "mechanical_action": "flag",
+    "output": {
+      "abstention_reason": null,
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "9130c824cbfdfc933b0ab74f58eaca9155fb2250afba99152e491dd474ede07d",
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The assertion states the governing thickness is 1.6 mm, but the cited evidence reveals conflicting callouts with no documented resolution. Source s0 provides a signed CAD archive export (E1) specifying 1.6 mm and explicitly states the packet 'supplies no release-order record or correction establishing priority between this export and export E2.' Source s1 provides a second signed CAD archive export (E2) for the same revision 7, specifying 2.0 mm, and states 'The packet explicitly identifies the two thickness callouts as conflicting and supplies no approval, correction or release-order record that resolves which callout governs.' The evidence establishes that both callouts exist in revision 7 with equal documented authority and no prioritizing record. Asserting a single governing value of 1.6 mm contradicts the documented absence of a resolution mechanism and the existence of the conflicting 2.0 mm callout in the same revision.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            },
+            {
+              "evidence_id": "s1"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "blind_id": "ca56850ff1c188c7",
+    "case_id": "af-001",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "dd891c18dfc56df7",
+    "case_id": "af-004",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "491b2b55353ede4888d447cf8c9cdfe64263ad4262b795562e5f8b4d627146cc",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "critique": "The source evidence states that the analyzer 'decodes bit zero as clear and records delta encoding disabled for this frame.' This directly contradicts the assertion that delta encoding was enabled in frame F-C3. The specification provides that bit zero controls this feature, with set enabling delta encoding and clear disabling it. The evidence shows bit zero decoded as clear, establishing that delta encoding was disabled, not enabled."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "1db72554bedfa552",
+    "case_id": "af-009",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "b490e04d09586124",
+    "case_id": "af-004",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "dce413e195b006c3f446d87f08e7fd54bfc458bb47f301acb98ed8ce11ae93f9",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The candidate claim states 'The analyzer captured a four-byte sample body for this frame.' The source evidence confirms the four-byte sample body was captured intact, which is consistent with the candidate. However, the candidate claim is paired with a contradictory top-level claim about delta encoding being enabled. The source evidence explicitly states: 'The analyzer decodes bit zero as clear and records delta encoding disabled for this frame.' This directly contradicts the top-level candidate claim that 'Delta encoding was enabled in frame F-C3.' The nested claim itself is factually accurate regarding the four-byte sample, but it appears in a context where it supports a contradicted assertion about delta encoding."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "90f0620e70396643",
+    "case_id": "af-012",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "9130c824cbfdfc933b0ab74f58eaca9155fb2250afba99152e491dd474ede07d",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            },
+            {
+              "evidence_id": "s1"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'The governing revision-7 design thickness of bracket PX is 1.6 mm.' However, the evidence shows direct factual contradiction: source s0 (CAD export E1, revision 7, signed) specifies thickness callout of 1.6 mm, while source s1 (CAD export E2, revision 7, also signed) specifies thickness callout of 2.0 mm. Both sources have valid archive signatures and both name revision 7 as current. Critically, s1 explicitly states 'The packet explicitly identifies the two thickness callouts as conflicting and supplies no approval, correction or release-order record that resolves which callout governs.' The candidate's assertion of 1.6 mm as 'the governing' thickness is unsupported by the evidence because the sources themselves document an unresolved conflict between the two callouts. The claim selects one value from a documented conflict without establishing governance, priority, or resolution authority. A definitive governing thickness cannot be determined from the provided evidence."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "f944b135560b735f",
+    "case_id": "af-015",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "ab0282e3032f4c2f",
+    "case_id": "af-005",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "51b7d5f7fe52e9a4",
+    "case_id": "af-005",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "d19504f85b2e8afd",
+    "case_id": "af-008",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "75158f3d655cb3d869ddfe37f109ac96dc2403ff2e13e597010790ceb88c605a",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_generalization",
+          "disposition": "qualify",
+          "critique": "The candidate claims 'Probe ZQ has a +0.2 C error at 90.0 C,' but the evidence only documents a +0.2 C error at a specific check temperature of 20.0 C. The source explicitly states 'No measurement above 25 C was performed in the supplied qualification' and provides 'no response curve or error bound outside the checked temperature.' Extrapolating a measurement error from 20.0 C to 90.0 C without supporting evidence is an unsupported generalization across a significantly different operating range."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "a526c6476d60be70",
+    "case_id": "af-009",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "dcfc69b6b1aa021a",
+    "case_id": "af-015",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "1fa44350a85fc3ca",
+    "case_id": "af-013",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "b1847f28cf2ceeb0",
+    "case_id": "af-003",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "37a55405bf56ffb1",
+    "case_id": "af-015",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "f97c2f1f66bd0a26",
+    "case_id": "af-008",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "73954eb688ea0057419c283dafa57e7df8aafd2e9c632df1cc4862bfea0cdbe4",
+          "basis": "factual_contradiction",
+          "disposition": "qualify",
+          "critique": "The claim states 'The probe serial was checked before immersion' as an absolute statement. The evidence indicates the serial verification occurred but provides the specific context: 'The sensor identifier was verified against its engraved serial before immersion.' This is qualified by the broader observation that only a specific temperature check (20.0 C \u2192 20.2 C) was performed. While the serial check did occur before immersion, presenting it without the limiting context that no qualification above 25 C was performed could be misleading about the probe's full validation status.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "a544764f5a147766",
+    "case_id": "af-012",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "9130c824cbfdfc933b0ab74f58eaca9155fb2250afba99152e491dd474ede07d",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            },
+            {
+              "evidence_id": "s1"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The claim asserts that 'the governing revision-7 design thickness of bracket PX is 1.6 mm.' However, the signed evidence presents a direct contradiction: source s0 (CAD export E1) specifies a thickness callout of 1.6 mm, while source s1 (CAD export E2) specifies a conflicting thickness callout of 2.0 mm. Both exports bear valid archive signatures and both identify revision 7 as current. Critically, s1 explicitly states 'The packet explicitly identifies the two thickness callouts as conflicting and supplies no approval, correction or release-order record that resolves which callout governs.' This means there is no documented resolution establishing which thickness value actually governs the design. The claim presupposes a resolution that does not exist in the evidence. The assertion of 1.6 mm as 'the governing' thickness cannot be supported when the original evidence establishes the conflict remains unresolved."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "6ee0fec0c2fc1261",
+    "case_id": "af-004",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "491b2b55353ede4888d447cf8c9cdfe64263ad4262b795562e5f8b4d627146cc",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The source explicitly states 'The analyzer decodes bit zero as clear and records delta encoding disabled for this frame.' This directly contradicts the assertion that 'Delta encoding was enabled in frame F-C3.' The evidence establishes that delta encoding was disabled, not enabled."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "5dd44fd47b7d8052",
+    "case_id": "af-013",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "5b17f8275a97bad5",
+    "case_id": "af-006",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "c0a2272f6b738933423f4d7b87e38585953b122f4d62fb514fc4a27b1bc8fea5",
+          "basis": "unsupported_causality",
+          "disposition": "relabel_inference",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The assertion states the foam insert caused the lower recorded sound level. The source reports two readings (68 dB in run A, 61 dB in run B) but explicitly states that 'no run held microphone distance constant while varying the insert, and no separate effect of either change was estimated.' The microphone distance also changed (0.5 m to 2 m), confounding any causal attribution. The source records the co-occurrence of the insert and lower sound level, but does not establish that the insert caused the difference; the source explicitly disavows causal attribution."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "b73d7a43c33cbf01",
+    "case_id": "af-011",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "cff5cb960afc751c",
+    "case_id": "af-002",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "d1cf1c2bc880cd682e312798605abfbaf66730e996d77d61e09c8158cc57a378",
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The source states a read returned submitted bytes while power remained connected and the capture ends before any power interruption. The assertion claims the bytes were 'guaranteed to survive' interruption, but the evidence explicitly states 'The capture does not establish whether this controller flushes on acknowledgment; its persistence policy was not measured.' No evidence supports a causal guarantee of survival across power loss.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "5e5d4ef4c1ceea5f",
+    "case_id": "af-002",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "d1cf1c2bc880cd682e312798605abfbaf66730e996d77d61e09c8158cc57a378",
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The assertion claims the bytes were 'guaranteed to survive a power interruption after acknowledgment,' but the evidence states the capture 'does not establish whether this controller flushes on acknowledgment; its persistence policy was not measured.' A successful write and subsequent read while power remained connected do not establish durability guarantees across power loss. The evidence explicitly disclaims measurement of persistence policy."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "0417f24dc41b9fb3",
+    "case_id": "af-008",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "75158f3d655cb3d869ddfe37f109ac96dc2403ff2e13e597010790ceb88c605a",
+          "basis": "unsupported_generalization",
+          "disposition": "qualify",
+          "critique": "The assertion claims Probe ZQ has a +0.2 C error at 90.0 C, but the evidence establishes this error only at 20.0 C. The source explicitly states 'No measurement above 25 C was performed in the supplied qualification,' which precludes any evidence of error at 90.0 C. The claimed scope (90.0 C) exceeds the observed scope (20.0 C only).",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "b85cb2d92d5a0719",
+    "case_id": "af-012",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "9130c824cbfdfc933b0ab74f58eaca9155fb2250afba99152e491dd474ede07d",
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            },
+            {
+              "evidence_id": "s1"
+            }
+          ],
+          "critique": "The candidate claims the governing revision-7 design thickness is 1.6 mm. However, the signed evidence presents a direct factual contradiction: source s0 reports a thickness callout of 1.6 mm from CAD export E1, while source s1 reports a thickness callout of 2.0 mm from CAD export E2. Both exports bear valid archive signatures, both name revision 7 as current, and the evidence explicitly states the packet identifies the two thickness callouts as conflicting with no approval, correction, or release-order record that resolves which callout governs. The claim asserts one specific value as 'governing' without evidence establishing priority between the conflicting callouts. This is an unsupported assertion of a universal state where the evidence establishes ambiguity requiring resolution."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "83d1a321b5a3e651",
+    "case_id": "af-001",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "498fc18e7cd29f18",
+    "case_id": "af-010",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "633d7fb0b1bd7b7cbeb3e3ee7184191a1dc7ff725b075d8c9179d1fbb4c7bb21",
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The source states that of the 12 cells in the grid (3 rows \u00d7 4 cells/row), exactly 2 cells are masked (row 1 column 2 and row 3 column 4), leaving 10 unmasked cells. The source explicitly confirms 'The record explicitly lists ten contributing cells' and 'The exported mean is computed over unmasked cells only.' However, the candidate claim asserts that 'The exported mean used twelve contributing cells.' This is a direct factual contradiction\u2014the mean was computed over 10 contributing cells, not 12. The candidate count includes masked cells that were explicitly excluded from the denominator.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "2fdf6c2d07c70293",
+    "case_id": "af-002",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "d1cf1c2bc880cd682e312798605abfbaf66730e996d77d61e09c8158cc57a378",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The assertion claims the bytes were 'guaranteed to survive a power interruption after acknowledgment.' The source reports only that a write succeeded and a read returned the submitted bytes while power remained connected. The source explicitly states the capture 'ends before any buffer-flush trace, restart or power interruption' and 'does not establish whether this controller flushes on acknowledgment.' No power interruption or persistence across disconnection is observed. The guarantee of survival after a power event cannot be supported from a scenario where power was never interrupted and persistence was not measured."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "53f7caa02f58e521",
+    "case_id": "af-010",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "bb1c6c62a480af051d21c8d947bbe89100daa9c0b155e610aefa5efb4bc7aae9",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'The exported mean used twelve contributing cells,' but the source evidence explicitly states 'The record explicitly lists ten contributing cells.' This is a direct factual contradiction: twelve \u2260 ten."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "2e86168fd80ffbba",
+    "case_id": "af-007",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "b8ba58f33e777716",
+    "case_id": "af-012",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "9130c824cbfdfc933b0ab74f58eaca9155fb2250afba99152e491dd474ede07d",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            },
+            {
+              "evidence_id": "s1"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The assertion states the governing revision-7 design thickness is 1.6 mm. However, the evidence presents two signed CAD archive exports both naming revision 7 as current: source s0 shows a 1.6 mm callout, while source s1 shows a 2.0 mm callout for the same bracket and revision. The sources explicitly identify these thickness callouts as conflicting and note that no approval, correction, or release-order record resolves which callout governs. The assertion asserts a single definite value without acknowledging this unresolved conflict within the stated revision."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "d93be5edec42bd09",
+    "case_id": "af-005",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "7924242cfb129face03e275168d650b9323eded8db4313283c5d1616ecd45864",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "relabel_inference",
+          "critique": "The claim attributes the lower sound level in run B to the foam insert, but the source explicitly states that two variables changed simultaneously: the foam insert was fitted AND the microphone distance increased from 0.5 m to 2 m. The source notes that 'no run held microphone distance constant while varying the insert, and no separate effect of either change was estimated.' The 7 dB difference cannot be attributed to the insert alone without eliminating the confounding effect of the 3.5\u00d7 increase in microphone distance, which would naturally reduce recorded sound levels. The causal assignment is unsupported by the evidence."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "07a0b33c3a9fefa5d7f3b3aa0120e844a29ed9380db65fe5828b4063c5d917f3",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "qualify",
+          "critique": "The claim states 'Fan speed was held fixed between the two runs,' but the source states this only once ('Fan speed was held fixed') without confirming that this was maintained across both runs A and B as distinct measurements. However, the phrasing 'between the two runs' could suggest the condition applied throughout the test protocol. The source text is sufficient to support that fan speed was controlled, but the claim's specific formulation about 'between' the runs is slightly stronger than explicitly confirmed in the source. A more precise qualification would align with the source: 'Fan speed was held constant during the test protocol.'"
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "c952897f315d64a8",
+    "case_id": "af-004",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "dce413e195b006c3f446d87f08e7fd54bfc458bb47f301acb98ed8ce11ae93f9",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The source evidence directly contradicts this claim. The analyzer record explicitly states: 'The analyzer decodes bit zero as clear and records delta encoding disabled for this frame.' This contradicts the claim that 'The analyzer captured a four-byte sample body for this frame.' While the source does confirm the four-byte sample body was captured intact, it does not support the claim as stated. More critically, the source definitively establishes that delta encoding was disabled (bit zero clear), not enabled. The claim must be removed or substantially revised."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "491b2b55353ede4888d447cf8c9cdfe64263ad4262b795562e5f8b4d627146cc",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The source evidence directly contradicts this claim. The analyzer record states: 'The analyzer decodes bit zero as clear and records delta encoding disabled for this frame.' The claim asserts 'Delta encoding was enabled in frame F-C3,' which is the opposite of what the signed observation documents. The source explicitly identifies bit zero as controlling delta encoding and confirms it was decoded as clear, meaning delta encoding was disabled, not enabled. This is a direct factual contradiction that cannot be qualified or reinterpreted."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "74638bf811f067ef",
+    "case_id": "af-001",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "6654edf33f03886e",
+    "case_id": "af-014",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "4aa8dd00fd05070803dd7e2e9901ba7171b147b28b9fad8ddd28fddb2969852a",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "misleading_certainty",
+          "disposition": "qualify",
+          "critique": "The assertion claims the true load-channel input at sample 407 was exactly 500 N. The evidence states that the displayed 500 N is a clipping value representing at least 500 N (due to saturation), not an exact measurement. The true input cannot be determined as exactly 500 N; only a lower bound is established by the evidence."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "02f6b696a6b81180",
+    "case_id": "af-007",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "fca9f9a070485f41",
+    "case_id": "af-005",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "7924242cfb129face03e275168d650b9323eded8db4313283c5d1616ecd45864",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The assertion reports a measured difference (68 dB vs. 61 dB) but attributes it to a causal comparison. The evidence explicitly states that the microphone distance changed (0.5 m to 2 m) and the foam insert was fitted simultaneously. The source notes: 'No run held microphone distance constant while varying the insert, and no separate effect of either change was estimated.' The recorded difference cannot be attributed to insert effect alone without controlling for microphone distance. The assertion as stated claims the sound level was lower in run B than in run A\u2014a factual comparison supported by the measurements\u2014but the causal framing implicit in comparing runs with uncontrolled variables overstates what the evidence permits."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "c5f2c84db3633fc3",
+    "case_id": "af-011",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "260788fa41d9a019",
+    "case_id": "af-005",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "7924242cfb129face03e275168d650b9323eded8db4313283c5d1616ecd45864",
+          "basis": "missing_condition",
+          "disposition": "qualify",
+          "critique": "The assertion states the sound level was lower in run B than run A as a bare comparison. However, the source evidence documents two distinct confounding changes: the foam insert was fitted AND the microphone distance changed from 0.5 m to 2 m. The source explicitly notes that 'no run held microphone distance constant while varying the insert.' The lower reading in run B cannot be attributed to the insert alone without controlling for the greater microphone distance, which itself would reduce sound level independently.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "cdbffd271df8ff45",
+    "case_id": "af-003",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "fe6b0beb7d5c1ee6",
+    "case_id": "af-006",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "c0a2272f6b738933423f4d7b87e38585953b122f4d62fb514fc4a27b1bc8fea5",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The candidate claims 'The foam insert caused the lower recorded sound level in run B.' The source evidence explicitly states: 'No run held microphone distance constant while varying the insert, and no separate effect of either change was estimated.' The source confirms two differences between runs A and B: (1) foam insert fitted, and (2) microphone moved from 0.5 m to 2 m. The source directly negates any causal attribution, reporting the readings without assigning the 7 dB difference to either change. The candidate advances a causal claim that the evidence explicitly disclaims as unestimated. This is an unsupported causal inference that requires qualification to reflect the confounding factor (microphone distance) and the source's documented absence of causal analysis."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "466e8e3edbb837c9",
+    "case_id": "af-009",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "998f809c551709dc",
+    "case_id": "af-004",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "491b2b55353ede4888d447cf8c9cdfe64263ad4262b795562e5f8b4d627146cc",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The assertion states delta encoding was enabled in frame F-C3. The source evidence explicitly states the analyzer decodes bit zero as clear and records delta encoding disabled for this frame. This is a direct contradiction of the same fact in the same scope."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "261478a041bf0d58",
+    "case_id": "af-008",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "75158f3d655cb3d869ddfe37f109ac96dc2403ff2e13e597010790ceb88c605a",
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The candidate claims 'Probe ZQ has a +0.2 C error at 90.0 C.' However, the source evidence explicitly states the error measurement was performed 'at 20.0 C' where 'Probe ZQ indicated 20.2 C' and that 'No measurement above 25 C was performed in the supplied qualification.' The +0.2 C error value is directly supported by the source, but its applicability at 90.0 C is unsupported and contradicts the evidence that no high-temperature measurements exist. This represents an unsupported temperature extrapolation of a measurement made at 20.0 C.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "88f475c2374545ef",
+    "case_id": "af-010",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "bb1c6c62a480af051d21c8d947bbe89100daa9c0b155e610aefa5efb4bc7aae9",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The source explicitly states 'The record explicitly lists ten contributing cells' but the candidate claims 'The exported mean used twelve contributing cells.' This is a direct factual contradiction: 10 \u2260 12."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "55827baf10f4fff5",
+    "case_id": "af-015",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "2c0e355b485ce2fc",
+    "case_id": "af-010",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "bb1c6c62a480af051d21c8d947bbe89100daa9c0b155e610aefa5efb4bc7aae9",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "critique": "The candidate claims 'The exported mean used twelve contributing cells,' but the source explicitly states 'The record explicitly lists ten contributing cells and excludes both masked values.' With a 3\u00d74 grid (12 total cells) and 2 masked cells, exactly 10 unmasked cells contribute to the mean, not 12. The claim of twelve contributing cells is a factual contradiction of the source's explicit statement."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "bfdeb9764317d3f4",
+    "case_id": "af-013",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "0b78d0b8d7dde196",
+    "case_id": "af-008",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "75158f3d655cb3d869ddfe37f109ac96dc2403ff2e13e597010790ceb88c605a",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_generalization",
+          "disposition": "qualify",
+          "critique": "The assertion claims Probe ZQ has a +0.2 C error at 90.0 C. The evidence shows this error was measured and recorded at 20.0 C only ('The bath was stabilized at 20.0 C. Probe ZQ indicated 20.2 C, and the worksheet records a +0.2 C error at this check'). The source explicitly states 'No measurement above 25 C was performed in the supplied qualification.' The claim overgeneralizes a single observation at 20.0 C to a different temperature (90.0 C) without evidence of error characteristics across the temperature range."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "73954eb688ea0057419c283dafa57e7df8aafd2e9c632df1cc4862bfea0cdbe4",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "missing_condition",
+          "disposition": "qualify",
+          "critique": "The assertion states 'The probe serial was checked before immersion.' The evidence confirms this action occurred ('The sensor identifier was verified against its engraved serial before immersion'), but the assertion lacks temporal specificity. The source indicates this check happened as part of a reference-bath qualification procedure; the assertion does not clarify that this was a pre-use verification within a specific measurement session, not a general prior inspection. The context is material to understanding the scope of this quality-assurance step."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "ae9b80cae5e5c587",
+    "case_id": "af-010",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "bb1c6c62a480af051d21c8d947bbe89100daa9c0b155e610aefa5efb4bc7aae9",
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The assertion states 'The exported mean used twelve contributing cells,' but the source explicitly states 'The record explicitly lists ten contributing cells.' The source further confirms the mean is computed over unmasked cells only, with cells at row 1 column 2 and row 3 column 4 masked (2 masked), yielding 10 unmasked cells in a 3\u00d74 grid (12 total minus 2 masked). The assertion's claim of twelve contributing cells directly contradicts the signed source observation."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "c1cdfad59f710192",
+    "case_id": "af-016",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "110f573a4754623b578cc0952d29c2acb0fd688cfdd4f891623bfe58a5ea3df6",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'At the final status read, unit H8 used the uploaded falling pulse polarity.' However, the source explicitly states: 'The final status read, after that upload, still identifies bank A as active and rising polarity as the effective value.' The source directly contradicts the claim by confirming that the final status read showed rising polarity (not falling) as the active and effective value, despite the falling-polarity configuration being uploaded to the inactive bank B."
+        }
+      ]
+    }
+  },
+  {
+    "blind_id": "f0ebd43e168d901c",
+    "case_id": "af-004",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "491b2b55353ede4888d447cf8c9cdfe64263ad4262b795562e5f8b4d627146cc",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "critique": "The candidate claims 'Delta encoding was enabled in frame F-C3.' The source evidence directly contradicts this: 'The analyzer decodes bit zero as clear and records delta encoding disabled for this frame.' The specification states that bit zero enables delta encoding when set; the analyzer observed bit zero as clear, which means delta encoding is disabled, not enabled. This is a direct factual contradiction of the main claim."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "371cb76d857febd2",
+    "case_id": "af-013",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "1ce769d398cf42a0",
+    "case_id": "af-011",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "1cea58ba452ad3a2",
+    "case_id": "af-002",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "d1cf1c2bc880cd682e312798605abfbaf66730e996d77d61e09c8158cc57a378",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The assertion claims bytes were 'guaranteed to survive a power interruption after acknowledgment.' The source evidence reports that a write returned success at tick 180, a read at tick 181 confirmed the bytes while power remained connected, and the capture used a volatile controller buffer. However, the source explicitly states: 'The capture ends before any buffer-flush trace, restart or power interruption' and 'The capture does not establish whether this controller flushes on acknowledgment; its persistence policy was not measured.' The source does not observe or measure survival through actual power interruption, nor does it establish the controller's behavior under such conditions. The assertion claims a guarantee of survival that the evidence does not support\u2014it only reports successful retrieval while power was active."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "8626b5848dc01ccc",
+    "case_id": "af-012",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "9130c824cbfdfc933b0ab74f58eaca9155fb2250afba99152e491dd474ede07d",
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            },
+            {
+              "evidence_id": "s1"
+            }
+          ],
+          "critique": "The assertion states that the governing revision-7 design thickness is 1.6 mm. However, the evidence shows two signed CAD archive exports for revision 7 with conflicting thickness callouts: export E1 specifies 1.6 mm while export E2 specifies 2.0 mm. Both exports bear valid archive signatures and name revision 7 as current. The evidence explicitly identifies these callouts as conflicting and states that no approval, correction, or release-order record resolves which callout governs. The assertion's designation of 1.6 mm as the governing thickness is not supported when conflicting, equally authenticated specifications exist and the evidence identifies no resolution mechanism or priority."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "0b535c65487b723d",
+    "case_id": "af-011",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "59aff33f1a3a0407dc687e16e8eef9eaf4926fd428d81240ead77c43b60cce13",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            },
+            {
+              "evidence_id": "s1"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The two signed archive exports both carry valid signatures and both authentically identify themselves as revision 7. Source s0 reports a design thickness callout of 1.6 mm for bracket PX, while source s1 reports a conflicting design thickness callout of 2.0 mm for the same bracket and revision. Both sources explicitly acknowledge the conflict exists and confirm that no release-order, approval, or correction record has been supplied that establishes which callout governs. The candidate claim accurately reports this disagreement as a factual observation from the signed evidence. However, the claim presents an unresolved technical discrepancy without noting that the sources themselves indicate no authoritative resolution mechanism is available in the packet. This is a direct factual situation rather than a causal claim, but the framing as a simple disagreement may warrant qualification regarding the unresolved nature of the conflict."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "08b52e3d0a77cc78",
+    "case_id": "af-001",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "d629ff415e015358",
+    "case_id": "af-005",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "07a0b33c3a9fefa5d7f3b3aa0120e844a29ed9380db65fe5828b4063c5d917f3",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "critique": "The claim that 'Fan speed was held fixed between the two runs' is presented as fact, but the evidence only reports this as an observation within an acoustic test notebook. The source text states 'Fan speed was held fixed' as part of its description, but this is a reported observation without any sign of signed provenance or instrumentation confirmation. More critically, this claim is presented without qualification despite being a subsidiary detail to the primary observation about sound levels. The confidence rating of 0.5 appropriately reflects uncertainty, but the claim should be labeled as a reported observation rather than as a verified condition, since only the acoustic readings (68 dB and 61 dB) appear to be from an actual measurement."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "7924242cfb129face03e275168d650b9323eded8db4313283c5d1616ecd45864",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The claim 'The recorded sound level was lower in run B than in run A' is factually supported (68 dB vs 61 dB), but the candidate presents this as evidence for the effectiveness of foam insert or microphone repositioning without qualification. The source explicitly states: 'No run held microphone distance constant while varying the insert, and no separate effect of either change was estimated. The notebook reports the two readings without attributing the difference to a cause.' The candidate conflates an observed outcome difference with causality. The lower reading in run B is attributable to at least two confounded variables: the foam insert and the microphone distance (0.5 m to 2 m). Without holding one variable constant, the cause of the reduction cannot be determined. This claim should be qualified to reflect that the difference is observed but causally ambiguous."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "407b7c8bb65e76c7",
+    "case_id": "af-007",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "8f8c26f188ea4f7c",
+    "case_id": "af-016",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "110f573a4754623b578cc0952d29c2acb0fd688cfdd4f891623bfe58a5ea3df6",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The assertion states 'unit H8 used the uploaded falling pulse polarity' at the final status read. However, the source evidence states: 'The final status read, after that upload, still identifies bank A as active and rising polarity as the effective value.' The source explicitly confirms that the final status read showed rising polarity (bank A) as the effective value, not falling polarity. The falling-polarity configuration was stored in bank B but never activated."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "28124d52f43aed98",
+    "case_id": "af-009",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "abbe6668ccfe3dfe",
+    "case_id": "af-008",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "75158f3d655cb3d869ddfe37f109ac96dc2403ff2e13e597010790ceb88c605a",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_generalization",
+          "disposition": "qualify",
+          "critique": "The assertion claims Probe ZQ has a +0.2 C error at 90.0 C, but the evidence documents a +0.2 C error only at 20.0 C. The source explicitly states 'No measurement above 25 C was performed in the supplied qualification.' The error value observed at one temperature does not extend to a different, untested temperature without evidence of a response curve or error characterization at 90.0 C."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "5b64b70bd51f4555",
+    "case_id": "af-015",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "c2b641178725f64b",
+    "case_id": "af-007",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "f4643c6824bf76fd",
+    "case_id": "af-016",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "110f573a4754623b578cc0952d29c2acb0fd688cfdd4f891623bfe58a5ea3df6",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "qualify",
+          "critique": "The source evidence states that 'The final status read, after that upload, still identifies bank A as active and rising polarity as the effective value.' This directly contradicts the candidate claim that 'At the final status read, unit H8 used the uploaded falling pulse polarity.' The evidence explicitly indicates that bank A (with rising polarity) remained the active configuration at the final status read, while the falling-polarity configuration in bank B was stored but not activated. The candidate asserts a usage of falling pulse polarity at final status that did not occur according to the signed observation."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "e923d12136120a43",
+    "case_id": "af-011",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "79025c274ff177f1",
+    "case_id": "af-003",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "c15958003eb3174d",
+    "case_id": "af-003",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "ed5019aeb5472a0c",
+    "case_id": "af-012",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "9130c824cbfdfc933b0ab74f58eaca9155fb2250afba99152e491dd474ede07d",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            },
+            {
+              "evidence_id": "s1"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'The governing revision-7 design thickness of bracket PX is 1.6 mm.' However, the cited evidence presents a direct contradiction. Evidence s0 (signed CAD archive export E1) specifies the thickness callout as 1.6 mm, while evidence s1 (signed CAD archive export E2) specifies the thickness callout as 2.0 mm. Both exports are signed, both name revision 7 as current, and s1 explicitly identifies the two callouts as conflicting. The evidence itself states there is 'no approval, correction or release-order record that resolves which callout governs.' The claim presupposes resolution of a documented conflict without supporting evidence for that resolution. The candidate cannot be affirmed as correct without evidence establishing which callout governs revision 7."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "a1a2b0b6cae30a12",
+    "case_id": "af-004",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "491b2b55353ede4888d447cf8c9cdfe64263ad4262b795562e5f8b4d627146cc",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The source explicitly states 'The analyzer decodes bit zero as clear and records delta encoding disabled for this frame.' The candidate claims 'Delta encoding was enabled in frame F-C3,' which directly contradicts the signed observation. The source has signed provenance and explicitly documents the state of the delta encoding flag."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "dce413e195b006c3f446d87f08e7fd54bfc458bb47f301acb98ed8ce11ae93f9",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_generalization",
+          "disposition": "qualify",
+          "critique": "The source states 'The four-byte sample body was captured intact' but explicitly limits its scope: 'This record makes no claim about other frames.' The candidate claim asserts 'The analyzer captured a four-byte sample body for this frame' without qualification. While the claim is accurate for frame F-C3, the generalized phrasing without scope qualification could be misleading. The evidence should be cited with explicit frame reference to avoid ambiguity."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "ada599f0f1df7360",
+    "case_id": "af-015",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": []
+    }
+  },
+  {
+    "blind_id": "6a5cc3f629f43b17",
+    "case_id": "af-010",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "633d7fb0b1bd7b7cbeb3e3ee7184191a1dc7ff725b075d8c9179d1fbb4c7bb21",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The claim states the grid has three rows and four cells per row, implying 12 total cells. However, the source explicitly states only ten cells are unmasked and contributing to the mean calculation, with 2 cells masked (at row 1 column 2 and row 3 column 4). This accounts for all 12 cells in the 3\u00d74 grid, confirming the grid structure. However, the claim omits the critical condition that 2 of these 4 cells per row are masked and excluded from calculations. The claim presents an incomplete picture by not specifying the masking condition, which is material to understanding the actual contributing data."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "9d159a869cc5b6af",
+    "case_id": "af-006",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "c0a2272f6b738933423f4d7b87e38585953b122f4d62fb514fc4a27b1bc8fea5",
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The source records two co-occurring changes in run B: the foam insert was fitted AND the microphone distance was moved from 0.5 m to 2 m. The source explicitly states that no run held microphone distance constant while varying the insert, and no separate effect of either change was estimated. Attributing the 7 dB reduction to the foam insert alone overreaches the evidence, which documents only that both changes happened together. The lower reading could result from the foam, the microphone distance increase, their interaction, or some combination. The source itself reports the readings without attributing the difference to a cause.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "60a26dde900d477b",
+    "case_id": "af-010",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "bb1c6c62a480af051d21c8d947bbe89100daa9c0b155e610aefa5efb4bc7aae9",
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The assertion states the exported mean used twelve contributing cells, but the source evidence explicitly states the record lists ten contributing cells with two masked cells excluded.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "a80bb6d067912658",
+    "case_id": "af-010",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "633d7fb0b1bd7b7cbeb3e3ee7184191a1dc7ff725b075d8c9179d1fbb4c7bb21",
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The assertion claims twelve contributing cells, but the source states the record explicitly lists ten contributing cells to the exported mean. The source document (M31) specifies that the grid has 3 rows \u00d7 4 columns = 12 total cells, but 2 are masked (row 1 column 2 and row 3 column 4), leaving exactly 10 unmasked cells that contribute to the mean computation.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "8c70d4c97cf3a8a6",
+    "case_id": "af-007",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "69f70bf703594046",
+    "case_id": "af-014",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "4aa8dd00fd05070803dd7e2e9901ba7171b147b28b9fad8ddd28fddb2969852a",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'The true load-channel input at sample 407 was exactly 500 N.' However, the evidence states that 'Sample 407 displays 500 N and has the saturation flag set' and crucially that 'a saturated sample represents a true channel input of at least 500 N; displayed 500 is a clipping value, not an exact measurement.' The evidence explicitly indicates that 500 N is a clipping value (lower bound) due to saturation, not an exact measurement. The claim of exactness contradicts the source's signed observation that the true input is 'at least 500 N,' not exactly 500 N."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "f04c84651ee5f2ca",
+    "case_id": "af-013",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "0630b6ff640a7119893c9fbc5dc424a15132dca27f277e4d46b887afcff849f5",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The source directly states that 'The adjacent sample 406 has its saturation flag clear,' which supports the claim. However, this claim is presented in candidate context where it appears redundant or subordinate to the main assertion. The evidence supports the factual statement, but review context indicates it should be reconsidered for its role in the overall assertion structure."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "a319ce824504e5924c96ad7cf9735279603fe9069a3357b5b19126889c642773",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The source establishes that sample 407 displays 500 N with the saturation flag set, and states 'a saturated sample represents a true channel input of at least 500 N.' However, the claim presents this as a definitive measurement ('was at least 500 N') based on a clipping value. The source explicitly notes that 'displayed 500 is a clipping value, not an exact measurement' and that 'No secondary range, unclipped trace or upper bound is available.' The inference from saturation flag to minimum load value relies on an acquisition rule, not direct measurement. The claim should be qualified to reflect this causal reasoning is rule-based, not empirically measured."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "749e54b54bc820b5",
+    "case_id": "af-001",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "fa7621842ac14741",
+    "case_id": "af-002",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "d1cf1c2bc880cd682e312798605abfbaf66730e996d77d61e09c8158cc57a378",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The claim states bytes were 'guaranteed to survive a power interruption after acknowledgment.' The evidence shows a write succeeded at tick 180 and a read at tick 181 returned the bytes while power remained connected. However, the source explicitly states: 'The capture ends before any buffer-flush trace, restart or power interruption. The capture does not establish whether this controller flushes on acknowledgment; its persistence policy was not measured.' The source directly negates the causal claim\u2014it provides no evidence that the controller persists data on acknowledgment or that data would survive an actual power interruption. The observation is signed but limited to volatile-state behavior under continuous power. The conclusion about power-interruption survival exceeds what the evidence establishes."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "850aca9602b63268",
+    "case_id": "af-011",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "4d1b1ee98a6f7fa7",
+    "case_id": "af-001",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "5e672617cc539f23",
+    "case_id": "af-001",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "58286713b70db71b",
+    "case_id": "af-003",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "722073f98f830f28",
+    "case_id": "af-008",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "73954eb688ea0057419c283dafa57e7df8aafd2e9c632df1cc4862bfea0cdbe4",
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The assertion claims the probe serial was checked 'before immersion.' The evidence (s0) states 'The sensor identifier was verified against its engraved serial before immersion,' which supports that verification occurred, but the source text explicitly specifies the temporal scope as 'before immersion'\u2014not a general check timing. The assertion's claim is accurate within the source's scope. However, reviewing the candidate metadata, the claim is marked with contradicts_source_ids:[] and sources indicate this claim has low confidence (0.5) and is unsupported by its own source_ids listing. The evidence s0 actually confirms the serial was checked before immersion, supporting the assertion's exact statement."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "f34a8d73a40f32d7",
+    "case_id": "af-013",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "b792667993cc20bc",
+    "case_id": "af-003",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "dfaec1ef8b018499",
+    "case_id": "af-004",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "491b2b55353ede4888d447cf8c9cdfe64263ad4262b795562e5f8b4d627146cc",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The source explicitly states 'The analyzer decodes bit zero as clear and records delta encoding disabled for this frame.' This directly contradicts the assertion that delta encoding was enabled in frame F-C3."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "24555f24fe013a89",
+    "case_id": "af-015",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "94d3c802a1a3dd86",
+    "case_id": "af-003",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "38938099625b995e",
+    "case_id": "af-012",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "9130c824cbfdfc933b0ab74f58eaca9155fb2250afba99152e491dd474ede07d",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            },
+            {
+              "evidence_id": "s1"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The assertion claims the governing revision-7 design thickness of bracket PX is 1.6 mm. However, the evidence presents two signed CAD archive exports both named revision 7, with conflicting thickness callouts: s0 specifies 1.6 mm while s1 specifies 2.0 mm. Both exports bear valid signatures and name revision 7 as current. The evidence explicitly states the packet supplies no approval, correction, or release-order record that resolves which callout governs. The assertion presents a single value as governing when the original evidence documents unresolved conflict between equally-signed sources for the same revision."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "485182d23c7faf6a",
+    "case_id": "af-003",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  }
+]
