@@ -1,0 +1,236 @@
+[
+  {
+    "id": "vf-001",
+    "content": "The extractor refused the literal member name '../outside.txt' in EX-7.",
+    "claims": [
+      "The EX-7 refusal returned exit code 42."
+    ],
+    "sources": [
+      {
+        "id": "vf-001-source-1",
+        "text": "Extractor regression record EX-7. Submitted member name: '../outside.txt'. Result: refusal, exit code 42. The destination directory contained no file from that submitted member. The test list contains this one literal parent-directory name. Percent-encoded names, mixed separators and other spellings were not submitted in EX-7.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "vf-002",
+    "content": "The extractor refuses every traversal-shaped member name, including percent-encoded spellings.",
+    "claims": [
+      "The EX-7 refusal returned exit code 42."
+    ],
+    "sources": [
+      {
+        "id": "vf-002-source-1",
+        "text": "Extractor regression record EX-7. Submitted member name: '../outside.txt'. Result: refusal, exit code 42. The destination directory contained no file from that submitted member. The test list contains this one literal parent-directory name. Percent-encoded names, mixed separators and other spellings were not submitted in EX-7.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "vf-003",
+    "content": "Import IM-31 used the SERIALIZABLE isolation setting.",
+    "claims": [
+      "The final post-run check found no inv-17 row after the import transaction rolled back."
+    ],
+    "sources": [
+      {
+        "id": "vf-003-source-1",
+        "text": "Warehouse import trace IM-31, isolation setting SERIALIZABLE. The transaction log is BEGIN; INSERT invoice(id='inv-17'); ROLLBACK. A subsequent read outside the rolled-back transaction returns count=0 for id='inv-17'. The trace labels that read as the final post-run check; no other transaction occurs between the rollback and that read.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "vf-004",
+    "content": "Import IM-31 used the SERIALIZABLE isolation setting.",
+    "claims": [
+      "The import committed an inv-17 row that was present in the final post-run check."
+    ],
+    "sources": [
+      {
+        "id": "vf-004-source-1",
+        "text": "Warehouse import trace IM-31, isolation setting SERIALIZABLE. The transaction log is BEGIN; INSERT invoice(id='inv-17'); ROLLBACK. A subsequent read outside the rolled-back transaction returns count=0 for id='inv-17'. The trace labels that read as the final post-run check; no other transaction occurs between the rollback and that read.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "vf-005",
+    "content": "The recorded second link invocation finished ten seconds faster than the first.",
+    "claims": [
+      "Both recorded link invocations used eight workers."
+    ],
+    "sources": [
+      {
+        "id": "vf-005-source-1",
+        "text": "Release-build comparison RB-8. The first link invocation took 22 seconds. The next invocation took 12 seconds after the new linker plugin was enabled. Between those invocations, the object-file cache also changed from empty to populated. Both invocations used eight workers. There is no run varying the plugin while holding cache contents fixed; the engineer recorded the two durations without assigning the ten-second difference to either change.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "vf-006",
+    "content": "Enabling the new linker plugin caused the entire ten-second reduction in link duration.",
+    "claims": [
+      "Both recorded link invocations used eight workers."
+    ],
+    "sources": [
+      {
+        "id": "vf-006-source-1",
+        "text": "Release-build comparison RB-8. The first link invocation took 22 seconds. The next invocation took 12 seconds after the new linker plugin was enabled. Between those invocations, the object-file cache also changed from empty to populated. Both invocations used eight workers. There is no run varying the plugin while holding cache contents fixed; the engineer recorded the two durations without assigning the ten-second difference to either change.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "vf-007",
+    "content": "Credential relay profile CR-2 listens on port 2525.",
+    "claims": [
+      "Profile CR-2 requires both verified TLS and a verified client certificate before permitting credential submission."
+    ],
+    "sources": [
+      {
+        "id": "vf-007-source-1",
+        "text": "Credential relay profile CR-2 listens on port 2525. Its normative authentication gate is tls_verified AND client_certificate_verified. The profile commentary says neither check alone permits a credential submission. Conformance trace: with TLS verified and the client certificate unverified, the relay rejects AUTH before processing its credentials.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "vf-008",
+    "content": "Credential relay profile CR-2 listens on port 2525.",
+    "claims": [
+      "Verified TLS alone permits credential submission under CR-2, even with an unverified client certificate."
+    ],
+    "sources": [
+      {
+        "id": "vf-008-source-1",
+        "text": "Credential relay profile CR-2 listens on port 2525. Its normative authentication gate is tls_verified AND client_certificate_verified. The profile commentary says neither check alone permits a credential submission. Conformance trace: with TLS verified and the client certificate unverified, the relay rejects AUTH before processing its credentials.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "vf-009",
+    "content": "The PC-26 reassembly table contains seven complete application messages.",
+    "claims": [
+      "All complete application messages in PC-26 use stream S6."
+    ],
+    "sources": [
+      {
+        "id": "vf-009-source-1",
+        "text": "Packet-capture summary PC-26: eleven captured network fragments were grouped into seven complete application messages. Message identifiers in the final reassembly table are m1 through m7, each listed once. Every captured fragment belongs to one of those seven messages; there are no incomplete messages in this capture. All seven messages use stream S6.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "vf-010",
+    "content": "The PC-26 reassembly table contains eleven complete application messages.",
+    "claims": [
+      "All complete application messages in PC-26 use stream S6."
+    ],
+    "sources": [
+      {
+        "id": "vf-010-source-1",
+        "text": "Packet-capture summary PC-26: eleven captured network fragments were grouped into seven complete application messages. Message identifiers in the final reassembly table are m1 through m7, each listed once. Every captured fragment belongs to one of those seven messages; there are no incomplete messages in this capture. All seven messages use stream S6.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "vf-011",
+    "content": "Both supplied mirror exports list the archive format as tar.zst.",
+    "claims": [
+      "The two supplied SY-4 mirror exports disagree on the archive digest for cedar-utils 7.2 on linux-amd64."
+    ],
+    "sources": [
+      {
+        "id": "vf-011-source-1",
+        "text": "Signed export from package-index mirror north: package=cedar-utils, release=7.2, platform=linux-amd64, archive_digest=aa17. Export receipt says it was produced for synchronization batch SY-4. The archive format field is tar.zst. No precedence or supersession field is present.",
+        "provenance": "signed"
+      },
+      {
+        "id": "vf-011-source-2",
+        "text": "Signed export from package-index mirror south: package=cedar-utils, release=7.2, platform=linux-amd64, archive_digest=bb29. Export receipt also identifies synchronization batch SY-4 and archive format tar.zst. The attached sync note states that neither mirror is designated authoritative for this batch and that no selected archive or reconciliation result was supplied.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "vf-012",
+    "content": "Both supplied mirror exports list the archive format as tar.zst.",
+    "claims": [
+      "The authoritative archive digest for cedar-utils 7.2 on linux-amd64 in SY-4 is aa17."
+    ],
+    "sources": [
+      {
+        "id": "vf-012-source-1",
+        "text": "Signed export from package-index mirror north: package=cedar-utils, release=7.2, platform=linux-amd64, archive_digest=aa17. Export receipt says it was produced for synchronization batch SY-4. The archive format field is tar.zst. No precedence or supersession field is present.",
+        "provenance": "signed"
+      },
+      {
+        "id": "vf-012-source-2",
+        "text": "Signed export from package-index mirror south: package=cedar-utils, release=7.2, platform=linux-amd64, archive_digest=bb29. Export receipt also identifies synchronization batch SY-4 and archive format tar.zst. The attached sync note states that neither mirror is designated authoritative for this batch and that no selected archive or reconciliation result was supplied.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "vf-013",
+    "content": "The authoritative zone served api.lab.example with a TTL of 300 seconds at the 09:05 audit.",
+    "claims": [
+      "Both audited zone revisions delegate lab.example to ns7.lab.example."
+    ],
+    "sources": [
+      {
+        "id": "vf-013-source-1",
+        "text": "Authoritative DNS zone audit for lab.example, 2026-08-03 UTC. Revision Z41 served api.lab.example with TTL 900 seconds until 09:00. Revision Z42 became active at 09:00 and changed that TTL to 300 seconds. The audit at 09:05 identifies Z42 as the served revision and reads TTL 300 from it. Both revisions delegate the zone to nameserver ns7.lab.example. The audit says nothing about cached copies held by recursive resolvers.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "vf-014",
+    "content": "The authoritative zone served api.lab.example with a TTL of 900 seconds at the 09:05 audit.",
+    "claims": [
+      "Both audited zone revisions delegate lab.example to ns7.lab.example."
+    ],
+    "sources": [
+      {
+        "id": "vf-014-source-1",
+        "text": "Authoritative DNS zone audit for lab.example, 2026-08-03 UTC. Revision Z41 served api.lab.example with TTL 900 seconds until 09:00. Revision Z42 became active at 09:00 and changed that TTL to 300 seconds. The audit at 09:05 identifies Z42 as the served revision and reads TTL 300 from it. Both revisions delegate the zone to nameserver ns7.lab.example. The audit says nothing about cached copies held by recursive resolvers.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "vf-015",
+    "content": "The MR-19 renderer labels the preview pane language SQL.",
+    "claims": [
+      "The MR-19 preview pane displays the string 'DELETE FROM session_cache;'."
+    ],
+    "sources": [
+      {
+        "id": "vf-015-source-1",
+        "text": "Migration review attachment MR-19 is a preview renderer transcript. Input fixture text includes the SQL string 'DELETE FROM session_cache;'. The renderer emits that exact string in the SQL preview pane and labels the pane language SQL. The attached trace ends at the emitted preview. It contains no database execution receipt, affected-row count or post-execution table inspection; it does not report whether anyone later applied the preview.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "vf-016",
+    "content": "The MR-19 renderer labels the preview pane language SQL.",
+    "claims": [
+      "The session_cache rows were deleted by the SQL shown in the MR-19 preview."
+    ],
+    "sources": [
+      {
+        "id": "vf-016-source-1",
+        "text": "Migration review attachment MR-19 is a preview renderer transcript. Input fixture text includes the SQL string 'DELETE FROM session_cache;'. The renderer emits that exact string in the SQL preview pane and labels the pane language SQL. The attached trace ends at the emitted preview. It contains no database execution receipt, affected-row count or post-execution table inspection; it does not report whether anyone later applied the preview.",
+        "provenance": "signed"
+      }
+    ]
+  }
+]

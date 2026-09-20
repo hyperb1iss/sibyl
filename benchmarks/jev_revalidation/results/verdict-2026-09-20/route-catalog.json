@@ -1,0 +1,445 @@
+{
+  "checked_at": "2026-09-20T19:41:45.606765+00:00",
+  "urls": {
+    "jev": "https://openrouter.ai/api/v1/models?output_modalities=decisions",
+    "haiku": "https://openrouter.ai/api/v1/models/anthropic/claude-haiku-4.5/endpoints"
+  },
+  "jev": {
+    "data": [
+      {
+        "id": "typesafe/jev-1.13",
+        "canonical_slug": "typesafe/jev-1.13-20260917",
+        "hugging_face_id": null,
+        "name": "TypeSafe: Jev 1.13",
+        "created": 1789689684,
+        "description": "Jev is a structured decision model from TypeSafe, and the first of its System One models. System One models make fast, structured decisions for software, returning a typed choice rather...",
+        "context_length": 32000,
+        "architecture": {
+          "modality": "text->decisions",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "decisions"
+          ],
+          "tokenizer": "Other",
+          "instruct_type": null
+        },
+        "pricing": {
+          "prompt": "0.000000042",
+          "completion": "0"
+        },
+        "top_provider": {
+          "context_length": 32000,
+          "max_completion_tokens": 28800,
+          "is_moderated": false
+        },
+        "per_request_limits": null,
+        "supported_parameters": [],
+        "default_parameters": {},
+        "supported_voices": null,
+        "knowledge_cutoff": null,
+        "expiration_date": null,
+        "links": {
+          "details": "/api/v1/models/typesafe/jev-1.13-20260917/endpoints"
+        }
+      }
+    ],
+    "total_count": 2,
+    "links": {
+      "next": null
+    }
+  },
+  "haiku": {
+    "data": {
+      "id": "anthropic/claude-haiku-4.5",
+      "name": "Anthropic: Claude Haiku 4.5",
+      "created": 1760547638,
+      "description": "Claude Haiku 4.5 is Anthropic\u2019s fastest and most efficient model, delivering near-frontier intelligence at a fraction of the cost and latency of larger Claude models. Matching Claude Sonnet 4\u2019s performance...",
+      "architecture": {
+        "tokenizer": "Claude",
+        "instruct_type": null,
+        "modality": "text+image+file->text",
+        "input_modalities": [
+          "text",
+          "image",
+          "file"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "endpoints": [
+        {
+          "name": "Azure | anthropic/claude-4.5-haiku-20251001",
+          "model_id": "anthropic/claude-haiku-4.5",
+          "model_name": "Anthropic: Claude Haiku 4.5",
+          "context_length": 200000,
+          "pricing": {
+            "prompt": "0.000001",
+            "completion": "0.000005",
+            "web_search": "0.01",
+            "input_cache_read": "0.0000001",
+            "input_cache_write": "0.00000125",
+            "input_cache_write_1h": "0.000002",
+            "discount": 0
+          },
+          "provider_name": "Azure",
+          "tag": "azure/global",
+          "quantization": "unknown",
+          "max_completion_tokens": 64000,
+          "max_prompt_tokens": null,
+          "supported_parameters": [
+            "reasoning",
+            "include_reasoning",
+            "max_tokens",
+            "temperature",
+            "top_p",
+            "max_completion_tokens",
+            "tools",
+            "tool_choice",
+            "top_k",
+            "response_format"
+          ],
+          "supports_tool_choice": {
+            "none": true,
+            "auto": true,
+            "required": true,
+            "function": true
+          },
+          "status": 0,
+          "uptime_last_30m": 100,
+          "uptime_last_5m": null,
+          "uptime_last_1d": 99.991924412501,
+          "supports_implicit_caching": false,
+          "supports_voice_cloning": false,
+          "latency_last_30m": null,
+          "throughput_last_30m": null
+        },
+        {
+          "name": "Amazon Bedrock | anthropic/claude-4.5-haiku-20251001",
+          "model_id": "anthropic/claude-haiku-4.5",
+          "model_name": "Anthropic: Claude Haiku 4.5",
+          "context_length": 200000,
+          "pricing": {
+            "prompt": "0.000001",
+            "completion": "0.000005",
+            "web_search": "0.01",
+            "input_cache_read": "0.0000001",
+            "input_cache_write": "0.00000125",
+            "input_cache_write_1h": "0.000002",
+            "discount": 0
+          },
+          "provider_name": "Amazon Bedrock",
+          "tag": "amazon-bedrock/global",
+          "quantization": "unknown",
+          "max_completion_tokens": 64000,
+          "max_prompt_tokens": null,
+          "supported_parameters": [
+            "reasoning",
+            "include_reasoning",
+            "max_tokens",
+            "temperature",
+            "top_p",
+            "top_k",
+            "stop",
+            "tools",
+            "tool_choice",
+            "structured_outputs",
+            "response_format"
+          ],
+          "supports_tool_choice": {
+            "none": true,
+            "auto": true,
+            "required": true,
+            "function": true
+          },
+          "status": 0,
+          "uptime_last_30m": 99.96023781573068,
+          "uptime_last_5m": 99.93926879630754,
+          "uptime_last_1d": 99.9707949880995,
+          "supports_implicit_caching": false,
+          "supports_voice_cloning": false,
+          "latency_last_30m": null,
+          "throughput_last_30m": null
+        },
+        {
+          "name": "Google | anthropic/claude-4.5-haiku-20251001",
+          "model_id": "anthropic/claude-haiku-4.5",
+          "model_name": "Anthropic: Claude Haiku 4.5",
+          "context_length": 200000,
+          "pricing": {
+            "prompt": "0.000001",
+            "completion": "0.000005",
+            "web_search": "0.01",
+            "input_cache_read": "0.0000001",
+            "input_cache_write": "0.00000125",
+            "input_cache_write_1h": "0.000002",
+            "discount": 0
+          },
+          "provider_name": "Google",
+          "tag": "google-vertex/global",
+          "quantization": "unknown",
+          "max_completion_tokens": 64000,
+          "max_prompt_tokens": null,
+          "supported_parameters": [
+            "max_tokens",
+            "top_p",
+            "temperature",
+            "stop",
+            "reasoning",
+            "include_reasoning",
+            "tools",
+            "tool_choice",
+            "top_k"
+          ],
+          "supports_tool_choice": {
+            "none": true,
+            "auto": true,
+            "required": true,
+            "function": true
+          },
+          "status": 0,
+          "uptime_last_30m": 100,
+          "uptime_last_5m": 100,
+          "uptime_last_1d": 99.99521370794045,
+          "supports_implicit_caching": false,
+          "supports_voice_cloning": false,
+          "latency_last_30m": null,
+          "throughput_last_30m": null
+        },
+        {
+          "name": "Anthropic | anthropic/claude-4.5-haiku-20251001",
+          "model_id": "anthropic/claude-haiku-4.5",
+          "model_name": "Anthropic: Claude Haiku 4.5",
+          "context_length": 200000,
+          "pricing": {
+            "prompt": "0.000001",
+            "completion": "0.000005",
+            "web_search": "0.01",
+            "input_cache_read": "0.0000001",
+            "input_cache_write": "0.00000125",
+            "input_cache_write_1h": "0.000002",
+            "discount": 0
+          },
+          "provider_name": "Anthropic",
+          "tag": "anthropic",
+          "quantization": "unknown",
+          "max_completion_tokens": 64000,
+          "max_prompt_tokens": null,
+          "supported_parameters": [
+            "max_tokens",
+            "top_p",
+            "temperature",
+            "stop",
+            "reasoning",
+            "include_reasoning",
+            "tools",
+            "tool_choice",
+            "top_k",
+            "structured_outputs",
+            "response_format"
+          ],
+          "supports_tool_choice": {
+            "none": true,
+            "auto": true,
+            "required": true,
+            "function": true
+          },
+          "status": 0,
+          "uptime_last_30m": 100,
+          "uptime_last_5m": 100,
+          "uptime_last_1d": 99.99661705006766,
+          "supports_implicit_caching": false,
+          "supports_voice_cloning": false,
+          "latency_last_30m": null,
+          "throughput_last_30m": null
+        },
+        {
+          "name": "Amazon Bedrock | anthropic/claude-4.5-haiku-20251001",
+          "model_id": "anthropic/claude-haiku-4.5",
+          "model_name": "Anthropic: Claude Haiku 4.5",
+          "context_length": 200000,
+          "pricing": {
+            "prompt": "0.0000011",
+            "completion": "0.0000055",
+            "web_search": "0.01",
+            "input_cache_read": "0.00000011",
+            "input_cache_write": "0.000001375",
+            "input_cache_write_1h": "0.0000022",
+            "discount": 0
+          },
+          "provider_name": "Amazon Bedrock",
+          "tag": "amazon-bedrock/us",
+          "quantization": "unknown",
+          "max_completion_tokens": 64000,
+          "max_prompt_tokens": null,
+          "supported_parameters": [
+            "reasoning",
+            "include_reasoning",
+            "max_tokens",
+            "temperature",
+            "top_p",
+            "top_k",
+            "stop",
+            "tools",
+            "tool_choice",
+            "structured_outputs",
+            "response_format"
+          ],
+          "supports_tool_choice": {
+            "none": true,
+            "auto": true,
+            "required": true,
+            "function": true
+          },
+          "status": 0,
+          "uptime_last_30m": null,
+          "uptime_last_5m": null,
+          "uptime_last_1d": 100,
+          "supports_implicit_caching": false,
+          "supports_voice_cloning": false,
+          "latency_last_30m": null,
+          "throughput_last_30m": null
+        },
+        {
+          "name": "Google | anthropic/claude-4.5-haiku-20251001",
+          "model_id": "anthropic/claude-haiku-4.5",
+          "model_name": "Anthropic: Claude Haiku 4.5",
+          "context_length": 200000,
+          "pricing": {
+            "prompt": "0.0000011",
+            "completion": "0.0000055",
+            "web_search": "0.01",
+            "input_cache_read": "0.00000011",
+            "input_cache_write": "0.000001375",
+            "input_cache_write_1h": "0.0000022",
+            "discount": 0
+          },
+          "provider_name": "Google",
+          "tag": "google-vertex/us-east5",
+          "quantization": "unknown",
+          "max_completion_tokens": 64000,
+          "max_prompt_tokens": null,
+          "supported_parameters": [
+            "max_tokens",
+            "top_p",
+            "temperature",
+            "stop",
+            "reasoning",
+            "include_reasoning",
+            "tools",
+            "tool_choice",
+            "top_k"
+          ],
+          "supports_tool_choice": {
+            "none": true,
+            "auto": true,
+            "required": true,
+            "function": true
+          },
+          "status": 0,
+          "uptime_last_30m": null,
+          "uptime_last_5m": null,
+          "uptime_last_1d": 100,
+          "supports_implicit_caching": false,
+          "supports_voice_cloning": false,
+          "latency_last_30m": null,
+          "throughput_last_30m": null
+        },
+        {
+          "name": "Amazon Bedrock | anthropic/claude-4.5-haiku-20251001",
+          "model_id": "anthropic/claude-haiku-4.5",
+          "model_name": "Anthropic: Claude Haiku 4.5",
+          "context_length": 200000,
+          "pricing": {
+            "prompt": "0.0000011",
+            "completion": "0.0000055",
+            "web_search": "0.01",
+            "input_cache_read": "0.00000011",
+            "input_cache_write": "0.000001375",
+            "input_cache_write_1h": "0.0000022",
+            "discount": 0
+          },
+          "provider_name": "Amazon Bedrock",
+          "tag": "amazon-bedrock/eu-west-1",
+          "quantization": "unknown",
+          "max_completion_tokens": 64000,
+          "max_prompt_tokens": null,
+          "supported_parameters": [
+            "reasoning",
+            "include_reasoning",
+            "max_tokens",
+            "temperature",
+            "top_p",
+            "top_k",
+            "stop",
+            "tools",
+            "tool_choice",
+            "structured_outputs",
+            "response_format"
+          ],
+          "supports_tool_choice": {
+            "none": true,
+            "auto": true,
+            "required": true,
+            "function": true
+          },
+          "status": 0,
+          "uptime_last_30m": 100,
+          "uptime_last_5m": null,
+          "uptime_last_1d": 100,
+          "supports_implicit_caching": false,
+          "supports_voice_cloning": false,
+          "latency_last_30m": null,
+          "throughput_last_30m": null
+        },
+        {
+          "name": "Google | anthropic/claude-4.5-haiku-20251001",
+          "model_id": "anthropic/claude-haiku-4.5",
+          "model_name": "Anthropic: Claude Haiku 4.5",
+          "context_length": 200000,
+          "pricing": {
+            "prompt": "0.0000011",
+            "completion": "0.0000055",
+            "web_search": "0.01",
+            "input_cache_read": "0.00000011",
+            "input_cache_write": "0.000001375",
+            "input_cache_write_1h": "0.0000022",
+            "discount": 0
+          },
+          "provider_name": "Google",
+          "tag": "google-vertex/europe",
+          "quantization": "unknown",
+          "max_completion_tokens": 64000,
+          "max_prompt_tokens": null,
+          "supported_parameters": [
+            "max_tokens",
+            "top_p",
+            "temperature",
+            "stop",
+            "reasoning",
+            "include_reasoning",
+            "tools",
+            "tool_choice",
+            "top_k"
+          ],
+          "supports_tool_choice": {
+            "none": true,
+            "auto": true,
+            "required": true,
+            "function": true
+          },
+          "status": 0,
+          "uptime_last_30m": null,
+          "uptime_last_5m": null,
+          "uptime_last_1d": 100,
+          "supports_implicit_caching": false,
+          "supports_voice_cloning": false,
+          "latency_last_30m": null,
+          "throughput_last_30m": null
+        }
+      ]
+    }
+  }
+}

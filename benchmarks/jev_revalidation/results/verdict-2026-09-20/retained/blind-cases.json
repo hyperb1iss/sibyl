@@ -1,0 +1,222 @@
+[
+  {
+    "id": "hf-005",
+    "content": "The diary reports lower median response time after the parser upgrade.",
+    "claims": [
+      "The worker count doubled during the same monitoring window."
+    ],
+    "sources": [
+      {
+        "id": "hf-005-source-1",
+        "text": "Release diary for the Copperline search service. After the parser package was upgraded, median response time was lower in the following monitoring window. During the same window, the query mix shifted toward short queries and the worker count doubled. The diary contains no matched-load test, rollback comparison or causal attribution. The author describes these as co-occurring changes and leaves their separate effects unmeasured.",
+        "provenance": "reported"
+      }
+    ]
+  },
+  {
+    "id": "hf-006",
+    "content": "The parser upgrade caused the lower median response time.",
+    "claims": [
+      "The worker count doubled during the same monitoring window."
+    ],
+    "sources": [
+      {
+        "id": "hf-006-source-1",
+        "text": "Release diary for the Copperline search service. After the parser package was upgraded, median response time was lower in the following monitoring window. During the same window, the query mix shifted toward short queries and the worker count doubled. The diary contains no matched-load test, rollback comparison or causal attribution. The author describes these as co-occurring changes and leaves their separate effects unmeasured.",
+        "provenance": "reported"
+      }
+    ]
+  },
+  {
+    "id": "hf-009",
+    "content": "At the checkpoint, background compaction was enabled in the staging namespace.",
+    "claims": [
+      "Production ran release r8 at that checkpoint."
+    ],
+    "sources": [
+      {
+        "id": "hf-009-source-1",
+        "text": "Configuration attestation, deployment group Narwhal. At the recorded checkpoint, the staging namespace ran release r9 with background compaction enabled. Production ran release r8 with background compaction disabled. The attestation binds these values to separate namespace identifiers and states that there was no production rollout in this checkpoint. No production performance result is attached.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "hf-010",
+    "content": "At the checkpoint, background compaction was enabled in the production namespace.",
+    "claims": [
+      "Production ran release r8 at that checkpoint."
+    ],
+    "sources": [
+      {
+        "id": "hf-010-source-1",
+        "text": "Configuration attestation, deployment group Narwhal. At the recorded checkpoint, the staging namespace ran release r9 with background compaction enabled. Production ran release r8 with background compaction disabled. The attestation binds these values to separate namespace identifiers and states that there was no production rollout in this checkpoint. No production performance result is attached.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "hf-017",
+    "content": "No web-editor write event was recorded for repository Delta during the interval.",
+    "claims": [],
+    "sources": [
+      {
+        "id": "hf-017-source-1",
+        "text": "Access-audit export for repository Delta, interval 16:00-17:00Z. The export contains every write event recorded through the web editor in that interval, and there are none. Command-line and service-token clients write through separate audit channels omitted from this export. The export provides no observations about those channels and makes no claim about the total number of repository writes.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "hf-018",
+    "content": "No write to repository Delta occurred through any client during the interval.",
+    "claims": [],
+    "sources": [
+      {
+        "id": "hf-018-source-1",
+        "text": "Access-audit export for repository Delta, interval 16:00-17:00Z. The export contains every write event recorded through the web editor in that interval, and there are none. Command-line and service-token clients write through separate audit channels omitted from this export. The export provides no observations about those channels and makes no claim about the total number of repository writes.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "hf-023",
+    "content": "The complete upload U19, including its manifest, totaled twenty-seven KiB.",
+    "claims": [
+      "The four data frames carried twenty-four KiB of payload."
+    ],
+    "sources": [
+      {
+        "id": "hf-023-source-1",
+        "text": "Wire-format accounting for upload U19. Four data frames carry six KiB of payload each. A single separate three-KiB manifest is sent in addition to those frames. The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest; the figures already use KiB consistently, and there is no other framing overhead in this accounting.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "hf-024",
+    "content": "The complete upload U19, including its manifest, totaled twenty-four KiB.",
+    "claims": [
+      "The four data frames carried twenty-four KiB of payload."
+    ],
+    "sources": [
+      {
+        "id": "hf-024-source-1",
+        "text": "Wire-format accounting for upload U19. Four data frames carry six KiB of payload each. A single separate three-KiB manifest is sent in addition to those frames. The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest; the figures already use KiB consistently, and there is no other framing overhead in this accounting.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "af-005",
+    "content": "The recorded sound level was lower in run B than in run A.",
+    "claims": [
+      "Fan speed was held fixed between the two runs."
+    ],
+    "sources": [
+      {
+        "id": "af-005-source-1",
+        "text": "Acoustic notebook, enclosure test T5. Run A recorded 68 dB with the original lining and the microphone 0.5 m from the enclosure. Run B recorded 61 dB after a foam insert was fitted and the microphone was moved to 2 m. Fan speed was held fixed. No run held microphone distance constant while varying the insert, and no separate effect of either change was estimated. The notebook reports the two readings without attributing the difference to a cause.",
+        "provenance": "reported"
+      }
+    ]
+  },
+  {
+    "id": "af-006",
+    "content": "The foam insert caused the lower recorded sound level in run B.",
+    "claims": [
+      "Fan speed was held fixed between the two runs."
+    ],
+    "sources": [
+      {
+        "id": "af-006-source-1",
+        "text": "Acoustic notebook, enclosure test T5. Run A recorded 68 dB with the original lining and the microphone 0.5 m from the enclosure. Run B recorded 61 dB after a foam insert was fitted and the microphone was moved to 2 m. Fan speed was held fixed. No run held microphone distance constant while varying the insert, and no separate effect of either change was estimated. The notebook reports the two readings without attributing the difference to a cause.",
+        "provenance": "reported"
+      }
+    ]
+  },
+  {
+    "id": "af-007",
+    "content": "Probe ZQ had a +0.2 C error in the recorded 20.0 C reference-bath check.",
+    "claims": [
+      "The probe serial was checked before immersion."
+    ],
+    "sources": [
+      {
+        "id": "af-007-source-1",
+        "text": "Reference-bath worksheet for probe ZQ. The bath was stabilized at 20.0 C. Probe ZQ indicated 20.2 C, and the worksheet records a +0.2 C error at this check. No measurement above 25 C was performed in the supplied qualification. The sensor identifier was verified against its engraved serial before immersion. The worksheet supplies no response curve or error bound outside the checked temperature.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "af-008",
+    "content": "Probe ZQ has a +0.2 C error at 90.0 C.",
+    "claims": [
+      "The probe serial was checked before immersion."
+    ],
+    "sources": [
+      {
+        "id": "af-008-source-1",
+        "text": "Reference-bath worksheet for probe ZQ. The bath was stabilized at 20.0 C. Probe ZQ indicated 20.2 C, and the worksheet records a +0.2 C error at this check. No measurement above 25 C was performed in the supplied qualification. The sensor identifier was verified against its engraved serial before immersion. The worksheet supplies no response curve or error bound outside the checked temperature.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "af-009",
+    "content": "The exported mean used ten contributing cells.",
+    "claims": [
+      "The acquired grid has three rows and four cells per row."
+    ],
+    "sources": [
+      {
+        "id": "af-009-source-1",
+        "text": "Array-analysis record M31. The acquired grid has three rows and four cells per row. Cells at row 1 column 2 and row 3 column 4 are masked, and every other cell is unmasked. The exported mean is computed over unmasked cells only. The record explicitly lists ten contributing cells and excludes both masked values; neither a masked value nor a placeholder is added to the denominator.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "af-010",
+    "content": "The exported mean used twelve contributing cells.",
+    "claims": [
+      "The acquired grid has three rows and four cells per row."
+    ],
+    "sources": [
+      {
+        "id": "af-010-source-1",
+        "text": "Array-analysis record M31. The acquired grid has three rows and four cells per row. Cells at row 1 column 2 and row 3 column 4 are masked, and every other cell is unmasked. The exported mean is computed over unmasked cells only. The record explicitly lists ten contributing cells and excludes both masked values; neither a masked value nor a placeholder is added to the denominator.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "af-015",
+    "content": "At the final status read, unit H8 still used rising pulse polarity.",
+    "claims": [
+      "The falling-polarity configuration was stored in inactive bank B."
+    ],
+    "sources": [
+      {
+        "id": "af-015-source-1",
+        "text": "Motion-controller configuration trace for unit H8. At boot, active bank A set pulse polarity to rising. A later upload stored a falling-polarity configuration in inactive bank B. The controller reported upload complete but activation pending. The final status read, after that upload, still identifies bank A as active and rising polarity as the effective value. No bank-switch command occurred within the trace.",
+        "provenance": "signed"
+      }
+    ]
+  },
+  {
+    "id": "af-016",
+    "content": "At the final status read, unit H8 used the uploaded falling pulse polarity.",
+    "claims": [
+      "The falling-polarity configuration was stored in inactive bank B."
+    ],
+    "sources": [
+      {
+        "id": "af-016-source-1",
+        "text": "Motion-controller configuration trace for unit H8. At boot, active bank A set pulse polarity to rising. A later upload stored a falling-polarity configuration in inactive bank B. The controller reported upload complete but activation pending. The final status read, after that upload, still identifies bank A as active and rising polarity as the effective value. No bank-switch command occurred within the trace.",
+        "provenance": "signed"
+      }
+    ]
+  }
+]
