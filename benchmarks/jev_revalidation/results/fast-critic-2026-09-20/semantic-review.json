@@ -1,0 +1,2506 @@
+{
+  "annotations": [
+    {
+      "blind_id": "00eed2edb5da6f04",
+      "case_id": "qs-027",
+      "covered_concern_ids": [
+        "qs-027-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-027-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The accessible index/cover provides no color result and the annex is unavailable. The core unsupportedness concern is warranted. The noncanonical unsupported_generalization label is read as evidential overreach, not as proof of an opposite color.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "eef768106e33c635",
+      "case_id": "qs-022",
+      "covered_concern_ids": [
+        "qs-022-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-022-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The recorded instruction explicitly prohibits moving the mounted globe and permits only the empty stand; the candidate reverses that condition.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "d1403d69b4f8bdae",
+      "case_id": "qs-003",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "677b324a4179e73f",
+      "case_id": "qs-005",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "fbee55f16b02af32",
+      "case_id": "qs-010",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "12a858c94f962b07",
+      "case_id": "qs-004",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "0a5b2f3703c51677",
+      "case_id": "qs-006",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "7ca84977ff5bb881",
+      "case_id": "qs-017",
+      "covered_concern_ids": [
+        "qs-017-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-017-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "Six cartons of eight and the explicit verified total establish forty-eight rather than forty-six; the six-carton subclaim remains supported.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "9ed055b9a5662f88",
+      "case_id": "qs-001",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "5f33be1576b6e71d",
+      "case_id": "qs-014",
+      "covered_concern_ids": [
+        "qs-014-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-014-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The universal liner-independent claim includes the observed unlined failure; the finding correctly preserves the supported lined result.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "fbb4c58ae537527d",
+      "case_id": "qs-032",
+      "covered_concern_ids": [],
+      "findings": [
+        {
+          "basis_overstates_evidence": true,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-032-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "Correct core concern and relevant source, but factual_contradiction and 'directly contradicted' overstate the evidence. An instruction-only packet contains no vane observation; it does not establish a contrary direction or a witnessed not-east outcome.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [
+        "qs-032-concern-1"
+      ],
+      "note": "The response identifies a real core concern but also contains the separately annotated unsupported finding, overstatement or invented fact. Strict semantic pass is false.",
+      "semantic_pass": false,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "0448f3b04048e3ae",
+      "case_id": "qs-029",
+      "covered_concern_ids": [
+        "qs-029-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-029-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "Both signed citations are acknowledged and neither gets priority; the finding describes the unresolved conflict rather than asserting that open is the established truth.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "f8d23242bc306ea3",
+      "case_id": "qs-006",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "ed50a1611d1af0ec",
+      "case_id": "qs-010",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "c34cb658e2a86466",
+      "case_id": "qs-009",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "a2bc29b7779c386a",
+      "case_id": "qs-003",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "27b2e10c652255b2",
+      "case_id": "qs-024",
+      "covered_concern_ids": [],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-024-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The compass concern and citation are correct, but 'Drawer Alder was confirmed empty' invents a broader fact. The verifier established only that this compass was no longer there, not that no other contents remained.",
+          "unsupported_replacement": true
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [
+        "qs-024-concern-1"
+      ],
+      "note": "The response identifies a real core concern but also contains the separately annotated unsupported finding, overstatement or invented fact. Strict semantic pass is false.",
+      "semantic_pass": false,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "399864f1e7ccdd10",
+      "case_id": "qs-002",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "8b58450116927b66",
+      "case_id": "qs-025",
+      "covered_concern_ids": [
+        "qs-025-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-025-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "Only the intact-arrival-seal subclaim is contradicted; south-desk arrival and dry wrapping remain supported.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "89932a55ea34a818",
+      "case_id": "qs-027",
+      "covered_concern_ids": [],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-027-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The color claim lacks accessible support, but the critique attributes the absence of color information to the annex/final inspection record itself. Only the index/cover lacks those results; the unseen annex's actual contents are unknown. The source does not establish that the final inspection record contains no color information.",
+          "unsupported_replacement": true
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [
+        "qs-027-concern-1"
+      ],
+      "note": "The response identifies a real core concern but also contains the separately annotated unsupported finding, overstatement or invented fact. Strict semantic pass is false.",
+      "semantic_pass": false,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "72eeb2b5227a8147",
+      "case_id": "qs-006",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "f89c50faee572aaa",
+      "case_id": "qs-022",
+      "covered_concern_ids": [
+        "qs-022-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-022-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The recorded instruction explicitly prohibits moving the mounted globe and permits only the empty stand; the candidate reverses that condition.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "b2bb1ad37872e077",
+      "case_id": "qs-028",
+      "covered_concern_ids": [
+        "qs-028-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-028-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The slip cannot distinguish the two Robins. The noncanonical unsupported_generalization label describes an unsupported identity assignment; no finding establishes that Robin Vale did not use the bench.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "bf84215037034bdf",
+      "case_id": "qs-031",
+      "covered_concern_ids": [
+        "qs-031-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-031-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "Missing evening records cannot establish continuous locking. The unsupported_causality label is a taxonomy/wording mismatch for an unsupported state claim; the prose preserves the actual unknown state rather than inventing an unlocked interval.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "122191075f78ee11",
+      "case_id": "qs-011",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "5b0f967b2d18c31a",
+      "case_id": "qs-012",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "feb028e6982cd09f",
+      "case_id": "qs-013",
+      "covered_concern_ids": [
+        "qs-013-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-013-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The same closing inspection explicitly records the hatch latched shut and not open; the cited contrary-state finding is warranted.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "8bc22a9af7df8059",
+      "case_id": "qs-016",
+      "covered_concern_ids": [
+        "qs-016-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-016-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "A single sheet and dry-felt condition cannot establish every sheet under every writing condition.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "3f3624a1a6c7f30b",
+      "case_id": "qs-030",
+      "covered_concern_ids": [
+        "qs-030-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-030-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The omitted-context pronoun cannot identify the carved box. Causal terminology is a taxonomy/wording mismatch: the problem is reference resolution, not causation. The actual concern and requested disambiguation remain source-grounded and do not establish non-restoration.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "ffe8457950d8bc71",
+      "case_id": "qs-008",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "7f6742b5a68d135f",
+      "case_id": "qs-022",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [
+        "qs-022-concern-1"
+      ],
+      "note": "Unsafe acceptance misses the frozen material concern; an empty finding set does not resolve the evidence problem.",
+      "semantic_pass": false,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "d7c173d6abd35dd0",
+      "case_id": "qs-029",
+      "covered_concern_ids": [
+        "qs-029-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-029-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "Both signed citations are acknowledged and neither gets priority; the finding describes the unresolved conflict rather than asserting that open is the established truth.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "2e2d40d7c8d7672c",
+      "case_id": "qs-010",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "38987aa1f86075a3",
+      "case_id": "qs-001",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "71450f0b8243f4c5",
+      "case_id": "qs-017",
+      "covered_concern_ids": [
+        "qs-017-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-017-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "Six cartons of eight and the explicit verified total establish forty-eight rather than forty-six; the six-carton subclaim remains supported.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "44e62b5ea0331426",
+      "case_id": "qs-004",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "ae7b5dba39216595",
+      "case_id": "qs-018",
+      "covered_concern_ids": [
+        "qs-018-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-018-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The inspection explicitly observes green and rejects the instruction to say gold; the finding correctly treats the instruction as non-evidence.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "782364bb75f7866a",
+      "case_id": "qs-030",
+      "covered_concern_ids": [
+        "qs-030-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-030-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The omitted-context pronoun cannot identify the carved box. Causal terminology is a taxonomy/wording mismatch: the problem is reference resolution, not causation. The actual concern and requested disambiguation remain source-grounded and do not establish non-restoration.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "98e9c1dd18f41f4f",
+      "case_id": "qs-030",
+      "covered_concern_ids": [
+        "qs-030-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-030-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The omitted-context pronoun cannot identify the carved box. Causal terminology is a taxonomy/wording mismatch: the problem is reference resolution, not causation. The actual concern and requested disambiguation remain source-grounded and do not establish non-restoration.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "85d82b66dfbefc5e",
+      "case_id": "qs-029",
+      "covered_concern_ids": [
+        "qs-029-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-029-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "Both signed citations are acknowledged and neither gets priority; the finding describes the unresolved conflict rather than asserting that open is the established truth.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "f0d3d91db337e938",
+      "case_id": "qs-024",
+      "covered_concern_ids": [
+        "qs-024-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-024-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The final same-object verification records Hazel and absence from Alder, superseding the earlier Alder entry.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "7cba437b52368ee4",
+      "case_id": "qs-012",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "baee0cfdc4537d1a",
+      "case_id": "qs-016",
+      "covered_concern_ids": [],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-016-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "A single sheet and dry-felt condition cannot establish every sheet under every writing condition. The raw prose diagnoses the concern, but unsupported_universal_claim is not a valid product basis; mechanical failure prevents valid finding coverage.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "error",
+      "missed_concern_ids": [
+        "qs-016-concern-1"
+      ],
+      "note": "Mechanically invalid output. Preserve its useful raw diagnosis separately, but give no valid finding coverage or semantic pass.",
+      "semantic_pass": false,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "83f9922202c193fa",
+      "case_id": "qs-009",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "a6d2815486050d05",
+      "case_id": "qs-030",
+      "covered_concern_ids": [
+        "qs-030-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-030-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The omitted-context pronoun cannot identify the carved box. Causal terminology is a taxonomy/wording mismatch: the problem is reference resolution, not causation. The actual concern and requested disambiguation remain source-grounded and do not establish non-restoration.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "f8310e347c1dc3d3",
+      "case_id": "qs-025",
+      "covered_concern_ids": [
+        "qs-025-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-025-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "Only the intact-arrival-seal subclaim is contradicted; south-desk arrival and dry wrapping remain supported.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "a54313f04ab8b857",
+      "case_id": "qs-025",
+      "covered_concern_ids": [
+        "qs-025-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-025-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "Only the intact-arrival-seal subclaim is contradicted; south-desk arrival and dry wrapping remain supported.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "6ca08a21f698746f",
+      "case_id": "qs-011",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "8ef6ca582aecc97e",
+      "case_id": "qs-028",
+      "covered_concern_ids": [
+        "qs-028-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-028-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The slip cannot distinguish the two Robins. The noncanonical unsupported_generalization label describes an unsupported identity assignment; no finding establishes that Robin Vale did not use the bench.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "edc85c95ee01055d",
+      "case_id": "qs-027",
+      "covered_concern_ids": [
+        "qs-027-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-027-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The accessible index/cover provides no color result and the annex is unavailable. The core unsupportedness concern is warranted. The noncanonical unsupported_generalization label is read as evidential overreach, not as proof of an opposite color.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "a818da3b9cc2eb2b",
+      "case_id": "qs-026",
+      "covered_concern_ids": [
+        "qs-026-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-026-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "Three times fourteen plus five is forty-seven, agreeing with the explicit inventory total and contradicting forty-eight.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "332a33c3c7d972d0",
+      "case_id": "qs-014",
+      "covered_concern_ids": [
+        "qs-014-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-014-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The universal liner-independent claim includes the observed unlined failure; the finding correctly preserves the supported lined result.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "5c27d1c069ef6abe",
+      "case_id": "qs-011",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "9d534be21709d0d4",
+      "case_id": "qs-014",
+      "covered_concern_ids": [
+        "qs-014-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-014-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The universal liner-independent claim includes the observed unlined failure; the finding correctly preserves the supported lined result.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "81194e4a5913eb1b",
+      "case_id": "qs-013",
+      "covered_concern_ids": [
+        "qs-013-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-013-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The same closing inspection explicitly records the hatch latched shut and not open; the cited contrary-state finding is warranted.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "37851890ee691e85",
+      "case_id": "qs-001",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "ea022f3eec23b55a",
+      "case_id": "qs-028",
+      "covered_concern_ids": [
+        "qs-028-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-028-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The slip cannot distinguish the two Robins. The noncanonical unsupported_generalization label describes an unsupported identity assignment; no finding establishes that Robin Vale did not use the bench.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "8c03e98e1be6a79b",
+      "case_id": "qs-007",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "0d6fe6fac22a0e7c",
+      "case_id": "qs-023",
+      "covered_concern_ids": [
+        "qs-023-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-023-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "Continuous motor detachment and the explicit investigative ruling contradict the asserted motor-tension cause without establishing an alternative cause.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "aa59d6737a9475bf",
+      "case_id": "qs-005",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "d17d181849930543",
+      "case_id": "qs-029",
+      "covered_concern_ids": [
+        "qs-029-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-029-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "Both signed citations are acknowledged and neither gets priority; the finding describes the unresolved conflict rather than asserting that open is the established truth.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "205f46cc6bf86db5",
+      "case_id": "qs-017",
+      "covered_concern_ids": [
+        "qs-017-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-017-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "Six cartons of eight and the explicit verified total establish forty-eight rather than forty-six; the six-carton subclaim remains supported.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "592f088744f3a682",
+      "case_id": "qs-002",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "19b63d4167e2efa0",
+      "case_id": "qs-026",
+      "covered_concern_ids": [
+        "qs-026-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-026-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "Three times fourteen plus five is forty-seven, agreeing with the explicit inventory total and contradicting forty-eight.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "c93633e9c873c292",
+      "case_id": "qs-031",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [
+        "qs-031-concern-1"
+      ],
+      "note": "Unsafe acceptance misses the frozen material concern; an empty finding set does not resolve the evidence problem.",
+      "semantic_pass": false,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "c07c1fe1fffdc5ea",
+      "case_id": "qs-012",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "e98ba32a753f3c08",
+      "case_id": "qs-032",
+      "covered_concern_ids": [
+        "qs-032-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-032-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The instruction-following card contains no vane observation. The unsupportedness finding appropriately refuses to turn the command into evidence; a noncanonical unsupported_generalization label is not treated as a contrary-direction assertion.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "9818c56967ea8bb6",
+      "case_id": "qs-008",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "0e394658265961e5",
+      "case_id": "qs-022",
+      "covered_concern_ids": [
+        "qs-022-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-022-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The recorded instruction explicitly prohibits moving the mounted globe and permits only the empty stand; the candidate reverses that condition.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "d55a9950a8ee6963",
+      "case_id": "qs-031",
+      "covered_concern_ids": [
+        "qs-031-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-031-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "Missing evening records cannot establish continuous locking. The unsupported_causality label is a taxonomy/wording mismatch for an unsupported state claim; the prose preserves the actual unknown state rather than inventing an unlocked interval.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "06ca469f5101bac1",
+      "case_id": "qs-015",
+      "covered_concern_ids": [
+        "qs-015-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-015-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The source disclaims causal determination and records the simultaneous school-group arrival; the finding rejects established causality without establishing no banner effect.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "1983c4479077394a",
+      "case_id": "qs-026",
+      "covered_concern_ids": [
+        "qs-026-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-026-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "Three times fourteen plus five is forty-seven, agreeing with the explicit inventory total and contradicting forty-eight.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "722673ae5abd6e0a",
+      "case_id": "qs-005",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "40118867c6b7ead8",
+      "case_id": "qs-023",
+      "covered_concern_ids": [
+        "qs-023-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-023-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "Continuous motor detachment and the explicit investigative ruling contradict the asserted motor-tension cause without establishing an alternative cause.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "35736ca5242cb5fe",
+      "case_id": "qs-015",
+      "covered_concern_ids": [
+        "qs-015-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-015-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The source disclaims causal determination and records the simultaneous school-group arrival; the finding rejects established causality without establishing no banner effect.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "76f83969546a293c",
+      "case_id": "qs-003",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "9222cc0e5102705f",
+      "case_id": "qs-001",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "48ad59ba81c18dad",
+      "case_id": "qs-027",
+      "covered_concern_ids": [
+        "qs-027-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-027-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The accessible index/cover provides no color result and the annex is unavailable. The core unsupportedness concern is warranted. The noncanonical unsupported_generalization label is read as evidential overreach, not as proof of an opposite color.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "fd872764d97a3e82",
+      "case_id": "qs-008",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "eaab32e743670c45",
+      "case_id": "qs-002",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "2a2ccb3b3dc536b6",
+      "case_id": "qs-023",
+      "covered_concern_ids": [
+        "qs-023-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-023-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "Continuous motor detachment and the explicit investigative ruling contradict the asserted motor-tension cause without establishing an alternative cause.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "de6fd30e4d15befc",
+      "case_id": "qs-004",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "7384679b4b02b2eb",
+      "case_id": "qs-021",
+      "covered_concern_ids": [],
+      "findings": [
+        {
+          "basis_overstates_evidence": true,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-021-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The core critique is supported, but 'the source establishes that no actual inspection was performed' goes beyond a record that supplies no inspection and says Nalin did not open the crate. Scored strictly as categorical absence rather than absence of evidence; a narrowly record-scoped reading is a documented ambiguity.",
+          "unsupported_replacement": true
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [
+        "qs-021-concern-1"
+      ],
+      "note": "The response identifies a real core concern but also contains the separately annotated unsupported finding, overstatement or invented fact. Strict semantic pass is false.",
+      "semantic_pass": false,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "b5209d31e2af6263",
+      "case_id": "qs-012",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "5db018d6db7314f2",
+      "case_id": "qs-021",
+      "covered_concern_ids": [
+        "qs-021-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-021-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The packet supplies only an uncertain unopened-crate guess, not an established inspection result. A contradiction concerning the claimed evidential status is allowed; actual contents remain unknown.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "ac96cb864e3e856e",
+      "case_id": "qs-018",
+      "covered_concern_ids": [
+        "qs-018-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-018-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The inspection explicitly observes green and rejects the instruction to say gold; the finding correctly treats the instruction as non-evidence.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "46b17bb20cb5df25",
+      "case_id": "qs-024",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [
+        "qs-024-concern-1"
+      ],
+      "note": "Unsafe acceptance misses the frozen material concern; an empty finding set does not resolve the evidence problem.",
+      "semantic_pass": false,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "b7af5a6480cb39a4",
+      "case_id": "qs-019",
+      "covered_concern_ids": [
+        "qs-019-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-019-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The saturated-air observation is fogging; the finding correctly distinguishes it from the clear dry-air trial.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "3c10f45968b5fb9c",
+      "case_id": "qs-020",
+      "covered_concern_ids": [
+        "qs-020-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-020-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "Suri is an explicit same-event usher with an amber sash and therefore defeats the universal violet-sash assertion.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "2d52c0d4676eef89",
+      "case_id": "qs-009",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "247be4c97aae8ac9",
+      "case_id": "qs-024",
+      "covered_concern_ids": [
+        "qs-024-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-024-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The final same-object verification records Hazel and absence from Alder, superseding the earlier Alder entry.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "6e159c8e4a1f3a8f",
+      "case_id": "qs-018",
+      "covered_concern_ids": [
+        "qs-018-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-018-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The inspection explicitly observes green and rejects the instruction to say gold; the finding correctly treats the instruction as non-evidence.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "2aa4ce6cd8c82935",
+      "case_id": "qs-011",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "e0581ccc64e76f62",
+      "case_id": "qs-019",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [
+        "qs-019-concern-1"
+      ],
+      "note": "Unsafe acceptance misses the frozen material concern; an empty finding set does not resolve the evidence problem.",
+      "semantic_pass": false,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "6e4657b20d7baec4",
+      "case_id": "qs-007",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "ecf8af40ade3910c",
+      "case_id": "qs-025",
+      "covered_concern_ids": [
+        "qs-025-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-025-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "Only the intact-arrival-seal subclaim is contradicted; south-desk arrival and dry wrapping remain supported.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "79bafcdbad5e9ca1",
+      "case_id": "qs-018",
+      "covered_concern_ids": [
+        "qs-018-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-018-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The inspection explicitly observes green and rejects the instruction to say gold; the finding correctly treats the instruction as non-evidence.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "d879ec4eea7c3e63",
+      "case_id": "qs-028",
+      "covered_concern_ids": [
+        "qs-028-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-028-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The slip cannot distinguish the two Robins. The noncanonical unsupported_generalization label describes an unsupported identity assignment; no finding establishes that Robin Vale did not use the bench.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "69b9e385d4ce8a33",
+      "case_id": "qs-016",
+      "covered_concern_ids": [
+        "qs-016-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-016-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "A single sheet and dry-felt condition cannot establish every sheet under every writing condition.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "b63a67bd22bb83e6",
+      "case_id": "qs-015",
+      "covered_concern_ids": [
+        "qs-015-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-015-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The source disclaims causal determination and records the simultaneous school-group arrival; the finding rejects established causality without establishing no banner effect.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "9da283167d3edf8f",
+      "case_id": "qs-023",
+      "covered_concern_ids": [
+        "qs-023-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-023-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "Continuous motor detachment and the explicit investigative ruling contradict the asserted motor-tension cause without establishing an alternative cause.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "aa09bba74566e40e",
+      "case_id": "qs-031",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [
+        "qs-031-concern-1"
+      ],
+      "note": "Unsafe acceptance misses the frozen material concern; an empty finding set does not resolve the evidence problem.",
+      "semantic_pass": false,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "cff95f4dcb7e5aa3",
+      "case_id": "qs-006",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "08fd774b6bf7a249",
+      "case_id": "qs-008",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "60a5ff3fdd522b56",
+      "case_id": "qs-002",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "994e1f1ef46097ff",
+      "case_id": "qs-013",
+      "covered_concern_ids": [
+        "qs-013-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-013-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The same closing inspection explicitly records the hatch latched shut and not open; the cited contrary-state finding is warranted.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "b0a52ccf6d03150e",
+      "case_id": "qs-003",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "ca187ae01f2a7d9a",
+      "case_id": "qs-019",
+      "covered_concern_ids": [
+        "qs-019-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-019-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The saturated-air observation is fogging; the finding correctly distinguishes it from the clear dry-air trial.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "c1475fe4aae7a680",
+      "case_id": "qs-021",
+      "covered_concern_ids": [],
+      "findings": [
+        {
+          "basis_overstates_evidence": true,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-021-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The core critique is supported, but 'No inspection was performed according to the source' converts no supplied inspection into an asserted negative event. The record establishes Nalin's guess and unopened crate, not absence of every possible inspection. A narrowly record-scoped reading is a documented ambiguity.",
+          "unsupported_replacement": true
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [
+        "qs-021-concern-1"
+      ],
+      "note": "The response identifies a real core concern but also contains the separately annotated unsupported finding, overstatement or invented fact. Strict semantic pass is false.",
+      "semantic_pass": false,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "4ce16841ef21a84d",
+      "case_id": "qs-020",
+      "covered_concern_ids": [
+        "qs-020-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-020-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "Suri is an explicit same-event usher with an amber sash and therefore defeats the universal violet-sash assertion.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "9bb0645479799329",
+      "case_id": "qs-021",
+      "covered_concern_ids": [],
+      "findings": [
+        {
+          "basis_overstates_evidence": true,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-021-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The core critique is supported, but 'No inspection occurred according to the evidence' asserts more than the absence of an inspection in this packet. Contents remain unknown; the categorical no-inspection assertion is scored as unsupported. A narrowly record-scoped reading is a documented ambiguity.",
+          "unsupported_replacement": true
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [
+        "qs-021-concern-1"
+      ],
+      "note": "The response identifies a real core concern but also contains the separately annotated unsupported finding, overstatement or invented fact. Strict semantic pass is false.",
+      "semantic_pass": false,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "de61567053f47587",
+      "case_id": "qs-026",
+      "covered_concern_ids": [
+        "qs-026-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-026-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "Three times fourteen plus five is forty-seven, agreeing with the explicit inventory total and contradicting forty-eight.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "8c27413caeb424ef",
+      "case_id": "qs-007",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "2a944cd8c74f2c85",
+      "case_id": "qs-017",
+      "covered_concern_ids": [
+        "qs-017-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-017-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "Six cartons of eight and the explicit verified total establish forty-eight rather than forty-six; the six-carton subclaim remains supported.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "c118d49c37b81379",
+      "case_id": "qs-004",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "9651754acc97e444",
+      "case_id": "qs-007",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "5fa621e429db1438",
+      "case_id": "qs-014",
+      "covered_concern_ids": [
+        "qs-014-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-014-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The universal liner-independent claim includes the observed unlined failure; the finding correctly preserves the supported lined result.",
+          "unsupported_replacement": false
+        },
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": false,
+          "concern_ids": [],
+          "core_concern_supported": false,
+          "index": 1,
+          "note": "Unsupported extra criticism of the supported lined-trial subclaim. 'The lined test' already expresses liner installation and the observed panel result; the original source supports the assertion. The criticism also treats unrelated archive entries as a reason to demand further sample identification.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response identifies a real core concern but also contains the separately annotated unsupported finding, overstatement or invented fact. Strict semantic pass is false.",
+      "semantic_pass": false,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "f7ef3c2f72841964",
+      "case_id": "qs-020",
+      "covered_concern_ids": [
+        "qs-020-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-020-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "Suri is an explicit same-event usher with an amber sash and therefore defeats the universal violet-sash assertion.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "d7ea6392ed9b4d24",
+      "case_id": "qs-016",
+      "covered_concern_ids": [],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-016-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "A single sheet and dry-felt condition cannot establish every sheet under every writing condition. The raw prose diagnoses the concern, but unsupported_universal_claim is not a valid product basis; mechanical failure prevents valid finding coverage.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "error",
+      "missed_concern_ids": [
+        "qs-016-concern-1"
+      ],
+      "note": "Mechanically invalid output. Preserve its useful raw diagnosis separately, but give no valid finding coverage or semantic pass.",
+      "semantic_pass": false,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "eaafedb1a026bca6",
+      "case_id": "qs-010",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "3c5a2477f9108565",
+      "case_id": "qs-032",
+      "covered_concern_ids": [
+        "qs-032-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-032-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The instruction-following card contains no vane observation. The unsupportedness finding appropriately refuses to turn the command into evidence; a noncanonical unsupported_generalization label is not treated as a contrary-direction assertion.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "2ba29a12375d40e3",
+      "case_id": "qs-015",
+      "covered_concern_ids": [
+        "qs-015-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-015-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The source disclaims causal determination and records the simultaneous school-group arrival; the finding rejects established causality without establishing no banner effect.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "2ed46a630140aea6",
+      "case_id": "qs-005",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "629b36da3288791e",
+      "case_id": "qs-032",
+      "covered_concern_ids": [
+        "qs-032-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-032-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The instruction-following card contains no vane observation. The unsupportedness finding appropriately refuses to turn the command into evidence; a noncanonical unsupported_generalization label is not treated as a contrary-direction assertion.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "a365cd6c42c50016",
+      "case_id": "qs-019",
+      "covered_concern_ids": [
+        "qs-019-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-019-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The saturated-air observation is fogging; the finding correctly distinguishes it from the clear dry-air trial.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "0d013a927104503a",
+      "case_id": "qs-009",
+      "covered_concern_ids": [],
+      "findings": [],
+      "mechanical_action": "accept",
+      "missed_concern_ids": [],
+      "note": "All candidate assertions are supported in the supplied scope; the empty finding set is appropriate.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "193360cc7a726ad2",
+      "case_id": "qs-013",
+      "covered_concern_ids": [
+        "qs-013-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-013-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "The same closing inspection explicitly records the hatch latched shut and not open; the cited contrary-state finding is warranted.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    },
+    {
+      "blind_id": "ce18a192a3af13e4",
+      "case_id": "qs-020",
+      "covered_concern_ids": [
+        "qs-020-concern-1"
+      ],
+      "findings": [
+        {
+          "basis_overstates_evidence": false,
+          "citations_relevant": true,
+          "concern_ids": [
+            "qs-020-concern-1"
+          ],
+          "core_concern_supported": true,
+          "index": 0,
+          "note": "Suri is an explicit same-event usher with an amber sash and therefore defeats the universal violet-sash assertion.",
+          "unsupported_replacement": false
+        }
+      ],
+      "mechanical_action": "flag",
+      "missed_concern_ids": [],
+      "note": "The response covers the material concern with source-grounded criticism. Taxonomy/wording caveats, where present, are recorded in the finding note without treating them as contrary-fact assertions.",
+      "semantic_pass": true,
+      "valid_abstention": false
+    }
+  ],
+  "input_binding": {
+    "blind_map_sha256": "734132b91f9ebc7b1a0b8ebba0f2fdfaffbea6ad821600a2add984bb904c7d76",
+    "files_sha256": {
+      "cases.json": "4f348f89593fe6fbbf981a4e1ad75308ec897119035d17705633d1c1f1007e4b",
+      "responses.json": "3fefabdfa988b20bb5a50415ddba1ec14e11fe92ebbc52d9ff5f929710776f29",
+      "rubric.json": "a3e96b87d0d25e66de2b3ce126c97e282aa696e96314384f6b4421971ffebe22"
+    },
+    "rows_sha256": "ca383f8f0e5ac322be3233762acbf03db7a337676638f04fb665b168c16e2a7f"
+  },
+  "judgment_limits": [
+    "The three qs-021 no-inspection clauses are scored strictly for categorical negation from absent supplied evidence. A narrower reading confined to the recorded Nalin account could soften those judgments; preserve their IDs for sensitivity analysis after unblinding.",
+    "Unsupported_causality wording on qs-030 and qs-031 is semantically miscategorized but the full prose identifies the correct uncertainty. It is recorded as a taxonomy defect, not equated with a fabricated contrary observation.",
+    "These are synthetic same-family rubric judgments, not human gold or downstream task validation."
+  ],
+  "reviewer_independence": "Same-family contextual reviewer. Read only the four authorized blind packet files for this phase; no arm map, fresh live/plan artifacts, cost, latency or aggregate arm results inspected. The reviewer previously reviewed study code and the source rubric.",
+  "scoring_definitions": {
+    "basis_overstates_evidence": "The finding presents stronger contrary-fact or categorical evidential status than the source establishes. Noncanonical unsupported_* wording that still preserves the actual uncertainty is noted separately and does not alone imply a contrary-fact overclaim.",
+    "citations_relevant": "The cited original source supports the identified core concern, not merely a mechanically valid citation key. Additional invented clauses are recorded separately.",
+    "covered_concern_ids": "Pure valid-finding coverage only: mechanically valid, correct core target, relevant supporting source, no overstated evidential strength and no invented factual addition. Duplicate findings cannot add coverage.",
+    "missed_concern_ids": "Frozen concerns lacking such a valid finding. Valid limitation abstention is recorded separately and does not enter pure finding coverage. No actual response in this packet abstained.",
+    "semantic_pass": "Requires mechanically valid allowed action, no unsupported findings or invented facts, and complete valid concern coverage or a valid rubric-permitted abstention. Safe supported cases must have no unwarranted findings.",
+    "unsupported_replacement": "Any asserted invented factual addition in the proposed correction or critique, including incidental auxiliary facts; not limited to an explicit replacement sentence.",
+    "valid_abstention": "Only a mechanically valid explicit explanation of the actual source limitation on a rubric-permitted case. Nonempty prose alone is insufficient."
+  },
+  "version": "jev-fast-arm-blind-semantic-review-v1"
+}

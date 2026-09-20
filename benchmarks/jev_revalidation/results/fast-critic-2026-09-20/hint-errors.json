@@ -1,0 +1,26 @@
+{
+  "scope": "All92 archived assertion labels across64 paths; comparison with existing fixture gold, not a new hint evaluation.",
+  "wrong_hints": [
+    {
+      "case_id": "qs-028",
+      "repeat": 1,
+      "claim_path": "/content",
+      "hint": "insufficient",
+      "fixture_label": "ambiguous"
+    },
+    {
+      "case_id": "qs-015",
+      "repeat": 1,
+      "claim_path": "/content",
+      "hint": "contradicted",
+      "fixture_label": "insufficient"
+    },
+    {
+      "case_id": "qs-015",
+      "repeat": 0,
+      "claim_path": "/content",
+      "hint": "contradicted",
+      "fixture_label": "insufficient"
+    }
+  ]
+}

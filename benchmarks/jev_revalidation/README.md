@@ -61,3 +61,11 @@ before validation. Even its ideal ceiling improves median latency only 4.88% on
 that corpus. The runner validates the retained archive, uses paired baseline
 critic samples for misses and accounts for late background calls. It has no live
 mode and does not enable product bypass.
+
+## Fast critic with Jev hints
+
+The [paired fast-critic study](results/fast-critic-2026-09-20/report.md) compares
+128 fresh Haiku calls with and without cached Jev hints. Hints removed five false
+accepts and improved reviewed concern coverage, but introduced two paired semantic
+regressions. Median critic time rose 3.00%; full Jev acquisition is not measured.
+The retained archive includes frozen inputs, per-call outcomes and blind review.

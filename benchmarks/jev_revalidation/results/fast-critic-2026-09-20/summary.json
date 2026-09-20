@@ -1,0 +1,622 @@
+{
+  "arms": {
+    "direct": {
+      "actions": {
+        "accept": 29,
+        "error": 2,
+        "flag": 33
+      },
+      "attributed_prior_jev_calls": 0,
+      "attributed_prior_jev_cost_usd": "0",
+      "available_hint_paths": 0,
+      "execution_failures": 2,
+      "false_accepts": 5,
+      "fresh_critic_calls": 64,
+      "fresh_known_cost_usd": "0.278300",
+      "fresh_plus_attributed_jev_cost_usd": "0.278300",
+      "output_tokens": 11181,
+      "paths": 64,
+      "queue_p95_ms": 30594.831354988855,
+      "rubric_correct": 57,
+      "safe_accepted": 24,
+      "safe_candidates": 24,
+      "service_p50_ms": 2254.751973989187,
+      "service_p95_ms": 4305.258139997022,
+      "strict_correct": 47,
+      "unknown_cost_calls": 0,
+      "unknown_output_token_calls": 0
+    },
+    "hinted": {
+      "actions": {
+        "accept": 24,
+        "flag": 40
+      },
+      "attributed_prior_jev_calls": 64,
+      "attributed_prior_jev_cost_usd": "0.006124356",
+      "available_hint_paths": 64,
+      "execution_failures": 0,
+      "false_accepts": 0,
+      "fresh_critic_calls": 64,
+      "fresh_known_cost_usd": "0.288742",
+      "fresh_plus_attributed_jev_cost_usd": "0.294866356",
+      "output_tokens": 12188,
+      "paths": 64,
+      "queue_p95_ms": 30528.555664001033,
+      "rubric_correct": 64,
+      "safe_accepted": 24,
+      "safe_candidates": 24,
+      "service_p50_ms": 2322.4974065014976,
+      "service_p95_ms": 3722.2845689975657,
+      "strict_correct": 52,
+      "unknown_cost_calls": 0,
+      "unknown_output_token_calls": 0
+    }
+  },
+  "limits": [
+    "Fresh paired critic-stage measurements with pre-existing hints; no live background scheduler or complete Jev acquisition latency measured.",
+    "Prior Jev acquisition cost is attributed separately, not billed again by this experiment.",
+    "Same 32 synthetic cases as prior work and two dependent repeats; no new held-out or downstream quality evidence.",
+    "Action-level matches do not establish finding correctness. Frozen source rubric and arm-blind semantic review are required.",
+    "Historical Opus is a dated reference, not a contemporaneous control."
+  ],
+  "pairs": [
+    {
+      "case_id": "qs-001",
+      "direct_action": "accept",
+      "hinted_action": "accept",
+      "repeat": 0,
+      "service_delta_ms": -18.082869006320834
+    },
+    {
+      "case_id": "qs-001",
+      "direct_action": "accept",
+      "hinted_action": "accept",
+      "repeat": 1,
+      "service_delta_ms": -113.18940499040764
+    },
+    {
+      "case_id": "qs-002",
+      "direct_action": "accept",
+      "hinted_action": "accept",
+      "repeat": 0,
+      "service_delta_ms": 18.732066004304215
+    },
+    {
+      "case_id": "qs-002",
+      "direct_action": "accept",
+      "hinted_action": "accept",
+      "repeat": 1,
+      "service_delta_ms": 306.2765560025582
+    },
+    {
+      "case_id": "qs-003",
+      "direct_action": "accept",
+      "hinted_action": "accept",
+      "repeat": 0,
+      "service_delta_ms": -29.925135997473262
+    },
+    {
+      "case_id": "qs-003",
+      "direct_action": "accept",
+      "hinted_action": "accept",
+      "repeat": 1,
+      "service_delta_ms": -188.2754649996059
+    },
+    {
+      "case_id": "qs-004",
+      "direct_action": "accept",
+      "hinted_action": "accept",
+      "repeat": 0,
+      "service_delta_ms": -202.069857987226
+    },
+    {
+      "case_id": "qs-004",
+      "direct_action": "accept",
+      "hinted_action": "accept",
+      "repeat": 1,
+      "service_delta_ms": 96.89991100458428
+    },
+    {
+      "case_id": "qs-005",
+      "direct_action": "accept",
+      "hinted_action": "accept",
+      "repeat": 0,
+      "service_delta_ms": 58.81703599879984
+    },
+    {
+      "case_id": "qs-005",
+      "direct_action": "accept",
+      "hinted_action": "accept",
+      "repeat": 1,
+      "service_delta_ms": 178.5999589919811
+    },
+    {
+      "case_id": "qs-006",
+      "direct_action": "accept",
+      "hinted_action": "accept",
+      "repeat": 0,
+      "service_delta_ms": -100.16213200287893
+    },
+    {
+      "case_id": "qs-006",
+      "direct_action": "accept",
+      "hinted_action": "accept",
+      "repeat": 1,
+      "service_delta_ms": 30.530524003552273
+    },
+    {
+      "case_id": "qs-007",
+      "direct_action": "accept",
+      "hinted_action": "accept",
+      "repeat": 0,
+      "service_delta_ms": 53.66373001015745
+    },
+    {
+      "case_id": "qs-007",
+      "direct_action": "accept",
+      "hinted_action": "accept",
+      "repeat": 1,
+      "service_delta_ms": -46.79476401361171
+    },
+    {
+      "case_id": "qs-008",
+      "direct_action": "accept",
+      "hinted_action": "accept",
+      "repeat": 0,
+      "service_delta_ms": 41.86506099358667
+    },
+    {
+      "case_id": "qs-008",
+      "direct_action": "accept",
+      "hinted_action": "accept",
+      "repeat": 1,
+      "service_delta_ms": 227.34497899364214
+    },
+    {
+      "case_id": "qs-009",
+      "direct_action": "accept",
+      "hinted_action": "accept",
+      "repeat": 0,
+      "service_delta_ms": 26.9671090063639
+    },
+    {
+      "case_id": "qs-009",
+      "direct_action": "accept",
+      "hinted_action": "accept",
+      "repeat": 1,
+      "service_delta_ms": 31.790334003744647
+    },
+    {
+      "case_id": "qs-010",
+      "direct_action": "accept",
+      "hinted_action": "accept",
+      "repeat": 0,
+      "service_delta_ms": -67.73701800557319
+    },
+    {
+      "case_id": "qs-010",
+      "direct_action": "accept",
+      "hinted_action": "accept",
+      "repeat": 1,
+      "service_delta_ms": 196.31472299806774
+    },
+    {
+      "case_id": "qs-011",
+      "direct_action": "accept",
+      "hinted_action": "accept",
+      "repeat": 0,
+      "service_delta_ms": 4.90904098842293
+    },
+    {
+      "case_id": "qs-011",
+      "direct_action": "accept",
+      "hinted_action": "accept",
+      "repeat": 1,
+      "service_delta_ms": -19.791872982750647
+    },
+    {
+      "case_id": "qs-012",
+      "direct_action": "accept",
+      "hinted_action": "accept",
+      "repeat": 0,
+      "service_delta_ms": 4.416018011397682
+    },
+    {
+      "case_id": "qs-012",
+      "direct_action": "accept",
+      "hinted_action": "accept",
+      "repeat": 1,
+      "service_delta_ms": -19.08924398594536
+    },
+    {
+      "case_id": "qs-013",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 0,
+      "service_delta_ms": 283.98707100132015
+    },
+    {
+      "case_id": "qs-013",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 1,
+      "service_delta_ms": -43.52195998944808
+    },
+    {
+      "case_id": "qs-014",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 0,
+      "service_delta_ms": -861.3409749959828
+    },
+    {
+      "case_id": "qs-014",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 1,
+      "service_delta_ms": -4292.827887984458
+    },
+    {
+      "case_id": "qs-015",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 0,
+      "service_delta_ms": -71.98695599799976
+    },
+    {
+      "case_id": "qs-015",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 1,
+      "service_delta_ms": 327.0349430094939
+    },
+    {
+      "case_id": "qs-016",
+      "direct_action": "error",
+      "hinted_action": "flag",
+      "repeat": 0,
+      "service_delta_ms": -1183.774468008778
+    },
+    {
+      "case_id": "qs-016",
+      "direct_action": "error",
+      "hinted_action": "flag",
+      "repeat": 1,
+      "service_delta_ms": -1093.3039490046212
+    },
+    {
+      "case_id": "qs-017",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 0,
+      "service_delta_ms": 197.745474986732
+    },
+    {
+      "case_id": "qs-017",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 1,
+      "service_delta_ms": -426.27084099513013
+    },
+    {
+      "case_id": "qs-018",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 0,
+      "service_delta_ms": -46.895850013243034
+    },
+    {
+      "case_id": "qs-018",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 1,
+      "service_delta_ms": -14.925146009773016
+    },
+    {
+      "case_id": "qs-019",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 0,
+      "service_delta_ms": -479.68396299984306
+    },
+    {
+      "case_id": "qs-019",
+      "direct_action": "accept",
+      "hinted_action": "flag",
+      "repeat": 1,
+      "service_delta_ms": 2100.089590996504
+    },
+    {
+      "case_id": "qs-020",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 0,
+      "service_delta_ms": -926.1855619843118
+    },
+    {
+      "case_id": "qs-020",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 1,
+      "service_delta_ms": -655.2046080032596
+    },
+    {
+      "case_id": "qs-021",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 0,
+      "service_delta_ms": 1057.3293310008012
+    },
+    {
+      "case_id": "qs-021",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 1,
+      "service_delta_ms": 317.44067699764855
+    },
+    {
+      "case_id": "qs-022",
+      "direct_action": "accept",
+      "hinted_action": "flag",
+      "repeat": 0,
+      "service_delta_ms": 534.3279530061409
+    },
+    {
+      "case_id": "qs-022",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 1,
+      "service_delta_ms": 270.71163000073284
+    },
+    {
+      "case_id": "qs-023",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 0,
+      "service_delta_ms": 254.4398410100257
+    },
+    {
+      "case_id": "qs-023",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 1,
+      "service_delta_ms": 233.32841800583992
+    },
+    {
+      "case_id": "qs-024",
+      "direct_action": "accept",
+      "hinted_action": "flag",
+      "repeat": 0,
+      "service_delta_ms": 1991.8198119848967
+    },
+    {
+      "case_id": "qs-024",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 1,
+      "service_delta_ms": -937.239883991424
+    },
+    {
+      "case_id": "qs-025",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 0,
+      "service_delta_ms": -608.5513180005364
+    },
+    {
+      "case_id": "qs-025",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 1,
+      "service_delta_ms": 298.835430003237
+    },
+    {
+      "case_id": "qs-026",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 0,
+      "service_delta_ms": 11.66714500868693
+    },
+    {
+      "case_id": "qs-026",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 1,
+      "service_delta_ms": -92.95775200007483
+    },
+    {
+      "case_id": "qs-027",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 0,
+      "service_delta_ms": -10.189101012656465
+    },
+    {
+      "case_id": "qs-027",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 1,
+      "service_delta_ms": -120.96475300495513
+    },
+    {
+      "case_id": "qs-028",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 0,
+      "service_delta_ms": -582.9735709994566
+    },
+    {
+      "case_id": "qs-028",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 1,
+      "service_delta_ms": 741.7343459965196
+    },
+    {
+      "case_id": "qs-029",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 0,
+      "service_delta_ms": -695.1212139829295
+    },
+    {
+      "case_id": "qs-029",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 1,
+      "service_delta_ms": -534.802102993126
+    },
+    {
+      "case_id": "qs-030",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 0,
+      "service_delta_ms": -45.91841598448809
+    },
+    {
+      "case_id": "qs-030",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 1,
+      "service_delta_ms": 1312.3313640098786
+    },
+    {
+      "case_id": "qs-031",
+      "direct_action": "accept",
+      "hinted_action": "flag",
+      "repeat": 0,
+      "service_delta_ms": 3218.7297089985805
+    },
+    {
+      "case_id": "qs-031",
+      "direct_action": "accept",
+      "hinted_action": "flag",
+      "repeat": 1,
+      "service_delta_ms": 2802.572668006178
+    },
+    {
+      "case_id": "qs-032",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 0,
+      "service_delta_ms": -371.7503490042873
+    },
+    {
+      "case_id": "qs-032",
+      "direct_action": "flag",
+      "hinted_action": "flag",
+      "repeat": 1,
+      "service_delta_ms": -21.906988011323847
+    }
+  ],
+  "per_repeat": {
+    "0": {
+      "direct": {
+        "actions": {
+          "accept": 15,
+          "error": 1,
+          "flag": 16
+        },
+        "attributed_prior_jev_calls": 0,
+        "attributed_prior_jev_cost_usd": "0",
+        "available_hint_paths": 0,
+        "execution_failures": 1,
+        "false_accepts": 3,
+        "fresh_critic_calls": 32,
+        "fresh_known_cost_usd": "0.137870",
+        "fresh_plus_attributed_jev_cost_usd": "0.137870",
+        "output_tokens": 5338,
+        "paths": 32,
+        "queue_p95_ms": 30846.775822006748,
+        "rubric_correct": 28,
+        "safe_accepted": 12,
+        "safe_candidates": 12,
+        "service_p50_ms": 2206.000808997487,
+        "service_p95_ms": 4305.258139997022,
+        "strict_correct": 23,
+        "unknown_cost_calls": 0,
+        "unknown_output_token_calls": 0
+      },
+      "hinted": {
+        "actions": {
+          "accept": 12,
+          "flag": 20
+        },
+        "attributed_prior_jev_calls": 32,
+        "attributed_prior_jev_cost_usd": "0.003062178",
+        "available_hint_paths": 32,
+        "execution_failures": 0,
+        "false_accepts": 0,
+        "fresh_critic_calls": 32,
+        "fresh_known_cost_usd": "0.144019",
+        "fresh_plus_attributed_jev_cost_usd": "0.147081178",
+        "output_tokens": 6027,
+        "paths": 32,
+        "queue_p95_ms": 30835.578931990312,
+        "rubric_correct": 32,
+        "safe_accepted": 12,
+        "safe_candidates": 12,
+        "service_p50_ms": 2312.652476495714,
+        "service_p95_ms": 3722.2845689975657,
+        "strict_correct": 26,
+        "unknown_cost_calls": 0,
+        "unknown_output_token_calls": 0
+      }
+    },
+    "1": {
+      "direct": {
+        "actions": {
+          "accept": 14,
+          "error": 1,
+          "flag": 17
+        },
+        "attributed_prior_jev_calls": 0,
+        "attributed_prior_jev_cost_usd": "0",
+        "available_hint_paths": 0,
+        "execution_failures": 1,
+        "false_accepts": 2,
+        "fresh_critic_calls": 32,
+        "fresh_known_cost_usd": "0.140430",
+        "fresh_plus_attributed_jev_cost_usd": "0.140430",
+        "output_tokens": 5843,
+        "paths": 32,
+        "queue_p95_ms": 30594.831354988855,
+        "rubric_correct": 29,
+        "safe_accepted": 12,
+        "safe_candidates": 12,
+        "service_p50_ms": 2295.873330993345,
+        "service_p95_ms": 4780.2066300064325,
+        "strict_correct": 24,
+        "unknown_cost_calls": 0,
+        "unknown_output_token_calls": 0
+      },
+      "hinted": {
+        "actions": {
+          "accept": 12,
+          "flag": 20
+        },
+        "attributed_prior_jev_calls": 32,
+        "attributed_prior_jev_cost_usd": "0.003062178",
+        "available_hint_paths": 32,
+        "execution_failures": 0,
+        "false_accepts": 0,
+        "fresh_critic_calls": 32,
+        "fresh_known_cost_usd": "0.144723",
+        "fresh_plus_attributed_jev_cost_usd": "0.147785178",
+        "output_tokens": 6161,
+        "paths": 32,
+        "queue_p95_ms": 30528.555664001033,
+        "rubric_correct": 32,
+        "safe_accepted": 12,
+        "safe_candidates": 12,
+        "service_p50_ms": 2352.128017002542,
+        "service_p95_ms": 4008.704129999387,
+        "strict_correct": 26,
+        "unknown_cost_calls": 0,
+        "unknown_output_token_calls": 0
+      }
+    }
+  },
+  "production_qualified": false,
+  "semantic_review_status": "pending"
+}
