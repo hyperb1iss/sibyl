@@ -753,6 +753,10 @@ async def _recall_raw_memory_result(
                     )
         from sibyl_core.services.memory_source_validation import SourceReadAuthority
 
+        # The scope the caller already authorized is the ceiling for source
+        # validation. Every shared scope key has to reach the authority, or
+        # validation reads a listed memory as unavailable and recall drops
+        # what listing returns.
         authority = source_authority or SourceReadAuthority(
             principal_id=principal_id,
             projects=frozenset([scope_key])
@@ -760,6 +764,9 @@ async def _recall_raw_memory_result(
             else frozenset(),
             teams=frozenset([scope_key])
             if normalized_scope is MemoryScope.TEAM and scope_key
+            else frozenset(),
+            delegations=frozenset([scope_key])
+            if normalized_scope is MemoryScope.DELEGATED and scope_key
             else frozenset(),
         )
         unavailable = await unavailable_publication_ids(

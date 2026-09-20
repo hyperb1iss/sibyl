@@ -1542,6 +1542,10 @@ tasks:
       - packages/python/sibyl-core/src/sibyl_core/memory_pipeline/capture.py
       - packages/python/sibyl-core/src/sibyl_core/retrieval/search.py
       - packages/python/sibyl-core/src/sibyl_core/services/surreal_content.py
+      - packages/python/sibyl-core/src/sibyl_core/services/content_raw_recall.py
+      - packages/python/sibyl-core/src/sibyl_core/services/content_raw_persistence.py
+      - packages/python/sibyl-core/src/sibyl_core/services/content_models.py
+      - packages/python/sibyl-core/src/sibyl_core/services/memory_source_validation.py
       - apps/api/src/sibyl/persistence/surreal/auth_runtime/projects.py
       - benchmarks/results/ai-memory/manifest.json
       - benchmarks/results/ai-memory/team-scope-trust-receipt.json
