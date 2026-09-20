@@ -1,0 +1,20 @@
+{
+  "evidence": {
+    "blind-annotations.json": "63fa93327acb803f40ac5df9f9858a7df2e4e98fef89ae11677667c6c297271e",
+    "blind-review.md": "466fce00809b9e6c3e0822574559d2f40f9590400ed6da7876615dc67837745a",
+    "code-review.md": "08081883502e0a6936c9edfcde46237d3c26fbcac13e26cd3a8587f2ea937ed1",
+    "launch.py": "66da17a66ec3ec635d79d47d523b25951a244542f8118944597392c57dd21a10",
+    "protocol.json": "9eecddcbd6a3b6c36672ab55394e007cb59b58f811c0e4f4d2583ee10aadd936"
+  },
+  "files": {
+    "benchmarks/jev_revalidation/quality_speed.py": "03a8f3da9adf4d4960c49e8a5081336fd81b130c6309ee991764b6d47bb1654b",
+    "benchmarks/jev_revalidation/quality_speed_analysis.py": "f5867a16ea2d2aa83e739513a8b1e6bc98af37659019b7a8f00f09ca9e1c384a",
+    "benchmarks/jev_revalidation/quality_speed_cases.json": "aaa9350414374b2d798f4333b3679fe77b304535c7708c911d9a681844f353f6",
+    "benchmarks/jev_revalidation/test_quality_speed.py": "e28582ca1252dff7c0b95b16db2886154c53c7aa56cc2f8eb85fc200cb441999",
+    "moon.yml": "3b0c97c274c280f8c2a6c1003745f68b7d40573fe0e4c4d1d892f01867924177",
+    "packages/python/sibyl-core/src/sibyl_core/tasks/memory_validation.py": "a3c7b99ff799ff3efece23f66271c5a3ca4658a70de59ef836d54041fb19c77d",
+    "packages/python/sibyl-core/tests/test_memory_validation_outcomes.py": "e9b07e8c0234274df4a4b41942a3316304946033564b8be28678e05b1af6b9e3"
+  },
+  "implementation_commit": "89dd8d51833d5e8aa69a4d50b990ca5049a90290",
+  "manifest_sha256": "63dbe3d67510473fbc3a68e723d4fd95ba1542abb016990a66ec858c1307e960"
+}

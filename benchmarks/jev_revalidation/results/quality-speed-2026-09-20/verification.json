@@ -1,0 +1,38 @@
+{
+  "benchmark": {
+    "lint": "pass",
+    "passed": 257,
+    "typecheck": "pass"
+  },
+  "diagnostic_target_met": false,
+  "environment": "stef-gradial-com-main",
+  "exact_replay": {
+    "rows.json": "80ebcb053977532cfb09f55d51407b79ef79c6abf3a40c3b07de267b56104105",
+    "schedule.json": "477b0a482c3933bee765e08c4129d3bb3c798bf807066f0dc358a43d433ad651",
+    "summary.json": "ca0a3587dfd13c885bd4e19a1d31ad513009fe875feb56b026b036e82758d522"
+  },
+  "full_raw_directory": "/home/dev/dev/eval-runs/jev-quality-speed-20260920/live",
+  "implementation_commit": "89dd8d51833d5e8aa69a4d50b990ca5049a90290",
+  "independent": {
+    "benchmark_tests": 26,
+    "product_tests": 6,
+    "same_model_family": true
+  },
+  "product": {
+    "lint": "pass",
+    "passed": 103,
+    "skipped": 1,
+    "typecheck": "pass"
+  },
+  "production_qualified": false,
+  "raw_audit": {
+    "independent": "pass",
+    "rejection_probes": "pass",
+    "root_reproduced_byte_for_byte": true,
+    "script_sha256": "a95be785f086c6f6ecc8eb5fe557e5331bd162e2310b0a3fb8faf676d7417605"
+  },
+  "root_spotchecks": {
+    "benchmark_tests": 15,
+    "product_tests": 6
+  }
+}

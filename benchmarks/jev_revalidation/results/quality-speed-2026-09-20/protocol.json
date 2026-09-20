@@ -1,0 +1,53 @@
+{
+  "cohort": {
+    "arms": 2,
+    "cases": 32,
+    "categories": {
+      "abstain": 6,
+      "accept": 12,
+      "flag": 14
+    },
+    "maximum_provider_calls": 192,
+    "repeats": 2,
+    "synthetic_only": true
+  },
+  "consumer": "Deterministic accept/withhold availability accounting only. No claim of executed downstream QA or retrieval gain.",
+  "freeze": "Pin fixture, program/policy/source hashes, route, schema, prompt, exact schedule, blind review and launch code before paid calls. No retries or replacement calls.",
+  "gates": {
+    "all_paths_valid_and_all_cost_known": true,
+    "median_service_at_least_20_percent_lower": true,
+    "no_paired_supported_candidate_loss": true,
+    "p95_service_not_worse": true,
+    "rubric_correct_count_not_below_baseline": true,
+    "total_cost_not_worse": true,
+    "zero_unsafe_or_insufficient_accepts": true
+  },
+  "gold": {
+    "limits": "Same-family reviewers; action-level flag correctness does not establish that each critique is semantically justified",
+    "primary": "Predeclared acceptable_actions; qs027-032 admit valid flag or genuine abstain, never accept or mechanical failure",
+    "secondary": "Strict original expected_action exact match, preserved",
+    "source": "fixture author plus independently frozen blind review"
+  },
+  "interpretation": "Diagnostic target only, never production qualification; any failure remains visible. If action-level quality improves, review raw findings semantically before making a positive quality claim.",
+  "primary_arms": [
+    "clarified complete critic",
+    "unchanged grouped Jev .99 numeric guard then same complete critic on fallback"
+  ],
+  "question": "Does frozen Jev source-support routing improve validation-stage speed while retaining useful evidence and avoiding unsafe acceptance?",
+  "route": "Experimental full-critic bypass, no product publication authority. Prior threshold unchanged; no post-result refitting.",
+  "timing": {
+    "concurrency": 8,
+    "excluded": [
+      "original evidence acquisition",
+      "candidate generation",
+      "correction generation",
+      "publication",
+      "retrieval",
+      "answer generation"
+    ],
+    "primary": "Monotonic prepared-evidence-to-final-action service time includes actual Jev request, any sequential critic fallback, mechanical validation and raw receipt writes",
+    "queue": "Measure harness semaphore queue and total separately. Artificial benchmark queue is not interactive product latency.",
+    "schedule": "Seeded randomized pairs and arm order, two repeats"
+  },
+  "version": "jev-quality-speed-protocol-v1"
+}

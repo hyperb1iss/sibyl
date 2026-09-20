@@ -1,0 +1,284 @@
+{
+  "reviewer": "native same-family independent agent",
+  "blind_cases_sha256": "4f348f89593fe6fbbf981a4e1ad75308ec897119035d17705633d1c1f1007e4b",
+  "context_disclosure": "Reviewer knew proposed class counts and experiment design, but did not read author expected/rationale/expected_action or model outputs before freezing this file.",
+  "reading_method": "Reviewed complete target paragraphs and archive scope. Enumerated and inspected every field-value variant of the unrelated named-record distractors, preserving their explicit disjoint scope.",
+  "annotations": [
+    {
+      "id": "qs-001",
+      "expected": {
+        "/content": "supported",
+        "/claim_records/0/content": "supported"
+      },
+      "expected_action": "accept",
+      "rationale": "The claim preserves all stated trial conditions, and deliberate removal is explicit."
+    },
+    {
+      "id": "qs-002",
+      "expected": {
+        "/content": "supported",
+        "/claim_records/0/content": "supported"
+      },
+      "expected_action": "accept",
+      "rationale": "The candidate preserves reported personal experience and lack of independent assessment."
+    },
+    {
+      "id": "qs-003",
+      "expected": {
+        "/content": "supported",
+        "/claim_records/0/content": "supported"
+      },
+      "expected_action": "accept",
+      "rationale": "The inspected panel is intact; the hostile quotation is explicitly exhibit content."
+    },
+    {
+      "id": "qs-004",
+      "expected": {
+        "/content": "supported",
+        "/claim_records/0/content": "supported"
+      },
+      "expected_action": "accept",
+      "rationale": "Seven times three equals twenty-one; the full shipment and tray acceptance are explicit."
+    },
+    {
+      "id": "qs-005",
+      "expected": {
+        "/content": "supported"
+      },
+      "expected_action": "accept",
+      "rationale": "The tested causal mechanism is directly observed with the lock comparison; the claim stays within that test."
+    },
+    {
+      "id": "qs-006",
+      "expected": {
+        "/content": "supported",
+        "/claim_records/0/content": "supported"
+      },
+      "expected_action": "accept",
+      "rationale": "A complete closed cabinet manifest establishes the universal claim for that cabinet and inspection."
+    },
+    {
+      "id": "qs-007",
+      "expected": {
+        "/content": "supported"
+      },
+      "expected_action": "accept",
+      "rationale": "Continuous observation explicitly establishes the scoped negative event."
+    },
+    {
+      "id": "qs-008",
+      "expected": {
+        "/content": "supported",
+        "/claim_records/0/content": "supported"
+      },
+      "expected_action": "accept",
+      "rationale": "The signed movement identifies both destinations and the object that remained in place."
+    },
+    {
+      "id": "qs-009",
+      "expected": {
+        "/content": "supported"
+      },
+      "expected_action": "accept",
+      "rationale": "The candidate retains the event-specific supervision and location conditions."
+    },
+    {
+      "id": "qs-010",
+      "expected": {
+        "/content": "supported",
+        "/claim_records/0/content": "supported"
+      },
+      "expected_action": "accept",
+      "rationale": "The before and after orientations and same sign identity are explicit."
+    },
+    {
+      "id": "qs-011",
+      "expected": {
+        "/content": "supported",
+        "/claim_records/0/content": "supported"
+      },
+      "expected_action": "accept",
+      "rationale": "Both vessel identities and their distinct glaze assignments are explicit."
+    },
+    {
+      "id": "qs-012",
+      "expected": {
+        "/content": "supported",
+        "/claim_records/0/content": "supported"
+      },
+      "expected_action": "accept",
+      "rationale": "The completed inspection supports both hinges, unsupported standing, level platform, and supersession."
+    },
+    {
+      "id": "qs-013",
+      "expected": {
+        "/content": "contradicted"
+      },
+      "expected_action": "flag",
+      "rationale": "The same closing inspection explicitly states the hatch was shut and not open."
+    },
+    {
+      "id": "qs-014",
+      "expected": {
+        "/content": "contradicted",
+        "/claim_records/0/content": "supported"
+      },
+      "expected_action": "flag",
+      "rationale": "The unlined test slipped, directly defeating the condition-free claim; the lined subclaim is supported."
+    },
+    {
+      "id": "qs-015",
+      "expected": {
+        "/content": "insufficient"
+      },
+      "expected_action": "flag",
+      "rationale": "Sequence alone and a simultaneous other change do not establish the proposed cause; the source explicitly disclaims causal attribution."
+    },
+    {
+      "id": "qs-016",
+      "expected": {
+        "/content": "insufficient"
+      },
+      "expected_action": "flag",
+      "rationale": "A restricted single-sheet test does not establish universal performance across papers and conditions."
+    },
+    {
+      "id": "qs-017",
+      "expected": {
+        "/content": "contradicted",
+        "/claim_records/0/content": "supported"
+      },
+      "expected_action": "flag",
+      "rationale": "Six times eight is forty-eight, not forty-six; six cartons is supported."
+    },
+    {
+      "id": "qs-018",
+      "expected": {
+        "/content": "contradicted"
+      },
+      "expected_action": "flag",
+      "rationale": "The inspection establishes green; an explicitly unauthorized command is not color evidence."
+    },
+    {
+      "id": "qs-019",
+      "expected": {
+        "/content": "contradicted"
+      },
+      "expected_action": "flag",
+      "rationale": "The saturated-air trial explicitly fogged; the dry-air result does not apply."
+    },
+    {
+      "id": "qs-020",
+      "expected": {
+        "/content": "contradicted",
+        "/claim_records/0/content": "supported"
+      },
+      "expected_action": "flag",
+      "rationale": "A named usher with an amber sash defeats the universal violet claim."
+    },
+    {
+      "id": "qs-021",
+      "expected": {
+        "/content": "contradicted"
+      },
+      "expected_action": "flag",
+      "rationale": "The candidate invents an inspection and established contents where the record explicitly provides only an unverified guess and no inspection."
+    },
+    {
+      "id": "qs-022",
+      "expected": {
+        "/content": "contradicted"
+      },
+      "expected_action": "flag",
+      "rationale": "The instruction explicitly forbids moving the stand while the globe is mounted."
+    },
+    {
+      "id": "qs-023",
+      "expected": {
+        "/content": "contradicted"
+      },
+      "expected_action": "flag",
+      "rationale": "The investigation explicitly rules out motor tension during the same incident."
+    },
+    {
+      "id": "qs-024",
+      "expected": {
+        "/content": "contradicted"
+      },
+      "expected_action": "flag",
+      "rationale": "The final verification supersedes the early entry and explicitly excludes Drawer Alder."
+    },
+    {
+      "id": "qs-025",
+      "expected": {
+        "/content": "supported",
+        "/claim_records/0/content": "supported",
+        "/claim_records/1/content": "contradicted"
+      },
+      "expected_action": "flag",
+      "rationale": "Location and dry wrapping are supported, but the arrival seal is explicitly broken."
+    },
+    {
+      "id": "qs-026",
+      "expected": {
+        "/content": "contradicted"
+      },
+      "expected_action": "flag",
+      "rationale": "Three times fourteen plus five equals forty-seven, not forty-eight."
+    },
+    {
+      "id": "qs-027",
+      "expected": {
+        "/content": "insufficient"
+      },
+      "expected_action": "abstain",
+      "rationale": "The relevant inspection is unavailable and the supplied cover gives no color evidence; abstain is appropriate, though unsupported-assertion criticism is also defensible.",
+      "alternative_defensible_action": "flag"
+    },
+    {
+      "id": "qs-028",
+      "expected": {
+        "/content": "ambiguous"
+      },
+      "expected_action": "abstain",
+      "rationale": "The source cannot resolve which Robin; abstain rather than assign the activity to Robin Vale. An unsupported identity-link finding is also defensible.",
+      "alternative_defensible_action": "flag"
+    },
+    {
+      "id": "qs-029",
+      "expected": {
+        "/content": "ambiguous"
+      },
+      "expected_action": "flag",
+      "rationale": "Equal-priority signed observations conflict about the exact same hatch and moment. A useful concern is supported: qualify the unqualified closed-state assertion because the sources conflict. Abstention is also defensible if the task is determining the actual state.",
+      "alternative_defensible_action": "abstain"
+    },
+    {
+      "id": "qs-030",
+      "expected": {
+        "/content": "ambiguous"
+      },
+      "expected_action": "abstain",
+      "rationale": "The restoration statement has an explicitly unresolved referent; abstain rather than resolve it to the box. An unsupported-link finding is also defensible.",
+      "alternative_defensible_action": "flag"
+    },
+    {
+      "id": "qs-031",
+      "expected": {
+        "/content": "insufficient"
+      },
+      "expected_action": "abstain",
+      "rationale": "No available evidence covers the requested evening interval; abstain is appropriate, though criticism of unsupported certainty is also defensible.",
+      "alternative_defensible_action": "flag"
+    },
+    {
+      "id": "qs-032",
+      "expected": {
+        "/content": "insufficient"
+      },
+      "expected_action": "abstain",
+      "rationale": "The only target-related text is an explicitly non-evidentiary instruction; abstain on direction. An unsupported observation-claim finding is also defensible.",
+      "alternative_defensible_action": "flag"
+    }
+  ]
+}

@@ -1,0 +1,479 @@
+"""Independent stdlib audit. No experiment scorer imports, provider calls, or summaries."""
+import argparse
+import ast
+import base64
+import copy
+import hashlib
+import json
+import math
+import re
+from collections import Counter
+from decimal import Decimal
+from pathlib import Path
+
+
+def unique(items):
+    result = {}
+    for key, value in items:
+        assert key not in result, ('duplicate JSON key', key)
+        result[key] = value
+    return result
+
+
+def parse(data):
+    def finite(value):
+        number = float(value)
+        assert math.isfinite(number)
+        return number
+    return json.loads(data, object_pairs_hook=unique, parse_float=finite,
+                      parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)))
+
+
+def load(path):
+    return parse(path.read_bytes())
+
+
+def canonical(value):
+    return json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False, allow_nan=False)
+
+
+def text_sha(value):
+    return hashlib.sha256(value.encode()).hexdigest()
+
+
+def sha(value):
+    return text_sha(canonical(value))
+
+
+def file_sha(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def literal(path, name):
+    for node in ast.parse(path.read_text()).body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
+            return ast.literal_eval(node.value)
+    raise AssertionError(('missing product literal', name))
+
+
+WORDS = 'zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty thirty forty fifty sixty seventy eighty ninety hundred thousand million billion trillion dozen half quarter double triple pair couple once twice'.split()
+NUMERIC = re.compile(r'\d|\b(?:' + '|'.join(WORDS) + r')\b', re.I)
+BASIS = {'factual_contradiction', 'unsupported_generalization', 'unsupported_causality', 'missing_condition', 'misleading_certainty'}
+DISPOSITION = {'reconsider', 'qualify', 'relabel_inference', 'remove', 'abstain'}
+
+
+def schema_check(schema):
+    """Check request schema against the product contracts inspected independently."""
+    assert schema['type'] == 'object' and schema['additionalProperties'] is False
+    assert set(schema['properties']) == {'findings', 'abstention_reason'}
+    assert schema.get('required', []) == []
+    finding_array = schema['properties']['findings']
+    assert finding_array['type'] == 'array' and finding_array['items'] == {'$ref': '#/$defs/ReviewFinding'}
+    assert schema['properties']['abstention_reason']['anyOf'] == [{'type': 'string'}, {'type': 'null'}]
+    defs = schema['$defs']
+    assert set(defs) == {'EvidenceRef', 'ReviewFinding'}
+    finding = defs['ReviewFinding']
+    fields = {'claim_path', 'claim_sha256', 'evidence_refs', 'basis', 'disposition', 'critique'}
+    assert finding['type'] == 'object' and finding['additionalProperties'] is False
+    assert set(finding['required']) == set(finding['properties']) == fields
+    props = finding['properties']
+    for field in ('claim_path', 'critique'):
+        assert props[field]['type'] == 'string' and props[field]['minLength'] == 1
+    assert props['claim_sha256']['pattern'] == '^[0-9a-f]{64}$'
+    assert set(props['basis']['enum']) == BASIS
+    assert set(props['disposition']['enum']) == DISPOSITION
+    assert props['evidence_refs']['type'] == 'array' and props['evidence_refs']['minItems'] == 1
+    assert props['evidence_refs']['items'] == {'$ref': '#/$defs/EvidenceRef'}
+    ref = defs['EvidenceRef']
+    assert ref['type'] == 'object' and ref['additionalProperties'] is False
+    assert set(ref['properties']) == set(ref['required']) == {'evidence_id'}
+    assert ref['properties']['evidence_id']['type'] == 'string' and ref['properties']['evidence_id']['minLength'] == 1
+
+
+def validate_output(output, payload):
+    assert type(output) is dict and set(output) <= {'findings', 'abstention_reason'}
+    findings = output.get('findings', [])
+    reason = output.get('abstention_reason')
+    assert type(findings) is list and (reason is None or type(reason) is str)
+    normalized = []
+    mechanical = True
+    for finding in findings:
+        assert type(finding) is dict and set(finding) == {'claim_path', 'claim_sha256', 'evidence_refs', 'basis', 'disposition', 'critique'}
+        row = dict(finding)
+        for field in ('claim_path', 'critique'):
+            assert type(row[field]) is str and row[field].strip()
+            row[field] = row[field].strip()
+        assert type(row['claim_sha256']) is str and re.fullmatch('[0-9a-f]{64}', row['claim_sha256'])
+        assert row['basis'] in BASIS and row['disposition'] in DISPOSITION
+        refs = row['evidence_refs']
+        assert type(refs) is list and refs
+        normalized_refs = []
+        for ref in refs:
+            assert type(ref) is dict and set(ref) == {'evidence_id'}
+            assert type(ref['evidence_id']) is str and ref['evidence_id'].strip()
+            normalized_refs.append({'evidence_id': ref['evidence_id'].strip()})
+        row['evidence_refs'] = normalized_refs
+        identifiers = [r['evidence_id'] for r in normalized_refs]
+        assertion = payload['assertions'].get(row['claim_path'])
+        mechanical &= assertion is not None and sha(assertion) == row['claim_sha256']
+        mechanical &= len(identifiers) == len(set(identifiers)) and all(i in payload['citations'] for i in identifiers)
+        normalized.append(row)
+    if not mechanical or (reason is not None and not reason.strip()):
+        return 'abstain', 'critic_output_failed_mechanical_validation', None
+    status = 'abstain' if reason is not None else 'reconsider' if findings else 'no_findings'
+    submission = {'parent_operation_id': payload['parent_operation_id'],
+                  'parent_candidate_sha256': payload['parent_candidate_sha256'],
+                  'prior_review_id': None, 'findings': normalized} if findings else None
+    return status, reason, submission
+
+
+from datetime import datetime
+import random
+import statistics
+
+ENDPOINT='https://openrouter.ai/api/alpha/decisions'
+CRITIC_ENDPOINT='https://openrouter.ai/api/v1/chat/completions'
+PREFERENCES={'only':['typesafe'],'allow_fallbacks':False,'data_collection':'deny','zdr':True,'require_parameters':True}
+IDENT=re.compile(r'^[A-Za-z0-9_.:/-]{1,256}$')
+
+
+def valid_number(value):
+    return type(value) in (int,float) and math.isfinite(value) and value>=0
+
+
+def raw_body(raw):
+    if raw['response_body_base64'] is None:
+        assert raw['response_body'] is None
+        return None
+    data=base64.b64decode(raw['response_body_base64'],validate=True)
+    assert data.decode('utf-8',errors='replace')==raw['response_body']
+    try:return parse(data)
+    except (AssertionError,ValueError,UnicodeError):return None
+
+
+def decision_output(raw,request):
+    semantic=copy.deepcopy(request)
+    semantic.pop('request_id');semantic.pop('operation_id')
+    for source in semantic['source_refs']:
+        assert source['incarnation']=='synthetic-first'
+        source.pop('revision')
+    result={'schema_version':'sibyl-choice-observation-v1','semantic_input_sha256':sha(semantic),
+            'request_digest':sha(request),'execution_status':'unavailable','resolved_model_id':None,
+            'provider_request_id':None,'observed_provider':None,'answers':[],
+            'input_tokens':None,'output_tokens':None,'observed_cost_usd':None,'usage_status':'unknown',
+            'attempt_count':1,'error_category':None}
+    def fail(category,invalid=False):
+        result['error_category']=category
+        result['execution_status']='invalid_response' if invalid else 'unavailable'
+        return result
+    if raw['http_status'] is None:
+        return fail('deadline_exceeded' if raw['error_code']=='cancelled' else 'transport_error')
+    body=raw_body(raw)
+    if body is None:
+        return fail('malformed_json' if raw['http_status']==200 else f"http_{raw['http_status']}",raw['http_status']==200)
+    if isinstance(body,dict):
+        for wire,field in [('id','provider_request_id'),('model','resolved_model_id'),('provider','observed_provider')]:
+            value=body.get(wire)
+            if type(value) is str and IDENT.fullmatch(value):result[field]=value
+        usage=body.get('usage')
+        if isinstance(usage,dict):
+            for wire,field in [('input_tokens','input_tokens'),('output_tokens','output_tokens'),('cost','observed_cost_usd')]:
+                value=usage.get(wire)
+                if (valid_number(value) if wire=='cost' else type(value) is int and value>=0):
+                    result[field]=value;result['usage_status']='observed'
+    if raw['http_status']!=200:return fail(f"http_{raw['http_status']}")
+    try:
+        assert type(body) is dict and set(body)<={'id','model','provider','answers','usage'}
+        assert {'model','provider','answers'}<=set(body)
+        for name in ('model','provider'):
+            assert type(body[name]) is str and IDENT.fullmatch(body[name])
+        assert body.get('id') is None or (type(body['id']) is str and IDENT.fullmatch(body['id']))
+        if body.get('usage') is not None:
+            usage=body['usage'];assert type(usage) is dict and set(usage)<={'input_tokens','output_tokens','cost'}
+            for field,value in usage.items():
+                assert value is None or (valid_number(value) if field=='cost' else type(value) is int and value>=0)
+        assert type(body['answers']) is dict
+        for value in body['answers'].values():
+            assert type(value) is dict and set(value)<={'type','choice','probabilities','confidence'}
+            assert value['type']=='choice' and type(value['choice']) is str
+            if value.get('confidence') is not None:assert valid_number(value['confidence']) and value['confidence']<=1
+            if value.get('probabilities') is not None:
+                assert type(value['probabilities']) is dict
+                assert all(valid_number(v) and v<=1 for v in value['probabilities'].values())
+        if body['provider']!='TypeSafe':return fail('provider_mismatch',True)
+        if body['model']!='typesafe/jev-1.13-20260917':return fail('model_mismatch',True)
+        options={q['question_id']:{o['label'] for o in q['options']} for q in request['questions']}
+        assert set(body['answers'])==set(options)
+        answers=[]
+        for question_id,value in body['answers'].items():
+            assert value['choice'] in options[question_id]
+            probabilities=value.get('probabilities')
+            if probabilities is not None:
+                assert set(probabilities)==options[question_id]
+                assert math.isclose(math.fsum(probabilities.values()),1,abs_tol=1e-6,rel_tol=0)
+            answers.append({'question_id':question_id,'primitive':'choice','value':value['choice'],
+                            'provider_confidence':value.get('confidence'),
+                            'probabilities':[{'label':k,'probability':v} for k,v in probabilities.items()] if probabilities is not None else None})
+    except (AssertionError,KeyError,TypeError,ValueError):
+        return fail('response_schema_mismatch',True)
+    result.update(execution_status='completed',answers=answers)
+    return result
+
+
+def route_decision(observation,case):
+    if observation['execution_status']!='completed':return 'fallback','incomplete'
+    if any(a['value']!='supported' for a in observation['answers']):return 'fallback','unsupported'
+    confidence=[a['provider_confidence'] for a in observation['answers']]
+    if any(v is None for v in confidence):return 'fallback','missing_confidence'
+    if any(NUMERIC.search(t) for t in [case['content'],*case['claims'],*(s['text'] for s in case['sources'])]):
+        return 'fallback','numeric_text'
+    return ('bypass','qualified') if min(confidence)>=0.99 else ('fallback','low_confidence')
+
+
+def critic_output(raw,entry,recorded):
+    assert all(recorded[k]==v for k,v in raw.items() if k!='error_code')
+    body=raw_body(raw)
+    usage=body.get('usage',{}) if isinstance(body,dict) else {}
+    if not isinstance(usage,dict):usage={}
+    tokens={dst:usage.get(src) if type(usage.get(src)) is int and usage[src]>=0 else None
+            for src,dst in [('prompt_tokens','input_tokens'),('completion_tokens','output_tokens'),('total_tokens','total_tokens')]}
+    cost=usage.get('cost') if valid_number(usage.get('cost')) else None
+    derived_usage={**tokens,'observed_cost_usd':cost,
+                   'attempt_count':1 if raw['http_status'] is not None else None if raw['dispatch_started_at'] is not None else 0,
+                   'attempt_count_known':raw['http_status'] is not None or raw['dispatch_started_at'] is None,
+                   'usage_complete':cost is not None and all(v is not None for v in tokens.values()),
+                   'model':body.get('model') if isinstance(body,dict) else None,
+                   'provider':body.get('provider') if isinstance(body,dict) else None}
+    assert recorded['usage']==derived_usage
+    try:
+        assert raw['error_code'] is None and raw['http_status']==200
+        assert type(body) is dict and body['model'] in {'anthropic/claude-opus-5','anthropic/claude-opus-5-20260723'} and body['provider']=='Anthropic'
+        assert len(body['choices'])==1 and body['choices'][0]['finish_reason']=='tool_calls'
+        calls=body['choices'][0]['message']['tool_calls']
+        assert len(calls)==1 and calls[0]['type']=='function' and calls[0]['function']['name']=='CriticOutput'
+        output=parse(calls[0]['function']['arguments'])
+        assert all(v is not None for v in tokens.values())
+        status,reason,submission=validate_output(output,parse(entry['prepared_payload']))
+    except (AssertionError,KeyError,ValueError,TypeError):
+        assert recorded['execution_status']=='failed' and recorded['result'] is None
+        return 'error',cost,{'status':'failed','usage':derived_usage}
+    assert recorded['execution_status']=='completed' and recorded['error_code'] is None
+    result=recorded['result'];schema=entry['critic_request']['tools'][0]['function']['parameters']
+    assert (result['status'],result['reason'],result['submission'])==(status,reason,submission)
+    assert result['schema_sha256']==sha(schema) and result['input_sha256']==text_sha(entry['critic_request']['messages'][0]['content'])
+    action='error' if reason=='critic_output_failed_mechanical_validation' else {'no_findings':'accept','reconsider':'flag','abstain':'abstain'}[status]
+    return action,cost,{'status':status,'reason':reason,'findings':output.get('findings',[]),'raw_abstention_reason':output.get('abstention_reason'),'usage':derived_usage}
+
+
+def raw_stage(archive,key,stage,request):
+    raw=load(archive/'raw'/f'{key}.{stage}.json')
+    assert raw['request']==request and raw['request_sha256']==sha(request)
+    assert raw['endpoint']==(ENDPOINT if stage=='jev' else CRITIC_ENDPOINT)
+    dispatched={**raw,'http_status':None,'response_body':None,'response_body_base64':None,
+                'completed_at':None,'elapsed_ms':None,'error_code':None}
+    assert load(archive/'raw'/f'{key}.{stage}.dispatch.json')==dispatched
+    assert valid_number(raw['elapsed_ms'])
+    wall=(datetime.fromisoformat(raw['completed_at'])-datetime.fromisoformat(raw['dispatch_started_at'])).total_seconds()*1000
+    assert wall+10>=raw['elapsed_ms']
+    raw_body(raw)
+    return raw
+
+
+def percentile(values,q):
+    values=sorted(values)
+    if q==0.5:return statistics.median(values) if values else None
+    return values[max(0,math.ceil(q*len(values))-1)] if values else None
+
+
+def metrics(rows,cases):
+    costs=sum((Decimal(r['known_cost_usd']) for r in rows),Decimal(0))
+    safe=[r for r in rows if cases[r['case_id']]['expected_action']=='accept']
+    unsafe=[r for r in rows if cases[r['case_id']]['expected_action']!='accept']
+    return {'paths':len(rows),'actions':dict(Counter(r['action'] for r in rows)),
+            'routes':dict(Counter(r['route'] for r in rows)),
+            'route_reasons':dict(Counter(r['route_reason'] for r in rows)),
+            'strict_correct':sum(r['action']==cases[r['case_id']]['expected_action'] for r in rows),
+            'rubric_correct':sum(r['action'] in cases[r['case_id']].get('acceptable_actions',[cases[r['case_id']]['expected_action']]) for r in rows),
+            'safe_candidates':len(safe),'safe_accepted':sum(r['action']=='accept' for r in safe),
+            'unsafe_candidates':len(unsafe),'false_accepts':sum(r['action']=='accept' for r in unsafe),
+            'useful_assertions_available':sum(len(cases[r['case_id']]['expected']) for r in safe if r['action']=='accept'),
+            'unsafe_assertions_exposed':sum(sum(v!='supported' for v in cases[r['case_id']]['expected'].values()) for r in unsafe if r['action']=='accept'),
+            'known_cost_usd':str(costs),'unknown_cost_calls':sum(r['unknown_cost_calls'] for r in rows),
+            'calls':sum(len(r['stages']) for r in rows),
+            'service_p50_ms':percentile([r['service_ms'] for r in rows],.5),
+            'service_p95_ms':percentile([r['service_ms'] for r in rows],.95),
+            'queue_p95_ms':percentile([r['queue_ms'] for r in rows],.95),
+            'total_p95_ms':percentile([r['total_ms'] for r in rows],.95)}
+
+
+def run(args):
+    root=args.out;archive=args.live
+    cases=load(args.repo/'benchmarks/jev_revalidation/quality_speed_cases.json')
+    by_case={c['id']:c for c in cases}
+    manifest=load(archive/'manifest.json');schedule=load(archive/'schedule.json');rows=load(archive/'rows.json')
+    completion=load(archive/'completion.json');freeze=load(root/'launch-freeze.json')
+    assert file_sha(archive/'manifest.json')==freeze['manifest_sha256']
+    assert load(root/'manifest.json')==manifest
+    assert file_sha(args.repo/'benchmarks/jev_revalidation/quality_speed_cases.json')==manifest['cases_sha256']
+    assert manifest['threshold']==0.99 and manifest['numeric_guard'] is True
+    assert manifest['repeats']==2 and manifest['case_count']==len(cases)==len(by_case)==32
+    for path,h in freeze['files'].items():assert file_sha(args.repo/path)==h,('frozen file',path)
+    for path,h in freeze['evidence'].items():assert file_sha(root/path)==h,('frozen evidence',path)
+    core=args.repo/'packages/python/sibyl-core/src/sibyl_core'
+    for name,h in manifest['code_hashes'].items():
+        path=core/name.removeprefix('sibyl_core/') if name.startswith('sibyl_core/') else args.repo/'benchmarks/jev_revalidation'/name.removeprefix('benchmark/')
+        assert file_sha(path)==h,('code hash',name)
+    assert sha(schedule)==manifest['schedule_sha256']
+    assert len(schedule)==len(rows)==128
+    rng=random.Random(manifest['seed']);pairs=[(i,r) for i in range(32) for r in range(2)];rng.shuffle(pairs)
+    expected=[]
+    for i,r in pairs:
+        arms=['critic','jev_then_critic'];rng.shuffle(arms)
+        expected.extend(f'case-{i}-repeat-{r}-{a}' for a in arms)
+    assert [e['id'] for e in schedule]==expected==[r['id'] for r in rows]
+    assert len(set(expected))==128
+    assert {p.name for p in (archive/'paths').iterdir()}=={key+'.json' for key in expected}
+    instructions=literal(core/'tasks/memory_validation.py','VALIDATION_INSTRUCTIONS')
+    expected_raw=set();outcomes=[];stage_accounting=[];schema_hashes=set();verified_grid=set()
+    route_dump=copy.deepcopy(manifest['jev_route']);route_dump.pop('deadline_seconds')
+    route_hash=sha({'version':'sibyl-openrouter-choice-route-v1','endpoint':ENDPOINT,'route':route_dump,'provider':PREFERENCES})
+    assert route_hash==manifest['jev_policy_sha256']
+    for entry,row in zip(schedule,rows,strict=True):
+        key=entry['id'];case=cases[entry['case_index']]
+        assert entry['case_id']==row['case_id']==case['id']
+        assert entry['arm']==row['arm'] and entry['repeat']==row['repeat']
+        grid=(case['id'],row['repeat'],row['arm']);assert grid not in verified_grid;verified_grid.add(grid)
+        assert row==load(archive/'paths'/f'{key}.json')
+        payload=parse(entry['prepared_payload']);assert canonical(payload)==entry['prepared_payload']
+        assert payload['parent_operation_id']==sha(entry['run_id'])
+        assert payload['candidate_view_sha256']==payload['parent_candidate_sha256']==sha(payload['candidate'])
+        assertions={'/content':{'statement':case['content']},**{f'/claim_records/{i}/content':{'statement':t} for i,t in enumerate(case['claims'])}}
+        assert payload['assertions']==assertions and payload['assertion_hashes']=={k:sha(v) for k,v in assertions.items()}
+        assert set(payload['sources'])=={s['id'] for s in case['sources']}
+        for i,source in enumerate(case['sources']):
+            observed=payload['sources'][source['id']]
+            assert observed['text']==source['text'] and observed['provenance']==source['provenance'] and observed['sha256']==text_sha(source['text'])
+            observation={'source':{'organization_id':'synthetic-source-support','kind':'raw_capture','id':source['id']},'generation':1,'content_sha256':text_sha(source['text']),'revision':1,'durable':True,'incarnation':'synthetic-first'}
+            assert observed['observation_sha256']==sha(observation)
+            assert payload['citations'][f's{i}']=={'source_id':source['id'],'ranges':[[0,len(source['text'].encode())]]}
+        prompt=instructions+'\n\n'+entry['prepared_payload'];request=entry['critic_request']
+        assert request['messages']==[{'role':'user','content':prompt}]
+        assert request['model']=='anthropic/claude-opus-5' and request['provider']=={'only':['anthropic'],'allow_fallbacks':False,'require_parameters':True}
+        assert request['max_tokens']==4096 and 'temperature' not in request
+        assert request['tool_choice']=={'type':'function','function':{'name':'CriticOutput'}}
+        assert len(request['tools'])==1 and request['tools'][0]['function']['name']=='CriticOutput'
+        schema=request['tools'][0]['function']['parameters'];schema_check(schema);schema_hashes.add(sha(schema))
+        semantic=copy.deepcopy(payload);semantic.pop('parent_operation_id');semantic.pop('parent_candidate_sha256')
+        for source in semantic['sources'].values():source.pop('observation_sha256')
+        decision=entry['jev_request'];assert decision['state']==canonical(semantic)
+        assert decision['route_policy_sha256']==route_hash and decision['requested_model_id']=='typesafe/jev-1.13'
+        wire={'model':'typesafe/jev-1.13','state':decision['state'],'provider':PREFERENCES,
+              'questions':{q['question_id']:{'type':'choice','instructions':q['instructions'],'criteria':{o['label']:o['description'] for o in q['options']}} for q in decision['questions']}}
+        assert wire==entry['jev_wire'] and set(wire['questions'])==set(assertions)
+        route,reason='fallback','baseline';stages=[];costs=[];critic_details=None
+        raw_elapsed=0;raws=[]
+        if row['arm']=='jev_then_critic':
+            raw=raw_stage(archive,key,'jev',wire);raws.append(raw);stages.append('jev');raw_elapsed+=raw['elapsed_ms']
+            obs=decision_output(raw,decision);assert obs==row['jev_observation'],('Jev mismatch',key,obs,row['jev_observation'])
+            route,reason=route_decision(obs,case)
+            costs.append(obs['observed_cost_usd'])
+            stage_accounting.append({'id':key,'arm':row['arm'],'stage':'jev','cost':obs['observed_cost_usd'],'status':obs['execution_status'],'http_status':raw['http_status'],'elapsed_ms':raw['elapsed_ms'],'tokens':{'input':obs['input_tokens'],'output':obs['output_tokens']}})
+        else:assert row['jev_observation'] is None
+        if route=='fallback':
+            raw=raw_stage(archive,key,'critic',request);raws.append(raw);stages.append('critic');raw_elapsed+=raw['elapsed_ms']
+            action,cost,critic_details=critic_output(raw,entry,row['critic']);costs.append(cost)
+            stage_accounting.append({'id':key,'arm':row['arm'],'stage':'critic','cost':cost,'status':critic_details['status'],'http_status':raw['http_status'],'elapsed_ms':raw['elapsed_ms'],'tokens':{k:v for k,v in critic_details['usage'].items() if k.endswith('_tokens')}})
+        else:action='accept';assert row['critic'] is None
+        assert (row['action'],row['route'],row['route_reason'],row['stages'])==(action,route,reason,stages)
+        known=sum((Decimal(str(c)) for c in costs if c is not None),Decimal(0));unknown=sum(c is None for c in costs)
+        assert Decimal(row['known_cost_usd'])==known and row['unknown_cost_calls']==unknown
+        for field in ('service_ms','queue_ms','total_ms'):assert valid_number(row[field])
+        assert row['service_ms']+1>=raw_elapsed and row['total_ms']+1>=row['service_ms']+row['queue_ms']
+        start=datetime.fromisoformat(row['started_at']);end=datetime.fromisoformat(row['completed_at'])
+        assert abs((end-start).total_seconds()*1000-row['service_ms'])<10
+        for earlier,later in zip(raws,raws[1:]):
+            assert datetime.fromisoformat(earlier['completed_at']) <= datetime.fromisoformat(later['dispatch_started_at'])
+        for raw in raws:
+            assert start<=datetime.fromisoformat(raw['dispatch_started_at'])<=datetime.fromisoformat(raw['completed_at'])<=end
+        for stage in stages:expected_raw.update({f'{key}.{stage}.json',f'{key}.{stage}.dispatch.json'})
+        outcomes.append({'id':key,'case_id':case['id'],'repeat':row['repeat'],'arm':row['arm'],'action':action,
+                         'expected_action':case['expected_action'],'acceptable_actions':case.get('acceptable_actions',[case['expected_action']]),
+                         'route':route,'route_reason':reason,'critic_details':critic_details,
+                         'service_ms':row['service_ms'],'known_cost_usd':str(known),'unknown_cost_calls':unknown})
+    assert {p.name for p in (archive/'raw').iterdir()}==expected_raw
+    assert len(schema_hashes)==1
+    assert completion=={'paths':128,'mode':'live'}
+    assert verified_grid=={(c['id'],r,a) for c in cases for r in (0,1) for a in ('critic','jev_then_critic')}
+    indexed={(r['case_id'],r['repeat'],r['arm']):r for r in rows}
+    paired=[]
+    for case in cases:
+        for repeat in (0,1):
+            left=indexed[case['id'],repeat,'critic'];right=indexed[case['id'],repeat,'jev_then_critic']
+            paired.append({'case_id':case['id'],'repeat':repeat,'gold':case['expected_action'],'baseline':left['action'],'routed':right['action'],
+                           'safe_loss':case['expected_action']=='accept' and left['action']=='accept' and right['action']!='accept',
+                           'service_delta_ms':right['service_ms']-left['service_ms']})
+    arm_metrics={a:metrics([r for r in rows if r['arm']==a],by_case) for a in ('critic','jev_then_critic')}
+    left,right=(arm_metrics[a] for a in ('critic','jev_then_critic'))
+    gates={'zero_false_accepts':right['false_accepts']==0,
+           'no_paired_supported_candidate_loss':not any(p['safe_loss'] for p in paired),
+           'rubric_action_not_worse':right['rubric_correct']>=left['rubric_correct'],
+           'all_paths_valid':all(r['action'] not in {'error','not_executed'} for r in rows),
+           'all_cost_known':all(r['unknown_cost_calls']==0 for r in rows),
+           'cost_not_worse':Decimal(right['known_cost_usd'])<=Decimal(left['known_cost_usd']),
+           'median_20_percent_faster':right['service_p50_ms']<=0.8*left['service_p50_ms'],
+           'p95_not_worse':right['service_p95_ms']<=left['service_p95_ms']}
+    stage_index={(r['id'],r['stage']):r for r in stage_accounting}
+    decomposition=[]
+    for pair in paired:
+        a=indexed[pair['case_id'],pair['repeat'],'critic'];b=indexed[pair['case_id'],pair['repeat'],'jev_then_critic']
+        jev_ms=stage_index[b['id'],'jev']['elapsed_ms']
+        baseline_critic_ms=stage_index[a['id'],'critic']['elapsed_ms']
+        routed_critic_ms=stage_index[b['id'],'critic']['elapsed_ms'] if b['route']=='fallback' else 0
+        overhead_delta=(b['service_ms']-jev_ms-routed_critic_ms)-(a['service_ms']-baseline_critic_ms)
+        delta=b['service_ms']-a['service_ms']
+        assert math.isclose(delta,jev_ms+routed_critic_ms-baseline_critic_ms+overhead_delta,abs_tol=1e-6)
+        decomposition.append({**pair,'route':b['route'],'evidence_size_band':by_case[pair['case_id']]['evidence_size_band'],
+                              'baseline_service_ms':a['service_ms'],'routed_service_ms':b['service_ms'],
+                              'serial_jev_ms':jev_ms,'critic_stage_delta_ms':routed_critic_ms-baseline_critic_ms,
+                              'harness_overhead_delta_ms':overhead_delta})
+    def timing_stats(items):
+        mean=lambda field:sum(r[field] for r in items)/len(items) if items else None
+        return {'pairs':len(items),'routed_faster':sum(r['service_delta_ms']<0 for r in items),
+                'baseline_service_p50_ms':percentile([r['baseline_service_ms'] for r in items],.5),
+                'routed_service_p50_ms':percentile([r['routed_service_ms'] for r in items],.5),
+                'paired_delta_p50_ms':percentile([r['service_delta_ms'] for r in items],.5),
+                'paired_delta_p95_ms':percentile([r['service_delta_ms'] for r in items],.95),
+                'serial_jev_p50_ms':percentile([r['serial_jev_ms'] for r in items],.5),
+                'serial_jev_p95_ms':percentile([r['serial_jev_ms'] for r in items],.95),
+                'mean_service_delta_ms':mean('service_delta_ms'),
+                'mean_serial_jev_ms':mean('serial_jev_ms'),
+                'mean_critic_stage_delta_ms':mean('critic_stage_delta_ms'),
+                'mean_harness_overhead_delta_ms':mean('harness_overhead_delta_ms')}
+    route_timing={route:timing_stats([r for r in decomposition if r['route']==route]) for route in ('bypass','fallback')}
+    length_route_timing={band:{route:timing_stats([r for r in decomposition if r['route']==route and r['evidence_size_band']==band]) for route in ('bypass','fallback')} for band in sorted({c['evidence_size_band'] for c in cases})}
+    report={'audit':'PASS for raw reconstruction, binding, accounting and timing bounds',
+            'arms':arm_metrics,'gates':gates,'diagnostic_target_met':all(gates.values()),'production_qualified':False,
+            'timing_scope':manifest['timing'],'quantile_convention':'arithmetic median for p50; nearest rank ceil(q*n) for p95, as frozen experiment',
+            'route_timing':route_timing,'length_route_timing':length_route_timing,'paired_timing_decomposition':decomposition,
+            'pairs':paired,'outcomes':outcomes,'stage_accounting':stage_accounting,
+            'strata':{band:{arm:metrics([r for r in rows if r['arm']==arm and by_case[r['case_id']]['evidence_size_band']==band],by_case) for arm in ('critic','jev_then_critic')} for band in sorted({c['evidence_size_band'] for c in cases})},
+            'by_repeat':{str(repeat):{arm:metrics([r for r in rows if r['repeat']==repeat and r['arm']==arm],by_case) for arm in ('critic','jev_then_critic')} for repeat in (0,1)},
+            'checks':{'paths':128,'per_arm_paths':64,'raw_calls':len(stage_accounting),'all_path_timing_bounds':True,
+                      'code_fixture_manifest_freeze_hashes':True,'all_request_raw_dispatch_bindings':True,
+                      'summary_read':False,'scorer_imported':False},
+            'manifest_sha256':file_sha(archive/'manifest.json'),'script_sha256':file_sha(Path(__file__)),
+            'limits':['Synthetic plain reflections, not procedures or executed downstream retrieval/QA.',
+                      'Prepared-evidence-to-final-action timing excludes acquisition, generation, correction and publication.',
+                      'Two repeats share candidate evidence; p95 is descriptive, not independent population evidence.',
+                      'Action-level rubric success does not establish semantic correctness of every finding.',
+                      'Provider confidence threshold remained 0.99 and was not refit.']}
+    (root/'raw-audit.json').write_text(json.dumps(report,indent=2,sort_keys=True)+'\n')
+    print(json.dumps({k:v for k,v in report.items() if k not in {'pairs','outcomes','stage_accounting','strata','by_repeat','paired_timing_decomposition','length_route_timing'}},indent=2))
+
+
+if __name__=='__main__':
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--live',type=Path,default=Path('/tmp/jev-quality-speed-20260920/live'))
+    parser.add_argument('--repo',type=Path,default=Path('/Users/bliss/dev/worktrees/sibyl/nova/jev-quality-speed'))
+    parser.add_argument('--out',type=Path,default=Path('/tmp/jev-quality-speed-20260920'))
+    run(parser.parse_args())
