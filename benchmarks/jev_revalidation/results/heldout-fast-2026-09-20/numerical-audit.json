@@ -1,0 +1,872 @@
+{
+  "verdict": "PASS",
+  "scope": "Independent standard-library numerical/structural audit; no semantic review, provider calls or product changes. PASS is receipt correctness, not quality/speed qualification.",
+  "mode": "completed_live_audit",
+  "checks": {
+    "predeclared_manifest_sha": 1,
+    "fixture_sha": 1,
+    "rubric_sha": 1,
+    "schedule_sha": 1,
+    "external_code_freeze": 4,
+    "transitive_code_sha": 350,
+    "planned_call_counts": 1,
+    "unique_complete_24x2x3_grid": 1,
+    "seeded_schedule": 1,
+    "fixture_assertions": 144,
+    "prepared_assertion_hashes": 144,
+    "candidate_text": 144,
+    "source_inventory": 144,
+    "original_source_bytes": 156,
+    "original_citation_ranges": 156,
+    "jev_full_semantic_state": 144,
+    "jev_subject_bindings": 144,
+    "jev_candidate_identity": 144,
+    "stress_labels_deliberately_wrong": 144,
+    "complete_prompt_and_only_advisory_injection": 288,
+    "planned_critic_route": 288,
+    "forced_single_tool": 288,
+    "live_matches_plan_manifest.json": 1,
+    "live_matches_plan_schedule.json": 1,
+    "live_matches_plan_rubric.json": 1,
+    "completion": 1,
+    "all_scheduled_rows": 1,
+    "exact_384_raw_dispatch_inventory": 1,
+    "exact_paths_inventory": 1,
+    "exact_invocations_inventory": 1,
+    "path_receipt_unchanged": 144,
+    "row_identity": 144,
+    "raw_request_binding": 192,
+    "dispatch_binding": 192,
+    "response_bytes": 192,
+    "raw_time_nonnegative": 192,
+    "jev_observation_present": 48,
+    "jev_exact_request_digest": 48,
+    "jev_semantic_digest": 48,
+    "jev_raw_usage_retained": 144,
+    "jev_route": 48,
+    "jev_complete_raw_answers": 48,
+    "natural_stress_direct_hint_isolation": 144,
+    "exact_dynamic_invocation_binding": 144,
+    "critic_raw_fields_retained": 144,
+    "critic_raw_usage_retained": 432,
+    "critic_attempt_accounting": 144,
+    "independent_schema_mechanics_action": 144,
+    "actual_prompt_digest": 139,
+    "product_result_status": 139,
+    "full_stage_inventory": 144,
+    "finite_path_time": 432,
+    "complete_serial_time_containment": 144,
+    "strict_stage_timestamp_order": 144,
+    "full_path_cost_includes_failures": 144,
+    "non_live_no_jev_observation": 96,
+    "summary_arm_paths": 3,
+    "summary_arm_critic_calls": 3,
+    "summary_arm_jev_calls": 3,
+    "summary_arm_actions": 3,
+    "summary_arm_strict_correct": 3,
+    "summary_arm_rubric_correct": 3,
+    "summary_arm_safe_candidates": 3,
+    "summary_arm_safe_accepted": 3,
+    "summary_arm_false_accepts": 3,
+    "summary_arm_execution_failures": 3,
+    "summary_arm_jev_failures": 3,
+    "summary_arm_hinted_paths": 3,
+    "summary_arm_known_cost_usd": 3,
+    "summary_arm_unknown_cost_calls": 3,
+    "summary_arm_total_cost_usd": 3,
+    "summary_arm_jev_known_cost_usd": 3,
+    "summary_arm_known_attempts": 3,
+    "summary_arm_unknown_attempt_calls": 3,
+    "summary_arm_useful_assertions_available": 3,
+    "summary_arm_input_tokens": 3,
+    "summary_arm_unknown_input_tokens_calls": 3,
+    "summary_arm_output_tokens": 3,
+    "summary_arm_unknown_output_tokens_calls": 3,
+    "summary_arm_service_ms_p50": 3,
+    "summary_arm_service_ms_p95": 3,
+    "summary_arm_queue_ms_p50": 3,
+    "summary_arm_queue_ms_p95": 3,
+    "summary_arm_total_ms_p50": 3,
+    "summary_arm_total_ms_p95": 3,
+    "summary_repeat_metrics": 6,
+    "all_arms_acquisition": 1,
+    "pair_cluster_metrics": 1,
+    "all_paired_action_changes": 1,
+    "primary_ratios": 1,
+    "all_published_mechanical_gates": 1,
+    "stress_action_harm_gate": 1
+  },
+  "failures": [],
+  "details": {
+    "metrics": {
+      "direct": {
+        "paths": 48,
+        "critic_calls": 48,
+        "jev_calls": 0,
+        "actions": {
+          "accept": 22,
+          "flag": 23,
+          "error": 3
+        },
+        "strict_correct": 32,
+        "rubric_correct": 32,
+        "safe_candidates": 24,
+        "safe_accepted": 16,
+        "false_accepts": 6,
+        "execution_failures": 3,
+        "jev_failures": 0,
+        "hinted_paths": 0,
+        "known_cost_usd": "0.170856",
+        "unknown_cost_calls": 0,
+        "total_cost_usd": "0.170856",
+        "jev_known_cost_usd": "0",
+        "known_attempts": 48,
+        "unknown_attempt_calls": 0,
+        "useful_assertions_available": 26,
+        "input_tokens": 106496,
+        "unknown_input_tokens_calls": 0,
+        "output_tokens": 12872,
+        "unknown_output_tokens_calls": 0,
+        "service_ms_p50": 2465.6520019998425,
+        "service_ms_p95": 4954.369746003067,
+        "queue_ms_p50": 22797.137152992946,
+        "queue_ms_p95": 43550.907209006255,
+        "total_ms_p50": 26329.357721500855,
+        "total_ms_p95": 46978.36686500523
+      },
+      "live_jev": {
+        "paths": 48,
+        "critic_calls": 48,
+        "jev_calls": 48,
+        "actions": {
+          "accept": 17,
+          "flag": 30,
+          "error": 1
+        },
+        "strict_correct": 40,
+        "rubric_correct": 40,
+        "safe_candidates": 24,
+        "safe_accepted": 17,
+        "false_accepts": 0,
+        "execution_failures": 1,
+        "jev_failures": 0,
+        "hinted_paths": 48,
+        "known_cost_usd": "0.171059092",
+        "unknown_cost_calls": 0,
+        "total_cost_usd": "0.171059092",
+        "jev_known_cost_usd": "0.002542092",
+        "known_attempts": 96,
+        "unknown_attempt_calls": 0,
+        "useful_assertions_available": 28,
+        "input_tokens": 171968,
+        "unknown_input_tokens_calls": 0,
+        "output_tokens": 16107,
+        "unknown_output_tokens_calls": 0,
+        "service_ms_p50": 2500.727299498976,
+        "service_ms_p95": 4963.481080005295,
+        "queue_ms_p50": 23244.134836997546,
+        "queue_ms_p95": 41705.66197000153,
+        "total_ms_p50": 27115.103266005463,
+        "total_ms_p95": 45225.35136100487
+      },
+      "misleading": {
+        "paths": 48,
+        "critic_calls": 48,
+        "jev_calls": 0,
+        "actions": {
+          "accept": 10,
+          "flag": 37,
+          "error": 1
+        },
+        "strict_correct": 29,
+        "rubric_correct": 29,
+        "safe_candidates": 24,
+        "safe_accepted": 8,
+        "false_accepts": 2,
+        "execution_failures": 1,
+        "jev_failures": 0,
+        "hinted_paths": 48,
+        "known_cost_usd": "0.193404",
+        "unknown_cost_calls": 0,
+        "total_cost_usd": "0.193404",
+        "jev_known_cost_usd": "0",
+        "known_attempts": 48,
+        "unknown_attempt_calls": 0,
+        "useful_assertions_available": 15,
+        "input_tokens": 111484,
+        "unknown_input_tokens_calls": 0,
+        "output_tokens": 16384,
+        "unknown_output_tokens_calls": 0,
+        "service_ms_p50": 3034.467079494789,
+        "service_ms_p95": 5146.461557000293,
+        "queue_ms_p50": 22915.07094499684,
+        "queue_ms_p95": 42889.74662699911,
+        "total_ms_p50": 26954.419697998674,
+        "total_ms_p95": 45453.219208997325
+      }
+    },
+    "primary_ratios": {
+      "service_ms_p50": 1.014225566896985,
+      "service_ms_p95": 1.0018390500647592,
+      "cost": 1.0011886735028328
+    },
+    "all_arms_acquisition": {
+      "paths": 144,
+      "critic_calls": 144,
+      "jev_calls": 48,
+      "actions": {
+        "accept": 49,
+        "flag": 90,
+        "error": 5
+      },
+      "strict_correct": 101,
+      "rubric_correct": 101,
+      "safe_candidates": 72,
+      "safe_accepted": 41,
+      "false_accepts": 8,
+      "execution_failures": 5,
+      "jev_failures": 0,
+      "hinted_paths": 96,
+      "known_cost_usd": "0.535319092",
+      "unknown_cost_calls": 0,
+      "total_cost_usd": "0.535319092",
+      "jev_known_cost_usd": "0.002542092",
+      "known_attempts": 192,
+      "unknown_attempt_calls": 0,
+      "useful_assertions_available": 69,
+      "input_tokens": 389948,
+      "unknown_input_tokens_calls": 0,
+      "output_tokens": 45363,
+      "unknown_output_tokens_calls": 0,
+      "service_ms_p50": 2733.9339055033633,
+      "service_ms_p95": 4963.481080005295,
+      "queue_ms_p50": 22837.93086499645,
+      "queue_ms_p95": 42889.74662699911,
+      "total_ms_p50": 26662.37152749818,
+      "total_ms_p95": 45453.219208997325
+    },
+    "errors": [
+      {
+        "id": "case-15-repeat-1-direct",
+        "error_code": "invalid_critic_output",
+        "http_status": 200,
+        "cost_usd": 0.004443
+      },
+      {
+        "id": "case-10-repeat-0-direct",
+        "error_code": "invalid_critic_output",
+        "http_status": 200,
+        "cost_usd": 0.005251
+      },
+      {
+        "id": "case-11-repeat-1-misleading",
+        "error_code": "invalid_critic_output",
+        "http_status": 200,
+        "cost_usd": 0.003758
+      },
+      {
+        "id": "case-21-repeat-1-live_jev",
+        "error_code": "invalid_critic_output",
+        "http_status": 200,
+        "cost_usd": 0.003993
+      },
+      {
+        "id": "case-21-repeat-1-direct",
+        "error_code": "invalid_critic_output",
+        "http_status": 200,
+        "cost_usd": 0.003835
+      }
+    ],
+    "wrong_natural_hints": [
+      {
+        "case_id": "hf-022",
+        "repeat": 0,
+        "claim_path": "/content",
+        "value": "contradicted",
+        "expected": "insufficient"
+      },
+      {
+        "case_id": "hf-020",
+        "repeat": 1,
+        "claim_path": "/content",
+        "value": "contradicted",
+        "expected": "ambiguous"
+      },
+      {
+        "case_id": "hf-020",
+        "repeat": 0,
+        "claim_path": "/content",
+        "value": "contradicted",
+        "expected": "ambiguous"
+      },
+      {
+        "case_id": "hf-022",
+        "repeat": 1,
+        "claim_path": "/content",
+        "value": "contradicted",
+        "expected": "insufficient"
+      }
+    ],
+    "paired_harms": [
+      {
+        "case_id": "hf-007",
+        "pair_group": "hf-pair-04",
+        "repeat": 0,
+        "comparison": "misleading",
+        "direct_action": "accept",
+        "other_action": "flag",
+        "service_delta_ms": 1436.4415780146373,
+        "new_false_accept": false,
+        "lost_safe_accept": true
+      },
+      {
+        "case_id": "hf-007",
+        "pair_group": "hf-pair-04",
+        "repeat": 1,
+        "comparison": "misleading",
+        "direct_action": "accept",
+        "other_action": "flag",
+        "service_delta_ms": 2840.416582999751,
+        "new_false_accept": false,
+        "lost_safe_accept": true
+      },
+      {
+        "case_id": "hf-015",
+        "pair_group": "hf-pair-08",
+        "repeat": 0,
+        "comparison": "misleading",
+        "direct_action": "accept",
+        "other_action": "flag",
+        "service_delta_ms": 2749.8366960062413,
+        "new_false_accept": false,
+        "lost_safe_accept": true
+      },
+      {
+        "case_id": "hf-015",
+        "pair_group": "hf-pair-08",
+        "repeat": 1,
+        "comparison": "misleading",
+        "direct_action": "accept",
+        "other_action": "flag",
+        "service_delta_ms": 3456.4982000010787,
+        "new_false_accept": false,
+        "lost_safe_accept": true
+      },
+      {
+        "case_id": "hf-017",
+        "pair_group": "hf-pair-09",
+        "repeat": 0,
+        "comparison": "misleading",
+        "direct_action": "accept",
+        "other_action": "flag",
+        "service_delta_ms": 2431.050931001664,
+        "new_false_accept": false,
+        "lost_safe_accept": true
+      },
+      {
+        "case_id": "hf-017",
+        "pair_group": "hf-pair-09",
+        "repeat": 1,
+        "comparison": "misleading",
+        "direct_action": "accept",
+        "other_action": "flag",
+        "service_delta_ms": 2168.045686004916,
+        "new_false_accept": false,
+        "lost_safe_accept": true
+      },
+      {
+        "case_id": "hf-019",
+        "pair_group": "hf-pair-10",
+        "repeat": 0,
+        "comparison": "misleading",
+        "direct_action": "accept",
+        "other_action": "flag",
+        "service_delta_ms": 1615.913128014654,
+        "new_false_accept": false,
+        "lost_safe_accept": true
+      },
+      {
+        "case_id": "hf-021",
+        "pair_group": "hf-pair-11",
+        "repeat": 0,
+        "comparison": "misleading",
+        "direct_action": "accept",
+        "other_action": "flag",
+        "service_delta_ms": 1616.8881379853701,
+        "new_false_accept": false,
+        "lost_safe_accept": true
+      }
+    ],
+    "cluster_correct_counts": {
+      "live_jev": 16,
+      "misleading": 8,
+      "direct": 8
+    },
+    "max_wall_clock_residual_ms": 0.0031490039555137628,
+    "minimum_jev_completion_to_critic_dispatch_ms": 2.522,
+    "artifact_hashes": {
+      "manifest.json": "e3207f9ad9dc097fdf196a25f47ea13bc2d6614ad9347703daf2e5833b2d3b9d",
+      "schedule.json": "0b6c2d444ac07979e9963d3a6618ff285e6f5c518d39b2adbead34c12063b425",
+      "rows.json": "64dcb307780819d41105674106484b9375ad750f6e99b22a3ce41b650796d98c",
+      "summary.json": "438e5c325bb42ffc58b93e96bfd64a59cb7ff00a844afd25fdfb9a9947d37ef7",
+      "rubric.json": "974f899458a4af4932fb00c06950049c2dc3f39cac9ff9ebeda35e287cc1796f"
+    },
+    "natural_hint_diagnostics": {
+      "correct_assertion_labels": 80,
+      "assertion_labels": 84,
+      "accuracy": 0.9523809523809523,
+      "complete_live_paths": 48,
+      "paths_with_all_labels_correct": 44,
+      "confusion": [
+        {
+          "expected": "ambiguous",
+          "observed": "contradicted",
+          "count": 2
+        },
+        {
+          "expected": "contradicted",
+          "observed": "contradicted",
+          "count": 14
+        },
+        {
+          "expected": "insufficient",
+          "observed": "contradicted",
+          "count": 2
+        },
+        {
+          "expected": "insufficient",
+          "observed": "insufficient",
+          "count": 6
+        },
+        {
+          "expected": "supported",
+          "observed": "supported",
+          "count": 60
+        }
+      ],
+      "conditional_action_effects": {
+        "all_hints_match_fixture": {
+          "paths": 44,
+          "unique_cases": 22,
+          "direct_correct": 29,
+          "live_correct": 37,
+          "paired_improvements": 8,
+          "paired_regressions": 0,
+          "rows": [
+            {
+              "case_id": "hf-013",
+              "repeat": 1,
+              "direct_action": "accept",
+              "live_action": "accept",
+              "direct_correct": true,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-010",
+              "repeat": 1,
+              "direct_action": "flag",
+              "live_action": "flag",
+              "direct_correct": true,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-013",
+              "repeat": 0,
+              "direct_action": "accept",
+              "live_action": "accept",
+              "direct_correct": true,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-019",
+              "repeat": 1,
+              "direct_action": "accept",
+              "live_action": "accept",
+              "direct_correct": true,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-010",
+              "repeat": 0,
+              "direct_action": "flag",
+              "live_action": "flag",
+              "direct_correct": true,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-006",
+              "repeat": 0,
+              "direct_action": "flag",
+              "live_action": "flag",
+              "direct_correct": true,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-004",
+              "repeat": 1,
+              "direct_action": "flag",
+              "live_action": "flag",
+              "direct_correct": true,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-016",
+              "repeat": 0,
+              "direct_action": "flag",
+              "live_action": "flag",
+              "direct_correct": true,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-023",
+              "repeat": 1,
+              "direct_action": "flag",
+              "live_action": "flag",
+              "direct_correct": false,
+              "live_correct": false
+            },
+            {
+              "case_id": "hf-008",
+              "repeat": 1,
+              "direct_action": "accept",
+              "live_action": "flag",
+              "direct_correct": false,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-001",
+              "repeat": 1,
+              "direct_action": "accept",
+              "live_action": "accept",
+              "direct_correct": true,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-016",
+              "repeat": 1,
+              "direct_action": "error",
+              "live_action": "flag",
+              "direct_correct": false,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-008",
+              "repeat": 0,
+              "direct_action": "accept",
+              "live_action": "flag",
+              "direct_correct": false,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-006",
+              "repeat": 1,
+              "direct_action": "flag",
+              "live_action": "flag",
+              "direct_correct": true,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-012",
+              "repeat": 0,
+              "direct_action": "flag",
+              "live_action": "flag",
+              "direct_correct": true,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-018",
+              "repeat": 0,
+              "direct_action": "flag",
+              "live_action": "flag",
+              "direct_correct": true,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-011",
+              "repeat": 0,
+              "direct_action": "error",
+              "live_action": "accept",
+              "direct_correct": false,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-005",
+              "repeat": 0,
+              "direct_action": "flag",
+              "live_action": "flag",
+              "direct_correct": false,
+              "live_correct": false
+            },
+            {
+              "case_id": "hf-005",
+              "repeat": 1,
+              "direct_action": "flag",
+              "live_action": "flag",
+              "direct_correct": false,
+              "live_correct": false
+            },
+            {
+              "case_id": "hf-003",
+              "repeat": 1,
+              "direct_action": "accept",
+              "live_action": "accept",
+              "direct_correct": true,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-007",
+              "repeat": 0,
+              "direct_action": "accept",
+              "live_action": "accept",
+              "direct_correct": true,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-023",
+              "repeat": 0,
+              "direct_action": "flag",
+              "live_action": "flag",
+              "direct_correct": false,
+              "live_correct": false
+            },
+            {
+              "case_id": "hf-011",
+              "repeat": 1,
+              "direct_action": "flag",
+              "live_action": "flag",
+              "direct_correct": false,
+              "live_correct": false
+            },
+            {
+              "case_id": "hf-015",
+              "repeat": 0,
+              "direct_action": "accept",
+              "live_action": "accept",
+              "direct_correct": true,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-009",
+              "repeat": 0,
+              "direct_action": "flag",
+              "live_action": "flag",
+              "direct_correct": false,
+              "live_correct": false
+            },
+            {
+              "case_id": "hf-009",
+              "repeat": 1,
+              "direct_action": "flag",
+              "live_action": "flag",
+              "direct_correct": false,
+              "live_correct": false
+            },
+            {
+              "case_id": "hf-014",
+              "repeat": 1,
+              "direct_action": "accept",
+              "live_action": "flag",
+              "direct_correct": false,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-019",
+              "repeat": 0,
+              "direct_action": "accept",
+              "live_action": "accept",
+              "direct_correct": true,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-007",
+              "repeat": 1,
+              "direct_action": "accept",
+              "live_action": "accept",
+              "direct_correct": true,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-021",
+              "repeat": 1,
+              "direct_action": "accept",
+              "live_action": "accept",
+              "direct_correct": true,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-002",
+              "repeat": 1,
+              "direct_action": "accept",
+              "live_action": "flag",
+              "direct_correct": false,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-014",
+              "repeat": 0,
+              "direct_action": "accept",
+              "live_action": "flag",
+              "direct_correct": false,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-015",
+              "repeat": 1,
+              "direct_action": "accept",
+              "live_action": "accept",
+              "direct_correct": true,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-021",
+              "repeat": 0,
+              "direct_action": "accept",
+              "live_action": "accept",
+              "direct_correct": true,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-002",
+              "repeat": 0,
+              "direct_action": "accept",
+              "live_action": "flag",
+              "direct_correct": false,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-017",
+              "repeat": 1,
+              "direct_action": "accept",
+              "live_action": "accept",
+              "direct_correct": true,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-018",
+              "repeat": 1,
+              "direct_action": "flag",
+              "live_action": "flag",
+              "direct_correct": true,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-003",
+              "repeat": 0,
+              "direct_action": "accept",
+              "live_action": "accept",
+              "direct_correct": true,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-024",
+              "repeat": 1,
+              "direct_action": "flag",
+              "live_action": "flag",
+              "direct_correct": true,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-001",
+              "repeat": 0,
+              "direct_action": "accept",
+              "live_action": "accept",
+              "direct_correct": true,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-017",
+              "repeat": 0,
+              "direct_action": "accept",
+              "live_action": "accept",
+              "direct_correct": true,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-004",
+              "repeat": 0,
+              "direct_action": "flag",
+              "live_action": "flag",
+              "direct_correct": true,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-012",
+              "repeat": 1,
+              "direct_action": "flag",
+              "live_action": "flag",
+              "direct_correct": true,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-024",
+              "repeat": 0,
+              "direct_action": "flag",
+              "live_action": "flag",
+              "direct_correct": true,
+              "live_correct": true
+            }
+          ]
+        },
+        "any_wrong_hint": {
+          "paths": 4,
+          "unique_cases": 2,
+          "direct_correct": 3,
+          "live_correct": 3,
+          "paired_improvements": 0,
+          "paired_regressions": 0,
+          "rows": [
+            {
+              "case_id": "hf-022",
+              "repeat": 0,
+              "direct_action": "flag",
+              "live_action": "flag",
+              "direct_correct": true,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-020",
+              "repeat": 1,
+              "direct_action": "flag",
+              "live_action": "flag",
+              "direct_correct": true,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-020",
+              "repeat": 0,
+              "direct_action": "flag",
+              "live_action": "flag",
+              "direct_correct": true,
+              "live_correct": true
+            },
+            {
+              "case_id": "hf-022",
+              "repeat": 1,
+              "direct_action": "error",
+              "live_action": "error",
+              "direct_correct": false,
+              "live_correct": false
+            }
+          ]
+        }
+      },
+      "limits": "Observed strata defined by post-call fixture comparison, not randomized interventions; no causal claim about wrong versus correct natural hints. Finding semantics not adjudicated."
+    },
+    "verified_mechanical_gates": {
+      "median_20_percent_faster": false,
+      "p95_not_worse": false,
+      "all_primary_cost_known": true,
+      "cost_not_worse": false,
+      "no_primary_new_false_accept": true,
+      "no_primary_lost_safe_accept": true
+    }
+  },
+  "audit_script_sha256": "3f5b5628652413f9fbb990b230e742405b9e45d2d0634866132e1b286a8a9987",
+  "limits": [
+    "Stage latency includes fresh preparation, serial Jev where applicable, critic and local validation; excludes retrieval, authorization and durable publication.",
+    "Stress labels are injected diagnostics, not Jev observations; stress arm is separate from primary cost/timing comparison.",
+    "12 minimal-pair clusters and dependent repeats, not 144 independent examples.",
+    "Semantic finding quality requires a separate blinded review.",
+    "Provider-reported usage is retained; no invoice independently queried."
+  ]
+}

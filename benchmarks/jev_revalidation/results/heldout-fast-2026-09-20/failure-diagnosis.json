@@ -1,0 +1,182 @@
+{
+  "classification": "provider_output_schema_violations",
+  "critic_cost_usd": "0.021280",
+  "failures": [
+    {
+      "arm": "direct",
+      "case_id": "hf-016",
+      "error": {
+        "ctx": {
+          "expected": "'factual_contradiction', 'unsupported_generalization', 'unsupported_causality', 'missing_condition' or 'misleading_certainty'"
+        },
+        "loc": [
+          "findings",
+          1,
+          "basis"
+        ],
+        "msg": "Input should be 'factual_contradiction', 'unsupported_generalization', 'unsupported_causality', 'missing_condition' or 'misleading_certainty'",
+        "type": "literal_error"
+      },
+      "id": "case-15-repeat-1-direct",
+      "invalid_value": "unsupported_certainty",
+      "jev_cost_usd": null,
+      "path_known_cost_usd": "0.004443",
+      "raw_path": "/home/dev/dev/eval-runs/jev-heldout-fast-20260920/live/raw/case-15-repeat-1-direct.critic.json",
+      "raw_sha256": "cfc1b6de9cbce94217458405bb64e99c7531ae5cc3ae7493192af03087bda437",
+      "request_binding_valid": true,
+      "request_sha256": "81c1902eb0c0fb8a90cd66fbacda0b9587d75b02cbfbb192849f218a6da3fcf9",
+      "schema_matches_product": true,
+      "usage": {
+        "attempt_count": 1,
+        "attempt_count_known": true,
+        "input_tokens": 2233,
+        "model": "anthropic/claude-haiku-4.5",
+        "observed_cost_usd": 0.004443,
+        "output_tokens": 442,
+        "provider": "Anthropic",
+        "total_tokens": 2675,
+        "usage_complete": true
+      }
+    },
+    {
+      "arm": "direct",
+      "case_id": "hf-011",
+      "error": {
+        "ctx": {
+          "expected": "'factual_contradiction', 'unsupported_generalization', 'unsupported_causality', 'missing_condition' or 'misleading_certainty'"
+        },
+        "loc": [
+          "findings",
+          1,
+          "basis"
+        ],
+        "msg": "Input should be 'factual_contradiction', 'unsupported_generalization', 'unsupported_causality', 'missing_condition' or 'misleading_certainty'",
+        "type": "literal_error"
+      },
+      "id": "case-10-repeat-0-direct",
+      "invalid_value": "unsupported_certainty",
+      "jev_cost_usd": null,
+      "path_known_cost_usd": "0.005251",
+      "raw_path": "/home/dev/dev/eval-runs/jev-heldout-fast-20260920/live/raw/case-10-repeat-0-direct.critic.json",
+      "raw_sha256": "d3ba6dda8292b1d9de0f5a2b0b2bdb914dd94eed62d55e477f610e00596b9653",
+      "request_binding_valid": true,
+      "request_sha256": "aa86d1709c3cabec7aa2aa98891e42ed45ae5a557abc5ad00834463803bec3ab",
+      "schema_matches_product": true,
+      "usage": {
+        "attempt_count": 1,
+        "attempt_count_known": true,
+        "input_tokens": 2276,
+        "model": "anthropic/claude-haiku-4.5",
+        "observed_cost_usd": 0.005251,
+        "output_tokens": 595,
+        "provider": "Anthropic",
+        "total_tokens": 2871,
+        "usage_complete": true
+      }
+    },
+    {
+      "arm": "misleading",
+      "case_id": "hf-012",
+      "error": {
+        "loc": [
+          "findings"
+        ],
+        "msg": "Input should be a valid list",
+        "type": "list_type"
+      },
+      "id": "case-11-repeat-1-misleading",
+      "invalid_value": "findings is a string, not an array",
+      "jev_cost_usd": null,
+      "path_known_cost_usd": "0.003758",
+      "raw_path": "/home/dev/dev/eval-runs/jev-heldout-fast-20260920/live/raw/case-11-repeat-1-misleading.critic.json",
+      "raw_sha256": "0e25e1c6a25ddf681a66cd8fae055da454cc680037e2f58777b6c3a9671c06d7",
+      "request_binding_valid": true,
+      "request_sha256": "6a99272d72381f3136320219daf8201e250b05f136ed9504565c2a951330598e",
+      "schema_matches_product": true,
+      "usage": {
+        "attempt_count": 1,
+        "attempt_count_known": true,
+        "input_tokens": 2388,
+        "model": "anthropic/claude-haiku-4.5",
+        "observed_cost_usd": 0.003758,
+        "output_tokens": 274,
+        "provider": "Anthropic",
+        "total_tokens": 2662,
+        "usage_complete": true
+      }
+    },
+    {
+      "arm": "live_jev",
+      "case_id": "hf-022",
+      "error": {
+        "ctx": {
+          "expected": "'factual_contradiction', 'unsupported_generalization', 'unsupported_causality', 'missing_condition' or 'misleading_certainty'"
+        },
+        "loc": [
+          "findings",
+          0,
+          "basis"
+        ],
+        "msg": "Input should be 'factual_contradiction', 'unsupported_generalization', 'unsupported_causality', 'missing_condition' or 'misleading_certainty'",
+        "type": "literal_error"
+      },
+      "id": "case-21-repeat-1-live_jev",
+      "invalid_value": "unsupported_universality",
+      "jev_cost_usd": 5.6574e-05,
+      "path_known_cost_usd": "0.004049574",
+      "raw_path": "/home/dev/dev/eval-runs/jev-heldout-fast-20260920/live/raw/case-21-repeat-1-live_jev.critic.json",
+      "raw_sha256": "f79e2094ce1f0a54d06127349abd5edfaab1a2c87a8da1eb9bc02980097ef340",
+      "request_binding_valid": true,
+      "request_sha256": "ad373241acfdcfe1bd116ca7dab14c255f8566011ce1a42f8a0c7cd51e837481",
+      "schema_matches_product": true,
+      "usage": {
+        "attempt_count": 1,
+        "attempt_count_known": true,
+        "input_tokens": 2378,
+        "model": "anthropic/claude-haiku-4.5",
+        "observed_cost_usd": 0.003993,
+        "output_tokens": 323,
+        "provider": "Anthropic",
+        "total_tokens": 2701,
+        "usage_complete": true
+      }
+    },
+    {
+      "arm": "direct",
+      "case_id": "hf-022",
+      "error": {
+        "ctx": {
+          "expected": "'factual_contradiction', 'unsupported_generalization', 'unsupported_causality', 'missing_condition' or 'misleading_certainty'"
+        },
+        "loc": [
+          "findings",
+          0,
+          "basis"
+        ],
+        "msg": "Input should be 'factual_contradiction', 'unsupported_generalization', 'unsupported_causality', 'missing_condition' or 'misleading_certainty'",
+        "type": "literal_error"
+      },
+      "id": "case-21-repeat-1-direct",
+      "invalid_value": "unsupported_universal_claim",
+      "jev_cost_usd": null,
+      "path_known_cost_usd": "0.003835",
+      "raw_path": "/home/dev/dev/eval-runs/jev-heldout-fast-20260920/live/raw/case-21-repeat-1-direct.critic.json",
+      "raw_sha256": "5bf1f8835eb205ed8f7b0b668553289f1be109556053a5758f875112feded7ad",
+      "request_binding_valid": true,
+      "request_sha256": "4a64331b1759aa36d271fab459c0d6ac876f66812a023a0103bbe69b8b309ed3",
+      "schema_matches_product": true,
+      "usage": {
+        "attempt_count": 1,
+        "attempt_count_known": true,
+        "input_tokens": 2255,
+        "model": "anthropic/claude-haiku-4.5",
+        "observed_cost_usd": 0.003835,
+        "output_tokens": 316,
+        "provider": "Anthropic",
+        "total_tokens": 2571,
+        "usage_complete": true
+      }
+    }
+  ],
+  "interpreter_sha256": "62c01244c44098459079933fbdca848a9daa91eb45b293692b84721adea4c347"
+}

@@ -69,3 +69,12 @@ The [paired fast-critic study](results/fast-critic-2026-09-20/report.md) compare
 accepts and improved reviewed concern coverage, but introduced two paired semantic
 regressions. Median critic time rose 3.00%; full Jev acquisition is not measured.
 The retained archive includes frozen inputs, per-call outcomes and blind review.
+
+## Fresh cases with live Jev acquisition
+
+The [held-out challenge study](results/heldout-fast-2026-09-20/report.md) adds
+24 fresh cases, actual Jev acquisition and intentionally wrong hints. Live hints
+improved blind semantic passes from 22/48 to 38/48 at nearly unchanged latency
+and cost, with one paired semantic regression. Wrong hints reduced supported
+acceptance sharply. The separate quality, speed and robustness gates prevent
+treating the aggregate improvement as production qualification.
