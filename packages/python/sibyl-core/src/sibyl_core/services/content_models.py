@@ -169,6 +169,9 @@ class RawMemoryRecallResult:
         }
         if failures:
             metadata["raw_recall_failures"] = failures
+        notes = {source.source: source.note for source in self.sources if source.note}
+        if notes:
+            metadata["raw_recall_notes"] = notes
         return metadata
 
 

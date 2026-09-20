@@ -23,6 +23,8 @@ class CandidateSourceResult[CandidateT]:
     source: str
     candidates: tuple[CandidateT, ...] = ()
     failure: CandidateSourceFailure | None = None
+    # A lane that answered but could not certify its own coverage says so here.
+    note: str | None = None
 
     @classmethod
     def success(
@@ -42,6 +44,15 @@ class CandidateSourceResult[CandidateT]:
             source=source,
             failure=CandidateSourceFailure(source=source, error_type=error_type),
         )
+
+    @classmethod
+    def noted(
+        cls,
+        source: str,
+        candidates: Sequence[CandidateT],
+        note: str,
+    ) -> CandidateSourceResult[CandidateT]:
+        return cls(source=source, candidates=tuple(candidates), note=note)
 
     @property
     def degraded(self) -> bool:

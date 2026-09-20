@@ -44,6 +44,12 @@ _EMBEDDED_SURREAL_SCHEMES = ("memory://", "surrealkv://", "rocksdb://", "file://
 
 log = structlog.get_logger()
 
+# Reported by the raw_vector lane when the scope has captures but no vectors.
+RAW_VECTOR_EMBEDDINGS_MISSING = "RawEmbeddingsMissing"
+# Noted on an empty raw_vector result when the coverage walk hit its row cap
+# before it could tell a scope without vectors from one with no matches.
+RAW_VECTOR_COVERAGE_UNKNOWN = "embedding_coverage_unknown"
+
 _RAW_MEMORY_RECALL_FIELDS = ", ".join(
     (
         "id AS record_id",
@@ -342,6 +348,109 @@ async def _recall_raw_memory_vector(
     )
 
 
+# Rows the coverage probe will read per side before it stops judging. A scope
+# with more ineligible rows than this on one side is reported as healthy, never
+# as missing, so a truncated walk cannot raise a false report.
+_COVERAGE_ROW_CAP = 512
+
+
+async def _eligible_rows_present(
+    client: SurrealContentClient,
+    *,
+    where_clause: str,
+    params: Mapping[str, object],
+    as_of: datetime | None,
+    extra_clause: str,
+    page_size: int,
+) -> bool | None:
+    """Walk one side of the scope in uuid order until an eligible row appears.
+
+    Returns True on the first recall-eligible row, False when the side is
+    exhausted, and None when the walk hit its row cap without a verdict.
+    """
+    cursor = ""
+    seen = 0
+    while seen < _COVERAGE_ROW_CAP:
+        # Never read past the cap: the last page is clamped to what remains.
+        page = min(page_size, _COVERAGE_ROW_CAP - seen)
+        rows = await with_timeout(
+            content_client.select_many_raw(
+                client,
+                f"SELECT {_RAW_MEMORY_RECALL_FIELDS} FROM raw_captures "
+                f"WHERE {where_clause}{extra_clause} AND uuid > $coverage_cursor "
+                "ORDER BY uuid ASC LIMIT $coverage_limit;",
+                **params,
+                coverage_cursor=cursor,
+                coverage_limit=page,
+            ),
+            timeout_seconds=content_client.DIRECT_SEARCH_QUERY_TIMEOUT_SECONDS,
+            operation_name="surreal_raw_memory_embedding_coverage",
+        )
+        if not rows:
+            return False
+        if models.recallable_memories(
+            [models.raw_memory_from_record(row) for row in rows], limit=1, as_of=as_of
+        ):
+            return True
+        if len(rows) < page:
+            return False
+        seen += len(rows)
+        cursor = str(rows[-1]["uuid"])
+    return None
+
+
+async def _raw_memory_scope_lacks_embeddings(
+    client: SurrealContentClient,
+    *,
+    where_clause: str,
+    params: Mapping[str, object],
+    as_of: datetime | None,
+    limit: int,
+    organization_id: str,
+) -> bool | None:
+    """Tell whether the scope has recall-eligible captures and none carries a vector.
+
+    A KNN read over such a scope returns nothing and looks identical to a scope
+    with no matches, so the raw arm would degrade to BM25 alone without anyone
+    noticing. Captures restored from an archive, or written while no embedding
+    provider was configured, land here until the embedding repair runs.
+
+    Eligibility is judged exactly as recall judges it, through the lifecycle
+    and as-of filters, so an archived or not-yet-valid row can neither mask a
+    missing vector nor raise the report on its own. Each side of the scope is
+    walked in uuid order to a fixed row cap. True means vectors are missing,
+    False means coverage is fine or the scope is empty, and None means the
+    walk hit its cap without a verdict, which the lane reports as unknown
+    rather than asserting either way.
+    """
+    page_size = max(limit * content_client.LIFECYCLE_FILTER_OVERFETCH_FACTOR, 128)
+
+    async def present(extra_clause: str) -> bool | None:
+        return await _eligible_rows_present(
+            client,
+            where_clause=where_clause,
+            params=params,
+            as_of=as_of,
+            extra_clause=extra_clause,
+            page_size=page_size,
+        )
+
+    try:
+        embedded = await present(" AND embedding != NONE")
+        if embedded is not False:
+            return None if embedded is None else False
+        return await present(" AND embedding = NONE")
+    except Exception as exc:
+        # The probe is diagnostic only; a failed probe must not turn an empty
+        # vector read into a failed recall.
+        log.warning(
+            "raw_memory_embedding_coverage_probe_failed",
+            organization_id=organization_id,
+            error_type=type(exc).__name__,
+        )
+        return False
+
+
 async def raw_memory_query_embedding(query: str) -> list[float] | None:
     provider: EmbeddingProvider | None = None
     try:
@@ -610,7 +719,38 @@ async def _recall_raw_memory_result(
                     CandidateSourceResult.failed("raw_vector", type(exc).__name__)
                 )
             else:
-                source_results.append(CandidateSourceResult.success("raw_vector", vector_memories))
+                coverage = (
+                    await _raw_memory_scope_lacks_embeddings(
+                        client,
+                        where_clause=where_clause,
+                        params=params,
+                        as_of=effective_as_of,
+                        limit=limit,
+                        organization_id=organization_id,
+                    )
+                    if not vector_memories
+                    else False
+                )
+                if coverage is True:
+                    log.warning(
+                        "raw_memory_vector_recall_unembedded_scope",
+                        organization_id=organization_id,
+                        memory_scope=normalized_scope.value,
+                        has_scope_key=scope_key is not None,
+                    )
+                    source_results.append(
+                        CandidateSourceResult.failed("raw_vector", RAW_VECTOR_EMBEDDINGS_MISSING)
+                    )
+                elif coverage is None:
+                    source_results.append(
+                        CandidateSourceResult.noted(
+                            "raw_vector", vector_memories, RAW_VECTOR_COVERAGE_UNKNOWN
+                        )
+                    )
+                else:
+                    source_results.append(
+                        CandidateSourceResult.success("raw_vector", vector_memories)
+                    )
         from sibyl_core.services.memory_source_validation import SourceReadAuthority
 
         authority = source_authority or SourceReadAuthority(

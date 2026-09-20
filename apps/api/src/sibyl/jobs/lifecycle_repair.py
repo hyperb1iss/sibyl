@@ -15,6 +15,7 @@ from sibyl.persistence.auth_runtime import (
 )
 from sibyl.persistence.organization_runtime import list_org_ids
 from sibyl_core.projection.repair import repair_graph_lifecycle
+from sibyl_core.services.content_raw_embedding_repair import repair_raw_capture_embeddings
 from sibyl_core.services.graph_runtime import background_graph_runtime
 from sibyl_core.services.memory_embedding import repair_promoted_embeddings
 from sibyl_core.services.memory_source_validation import (
@@ -77,6 +78,7 @@ async def repair_lifecycle_all_orgs(ctx: dict[str, Any]) -> dict[str, int]:  # n
             repair_raw_source_lifecycle(
                 organization_id, authority_resolver=resolve_source_authority
             ),
+            repair_raw_capture_embeddings(organization_id),
             return_exceptions=True,
         )
         if any(isinstance(result, BaseException) for result in results):
@@ -90,6 +92,7 @@ async def repair_lifecycle_all_orgs(ctx: dict[str, Any]) -> dict[str, int]:  # n
                 )
             else:
                 for key, value in asdict(result).items():
-                    summary[key] += value
+                    if key in summary and isinstance(value, int):
+                        summary[key] += value
     log.info("lifecycle_repair_completed", **summary)
     return summary
