@@ -1,6 +1,83 @@
 # Sibyl 1.4 execution receipts
 
-## Current checkpoint: September 19, 2026, floor probe executed
+## Current checkpoint: September 20, 2026, instrument repaired, first directional signal
+
+The four product and harness defects the September 19 probe surfaced each landed as their own merged
+PR before any further spend:
+
+- Headroom banding at two repetitions was noise.
+  [PR 630](https://github.com/hyperb1iss/sibyl/pull/630) bands from a Wilson 95% interval over known
+  outcomes, refuses to band a task from fewer than five, defaults the screen to ten, and makes the
+  probe recompute and refuse any band it is handed.
+- Raw captures restored from an archive never carried a vector, so the raw_vector lane returned
+  nothing and the raw control was BM25 alone. [PR 631](https://github.com/hyperb1iss/sibyl/pull/631)
+  adds the product repair, runs it from the lifecycle job and the restore path, and makes the lane
+  report an unembedded scope instead of an empty success.
+- The native pack rendered a raw controller episode in conversation shape and the solver read it as
+  its own history. [PR 635](https://github.com/hyperb1iss/sibyl/pull/635) renders every episode as
+  quoted evidence with the recorded task and workspace named, binds the original bytes, records a
+  renderer version, and flags a cell that claims completion without an edit as premature_completion.
+- [PR 636](https://github.com/hyperb1iss/sibyl/pull/636) gives the devbox phase runner a
+  repair_raw_embeddings phase that exits non-zero unless every raw row in the study organization
+  carries a vector, so a probe can no longer be prepared on an unembedded lane.
+
+The no-memory screen then re-ran at ten repetitions over all 18 transfer tasks, on runtime 69f96092a
+between 01:07 and 01:38 UTC on September 20, at $1.93.
+
+| Task                     | Known passes | Wilson 95%   | Band         |
+| ------------------------ | ------------ | ------------ | ------------ |
+| cdn-batch-map            | 5/9          | [0.27, 0.81] | floor        |
+| stock-adjustment-log     | 7/9          | [0.45, 0.94] | undetermined |
+| department-unit-budget   | 8/10         | [0.49, 0.94] | undetermined |
+| fleet-profile-resolution | 8/9          | [0.56, 0.98] | undetermined |
+| tenant-download-plan     | 9/10         | [0.60, 0.98] | undetermined |
+| telemetry-session-ranges | 9/10         | [0.60, 0.98] | undetermined |
+| twelve other tasks       | every known  |              | undetermined |
+
+The September 18 banding was wrong about tenant-download-plan (0/2 then, 9/10 now) and right about
+cdn-batch-map. Three tasks carry twenty or more points of no-memory headroom, which is the first
+time the instrument has had anything a memory arm could lift.
+
+The floor probe re-ran on those three tasks at runtime 8dff41318 between 02:28 and 03:14 UTC on
+September 20. The repair phase ran first against the checkpoint-one database and embedded 233 of 233
+raw captures with zero failures in 21 seconds, the first live SurrealDB 3.x execution of the
+compare-and-set update. Every arm was then prepared fresh through the new renderer, and 60 cells ran
+at five repetitions on Qwen coder through OpenRouter, at $8.78.
+
+| Task                   | native | raw_retrieval | strong_summary | no_memory |
+| ---------------------- | ------ | ------------- | -------------- | --------- |
+| cdn-batch-map          | 2/5    | 3/5           | 3/5            | 0/3       |
+| stock-adjustment-log   | 5/5    | 5/5           | 4/4            | 2/3       |
+| department-unit-budget | 5/5    | 5/5           | 5/5            | 4/5       |
+
+Denominators exclude five controller failures (two no_memory on cdn-batch-map, two no_memory on
+stock-adjustment-log, one strong_summary on stock-adjustment-log). Pooled over known outcomes,
+native passed 12 of 15, raw_retrieval 13 of 15, strong_summary 12 of 14 and no_memory 6 of 11. The
+ten-repetition screen's no-memory baseline for the same three tasks was 20 of 28.
+premature_completion fired once on native, once on raw_retrieval and three times on no_memory, so
+the early stop is a solver habit rather than something memory causes.
+
+Two things are now observed that were not before. Memory of any kind lifts these tasks over no
+memory, by 13 to 29 points depending on which baseline is used. And the native arm does not beat the
+simple controls: it sits at or below raw retrieval and the authored summary library on every task.
+That ordering is what the September 19 finding predicted, since 33 of the 34 promoted procedures
+carry no decision mechanism, so the dream arm holds nothing raw retrieval does not.
+
+Five repetitions per cell support no confidence interval worth stating. The plan's task-transfer
+gate, at least ten points over no memory and five over the best simple control with a positive
+paired lower 95% bound, is not met and cannot be tested at this size. learning_benefit_established
+stays false. The 1.4.0 release proceeds on the recorded product decision of September 19 with the
+learning claim withheld; the remaining proof work is reflection retention (procedures must keep the
+decision rules and the input that broke), a fresh consolidation cycle under the new renderer, and a
+sealed study at ten or more repetitions on the headroom tasks.
+
+Receipts:
+[headroom screen](/Users/bliss/dev/eval-artifacts/sibyl/screen48-headroom-20260920/headroom.json),
+[re-probe report](/Users/bliss/dev/eval-artifacts/sibyl/screen48-probe-20260920/probe-20260920T022805Z/probe.json),
+[repair phase](/Users/bliss/dev/eval-artifacts/sibyl/screen48-probe-20260920/repair-20260920T022805Z/repair.json);
+on the devbox under /home/dev/dev/eval-runs/sibyl14-screen48-runtime-8dff413188ab/.
+
+## Earlier checkpoint: September 19, 2026, floor probe executed
 
 The no-memory headroom screen ([PR 625](https://github.com/hyperb1iss/sibyl/pull/625)) banded the 18
 remaining transfer tasks at two repetitions each: 14 saturated, 2 headroom, 2 floor. The two floor
