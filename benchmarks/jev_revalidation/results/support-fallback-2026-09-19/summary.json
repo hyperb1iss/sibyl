@@ -1,0 +1,3926 @@
+{
+  "arms": {
+    "grouped": {
+      "accounting": {
+        "completed_calls": 128,
+        "dispatch_started_calls": 128,
+        "input_tokens": 169202,
+        "known_physical_attempts": 128,
+        "latency_p50_ms": 127.98616100189975,
+        "latency_p95_ms": 246.39674500213005,
+        "observed_cost_usd": 0.007106484,
+        "output_tokens": 14370,
+        "scheduled_calls": 128,
+        "unknown_attempt_count_calls": 0,
+        "unknown_input_tokens_calls": 0,
+        "unknown_observed_cost_usd_calls": 0,
+        "unknown_output_tokens_calls": 0
+      },
+      "pooled": {
+        "accuracy": 0.9609375,
+        "assertions": 256,
+        "candidate_outcomes": [
+          {
+            "case_id": "fh-008",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-045",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-049",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-038",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-004",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-047",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-034",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-051",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-010",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-057",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-039",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-037",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-011",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-058",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-052",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-061",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-056",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-042",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-041",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-022",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-031",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-043",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-032",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-046",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-033",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-062",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-048",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-059",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-025",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-050",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-012",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-017",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-026",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-055",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-044",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-019",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-060",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-064",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-021",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-013",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-036",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-018",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-014",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-005",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-063",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-029",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-054",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-030",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-020",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-023",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-040",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-028",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-015",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-009",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-001",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-053",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-027",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-024",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-035",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-007",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-003",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-006",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-002",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-016",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-008",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-045",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-049",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-038",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-004",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-047",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-034",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-051",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-010",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-057",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-039",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-037",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-011",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-058",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-052",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-061",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-056",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-042",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-041",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-022",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-031",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-043",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-032",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-046",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-033",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-062",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-048",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-059",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-025",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-050",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-012",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-017",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-026",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-055",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-044",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-019",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-060",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-064",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-021",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-013",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-036",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-018",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-014",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-005",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-063",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-029",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-054",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-030",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-020",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-023",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-040",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-028",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-015",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-009",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-001",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-053",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-027",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-024",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-035",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-007",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-003",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-006",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-002",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-016",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          }
+        ],
+        "candidates": 128,
+        "clear_precision": 1.0,
+        "cleared_candidates": 48,
+        "complete_candidates": 128,
+        "completed_assertions": 256,
+        "confusion": {
+          "ambiguous": {
+            "ambiguous": 22,
+            "contradicted": 0,
+            "insufficient": 0,
+            "supported": 0
+          },
+          "contradicted": {
+            "ambiguous": 0,
+            "contradicted": 44,
+            "insufficient": 0,
+            "supported": 4
+          },
+          "insufficient": {
+            "ambiguous": 0,
+            "contradicted": 6,
+            "insufficient": 32,
+            "supported": 0
+          },
+          "supported": {
+            "ambiguous": 0,
+            "contradicted": 0,
+            "insufficient": 0,
+            "supported": 148
+          }
+        },
+        "correct": 246,
+        "failed_assertions": 0,
+        "false_clear_rate": 0.0,
+        "false_clears": 0,
+        "false_support": 4,
+        "false_support_rate": 0.037037037037037035,
+        "gold_supported_candidates": 48,
+        "supported_candidate_coverage": 1.0,
+        "unsafe_assertions": 108,
+        "unsafe_candidates": 80
+      },
+      "repeats": {
+        "0": {
+          "accuracy": 0.9609375,
+          "assertions": 128,
+          "candidate_outcomes": [
+            {
+              "case_id": "fh-008",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-045",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-049",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-038",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-004",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-047",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-034",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-051",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-010",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-057",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-039",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-037",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-011",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-058",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-052",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-061",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-056",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-042",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-041",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-022",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-031",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-043",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-032",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-046",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-033",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-062",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-048",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-059",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-025",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-050",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-012",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-017",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-026",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-055",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-044",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-019",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-060",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-064",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-021",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-013",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-036",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-018",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-014",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-005",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-063",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-029",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-054",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-030",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-020",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-023",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-040",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-028",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-015",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-009",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-001",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-053",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-027",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-024",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-035",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-007",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-003",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-006",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-002",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-016",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            }
+          ],
+          "candidates": 64,
+          "clear_precision": 1.0,
+          "cleared_candidates": 24,
+          "complete_candidates": 64,
+          "completed_assertions": 128,
+          "confusion": {
+            "ambiguous": {
+              "ambiguous": 11,
+              "contradicted": 0,
+              "insufficient": 0,
+              "supported": 0
+            },
+            "contradicted": {
+              "ambiguous": 0,
+              "contradicted": 22,
+              "insufficient": 0,
+              "supported": 2
+            },
+            "insufficient": {
+              "ambiguous": 0,
+              "contradicted": 3,
+              "insufficient": 16,
+              "supported": 0
+            },
+            "supported": {
+              "ambiguous": 0,
+              "contradicted": 0,
+              "insufficient": 0,
+              "supported": 74
+            }
+          },
+          "correct": 123,
+          "failed_assertions": 0,
+          "false_clear_rate": 0.0,
+          "false_clears": 0,
+          "false_support": 2,
+          "false_support_rate": 0.037037037037037035,
+          "gold_supported_candidates": 24,
+          "supported_candidate_coverage": 1.0,
+          "unsafe_assertions": 54,
+          "unsafe_candidates": 40
+        },
+        "1": {
+          "accuracy": 0.9609375,
+          "assertions": 128,
+          "candidate_outcomes": [
+            {
+              "case_id": "fh-008",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-045",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-049",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-038",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-004",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-047",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-034",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-051",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-010",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-057",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-039",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-037",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-011",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-058",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-052",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-061",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-056",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-042",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-041",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-022",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-031",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-043",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-032",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-046",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-033",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-062",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-048",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-059",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-025",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-050",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-012",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-017",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-026",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-055",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-044",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-019",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-060",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-064",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-021",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-013",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-036",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-018",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-014",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-005",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-063",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-029",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-054",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-030",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-020",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-023",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-040",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-028",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-015",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-009",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-001",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-053",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-027",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-024",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-035",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-007",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-003",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-006",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-002",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-016",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            }
+          ],
+          "candidates": 64,
+          "clear_precision": 1.0,
+          "cleared_candidates": 24,
+          "complete_candidates": 64,
+          "completed_assertions": 128,
+          "confusion": {
+            "ambiguous": {
+              "ambiguous": 11,
+              "contradicted": 0,
+              "insufficient": 0,
+              "supported": 0
+            },
+            "contradicted": {
+              "ambiguous": 0,
+              "contradicted": 22,
+              "insufficient": 0,
+              "supported": 2
+            },
+            "insufficient": {
+              "ambiguous": 0,
+              "contradicted": 3,
+              "insufficient": 16,
+              "supported": 0
+            },
+            "supported": {
+              "ambiguous": 0,
+              "contradicted": 0,
+              "insufficient": 0,
+              "supported": 74
+            }
+          },
+          "correct": 123,
+          "failed_assertions": 0,
+          "false_clear_rate": 0.0,
+          "false_clears": 0,
+          "false_support": 2,
+          "false_support_rate": 0.037037037037037035,
+          "gold_supported_candidates": 24,
+          "supported_candidate_coverage": 1.0,
+          "unsafe_assertions": 54,
+          "unsafe_candidates": 40
+        }
+      }
+    },
+    "singleton": {
+      "accounting": {
+        "completed_calls": 256,
+        "dispatch_started_calls": 256,
+        "input_tokens": 313418,
+        "known_physical_attempts": 256,
+        "latency_p50_ms": 129.29442550375825,
+        "latency_p95_ms": 220.91658600402297,
+        "observed_cost_usd": 0.013163556,
+        "output_tokens": 14882,
+        "scheduled_calls": 256,
+        "unknown_attempt_count_calls": 0,
+        "unknown_input_tokens_calls": 0,
+        "unknown_observed_cost_usd_calls": 0,
+        "unknown_output_tokens_calls": 0
+      },
+      "pooled": {
+        "accuracy": 0.9609375,
+        "assertions": 256,
+        "candidate_outcomes": [
+          {
+            "case_id": "fh-008",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-045",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-049",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-038",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-004",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-047",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-034",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-051",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-010",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-057",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-039",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-037",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-011",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-058",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-052",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-061",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-056",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-042",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-041",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-022",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-031",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-043",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-032",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-046",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-033",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-062",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-048",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-059",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-025",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-050",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-012",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-017",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-026",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-055",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-044",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-019",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-060",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-064",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-021",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-013",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-036",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-018",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-014",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-005",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-063",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-029",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-054",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-030",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-020",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-023",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-040",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-028",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-015",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-009",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-001",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-053",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-027",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-024",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-035",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-007",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-003",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-006",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-002",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-016",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 0
+          },
+          {
+            "case_id": "fh-008",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-045",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-049",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-038",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-004",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-047",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-034",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-051",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-010",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-057",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-039",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-037",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-011",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-058",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-052",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-061",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-056",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-042",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-041",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-022",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-031",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-043",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-032",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-046",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-033",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-062",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-048",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-059",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-025",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-050",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-012",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-017",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-026",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-055",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-044",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-019",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-060",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-064",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-021",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-013",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-036",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-018",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-014",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-005",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-063",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-029",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-054",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-030",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-020",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-023",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-040",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-028",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-015",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-009",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-001",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-053",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-027",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-024",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-035",
+            "clears": false,
+            "complete": true,
+            "gold_supported": false,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-007",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-003",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-006",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-002",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          },
+          {
+            "case_id": "fh-016",
+            "clears": true,
+            "complete": true,
+            "gold_supported": true,
+            "repeat": 1
+          }
+        ],
+        "candidates": 128,
+        "clear_precision": 1.0,
+        "cleared_candidates": 48,
+        "complete_candidates": 128,
+        "completed_assertions": 256,
+        "confusion": {
+          "ambiguous": {
+            "ambiguous": 22,
+            "contradicted": 0,
+            "insufficient": 0,
+            "supported": 0
+          },
+          "contradicted": {
+            "ambiguous": 0,
+            "contradicted": 44,
+            "insufficient": 0,
+            "supported": 4
+          },
+          "insufficient": {
+            "ambiguous": 0,
+            "contradicted": 6,
+            "insufficient": 32,
+            "supported": 0
+          },
+          "supported": {
+            "ambiguous": 0,
+            "contradicted": 0,
+            "insufficient": 0,
+            "supported": 148
+          }
+        },
+        "correct": 246,
+        "failed_assertions": 0,
+        "false_clear_rate": 0.0,
+        "false_clears": 0,
+        "false_support": 4,
+        "false_support_rate": 0.037037037037037035,
+        "gold_supported_candidates": 48,
+        "supported_candidate_coverage": 1.0,
+        "unsafe_assertions": 108,
+        "unsafe_candidates": 80
+      },
+      "repeats": {
+        "0": {
+          "accuracy": 0.9609375,
+          "assertions": 128,
+          "candidate_outcomes": [
+            {
+              "case_id": "fh-008",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-045",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-049",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-038",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-004",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-047",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-034",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-051",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-010",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-057",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-039",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-037",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-011",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-058",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-052",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-061",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-056",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-042",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-041",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-022",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-031",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-043",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-032",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-046",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-033",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-062",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-048",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-059",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-025",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-050",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-012",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-017",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-026",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-055",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-044",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-019",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-060",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-064",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-021",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-013",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-036",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-018",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-014",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-005",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-063",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-029",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-054",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-030",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-020",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-023",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-040",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-028",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-015",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-009",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-001",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-053",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-027",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-024",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-035",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-007",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-003",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-006",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-002",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            },
+            {
+              "case_id": "fh-016",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 0
+            }
+          ],
+          "candidates": 64,
+          "clear_precision": 1.0,
+          "cleared_candidates": 24,
+          "complete_candidates": 64,
+          "completed_assertions": 128,
+          "confusion": {
+            "ambiguous": {
+              "ambiguous": 11,
+              "contradicted": 0,
+              "insufficient": 0,
+              "supported": 0
+            },
+            "contradicted": {
+              "ambiguous": 0,
+              "contradicted": 22,
+              "insufficient": 0,
+              "supported": 2
+            },
+            "insufficient": {
+              "ambiguous": 0,
+              "contradicted": 3,
+              "insufficient": 16,
+              "supported": 0
+            },
+            "supported": {
+              "ambiguous": 0,
+              "contradicted": 0,
+              "insufficient": 0,
+              "supported": 74
+            }
+          },
+          "correct": 123,
+          "failed_assertions": 0,
+          "false_clear_rate": 0.0,
+          "false_clears": 0,
+          "false_support": 2,
+          "false_support_rate": 0.037037037037037035,
+          "gold_supported_candidates": 24,
+          "supported_candidate_coverage": 1.0,
+          "unsafe_assertions": 54,
+          "unsafe_candidates": 40
+        },
+        "1": {
+          "accuracy": 0.9609375,
+          "assertions": 128,
+          "candidate_outcomes": [
+            {
+              "case_id": "fh-008",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-045",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-049",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-038",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-004",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-047",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-034",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-051",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-010",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-057",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-039",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-037",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-011",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-058",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-052",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-061",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-056",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-042",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-041",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-022",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-031",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-043",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-032",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-046",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-033",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-062",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-048",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-059",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-025",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-050",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-012",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-017",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-026",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-055",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-044",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-019",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-060",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-064",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-021",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-013",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-036",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-018",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-014",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-005",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-063",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-029",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-054",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-030",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-020",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-023",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-040",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-028",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-015",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-009",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-001",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-053",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-027",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-024",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-035",
+              "clears": false,
+              "complete": true,
+              "gold_supported": false,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-007",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-003",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-006",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-002",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            },
+            {
+              "case_id": "fh-016",
+              "clears": true,
+              "complete": true,
+              "gold_supported": true,
+              "repeat": 1
+            }
+          ],
+          "candidates": 64,
+          "clear_precision": 1.0,
+          "cleared_candidates": 24,
+          "complete_candidates": 64,
+          "completed_assertions": 128,
+          "confusion": {
+            "ambiguous": {
+              "ambiguous": 11,
+              "contradicted": 0,
+              "insufficient": 0,
+              "supported": 0
+            },
+            "contradicted": {
+              "ambiguous": 0,
+              "contradicted": 22,
+              "insufficient": 0,
+              "supported": 2
+            },
+            "insufficient": {
+              "ambiguous": 0,
+              "contradicted": 3,
+              "insufficient": 16,
+              "supported": 0
+            },
+            "supported": {
+              "ambiguous": 0,
+              "contradicted": 0,
+              "insufficient": 0,
+              "supported": 74
+            }
+          },
+          "correct": 123,
+          "failed_assertions": 0,
+          "false_clear_rate": 0.0,
+          "false_clears": 0,
+          "false_support": 2,
+          "false_support_rate": 0.037037037037037035,
+          "gold_supported_candidates": 24,
+          "supported_candidate_coverage": 1.0,
+          "unsafe_assertions": 54,
+          "unsafe_candidates": 40
+        }
+      }
+    }
+  },
+  "limits": [
+    "Original synthetic diagnostics, not human gold or a public benchmark.",
+    "Repeated assertions within candidates are correlated, not independent samples.",
+    "All scheduled assertions remain in accuracy denominators, including failed calls.",
+    "Candidate clears are diagnostic labels only, without publication authority.",
+    "Observed provider usage is retained on replay; replay has no new billed usage.",
+    "Source support does not replace proposal generation or the complete semantic critic.",
+    "The fresh fixture has only mixed-label multi-assertion candidates; positive clear coverage measures single-assertion candidates."
+  ],
+  "paired": {
+    "both_complete": 256,
+    "failure_pairs": [],
+    "incomplete_pairs": 0,
+    "scheduled_assertion_pairs": 256,
+    "semantic_difference_count": 0,
+    "semantic_differences": [],
+    "semantic_disagreement_rate": 0.0
+  }
+}

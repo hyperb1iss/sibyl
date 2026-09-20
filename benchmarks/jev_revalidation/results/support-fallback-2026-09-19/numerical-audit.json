@@ -1,0 +1,1006 @@
+{
+  "artifact_sha256": {
+    "calls.json": "2c15b55c335b94437965bfc9b90ca7083d90061a72b2bb97b25960e973c8d89d",
+    "completion.json": "544ecbc687b6e7e335fe5fb3904b7be518e0a77976d7891fb978d5c971601def",
+    "manifest.json": "7202e9a11d6ac5a419ed8440110b0e718c4a29b630d0057aece2295aecf61f1e",
+    "predictions.json": "afb6f24256719e99afa574292e82f57193f43ccf2ae70b3b14cddf853018bf68",
+    "schedule.json": "4f4977dee4d8aee6ed986254f1fea0d31455ca795c8d1c8d29b04091ec6ab290"
+  },
+  "assertion_stats": {
+    "grouped": {
+      "assertions": 256,
+      "confusion": {
+        "ambiguous": {
+          "ambiguous": 22
+        },
+        "contradicted": {
+          "contradicted": 44,
+          "supported": 4
+        },
+        "insufficient": {
+          "contradicted": 6,
+          "insufficient": 32
+        },
+        "supported": {
+          "supported": 148
+        }
+      },
+      "correct": 246,
+      "false_support": 4
+    },
+    "singleton": {
+      "assertions": 256,
+      "confusion": {
+        "ambiguous": {
+          "ambiguous": 22
+        },
+        "contradicted": {
+          "contradicted": 44,
+          "supported": 4
+        },
+        "insufficient": {
+          "contradicted": 6,
+          "insufficient": 32
+        },
+        "supported": {
+          "supported": 148
+        }
+      },
+      "correct": 246,
+      "false_support": 4
+    }
+  },
+  "audit_script_sha256": "61c7fa5562a8a3258ec65bccd94e182b34e1ed0d7cabed588a6fc036f9469ab1",
+  "calibration_selection": {
+    "distinct_safe_calibration_candidates": 8,
+    "guard_eligible_safe_ids": [
+      "support-009",
+      "support-012"
+    ],
+    "holdout_sha256": "3c0fa1d0050751f8ea96a84f38e8d5aa5daaf04527bbe3d3c6006430957f7b08",
+    "safe_candidates_bypassed_both": 2,
+    "selection_sha256": "6a34a79207ca00fc930bb26acbdf93c5d0a586d10ffd80c4262d07421c533a12",
+    "threshold": 0.99,
+    "unsafe_candidates_bypassed_any": 0
+  },
+  "checks": {
+    "all_101_threshold_rows_match": true,
+    "all_observation_fields_match_calls": true,
+    "all_prediction_rows_reconstructed": true,
+    "calibration_candidate_rows_equal_frozen_selection": true,
+    "calibration_receipts": 256,
+    "evaluation_json_read": false,
+    "heldout_assertions": 512,
+    "heldout_receipts": 384,
+    "request_and_semantic_digests_verified": true,
+    "schedules_seeded_and_complete": true,
+    "summary_json_read": false
+  },
+  "costs": {
+    "grouped": {
+      "calls": 128,
+      "input_tokens": 169202,
+      "observed_cost_usd": "0.007106484",
+      "output_tokens": 14370,
+      "physical_attempts": 128,
+      "unknown_usage_calls": 0
+    },
+    "singleton": {
+      "calls": 256,
+      "input_tokens": 313418,
+      "observed_cost_usd": "0.013163556",
+      "output_tokens": 14882,
+      "physical_attempts": 256,
+      "unknown_usage_calls": 0
+    }
+  },
+  "false_support_assertions": [
+    {
+      "arm": "singleton",
+      "call": "case-32-repeat-1-singleton-2",
+      "case_id": "fh-026",
+      "category": "quantity_words",
+      "expected": "contradicted",
+      "multi": true,
+      "prediction": "supported",
+      "probabilities": [
+        {
+          "label": "supported",
+          "probability": 0.75
+        },
+        {
+          "label": "insufficient",
+          "probability": 0.03
+        },
+        {
+          "label": "contradicted",
+          "probability": 0.22
+        },
+        {
+          "label": "ambiguous",
+          "probability": 0.0
+        }
+      ],
+      "provider_confidence": 0.66,
+      "question_id": "/content",
+      "repeat": 1,
+      "status": "completed"
+    },
+    {
+      "arm": "grouped",
+      "call": "case-32-repeat-1-grouped-0",
+      "case_id": "fh-026",
+      "category": "quantity_words",
+      "expected": "contradicted",
+      "multi": true,
+      "prediction": "supported",
+      "probabilities": [
+        {
+          "label": "insufficient",
+          "probability": 0.03
+        },
+        {
+          "label": "ambiguous",
+          "probability": 0.0
+        },
+        {
+          "label": "contradicted",
+          "probability": 0.21
+        },
+        {
+          "label": "supported",
+          "probability": 0.76
+        }
+      ],
+      "provider_confidence": 0.68,
+      "question_id": "/content",
+      "repeat": 1,
+      "status": "completed"
+    },
+    {
+      "arm": "singleton",
+      "call": "case-28-repeat-0-singleton-2",
+      "case_id": "fh-025",
+      "category": "quantity_multiplication",
+      "expected": "contradicted",
+      "multi": true,
+      "prediction": "supported",
+      "probabilities": [
+        {
+          "label": "insufficient",
+          "probability": 0.01
+        },
+        {
+          "label": "ambiguous",
+          "probability": 0.0
+        },
+        {
+          "label": "contradicted",
+          "probability": 0.08
+        },
+        {
+          "label": "supported",
+          "probability": 0.91
+        }
+      ],
+      "provider_confidence": 0.88,
+      "question_id": "/content",
+      "repeat": 0,
+      "status": "completed"
+    },
+    {
+      "arm": "grouped",
+      "call": "case-28-repeat-0-grouped-0",
+      "case_id": "fh-025",
+      "category": "quantity_multiplication",
+      "expected": "contradicted",
+      "multi": true,
+      "prediction": "supported",
+      "probabilities": [
+        {
+          "label": "insufficient",
+          "probability": 0.01
+        },
+        {
+          "label": "contradicted",
+          "probability": 0.08
+        },
+        {
+          "label": "supported",
+          "probability": 0.91
+        },
+        {
+          "label": "ambiguous",
+          "probability": 0.0
+        }
+      ],
+      "provider_confidence": 0.88,
+      "question_id": "/content",
+      "repeat": 0,
+      "status": "completed"
+    },
+    {
+      "arm": "grouped",
+      "call": "case-28-repeat-1-grouped-0",
+      "case_id": "fh-025",
+      "category": "quantity_multiplication",
+      "expected": "contradicted",
+      "multi": true,
+      "prediction": "supported",
+      "probabilities": [
+        {
+          "label": "supported",
+          "probability": 0.91
+        },
+        {
+          "label": "insufficient",
+          "probability": 0.01
+        },
+        {
+          "label": "contradicted",
+          "probability": 0.08
+        },
+        {
+          "label": "ambiguous",
+          "probability": 0.0
+        }
+      ],
+      "provider_confidence": 0.88,
+      "question_id": "/content",
+      "repeat": 1,
+      "status": "completed"
+    },
+    {
+      "arm": "singleton",
+      "call": "case-28-repeat-1-singleton-2",
+      "case_id": "fh-025",
+      "category": "quantity_multiplication",
+      "expected": "contradicted",
+      "multi": true,
+      "prediction": "supported",
+      "probabilities": [
+        {
+          "label": "insufficient",
+          "probability": 0.01
+        },
+        {
+          "label": "supported",
+          "probability": 0.93
+        },
+        {
+          "label": "ambiguous",
+          "probability": 0.0
+        },
+        {
+          "label": "contradicted",
+          "probability": 0.06
+        }
+      ],
+      "provider_confidence": 0.91,
+      "question_id": "/content",
+      "repeat": 1,
+      "status": "completed"
+    },
+    {
+      "arm": "singleton",
+      "call": "case-32-repeat-0-singleton-2",
+      "case_id": "fh-026",
+      "category": "quantity_words",
+      "expected": "contradicted",
+      "multi": true,
+      "prediction": "supported",
+      "probabilities": [
+        {
+          "label": "ambiguous",
+          "probability": 0.0
+        },
+        {
+          "label": "contradicted",
+          "probability": 0.25
+        },
+        {
+          "label": "insufficient",
+          "probability": 0.03
+        },
+        {
+          "label": "supported",
+          "probability": 0.72
+        }
+      ],
+      "provider_confidence": 0.63,
+      "question_id": "/content",
+      "repeat": 0,
+      "status": "completed"
+    },
+    {
+      "arm": "grouped",
+      "call": "case-32-repeat-0-grouped-0",
+      "case_id": "fh-026",
+      "category": "quantity_words",
+      "expected": "contradicted",
+      "multi": true,
+      "prediction": "supported",
+      "probabilities": [
+        {
+          "label": "supported",
+          "probability": 0.63
+        },
+        {
+          "label": "ambiguous",
+          "probability": 0.01
+        },
+        {
+          "label": "contradicted",
+          "probability": 0.33
+        },
+        {
+          "label": "insufficient",
+          "probability": 0.03
+        }
+      ],
+      "provider_confidence": 0.52,
+      "question_id": "/content",
+      "repeat": 0,
+      "status": "completed"
+    }
+  ],
+  "fixture": {
+    "assertions_per_repeat": 128,
+    "cases": 64,
+    "safe_cases": 24,
+    "safe_multi_cases": 16,
+    "unsafe_multi_cases": 16
+  },
+  "lexical_capability_probes": {
+    "A majority of voters agreed.": false,
+    "Both applicants qualify.": false,
+    "Dozens of guests arrived.": false,
+    "Half the team attended.": true,
+    "III medals were awarded.": false,
+    "No more than a handful attended.": false,
+    "The dossier discusses one example.": true,
+    "The one-piece garment was folded.": true
+  },
+  "limits": [
+    "The inherited raw summary statement that all multi-assertion candidates are mixed is stale for this heldout fixture; 16 fully supported multi-assertion cases exist and are measured here.",
+    "The threshold was chosen on prior calibration before heldout labels/results; this audit does not refit it.",
+    "Only two distinct safe calibration candidates bypassed on both repeats at the selected threshold.",
+    "The unthresholded all-assertions-supported gate already rejects every unsafe heldout candidate. This heldout therefore does not demonstrate incremental safety from the confidence threshold or numeric guard.",
+    "The literal token guard is not a detector of all arithmetic or logical inference: it misses unlisted quantity words, plurals and Roman numerals and can defer incidental numeric wording.",
+    "Bypass measures source-support fallback routing only, not all-critic coverage or publication authorization.",
+    "No generative fallback was run: its cost, quality and end-to-end savings are unmeasured.",
+    "Two repeats share the same 64 cases; candidate evaluations are not independent corpus samples.",
+    "The independent annotation disagreement for fh-042 is contradicted versus insufficient; either gold keeps this candidate unsafe, so the routing safety classification is unchanged."
+  ],
+  "methods": {
+    "grouped_confidence_only": {
+      "distinct": {
+        "cases": 64,
+        "false_bypass_any": 0,
+        "false_bypass_both": 0,
+        "safe_bypass_any": 18,
+        "safe_bypass_both": 17,
+        "safe_cases": 24,
+        "unsafe_cases": 40
+      },
+      "multi": {
+        "bypass_precision": 1.0,
+        "bypassed": 22,
+        "candidate_evaluations": 64,
+        "fallback": 42,
+        "fallback_reasons": {
+          "low_confidence": 10,
+          "unsupported": 32
+        },
+        "false_bypass": 0,
+        "false_bypass_rate": 0.0,
+        "safe_bypass_coverage": 0.6875,
+        "safe_evaluations": 32,
+        "unsafe_evaluations": 32
+      },
+      "multi_distinct": {
+        "cases": 32,
+        "false_bypass_any": 0,
+        "false_bypass_both": 0,
+        "safe_bypass_any": 11,
+        "safe_bypass_both": 11,
+        "safe_cases": 16,
+        "unsafe_cases": 16
+      },
+      "multi_repeats": {
+        "0": {
+          "bypass_precision": 1.0,
+          "bypassed": 11,
+          "candidate_evaluations": 32,
+          "fallback": 21,
+          "fallback_reasons": {
+            "low_confidence": 5,
+            "unsupported": 16
+          },
+          "false_bypass": 0,
+          "false_bypass_rate": 0.0,
+          "safe_bypass_coverage": 0.6875,
+          "safe_evaluations": 16,
+          "unsafe_evaluations": 16
+        },
+        "1": {
+          "bypass_precision": 1.0,
+          "bypassed": 11,
+          "candidate_evaluations": 32,
+          "fallback": 21,
+          "fallback_reasons": {
+            "low_confidence": 5,
+            "unsupported": 16
+          },
+          "false_bypass": 0,
+          "false_bypass_rate": 0.0,
+          "safe_bypass_coverage": 0.6875,
+          "safe_evaluations": 16,
+          "unsafe_evaluations": 16
+        }
+      },
+      "pooled": {
+        "bypass_precision": 1.0,
+        "bypassed": 35,
+        "candidate_evaluations": 128,
+        "fallback": 93,
+        "fallback_reasons": {
+          "low_confidence": 13,
+          "unsupported": 80
+        },
+        "false_bypass": 0,
+        "false_bypass_rate": 0.0,
+        "safe_bypass_coverage": 0.7291666666666666,
+        "safe_evaluations": 48,
+        "unsafe_evaluations": 80
+      },
+      "repeats": {
+        "0": {
+          "bypass_precision": 1.0,
+          "bypassed": 17,
+          "candidate_evaluations": 64,
+          "fallback": 47,
+          "fallback_reasons": {
+            "low_confidence": 7,
+            "unsupported": 40
+          },
+          "false_bypass": 0,
+          "false_bypass_rate": 0.0,
+          "safe_bypass_coverage": 0.7083333333333334,
+          "safe_evaluations": 24,
+          "unsafe_evaluations": 40
+        },
+        "1": {
+          "bypass_precision": 1.0,
+          "bypassed": 18,
+          "candidate_evaluations": 64,
+          "fallback": 46,
+          "fallback_reasons": {
+            "low_confidence": 6,
+            "unsupported": 40
+          },
+          "false_bypass": 0,
+          "false_bypass_rate": 0.0,
+          "safe_bypass_coverage": 0.75,
+          "safe_evaluations": 24,
+          "unsafe_evaluations": 40
+        }
+      }
+    },
+    "grouped_guarded": {
+      "distinct": {
+        "cases": 64,
+        "false_bypass_any": 0,
+        "false_bypass_both": 0,
+        "safe_bypass_any": 17,
+        "safe_bypass_both": 16,
+        "safe_cases": 24,
+        "unsafe_cases": 40
+      },
+      "multi": {
+        "bypass_precision": 1.0,
+        "bypassed": 20,
+        "candidate_evaluations": 64,
+        "fallback": 44,
+        "fallback_reasons": {
+          "numeric_text": 12,
+          "unsupported": 32
+        },
+        "false_bypass": 0,
+        "false_bypass_rate": 0.0,
+        "safe_bypass_coverage": 0.625,
+        "safe_evaluations": 32,
+        "unsafe_evaluations": 32
+      },
+      "multi_distinct": {
+        "cases": 32,
+        "false_bypass_any": 0,
+        "false_bypass_both": 0,
+        "safe_bypass_any": 10,
+        "safe_bypass_both": 10,
+        "safe_cases": 16,
+        "unsafe_cases": 16
+      },
+      "multi_repeats": {
+        "0": {
+          "bypass_precision": 1.0,
+          "bypassed": 10,
+          "candidate_evaluations": 32,
+          "fallback": 22,
+          "fallback_reasons": {
+            "numeric_text": 6,
+            "unsupported": 16
+          },
+          "false_bypass": 0,
+          "false_bypass_rate": 0.0,
+          "safe_bypass_coverage": 0.625,
+          "safe_evaluations": 16,
+          "unsafe_evaluations": 16
+        },
+        "1": {
+          "bypass_precision": 1.0,
+          "bypassed": 10,
+          "candidate_evaluations": 32,
+          "fallback": 22,
+          "fallback_reasons": {
+            "numeric_text": 6,
+            "unsupported": 16
+          },
+          "false_bypass": 0,
+          "false_bypass_rate": 0.0,
+          "safe_bypass_coverage": 0.625,
+          "safe_evaluations": 16,
+          "unsafe_evaluations": 16
+        }
+      },
+      "pooled": {
+        "bypass_precision": 1.0,
+        "bypassed": 33,
+        "candidate_evaluations": 128,
+        "fallback": 95,
+        "fallback_reasons": {
+          "low_confidence": 3,
+          "numeric_text": 12,
+          "unsupported": 80
+        },
+        "false_bypass": 0,
+        "false_bypass_rate": 0.0,
+        "safe_bypass_coverage": 0.6875,
+        "safe_evaluations": 48,
+        "unsafe_evaluations": 80
+      },
+      "repeats": {
+        "0": {
+          "bypass_precision": 1.0,
+          "bypassed": 16,
+          "candidate_evaluations": 64,
+          "fallback": 48,
+          "fallback_reasons": {
+            "low_confidence": 2,
+            "numeric_text": 6,
+            "unsupported": 40
+          },
+          "false_bypass": 0,
+          "false_bypass_rate": 0.0,
+          "safe_bypass_coverage": 0.6666666666666666,
+          "safe_evaluations": 24,
+          "unsafe_evaluations": 40
+        },
+        "1": {
+          "bypass_precision": 1.0,
+          "bypassed": 17,
+          "candidate_evaluations": 64,
+          "fallback": 47,
+          "fallback_reasons": {
+            "low_confidence": 1,
+            "numeric_text": 6,
+            "unsupported": 40
+          },
+          "false_bypass": 0,
+          "false_bypass_rate": 0.0,
+          "safe_bypass_coverage": 0.7083333333333334,
+          "safe_evaluations": 24,
+          "unsafe_evaluations": 40
+        }
+      }
+    },
+    "singleton_confidence_only": {
+      "distinct": {
+        "cases": 64,
+        "false_bypass_any": 0,
+        "false_bypass_both": 0,
+        "safe_bypass_any": 19,
+        "safe_bypass_both": 17,
+        "safe_cases": 24,
+        "unsafe_cases": 40
+      },
+      "multi": {
+        "bypass_precision": 1.0,
+        "bypassed": 22,
+        "candidate_evaluations": 64,
+        "fallback": 42,
+        "fallback_reasons": {
+          "low_confidence": 10,
+          "unsupported": 32
+        },
+        "false_bypass": 0,
+        "false_bypass_rate": 0.0,
+        "safe_bypass_coverage": 0.6875,
+        "safe_evaluations": 32,
+        "unsafe_evaluations": 32
+      },
+      "multi_distinct": {
+        "cases": 32,
+        "false_bypass_any": 0,
+        "false_bypass_both": 0,
+        "safe_bypass_any": 11,
+        "safe_bypass_both": 11,
+        "safe_cases": 16,
+        "unsafe_cases": 16
+      },
+      "multi_repeats": {
+        "0": {
+          "bypass_precision": 1.0,
+          "bypassed": 11,
+          "candidate_evaluations": 32,
+          "fallback": 21,
+          "fallback_reasons": {
+            "low_confidence": 5,
+            "unsupported": 16
+          },
+          "false_bypass": 0,
+          "false_bypass_rate": 0.0,
+          "safe_bypass_coverage": 0.6875,
+          "safe_evaluations": 16,
+          "unsafe_evaluations": 16
+        },
+        "1": {
+          "bypass_precision": 1.0,
+          "bypassed": 11,
+          "candidate_evaluations": 32,
+          "fallback": 21,
+          "fallback_reasons": {
+            "low_confidence": 5,
+            "unsupported": 16
+          },
+          "false_bypass": 0,
+          "false_bypass_rate": 0.0,
+          "safe_bypass_coverage": 0.6875,
+          "safe_evaluations": 16,
+          "unsafe_evaluations": 16
+        }
+      },
+      "pooled": {
+        "bypass_precision": 1.0,
+        "bypassed": 36,
+        "candidate_evaluations": 128,
+        "fallback": 92,
+        "fallback_reasons": {
+          "low_confidence": 12,
+          "unsupported": 80
+        },
+        "false_bypass": 0,
+        "false_bypass_rate": 0.0,
+        "safe_bypass_coverage": 0.75,
+        "safe_evaluations": 48,
+        "unsafe_evaluations": 80
+      },
+      "repeats": {
+        "0": {
+          "bypass_precision": 1.0,
+          "bypassed": 18,
+          "candidate_evaluations": 64,
+          "fallback": 46,
+          "fallback_reasons": {
+            "low_confidence": 6,
+            "unsupported": 40
+          },
+          "false_bypass": 0,
+          "false_bypass_rate": 0.0,
+          "safe_bypass_coverage": 0.75,
+          "safe_evaluations": 24,
+          "unsafe_evaluations": 40
+        },
+        "1": {
+          "bypass_precision": 1.0,
+          "bypassed": 18,
+          "candidate_evaluations": 64,
+          "fallback": 46,
+          "fallback_reasons": {
+            "low_confidence": 6,
+            "unsupported": 40
+          },
+          "false_bypass": 0,
+          "false_bypass_rate": 0.0,
+          "safe_bypass_coverage": 0.75,
+          "safe_evaluations": 24,
+          "unsafe_evaluations": 40
+        }
+      }
+    },
+    "singleton_guarded": {
+      "distinct": {
+        "cases": 64,
+        "false_bypass_any": 0,
+        "false_bypass_both": 0,
+        "safe_bypass_any": 18,
+        "safe_bypass_both": 16,
+        "safe_cases": 24,
+        "unsafe_cases": 40
+      },
+      "multi": {
+        "bypass_precision": 1.0,
+        "bypassed": 20,
+        "candidate_evaluations": 64,
+        "fallback": 44,
+        "fallback_reasons": {
+          "numeric_text": 12,
+          "unsupported": 32
+        },
+        "false_bypass": 0,
+        "false_bypass_rate": 0.0,
+        "safe_bypass_coverage": 0.625,
+        "safe_evaluations": 32,
+        "unsafe_evaluations": 32
+      },
+      "multi_distinct": {
+        "cases": 32,
+        "false_bypass_any": 0,
+        "false_bypass_both": 0,
+        "safe_bypass_any": 10,
+        "safe_bypass_both": 10,
+        "safe_cases": 16,
+        "unsafe_cases": 16
+      },
+      "multi_repeats": {
+        "0": {
+          "bypass_precision": 1.0,
+          "bypassed": 10,
+          "candidate_evaluations": 32,
+          "fallback": 22,
+          "fallback_reasons": {
+            "numeric_text": 6,
+            "unsupported": 16
+          },
+          "false_bypass": 0,
+          "false_bypass_rate": 0.0,
+          "safe_bypass_coverage": 0.625,
+          "safe_evaluations": 16,
+          "unsafe_evaluations": 16
+        },
+        "1": {
+          "bypass_precision": 1.0,
+          "bypassed": 10,
+          "candidate_evaluations": 32,
+          "fallback": 22,
+          "fallback_reasons": {
+            "numeric_text": 6,
+            "unsupported": 16
+          },
+          "false_bypass": 0,
+          "false_bypass_rate": 0.0,
+          "safe_bypass_coverage": 0.625,
+          "safe_evaluations": 16,
+          "unsafe_evaluations": 16
+        }
+      },
+      "pooled": {
+        "bypass_precision": 1.0,
+        "bypassed": 34,
+        "candidate_evaluations": 128,
+        "fallback": 94,
+        "fallback_reasons": {
+          "low_confidence": 2,
+          "numeric_text": 12,
+          "unsupported": 80
+        },
+        "false_bypass": 0,
+        "false_bypass_rate": 0.0,
+        "safe_bypass_coverage": 0.7083333333333334,
+        "safe_evaluations": 48,
+        "unsafe_evaluations": 80
+      },
+      "repeats": {
+        "0": {
+          "bypass_precision": 1.0,
+          "bypassed": 17,
+          "candidate_evaluations": 64,
+          "fallback": 47,
+          "fallback_reasons": {
+            "low_confidence": 1,
+            "numeric_text": 6,
+            "unsupported": 40
+          },
+          "false_bypass": 0,
+          "false_bypass_rate": 0.0,
+          "safe_bypass_coverage": 0.7083333333333334,
+          "safe_evaluations": 24,
+          "unsafe_evaluations": 40
+        },
+        "1": {
+          "bypass_precision": 1.0,
+          "bypassed": 17,
+          "candidate_evaluations": 64,
+          "fallback": 47,
+          "fallback_reasons": {
+            "low_confidence": 1,
+            "numeric_text": 6,
+            "unsupported": 40
+          },
+          "false_bypass": 0,
+          "false_bypass_rate": 0.0,
+          "safe_bypass_coverage": 0.7083333333333334,
+          "safe_evaluations": 24,
+          "unsafe_evaluations": 40
+        }
+      }
+    }
+  },
+  "numeric_guard_matches": [
+    {
+      "case_id": "fh-004",
+      "category": "quantity_words",
+      "gold_supported": true,
+      "matched": [
+        "eighteen",
+        "five",
+        "four",
+        "nine"
+      ]
+    },
+    {
+      "case_id": "fh-039",
+      "category": "unresolved_reference",
+      "gold_supported": false,
+      "matched": [
+        "two"
+      ]
+    },
+    {
+      "case_id": "fh-046",
+      "category": "distractor_hard_negative",
+      "gold_supported": false,
+      "matched": [
+        "two"
+      ]
+    },
+    {
+      "case_id": "fh-025",
+      "category": "quantity_multiplication",
+      "gold_supported": false,
+      "matched": [
+        "2",
+        "7",
+        "four"
+      ]
+    },
+    {
+      "case_id": "fh-026",
+      "category": "quantity_words",
+      "gold_supported": false,
+      "matched": [
+        "five",
+        "six",
+        "thirty",
+        "two"
+      ]
+    },
+    {
+      "case_id": "fh-005",
+      "category": "quantity_multiplication",
+      "gold_supported": true,
+      "matched": [
+        "five",
+        "fourteen",
+        "nine",
+        "one",
+        "three"
+      ]
+    },
+    {
+      "case_id": "fh-029",
+      "category": "quantity_logical_exclusion",
+      "gold_supported": false,
+      "matched": [
+        "one"
+      ]
+    },
+    {
+      "case_id": "fh-030",
+      "category": "quantity_sampling",
+      "gold_supported": false,
+      "matched": [
+        "nine",
+        "three",
+        "twelve"
+      ]
+    },
+    {
+      "case_id": "fh-028",
+      "category": "quantity_conflict",
+      "gold_supported": false,
+      "matched": [
+        "4",
+        "5"
+      ]
+    },
+    {
+      "case_id": "fh-001",
+      "category": "quantity_addition",
+      "gold_supported": true,
+      "matched": [
+        "1",
+        "5",
+        "7",
+        "8"
+      ]
+    },
+    {
+      "case_id": "fh-027",
+      "category": "quantity_lower_bound",
+      "gold_supported": false,
+      "matched": [
+        "fourteen",
+        "pair"
+      ]
+    },
+    {
+      "case_id": "fh-003",
+      "category": "quantity_duration",
+      "gold_supported": true,
+      "matched": [
+        "0",
+        "1",
+        "3",
+        "4",
+        "5",
+        "9"
+      ]
+    },
+    {
+      "case_id": "fh-006",
+      "category": "quantity_geometry",
+      "gold_supported": true,
+      "matched": [
+        "2",
+        "4",
+        "6"
+      ]
+    },
+    {
+      "case_id": "fh-002",
+      "category": "quantity_reconciliation",
+      "gold_supported": true,
+      "matched": [
+        "ninety",
+        "seventy",
+        "twenty"
+      ]
+    }
+  ],
+  "total_usage": {
+    "calls": 384,
+    "input_tokens": 482620,
+    "observed_cost_usd": "0.020270040",
+    "output_tokens": 29252,
+    "physical_attempts": 384,
+    "unknown_usage_calls": 0
+  },
+  "unsafe_bypass_examples": {
+    "grouped_confidence_only": [],
+    "grouped_guarded": [],
+    "singleton_confidence_only": [],
+    "singleton_guarded": []
+  },
+  "unthresholded_all_supported": {
+    "grouped": {
+      "safe_pass": 48,
+      "unsafe_pass": 0
+    },
+    "singleton": {
+      "safe_pass": 48,
+      "unsafe_pass": 0
+    }
+  },
+  "verdict": "PASS for receipt integrity and independent policy reconstruction; safety findings below"
+}

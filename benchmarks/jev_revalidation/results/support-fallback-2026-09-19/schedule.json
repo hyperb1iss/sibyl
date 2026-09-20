@@ -1,0 +1,3970 @@
+[
+  {
+    "arm": "singleton",
+    "case_id": "fh-024",
+    "key": "case-57-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "70f60f30551fe0d80ef205128b99756ff9e8fe4bc39a36472d2314065d23f8b1"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-024",
+    "key": "case-57-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "a439ee9f4ae3727adcbcd8fca6c11c58ed752aa00c1b3dbcb2523d27786e037e"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-049",
+    "key": "case-2-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "59f01f5aad31bb3a7205c873efa7336d4259d83e22614d98ada7203c9876a09d"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-049",
+    "key": "case-2-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "53e7f7dc3f26a4259e26ae33c8c41e290f872386ffd301ca17bdf2476c1c321c"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-023",
+    "key": "case-49-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "91c9d6323a9538b37ceb7b204b1559022b47f7cf024761e2f41d22e3a798494a"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-023",
+    "key": "case-49-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "81a9709d3016aae715d4f3e0ec89866dd602859c7013fa37448becc271757a8e"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-011",
+    "key": "case-12-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "b9282b5c69d1a4436a449c63c6600796877b2fd31f695b4b321bd8ccbdec678d"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-011",
+    "key": "case-12-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "83c8883621e28807f1ebf20b241e29a6d2920e0ef127e2ce9f40778b287f91b5"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-011",
+    "key": "case-12-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "2f28b3afbf9996365325945dc3cda218d1cf67a22fd97590de8c342f073228e2"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-011",
+    "key": "case-12-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "216e77db2add6b6d3740dc288dc3d8a328ed912b2c70660d75846741df13834e"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-002",
+    "key": "case-62-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "372c090de5a26946f25ea395df7d96ee906b044e5c226a7ad4b8b569f80563bf"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-002",
+    "key": "case-62-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "986cb450871ac8bab8c0790b0e210269544904ebc40deeb87110931dc6b6e31a"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-002",
+    "key": "case-62-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "91e9bc1a3ad4043fcf596814bf9bcf0ff8fcc3c3bb39acfead3ab64fcbc2b732"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-002",
+    "key": "case-62-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "92cef1a8693ca3c760f0055fc510919e6891d49cbe090a396681d5e4543e46d6"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-006",
+    "key": "case-61-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "19f0656165bc9c30ebe9c806eb182c4199ad87218a8fc012ab3a038c7999590a"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-006",
+    "key": "case-61-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "60ab8dcebb5b4c3fc5de9a95e06601e612bab223dca3acd49fa993db05a0b029"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-006",
+    "key": "case-61-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "e4fbdff50fe3562e2646be4a2e88e6706396d5c0ced03d8c9bee9c431619f85c"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-006",
+    "key": "case-61-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "91f11e504c0704fb33d6e2b7cc221e1282b2edd92a709d29b8753685448188f2"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-008",
+    "key": "case-0-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "def351cadf54b21a9c47b7c24b35b792f252eead5b4ff58071afdd1342d33a2d"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-008",
+    "key": "case-0-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "2741905e4794d00eb9be28319e9e516a5fc772d9e7b053aa3a69fefd63b27877"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-008",
+    "key": "case-0-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "d535fb8bbac0629944696e5f8b3f077b7374c9df4a113306989b4d9cf2dc9d39"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-008",
+    "key": "case-0-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "4b3ac1a9bee0c1f45af7ca853e47109ed65e8947386d62c596c61d3654fb151e"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-011",
+    "key": "case-12-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "f710d13de2318bda14dd84dba55a798089a962609c9fd57ced99134f95bd8cc5"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-011",
+    "key": "case-12-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "020274215f18f95a8c3e8181b337a1eda19e5dbef0ec0fa435a97a7bcab803ec"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-011",
+    "key": "case-12-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "51b2634c3be208fa576e948f52c655b1d7e6f9938f994591786f32fbb66638d2"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-011",
+    "key": "case-12-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "8876241100e263ac41dd6043527e52bcbd5f041eeea51b12c97deab9c065744d"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-005",
+    "key": "case-43-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "b13e3f502a7738013187abb29b396daa6f3617ce61cfafb80f0142cd54b9fff2"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-005",
+    "key": "case-43-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "43191d2b2848caf74a0e402c42a665578bb85e5ac81cf30e7f59a11e06d9f202"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-005",
+    "key": "case-43-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "5c23be7409f1a8a2e088539e0e7ae9030bb9436e47855ef58c86a67a7b390a59"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-005",
+    "key": "case-43-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "ff19aef96fb99430492d7f91ff6bccd5c93ed995d8d7ba2d7f27aab6737b09ec"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-022",
+    "key": "case-19-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "eb1e0d3332a0b4fb9e2c8599ea2be416f56b7139a2e387e7415fd8382eb0f7d1"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-022",
+    "key": "case-19-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "67e6c23053f80be03d2c232573e83125d20c038b941feca3b074867df2ff8168"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-012",
+    "key": "case-30-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "adee5b8404306ae13cae1c6193443a00d860d9babd9b418eeba5c6a6d7bba12f"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-012",
+    "key": "case-30-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "2f064dcc17d566db760e89e8d4b8fc7b38323ac097448e7cd4e6fda21a634a5e"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-012",
+    "key": "case-30-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "98d160ce5d9a882ac029eb99e5011ec34236b1b5d555339d3fab32b5473a22cf"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-012",
+    "key": "case-30-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "8f1da1405d97a25a5e13e247356d7335cd9cdefc575ff54d68780d591ead53d5"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-006",
+    "key": "case-61-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "214e4b9d57dbe25637071aa890e300c6798bd62b4db1d0e0952c34375786bdc2"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-006",
+    "key": "case-61-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "2a32420dd573e818ee82be0d14c7cd59f3c0bad64c1db83360a3ea50bf6d0115"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-006",
+    "key": "case-61-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "322150294813453f6146f8fdbd7b7afb230386056c586d75263de5a6cd565a49"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-006",
+    "key": "case-61-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "f76318dd2727940517062dce607b946a7f839433093b23d762961ed4e2c2c629"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-059",
+    "key": "case-27-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "3ee7aa0f244daad4721f87553998d6fb95c5ce81394ef2fada841e4be06a72d1"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-059",
+    "key": "case-27-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "a12c9f18668800b03c7356fdd370d26ff121ea6e029e188df3af9ea39f966961"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-049",
+    "key": "case-2-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "1a688cf14db2abbf6fc0054093250953934bebad2264a3a88e4dae7a5af57f6b"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-049",
+    "key": "case-2-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "798826d4513cde7ed811f7c3dddf5623cf5233ea6290c7361bc185350c4d7e88"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-056",
+    "key": "case-16-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "faf592e4af7bfe5f92012e767ee2e55609e9f6e80119ac7991a02ab557182cf4"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-056",
+    "key": "case-16-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "71af13fbb58120a90eb4518e197f96786eb9b3cb4400934a1e678d184d036bae"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-051",
+    "key": "case-7-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "b13e215b2c46a30ff3e3af897189530848181122c2184823917dd2c6c94839ae"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-051",
+    "key": "case-7-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "8b58b64c5840dd080e41545e0e3a66c3091f035b9469e6e4049af9fd1eceae07"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-045",
+    "key": "case-1-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "e37aa71f07b715089ae74ed19faa7fc37419bbfbb321cc5c8ab4a52000927fa1"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-045",
+    "key": "case-1-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "471380fa14660eb26764bebdd76c2a2aad0bed4f5fb29c9d20cab62f7a286e35"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-035",
+    "key": "case-58-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "17007e23849c45734ac8a84062ef28fa6a78a0d63f1a4a48b13665d758760aa4"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-035",
+    "key": "case-58-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "d7249a4b6fcb727d9a1b251a3cf2d01d7f6c0031fb22b9f5a14d21d70e721e24"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-035",
+    "key": "case-58-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "e2985fd968ece167df11c0ecbcb0443338ee4b893aed912e3634caaad623febe"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-035",
+    "key": "case-58-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "345afa69fadd22defacb4950195dfdef62f984f90cdb7e04547282c7be40ecef"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-028",
+    "key": "case-51-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "e15958b536d6e9494c9b14205e9fc9c20788bac8af36c19cf56b24e6e6af0b5f"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-028",
+    "key": "case-51-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "211e95266b7ecbfafee60a1e308802c9146ea495161f0f363ff96aafb6456781"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-028",
+    "key": "case-51-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "a38123c3424ea40c789d10228e329a735cee37b24977d60debdf2533387844e1"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-028",
+    "key": "case-51-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "3534f974e068d7a517389692731601bbd6900817a66031a8f818eee7ad485346"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-026",
+    "key": "case-32-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "e4038b4c8af883ff2a755b6d5308cb86a73ab5332dd448f9c49ecbd91a7400e5"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-026",
+    "key": "case-32-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "79ef385c210570f8f32ba02c6dd30fe019ff645ff56111b35fcc8a0475c65987"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-026",
+    "key": "case-32-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "2b31b8e255ce855a793fc3910c6f7ab37ba34e22dc303e008d1b076f94cc6583"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-026",
+    "key": "case-32-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "150c9b18e67ca8e7c825caece0f389eb460ef16448d41dfa98f0524758cc7f32"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-043",
+    "key": "case-21-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "6e1ecdd3cd68df462ba6cfce4217128bcf863ab26ecca7c7763deaf9e19ab9db"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-043",
+    "key": "case-21-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "f8df6bbeff16077e83ac4542d412026ed29c833aa39bc71718bc80408a66da88"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-024",
+    "key": "case-57-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "22521fe21e4648bfdd6d807eafb2e634e9386247c3910180b5188318f253bdb9"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-024",
+    "key": "case-57-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "7edda653c0c1809f7c7e5befe6c91955fefcb7685941b52580f3f9e4579aa35f"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-042",
+    "key": "case-17-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "a5e6b27b06263a6e199e81ad49e4549a12f8624ad61b164044b6f89edfa8487b"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-042",
+    "key": "case-17-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "fff80cf47f739874ce3e27b6bf120d70bd9abc1846b0ddcbf87746df8a7457ef"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-061",
+    "key": "case-15-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "fa62b087791a236cc93636e5e95f7de9a5beb6d02047ac09ee47bb0001c315a2"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-061",
+    "key": "case-15-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "2b7075122100665c965f2799eb346e8b09300a160141c982b3912a7547198aa4"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-018",
+    "key": "case-41-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "3330e7358957be5c39c19413427d5f90a851d3a5c7cc0ec3935c496e09976637"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-018",
+    "key": "case-41-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "e1594052ac60648d14999f8be13ba2a696ff60357d569d12c6ecfdff60b44772"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-035",
+    "key": "case-58-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "4ca9367034f2e3203257e25f948ec4eaad4f499aabae238164e7ff86ff8d0ea0"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-035",
+    "key": "case-58-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "9eb2bd509e976d9bcf7774a8926b036f6ea2d0a216e57192d4198e6a36420830"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-035",
+    "key": "case-58-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "80ddeaa643489080ea562f8a11cef409fe46a6eb07e065cf64fd9f4d901c7b38"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-035",
+    "key": "case-58-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "9cf0d3090a62f0ceb76e9e2a419bee4f98f26895691664536516dcce0f044f3f"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-010",
+    "key": "case-8-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "41e3219b0662b8f2eeb93870869f3ba435b81bbaf30b1b6e6682f3182f9f731d"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-010",
+    "key": "case-8-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "ce56c9119d3f530e04a55d65eb10f638ec59bdcb60a88fc714b9ec54737d1a57"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-010",
+    "key": "case-8-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "06867f66c7ed8ab420f7891a33784f1209b048d5e43ec0ac4560996732cb839b"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-010",
+    "key": "case-8-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "d76558bbccb2125059b891d420d835f421604bddb13cbe2faffae694afec2295"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-004",
+    "key": "case-4-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "10606c4f7bf10b043a7bb473b2eb6e42c5192f67d8c7b3bcd78960a90945fb72"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-004",
+    "key": "case-4-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "cb787a40061622690fe0140f08fdc612a9d455380beaa850817a6ef24c6f81e1"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-004",
+    "key": "case-4-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "a6171c1fa2c5e6f09963d567e0c51385956797cf6547a5ba9ca66ea50f7b216a"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-004",
+    "key": "case-4-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "e1618749a8a6495b217117bb76cbe45cbaa646dfb415f825a3c2507eb3882e22"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-048",
+    "key": "case-26-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "675ef819acdeddbd500765d365371d0eae51d250d70c0d070cbda11ea22267d2"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-048",
+    "key": "case-26-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "b72a2385d5fd8201ea7a8ccabbd69da66e51b6c51d3d4926c5deb31b4a92da17"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-020",
+    "key": "case-48-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "1923693535afc15a5f852a36ac45abed8cc95c5e2c844c5c0aabb95993dbb88a"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-020",
+    "key": "case-48-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "86278e8abca97c939251f038777bdcd7a0824cebacb5195289653ff54601cc2a"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-036",
+    "key": "case-40-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "82e2dc388d8ff69fb425637c695d2b367f9adc9c2fa1e77f3e6f9f438fa5773c"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-036",
+    "key": "case-40-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "a6cf4a69a5f4c2e2336289866011180a2c275153053743d5530017fdde5c4c64"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-036",
+    "key": "case-40-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "5f8d01960feceaa04b49299d65da174364818c0cbf7482d85d9f386a0eb6086f"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-036",
+    "key": "case-40-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "b75a2f107179fdc0518273bdf416e120fb98189c983527011b8207537a184943"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-043",
+    "key": "case-21-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "2eca5809564576c2b5a1cbcb2cec5d884b7d500c4742e6c3bfacb7af6c312e96"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-043",
+    "key": "case-21-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "f0c6e2f0c081321d4863e03e962a046a5b2b497d89ad1c3d7bea0a44a704c006"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-027",
+    "key": "case-56-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "755ee36376b0f4781b62440a7e10c49b21781d766d9211aacca142ed92c50f78"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-027",
+    "key": "case-56-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "f494eadd3b52aa57af1c8bdee833cb8774c667887a699dd0ac3bbffe0cb474fa"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-027",
+    "key": "case-56-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "cc4e69c733af1ca964f8828bbce6b8728258c8a07a0fb43f28b8b9c5ab437874"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-027",
+    "key": "case-56-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "e3b4bd92b1bb8e977cc8013a524a9bfb144e372104369c8c31c0e4833dfd5d27"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-014",
+    "key": "case-42-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "e98e66a01e1c8cf348e918e147b6fb53f3c83dc9b41ecbc38f5f9dd0e0e64a83"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-014",
+    "key": "case-42-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "088409802b9fa13faa47cff7d04f2b88617dd0bb1e28c20529f1e7971879dad3"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-014",
+    "key": "case-42-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "9356a9ede184839b82e8d631ee25a70e9c878589a4834ff612f9a318139d2f46"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-014",
+    "key": "case-42-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "0e8510c321a58304ac766a74b2d7b6870d3ce737d9f47e438094a9e585fe3f9a"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-050",
+    "key": "case-29-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "c6c48cc01d96384979bae66188a92a7f429498a1f50bab94e621b8a574826877"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-050",
+    "key": "case-29-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "069617fcaca30fb68d9fb198596a9765e9f3f8b7901606e8c35ec140dbafd190"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-047",
+    "key": "case-5-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "4df4d70baad431dd024e9b2442ea9d7d65467a95d1bbe4d25333e0b9656bf7df"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-047",
+    "key": "case-5-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "a3192ced492d99f8436ae3b869a288ef7fcf2bcbe74bdf0f9cd70952400cf428"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-016",
+    "key": "case-63-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "98fa09ef7b45fa914d0741b862818aae0d859432dae6b81bb82774704a138e26"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-016",
+    "key": "case-63-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "3ecf13431892a1b9a54b6b29b1d53e277f80731c5b39facb9279b68655c4737a"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-016",
+    "key": "case-63-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "c43e11fff6bfece814bcfe4fe17ccb7d991c966e86a245ea357448c797c7a1c3"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-016",
+    "key": "case-63-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "e5488aa6db5827933ad7a64a8974f572bd3b9de8b7b3bc0f5acb264d3bb38cbf"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-027",
+    "key": "case-56-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "3f2512e4c5054d736a9dfafce21c8765eefe8ccdac3e0c86d8f6fa679d0bac79"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-027",
+    "key": "case-56-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "9f44e47bfe057ae586c5b69436123368bc76fbf293524c846b9556e2b9ab4ed8"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-027",
+    "key": "case-56-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "fc76eb5ae5bae299a99e8ae47fa01b0e715f50b388631884549d90fe24a24e45"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-027",
+    "key": "case-56-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "fa1f1c40ae1c8e23ef9330565ab585a5fb99dbee2bc9d77d8681eb2eed117bb9"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-021",
+    "key": "case-38-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "5763b9b08b62d4ba08be3f5cc7beb4d18e1680a8bc79fc560cacbdc8cc746456"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-021",
+    "key": "case-38-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "93f5960324bf594e7b047c6346d1064b4488b29c8d52a089352325af07b9dc05"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-017",
+    "key": "case-31-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "6474e19e5594d51fcb2fc4a7d9e6bd9eae06df17da5c4a96840c5bc65a5d5d20"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-017",
+    "key": "case-31-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "682b5648e07cf1c476a7ef894d628ace7192ab5be766d7324eb3b6e5d467445b"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-015",
+    "key": "case-52-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "cc530384d1448ae69929bfeda053b3b611861e0bbe26b891b781035420594592"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-015",
+    "key": "case-52-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "0bd6d628604fd32079c3685146e627ef603168b9201c9c75a20f4ef4b1a0d2c5"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-015",
+    "key": "case-52-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "3981a34d94c6d35255cfac65441b7f54aafe5bc27c71660356e17f3d8f2c9cfb"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-015",
+    "key": "case-52-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "6dd11ff8fea40b68edb268113f0939235e83a69e6001000de5c69c560abb40ee"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-061",
+    "key": "case-15-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "693a5d9054d80deca028a5b6a4bece10a322ae422c3842fe58ececd5564ec952"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-061",
+    "key": "case-15-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "c2401afc0fd7a7db9ef62e38bb94fd02f4cef652f8ffa81cc149aa353df9812a"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-031",
+    "key": "case-20-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "3fa6595ffe8d1f3a736dbebc9d7a242c311daa8562e8e325ef7fe4fa4c3668d7"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-031",
+    "key": "case-20-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "2c5a8fa75648d05b145e278f7d3e7a2d444ffa86ecb770cef365728d6e5d0b78"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-031",
+    "key": "case-20-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "01a9efe5c91bc7a55765f4b14287ca0bb3f05029843e6041d30bd67209a23a3a"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-031",
+    "key": "case-20-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "f022a3f982c3136eab2b056c4e6dd786fec150305e1f15153eb54488453b2f9d"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-055",
+    "key": "case-33-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "25c9432bd4e9f8b772c1732a29ba915a39f0f44aa0172e4bf49e5dfb61d62717"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-055",
+    "key": "case-33-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "a8dd61115b49c42edb93709e5a374f78fb6f7822daebb742976275b95a7b31bc"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-045",
+    "key": "case-1-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "73132e0800eefb13ceaf5633541ba5dd0d706689bbbe64a92f2d3dd4df91f8f5"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-045",
+    "key": "case-1-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "d946a86ee98860da2e60895e5db3ef0b9cf0d0b8baab7968b1a81ec37970fd3e"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-029",
+    "key": "case-45-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "c50be65f2ae4a8611ad13e1bb3a7d2365942d6fa860ebba9659e4b0228e2f347"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-029",
+    "key": "case-45-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "0bdf9b0ee5621598f5065966a3ef3cd489c4cfb057ac3931b74e0a8f9de63317"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-029",
+    "key": "case-45-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "ca83ea0dbf176fec47d44696cb26c3e29b2faea7fd34960d6dfbf7161e5af309"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-029",
+    "key": "case-45-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "15a1f805dcec3ef29ea6782764fcddc4154bb2d5ad313d59cee3258f02f013f1"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-039",
+    "key": "case-10-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "67add90c346b7aeb6287ae21dbb0555b7847272424fc0c5042cbaf62e92b2258"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-039",
+    "key": "case-10-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "c35f9b407a62dccb9c47378550cfaf618d21045818795023da2df0984df7b6c5"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-039",
+    "key": "case-10-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "2e88a1fd7f9a5cdf7d499add36bd6940d86f13d93ae12066d27c04ceb5a797de"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-039",
+    "key": "case-10-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "6880cf36699b56c38e781212887ad769907b96d61744831474f1d9bf48e59e44"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-034",
+    "key": "case-6-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "2674cd105ffb9061180dd32f1a97a64e1030a27e96c517b16c8fb11ac9cadf0f"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-034",
+    "key": "case-6-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "e38d5a60a52e5090e42c124c38737beba9ee65ebd19cf8197bdf61ef17828dc4"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-034",
+    "key": "case-6-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "79bc3196544e77b72980d07ecc21ad02970b4428681579c1f5ee4d402114e78a"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-034",
+    "key": "case-6-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "f3440fec4de8171760d1d63585c3c9cd60dfa6d740416f0501934b6c912f14a7"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-033",
+    "key": "case-24-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "d5ab519bcf581d6b10f4b9c8c1970df8ba7b2d262630540be08e9d11ee9a2f04"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-033",
+    "key": "case-24-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "e86a56666c55bca0935b122fd6b1d01a0c0f77f68192be1b6bd613119699f3ae"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-033",
+    "key": "case-24-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "0f00210715513aefc99de1de1ef2417fde8cb495f521c169e7792983bf15bb93"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-033",
+    "key": "case-24-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "338af36367ab678514442a03921e392256d23897e6714dca2c234e5f71390e20"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-025",
+    "key": "case-28-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "3e8d9aa29c26664f7f3d218e891991cdc5703420dda660b80bed9b93ef358066"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-025",
+    "key": "case-28-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "54ef5cc62e96798ca77c44ad771eb3458e349b2eeb27291fd89d219752a98d76"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-025",
+    "key": "case-28-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "d0036629f778b123c77230fc3c810efe4c2eb0ba9abed80df898e7c0346b83ed"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-025",
+    "key": "case-28-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "fe3ead0cb53c1ff808d04403f409b9d42feea817782ec5d03f988f262cf8d675"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-056",
+    "key": "case-16-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "1f358b754bab22a247ba6b9ec68036f2b1631e1987f803751cb5ba1ae59ef083"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-056",
+    "key": "case-16-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "0f1e812f512f31947fe76d7dd7baf9961c3e6702359323210a208683636adb3f"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-010",
+    "key": "case-8-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "caa4fb3ea199e415e731d7a115f04fccaa4361e017cb77a447084cbb483c5b6a"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-010",
+    "key": "case-8-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "65002b9ec3217f692c85e98b61a5ff90a18f59b0e82117729e3d113605fc2ada"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-010",
+    "key": "case-8-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "e9ef645c72a6828a1fd6834887913da900592aee2df6a1505c67710516f361e4"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-010",
+    "key": "case-8-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "10337ce0fd4181067f8d16bf88b3c55c77880d82b43c95a4d3c679fb3c52f135"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-003",
+    "key": "case-60-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "4303df1f9177ea9536af3edb3ec12884a6839fc3908bef58ee9c1c30cbb31c96"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-003",
+    "key": "case-60-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "988792595c4cb3a0c61ee0c72c1bc9aabb96fbb7c3b6a6f92e632a355c173a6c"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-003",
+    "key": "case-60-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "cd390c6b00d427ab2f461ca41f059d66f29bc82bcc5b43029fa471c04ab573e5"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-003",
+    "key": "case-60-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "c06cbf496db34744f7eb06a39a1a19b3e55aa5ee2c9284f71344f0bd05138428"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-031",
+    "key": "case-20-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "3c14152c74919b17860fb000ea497cbfd955d14357f0a9e743b5e2b4a97259a2"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-031",
+    "key": "case-20-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "4cfe0f3714c9d66537bd122f279d74f02cffa84865668a235ef1c2c273c59b24"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-031",
+    "key": "case-20-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "dac445f35293958cfa0f2cabd76a5e7dc6f2b4f50ce70186feb90b7792bdd2fd"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-031",
+    "key": "case-20-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "831da7d8abe2629e8154a3505bcd54ec9786a7855941062a30be58654dfc9d75"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-004",
+    "key": "case-4-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "2df5d9efd4522279b253878b556ddbdc1da4c17bc96529f4ce503d7d332ec107"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-004",
+    "key": "case-4-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "dffb7b860ad7d9af5340fef52c16436f935d66b0a2e828a42870029ceeb91a22"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-004",
+    "key": "case-4-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "e916a408ef1d733f74ceeb61dbf0206e5bf5298f37a1a8fe9c3e54afa3222247"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-004",
+    "key": "case-4-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "cb5371b473f1a6645c9076f10aee4d287cb0407e6bab9f301a43401120609c9d"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-019",
+    "key": "case-35-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "2ac1498a9c5ff8b3939e49cfca04434e71875c80d3e4401c43f15bd4954fe306"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-019",
+    "key": "case-35-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "aaea9868e5c8b45cd4fe33a9865ddd102c0e0bf8dc2e6b0ec7cd04205fdd0fd3"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-054",
+    "key": "case-46-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "eea5b45279a82e80008a62e41d847a9d35f5af3657e748111ae2b221ea426cfe"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-054",
+    "key": "case-46-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "8ff6877364945a1345839356458c818336d7119e168355f0a4ffc551adccab3c"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-036",
+    "key": "case-40-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "7f9e4219178095cc5bc9cbf6d47dca362aa890565deed5364a69418121feab10"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-036",
+    "key": "case-40-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "59ef46fbfc04bdca9b16df19edaea2062019376b8a8e80f58570e8a53af985c6"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-036",
+    "key": "case-40-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "c0c023e59d35c02ca7c42075f2927a36f672f541699eaeb348ef2b636cc9e19c"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-036",
+    "key": "case-40-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "98b908f005598852b9d6f7497c50ac1a8147b6e70ac8d7b46dc9e76d37baba34"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-063",
+    "key": "case-44-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "fdc9c322367640bb032c7d2689a0c0fe2371e9f1eaef4c7a0abe0fcde00b3607"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-063",
+    "key": "case-44-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "653a39022117cfa2b8dec593f788af13f992f09ea25f3cbc1543baf3878186bf"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-001",
+    "key": "case-54-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "e706cad34c3d795a93241cdeda2f057595358317e710e56890c97f1043278ed0"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-001",
+    "key": "case-54-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "661cb65c28c6400f0af3c82de576055201f09a753ac8ca2bf0df560813e16270"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-001",
+    "key": "case-54-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "a29be5e2623d22f8e3f7f192c925a9c0e575b46fc34dd9a302d8a32a5742527d"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-001",
+    "key": "case-54-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "432cbcf3673008e6ae430a8179b96b95c2b2cca7221259bb1d23dda3c86ae687"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-044",
+    "key": "case-34-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "65cc0f6d7ce67bf6ae012984c58851326c42049c64ed4de7aeab9fa112bc4aec"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-044",
+    "key": "case-34-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "e2ed9b26e94e07aa08268a1908d19d40a5b7812ecdd9582469b429a53a2c01fc"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-064",
+    "key": "case-37-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "a30106deae35ad605a837ae005cdca462b3faac8ac1f123fcd570d75bb4cbc69"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-064",
+    "key": "case-37-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "301493247285579dc29afa9fbe296c9affc07765abd07623cf6ba6cb257784af"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-057",
+    "key": "case-9-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "2fa021aaec6bbc5f89c02ae534e76ad2a54f6f7dcd6b2be107fdf8f541a77a2b"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-057",
+    "key": "case-9-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "5bf1cbeb0421870d61edcc450b95fdc3861bc5342704b01dd2945b514e7770a8"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-064",
+    "key": "case-37-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "8cf6546a267aeb50649dbff5b0bd440126b9bf9ebe9ef63497fc01c233eb143e"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-064",
+    "key": "case-37-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "74afc928b82479dc4486cd83be1d08a8d1da6ad0bd622eb89e729b4b2ef41cce"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-037",
+    "key": "case-11-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "b70e0b48673035c43db4f748b4ecb1c275c35d8ff0824400d557578367c95cce"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-037",
+    "key": "case-11-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "e75a8c6eac0041d2823c9e132fa9384b1f7f9babef425c124ea711826046785d"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-037",
+    "key": "case-11-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "def508c672f6d01825fd9191356128c76a17307f006a4feb6c5f209c97cc8d63"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-037",
+    "key": "case-11-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "8e49fe3dc0c13a1f4a34447120bc5e800db3f25ab325572c1856e183174c19e3"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-058",
+    "key": "case-13-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "1f78d605b3298e00f9782a29b3645dee91ac29ffbb6811e25afeab9bb97ba295"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-058",
+    "key": "case-13-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "1d3443a1d8e9e39999d87a5949519672b8d573b790ae3c9b75d44d4c65950025"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-051",
+    "key": "case-7-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "77589c47bc96721fda16dc23fd8f90ac13379a6483d1ac36f03bc1aa41910401"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-051",
+    "key": "case-7-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "80d1c2f46b5cbe80758d3656d65a3c9727d90337a50fbfad14280979b615b36b"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-040",
+    "key": "case-50-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "cf511bd3900191c02118cbb85f1659e65fede3957dd00ac5b2a6e793c3a06a2f"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-040",
+    "key": "case-50-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "81268a36de3880098885a842eb95f326bf09f91d5a7763630bd3c1a99e787a43"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-040",
+    "key": "case-50-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "63af25f01e8ff3f21d5adc9512d66e89c45afe8a970a546e183ca9bf611dcb55"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-040",
+    "key": "case-50-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "1a096a8b93dbd761c631acec96d0b7f85e06753231799335c1b589a4dd054599"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-042",
+    "key": "case-17-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "50d31a72b51fa187c853b65c2f442ccea3aeb9b9caa38396b3add922a133e754"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-042",
+    "key": "case-17-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "854efeebc6cef5061711857687e1e2c56ab2a9068e794850d4098ff613e109a4"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-030",
+    "key": "case-47-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "8dc681d522d36c574a97b6c6c4debdc0a9251aba5043714b824e1aa45f1d1c38"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-030",
+    "key": "case-47-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "3f7468e89e36f25b9598212d8b926f06e8dee5aeb7bf5f0d8da291ca6f0b99dd"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-030",
+    "key": "case-47-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "56d0cd5431c07096f0c1c6e34d940ef40e30ec9996052af99b3e9f09e08c049d"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-030",
+    "key": "case-47-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "473fc17d05742b7eaa3b6262fc6d76602c4e10744a8812386b582cbcb3a7f7e1"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-052",
+    "key": "case-14-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "8c4e13b789ce9f3e37f4bfb6f810394856fa88695abbc3348ad1c5373a2a4aa4"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-052",
+    "key": "case-14-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "8bce30ca040e534a2771843dbe8f939bbfcc07549d0803860ce27a950c10a214"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-059",
+    "key": "case-27-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "29b3dd9b4bc28c58d7c8dfe2f4e63470a05325eee0369fb3571c1a4d2435727a"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-059",
+    "key": "case-27-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "9a8f5671cf917ac52bc08eaecb94435dd458c95f94ad363b9f49414963c689b3"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-025",
+    "key": "case-28-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "9505051df26d6fa9fd8cb0b14e76703d7de31f9225e752357a69c52968590117"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-025",
+    "key": "case-28-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "7a4ee601d8b21a173ca5098f46134456aceccbf28e6ea7e7e8e2b47e6bcf4220"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-025",
+    "key": "case-28-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "51c054b50c6bc45be67e5cada0bac9baed6e98d37ddbf808ca3c264c4430a2c7"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-025",
+    "key": "case-28-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "f51dd9eefa317c028372d142abf636b9245056fdcfaec407760a43b3b4e47e74"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-020",
+    "key": "case-48-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "6c5ca3d2dae2af2d52e68e616fb7f2f81c4f3f796532b5629585cbc2aebbaa8d"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-020",
+    "key": "case-48-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "5233ab10b63363b37bf6948ab61c00fb2092aede0c978a2d22c51ffc0c649b71"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-012",
+    "key": "case-30-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "f7a3aaa687eea25c91f5776d2d7a6847d7b72f4a3065cee053f672fa3a414d5f"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-012",
+    "key": "case-30-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "5695706164b7f5097c55cfff3e0765a313fd7c59ef6d75ae7382e0c402fee9c6"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-012",
+    "key": "case-30-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "14a7fabc3b80b81d10d10653a5e315ee834e76b239c98f6df713716b02a10f6a"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-012",
+    "key": "case-30-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "4e25a6c19b8047416bf27baf62f67906fea6d940583c0c8baae877527b8cc613"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-028",
+    "key": "case-51-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "d3ef2ebce96a9d6890797c31de035bb1d73ec0fbfa361d29f12cffed53e4897f"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-028",
+    "key": "case-51-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "52e370c0c3b064c8d96e120806fd6d5489a00453850d9daf8ae1d1fd0ddbc2f7"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-028",
+    "key": "case-51-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "9bfce1e6e744070d7e3a7fe249debd311e612a8cb8ef7f12090b811c0cd9a675"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-028",
+    "key": "case-51-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "d3bfab4a6b16d2026d01c49a1333260ff7536349075332873b38f7ec68afea4c"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-063",
+    "key": "case-44-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "ce6a701be134555b308d24f81541d033bde64e06b8d947211e12f0076eec2b1c"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-063",
+    "key": "case-44-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "ea0af0164176805b6b2befb2099320c044b54ef4442df8941072512cebe420ce"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-007",
+    "key": "case-59-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "2c13663d498796dd30c4481bec7b4288101891abb33edc7fda528cde65d83e18"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-007",
+    "key": "case-59-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "6a5747a22f9e5f79e6b0f15ab5011895ff2a5eae18bf99cbefafc7fe6447745a"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-007",
+    "key": "case-59-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "22830837a3b0d55ca123533c6cba06a8a8cc006f2f9ec30e7d4b5a7e722106f6"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-007",
+    "key": "case-59-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "323301a19ed6b85c4976334b00bf5b4a69a17ebb8b63858bd8602b3996f23422"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-018",
+    "key": "case-41-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "81c542d8a78611ab0f55e96ef5efc84d75c86e7cf9bcf9c741d08acb65f61623"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-018",
+    "key": "case-41-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "2cfbc5b818d4214c57e26c2951ed72f869d23f7bc8a559029fa7f81ba73de93c"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-015",
+    "key": "case-52-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "e0fbc928d98fff23ec2bbe072f19a619a427950b14f608db1413619698a06936"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-015",
+    "key": "case-52-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "8500dd69b216ddef7d1e2084b0fa5b2cc9a4e74e6f3eb6d665083eef043c5932"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-015",
+    "key": "case-52-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "929d604757d236b18ce8f9c68e4c9b21708ec97c5c7c6aba646855083712dc9e"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-015",
+    "key": "case-52-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "6a9c533c5c7a77086de07690b8c80d96f6f3f19708c8e62077e78b775e26c29d"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-032",
+    "key": "case-22-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "40ec4ee7f3ab398d0664ae0af3cef27a0ac1a9f42ffc5fa55b16b54f3d6bb955"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-032",
+    "key": "case-22-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "8fdee519cbb336e61a41c3e0ff4dc1812938959e13e4073107fd580348a0a610"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-032",
+    "key": "case-22-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "3df36483fd51949c2f427714cb55a99cc4486468e9c7c0e65f900620c6c5e6b0"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-032",
+    "key": "case-22-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "0d54e9ee394a98c1678219ae9e99350bf1a54db4f6235eedc06b750e31413a40"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-022",
+    "key": "case-19-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "877f65975bcb018ba987ed8fdd07785e0b857594fddd45a656a00d376486629f"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-022",
+    "key": "case-19-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "0880544072e77bd643552839d99c0925cc013efe893c57da91a890947c099162"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-060",
+    "key": "case-36-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "76cd97c9d6f4a2edb0744aa85625aae1d9326a6843934eff9527e29024f4e85b"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-060",
+    "key": "case-36-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "758cc86c891bf0bc4fdab18b5bbbb5a8a7b0582002f0663c49eade37b914088f"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-023",
+    "key": "case-49-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "65b21f3af3ace0dc406d6820d6e991c20f72617218e93675fce03f2da0bcd687"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-023",
+    "key": "case-49-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "2d080f764daab17df9673c07a405a8ef1660e40a8350988b8d08a3c0ea41fa53"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-033",
+    "key": "case-24-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "9611069cada601ca1abe11e2755653026fc8abc55399e37ac4c0cbea81f45c33"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-033",
+    "key": "case-24-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "e5a7cec2eb25aee21d2b4a7b7fa399b1babf06135ee36a27b973aafa8fca92f7"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-033",
+    "key": "case-24-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "3fce8ff2a720e7cebc1a2c50ce1048b8743e198e1f0f1a793536cf19620564c3"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-033",
+    "key": "case-24-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "e4111509e961a752fdd422b00a2505d61737caf221d7009df691c98edf1d82ff"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-044",
+    "key": "case-34-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "3ce31c02b08d6caa2f0ffedb913bb70693d813a46061c2b371dca95add79a0d9"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-044",
+    "key": "case-34-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "f35ecefc087f89b69db363385321325e2a81d897991294faca18b5293eba9821"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-034",
+    "key": "case-6-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "3371014a6d894b208b8eec61a58b4f864a75c915bc31c6f7fdf63c6d98833e15"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-034",
+    "key": "case-6-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "4d9240082f1db16ff61e1eb54f639abecd4b395d0740651ac5b32152bec97d7a"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-034",
+    "key": "case-6-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "122532273b2f0e131aed5130759afe61f705a4804ba48ff6c60835c4c2c0fc5a"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-034",
+    "key": "case-6-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "de9410af5c4fbb4242686e0b0a47fec59f7b9366239c88a58c87ee724e5b923f"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-021",
+    "key": "case-38-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "b193b79a6d5dd21d47129e485051f48017e31d2a3fe049a0408925cab2b5781c"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-021",
+    "key": "case-38-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "ba71f77a63caa55835fa353c968b9812b7c0f6d2f76740cb478e5bd5edc9acdf"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-038",
+    "key": "case-3-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "4bda02042b5a9134faceadffb94ffa639c65353da531b60b4a962c139210d0d6"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-038",
+    "key": "case-3-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "5de75acbf53c314bbac0189a3a616f9db9918b5e3f0a98b3d97b21f2c4b4ff08"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-038",
+    "key": "case-3-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "4409185616e83113986ffad6ee30c8f5f833258a877ff8e973684555bf0fc007"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-038",
+    "key": "case-3-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "2fb5b77b361ad93316fdbc2384b5667f125a1ebca730b3f2c6c37b10ce53da3c"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-060",
+    "key": "case-36-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "e849856d8a783a8b4ae752f02218b0f7627f943fecd6d2118424b690160e8221"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-060",
+    "key": "case-36-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "1cd5de0b3c4e9214ef31c0a7fac1db2f4e0e0a5c01100d7aaf22bdf3d932df16"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-003",
+    "key": "case-60-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "7771f4d768880e0dcc25d68740f39abbbd4fc9057762037818fd9b52ae5800c7"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-003",
+    "key": "case-60-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "44922e06738a676cd46b04e6e8027b2a899c700e14aac18de9367224fa446252"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-003",
+    "key": "case-60-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "ea230b392aa20cbd41c1fabbaff73542b131fb33d0010eaee33a2021159b3f8c"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-003",
+    "key": "case-60-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "fc39b5aaa0c05753b485b4937c16a8fd54a987e2e23b2b2ff6a370595fdf668f"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-062",
+    "key": "case-25-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "e61703313990cf722530dc5389af2213238b8d73aa3d7be5ca34774c95abfac6"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-062",
+    "key": "case-25-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "0bb28b69d3a24e2cc5c593e4e1d14e70f593af0b12beb752ea33f6bb3229384a"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-052",
+    "key": "case-14-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "946984e18354362de1dcf8d688c47e6513a0a84243581556d9831e16b70b70f8"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-052",
+    "key": "case-14-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "497862ad576677b8a24f7815d680ce5221087b81233965d8930b48c18522bfc7"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-009",
+    "key": "case-53-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "6aab5bcfde343af239a583ddf8b55fe56d5697cf1d5b0285303e501ec124c3b1"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-009",
+    "key": "case-53-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "7ae943e33aed542927e3536e76d02d584d07ec23bef43ee378ea34d0f5462d86"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-009",
+    "key": "case-53-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "670ccf26c63d94f5ee47b23d77062588ffacb9fe2f4223dfba2185a75f3bc16f"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-009",
+    "key": "case-53-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "369e58c826df7a481510820a9459439a91e57f46a3a5252b111fd880d36e3484"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-040",
+    "key": "case-50-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "5e5fed54c05e945df7409c890f83ffdd27e0c45cd2ec68a7243c7bd31f316d15"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-040",
+    "key": "case-50-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "e24c9cc3131b5da74e4ad82a9a993d078ff20939833b4f21a60ab8a993fa5ba1"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-040",
+    "key": "case-50-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "43eac2fc7bca06ae3c61180178272d6fce61d47354d0b777e1e41c06e5556e41"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-040",
+    "key": "case-50-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "f8d535ddf54d6106a50ded7346a635d5173d996c3e565ba074b87e757006153d"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-013",
+    "key": "case-39-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "873d5cf1113e9924169ed9adf39b207b44fb064610c4c079255c0012fcd541bb"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-013",
+    "key": "case-39-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "7c6aca0ddbcd2b3d2ebf4bfdaed1a01c395217ff8c32d8cefb97e045e5ff74f3"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-013",
+    "key": "case-39-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "5c5b86a778bfb99984b935f7cd1d83e3dc2748bda93befa0db627d821cb19830"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-013",
+    "key": "case-39-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "daad89d5465d8e85fc06ce988d6f610a4be90dbeee9b5afcd35b452845a40bf7"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-016",
+    "key": "case-63-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "33ff7346bb2aa3fe3dbe31bfbae1e785ce70439b0d151d1f0d398cc086ee4635"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-016",
+    "key": "case-63-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "29f0eb6329d6277561fbeb0d1f3a35ca6385ed415b60363476deb8a8a161cd21"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-016",
+    "key": "case-63-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "8090c7ddb83ee37a4d79606041eb11e28cc8a29b9b6d64f07ece683016ca6fda"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-016",
+    "key": "case-63-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "825f0b3a82e731fce0efdf8d2c3d057e636d0c850e69c579ba07bcc61e2aaaa4"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-029",
+    "key": "case-45-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "8c18d5935937635b71d9f30d2fcc0af03b42b76b0b84ac312ddc23050eddded6"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-029",
+    "key": "case-45-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "cbe80f0863c32be85e393eaef996a530c02b5a80c678e5173c24858bc35cfe86"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-029",
+    "key": "case-45-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "26cf70d33ae274a9fc811c0e9e2cf7d5e317a80260496b4a1ecff842cf50612c"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-029",
+    "key": "case-45-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "fe813b4e801fa92535f3fd9a8c1daf79d376c9d016839c6b7bf2f8d4b827752a"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-005",
+    "key": "case-43-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "7b1b617c41aab5f5f3efaf404244898434a94a2e63588586040ea8051a320e7f"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-005",
+    "key": "case-43-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "18f0821b9190b569216740c293a9b3d3f5ddc1b845ec078279b9bd60f778660e"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-005",
+    "key": "case-43-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "9c890a56d6154c9a189b7cee7f1589f6db9c2074dc4f2dd9ef47adc0ec874b3f"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-005",
+    "key": "case-43-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "ae29adf855f066f7dba525cb7fb710db1fcada0e5dd2e1a9c5309d013ca2fb93"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-030",
+    "key": "case-47-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "8003c02ddd6aa03a2f3285bc5bcecb861ec7b2ae0d4c3aa64f928478542f1ef8"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-030",
+    "key": "case-47-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "48a33a90eabd24af81e30619cfa290a6a0789aa898290e8a12410fa5ee4723e5"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-030",
+    "key": "case-47-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "b7bb382b07c11b3350d37405d5ae891abf8e50419e9a9c72ce1d303dc2c94588"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-030",
+    "key": "case-47-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "492fb4c598d28ed7c267ab50bb0a0b589091cb6ce54a012cfa13037c95c7fb08"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-032",
+    "key": "case-22-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "4c7b5ab9b8603cb04017ab0055cce446f66b13de0e93480a2184d2ebc94bae85"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-032",
+    "key": "case-22-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "67260eb1eea32a05c32adcfd4ca324457326c6a015588e1637165393e9721954"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-032",
+    "key": "case-22-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "fceb94aaf6357e5c734fc458f58f3a674d803d31c03c5c55d9b751fe5bbf9e3d"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-032",
+    "key": "case-22-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "0d131cef6d6c32deee04b9734a7ac1dce7251188a6dd29c90d2a83ab8d9df4c0"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-062",
+    "key": "case-25-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "e7933a82efc8f8ba83b307812eff27af244530961be474d8b308accfb00b3409"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-062",
+    "key": "case-25-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "3d54c789bb83b3ae70febe535ab861d578c4fe99a4717264b1a511498f1409f2"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-046",
+    "key": "case-23-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "325fd351d918af366b9907ffcfc740c213fa391f84ffb4102c1c57f42dbcd91c"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-046",
+    "key": "case-23-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "e77bf8e7ae91d640d905499871a5770dc321546c3d60627f4a95ad37828ec299"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-002",
+    "key": "case-62-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "10199fee22d25ccd215873af311664706a385be8044a573dd81fb0fe0d48c85f"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-002",
+    "key": "case-62-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "8a3932db85b04446de320f2e480ed3315f81446f69dc17882b753cdda49d7b44"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-002",
+    "key": "case-62-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "a741a9993a455615e35f46f848bc76b23cd5b20fa8216b6b124558497be159af"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-002",
+    "key": "case-62-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "0e780eee9082fb647ab5728041bcfc267cb5458b4743a0a4f72d942470b9da8d"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-013",
+    "key": "case-39-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "86412a6c469a3e4ff36309d63c009971458bf82a4252d7e2b5b1208aeaeb89a1"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-013",
+    "key": "case-39-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "c38ced48c5c4d68f93f740ac77720d742c434579630a1afb754150444c28cd42"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-013",
+    "key": "case-39-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "4ee65b89c0a531f7bd3fb3927b6ccecef11ee490e13c34e60fea49e11515a05b"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-013",
+    "key": "case-39-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "fee45e64d62b7095816840c4d84293bf63c58c8752d64eed80deb5ff987b0235"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-008",
+    "key": "case-0-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "99c6892eba1415e27d085142b55d35423112211f9a766872ee49ee71f531656c"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-008",
+    "key": "case-0-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "ac1c65b709467e8d3a5a2a97431ff9c10b3bd0eb79b41566e02fa6bd55b102e2"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-008",
+    "key": "case-0-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "332c9ec8178e54d38c523e26c10afa00157db5c8b2ecc831cc479052f357c197"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-008",
+    "key": "case-0-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "c76d622590c97010dfa25767172655fa0bc55aada6b1f6c00f97ce5fa497b448"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-017",
+    "key": "case-31-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "1bde2fc53fc560dc8daa32dc9ed33ac80c6f04354223ceb245c958aae4b82421"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-017",
+    "key": "case-31-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "96d88949289f34d66522d3f66203881f07532bbf5a7b74f24509b3de258cc58e"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-019",
+    "key": "case-35-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "104200a4a30d20fe2966d34821e316152b8f44bb37d77e4c17ab6146f819cc16"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-019",
+    "key": "case-35-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "ace89a4e758bfa6c69d68a7c626938265c862f5e94cedd40a252366dc2cd9f13"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-054",
+    "key": "case-46-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "607b6fafd9ff24ca7e1f90200a729753d7ebd3ccb09136625561dd2edd85c06f"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-054",
+    "key": "case-46-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "12d5c5d8c28a35fccec8ddd7bde75804bf53b9df610b42bd6cca8c07e47a3899"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-001",
+    "key": "case-54-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "58a5efa1cb721df62ef6cb398e09df40342dc613fc605ef84c596116f89b1e4f"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-001",
+    "key": "case-54-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "3d742031bebc45b362306ef6ff531442824bb34208065124abc07645cdabe2ec"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-001",
+    "key": "case-54-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "0bce9725b6e3702b2468b1a8efa342bea33117a4d037611896886be1bde5593a"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-001",
+    "key": "case-54-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "4df5c089a4a95670c4332bd5e79bfb0684ce470bce2ed74db108f66fa47c9e60"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-057",
+    "key": "case-9-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "42c962216dd37f84cad10d35ddce824a59f966de590bedf5d46301ede579f662"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-057",
+    "key": "case-9-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "c1e81eb290527c72616ebf0b0a34038400faae0d6f1145eaa84fb17d66f0df3f"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-009",
+    "key": "case-53-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "fcc4909cd6d79bc0eaa7a8189f3149bbd5548c735646315f5d987e80e892bcaa"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-009",
+    "key": "case-53-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "f4be46c040a0293eb43420526c3f2625f1ed4227048aa961aa4269b7b09b4f78"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-009",
+    "key": "case-53-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "927bda54f0e067417d4d0b8ddcbf6e0933df86fb9fc47426c029a0ed60e18f53"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-009",
+    "key": "case-53-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "e2640bd6220bde7ac324ce78ef700fdfb4da37a6064c822c6a39b596f3ecb661"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-058",
+    "key": "case-13-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "685bd3821dd380706e127e3426608efa2c657bb58abf9700cbfbd301573a7717"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-058",
+    "key": "case-13-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "958f2d4a6b99fd78c54f2ab944d5bf79224b1de3fff257b026e492b2d33931b9"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-041",
+    "key": "case-18-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "a35971d84a7240ccb190ad78ac63d0c8e211d5f4e306e28c56b7fba5eb380501"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-041",
+    "key": "case-18-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "13f2df6fe0ee433fa0197c16387c0a9e5506e1f04e5cca8beca71dc957bfa652"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-053",
+    "key": "case-55-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "459285dd566a43b514f6c30fa5aeb9ac465c1cb5a09c9b06b66d239e6ff9cf1c"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-053",
+    "key": "case-55-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "7bcbe4304b9562c87d5b375d94dba17f93526dfbaa958820e95bb93d11c11205"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-007",
+    "key": "case-59-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "71b71ae55cd8b4c3b748e8c6727e4eb7ed3a4236811d3cba0a5eca6a3e1dc519"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-007",
+    "key": "case-59-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "80702b00b7f0cd3376584cf4acad360e3a9c232daa79682858f3a1529561c348"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-007",
+    "key": "case-59-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "d2813ae5bdf2df13ddde79cb70442a7d1d21a2183a97971d27ebc1acbd584260"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-007",
+    "key": "case-59-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "de32befca60804abb9fb53a5c926e44a6ad531f9d6c0442b8fe4643abc56a61d"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-046",
+    "key": "case-23-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "d434e6d30242cb924fff9ec63549234a9ec6a1a1ab7b0cc4cda07d4af66f9234"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-046",
+    "key": "case-23-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "fd13c9e007528556f8f6a0e74caabde7660901d4db1ceb6e881621b0ffe204ff"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-055",
+    "key": "case-33-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "3af5eaac696773708803a511d895e8678ebec8250fe26cacda95839f3d534ea9"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-055",
+    "key": "case-33-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "f0722a9e7556081b40ba87d89725c43bb6b82bf81bd4898db760fc8e52e57289"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-041",
+    "key": "case-18-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "a5f01ff51cdb9552766f09e4fa98736200f6452716b1b2b50d1802129b41fd39"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-041",
+    "key": "case-18-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "d1d231781caa35be9034a7361ccc9b8681d00c4379941f59660509ed2be39dec"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-053",
+    "key": "case-55-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "4c3ce1960fbe66aa4d171d8a9e1f8a43609c9babf8a19974dcf3403e8840bb67"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-053",
+    "key": "case-55-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "071dc27caba0072262733713b41ebc7756948256d708fdb0626abb177362cd4c"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-037",
+    "key": "case-11-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "4ad91896e95c89cf084aa78b5bec28053fc628d3edaa7a16e305d8f2bd5c9c42"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-037",
+    "key": "case-11-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "0deef88acfabec11f869a288b6bd5b581cfd29eae70e44a2a89482e6d5c44e2d"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-037",
+    "key": "case-11-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "21bc4dab726b7eccfd9246898458fbbba281e768a132114d1543f1e4201ce4a7"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-037",
+    "key": "case-11-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "0a029f193e9bccf9bdd4736558fd986b86b89db1e63f44e05fd9cbae7ebfa53b"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-038",
+    "key": "case-3-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "89ca51bb1ff2058eb2b1187df9eb2ae06ae4338c9d59cf045a59755a1c0159e9"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-038",
+    "key": "case-3-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "dadb44c5a0af74c4041b17834b36aed70dd5083873311e32d9b2486d7fe6e129"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-038",
+    "key": "case-3-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "7bb017403861e9383e62a190e73afe54385946319eaf02972927567e1e5130b7"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-038",
+    "key": "case-3-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "336c14c56b644b731fd8f0b66578be65066df4562f2746d94525d4520b10d7bf"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-014",
+    "key": "case-42-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "433eb8e1ef135f687dc170f64a07aa86b2889618fbc6ed64245a7674c3a92e9c"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-014",
+    "key": "case-42-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "2ef5e74dbef2225a6f1b22af32b33e3ef50333c3aacfb78f16afb9b9962e60d5"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-014",
+    "key": "case-42-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "29f65ab5f4ffafadd6e6e918acc13a9dd9657b816940175985b1c83f5974ed16"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-014",
+    "key": "case-42-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "53ac70c4ddc4fb8db00912a83f0bfb56b91473c8c53fa5136bb98c2fe04786a5"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-039",
+    "key": "case-10-repeat-1-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "7792c12b80248476bac3ff8a20a89d0a4280d0cda34a4340bdd1025e90623fba"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-039",
+    "key": "case-10-repeat-1-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 1,
+    "request_digest": "0ea988e48a900666d331e4aed41a516b2c432cbf0ed51ca7f9d2ccb364029da1"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-039",
+    "key": "case-10-repeat-1-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 1,
+    "request_digest": "ba28557b27504d2f9d4a77ade867d44e83933d36ea0b04242c60b9b6a0ca0a21"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-039",
+    "key": "case-10-repeat-1-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "11fe6ea1a14aad4e0874eda1f2178fdca70ea232d1bc2487e803ea235ac39f1e"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-050",
+    "key": "case-29-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "8978c1f81e978e14cc2481c4c26f6ff0c5d38f28c64e5f0f4f8e01d81aee11e5"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-050",
+    "key": "case-29-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "1c00679c1261d9699d1a6a745a3b8cd6e12eb6287bc1002985785fb35be301e3"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-026",
+    "key": "case-32-repeat-0-singleton-0",
+    "question_ids": [
+      "/claim_records/0/content"
+    ],
+    "repeat": 0,
+    "request_digest": "a8bc5e869772662d03c684db91aed2581364d7a6305fa1efffd7f1dde5854c39"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-026",
+    "key": "case-32-repeat-0-singleton-1",
+    "question_ids": [
+      "/claim_records/1/content"
+    ],
+    "repeat": 0,
+    "request_digest": "e92ac268c08ab859c1b55974a652693657e6e587bac728d802edc94c32c33bf5"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-026",
+    "key": "case-32-repeat-0-singleton-2",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "50c2f9251bd9b93f997f44bfc70a8f33357c832e8d773193e95ea329e9177a6d"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-026",
+    "key": "case-32-repeat-0-grouped-0",
+    "question_ids": [
+      "/claim_records/0/content",
+      "/claim_records/1/content",
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "ba330d4ebe63b3693a362e549c0d8c1bdb86238cc9f2b66fcadbb9c8159fed5f"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-048",
+    "key": "case-26-repeat-0-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "cac8914daf873775c781353ed973b372c9bbed7afdaf7b05dce1200109be211c"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-048",
+    "key": "case-26-repeat-0-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 0,
+    "request_digest": "0f1c08c090ebb5b8e80856f7222aeda4c3489a93911fd826fb66bdd59fc8ed6a"
+  },
+  {
+    "arm": "grouped",
+    "case_id": "fh-047",
+    "key": "case-5-repeat-1-grouped-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "3b1228b4da8e04f00fb9652d62a119d8789b3784667ea13d6f5fcbde50bb0071"
+  },
+  {
+    "arm": "singleton",
+    "case_id": "fh-047",
+    "key": "case-5-repeat-1-singleton-0",
+    "question_ids": [
+      "/content"
+    ],
+    "repeat": 1,
+    "request_digest": "7c08cae4425721fae0a55483a4e0a2ffdff0a2ebb24caa6ae593806f6d331fa7"
+  }
+]

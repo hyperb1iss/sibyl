@@ -1,0 +1,30 @@
+{
+  "verdict": "PASS for offline experiment, not production activation",
+  "implementation_commit": "e8bc5d00",
+  "tests": 193,
+  "lint": "PASS",
+  "typecheck": "PASS",
+  "independent_focused_tests": 39,
+  "root_spotcheck_tests": 13,
+  "independent_heldout_receipts": 384,
+  "independent_calibration_receipts": 256,
+  "root_raw_audit_reproduced": true,
+  "all_independent_metrics_reconciled": true,
+  "exact_replay": [
+    "calls.json",
+    "predictions.json",
+    "summary.json"
+  ],
+  "results_review": "PASS",
+  "independence": "native same-family reviewers; numerical auditor authored fixture but not policy/analysis",
+  "policy_sha256": "b482f63ea506521c585e0ec6b07f595d45fa9207cd35b574308d1839c749fbb8",
+  "analysis_sha256": "a380521b6d6877ccadb8a3c2e35ad17282535146a87aee7c3facc3677f1064b7",
+  "report_sha256": "072cb2b2b242629536118748a50d55fa236ac81dd476f356012864f8534f7424",
+  "remaining_limits": [
+    "Synthetic cases and correlated repeats",
+    "No measured expensive fallback or whole-eval savings",
+    "Confidence and numeric guard do not establish independent safety improvement on this holdout",
+    "Arithmetic false support persists",
+    "Inherited summary corpus-specific sentence is stale; results report explicitly corrects it"
+  ]
+}
