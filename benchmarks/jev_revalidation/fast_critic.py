@@ -158,7 +158,7 @@ def _bound_invocation(
     return _Invocation(prepared.payload_json, expected["messages"][0]["content"])
 
 
-def _output(body: Any, status: int | None, usage: dict[str, Any]) -> CriticOutput:
+def _arguments(body: Any, status: int | None, *, tool_name: str = "CriticOutput") -> Any:
     if status != HTTPStatus.OK:
         raise ValueError("http_error")
     if not isinstance(body, dict):
@@ -183,15 +183,23 @@ def _output(body: Any, status: int | None, usage: dict[str, Any]) -> CriticOutpu
     if (
         not isinstance(function, dict)
         or tool.get("type") != "function"
-        or function.get("name") != "CriticOutput"
+        or function.get("name") != tool_name
     ):
         raise ValueError("invalid_tool_name")
     arguments = function.get("arguments")
     if not isinstance(arguments, str):
         raise TypeError("invalid_critic_output")
-    output = CriticOutput.model_validate(read_json_value(arguments.encode()))
+    return read_json_value(arguments.encode())
+
+
+def _require_usage(usage: dict[str, Any]) -> None:
     if any(usage[key] is None for key in ("input_tokens", "output_tokens", "total_tokens")):
         raise ValueError("missing_token_usage")
+
+
+def _output(body: Any, status: int | None, usage: dict[str, Any]) -> CriticOutput:
+    output = CriticOutput.model_validate(_arguments(body, status))
+    _require_usage(usage)
     return output
 
 
@@ -200,6 +208,7 @@ async def interpret(
     raw: dict[str, Any],
     *,
     request_builder: Callable[..., dict[str, Any]] = critic_request,
+    output_parser: Callable[..., tuple[CriticOutput, dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     """Recheck the actual wire request before applying unchanged product mechanics."""
     body = None
@@ -219,10 +228,14 @@ async def interpret(
         responded=raw.get("http_status") is not None,
     )
     result = None
+    artifacts: dict[str, Any] = {}
     try:
         prepared = _bound_invocation(entry, raw, request_builder)
         if error is None:
-            output = _output(body, raw.get("http_status"), usage)
+            if output_parser is None:
+                output = _output(body, raw.get("http_status"), usage)
+            else:
+                output, artifacts = output_parser(prepared, body, raw.get("http_status"), usage)
             recorded_usage = ExtractionUsage(
                 provider=usage["provider"],
                 model=usage["model"],
@@ -249,4 +262,5 @@ async def interpret(
         "error_code": error,
         "result": result,
         "usage": usage,
+        **artifacts,
     }

@@ -1,0 +1,2429 @@
+{
+  "verdict": "PASS",
+  "cohorts": {
+    "retained": {
+      "verdict": "PASS",
+      "counts": {
+        "exact_response_joins": 96,
+        "finding_annotations": 85,
+        "verdict_annotations": 91
+      },
+      "arms": {
+        "verdict_misleading": {
+          "paths": 16,
+          "semantic_pass": 8,
+          "projected_semantic_pass": 8,
+          "raw_semantic_pass": 8,
+          "projection_hides_defect": 0,
+          "raw_verdicts_reviewed": 30,
+          "raw_verdicts_unsupported": 9,
+          "raw_rationales_unsupported": 9,
+          "covered_concerns": 7,
+          "material_concerns": 8,
+          "fully_valid_findings": 7,
+          "mechanically_valid_findings": 15,
+          "unsupported_findings_including_invalid_diagnostics": 8,
+          "overstated_basis_including_invalid_diagnostics": 6,
+          "invented_facts_including_invalid_diagnostics": 1,
+          "valid_abstentions": 0
+        },
+        "verdict_live_jev": {
+          "paths": 16,
+          "semantic_pass": 12,
+          "projected_semantic_pass": 12,
+          "raw_semantic_pass": 12,
+          "projection_hides_defect": 0,
+          "raw_verdicts_reviewed": 30,
+          "raw_verdicts_unsupported": 3,
+          "raw_rationales_unsupported": 4,
+          "covered_concerns": 7,
+          "material_concerns": 8,
+          "fully_valid_findings": 7,
+          "mechanically_valid_findings": 11,
+          "unsupported_findings_including_invalid_diagnostics": 3,
+          "overstated_basis_including_invalid_diagnostics": 4,
+          "invented_facts_including_invalid_diagnostics": 0,
+          "valid_abstentions": 0
+        },
+        "baseline_direct": {
+          "paths": 16,
+          "semantic_pass": 11,
+          "projected_semantic_pass": 11,
+          "raw_semantic_pass": 11,
+          "projection_hides_defect": 0,
+          "raw_verdicts_reviewed": 0,
+          "raw_verdicts_unsupported": 0,
+          "raw_rationales_unsupported": 0,
+          "covered_concerns": 8,
+          "material_concerns": 8,
+          "fully_valid_findings": 8,
+          "mechanically_valid_findings": 14,
+          "unsupported_findings_including_invalid_diagnostics": 6,
+          "overstated_basis_including_invalid_diagnostics": 5,
+          "invented_facts_including_invalid_diagnostics": 0,
+          "valid_abstentions": 0
+        },
+        "baseline_misleading": {
+          "paths": 16,
+          "semantic_pass": 6,
+          "projected_semantic_pass": 6,
+          "raw_semantic_pass": 6,
+          "projection_hides_defect": 0,
+          "raw_verdicts_reviewed": 0,
+          "raw_verdicts_unsupported": 0,
+          "raw_rationales_unsupported": 0,
+          "covered_concerns": 4,
+          "material_concerns": 8,
+          "fully_valid_findings": 4,
+          "mechanically_valid_findings": 18,
+          "unsupported_findings_including_invalid_diagnostics": 13,
+          "overstated_basis_including_invalid_diagnostics": 13,
+          "invented_facts_including_invalid_diagnostics": 3,
+          "valid_abstentions": 0
+        },
+        "verdict_direct": {
+          "paths": 16,
+          "semantic_pass": 9,
+          "projected_semantic_pass": 9,
+          "raw_semantic_pass": 9,
+          "projection_hides_defect": 0,
+          "raw_verdicts_reviewed": 31,
+          "raw_verdicts_unsupported": 9,
+          "raw_rationales_unsupported": 10,
+          "covered_concerns": 7,
+          "material_concerns": 8,
+          "fully_valid_findings": 7,
+          "mechanically_valid_findings": 15,
+          "unsupported_findings_including_invalid_diagnostics": 9,
+          "overstated_basis_including_invalid_diagnostics": 7,
+          "invented_facts_including_invalid_diagnostics": 1,
+          "valid_abstentions": 0
+        },
+        "baseline_live_jev": {
+          "paths": 16,
+          "semantic_pass": 13,
+          "projected_semantic_pass": 13,
+          "raw_semantic_pass": 13,
+          "projection_hides_defect": 0,
+          "raw_verdicts_reviewed": 0,
+          "raw_verdicts_unsupported": 0,
+          "raw_rationales_unsupported": 0,
+          "covered_concerns": 7,
+          "material_concerns": 8,
+          "fully_valid_findings": 7,
+          "mechanically_valid_findings": 10,
+          "unsupported_findings_including_invalid_diagnostics": 2,
+          "overstated_basis_including_invalid_diagnostics": 3,
+          "invented_facts_including_invalid_diagnostics": 0,
+          "valid_abstentions": 0
+        }
+      },
+      "comparisons": {
+        "baseline_direct__to__baseline_live_jev": {
+          "semantic_improvements": 3,
+          "semantic_regressions": 1,
+          "projected_improvements": 3,
+          "projected_regressions": 1,
+          "new_missed_concern_paths": 1,
+          "new_defect_target_paths": 1,
+          "changes": [
+            {
+              "case_id": "af-005",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "af-008",
+              "repeat": 0,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [
+                "af-008-concern-1"
+              ],
+              "new_defect_targets": [
+                [
+                  "/content",
+                  "overstated_basis"
+                ]
+              ]
+            },
+            {
+              "case_id": "hf-010",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "hf-024",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            }
+          ]
+        },
+        "baseline_direct__to__baseline_misleading": {
+          "semantic_improvements": 1,
+          "semantic_regressions": 6,
+          "projected_improvements": 1,
+          "projected_regressions": 6,
+          "new_missed_concern_paths": 4,
+          "new_defect_target_paths": 8,
+          "changes": [
+            {
+              "case_id": "af-005",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "af-006",
+              "repeat": 0,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [
+                "af-006-concern-1"
+              ],
+              "new_defect_targets": [
+                [
+                  "/claim_records/0/content",
+                  "overstated_basis"
+                ],
+                [
+                  "/claim_records/0/content",
+                  "unsupported_concern"
+                ],
+                [
+                  "/content",
+                  "invented_fact"
+                ]
+              ]
+            },
+            {
+              "case_id": "af-008",
+              "repeat": 0,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [
+                "af-008-concern-1"
+              ],
+              "new_defect_targets": [
+                [
+                  "/claim_records/0/content",
+                  "overstated_basis"
+                ],
+                [
+                  "/claim_records/0/content",
+                  "unsupported_concern"
+                ]
+              ]
+            },
+            {
+              "case_id": "af-010",
+              "repeat": 0,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [],
+              "new_defect_targets": [
+                [
+                  "/claim_records/0/content",
+                  "invented_fact"
+                ],
+                [
+                  "/claim_records/0/content",
+                  "overstated_basis"
+                ],
+                [
+                  "/claim_records/0/content",
+                  "unsupported_concern"
+                ]
+              ]
+            },
+            {
+              "case_id": "af-015",
+              "repeat": 0,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [],
+              "new_defect_targets": [
+                [
+                  "/claim_records/0/content",
+                  "overstated_basis"
+                ],
+                [
+                  "/claim_records/0/content",
+                  "unsupported_concern"
+                ],
+                [
+                  "/content",
+                  "overstated_basis"
+                ],
+                [
+                  "/content",
+                  "unsupported_concern"
+                ]
+              ]
+            },
+            {
+              "case_id": "af-016",
+              "repeat": 0,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [],
+              "new_defect_targets": [
+                [
+                  "/claim_records/0/content",
+                  "overstated_basis"
+                ],
+                [
+                  "/claim_records/0/content",
+                  "unsupported_concern"
+                ]
+              ]
+            },
+            {
+              "case_id": "hf-006",
+              "repeat": 0,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [],
+              "new_defect_targets": [
+                [
+                  "/claim_records/0/content",
+                  "overstated_basis"
+                ],
+                [
+                  "/claim_records/0/content",
+                  "unsupported_concern"
+                ]
+              ]
+            },
+            {
+              "case_id": "hf-010",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": false,
+              "before_projected_pass": false,
+              "after_projected_pass": false,
+              "new_missed_concerns": [
+                "hf-010-concern-1"
+              ],
+              "new_defect_targets": [
+                [
+                  "/claim_records/0/content",
+                  "invented_fact"
+                ]
+              ]
+            },
+            {
+              "case_id": "hf-023",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": false,
+              "before_projected_pass": false,
+              "after_projected_pass": false,
+              "new_missed_concerns": [],
+              "new_defect_targets": [
+                [
+                  "/content",
+                  "overstated_basis"
+                ],
+                [
+                  "/content",
+                  "unsupported_concern"
+                ]
+              ]
+            },
+            {
+              "case_id": "hf-024",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": false,
+              "before_projected_pass": false,
+              "after_projected_pass": false,
+              "new_missed_concerns": [
+                "hf-024-concern-1"
+              ],
+              "new_defect_targets": []
+            }
+          ]
+        },
+        "baseline_direct__to__verdict_direct": {
+          "semantic_improvements": 0,
+          "semantic_regressions": 2,
+          "projected_improvements": 0,
+          "projected_regressions": 2,
+          "new_missed_concern_paths": 1,
+          "new_defect_target_paths": 2,
+          "changes": [
+            {
+              "case_id": "af-005",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": false,
+              "before_projected_pass": false,
+              "after_projected_pass": false,
+              "new_missed_concerns": [],
+              "new_defect_targets": [
+                [
+                  "/content",
+                  "invented_fact"
+                ]
+              ]
+            },
+            {
+              "case_id": "af-006",
+              "repeat": 0,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [
+                "af-006-concern-1"
+              ],
+              "new_defect_targets": [
+                [
+                  "/claim_records/0/content",
+                  "overstated_basis"
+                ],
+                [
+                  "/claim_records/0/content",
+                  "unsupported_concern"
+                ],
+                [
+                  "/content",
+                  "overstated_basis"
+                ]
+              ]
+            },
+            {
+              "case_id": "hf-017",
+              "repeat": 0,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            }
+          ]
+        },
+        "baseline_live_jev__to__verdict_live_jev": {
+          "semantic_improvements": 0,
+          "semantic_regressions": 1,
+          "projected_improvements": 0,
+          "projected_regressions": 1,
+          "new_missed_concern_paths": 0,
+          "new_defect_target_paths": 1,
+          "changes": [
+            {
+              "case_id": "hf-024",
+              "repeat": 0,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [],
+              "new_defect_targets": [
+                [
+                  "/claim_records/0/content",
+                  "overstated_basis"
+                ],
+                [
+                  "/claim_records/0/content",
+                  "unsupported_concern"
+                ]
+              ]
+            }
+          ]
+        },
+        "baseline_misleading__to__verdict_misleading": {
+          "semantic_improvements": 3,
+          "semantic_regressions": 1,
+          "projected_improvements": 3,
+          "projected_regressions": 1,
+          "new_missed_concern_paths": 1,
+          "new_defect_target_paths": 1,
+          "changes": [
+            {
+              "case_id": "af-005",
+              "repeat": 0,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [],
+              "new_defect_targets": [
+                [
+                  "/content",
+                  "invented_fact"
+                ],
+                [
+                  "/content",
+                  "unsupported_concern"
+                ]
+              ]
+            },
+            {
+              "case_id": "af-008",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "af-010",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": false,
+              "before_projected_pass": false,
+              "after_projected_pass": false,
+              "new_missed_concerns": [
+                "af-010-concern-1"
+              ],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "af-015",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "hf-006",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            }
+          ]
+        },
+        "verdict_direct__to__verdict_live_jev": {
+          "semantic_improvements": 4,
+          "semantic_regressions": 1,
+          "projected_improvements": 4,
+          "projected_regressions": 1,
+          "new_missed_concern_paths": 1,
+          "new_defect_target_paths": 1,
+          "changes": [
+            {
+              "case_id": "af-005",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "af-006",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "af-008",
+              "repeat": 0,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [
+                "af-008-concern-1"
+              ],
+              "new_defect_targets": [
+                [
+                  "/content",
+                  "overstated_basis"
+                ]
+              ]
+            },
+            {
+              "case_id": "hf-010",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "hf-017",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            }
+          ]
+        },
+        "verdict_direct__to__verdict_misleading": {
+          "semantic_improvements": 1,
+          "semantic_regressions": 2,
+          "projected_improvements": 1,
+          "projected_regressions": 2,
+          "new_missed_concern_paths": 1,
+          "new_defect_target_paths": 1,
+          "changes": [
+            {
+              "case_id": "af-010",
+              "repeat": 0,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [
+                "af-010-concern-1"
+              ],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "af-016",
+              "repeat": 0,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [],
+              "new_defect_targets": [
+                [
+                  "/claim_records/0/content",
+                  "unsupported_concern"
+                ]
+              ]
+            },
+            {
+              "case_id": "hf-017",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            }
+          ]
+        }
+      },
+      "new_raw_defect_diagnostics": {
+        "baseline_direct__to__baseline_live_jev": [],
+        "baseline_direct__to__baseline_misleading": [],
+        "baseline_direct__to__verdict_direct": [
+          {
+            "case_id": "af-005",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/content",
+                "invented_fact"
+              ],
+              [
+                "/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/content",
+                "unsupported_verdict"
+              ]
+            ]
+          },
+          {
+            "case_id": "af-006",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/claim_records/0/content",
+                "overstated_basis"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_verdict"
+              ],
+              [
+                "/content",
+                "overstated_basis"
+              ],
+              [
+                "/content",
+                "unsupported_rationale"
+              ]
+            ]
+          },
+          {
+            "case_id": "hf-009",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/claim_records/0/content",
+                "overstated_basis"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_verdict"
+              ],
+              [
+                "/content",
+                "overstated_basis"
+              ],
+              [
+                "/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/content",
+                "unsupported_verdict"
+              ]
+            ]
+          },
+          {
+            "case_id": "hf-010",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/claim_records/0/content",
+                "overstated_basis"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_verdict"
+              ]
+            ]
+          },
+          {
+            "case_id": "hf-023",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/claim_records/0/content",
+                "overstated_basis"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_verdict"
+              ]
+            ]
+          },
+          {
+            "case_id": "hf-024",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/claim_records/0/content",
+                "overstated_basis"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_verdict"
+              ]
+            ]
+          }
+        ],
+        "baseline_live_jev__to__verdict_live_jev": [
+          {
+            "case_id": "af-008",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/content",
+                "overstated_basis"
+              ],
+              [
+                "/content",
+                "unsupported_rationale"
+              ]
+            ]
+          },
+          {
+            "case_id": "hf-009",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/content",
+                "overstated_basis"
+              ],
+              [
+                "/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/content",
+                "unsupported_verdict"
+              ]
+            ]
+          },
+          {
+            "case_id": "hf-023",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/claim_records/0/content",
+                "overstated_basis"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_verdict"
+              ]
+            ]
+          },
+          {
+            "case_id": "hf-024",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/claim_records/0/content",
+                "overstated_basis"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_verdict"
+              ]
+            ]
+          }
+        ],
+        "baseline_misleading__to__verdict_misleading": [
+          {
+            "case_id": "af-005",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/content",
+                "invented_fact"
+              ],
+              [
+                "/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/content",
+                "unsupported_verdict"
+              ]
+            ]
+          },
+          {
+            "case_id": "af-006",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/claim_records/0/content",
+                "overstated_basis"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_verdict"
+              ]
+            ]
+          },
+          {
+            "case_id": "af-010",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/content",
+                "invented_fact"
+              ],
+              [
+                "/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/content",
+                "unsupported_verdict"
+              ]
+            ]
+          },
+          {
+            "case_id": "af-016",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/claim_records/0/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_verdict"
+              ]
+            ]
+          },
+          {
+            "case_id": "hf-009",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/claim_records/0/content",
+                "overstated_basis"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_verdict"
+              ],
+              [
+                "/content",
+                "overstated_basis"
+              ],
+              [
+                "/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/content",
+                "unsupported_verdict"
+              ]
+            ]
+          },
+          {
+            "case_id": "hf-010",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/claim_records/0/content",
+                "overstated_basis"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_verdict"
+              ]
+            ]
+          },
+          {
+            "case_id": "hf-023",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/claim_records/0/content",
+                "overstated_basis"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_verdict"
+              ]
+            ]
+          },
+          {
+            "case_id": "hf-024",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/claim_records/0/content",
+                "overstated_basis"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_verdict"
+              ]
+            ]
+          }
+        ],
+        "verdict_direct__to__verdict_live_jev": [
+          {
+            "case_id": "af-008",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/content",
+                "overstated_basis"
+              ],
+              [
+                "/content",
+                "unsupported_rationale"
+              ]
+            ]
+          }
+        ],
+        "verdict_direct__to__verdict_misleading": [
+          {
+            "case_id": "af-010",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/content",
+                "invented_fact"
+              ],
+              [
+                "/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/content",
+                "unsupported_verdict"
+              ]
+            ]
+          },
+          {
+            "case_id": "af-016",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/claim_records/0/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_verdict"
+              ]
+            ]
+          }
+        ]
+      },
+      "mechanical_errors_zero_credit": [
+        "case-4-repeat-0-verdict_direct"
+      ],
+      "review_sha256": "f996ffad1769545a616b867529588b1355cd42284cc0cbf48c22e85ae0ddabe8",
+      "summary_sha256": "5fcb3e1e0370fee5002231de57d8f718137929f695a52c07b615e48f0abc1310",
+      "limits": [
+        "This check verifies frozen judgments and aggregation, not a new semantic annotation.",
+        "Root paired defect-target metrics cover consumer findings only. Raw verdict/rationale defects are separately recomputed here; cross-contract baseline has no analogous extra raw surface.",
+        "Diagnostic target sets are not a full prose-equivalence or causal-effect test.",
+        "Contract-visible, hint-mode-blind same-family review; dependent pairs and repeats, separate cohorts.",
+        "Malformed raw strings are inspected only as labeled diagnostics, never repaired into applied output."
+      ],
+      "frozen_overrides_sha256": "1881a351ac3c1c6804a45518600da8e6945007e34e4b385a1bb83f1ddf8dca50",
+      "exact_overrides_checked": 5
+    },
+    "fresh": {
+      "verdict": "PASS",
+      "counts": {
+        "exact_response_joins": 192,
+        "finding_annotations": 133,
+        "verdict_annotations": 192,
+        "malformed_verdict_string_diagnostic_entries": 2,
+        "malformed_findings_string_diagnostics": 1
+      },
+      "arms": {
+        "verdict_direct": {
+          "paths": 32,
+          "semantic_pass": 28,
+          "projected_semantic_pass": 28,
+          "raw_semantic_pass": 28,
+          "projection_hides_defect": 0,
+          "raw_verdicts_reviewed": 64,
+          "raw_verdicts_unsupported": 4,
+          "raw_rationales_unsupported": 4,
+          "covered_concerns": 16,
+          "material_concerns": 16,
+          "fully_valid_findings": 16,
+          "mechanically_valid_findings": 20,
+          "unsupported_findings_including_invalid_diagnostics": 4,
+          "overstated_basis_including_invalid_diagnostics": 2,
+          "invented_facts_including_invalid_diagnostics": 0,
+          "valid_abstentions": 0
+        },
+        "baseline_direct": {
+          "paths": 32,
+          "semantic_pass": 22,
+          "projected_semantic_pass": 22,
+          "raw_semantic_pass": 22,
+          "projection_hides_defect": 0,
+          "raw_verdicts_reviewed": 0,
+          "raw_verdicts_unsupported": 0,
+          "raw_rationales_unsupported": 0,
+          "covered_concerns": 14,
+          "material_concerns": 16,
+          "fully_valid_findings": 14,
+          "mechanically_valid_findings": 24,
+          "unsupported_findings_including_invalid_diagnostics": 10,
+          "overstated_basis_including_invalid_diagnostics": 6,
+          "invented_facts_including_invalid_diagnostics": 0,
+          "valid_abstentions": 0
+        },
+        "baseline_misleading": {
+          "paths": 32,
+          "semantic_pass": 14,
+          "projected_semantic_pass": 14,
+          "raw_semantic_pass": 14,
+          "projection_hides_defect": 0,
+          "raw_verdicts_reviewed": 0,
+          "raw_verdicts_unsupported": 0,
+          "raw_rationales_unsupported": 0,
+          "covered_concerns": 9,
+          "material_concerns": 16,
+          "fully_valid_findings": 9,
+          "mechanically_valid_findings": 27,
+          "unsupported_findings_including_invalid_diagnostics": 19,
+          "overstated_basis_including_invalid_diagnostics": 17,
+          "invented_facts_including_invalid_diagnostics": 2,
+          "valid_abstentions": 0
+        },
+        "verdict_live_jev": {
+          "paths": 32,
+          "semantic_pass": 29,
+          "projected_semantic_pass": 29,
+          "raw_semantic_pass": 29,
+          "projection_hides_defect": 0,
+          "raw_verdicts_reviewed": 64,
+          "raw_verdicts_unsupported": 2,
+          "raw_rationales_unsupported": 2,
+          "covered_concerns": 16,
+          "material_concerns": 16,
+          "fully_valid_findings": 16,
+          "mechanically_valid_findings": 18,
+          "unsupported_findings_including_invalid_diagnostics": 2,
+          "overstated_basis_including_invalid_diagnostics": 0,
+          "invented_facts_including_invalid_diagnostics": 0,
+          "valid_abstentions": 0
+        },
+        "verdict_misleading": {
+          "paths": 32,
+          "semantic_pass": 23,
+          "projected_semantic_pass": 23,
+          "raw_semantic_pass": 23,
+          "projection_hides_defect": 0,
+          "raw_verdicts_reviewed": 64,
+          "raw_verdicts_unsupported": 11,
+          "raw_rationales_unsupported": 11,
+          "covered_concerns": 14,
+          "material_concerns": 16,
+          "fully_valid_findings": 14,
+          "mechanically_valid_findings": 23,
+          "unsupported_findings_including_invalid_diagnostics": 9,
+          "overstated_basis_including_invalid_diagnostics": 6,
+          "invented_facts_including_invalid_diagnostics": 1,
+          "valid_abstentions": 0
+        },
+        "baseline_live_jev": {
+          "paths": 32,
+          "semantic_pass": 30,
+          "projected_semantic_pass": 30,
+          "raw_semantic_pass": 30,
+          "projection_hides_defect": 0,
+          "raw_verdicts_reviewed": 0,
+          "raw_verdicts_unsupported": 0,
+          "raw_rationales_unsupported": 0,
+          "covered_concerns": 16,
+          "material_concerns": 16,
+          "fully_valid_findings": 16,
+          "mechanically_valid_findings": 18,
+          "unsupported_findings_including_invalid_diagnostics": 2,
+          "overstated_basis_including_invalid_diagnostics": 0,
+          "invented_facts_including_invalid_diagnostics": 0,
+          "valid_abstentions": 0
+        }
+      },
+      "comparisons": {
+        "baseline_direct__to__baseline_live_jev": {
+          "semantic_improvements": 8,
+          "semantic_regressions": 0,
+          "projected_improvements": 8,
+          "projected_regressions": 0,
+          "new_missed_concern_paths": 0,
+          "new_defect_target_paths": 0,
+          "changes": [
+            {
+              "case_id": "vf-004",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "vf-006",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "vf-006",
+              "repeat": 1,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "vf-010",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "vf-011",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "vf-011",
+              "repeat": 1,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "vf-012",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "vf-016",
+              "repeat": 1,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            }
+          ]
+        },
+        "baseline_direct__to__baseline_misleading": {
+          "semantic_improvements": 2,
+          "semantic_regressions": 10,
+          "projected_improvements": 2,
+          "projected_regressions": 10,
+          "new_missed_concern_paths": 7,
+          "new_defect_target_paths": 14,
+          "changes": [
+            {
+              "case_id": "vf-002",
+              "repeat": 1,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [
+                "vf-002-concern-1"
+              ],
+              "new_defect_targets": [
+                [
+                  "/claim_records/0/content",
+                  "overstated_basis"
+                ],
+                [
+                  "/claim_records/0/content",
+                  "unsupported_concern"
+                ]
+              ]
+            },
+            {
+              "case_id": "vf-004",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": false,
+              "before_projected_pass": false,
+              "after_projected_pass": false,
+              "new_missed_concerns": [
+                "vf-004-concern-1"
+              ],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "vf-004",
+              "repeat": 1,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [
+                "vf-004-concern-1"
+              ],
+              "new_defect_targets": [
+                [
+                  "/content",
+                  "overstated_basis"
+                ],
+                [
+                  "/content",
+                  "unsupported_concern"
+                ]
+              ]
+            },
+            {
+              "case_id": "vf-005",
+              "repeat": 1,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "vf-006",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "vf-008",
+              "repeat": 1,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [],
+              "new_defect_targets": [
+                [
+                  "/content",
+                  "overstated_basis"
+                ],
+                [
+                  "/content",
+                  "unsupported_concern"
+                ]
+              ]
+            },
+            {
+              "case_id": "vf-009",
+              "repeat": 0,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [],
+              "new_defect_targets": [
+                [
+                  "/claim_records/0/content",
+                  "overstated_basis"
+                ],
+                [
+                  "/claim_records/0/content",
+                  "unsupported_concern"
+                ],
+                [
+                  "/content",
+                  "overstated_basis"
+                ],
+                [
+                  "/content",
+                  "unsupported_concern"
+                ]
+              ]
+            },
+            {
+              "case_id": "vf-010",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": false,
+              "before_projected_pass": false,
+              "after_projected_pass": false,
+              "new_missed_concerns": [
+                "vf-010-concern-1"
+              ],
+              "new_defect_targets": [
+                [
+                  "/claim_records/0/content",
+                  "overstated_basis"
+                ]
+              ]
+            },
+            {
+              "case_id": "vf-010",
+              "repeat": 1,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [
+                "vf-010-concern-1"
+              ],
+              "new_defect_targets": [
+                [
+                  "/claim_records/0/content",
+                  "overstated_basis"
+                ],
+                [
+                  "/claim_records/0/content",
+                  "unsupported_concern"
+                ]
+              ]
+            },
+            {
+              "case_id": "vf-011",
+              "repeat": 1,
+              "before_pass": false,
+              "after_pass": false,
+              "before_projected_pass": false,
+              "after_projected_pass": false,
+              "new_missed_concerns": [],
+              "new_defect_targets": [
+                [
+                  "/claim_records/0/content",
+                  "overstated_basis"
+                ],
+                [
+                  "/claim_records/0/content",
+                  "unsupported_concern"
+                ]
+              ]
+            },
+            {
+              "case_id": "vf-012",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": false,
+              "before_projected_pass": false,
+              "after_projected_pass": false,
+              "new_missed_concerns": [],
+              "new_defect_targets": [
+                [
+                  "/content",
+                  "invented_fact"
+                ]
+              ]
+            },
+            {
+              "case_id": "vf-012",
+              "repeat": 1,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [],
+              "new_defect_targets": [
+                [
+                  "/content",
+                  "unsupported_concern"
+                ]
+              ]
+            },
+            {
+              "case_id": "vf-013",
+              "repeat": 0,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [],
+              "new_defect_targets": [
+                [
+                  "/claim_records/0/content",
+                  "overstated_basis"
+                ],
+                [
+                  "/claim_records/0/content",
+                  "unsupported_concern"
+                ]
+              ]
+            },
+            {
+              "case_id": "vf-013",
+              "repeat": 1,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [],
+              "new_defect_targets": [
+                [
+                  "/content",
+                  "overstated_basis"
+                ],
+                [
+                  "/content",
+                  "unsupported_concern"
+                ]
+              ]
+            },
+            {
+              "case_id": "vf-014",
+              "repeat": 0,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [
+                "vf-014-concern-1"
+              ],
+              "new_defect_targets": [
+                [
+                  "/claim_records/0/content",
+                  "overstated_basis"
+                ],
+                [
+                  "/claim_records/0/content",
+                  "unsupported_concern"
+                ]
+              ]
+            },
+            {
+              "case_id": "vf-014",
+              "repeat": 1,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [
+                "vf-014-concern-1"
+              ],
+              "new_defect_targets": [
+                [
+                  "/claim_records/0/content",
+                  "overstated_basis"
+                ],
+                [
+                  "/claim_records/0/content",
+                  "unsupported_concern"
+                ]
+              ]
+            },
+            {
+              "case_id": "vf-016",
+              "repeat": 1,
+              "before_pass": false,
+              "after_pass": false,
+              "before_projected_pass": false,
+              "after_projected_pass": false,
+              "new_missed_concerns": [],
+              "new_defect_targets": [
+                [
+                  "/content",
+                  "overstated_basis"
+                ],
+                [
+                  "/content",
+                  "unsupported_concern"
+                ]
+              ]
+            }
+          ]
+        },
+        "baseline_direct__to__verdict_direct": {
+          "semantic_improvements": 7,
+          "semantic_regressions": 1,
+          "projected_improvements": 7,
+          "projected_regressions": 1,
+          "new_missed_concern_paths": 0,
+          "new_defect_target_paths": 2,
+          "changes": [
+            {
+              "case_id": "vf-004",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "vf-006",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "vf-006",
+              "repeat": 1,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "vf-010",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": false,
+              "before_projected_pass": false,
+              "after_projected_pass": false,
+              "new_missed_concerns": [],
+              "new_defect_targets": [
+                [
+                  "/claim_records/0/content",
+                  "overstated_basis"
+                ]
+              ]
+            },
+            {
+              "case_id": "vf-010",
+              "repeat": 1,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [],
+              "new_defect_targets": [
+                [
+                  "/claim_records/0/content",
+                  "overstated_basis"
+                ],
+                [
+                  "/claim_records/0/content",
+                  "unsupported_concern"
+                ]
+              ]
+            },
+            {
+              "case_id": "vf-011",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "vf-011",
+              "repeat": 1,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "vf-012",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "vf-016",
+              "repeat": 1,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            }
+          ]
+        },
+        "baseline_live_jev__to__verdict_live_jev": {
+          "semantic_improvements": 0,
+          "semantic_regressions": 1,
+          "projected_improvements": 0,
+          "projected_regressions": 1,
+          "new_missed_concern_paths": 0,
+          "new_defect_target_paths": 0,
+          "changes": [
+            {
+              "case_id": "vf-003",
+              "repeat": 0,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            }
+          ]
+        },
+        "baseline_misleading__to__verdict_misleading": {
+          "semantic_improvements": 10,
+          "semantic_regressions": 1,
+          "projected_improvements": 10,
+          "projected_regressions": 1,
+          "new_missed_concern_paths": 0,
+          "new_defect_target_paths": 2,
+          "changes": [
+            {
+              "case_id": "vf-004",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "vf-004",
+              "repeat": 1,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "vf-005",
+              "repeat": 1,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [],
+              "new_defect_targets": [
+                [
+                  "/content",
+                  "unsupported_concern"
+                ]
+              ]
+            },
+            {
+              "case_id": "vf-006",
+              "repeat": 1,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "vf-008",
+              "repeat": 1,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "vf-009",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "vf-011",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": false,
+              "before_projected_pass": false,
+              "after_projected_pass": false,
+              "new_missed_concerns": [],
+              "new_defect_targets": [
+                [
+                  "/claim_records/0/content",
+                  "invented_fact"
+                ]
+              ]
+            },
+            {
+              "case_id": "vf-011",
+              "repeat": 1,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "vf-012",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "vf-012",
+              "repeat": 1,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "vf-013",
+              "repeat": 1,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "vf-016",
+              "repeat": 1,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            }
+          ]
+        },
+        "verdict_direct__to__verdict_live_jev": {
+          "semantic_improvements": 2,
+          "semantic_regressions": 1,
+          "projected_improvements": 2,
+          "projected_regressions": 1,
+          "new_missed_concern_paths": 0,
+          "new_defect_target_paths": 0,
+          "changes": [
+            {
+              "case_id": "vf-003",
+              "repeat": 0,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "vf-010",
+              "repeat": 0,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            },
+            {
+              "case_id": "vf-010",
+              "repeat": 1,
+              "before_pass": false,
+              "after_pass": true,
+              "before_projected_pass": false,
+              "after_projected_pass": true,
+              "new_missed_concerns": [],
+              "new_defect_targets": []
+            }
+          ]
+        },
+        "verdict_direct__to__verdict_misleading": {
+          "semantic_improvements": 0,
+          "semantic_regressions": 5,
+          "projected_improvements": 0,
+          "projected_regressions": 5,
+          "new_missed_concern_paths": 2,
+          "new_defect_target_paths": 5,
+          "changes": [
+            {
+              "case_id": "vf-002",
+              "repeat": 1,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [],
+              "new_defect_targets": [
+                [
+                  "/claim_records/0/content",
+                  "overstated_basis"
+                ],
+                [
+                  "/claim_records/0/content",
+                  "unsupported_concern"
+                ]
+              ]
+            },
+            {
+              "case_id": "vf-011",
+              "repeat": 0,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [],
+              "new_defect_targets": [
+                [
+                  "/claim_records/0/content",
+                  "invented_fact"
+                ],
+                [
+                  "/claim_records/0/content",
+                  "overstated_basis"
+                ],
+                [
+                  "/claim_records/0/content",
+                  "unsupported_concern"
+                ]
+              ]
+            },
+            {
+              "case_id": "vf-013",
+              "repeat": 0,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [],
+              "new_defect_targets": [
+                [
+                  "/claim_records/0/content",
+                  "unsupported_concern"
+                ]
+              ]
+            },
+            {
+              "case_id": "vf-014",
+              "repeat": 0,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [
+                "vf-014-concern-1"
+              ],
+              "new_defect_targets": [
+                [
+                  "/claim_records/0/content",
+                  "overstated_basis"
+                ],
+                [
+                  "/claim_records/0/content",
+                  "unsupported_concern"
+                ]
+              ]
+            },
+            {
+              "case_id": "vf-014",
+              "repeat": 1,
+              "before_pass": true,
+              "after_pass": false,
+              "before_projected_pass": true,
+              "after_projected_pass": false,
+              "new_missed_concerns": [
+                "vf-014-concern-1"
+              ],
+              "new_defect_targets": [
+                [
+                  "/claim_records/0/content",
+                  "overstated_basis"
+                ],
+                [
+                  "/claim_records/0/content",
+                  "unsupported_concern"
+                ]
+              ]
+            }
+          ]
+        }
+      },
+      "new_raw_defect_diagnostics": {
+        "baseline_direct__to__baseline_live_jev": [],
+        "baseline_direct__to__baseline_misleading": [],
+        "baseline_direct__to__verdict_direct": [
+          {
+            "case_id": "vf-005",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/content",
+                "unsupported_verdict"
+              ]
+            ]
+          },
+          {
+            "case_id": "vf-005",
+            "repeat": 1,
+            "new_raw_defect_targets": [
+              [
+                "/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/content",
+                "unsupported_verdict"
+              ]
+            ]
+          },
+          {
+            "case_id": "vf-010",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/claim_records/0/content",
+                "overstated_basis"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_verdict"
+              ]
+            ]
+          },
+          {
+            "case_id": "vf-010",
+            "repeat": 1,
+            "new_raw_defect_targets": [
+              [
+                "/claim_records/0/content",
+                "overstated_basis"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_verdict"
+              ]
+            ]
+          }
+        ],
+        "baseline_live_jev__to__verdict_live_jev": [
+          {
+            "case_id": "vf-005",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/content",
+                "unsupported_verdict"
+              ]
+            ]
+          },
+          {
+            "case_id": "vf-005",
+            "repeat": 1,
+            "new_raw_defect_targets": [
+              [
+                "/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/content",
+                "unsupported_verdict"
+              ]
+            ]
+          }
+        ],
+        "baseline_misleading__to__verdict_misleading": [
+          {
+            "case_id": "vf-002",
+            "repeat": 1,
+            "new_raw_defect_targets": [
+              [
+                "/claim_records/0/content",
+                "overstated_basis"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_verdict"
+              ]
+            ]
+          },
+          {
+            "case_id": "vf-005",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/content",
+                "unsupported_verdict"
+              ]
+            ]
+          },
+          {
+            "case_id": "vf-005",
+            "repeat": 1,
+            "new_raw_defect_targets": [
+              [
+                "/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/content",
+                "unsupported_verdict"
+              ]
+            ]
+          },
+          {
+            "case_id": "vf-010",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/claim_records/0/content",
+                "overstated_basis"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_verdict"
+              ]
+            ]
+          },
+          {
+            "case_id": "vf-010",
+            "repeat": 1,
+            "new_raw_defect_targets": [
+              [
+                "/claim_records/0/content",
+                "overstated_basis"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_verdict"
+              ]
+            ]
+          },
+          {
+            "case_id": "vf-011",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/claim_records/0/content",
+                "invented_fact"
+              ],
+              [
+                "/claim_records/0/content",
+                "overstated_basis"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_verdict"
+              ]
+            ]
+          },
+          {
+            "case_id": "vf-013",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/claim_records/0/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_verdict"
+              ]
+            ]
+          },
+          {
+            "case_id": "vf-014",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/claim_records/0/content",
+                "overstated_basis"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_verdict"
+              ],
+              [
+                "/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/content",
+                "unsupported_verdict"
+              ]
+            ]
+          },
+          {
+            "case_id": "vf-014",
+            "repeat": 1,
+            "new_raw_defect_targets": [
+              [
+                "/claim_records/0/content",
+                "overstated_basis"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_verdict"
+              ],
+              [
+                "/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/content",
+                "unsupported_verdict"
+              ]
+            ]
+          }
+        ],
+        "verdict_direct__to__verdict_live_jev": [],
+        "verdict_direct__to__verdict_misleading": [
+          {
+            "case_id": "vf-002",
+            "repeat": 1,
+            "new_raw_defect_targets": [
+              [
+                "/claim_records/0/content",
+                "overstated_basis"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_verdict"
+              ]
+            ]
+          },
+          {
+            "case_id": "vf-011",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/claim_records/0/content",
+                "invented_fact"
+              ],
+              [
+                "/claim_records/0/content",
+                "overstated_basis"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_verdict"
+              ]
+            ]
+          },
+          {
+            "case_id": "vf-013",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/claim_records/0/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_verdict"
+              ]
+            ]
+          },
+          {
+            "case_id": "vf-014",
+            "repeat": 0,
+            "new_raw_defect_targets": [
+              [
+                "/claim_records/0/content",
+                "overstated_basis"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_verdict"
+              ],
+              [
+                "/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/content",
+                "unsupported_verdict"
+              ]
+            ]
+          },
+          {
+            "case_id": "vf-014",
+            "repeat": 1,
+            "new_raw_defect_targets": [
+              [
+                "/claim_records/0/content",
+                "overstated_basis"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/claim_records/0/content",
+                "unsupported_verdict"
+              ],
+              [
+                "/content",
+                "unsupported_rationale"
+              ],
+              [
+                "/content",
+                "unsupported_verdict"
+              ]
+            ]
+          }
+        ]
+      },
+      "mechanical_errors_zero_credit": [
+        "case-2-repeat-0-verdict_live_jev",
+        "case-15-repeat-1-baseline_direct",
+        "case-3-repeat-0-baseline_misleading"
+      ],
+      "review_sha256": "5ab5ccaf23840cf5236e7d224c3cf422c17258ac1ed7babd6d39d0638760cead",
+      "summary_sha256": "639bfacd913bc995235620c5349640cafc04910abf76d7f75236143f476b7fe4",
+      "limits": [
+        "This check verifies frozen judgments and aggregation, not a new semantic annotation.",
+        "Root paired defect-target metrics cover consumer findings only. Raw verdict/rationale defects are separately recomputed here; cross-contract baseline has no analogous extra raw surface.",
+        "Diagnostic target sets are not a full prose-equivalence or causal-effect test.",
+        "Contract-visible, hint-mode-blind same-family review; dependent pairs and repeats, separate cohorts.",
+        "Malformed raw strings are inspected only as labeled diagnostics, never repaired into applied output."
+      ],
+      "frozen_overrides_sha256": "28a35f2d406dab34f0320623b409ea4bd8fb096f10b394a725ace56ea788b447",
+      "exact_overrides_checked": 8
+    }
+  },
+  "audit_script_sha256": "9a21129aac328fb41cc8e8a3edef0d46bacd6be736b1c30c6b897df6d9af6c32"
+}

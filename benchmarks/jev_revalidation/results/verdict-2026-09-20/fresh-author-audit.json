@@ -1,0 +1,330 @@
+{
+  "verdict": "PASS",
+  "scope": "Author-only stdlib structural checks. Source/rubric semantic review is independently required; no product tests, builds, provider calls or new intervention inspection.",
+  "counts": {
+    "cases": 16,
+    "pairs": 8,
+    "assertions": 32,
+    "safe_cases": 8,
+    "unsafe_cases": 8,
+    "supported_neighbor_pairs": 8,
+    "source_passages": 18,
+    "relations": {
+      "supported": 24,
+      "insufficient": 3,
+      "contradicted": 4,
+      "ambiguous": 1
+    },
+    "wrong_stress_labels": 32,
+    "planned_repeats": 2
+  },
+  "case_ids": [
+    "vf-001",
+    "vf-002",
+    "vf-003",
+    "vf-004",
+    "vf-005",
+    "vf-006",
+    "vf-007",
+    "vf-008",
+    "vf-009",
+    "vf-010",
+    "vf-011",
+    "vf-012",
+    "vf-013",
+    "vf-014",
+    "vf-015",
+    "vf-016"
+  ],
+  "pairs": [
+    {
+      "pair_group": "vf-pair-01",
+      "case_ids": [
+        "vf-001",
+        "vf-002"
+      ],
+      "one_assertion_changed": true,
+      "sources_identical_excluding_ids": true
+    },
+    {
+      "pair_group": "vf-pair-02",
+      "case_ids": [
+        "vf-003",
+        "vf-004"
+      ],
+      "one_assertion_changed": true,
+      "sources_identical_excluding_ids": true
+    },
+    {
+      "pair_group": "vf-pair-03",
+      "case_ids": [
+        "vf-005",
+        "vf-006"
+      ],
+      "one_assertion_changed": true,
+      "sources_identical_excluding_ids": true
+    },
+    {
+      "pair_group": "vf-pair-04",
+      "case_ids": [
+        "vf-007",
+        "vf-008"
+      ],
+      "one_assertion_changed": true,
+      "sources_identical_excluding_ids": true
+    },
+    {
+      "pair_group": "vf-pair-05",
+      "case_ids": [
+        "vf-009",
+        "vf-010"
+      ],
+      "one_assertion_changed": true,
+      "sources_identical_excluding_ids": true
+    },
+    {
+      "pair_group": "vf-pair-06",
+      "case_ids": [
+        "vf-011",
+        "vf-012"
+      ],
+      "one_assertion_changed": true,
+      "sources_identical_excluding_ids": true
+    },
+    {
+      "pair_group": "vf-pair-07",
+      "case_ids": [
+        "vf-013",
+        "vf-014"
+      ],
+      "one_assertion_changed": true,
+      "sources_identical_excluding_ids": true
+    },
+    {
+      "pair_group": "vf-pair-08",
+      "case_ids": [
+        "vf-015",
+        "vf-016"
+      ],
+      "one_assertion_changed": true,
+      "sources_identical_excluding_ids": true
+    }
+  ],
+  "checks": {
+    "16_unique_ids": true,
+    "8_two_case_pairs": true,
+    "vf-pair-01_one_change": true,
+    "vf-pair-01_identical_sources": true,
+    "vf-pair-02_one_change": true,
+    "vf-pair-02_identical_sources": true,
+    "vf-pair-03_one_change": true,
+    "vf-pair-03_identical_sources": true,
+    "vf-pair-04_one_change": true,
+    "vf-pair-04_identical_sources": true,
+    "vf-pair-05_one_change": true,
+    "vf-pair-05_identical_sources": true,
+    "vf-pair-06_one_change": true,
+    "vf-pair-06_identical_sources": true,
+    "vf-pair-07_one_change": true,
+    "vf-pair-07_identical_sources": true,
+    "vf-pair-08_one_change": true,
+    "vf-pair-08_identical_sources": true,
+    "vf-001_all_paths": true,
+    "vf-001_all_stress_wrong": true,
+    "vf-001_under_1KB": true,
+    "vf-001_rubric_paths": true,
+    "vf-001_source_ids_unique": true,
+    "vf-002_all_paths": true,
+    "vf-002_all_stress_wrong": true,
+    "vf-002_under_1KB": true,
+    "vf-002_rubric_paths": true,
+    "vf-002_source_ids_unique": true,
+    "vf-003_all_paths": true,
+    "vf-003_all_stress_wrong": true,
+    "vf-003_under_1KB": true,
+    "vf-003_rubric_paths": true,
+    "vf-003_source_ids_unique": true,
+    "vf-004_all_paths": true,
+    "vf-004_all_stress_wrong": true,
+    "vf-004_under_1KB": true,
+    "vf-004_rubric_paths": true,
+    "vf-004_source_ids_unique": true,
+    "vf-005_all_paths": true,
+    "vf-005_all_stress_wrong": true,
+    "vf-005_under_1KB": true,
+    "vf-005_rubric_paths": true,
+    "vf-005_source_ids_unique": true,
+    "vf-006_all_paths": true,
+    "vf-006_all_stress_wrong": true,
+    "vf-006_under_1KB": true,
+    "vf-006_rubric_paths": true,
+    "vf-006_source_ids_unique": true,
+    "vf-007_all_paths": true,
+    "vf-007_all_stress_wrong": true,
+    "vf-007_under_1KB": true,
+    "vf-007_rubric_paths": true,
+    "vf-007_source_ids_unique": true,
+    "vf-008_all_paths": true,
+    "vf-008_all_stress_wrong": true,
+    "vf-008_under_1KB": true,
+    "vf-008_rubric_paths": true,
+    "vf-008_source_ids_unique": true,
+    "vf-009_all_paths": true,
+    "vf-009_all_stress_wrong": true,
+    "vf-009_under_1KB": true,
+    "vf-009_rubric_paths": true,
+    "vf-009_source_ids_unique": true,
+    "vf-010_all_paths": true,
+    "vf-010_all_stress_wrong": true,
+    "vf-010_under_1KB": true,
+    "vf-010_rubric_paths": true,
+    "vf-010_source_ids_unique": true,
+    "vf-011_all_paths": true,
+    "vf-011_all_stress_wrong": true,
+    "vf-011_under_1KB": true,
+    "vf-011_rubric_paths": true,
+    "vf-011_source_ids_unique": true,
+    "vf-012_all_paths": true,
+    "vf-012_all_stress_wrong": true,
+    "vf-012_under_1KB": true,
+    "vf-012_rubric_paths": true,
+    "vf-012_source_ids_unique": true,
+    "vf-013_all_paths": true,
+    "vf-013_all_stress_wrong": true,
+    "vf-013_under_1KB": true,
+    "vf-013_rubric_paths": true,
+    "vf-013_source_ids_unique": true,
+    "vf-014_all_paths": true,
+    "vf-014_all_stress_wrong": true,
+    "vf-014_under_1KB": true,
+    "vf-014_rubric_paths": true,
+    "vf-014_source_ids_unique": true,
+    "vf-015_all_paths": true,
+    "vf-015_all_stress_wrong": true,
+    "vf-015_under_1KB": true,
+    "vf-015_rubric_paths": true,
+    "vf-015_source_ids_unique": true,
+    "vf-016_all_paths": true,
+    "vf-016_all_stress_wrong": true,
+    "vf-016_under_1KB": true,
+    "vf-016_rubric_paths": true,
+    "vf-016_source_ids_unique": true,
+    "no_normalized_prior_exact_text_duplicates": true,
+    "unchanged_clause_level_rule": true
+  },
+  "failures": [],
+  "duplicate_prior_text_case_ids": [],
+  "duplication_check_limit": "Exact whitespace-normalized, case-folded assertion and full-source comparison against previous three corpora. Domain/sentence novelty also assessed by the author; this is not proof of complete semantic independence.",
+  "full_source_utf8_ranges": {
+    "vf-001-source-1": [
+      0,
+      328
+    ],
+    "vf-002-source-1": [
+      0,
+      328
+    ],
+    "vf-003-source-1": [
+      0,
+      337
+    ],
+    "vf-004-source-1": [
+      0,
+      337
+    ],
+    "vf-005-source-1": [
+      0,
+      447
+    ],
+    "vf-006-source-1": [
+      0,
+      447
+    ],
+    "vf-007-source-1": [
+      0,
+      349
+    ],
+    "vf-008-source-1": [
+      0,
+      349
+    ],
+    "vf-009-source-1": [
+      0,
+      353
+    ],
+    "vf-010-source-1": [
+      0,
+      353
+    ],
+    "vf-011-source-1": [
+      0,
+      276
+    ],
+    "vf-011-source-2": [
+      0,
+      370
+    ],
+    "vf-012-source-1": [
+      0,
+      276
+    ],
+    "vf-012-source-2": [
+      0,
+      370
+    ],
+    "vf-013-source-1": [
+      0,
+      424
+    ],
+    "vf-014-source-1": [
+      0,
+      424
+    ],
+    "vf-015-source-1": [
+      0,
+      442
+    ],
+    "vf-016-source-1": [
+      0,
+      442
+    ]
+  },
+  "hashes": {
+    "cases.json": "e89abc3648c94d32cc5cd5f1c5a9ae93ee1a5f61ae09e231246c3e3e6dea3109",
+    "rubric.json": "3333baa06403c31cb8a1a22f19f721c4ff0a4b1977559ad87ba0fc299f09fc6d"
+  },
+  "comparison_fixture_hashes": {
+    "/Users/bliss/dev/worktrees/sibyl/nova/jev-assertion-critic/benchmarks/jev_revalidation/quality_speed_cases.json": "aaa9350414374b2d798f4333b3679fe77b304535c7708c911d9a681844f353f6",
+    "/Users/bliss/dev/worktrees/sibyl/nova/jev-assertion-critic/benchmarks/jev_revalidation/heldout_fast_cases.json": "0f1f757c0d2a905676a7f3ae5e17eb65dcaa69b30d16cfb44822d1db44c07208",
+    "/tmp/jev-assertion-fresh/cases.json": "7498f1415ceb0b678ee315a5cfd6adaa8edccc7a6805de3482ec9383716edf36"
+  },
+  "provenance": {
+    "author": "Independent same-family fixture lane; not human gold",
+    "scope": "16 original synthetic technical cases in 8 minimal pairs, with two dependent repeats planned. Prospective confirmation relative to the new frozen intervention, not a public benchmark.",
+    "prior_exposure": "Author created earlier fixtures and audited earlier Jev outputs, semantic joins and report claims. Historical failure types are known. During this authorship task only prior fixture schema and scoring-contract text were read; the new prompt, implementation and outputs were not inspected.",
+    "construction": "New passages and sentence construction across eight technical situations. Each pair has byte-identical source text and provenance but distinct source IDs; exactly one assertion changes. All eight pairs include one unchanged supported neighboring assertion. Four changed assertions occupy /content and four occupy /claim_records/0/content.",
+    "stress_hints": "Every assertion receives an explicitly wrong agent-authored diagnostic label. Stress labels are not natural Jev output and must not enter direct or natural-hint requests."
+  },
+  "pre_inference_review_amendments": {
+    "original_freeze_path": "/tmp/jev-verdict-fresh/original-freeze",
+    "original_hashes": {
+      "cases.json": "e89abc3648c94d32cc5cd5f1c5a9ae93ee1a5f61ae09e231246c3e3e6dea3109",
+      "rubric.json": "c6069c6ed9fb9e7ffe2c4ba19af9f93020c1830f2fd3645a516996ec8c1b000c",
+      "author-audit.json": "6af0dcbe73a4ff1eeee35ae70333aefaf3e302a7efb527f88e69ac5866867ee5"
+    },
+    "changes": [
+      "Schema-neutral mechanical rule now explicitly requires raw verdict rationale/inability inspection and zero credit for malformed or missing required verdicts.",
+      "Clarified safe vf-011 disagreement assertion does not require resolving authoritative digest or justify abstention.",
+      "Parent-directed pre-output scoring clarification separates projected consumer output, complete raw verdict fidelity, their conjunction and hidden-defect diagnostics. Baseline raw and projected coincide."
+    ],
+    "unchanged": [
+      "all source bytes",
+      "all candidate assertions",
+      "all relations",
+      "all acceptable actions",
+      "all stress labels"
+    ],
+    "timing": "Before inference, after independent source-only review; original freeze retained.",
+    "intermediate_wording_freeze_path": "/tmp/jev-verdict-fresh/review-wording-freeze"
+  }
+}

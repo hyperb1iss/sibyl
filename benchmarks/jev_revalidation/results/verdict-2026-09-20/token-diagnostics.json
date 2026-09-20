@@ -1,0 +1,78 @@
+{
+  "retained": {
+    "baseline_direct": {
+      "paths": 16,
+      "total_critic_input_tokens": 42939,
+      "total_critic_output_tokens": 3833,
+      "median_critic_output_tokens": 252.0
+    },
+    "baseline_live_jev": {
+      "paths": 16,
+      "total_critic_input_tokens": 44737,
+      "total_critic_output_tokens": 2832,
+      "median_critic_output_tokens": 209.0
+    },
+    "baseline_misleading": {
+      "paths": 16,
+      "total_critic_input_tokens": 44754,
+      "total_critic_output_tokens": 5242,
+      "median_critic_output_tokens": 323.0
+    },
+    "verdict_direct": {
+      "paths": 16,
+      "total_critic_input_tokens": 59515,
+      "total_critic_output_tokens": 7832,
+      "median_critic_output_tokens": 475.5
+    },
+    "verdict_live_jev": {
+      "paths": 16,
+      "total_critic_input_tokens": 61141,
+      "total_critic_output_tokens": 6749,
+      "median_critic_output_tokens": 442.5
+    },
+    "verdict_misleading": {
+      "paths": 16,
+      "total_critic_input_tokens": 61330,
+      "total_critic_output_tokens": 7624,
+      "median_critic_output_tokens": 467.0
+    }
+  },
+  "fresh": {
+    "baseline_direct": {
+      "paths": 32,
+      "total_critic_input_tokens": 88272,
+      "total_critic_output_tokens": 7597,
+      "median_critic_output_tokens": 267.5
+    },
+    "baseline_live_jev": {
+      "paths": 32,
+      "total_critic_input_tokens": 92032,
+      "total_critic_output_tokens": 5480,
+      "median_critic_output_tokens": 235.0
+    },
+    "baseline_misleading": {
+      "paths": 32,
+      "total_critic_input_tokens": 92070,
+      "total_critic_output_tokens": 8330,
+      "median_critic_output_tokens": 275.5
+    },
+    "verdict_direct": {
+      "paths": 32,
+      "total_critic_input_tokens": 121424,
+      "total_critic_output_tokens": 14316,
+      "median_critic_output_tokens": 470.0
+    },
+    "verdict_live_jev": {
+      "paths": 32,
+      "total_critic_input_tokens": 125184,
+      "total_critic_output_tokens": 14016,
+      "median_critic_output_tokens": 470.0
+    },
+    "verdict_misleading": {
+      "paths": 32,
+      "total_critic_input_tokens": 125222,
+      "total_critic_output_tokens": 15533,
+      "median_critic_output_tokens": 477.0
+    }
+  }
+}

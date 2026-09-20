@@ -1,0 +1,47 @@
+{
+  "verdict": "PASS",
+  "windows": {
+    "retained": {
+      "path_started_at": "2026-09-20T19:51:21.666791+00:00",
+      "path_completed_at": "2026-09-20T19:52:09.939008+00:00",
+      "first_dispatch_at": "2026-09-20T19:51:21.672895+00:00",
+      "last_dispatch_completion_at": "2026-09-20T19:52:09.932411+00:00",
+      "dispatched_calls": 128,
+      "observed_responses": 127
+    },
+    "fresh": {
+      "path_started_at": "2026-09-20T19:52:10.804590+00:00",
+      "path_completed_at": "2026-09-20T19:53:22.528721+00:00",
+      "first_dispatch_at": "2026-09-20T19:52:10.809242+00:00",
+      "last_dispatch_completion_at": "2026-09-20T19:53:22.521360+00:00",
+      "dispatched_calls": 256,
+      "observed_responses": 256
+    }
+  },
+  "overlap": {
+    "path_window_overlap_seconds": 0,
+    "dispatch_window_overlap_seconds": 0,
+    "retained_path_end_to_fresh_path_start_seconds": 0.865582
+  },
+  "cross_cohort_inflight_intersections": [],
+  "dispatched_calls": 384,
+  "observed_response_ids": 383,
+  "unique_observed_response_ids": 383,
+  "no_observed_response": [
+    {
+      "cohort": "retained",
+      "file": "case-11-repeat-0-verdict_live_jev.jev.json",
+      "http_status": null,
+      "error_code": "cancelled",
+      "elapsed_ms": 30005.703028989956
+    }
+  ],
+  "known_provider_cost_usd": "1.460980470",
+  "unknown_cost_calls": 1,
+  "limits": [
+    "Dispatch count is host-observed attempted transport work, not proof that an unresponded request reached or was billed by a vendor.",
+    "Unknown billing remains unknown, not zero; no total all-call cost is claimed.",
+    "Timestamp overlap is host-observed transport/service concurrency, not vendor execution overlap.",
+    "No pooled quality or speed metrics across retained and fresh cohorts."
+  ]
+}

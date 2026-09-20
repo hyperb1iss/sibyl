@@ -1,0 +1,10 @@
+{
+  "review_visibility": "Contract visible from schema; hint mode, arm names, repeats, timing and cost withheld. Output prose may incidentally expose advisory labels.",
+  "rows_sha256": "47e1218ab55daeeed086887340281fd3dd74a6bfe0b3628d5e9241569071b5b2",
+  "files_sha256": {
+    "rubric.json": "3333baa06403c31cb8a1a22f19f721c4ff0a4b1977559ad87ba0fc299f09fc6d",
+    "responses.json": "5f7035e792ec865af9541f82a68a5eb367356b2e01cf0b055fe6b68dd4e2cf97",
+    "cases.json": "e808bfd6fabfe25bb96a04c44a9c7080def833d8392f95ecea05b4cecd7f9c40"
+  },
+  "blind_map_sha256": "28c58ac5eb14ed7db41c54ddbf49c52840010e7694fe3c139f5ac18a7371c1e3"
+}

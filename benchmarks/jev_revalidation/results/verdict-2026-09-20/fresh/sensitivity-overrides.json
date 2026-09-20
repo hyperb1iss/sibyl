@@ -1,0 +1,437 @@
+{
+  "metadata": {
+    "primary_annotations_sha256": "ef84608d06a8f0ea6a6fdfcaee3af72a47347c767b82fada52a97ce16a5eb8a2",
+    "frozen_before_unblinding": true,
+    "review_scope": "Contract-visible, hint-mode-blind; same-family contextual review. No maps or comparison outcomes read.",
+    "scenario": "Apply only these predeclared contextual interpretations, separately or jointly; no primary annotation, source, rubric, mechanical outcome or binding changes. Other defects remain failures.",
+    "coverage_semantics": "Coverage changes count only findings made fully valid by the stated interpretation; valid inability is not invented finding coverage."
+  },
+  "overrides": [
+    {
+      "blind_id": "03e5083b4356747a734fbc89",
+      "case_id": "vf-006",
+      "interpretation": {
+        "blind_id": "03e5083b4356747a734fbc89",
+        "finding_index": 1,
+        "primary": "Explicit contradiction of the qualified source position is an evidence-overstatement defect.",
+        "alternative": "Interpret contradicting the source qualified position as disagreement with certainty, not disproof of the causal claim.",
+        "rationale": "The same finding otherwise correctly says no causal assignment exists. Other false neighbor finding remains invalid.",
+        "original_preserved": true
+      },
+      "primary": {
+        "projected_semantic_pass": false,
+        "raw_semantic_pass": false,
+        "semantic_pass": false,
+        "projection_hides_defect": false,
+        "covered_concern_ids": [],
+        "missed_concern_ids": [
+          "vf-006-concern-1"
+        ]
+      },
+      "alternative": {
+        "projected_semantic_pass": false,
+        "raw_semantic_pass": false,
+        "semantic_pass": false,
+        "projection_hides_defect": false,
+        "covered_concern_ids": [
+          "vf-006-concern-1"
+        ],
+        "missed_concern_ids": []
+      },
+      "field_flips": [
+        {
+          "collection": "findings",
+          "index": 1,
+          "changes": {
+            "basis_overstates_evidence": {
+              "from": true,
+              "to": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "blind_id": "1ec22b383496f4b62ece423a",
+      "case_id": "vf-012",
+      "interpretation": {
+        "blind_id": "1ec22b383496f4b62ece423a",
+        "finding_index": 0,
+        "primary": "Strict wording turns lack of supplied authoritative selection into disproof or nonexistence of an authoritative digest/selection.",
+        "alternative": "Read authority and exists as restricted to designation in these supplied SY-4 reports, not a conclusion about physical truth or all possible authority evidence.",
+        "rationale": "Explicit no designated authoritative mirror supports the contextual reading, but the original rubric permits contradiction of reports only and the primary preserves the unqualified wording defect.",
+        "original_preserved": true
+      },
+      "primary": {
+        "projected_semantic_pass": false,
+        "raw_semantic_pass": false,
+        "semantic_pass": false,
+        "projection_hides_defect": false,
+        "covered_concern_ids": [],
+        "missed_concern_ids": [
+          "vf-012-concern-1"
+        ]
+      },
+      "alternative": {
+        "projected_semantic_pass": true,
+        "raw_semantic_pass": true,
+        "semantic_pass": true,
+        "projection_hides_defect": false,
+        "covered_concern_ids": [
+          "vf-012-concern-1"
+        ],
+        "missed_concern_ids": []
+      },
+      "field_flips": [
+        {
+          "collection": "findings",
+          "index": 0,
+          "changes": {
+            "basis_overstates_evidence": {
+              "from": true,
+              "to": false
+            }
+          }
+        },
+        {
+          "collection": "assertion_verdicts",
+          "index": 0,
+          "changes": {
+            "rationale_supported": {
+              "from": false,
+              "to": true
+            },
+            "basis_overstates_evidence": {
+              "from": true,
+              "to": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "blind_id": "c21ec7263d33ef33f19fecf4",
+      "case_id": "vf-012",
+      "interpretation": {
+        "blind_id": "c21ec7263d33ef33f19fecf4",
+        "finding_index": 0,
+        "primary": "Strict wording turns lack of supplied authoritative selection into disproof or nonexistence of an authoritative digest/selection.",
+        "alternative": "Read authority and exists as restricted to designation in these supplied SY-4 reports, not a conclusion about physical truth or all possible authority evidence.",
+        "rationale": "Explicit no designated authoritative mirror supports the contextual reading, but the original rubric permits contradiction of reports only and the primary preserves the unqualified wording defect.",
+        "original_preserved": true
+      },
+      "primary": {
+        "projected_semantic_pass": false,
+        "raw_semantic_pass": false,
+        "semantic_pass": false,
+        "projection_hides_defect": false,
+        "covered_concern_ids": [],
+        "missed_concern_ids": [
+          "vf-012-concern-1"
+        ]
+      },
+      "alternative": {
+        "projected_semantic_pass": true,
+        "raw_semantic_pass": true,
+        "semantic_pass": true,
+        "projection_hides_defect": false,
+        "covered_concern_ids": [
+          "vf-012-concern-1"
+        ],
+        "missed_concern_ids": []
+      },
+      "field_flips": [
+        {
+          "collection": "findings",
+          "index": 0,
+          "changes": {
+            "basis_overstates_evidence": {
+              "from": true,
+              "to": false
+            }
+          }
+        },
+        {
+          "collection": "assertion_verdicts",
+          "index": 0,
+          "changes": {
+            "rationale_supported": {
+              "from": false,
+              "to": true
+            },
+            "basis_overstates_evidence": {
+              "from": true,
+              "to": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "blind_id": "2d84271aa0ceded338369770",
+      "case_id": "vf-012",
+      "interpretation": {
+        "blind_id": "2d84271aa0ceded338369770",
+        "finding_index": 0,
+        "primary": "Strict wording turns lack of supplied authoritative selection into disproof or nonexistence of an authoritative digest/selection.",
+        "alternative": "Read authority and exists as restricted to designation in these supplied SY-4 reports, not a conclusion about physical truth or all possible authority evidence.",
+        "rationale": "Explicit no designated authoritative mirror supports the contextual reading, but the original rubric permits contradiction of reports only and the primary preserves the unqualified wording defect.",
+        "original_preserved": true
+      },
+      "primary": {
+        "projected_semantic_pass": false,
+        "raw_semantic_pass": false,
+        "semantic_pass": false,
+        "projection_hides_defect": false,
+        "covered_concern_ids": [],
+        "missed_concern_ids": [
+          "vf-012-concern-1"
+        ]
+      },
+      "alternative": {
+        "projected_semantic_pass": true,
+        "raw_semantic_pass": true,
+        "semantic_pass": true,
+        "projection_hides_defect": false,
+        "covered_concern_ids": [
+          "vf-012-concern-1"
+        ],
+        "missed_concern_ids": []
+      },
+      "field_flips": [
+        {
+          "collection": "findings",
+          "index": 0,
+          "changes": {
+            "basis_overstates_evidence": {
+              "from": true,
+              "to": false
+            }
+          }
+        },
+        {
+          "collection": "assertion_verdicts",
+          "index": 0,
+          "changes": {
+            "rationale_supported": {
+              "from": false,
+              "to": true
+            },
+            "basis_overstates_evidence": {
+              "from": true,
+              "to": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "blind_id": "4104b33d48a01ed5d02c2a0e",
+      "case_id": "vf-012",
+      "interpretation": {
+        "blind_id": "4104b33d48a01ed5d02c2a0e",
+        "finding_index": 0,
+        "primary": "Strict wording turns lack of supplied authoritative selection into disproof or nonexistence of an authoritative digest/selection.",
+        "alternative": "Read authority and exists as restricted to designation in these supplied SY-4 reports, not a conclusion about physical truth or all possible authority evidence.",
+        "rationale": "Explicit no designated authoritative mirror supports the contextual reading, but the original rubric permits contradiction of reports only and the primary preserves the unqualified wording defect.",
+        "original_preserved": true
+      },
+      "primary": {
+        "projected_semantic_pass": false,
+        "raw_semantic_pass": false,
+        "semantic_pass": false,
+        "projection_hides_defect": false,
+        "covered_concern_ids": [],
+        "missed_concern_ids": [
+          "vf-012-concern-1"
+        ]
+      },
+      "alternative": {
+        "projected_semantic_pass": true,
+        "raw_semantic_pass": true,
+        "semantic_pass": true,
+        "projection_hides_defect": false,
+        "covered_concern_ids": [
+          "vf-012-concern-1"
+        ],
+        "missed_concern_ids": []
+      },
+      "field_flips": [
+        {
+          "collection": "findings",
+          "index": 0,
+          "changes": {
+            "basis_overstates_evidence": {
+              "from": true,
+              "to": false
+            }
+          }
+        },
+        {
+          "collection": "assertion_verdicts",
+          "index": 0,
+          "changes": {
+            "rationale_supported": {
+              "from": false,
+              "to": true
+            },
+            "basis_overstates_evidence": {
+              "from": true,
+              "to": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "blind_id": "f73b7913537692feb7f46a4c",
+      "case_id": "vf-012",
+      "interpretation": {
+        "blind_id": "f73b7913537692feb7f46a4c",
+        "finding_index": 0,
+        "primary": "Strict wording turns lack of supplied authoritative selection into disproof or nonexistence of an authoritative digest/selection.",
+        "alternative": "Read authority and exists as restricted to designation in these supplied SY-4 reports, not a conclusion about physical truth or all possible authority evidence.",
+        "rationale": "Explicit no designated authoritative mirror supports the contextual reading, but the original rubric permits contradiction of reports only and the primary preserves the unqualified wording defect.",
+        "original_preserved": true
+      },
+      "primary": {
+        "projected_semantic_pass": false,
+        "raw_semantic_pass": false,
+        "semantic_pass": false,
+        "projection_hides_defect": false,
+        "covered_concern_ids": [],
+        "missed_concern_ids": [
+          "vf-012-concern-1"
+        ]
+      },
+      "alternative": {
+        "projected_semantic_pass": true,
+        "raw_semantic_pass": true,
+        "semantic_pass": true,
+        "projection_hides_defect": false,
+        "covered_concern_ids": [
+          "vf-012-concern-1"
+        ],
+        "missed_concern_ids": []
+      },
+      "field_flips": [
+        {
+          "collection": "findings",
+          "index": 0,
+          "changes": {
+            "basis_overstates_evidence": {
+              "from": true,
+              "to": false
+            },
+            "unsupported_replacement": {
+              "from": true,
+              "to": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "blind_id": "d06d1b38d64b5959ff16730e",
+      "case_id": "vf-012",
+      "interpretation": {
+        "blind_id": "d06d1b38d64b5959ff16730e",
+        "finding_index": 0,
+        "primary": "Both sources expressly deny authority overattributes the explicit south-mirror note to the north report.",
+        "alternative": "Treat both sources as the combined evidence packet rather than an each-source attribution.",
+        "rationale": "The packet jointly establishes lack of designated mirror authority. The separate false format finding remains invalid.",
+        "original_preserved": true
+      },
+      "primary": {
+        "projected_semantic_pass": false,
+        "raw_semantic_pass": false,
+        "semantic_pass": false,
+        "projection_hides_defect": false,
+        "covered_concern_ids": [],
+        "missed_concern_ids": [
+          "vf-012-concern-1"
+        ]
+      },
+      "alternative": {
+        "projected_semantic_pass": false,
+        "raw_semantic_pass": false,
+        "semantic_pass": false,
+        "projection_hides_defect": false,
+        "covered_concern_ids": [
+          "vf-012-concern-1"
+        ],
+        "missed_concern_ids": []
+      },
+      "field_flips": [
+        {
+          "collection": "findings",
+          "index": 0,
+          "changes": {
+            "unsupported_replacement": {
+              "from": true,
+              "to": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "blind_id": "25953364db1766c01edc484c",
+      "case_id": "vf-016",
+      "interpretation": {
+        "blind_id": "25953364db1766c01edc484c",
+        "finding_index": 0,
+        "primary": "SQL string was deleted by preview mischaracterizes the candidate.",
+        "alternative": "Treat the subject/object substitution as a wording error resolved by the immediately following correct execution/deletion explanation.",
+        "rationale": "The critique ends by correctly saying the preview does not establish rows were deleted. Primary strict clause review preserves the explicit false paraphrase.",
+        "original_preserved": true
+      },
+      "primary": {
+        "projected_semantic_pass": false,
+        "raw_semantic_pass": false,
+        "semantic_pass": false,
+        "projection_hides_defect": false,
+        "covered_concern_ids": [],
+        "missed_concern_ids": [
+          "vf-016-concern-1"
+        ]
+      },
+      "alternative": {
+        "projected_semantic_pass": true,
+        "raw_semantic_pass": true,
+        "semantic_pass": true,
+        "projection_hides_defect": false,
+        "covered_concern_ids": [
+          "vf-016-concern-1"
+        ],
+        "missed_concern_ids": []
+      },
+      "field_flips": [
+        {
+          "collection": "findings",
+          "index": 0,
+          "changes": {
+            "unsupported_replacement": {
+              "from": true,
+              "to": false
+            }
+          }
+        },
+        {
+          "collection": "assertion_verdicts",
+          "index": 0,
+          "changes": {
+            "rationale_supported": {
+              "from": false,
+              "to": true
+            },
+            "unsupported_replacement": {
+              "from": true,
+              "to": false
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

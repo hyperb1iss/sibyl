@@ -1,0 +1,135 @@
+{
+  "scope": "Root source-level spot check, after inference and independently of still-blinded semantic reviewer; no annotation edits.",
+  "rows_sha256": "47e1218ab55daeeed086887340281fd3dd74a6bfe0b3628d5e9241569071b5b2",
+  "case": {
+    "id": "vf-005",
+    "category": "link_time_confounded_change",
+    "pair_group": "vf-pair-03",
+    "sources": [
+      {
+        "id": "vf-005-source-1",
+        "text": "Release-build comparison RB-8. The first link invocation took 22 seconds. The next invocation took 12 seconds after the new linker plugin was enabled. Between those invocations, the object-file cache also changed from empty to populated. Both invocations used eight workers. There is no run varying the plugin while holding cache contents fixed; the engineer recorded the two durations without assigning the ten-second difference to either change.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "The recorded second link invocation finished ten seconds faster than the first.",
+    "claims": [
+      "Both recorded link invocations used eight workers."
+    ],
+    "expected": {
+      "/content": "supported",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "accept",
+    "rationale": "The two recorded durations are 22 and 12 seconds, a ten-second observed difference. The worker count for both invocations is explicitly eight.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "accept"
+    ],
+    "stress_hints": {
+      "/content": "contradicted",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  "paths": [
+    {
+      "id": "case-4-repeat-1-verdict_live_jev",
+      "hints": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "211afa58296a03414f2ebf45ac00a9e18091dfcb3fa4bc227d813e91fe523351",
+          "value": "supported"
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "30db049c283cf274212d643365793e9d3ea6fff8e431c1cc05ee41d55f34c417",
+          "value": "supported"
+        }
+      ],
+      "output": {
+        "verdicts": [
+          {
+            "claim_path": "/claim_records/0/content",
+            "claim_sha256": "211afa58296a03414f2ebf45ac00a9e18091dfcb3fa4bc227d813e91fe523351",
+            "evidence_refs": [
+              {
+                "evidence_id": "s0"
+              }
+            ],
+            "rationale": "The source directly states: 'Both invocations used eight workers.' This establishes the assertion within its stated scope.",
+            "verdict": "supported"
+          },
+          {
+            "claim_path": "/content",
+            "claim_sha256": "30db049c283cf274212d643365793e9d3ea6fff8e431c1cc05ee41d55f34c417",
+            "findings": [
+              {
+                "basis": "unsupported_causality",
+                "claim_path": "/content",
+                "claim_sha256": "30db049c283cf274212d643365793e9d3ea6fff8e431c1cc05ee41d55f34c417",
+                "critique": "The assertion attributes the ten-second difference to the second invocation being 'faster than the first,' implying a direct causal relationship. However, the source explicitly states: 'There is no run varying the plugin while holding cache contents fixed; the engineer recorded the two durations without assigning the ten-second difference to either change.' The source documents that the cache state also changed between invocations, and the ten-second difference cannot be attributed to the second invocation alone without isolating which factor (plugin or cache) caused the improvement.",
+                "disposition": "qualify",
+                "evidence_refs": [
+                  {
+                    "evidence_id": "s0"
+                  }
+                ]
+              }
+            ],
+            "verdict": "concern"
+          }
+        ]
+      }
+    },
+    {
+      "id": "case-4-repeat-0-verdict_live_jev",
+      "hints": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "211afa58296a03414f2ebf45ac00a9e18091dfcb3fa4bc227d813e91fe523351",
+          "value": "supported"
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "30db049c283cf274212d643365793e9d3ea6fff8e431c1cc05ee41d55f34c417",
+          "value": "supported"
+        }
+      ],
+      "output": {
+        "verdicts": [
+          {
+            "claim_path": "/claim_records/0/content",
+            "claim_sha256": "211afa58296a03414f2ebf45ac00a9e18091dfcb3fa4bc227d813e91fe523351",
+            "evidence_refs": [
+              {
+                "evidence_id": "s0"
+              }
+            ],
+            "rationale": "The source directly states: 'Both invocations used eight workers.' This directly establishes the assertion about the number of workers used by both recorded link invocations.",
+            "verdict": "supported"
+          },
+          {
+            "claim_path": "/content",
+            "claim_sha256": "30db049c283cf274212d643365793e9d3ea6fff8e431c1cc05ee41d55f34c417",
+            "findings": [
+              {
+                "basis": "unsupported_causality",
+                "claim_path": "/content",
+                "claim_sha256": "30db049c283cf274212d643365793e9d3ea6fff8e431c1cc05ee41d55f34c417",
+                "critique": "The assertion attributes the ten-second difference to the second invocation being 'faster than the first,' implying causality or a performance improvement. However, the source explicitly states: 'There is no run varying the plugin while holding cache contents fixed; the engineer recorded the two durations without assigning the ten-second difference to either change.' The source documents the observed time difference but explicitly declines to assign causality to either the linker plugin change or the cache state change. The assertion overstates certainty by framing this as a finished-time comparison without acknowledging the confounding variables and the source's own caution against causal attribution.",
+                "disposition": "qualify",
+                "evidence_refs": [
+                  {
+                    "evidence_id": "s0"
+                  }
+                ]
+              }
+            ],
+            "verdict": "concern"
+          }
+        ]
+      }
+    }
+  ],
+  "finding": "Both revised-live repeats challenge the actual duration comparison as a causal claim. The assertion states only recorded 12 versus 22 second ordering, without attributing it to plugin or cache. All supplied hints correctly label this main assertion and its eight-worker neighbor supported. Explicit verdict structure does not eliminate the semantic confusion."
+}

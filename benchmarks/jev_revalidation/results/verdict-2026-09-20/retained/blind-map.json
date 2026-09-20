@@ -1,0 +1,578 @@
+{
+  "a82e07e2a76e6c84839c2a02": {
+    "id": "case-9-repeat-0-verdict_direct",
+    "case_id": "af-006",
+    "repeat": 0,
+    "arm": "verdict_direct"
+  },
+  "8fbf62c215b4f4e29f744fea": {
+    "id": "case-9-repeat-0-verdict_misleading",
+    "case_id": "af-006",
+    "repeat": 0,
+    "arm": "verdict_misleading"
+  },
+  "cca2e448e6dde788bf36b756": {
+    "id": "case-9-repeat-0-baseline_misleading",
+    "case_id": "af-006",
+    "repeat": 0,
+    "arm": "baseline_misleading"
+  },
+  "fd64ea547405b899bb01350e": {
+    "id": "case-9-repeat-0-baseline_live_jev",
+    "case_id": "af-006",
+    "repeat": 0,
+    "arm": "baseline_live_jev"
+  },
+  "f9bd817ca30f4f6a0f363e13": {
+    "id": "case-9-repeat-0-verdict_live_jev",
+    "case_id": "af-006",
+    "repeat": 0,
+    "arm": "verdict_live_jev"
+  },
+  "9baeb84f84725313ae19145c": {
+    "id": "case-9-repeat-0-baseline_direct",
+    "case_id": "af-006",
+    "repeat": 0,
+    "arm": "baseline_direct"
+  },
+  "03756f0b8b23ac09c1351390": {
+    "id": "case-4-repeat-0-baseline_direct",
+    "case_id": "hf-017",
+    "repeat": 0,
+    "arm": "baseline_direct"
+  },
+  "10ae0b42a0137f7ece86a394": {
+    "id": "case-4-repeat-0-baseline_live_jev",
+    "case_id": "hf-017",
+    "repeat": 0,
+    "arm": "baseline_live_jev"
+  },
+  "788b683a71721beb49b49646": {
+    "id": "case-4-repeat-0-verdict_misleading",
+    "case_id": "hf-017",
+    "repeat": 0,
+    "arm": "verdict_misleading"
+  },
+  "8956a5576d2e402403df2459": {
+    "id": "case-4-repeat-0-verdict_live_jev",
+    "case_id": "hf-017",
+    "repeat": 0,
+    "arm": "verdict_live_jev"
+  },
+  "db80649a5df1a1fb970df95a": {
+    "id": "case-4-repeat-0-baseline_misleading",
+    "case_id": "hf-017",
+    "repeat": 0,
+    "arm": "baseline_misleading"
+  },
+  "64771745fe6441cb1488a7cd": {
+    "id": "case-4-repeat-0-verdict_direct",
+    "case_id": "hf-017",
+    "repeat": 0,
+    "arm": "verdict_direct"
+  },
+  "328d970ac9a7f2e95ca83074": {
+    "id": "case-1-repeat-0-verdict_direct",
+    "case_id": "hf-006",
+    "repeat": 0,
+    "arm": "verdict_direct"
+  },
+  "704683ab128889a8f2195735": {
+    "id": "case-1-repeat-0-baseline_direct",
+    "case_id": "hf-006",
+    "repeat": 0,
+    "arm": "baseline_direct"
+  },
+  "795817cb8be3a2fa884160aa": {
+    "id": "case-1-repeat-0-baseline_live_jev",
+    "case_id": "hf-006",
+    "repeat": 0,
+    "arm": "baseline_live_jev"
+  },
+  "44fbb458556338b0a5ea3076": {
+    "id": "case-1-repeat-0-verdict_misleading",
+    "case_id": "hf-006",
+    "repeat": 0,
+    "arm": "verdict_misleading"
+  },
+  "010c5c9961ab664335361b43": {
+    "id": "case-1-repeat-0-baseline_misleading",
+    "case_id": "hf-006",
+    "repeat": 0,
+    "arm": "baseline_misleading"
+  },
+  "a115dd65f013f4e88e48fcc8": {
+    "id": "case-1-repeat-0-verdict_live_jev",
+    "case_id": "hf-006",
+    "repeat": 0,
+    "arm": "verdict_live_jev"
+  },
+  "748439730a916b2ed48080f6": {
+    "id": "case-5-repeat-0-verdict_direct",
+    "case_id": "hf-018",
+    "repeat": 0,
+    "arm": "verdict_direct"
+  },
+  "e69e11ff2109ed7379e777d0": {
+    "id": "case-5-repeat-0-baseline_live_jev",
+    "case_id": "hf-018",
+    "repeat": 0,
+    "arm": "baseline_live_jev"
+  },
+  "710775bb1723c5a21d98a36b": {
+    "id": "case-5-repeat-0-verdict_live_jev",
+    "case_id": "hf-018",
+    "repeat": 0,
+    "arm": "verdict_live_jev"
+  },
+  "0fc63570aa06d8a16a24eceb": {
+    "id": "case-5-repeat-0-baseline_misleading",
+    "case_id": "hf-018",
+    "repeat": 0,
+    "arm": "baseline_misleading"
+  },
+  "99e8eaa0950d6f9f14651b58": {
+    "id": "case-5-repeat-0-baseline_direct",
+    "case_id": "hf-018",
+    "repeat": 0,
+    "arm": "baseline_direct"
+  },
+  "dc18a1779b832ed041936112": {
+    "id": "case-5-repeat-0-verdict_misleading",
+    "case_id": "hf-018",
+    "repeat": 0,
+    "arm": "verdict_misleading"
+  },
+  "9e9401ad30608c80f3cdfff6": {
+    "id": "case-3-repeat-0-verdict_live_jev",
+    "case_id": "hf-010",
+    "repeat": 0,
+    "arm": "verdict_live_jev"
+  },
+  "6d4923a42ae7f619ed516a58": {
+    "id": "case-3-repeat-0-verdict_direct",
+    "case_id": "hf-010",
+    "repeat": 0,
+    "arm": "verdict_direct"
+  },
+  "1fc91111de3b1af3dd24a6b2": {
+    "id": "case-3-repeat-0-baseline_live_jev",
+    "case_id": "hf-010",
+    "repeat": 0,
+    "arm": "baseline_live_jev"
+  },
+  "528750f217084863effd006d": {
+    "id": "case-3-repeat-0-baseline_misleading",
+    "case_id": "hf-010",
+    "repeat": 0,
+    "arm": "baseline_misleading"
+  },
+  "ad07d6e07bf04fa374b9c298": {
+    "id": "case-3-repeat-0-verdict_misleading",
+    "case_id": "hf-010",
+    "repeat": 0,
+    "arm": "verdict_misleading"
+  },
+  "fba62e7ae780545345fc1ea9": {
+    "id": "case-3-repeat-0-baseline_direct",
+    "case_id": "hf-010",
+    "repeat": 0,
+    "arm": "baseline_direct"
+  },
+  "48f71b7b291c9c4f4095b0d9": {
+    "id": "case-7-repeat-0-verdict_live_jev",
+    "case_id": "hf-024",
+    "repeat": 0,
+    "arm": "verdict_live_jev"
+  },
+  "eed01f01de9adb1fa2eb4e90": {
+    "id": "case-7-repeat-0-baseline_live_jev",
+    "case_id": "hf-024",
+    "repeat": 0,
+    "arm": "baseline_live_jev"
+  },
+  "37bca221020c983d5ca94b2b": {
+    "id": "case-7-repeat-0-verdict_misleading",
+    "case_id": "hf-024",
+    "repeat": 0,
+    "arm": "verdict_misleading"
+  },
+  "85501cbb8d36a7b3013647d3": {
+    "id": "case-7-repeat-0-verdict_direct",
+    "case_id": "hf-024",
+    "repeat": 0,
+    "arm": "verdict_direct"
+  },
+  "6887eb6e1c0552168d1ce144": {
+    "id": "case-7-repeat-0-baseline_misleading",
+    "case_id": "hf-024",
+    "repeat": 0,
+    "arm": "baseline_misleading"
+  },
+  "f156bce7e2609e8af41d9d76": {
+    "id": "case-7-repeat-0-baseline_direct",
+    "case_id": "hf-024",
+    "repeat": 0,
+    "arm": "baseline_direct"
+  },
+  "874d1a89d88ef73d428b6f9e": {
+    "id": "case-11-repeat-0-baseline_direct",
+    "case_id": "af-008",
+    "repeat": 0,
+    "arm": "baseline_direct"
+  },
+  "2b986d9d1eb0984026c4a0dd": {
+    "id": "case-11-repeat-0-baseline_misleading",
+    "case_id": "af-008",
+    "repeat": 0,
+    "arm": "baseline_misleading"
+  },
+  "4ad1244382300fcbee459bc8": {
+    "id": "case-11-repeat-0-baseline_live_jev",
+    "case_id": "af-008",
+    "repeat": 0,
+    "arm": "baseline_live_jev"
+  },
+  "b43236a6f0a9473af00f5bd3": {
+    "id": "case-11-repeat-0-verdict_live_jev",
+    "case_id": "af-008",
+    "repeat": 0,
+    "arm": "verdict_live_jev"
+  },
+  "e4299283f11af9ba8863d806": {
+    "id": "case-11-repeat-0-verdict_misleading",
+    "case_id": "af-008",
+    "repeat": 0,
+    "arm": "verdict_misleading"
+  },
+  "ee59d5840bc1e6a170041e55": {
+    "id": "case-11-repeat-0-verdict_direct",
+    "case_id": "af-008",
+    "repeat": 0,
+    "arm": "verdict_direct"
+  },
+  "94effdcf46fee0b27f655b7d": {
+    "id": "case-6-repeat-0-verdict_misleading",
+    "case_id": "hf-023",
+    "repeat": 0,
+    "arm": "verdict_misleading"
+  },
+  "81e689a0bac6719e31085d75": {
+    "id": "case-6-repeat-0-verdict_direct",
+    "case_id": "hf-023",
+    "repeat": 0,
+    "arm": "verdict_direct"
+  },
+  "edff03910a10e88b53af94e0": {
+    "id": "case-6-repeat-0-baseline_misleading",
+    "case_id": "hf-023",
+    "repeat": 0,
+    "arm": "baseline_misleading"
+  },
+  "2300dca7f1369e86e9e4e1bb": {
+    "id": "case-6-repeat-0-baseline_live_jev",
+    "case_id": "hf-023",
+    "repeat": 0,
+    "arm": "baseline_live_jev"
+  },
+  "193ad6961ed9557174f669b4": {
+    "id": "case-6-repeat-0-verdict_live_jev",
+    "case_id": "hf-023",
+    "repeat": 0,
+    "arm": "verdict_live_jev"
+  },
+  "a85b8e546d32c4b1669ebb02": {
+    "id": "case-6-repeat-0-baseline_direct",
+    "case_id": "hf-023",
+    "repeat": 0,
+    "arm": "baseline_direct"
+  },
+  "9b83458721406143bbbc5764": {
+    "id": "case-15-repeat-0-baseline_misleading",
+    "case_id": "af-016",
+    "repeat": 0,
+    "arm": "baseline_misleading"
+  },
+  "0e083aa3a7160241b65e486d": {
+    "id": "case-15-repeat-0-baseline_live_jev",
+    "case_id": "af-016",
+    "repeat": 0,
+    "arm": "baseline_live_jev"
+  },
+  "f28f33d73311c30909d2a1ec": {
+    "id": "case-15-repeat-0-baseline_direct",
+    "case_id": "af-016",
+    "repeat": 0,
+    "arm": "baseline_direct"
+  },
+  "7870491681883618fbf9ab02": {
+    "id": "case-15-repeat-0-verdict_direct",
+    "case_id": "af-016",
+    "repeat": 0,
+    "arm": "verdict_direct"
+  },
+  "68ef948cbde737d9c06d63f8": {
+    "id": "case-15-repeat-0-verdict_live_jev",
+    "case_id": "af-016",
+    "repeat": 0,
+    "arm": "verdict_live_jev"
+  },
+  "7ecb1665719c4d9333090960": {
+    "id": "case-15-repeat-0-verdict_misleading",
+    "case_id": "af-016",
+    "repeat": 0,
+    "arm": "verdict_misleading"
+  },
+  "6bace98a0d6a7a60a53d5c6d": {
+    "id": "case-12-repeat-0-verdict_misleading",
+    "case_id": "af-009",
+    "repeat": 0,
+    "arm": "verdict_misleading"
+  },
+  "f296ef74e1c215cb9229bf02": {
+    "id": "case-12-repeat-0-baseline_direct",
+    "case_id": "af-009",
+    "repeat": 0,
+    "arm": "baseline_direct"
+  },
+  "c98fa154477ce4d4480e6787": {
+    "id": "case-12-repeat-0-baseline_misleading",
+    "case_id": "af-009",
+    "repeat": 0,
+    "arm": "baseline_misleading"
+  },
+  "50c3b2d9e534de999e3810a8": {
+    "id": "case-12-repeat-0-verdict_live_jev",
+    "case_id": "af-009",
+    "repeat": 0,
+    "arm": "verdict_live_jev"
+  },
+  "b4e988e522985b4efd10b437": {
+    "id": "case-12-repeat-0-verdict_direct",
+    "case_id": "af-009",
+    "repeat": 0,
+    "arm": "verdict_direct"
+  },
+  "04fe5ac65d41aabb4d2bf6de": {
+    "id": "case-12-repeat-0-baseline_live_jev",
+    "case_id": "af-009",
+    "repeat": 0,
+    "arm": "baseline_live_jev"
+  },
+  "d9f70efe95aba13602f7fbae": {
+    "id": "case-2-repeat-0-baseline_misleading",
+    "case_id": "hf-009",
+    "repeat": 0,
+    "arm": "baseline_misleading"
+  },
+  "f71d5ae02e41b98b37cc4315": {
+    "id": "case-2-repeat-0-baseline_live_jev",
+    "case_id": "hf-009",
+    "repeat": 0,
+    "arm": "baseline_live_jev"
+  },
+  "02afdef0d0c81109af36dca2": {
+    "id": "case-2-repeat-0-verdict_live_jev",
+    "case_id": "hf-009",
+    "repeat": 0,
+    "arm": "verdict_live_jev"
+  },
+  "ac97d1e42f5dbd513eaa2fc1": {
+    "id": "case-2-repeat-0-verdict_direct",
+    "case_id": "hf-009",
+    "repeat": 0,
+    "arm": "verdict_direct"
+  },
+  "87080a4d8a15dce066e7c4dc": {
+    "id": "case-2-repeat-0-verdict_misleading",
+    "case_id": "hf-009",
+    "repeat": 0,
+    "arm": "verdict_misleading"
+  },
+  "e2d1cbc4b98eedb4cd357b4b": {
+    "id": "case-2-repeat-0-baseline_direct",
+    "case_id": "hf-009",
+    "repeat": 0,
+    "arm": "baseline_direct"
+  },
+  "fd316aaa3f8a7b0fba7e742a": {
+    "id": "case-14-repeat-0-baseline_misleading",
+    "case_id": "af-015",
+    "repeat": 0,
+    "arm": "baseline_misleading"
+  },
+  "961a4239ed17f316b6601cae": {
+    "id": "case-14-repeat-0-verdict_live_jev",
+    "case_id": "af-015",
+    "repeat": 0,
+    "arm": "verdict_live_jev"
+  },
+  "5791481f468bbd4f21338a32": {
+    "id": "case-14-repeat-0-verdict_misleading",
+    "case_id": "af-015",
+    "repeat": 0,
+    "arm": "verdict_misleading"
+  },
+  "1d8f336f281a6ab1cd6267d9": {
+    "id": "case-14-repeat-0-baseline_live_jev",
+    "case_id": "af-015",
+    "repeat": 0,
+    "arm": "baseline_live_jev"
+  },
+  "14e978d8d31b71b5bece823f": {
+    "id": "case-14-repeat-0-baseline_direct",
+    "case_id": "af-015",
+    "repeat": 0,
+    "arm": "baseline_direct"
+  },
+  "48386d8917b7fa4b5d1651f5": {
+    "id": "case-14-repeat-0-verdict_direct",
+    "case_id": "af-015",
+    "repeat": 0,
+    "arm": "verdict_direct"
+  },
+  "a3751dde5b6e79c3e3ce7c3b": {
+    "id": "case-8-repeat-0-verdict_direct",
+    "case_id": "af-005",
+    "repeat": 0,
+    "arm": "verdict_direct"
+  },
+  "da617ea13cd455c15a210d33": {
+    "id": "case-8-repeat-0-verdict_live_jev",
+    "case_id": "af-005",
+    "repeat": 0,
+    "arm": "verdict_live_jev"
+  },
+  "b7e016e3ede8783e60536ce3": {
+    "id": "case-8-repeat-0-baseline_live_jev",
+    "case_id": "af-005",
+    "repeat": 0,
+    "arm": "baseline_live_jev"
+  },
+  "0309cf0d751beecea9daba2c": {
+    "id": "case-8-repeat-0-baseline_misleading",
+    "case_id": "af-005",
+    "repeat": 0,
+    "arm": "baseline_misleading"
+  },
+  "3777c4af7951f37d47503ffa": {
+    "id": "case-8-repeat-0-verdict_misleading",
+    "case_id": "af-005",
+    "repeat": 0,
+    "arm": "verdict_misleading"
+  },
+  "4c0ebb8a08206d65808ac6e1": {
+    "id": "case-8-repeat-0-baseline_direct",
+    "case_id": "af-005",
+    "repeat": 0,
+    "arm": "baseline_direct"
+  },
+  "a7c7a763ca5a0a8bb87fd75a": {
+    "id": "case-10-repeat-0-baseline_direct",
+    "case_id": "af-007",
+    "repeat": 0,
+    "arm": "baseline_direct"
+  },
+  "55c18e5751315a866b9db16d": {
+    "id": "case-10-repeat-0-baseline_live_jev",
+    "case_id": "af-007",
+    "repeat": 0,
+    "arm": "baseline_live_jev"
+  },
+  "dbbcabddcfa7860508103b69": {
+    "id": "case-10-repeat-0-verdict_misleading",
+    "case_id": "af-007",
+    "repeat": 0,
+    "arm": "verdict_misleading"
+  },
+  "c80d3e29dad1e412f8910d07": {
+    "id": "case-10-repeat-0-baseline_misleading",
+    "case_id": "af-007",
+    "repeat": 0,
+    "arm": "baseline_misleading"
+  },
+  "f426bf6285e8a5e540d7b75c": {
+    "id": "case-10-repeat-0-verdict_live_jev",
+    "case_id": "af-007",
+    "repeat": 0,
+    "arm": "verdict_live_jev"
+  },
+  "0846bf08bedc78a7977aef66": {
+    "id": "case-10-repeat-0-verdict_direct",
+    "case_id": "af-007",
+    "repeat": 0,
+    "arm": "verdict_direct"
+  },
+  "69fb1caa16e622ff0a2f82f4": {
+    "id": "case-13-repeat-0-baseline_misleading",
+    "case_id": "af-010",
+    "repeat": 0,
+    "arm": "baseline_misleading"
+  },
+  "3f22be12cdeeaf86b1bba317": {
+    "id": "case-13-repeat-0-baseline_direct",
+    "case_id": "af-010",
+    "repeat": 0,
+    "arm": "baseline_direct"
+  },
+  "48da9ca88671c9c9e2bde0f2": {
+    "id": "case-13-repeat-0-verdict_live_jev",
+    "case_id": "af-010",
+    "repeat": 0,
+    "arm": "verdict_live_jev"
+  },
+  "295f33d820b366f2d8fa5b9c": {
+    "id": "case-13-repeat-0-verdict_misleading",
+    "case_id": "af-010",
+    "repeat": 0,
+    "arm": "verdict_misleading"
+  },
+  "ca17bba631fe596192b0819d": {
+    "id": "case-13-repeat-0-verdict_direct",
+    "case_id": "af-010",
+    "repeat": 0,
+    "arm": "verdict_direct"
+  },
+  "ba1d9064e88d4237513998cf": {
+    "id": "case-13-repeat-0-baseline_live_jev",
+    "case_id": "af-010",
+    "repeat": 0,
+    "arm": "baseline_live_jev"
+  },
+  "a6c105bd0eba665794c9395a": {
+    "id": "case-0-repeat-0-verdict_direct",
+    "case_id": "hf-005",
+    "repeat": 0,
+    "arm": "verdict_direct"
+  },
+  "bb030f8adbf6d341751f3fe5": {
+    "id": "case-0-repeat-0-baseline_direct",
+    "case_id": "hf-005",
+    "repeat": 0,
+    "arm": "baseline_direct"
+  },
+  "e9209e156010143ad7878148": {
+    "id": "case-0-repeat-0-baseline_live_jev",
+    "case_id": "hf-005",
+    "repeat": 0,
+    "arm": "baseline_live_jev"
+  },
+  "7d92f453d3bd86fe3cded37e": {
+    "id": "case-0-repeat-0-baseline_misleading",
+    "case_id": "hf-005",
+    "repeat": 0,
+    "arm": "baseline_misleading"
+  },
+  "f89200405a635f7323aa2eff": {
+    "id": "case-0-repeat-0-verdict_live_jev",
+    "case_id": "hf-005",
+    "repeat": 0,
+    "arm": "verdict_live_jev"
+  },
+  "f72abbd85fa1789cf29b4092": {
+    "id": "case-0-repeat-0-verdict_misleading",
+    "case_id": "hf-005",
+    "repeat": 0,
+    "arm": "verdict_misleading"
+  }
+}

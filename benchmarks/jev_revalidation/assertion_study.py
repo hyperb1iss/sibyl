@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import random
+from collections.abc import Callable
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -44,17 +46,47 @@ PROTOCOL = {
 }
 
 
-def entries(cases: list[dict[str, Any]], *, repeats: int = REPEATS) -> list[dict[str, Any]]:
+@dataclass(frozen=True)
+class StudyConfig:
+    version: str
+    seed: int
+    contracts: tuple[str, ...]
+    critic_version: str
+    request_builder: Callable[..., dict[str, Any]]
+    interpreter: heldout_fast.Interpreter
+    comparisons: dict[str, list[str]]
+    protocol: dict[str, Any]
+
+    @property
+    def arms(self) -> tuple[str, ...]:
+        return tuple(f"{contract}_{mode}" for contract in self.contracts for mode in MODES)
+
+
+DEFAULT = StudyConfig(
+    VERSION,
+    SEED,
+    assertion_critic.CONTRACTS,
+    assertion_critic.VERSION,
+    assertion_critic.critic_request,
+    assertion_critic.interpret,
+    COMPARISONS,
+    PROTOCOL,
+)
+
+
+def entries(
+    cases: list[dict[str, Any]], *, repeats: int = REPEATS, config: StudyConfig = DEFAULT
+) -> list[dict[str, Any]]:
     if type(repeats) is not int or repeats < 1:
         raise ValueError("repeats must be a positive integer")
-    base = heldout_fast.entries(cases, repeats=repeats, seed=SEED, version=VERSION)
+    base = heldout_fast.entries(cases, repeats=repeats, seed=config.seed, version=config.version)
     pairs = {(e["case_index"], e["repeat"]): e for e in base}
-    rng = random.Random(SEED)  # noqa: S311 - reproducible randomized paired schedule
+    rng = random.Random(config.seed)  # noqa: S311 - reproducible randomized paired schedule
     schedule = []
     for entry in pairs.values():
         prepared = PreparedMemoryValidation(entry["prepared_payload"])
         stress = heldout_fast.stress_labels(cases[entry["case_index"]], prepared)
-        arms = list(ARMS)
+        arms = list(config.arms)
         rng.shuffle(arms)
         for arm in arms:
             contract, mode = arm.split("_", 1)
@@ -70,46 +102,46 @@ def entries(cases: list[dict[str, Any]], *, repeats: int = REPEATS) -> list[dict
                     "hint_mode": mode,
                     "decision_request_id": decision["request_id"],
                     "jev_request": decision,
-                    "direct_request": assertion_critic.critic_request(
-                        prepared, [], contract=contract
-                    ),
-                    "stress_request": assertion_critic.critic_request(
-                        prepared, stress, contract=contract
-                    ),
+                    "direct_request": config.request_builder(prepared, [], contract=contract),
+                    "stress_request": config.request_builder(prepared, stress, contract=contract),
                 }
             )
     return schedule
 
 
-def _assemble(cases_path: Path, rubric_path: Path, repeats: int):
+def _assemble(cases_path: Path, rubric_path: Path, repeats: int, config: StudyConfig = DEFAULT):
     cases, _, current = heldout_fast._assemble(cases_path, rubric_path)
-    schedule = entries(cases, repeats=repeats)
+    schedule = entries(cases, repeats=repeats, config=config)
     current.update(
-        version=VERSION,
+        version=config.version,
         schedule_sha256=quality_speed.digest(schedule),
         paths=len(schedule),
         critic_calls=len(schedule),
         jev_calls=sum(e["hint_mode"] == "live_jev" for e in schedule),
         repeats=repeats,
-        seed=SEED,
-        protocol=PROTOCOL,
-        contracts=list(assertion_critic.CONTRACTS),
-        critic_contract_version=assertion_critic.VERSION,
+        seed=config.seed,
+        protocol=config.protocol,
+        contracts=list(config.contracts),
+        critic_contract_version=config.critic_version,
     )
     return cases, schedule, current
 
 
-def manifest(cases_path: Path, rubric_path: Path, *, repeats: int = REPEATS) -> dict[str, Any]:
-    return _assemble(cases_path, rubric_path, repeats)[2]
+def manifest(
+    cases_path: Path, rubric_path: Path, *, repeats: int = REPEATS, config: StudyConfig = DEFAULT
+) -> dict[str, Any]:
+    return _assemble(cases_path, rubric_path, repeats, config)[2]
 
 
-async def prepare(cases_path: Path, rubric_path: Path, *, repeats: int = REPEATS):
-    return await asyncio.to_thread(_assemble, cases_path, rubric_path, repeats)
+async def prepare(
+    cases_path: Path, rubric_path: Path, *, repeats: int = REPEATS, config: StudyConfig = DEFAULT
+):
+    return await asyncio.to_thread(_assemble, cases_path, rubric_path, repeats, config)
 
 
-def _identity(entry: dict[str, Any]) -> None:
+def _identity(entry: dict[str, Any], config: StudyConfig = DEFAULT) -> None:
     if (
-        entry.get("contract") not in assertion_critic.CONTRACTS
+        entry.get("contract") not in config.contracts
         or entry.get("hint_mode") not in MODES
         or entry["arm"] != f"{entry['contract']}_{entry['hint_mode']}"
     ):
@@ -128,21 +160,22 @@ async def execute(
     client: httpx.AsyncClient | None,
     out: Path | None,
     archive: Path | None = None,
+    config: StudyConfig = DEFAULT,
 ) -> dict[str, Any]:
-    _identity(entry)
+    _identity(entry, config)
     return await heldout_fast.execute(
         entry,
         case,
         client=client,
         out=out,
         archive=archive,
-        request_builder=partial(assertion_critic.critic_request, contract=entry["contract"]),
-        interpreter=assertion_critic.interpret,
+        request_builder=partial(config.request_builder, contract=entry["contract"]),
+        interpreter=config.interpreter,
     )
 
 
-def _comparison(name, arms, indexed, cases, repeats):
-    before, after = COMPARISONS[name]
+def _comparison(name, arms, indexed, cases, repeats, comparisons=COMPARISONS):
+    before, after = comparisons[name]
     baseline, candidate = arms[before], arms[after]
     ratios = {
         field: candidate[field] / baseline[field] if baseline[field] else None
@@ -203,7 +236,11 @@ def _comparison(name, arms, indexed, cases, repeats):
 
 
 def summarize(
-    cases: list[dict[str, Any]], schedule: list[dict[str, Any]], rows: list[dict[str, Any]]
+    cases: list[dict[str, Any]],
+    schedule: list[dict[str, Any]],
+    rows: list[dict[str, Any]],
+    *,
+    config: StudyConfig = DEFAULT,
 ) -> dict[str, Any]:
     expected = {e["id"]: e for e in schedule}
     if (
@@ -213,7 +250,7 @@ def summarize(
     ):
         raise ValueError("complete unique factorial path coverage required")
     for entry in schedule:
-        _identity(entry)
+        _identity(entry, config)
     for row in rows:
         if any(
             row[k] != expected[row["id"]][k]
@@ -221,7 +258,7 @@ def summarize(
         ):
             raise ValueError("row critic contract binding changed")
     contracts = {}
-    for contract in assertion_critic.CONTRACTS:
+    for contract in config.contracts:
         contract_schedule = [
             {**e, "arm": e["hint_mode"]} for e in schedule if e["contract"] == contract
         ]
@@ -236,13 +273,14 @@ def summarize(
     }
     indexed = {(r["case_id"], r["repeat"], r["arm"]): r for r in rows}
     repeats = sorted({e["repeat"] for e in schedule})
-    if len(indexed) != len(cases) * len(repeats) * len(ARMS):
+    if len(indexed) != len(cases) * len(repeats) * len(config.arms):
         raise ValueError("complete factorial grid required")
     return {
         "arms": arms,
         "contracts": contracts,
         "comparisons": {
-            name: _comparison(name, arms, indexed, cases, repeats) for name in COMPARISONS
+            name: _comparison(name, arms, indexed, cases, repeats, config.comparisons)
+            for name in config.comparisons
         },
         "independent_clusters": len({c.get("pair_group", c["id"]) for c in cases}),
         "all_arms_acquisition": heldout_fast_analysis._metrics(rows, {c["id"]: c for c in cases}),
@@ -267,6 +305,7 @@ async def run(
     freeze: Path | None = None,
     live: bool = False,
     replay_path: Path | None = None,
+    config: StudyConfig = DEFAULT,
 ):
     return await heldout_fast.run(
         cases_path,
@@ -275,13 +314,13 @@ async def run(
         freeze=freeze,
         live=live,
         replay_path=replay_path,
-        prepare_fn=partial(prepare, repeats=repeats),
-        execute_fn=execute,
-        summarize_fn=summarize,
+        prepare_fn=partial(prepare, repeats=repeats, config=config),
+        execute_fn=partial(execute, config=config),
+        summarize_fn=partial(summarize, config=config),
     )
 
 
-def main() -> None:
+def main(config: StudyConfig = DEFAULT) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     for flag in ("cases", "rubric", "output-dir"):
         parser.add_argument(f"--{flag}", type=Path, required=True)
@@ -300,6 +339,7 @@ def main() -> None:
             freeze=args.freeze,
             live=args.live,
             replay_path=args.replay,
+            config=config,
         )
     )
 

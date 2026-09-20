@@ -1,0 +1,253 @@
+{
+  "metadata": {
+    "primary_annotations_sha256": "20f7bcd8101dfb664bb2b7cdcc02fa4b89b87d2a3aaa9aadd4447e5237ad1db7",
+    "frozen_before_unblinding": true,
+    "review_scope": "Contract-visible, hint-mode-blind; same-family contextual review. No maps or comparison outcomes read.",
+    "scenario": "Apply only these predeclared contextual interpretations, separately or jointly; no primary annotation, source, rubric, mechanical outcome or binding changes. Other defects remain failures.",
+    "coverage_semantics": "Coverage changes count only findings made fully valid by the stated interpretation; valid inability is not invented finding coverage."
+  },
+  "overrides": [
+    {
+      "blind_id": "f72abbd85fa1789cf29b4092",
+      "case_id": "hf-005",
+      "interpretation": {
+        "blind_id": "f72abbd85fa1789cf29b4092",
+        "verdict_index": 0,
+        "primary": "raw rationale fails for added chronology",
+        "alternative": "Treat the entire upgrade-and-observation episode as one monitoring window; this supported rationale would pass and raw-only defect disappears.",
+        "rationale": "The source says the lower-time monitoring window followed the upgrade. Primary exact-clause reading does not equate that with upgrade occurring inside the observed window. The supported worker-count assertion and consumer projection remain unaffected.",
+        "original_preserved": true
+      },
+      "primary": {
+        "projected_semantic_pass": true,
+        "raw_semantic_pass": false,
+        "semantic_pass": false,
+        "projection_hides_defect": true,
+        "covered_concern_ids": [],
+        "missed_concern_ids": []
+      },
+      "alternative": {
+        "projected_semantic_pass": true,
+        "raw_semantic_pass": true,
+        "semantic_pass": true,
+        "projection_hides_defect": false,
+        "covered_concern_ids": [],
+        "missed_concern_ids": []
+      },
+      "field_flips": [
+        {
+          "collection": "assertion_verdicts",
+          "index": 0,
+          "changes": {
+            "rationale_supported": {
+              "from": false,
+              "to": true
+            },
+            "unsupported_replacement": {
+              "from": true,
+              "to": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "blind_id": "328d970ac9a7f2e95ca83074",
+      "case_id": "hf-006",
+      "interpretation": {
+        "blind_id": "328d970ac9a7f2e95ca83074",
+        "verdict_index": 1,
+        "primary": "raw rationale fails for added chronology",
+        "alternative": "Treat the entire upgrade-and-observation episode as one monitoring window; this supported rationale would pass and raw-only defect disappears.",
+        "rationale": "The source says the lower-time monitoring window followed the upgrade. Primary exact-clause reading does not equate that with upgrade occurring inside the observed window. The supported worker-count assertion and consumer projection remain unaffected.",
+        "original_preserved": true
+      },
+      "primary": {
+        "projected_semantic_pass": true,
+        "raw_semantic_pass": false,
+        "semantic_pass": false,
+        "projection_hides_defect": true,
+        "covered_concern_ids": [
+          "hf-006-concern-1"
+        ],
+        "missed_concern_ids": []
+      },
+      "alternative": {
+        "projected_semantic_pass": true,
+        "raw_semantic_pass": true,
+        "semantic_pass": true,
+        "projection_hides_defect": false,
+        "covered_concern_ids": [
+          "hf-006-concern-1"
+        ],
+        "missed_concern_ids": []
+      },
+      "field_flips": [
+        {
+          "collection": "assertion_verdicts",
+          "index": 1,
+          "changes": {
+            "rationale_supported": {
+              "from": false,
+              "to": true
+            },
+            "unsupported_replacement": {
+              "from": true,
+              "to": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "blind_id": "a115dd65f013f4e88e48fcc8",
+      "case_id": "hf-006",
+      "interpretation": {
+        "blind_id": "a115dd65f013f4e88e48fcc8",
+        "verdict_index": 0,
+        "primary": "raw rationale fails for added chronology",
+        "alternative": "Treat the entire upgrade-and-observation episode as one monitoring window; this supported rationale would pass and raw-only defect disappears.",
+        "rationale": "The source says the lower-time monitoring window followed the upgrade. Primary exact-clause reading does not equate that with upgrade occurring inside the observed window. The supported worker-count assertion and consumer projection remain unaffected.",
+        "original_preserved": true
+      },
+      "primary": {
+        "projected_semantic_pass": true,
+        "raw_semantic_pass": false,
+        "semantic_pass": false,
+        "projection_hides_defect": true,
+        "covered_concern_ids": [
+          "hf-006-concern-1"
+        ],
+        "missed_concern_ids": []
+      },
+      "alternative": {
+        "projected_semantic_pass": true,
+        "raw_semantic_pass": true,
+        "semantic_pass": true,
+        "projection_hides_defect": false,
+        "covered_concern_ids": [
+          "hf-006-concern-1"
+        ],
+        "missed_concern_ids": []
+      },
+      "field_flips": [
+        {
+          "collection": "assertion_verdicts",
+          "index": 0,
+          "changes": {
+            "rationale_supported": {
+              "from": false,
+              "to": true
+            },
+            "unsupported_replacement": {
+              "from": true,
+              "to": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "blind_id": "a6c105bd0eba665794c9395a",
+      "case_id": "hf-005",
+      "interpretation": {
+        "blind_id": "a6c105bd0eba665794c9395a",
+        "verdict_index": 0,
+        "primary": "raw rationale fails for parser-upgrade effects characterization",
+        "alternative": "Read effects as loose shorthand for subsequent observations, not a causal effect. Raw-only defect would disappear.",
+        "rationale": "The source explicitly leaves separate effects unmeasured; primary strict review does not label the observed period a window of established upgrade effects.",
+        "original_preserved": true
+      },
+      "primary": {
+        "projected_semantic_pass": true,
+        "raw_semantic_pass": false,
+        "semantic_pass": false,
+        "projection_hides_defect": true,
+        "covered_concern_ids": [],
+        "missed_concern_ids": []
+      },
+      "alternative": {
+        "projected_semantic_pass": true,
+        "raw_semantic_pass": true,
+        "semantic_pass": true,
+        "projection_hides_defect": false,
+        "covered_concern_ids": [],
+        "missed_concern_ids": []
+      },
+      "field_flips": [
+        {
+          "collection": "assertion_verdicts",
+          "index": 0,
+          "changes": {
+            "rationale_supported": {
+              "from": false,
+              "to": true
+            },
+            "unsupported_replacement": {
+              "from": true,
+              "to": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "blind_id": "dc18a1779b832ed041936112",
+      "case_id": "hf-018",
+      "interpretation": {
+        "blind_id": "dc18a1779b832ed041936112",
+        "finding_index": 0,
+        "primary": "projected and raw fail for converting no recorded web-editor events into no actual web-editor writes",
+        "alternative": "Closed-channel shorthand interpretation makes this finding and both semantic layers pass.",
+        "rationale": "The same recorded-versus-occurring boundary was retained in prior experiments. Source exports every recorded event, not an independent guarantee that every actual write was recorded.",
+        "original_preserved": true
+      },
+      "primary": {
+        "projected_semantic_pass": false,
+        "raw_semantic_pass": false,
+        "semantic_pass": false,
+        "projection_hides_defect": false,
+        "covered_concern_ids": [],
+        "missed_concern_ids": [
+          "hf-018-concern-1"
+        ]
+      },
+      "alternative": {
+        "projected_semantic_pass": true,
+        "raw_semantic_pass": true,
+        "semantic_pass": true,
+        "projection_hides_defect": false,
+        "covered_concern_ids": [
+          "hf-018-concern-1"
+        ],
+        "missed_concern_ids": []
+      },
+      "field_flips": [
+        {
+          "collection": "findings",
+          "index": 0,
+          "changes": {
+            "unsupported_replacement": {
+              "from": true,
+              "to": false
+            }
+          }
+        },
+        {
+          "collection": "assertion_verdicts",
+          "index": 0,
+          "changes": {
+            "rationale_supported": {
+              "from": false,
+              "to": true
+            },
+            "unsupported_replacement": {
+              "from": true,
+              "to": false
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

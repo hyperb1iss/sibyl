@@ -88,3 +88,17 @@ paths. Fresh semantic passes rise from 21/32 for the original direct critic to
 Retained failures, two direct-prompt regressions and poor wrong-hint finding
 quality still prevent activation. Both cohorts retain the same frozen prompt,
 complete acquisition costs and separate blind reviews.
+
+## Explicit verdicts and the integration decision
+
+The [verdict-format study](results/verdict-2026-09-20/report.md) requires one
+bound judgment for every assertion and scores both its raw rationale and the
+findings exposed to consumers. On the fresh synthetic cohort, the simpler
+assertion-prefix critic with live Jev passes 29/32 paths at a 2.393-second median;
+explicit verdicts with Jev pass 27/32 at 3.400 seconds and cost 62.51% more.
+Correct Jev labels still leave critic errors. Retained regressions, wrong-hint
+failures and a 30-second acquisition deadline leave default activation
+unqualified. Keep Jev experimental and stop this verdict format as a Jev
+integration strategy. Standalone verdict-format value remains inconclusive.
+Adoption needs representative downstream evidence and a solution to critic
+errors and serial tail latency.

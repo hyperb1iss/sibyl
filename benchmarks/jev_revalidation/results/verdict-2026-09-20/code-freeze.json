@@ -1,0 +1,15 @@
+{
+  "created_at": "2026-09-20T19:48:17.135344+00:00",
+  "base": "ae83275721e6667918ea0d2a283d5657fa8213f5",
+  "files": {
+    "benchmarks/jev_revalidation/assertion_study.py": "835eb197fbf511ba6c86a4e7df055d79511e647ba6bc190eb790bbc60577b0ab",
+    "benchmarks/jev_revalidation/fast_critic.py": "80aaec139e0d00bf3693d6b00574e51fbd857851b3d1835422e52f63ecdf2102",
+    "benchmarks/jev_revalidation/test_verdict_critic.py": "6fddf9afc488ddd2967a2f498876a8df40726d4686f3f98708b17711b36ee44e",
+    "benchmarks/jev_revalidation/test_verdict_study.py": "03abbce6b1d231e6dc61d15f39aca6ab04ce48c6e743b4ff281ad25186048237",
+    "benchmarks/jev_revalidation/verdict_critic.py": "1148b88f79303ed469043d574bd1788331125a459bac531e941f7607f386b9d5",
+    "benchmarks/jev_revalidation/verdict_study.py": "10a994bc24120d05ae4f8c0a070c0ca078095edd0ebd3e1fe780e238908453fc",
+    "moon.yml": "c5d0f4cb569218569d675eabca3f2765e05f8baed1d4c28cf6cd73b1605a28ab"
+  },
+  "fresh_case_contents_seen_by_root": false,
+  "frozen_before_fresh_unseal": true
+}

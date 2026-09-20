@@ -2101,6 +2101,15 @@ tasks:
     options:
       cache: false
 
+  jev-verdict-critic:
+    command: uv run --locked --package sibyl-core python -m benchmarks.jev_revalidation.verdict_study
+    inputs:
+      - benchmarks/jev_revalidation/**/*
+      - packages/python/sibyl-core/src/sibyl_core/tasks/memory_validation.py
+      - packages/python/sibyl-core/src/sibyl_core/tasks/procedure_review.py
+    options:
+      cache: false
+
   jev-assertion-critic:
     command: uv run --locked --package sibyl-core python -m benchmarks.jev_revalidation.assertion_study
     inputs:

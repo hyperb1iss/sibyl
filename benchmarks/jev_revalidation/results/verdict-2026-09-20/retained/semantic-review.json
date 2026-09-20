@@ -1,0 +1,4077 @@
+{
+  "metadata": {
+    "reviewer": "Native same-family contextual independent reviewer; not human gold or cross-family verification.",
+    "visibility": "Contract-visible, hint-mode-blind. Only these four blind packet files read; no sibling mapping/raw/plan/summary/timing/cost inspected before freeze. Schemas expose intervention and response prose may incidentally reveal advisory labels.",
+    "prior_exposure": "Reviewer previously inspected fixture source truth and implementation and knows historical experiment failures. No current outcome or mapping was seen before blind packet inspection.",
+    "rules": "Original strict clause-level and exact-target rubric. Every raw verdict rationale/reason and every finding read individually. Mechanical errors stay failures. Explicit overclaim is not repaired by later qualification. Pure absence is not contradiction. Assembly code records human-readable individual judgments, not model/provider annotation.",
+    "field_definitions": {
+      "projected_semantic_pass": "Consumer-facing findings and abstention satisfy frozen rubric and complete concern coverage or explicitly permitted grounded abstention.",
+      "raw_semantic_pass": "Complete raw verdicts and rationales/reasons are correctly targeted, warranted and factual, with no hidden unsupported criticism. Baseline equals projected result.",
+      "semantic_pass": "Conjunction of projected and raw semantic passes.",
+      "projection_hides_defect": "Projected output passes but complete raw verdict fidelity fails.",
+      "core_concern_supported": "The exact finding target has the frozen material concern, independently of extra prose defects.",
+      "citations_relevant": "Original cited evidence addresses the proposition; relevance does not make criticism warranted.",
+      "basis_overstates_evidence": "Typed basis or prose alleges contradiction/disproof beyond evidence.",
+      "unsupported_replacement": "An auxiliary factual statement or proposed correction exceeds original evidence.",
+      "exact_target_bound": "Known unique host path and present bound hash; original mechanical validation checks exact prepared digest. Duplicate raw verdicts are not bound even if each copies the same hash.",
+      "concern_ids": "Concerns addressed by exact target; valid coverage counted separately.",
+      "covered_concern_ids": "Only fully valid mechanically accepted findings count, with each concern at most once.",
+      "missed_concern_ids": "Frozen concern set minus valid finding coverage. Valid inability remains separately recorded."
+    },
+    "input_bindings": {
+      "cases.json": "3fc6e59af6ff51c24a1b0e6769a521db907927f3cdc2d48a5d550cdb8f7a145a",
+      "rubric.json": "71c7ecc31c26dc40c1689f9ec37a0e35879a53f6c684b4eb65dedf084f797c95",
+      "responses.json": "ea0b5e01e1be48f4a4170e66cb1a9ab655a104fffe2732caf7ed8f9a504b1535",
+      "binding.json": "ecabe37e41a70878dcf5537d4891ededdf411118a99f92be335714be26681bc6"
+    },
+    "supplied_binding": {
+      "review_visibility": "Contract visible from schema; hint mode, arm names, repeats, timing and cost withheld. Output prose may incidentally expose advisory labels.",
+      "rows_sha256": "ebc46846d1b06eaee5af19bf68dc105859566f9b25a3283fbce9a9cbb2b15d5f",
+      "files_sha256": {
+        "rubric.json": "71c7ecc31c26dc40c1689f9ec37a0e35879a53f6c684b4eb65dedf084f797c95",
+        "responses.json": "ea0b5e01e1be48f4a4170e66cb1a9ab655a104fffe2732caf7ed8f9a504b1535",
+        "cases.json": "3fc6e59af6ff51c24a1b0e6769a521db907927f3cdc2d48a5d550cdb8f7a145a"
+      },
+      "blind_map_sha256": "dc0274f27dedb681e805753bcb5b25b16148631e20c8bd071f6bac00e54c6757"
+    },
+    "ambiguity_sensitivities": [
+      {
+        "blind_id": "f72abbd85fa1789cf29b4092",
+        "verdict_index": 0,
+        "primary": "raw rationale fails for added chronology",
+        "alternative": "Treat the entire upgrade-and-observation episode as one monitoring window; this supported rationale would pass and raw-only defect disappears.",
+        "rationale": "The source says the lower-time monitoring window followed the upgrade. Primary exact-clause reading does not equate that with upgrade occurring inside the observed window. The supported worker-count assertion and consumer projection remain unaffected.",
+        "original_preserved": true
+      },
+      {
+        "blind_id": "328d970ac9a7f2e95ca83074",
+        "verdict_index": 1,
+        "primary": "raw rationale fails for added chronology",
+        "alternative": "Treat the entire upgrade-and-observation episode as one monitoring window; this supported rationale would pass and raw-only defect disappears.",
+        "rationale": "The source says the lower-time monitoring window followed the upgrade. Primary exact-clause reading does not equate that with upgrade occurring inside the observed window. The supported worker-count assertion and consumer projection remain unaffected.",
+        "original_preserved": true
+      },
+      {
+        "blind_id": "a115dd65f013f4e88e48fcc8",
+        "verdict_index": 0,
+        "primary": "raw rationale fails for added chronology",
+        "alternative": "Treat the entire upgrade-and-observation episode as one monitoring window; this supported rationale would pass and raw-only defect disappears.",
+        "rationale": "The source says the lower-time monitoring window followed the upgrade. Primary exact-clause reading does not equate that with upgrade occurring inside the observed window. The supported worker-count assertion and consumer projection remain unaffected.",
+        "original_preserved": true
+      },
+      {
+        "blind_id": "a6c105bd0eba665794c9395a",
+        "verdict_index": 0,
+        "primary": "raw rationale fails for parser-upgrade effects characterization",
+        "alternative": "Read effects as loose shorthand for subsequent observations, not a causal effect. Raw-only defect would disappear.",
+        "rationale": "The source explicitly leaves separate effects unmeasured; primary strict review does not label the observed period a window of established upgrade effects.",
+        "original_preserved": true
+      },
+      {
+        "blind_id": "dc18a1779b832ed041936112",
+        "finding_index": 0,
+        "primary": "projected and raw fail for converting no recorded web-editor events into no actual web-editor writes",
+        "alternative": "Closed-channel shorthand interpretation makes this finding and both semantic layers pass.",
+        "rationale": "The same recorded-versus-occurring boundary was retained in prior experiments. Source exports every recorded event, not an independent guarantee that every actual write was recorded.",
+        "original_preserved": true
+      }
+    ],
+    "coverage": {
+      "responses": 96,
+      "unique_blind_ids": 96,
+      "cases": 16,
+      "raw_findings_reviewed": 85,
+      "raw_assertion_verdicts_reviewed": 91,
+      "scheduled_material_concern_instances": 48,
+      "mechanical_errors_retained": 1,
+      "mapping_read": false
+    }
+  },
+  "annotations": [
+    {
+      "blind_id": "dc18a1779b832ed041936112",
+      "case_id": "hf-018",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 0,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": true,
+          "concern_ids": [
+            "hf-018-concern-1"
+          ],
+          "note": "Correct all-client scope concern, but explicitly claims the evidence establishes absence of actual web-editor writes. The source establishes absence of recorded web-editor events; strict recorded-versus-occurring distinction retained."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": true,
+          "concern_ids": [
+            "hf-018-concern-1"
+          ],
+          "note": "Concern verdict is warranted for this target; its complete finding prose is checked separately."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "hf-018-concern-1"
+      ],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "68ef948cbde737d9c06d63f8",
+      "case_id": "af-016",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 1,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-016-concern-1"
+          ],
+          "note": "Correct exact-target concern: The staged upload was treated as activated despite a later status read retaining the earlier active setting."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-016-concern-1"
+          ],
+          "note": "Concern verdict is warranted for this target; its complete finding prose is checked separately."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-016-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "704683ab128889a8f2195735",
+      "case_id": "hf-006",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-006-concern-1"
+          ],
+          "note": "Correct exact-target concern: A co-occurring package change was assigned a causal effect despite changed workload and capacity and no causal comparison."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [
+        "hf-006-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "874d1a89d88ef73d428b6f9e",
+      "case_id": "af-008",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-008-concern-1"
+          ],
+          "note": "Correct exact-target concern: A local calibration error was transferred to an untested high temperature without a response curve."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [
+        "af-008-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "48f71b7b291c9c4f4095b0d9",
+      "case_id": "hf-024",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 0,
+          "finding_index": 0,
+          "claim_path": "/claim_records/0/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        },
+        {
+          "index": 1,
+          "verdict_index": 1,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-024-concern-1"
+          ],
+          "note": "Correct exact-target concern: The payload subtotal was presented as the complete upload total despite the expressly additional manifest."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": false,
+          "rationale_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict is not warranted for the exact assertion or cannot substitute for the frozen assessable concern."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-024-concern-1"
+          ],
+          "note": "Concern verdict is warranted for this target; its complete finding prose is checked separately."
+        }
+      ],
+      "covered_concern_ids": [
+        "hf-024-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "295f33d820b366f2d8fa5b9c",
+      "case_id": "af-010",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": false,
+          "rationale_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": true,
+          "concern_ids": [],
+          "note": "The source explicitly excludes two masked cells and says ten contribute; rationale redefines the claim of twelve contributors as total grid size and incorrectly equates that with denominator scope."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-010-concern-1"
+      ],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "d9f70efe95aba13602f7fbae",
+      "case_id": "hf-009",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/claim_records/0/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        },
+        {
+          "index": 1,
+          "verdict_index": null,
+          "finding_index": 1,
+          "claim_path": "/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "a85b8e546d32c4b1669ebb02",
+      "case_id": "hf-023",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/claim_records/0/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "0309cf0d751beecea9daba2c",
+      "case_id": "af-005",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "a3751dde5b6e79c3e3ce7c3b",
+      "case_id": "af-005",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 1,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": true,
+          "concern_ids": [],
+          "note": "Criticizes a supported measured comparison and further states the lower reading results from both changes, whose separate causal effects were not established."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": false,
+          "rationale_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": true,
+          "concern_ids": [],
+          "note": "The verdict is not warranted for the exact assertion or cannot substitute for the frozen assessable concern."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "f89200405a635f7323aa2eff",
+      "case_id": "hf-005",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "7d92f453d3bd86fe3cded37e",
+      "case_id": "hf-005",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "e4299283f11af9ba8863d806",
+      "case_id": "af-008",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 1,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-008-concern-1"
+          ],
+          "note": "Correct exact-target concern: A local calibration error was transferred to an untested high temperature without a response curve."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-008-concern-1"
+          ],
+          "note": "Concern verdict is warranted for this target; its complete finding prose is checked separately."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-008-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "69fb1caa16e622ff0a2f82f4",
+      "case_id": "af-010",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/claim_records/0/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": true,
+          "concern_ids": [],
+          "note": "Targets a supported grid statement and invents presence of two cells per row beyond four before later correcting its arithmetic; later retraction does not remove the emitted claim."
+        },
+        {
+          "index": 1,
+          "verdict_index": null,
+          "finding_index": 1,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-010-concern-1"
+          ],
+          "note": "Correct exact-target concern: The full acquired grid size was substituted for the mean denominator despite explicit masking exclusions."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [
+        "af-010-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "c98fa154477ce4d4480e6787",
+      "case_id": "af-009",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "db80649a5df1a1fb970df95a",
+      "case_id": "hf-017",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "fba62e7ae780545345fc1ea9",
+      "case_id": "hf-010",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/claim_records/0/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        },
+        {
+          "index": 1,
+          "verdict_index": null,
+          "finding_index": 1,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-010-concern-1"
+          ],
+          "note": "Correct exact-target concern: The enabled setting from staging was incorrectly attributed to the separately attested production namespace."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [
+        "hf-010-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "8956a5576d2e402403df2459",
+      "case_id": "hf-017",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "bb030f8adbf6d341751f3fe5",
+      "case_id": "hf-005",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "710775bb1723c5a21d98a36b",
+      "case_id": "hf-018",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 0,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-018-concern-1"
+          ],
+          "note": "Correct exact-target concern: An empty export for one channel was treated as proof of no writes across unobserved channels."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-018-concern-1"
+          ],
+          "note": "Concern verdict is warranted for this target; its complete finding prose is checked separately."
+        }
+      ],
+      "covered_concern_ids": [
+        "hf-018-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "f71d5ae02e41b98b37cc4315",
+      "case_id": "hf-009",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "5791481f468bbd4f21338a32",
+      "case_id": "af-015",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "14e978d8d31b71b5bece823f",
+      "case_id": "af-015",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "48386d8917b7fa4b5d1651f5",
+      "case_id": "af-015",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "6887eb6e1c0552168d1ce144",
+      "case_id": "hf-024",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/claim_records/0/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "hf-024-concern-1"
+      ],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "b4e988e522985b4efd10b437",
+      "case_id": "af-009",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "04fe5ac65d41aabb4d2bf6de",
+      "case_id": "af-009",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "7870491681883618fbf9ab02",
+      "case_id": "af-016",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 1,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-016-concern-1"
+          ],
+          "note": "Correct exact-target concern: The staged upload was treated as activated despite a later status read retaining the earlier active setting."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-016-concern-1"
+          ],
+          "note": "Concern verdict is warranted for this target; its complete finding prose is checked separately."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-016-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "1d8f336f281a6ab1cd6267d9",
+      "case_id": "af-015",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "87080a4d8a15dce066e7c4dc",
+      "case_id": "hf-009",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 0,
+          "finding_index": 0,
+          "claim_path": "/claim_records/0/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        },
+        {
+          "index": 1,
+          "verdict_index": 1,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": false,
+          "rationale_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict is not warranted for the exact assertion or cannot substitute for the frozen assessable concern."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": false,
+          "rationale_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict is not warranted for the exact assertion or cannot substitute for the frozen assessable concern."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "1fc91111de3b1af3dd24a6b2",
+      "case_id": "hf-010",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-010-concern-1"
+          ],
+          "note": "Correct exact-target concern: The enabled setting from staging was incorrectly attributed to the separately attested production namespace."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [
+        "hf-010-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "fd64ea547405b899bb01350e",
+      "case_id": "af-006",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-006-concern-1"
+          ],
+          "note": "Correct exact-target concern: The candidate attributes the change to the foam while microphone distance also changed and no isolated effect was estimated."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [
+        "af-006-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "64771745fe6441cb1488a7cd",
+      "case_id": "hf-017",
+      "mechanical_action": "error",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 0,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        },
+        {
+          "index": 1,
+          "verdict_index": 1,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/content",
+          "verdict": "concern",
+          "exact_target_bound": false,
+          "verdict_supported": false,
+          "rationale_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict is not warranted for the exact assertion or cannot substitute for the frozen assessable concern."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "concern",
+          "exact_target_bound": false,
+          "verdict_supported": false,
+          "rationale_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict is not warranted for the exact assertion or cannot substitute for the frozen assessable concern."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Mechanically invalid response retains raw diagnostic judgments but earns no projected/raw semantic credit or finding coverage."
+    },
+    {
+      "blind_id": "f156bce7e2609e8af41d9d76",
+      "case_id": "hf-024",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/claim_records/0/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        },
+        {
+          "index": 1,
+          "verdict_index": null,
+          "finding_index": 1,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-024-concern-1"
+          ],
+          "note": "Correct exact-target concern: The payload subtotal was presented as the complete upload total despite the expressly additional manifest."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [
+        "hf-024-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "8fbf62c215b4f4e29f744fea",
+      "case_id": "af-006",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 0,
+          "finding_index": 0,
+          "claim_path": "/claim_records/0/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        },
+        {
+          "index": 1,
+          "verdict_index": 1,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-006-concern-1"
+          ],
+          "note": "Correct exact-target concern: The candidate attributes the change to the foam while microphone distance also changed and no isolated effect was estimated."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": false,
+          "rationale_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict is not warranted for the exact assertion or cannot substitute for the frozen assessable concern."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-006-concern-1"
+          ],
+          "note": "Concern verdict is warranted for this target; its complete finding prose is checked separately."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-006-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "a7c7a763ca5a0a8bb87fd75a",
+      "case_id": "af-007",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "ca17bba631fe596192b0819d",
+      "case_id": "af-010",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 1,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-010-concern-1"
+          ],
+          "note": "Correct exact-target concern: The full acquired grid size was substituted for the mean denominator despite explicit masking exclusions."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-010-concern-1"
+          ],
+          "note": "Concern verdict is warranted for this target; its complete finding prose is checked separately."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-010-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "6bace98a0d6a7a60a53d5c6d",
+      "case_id": "af-009",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "99e8eaa0950d6f9f14651b58",
+      "case_id": "hf-018",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-018-concern-1"
+          ],
+          "note": "Correct exact-target concern: An empty export for one channel was treated as proof of no writes across unobserved channels."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [
+        "hf-018-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "f296ef74e1c215cb9229bf02",
+      "case_id": "af-009",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "dbbcabddcfa7860508103b69",
+      "case_id": "af-007",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "ad07d6e07bf04fa374b9c298",
+      "case_id": "hf-010",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 0,
+          "finding_index": 0,
+          "claim_path": "/claim_records/0/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        },
+        {
+          "index": 1,
+          "verdict_index": 1,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-010-concern-1"
+          ],
+          "note": "Correct exact-target concern: The enabled setting from staging was incorrectly attributed to the separately attested production namespace."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": false,
+          "rationale_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict is not warranted for the exact assertion or cannot substitute for the frozen assessable concern."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-010-concern-1"
+          ],
+          "note": "Concern verdict is warranted for this target; its complete finding prose is checked separately."
+        }
+      ],
+      "covered_concern_ids": [
+        "hf-010-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "2b986d9d1eb0984026c4a0dd",
+      "case_id": "af-008",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/claim_records/0/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-008-concern-1"
+      ],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "ba1d9064e88d4237513998cf",
+      "case_id": "af-010",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-010-concern-1"
+          ],
+          "note": "Correct exact-target concern: The full acquired grid size was substituted for the mean denominator despite explicit masking exclusions."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [
+        "af-010-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "eed01f01de9adb1fa2eb4e90",
+      "case_id": "hf-024",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-024-concern-1"
+          ],
+          "note": "Correct exact-target concern: The payload subtotal was presented as the complete upload total despite the expressly additional manifest."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [
+        "hf-024-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "193ad6961ed9557174f669b4",
+      "case_id": "hf-023",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 0,
+          "finding_index": 0,
+          "claim_path": "/claim_records/0/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": false,
+          "rationale_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict is not warranted for the exact assertion or cannot substitute for the frozen assessable concern."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "010c5c9961ab664335361b43",
+      "case_id": "hf-006",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-006-concern-1"
+          ],
+          "note": "Correct exact-target concern: A co-occurring package change was assigned a causal effect despite changed workload and capacity and no causal comparison."
+        },
+        {
+          "index": 1,
+          "verdict_index": null,
+          "finding_index": 1,
+          "claim_path": "/claim_records/0/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [
+        "hf-006-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "9b83458721406143bbbc5764",
+      "case_id": "af-016",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/claim_records/0/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        },
+        {
+          "index": 1,
+          "verdict_index": null,
+          "finding_index": 1,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-016-concern-1"
+          ],
+          "note": "Correct exact-target concern: The staged upload was treated as activated despite a later status read retaining the earlier active setting."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [
+        "af-016-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "f72abbd85fa1789cf29b4092",
+      "case_id": "hf-005",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": true,
+          "concern_ids": [],
+          "note": "The source places the observations in a window following the upgrade; the rationale adds that the upgrade occurred within that same window."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": true,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "0fc63570aa06d8a16a24eceb",
+      "case_id": "hf-018",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-018-concern-1"
+          ],
+          "note": "Correct exact-target concern: An empty export for one channel was treated as proof of no writes across unobserved channels."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [
+        "hf-018-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "0e083aa3a7160241b65e486d",
+      "case_id": "af-016",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-016-concern-1"
+          ],
+          "note": "Correct exact-target concern: The staged upload was treated as activated despite a later status read retaining the earlier active setting."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [
+        "af-016-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "748439730a916b2ed48080f6",
+      "case_id": "hf-018",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 0,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-018-concern-1"
+          ],
+          "note": "Correct exact-target concern: An empty export for one channel was treated as proof of no writes across unobserved channels."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-018-concern-1"
+          ],
+          "note": "Concern verdict is warranted for this target; its complete finding prose is checked separately."
+        }
+      ],
+      "covered_concern_ids": [
+        "hf-018-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "9baeb84f84725313ae19145c",
+      "case_id": "af-006",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-006-concern-1"
+          ],
+          "note": "Correct exact-target concern: The candidate attributes the change to the foam while microphone distance also changed and no isolated effect was estimated."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [
+        "af-006-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "44fbb458556338b0a5ea3076",
+      "case_id": "hf-006",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 1,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-006-concern-1"
+          ],
+          "note": "Correct exact-target concern: A co-occurring package change was assigned a causal effect despite changed workload and capacity and no causal comparison."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-006-concern-1"
+          ],
+          "note": "Concern verdict is warranted for this target; its complete finding prose is checked separately."
+        }
+      ],
+      "covered_concern_ids": [
+        "hf-006-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "10ae0b42a0137f7ece86a394",
+      "case_id": "hf-017",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "3f22be12cdeeaf86b1bba317",
+      "case_id": "af-010",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-010-concern-1"
+          ],
+          "note": "Correct exact-target concern: The full acquired grid size was substituted for the mean denominator despite explicit masking exclusions."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [
+        "af-010-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "7ecb1665719c4d9333090960",
+      "case_id": "af-016",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 0,
+          "finding_index": 0,
+          "claim_path": "/claim_records/0/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        },
+        {
+          "index": 1,
+          "verdict_index": 1,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-016-concern-1"
+          ],
+          "note": "Correct exact-target concern: The staged upload was treated as activated despite a later status read retaining the earlier active setting."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": false,
+          "rationale_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict is not warranted for the exact assertion or cannot substitute for the frozen assessable concern."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-016-concern-1"
+          ],
+          "note": "Concern verdict is warranted for this target; its complete finding prose is checked separately."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-016-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "ee59d5840bc1e6a170041e55",
+      "case_id": "af-008",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 1,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-008-concern-1"
+          ],
+          "note": "Correct exact-target concern: A local calibration error was transferred to an untested high temperature without a response curve."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-008-concern-1"
+          ],
+          "note": "Concern verdict is warranted for this target; its complete finding prose is checked separately."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-008-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "b7e016e3ede8783e60536ce3",
+      "case_id": "af-005",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "c80d3e29dad1e412f8910d07",
+      "case_id": "af-007",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "da617ea13cd455c15a210d33",
+      "case_id": "af-005",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "f426bf6285e8a5e540d7b75c",
+      "case_id": "af-007",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "e9209e156010143ad7878148",
+      "case_id": "hf-005",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "e2d1cbc4b98eedb4cd357b4b",
+      "case_id": "hf-009",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/claim_records/0/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        },
+        {
+          "index": 1,
+          "verdict_index": null,
+          "finding_index": 1,
+          "claim_path": "/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "a82e07e2a76e6c84839c2a02",
+      "case_id": "af-006",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 0,
+          "finding_index": 0,
+          "claim_path": "/claim_records/0/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        },
+        {
+          "index": 1,
+          "verdict_index": 1,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-006-concern-1"
+          ],
+          "note": "Correct causal concern, but the explicit directly-contradicts clause turns unmeasured attribution into disproof; surrounding uncertainty cannot repair it."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": false,
+          "rationale_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict is not warranted for the exact assertion or cannot substitute for the frozen assessable concern."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-006-concern-1"
+          ],
+          "note": "Concern verdict is warranted for this target; its complete finding prose is checked separately."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-006-concern-1"
+      ],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "f9bd817ca30f4f6a0f363e13",
+      "case_id": "af-006",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 1,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-006-concern-1"
+          ],
+          "note": "Correct exact-target concern: The candidate attributes the change to the foam while microphone distance also changed and no isolated effect was estimated."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-006-concern-1"
+          ],
+          "note": "Concern verdict is warranted for this target; its complete finding prose is checked separately."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-006-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "4c0ebb8a08206d65808ac6e1",
+      "case_id": "af-005",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "0846bf08bedc78a7977aef66",
+      "case_id": "af-007",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "4ad1244382300fcbee459bc8",
+      "case_id": "af-008",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-008-concern-1"
+          ],
+          "note": "Correct exact-target concern: A local calibration error was transferred to an untested high temperature without a response curve. A factual_contradiction basis incorrectly turns absent supporting evidence into disproof."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-008-concern-1"
+      ],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "55c18e5751315a866b9db16d",
+      "case_id": "af-007",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "788b683a71721beb49b49646",
+      "case_id": "hf-017",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "48da9ca88671c9c9e2bde0f2",
+      "case_id": "af-010",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 1,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-010-concern-1"
+          ],
+          "note": "Correct exact-target concern: The full acquired grid size was substituted for the mean denominator despite explicit masking exclusions."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-010-concern-1"
+          ],
+          "note": "Concern verdict is warranted for this target; its complete finding prose is checked separately."
+        }
+      ],
+      "covered_concern_ids": [
+        "af-010-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "03756f0b8b23ac09c1351390",
+      "case_id": "hf-017",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "ac97d1e42f5dbd513eaa2fc1",
+      "case_id": "hf-009",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 0,
+          "finding_index": 0,
+          "claim_path": "/claim_records/0/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        },
+        {
+          "index": 1,
+          "verdict_index": 1,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": false,
+          "rationale_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict is not warranted for the exact assertion or cannot substitute for the frozen assessable concern."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": false,
+          "rationale_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict is not warranted for the exact assertion or cannot substitute for the frozen assessable concern."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "edff03910a10e88b53af94e0",
+      "case_id": "hf-023",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/claim_records/0/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        },
+        {
+          "index": 1,
+          "verdict_index": null,
+          "finding_index": 1,
+          "claim_path": "/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "37bca221020c983d5ca94b2b",
+      "case_id": "hf-024",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 0,
+          "finding_index": 0,
+          "claim_path": "/claim_records/0/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        },
+        {
+          "index": 1,
+          "verdict_index": 1,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-024-concern-1"
+          ],
+          "note": "Correct exact-target concern: The payload subtotal was presented as the complete upload total despite the expressly additional manifest."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": false,
+          "rationale_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict is not warranted for the exact assertion or cannot substitute for the frozen assessable concern."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-024-concern-1"
+          ],
+          "note": "Concern verdict is warranted for this target; its complete finding prose is checked separately."
+        }
+      ],
+      "covered_concern_ids": [
+        "hf-024-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "f28f33d73311c30909d2a1ec",
+      "case_id": "af-016",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-016-concern-1"
+          ],
+          "note": "Correct exact-target concern: The staged upload was treated as activated despite a later status read retaining the earlier active setting."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [
+        "af-016-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "6d4923a42ae7f619ed516a58",
+      "case_id": "hf-010",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 0,
+          "finding_index": 0,
+          "claim_path": "/claim_records/0/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        },
+        {
+          "index": 1,
+          "verdict_index": 1,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-010-concern-1"
+          ],
+          "note": "Correct exact-target concern: The enabled setting from staging was incorrectly attributed to the separately attested production namespace."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": false,
+          "rationale_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict is not warranted for the exact assertion or cannot substitute for the frozen assessable concern."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-010-concern-1"
+          ],
+          "note": "Concern verdict is warranted for this target; its complete finding prose is checked separately."
+        }
+      ],
+      "covered_concern_ids": [
+        "hf-010-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "328d970ac9a7f2e95ca83074",
+      "case_id": "hf-006",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 0,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-006-concern-1"
+          ],
+          "note": "Correct exact-target concern: A co-occurring package change was assigned a causal effect despite changed workload and capacity and no causal comparison."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-006-concern-1"
+          ],
+          "note": "Concern verdict is warranted for this target; its complete finding prose is checked separately."
+        },
+        {
+          "index": 1,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": true,
+          "concern_ids": [],
+          "note": "The source describes the monitoring window following the parser upgrade, not an upgrade occurring inside that same window."
+        }
+      ],
+      "covered_concern_ids": [
+        "hf-006-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": true,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "a6c105bd0eba665794c9395a",
+      "case_id": "hf-005",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": true,
+          "concern_ids": [],
+          "note": "The source explicitly leaves separate effects unmeasured; describing this as the window of parser-upgrade effects introduces causal characterization."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": true,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "b43236a6f0a9473af00f5bd3",
+      "case_id": "af-008",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 1,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-008-concern-1"
+          ],
+          "note": "Correct exact-target concern: A local calibration error was transferred to an untested high temperature without a response curve. A factual_contradiction basis incorrectly turns absent supporting evidence into disproof."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "af-008-concern-1"
+          ],
+          "note": "Concern verdict is warranted for this target; its complete finding prose is checked separately."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-008-concern-1"
+      ],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "961a4239ed17f316b6601cae",
+      "case_id": "af-015",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "85501cbb8d36a7b3013647d3",
+      "case_id": "hf-024",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 0,
+          "finding_index": 0,
+          "claim_path": "/claim_records/0/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        },
+        {
+          "index": 1,
+          "verdict_index": 1,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-024-concern-1"
+          ],
+          "note": "Correct exact-target concern: The payload subtotal was presented as the complete upload total despite the expressly additional manifest."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": false,
+          "rationale_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict is not warranted for the exact assertion or cannot substitute for the frozen assessable concern."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-024-concern-1"
+          ],
+          "note": "Concern verdict is warranted for this target; its complete finding prose is checked separately."
+        }
+      ],
+      "covered_concern_ids": [
+        "hf-024-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "94effdcf46fee0b27f655b7d",
+      "case_id": "hf-023",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 0,
+          "finding_index": 0,
+          "claim_path": "/claim_records/0/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": false,
+          "rationale_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict is not warranted for the exact assertion or cannot substitute for the frozen assessable concern."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "2300dca7f1369e86e9e4e1bb",
+      "case_id": "hf-023",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/claim_records/0/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "9e9401ad30608c80f3cdfff6",
+      "case_id": "hf-010",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 1,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-010-concern-1"
+          ],
+          "note": "Correct exact-target concern: The enabled setting from staging was incorrectly attributed to the separately attested production namespace."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-010-concern-1"
+          ],
+          "note": "Concern verdict is warranted for this target; its complete finding prose is checked separately."
+        }
+      ],
+      "covered_concern_ids": [
+        "hf-010-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "528750f217084863effd006d",
+      "case_id": "hf-010",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/claim_records/0/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": true,
+          "concern_ids": [],
+          "note": "The correct production release claim is attacked using a false implication: no rollout does not mean production was not running at the checkpoint."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "hf-010-concern-1"
+      ],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "3777c4af7951f37d47503ffa",
+      "case_id": "af-005",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 1,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": true,
+          "concern_ids": [],
+          "note": "Criticizes a supported comparison and asserts microphone repositioning alone would reduce the level, an independent effect not measured by this source."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": false,
+          "rationale_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": true,
+          "concern_ids": [],
+          "note": "The verdict is not warranted for the exact assertion or cannot substitute for the frozen assessable concern."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "cca2e448e6dde788bf36b756",
+      "case_id": "af-006",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/claim_records/0/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        },
+        {
+          "index": 1,
+          "verdict_index": null,
+          "finding_index": 1,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": true,
+          "concern_ids": [
+            "af-006-concern-1"
+          ],
+          "note": "Correct causal concern, but states microphone distance independently affects the measured level as a categorical source-grounded fact; no separate effect was estimated."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [
+        "af-006-concern-1"
+      ],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "a115dd65f013f4e88e48fcc8",
+      "case_id": "hf-006",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 1,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-006-concern-1"
+          ],
+          "note": "Correct exact-target concern: A co-occurring package change was assigned a causal effect despite changed workload and capacity and no causal comparison."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": true,
+          "concern_ids": [],
+          "note": "Worker doubling is supported, but the added assertion that the upgrade occurred in that same monitoring window is not established by the source's following-window chronology."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-006-concern-1"
+          ],
+          "note": "Concern verdict is warranted for this target; its complete finding prose is checked separately."
+        }
+      ],
+      "covered_concern_ids": [
+        "hf-006-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": true,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "795817cb8be3a2fa884160aa",
+      "case_id": "hf-006",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-006-concern-1"
+          ],
+          "note": "Correct exact-target concern: A co-occurring package change was assigned a causal effect despite changed workload and capacity and no causal comparison."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [
+        "hf-006-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "02afdef0d0c81109af36dca2",
+      "case_id": "hf-009",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 1,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": false,
+          "rationale_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict is not warranted for the exact assertion or cannot substitute for the frozen assessable concern."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "e69e11ff2109ed7379e777d0",
+      "case_id": "hf-018",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/content",
+          "core_concern_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [
+            "hf-018-concern-1"
+          ],
+          "note": "Correct exact-target concern: An empty export for one channel was treated as proof of no writes across unobserved channels."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [
+        "hf-018-concern-1"
+      ],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "fd316aaa3f8a7b0fba7e742a",
+      "case_id": "af-015",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": null,
+          "finding_index": 0,
+          "claim_path": "/claim_records/0/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        },
+        {
+          "index": 1,
+          "verdict_index": null,
+          "finding_index": 1,
+          "claim_path": "/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        }
+      ],
+      "assertion_verdicts": [],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "50c3b2d9e534de999e3810a8",
+      "case_id": "af-009",
+      "mechanical_action": "accept",
+      "findings": [],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": true,
+      "raw_semantic_pass": true,
+      "semantic_pass": true,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    },
+    {
+      "blind_id": "81e689a0bac6719e31085d75",
+      "case_id": "hf-023",
+      "mechanical_action": "flag",
+      "findings": [
+        {
+          "index": 0,
+          "verdict_index": 0,
+          "finding_index": 0,
+          "claim_path": "/claim_records/0/content",
+          "core_concern_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The targeted assertion is supported in its exact stated scope. Criticism of a stronger hypothetical assertion, another target, or advisory disagreement is not a warranted finding."
+        }
+      ],
+      "assertion_verdicts": [
+        {
+          "index": 0,
+          "claim_path": "/claim_records/0/content",
+          "verdict": "concern",
+          "exact_target_bound": true,
+          "verdict_supported": false,
+          "rationale_supported": false,
+          "citations_relevant": true,
+          "basis_overstates_evidence": true,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict is not warranted for the exact assertion or cannot substitute for the frozen assessable concern."
+        },
+        {
+          "index": 1,
+          "claim_path": "/content",
+          "verdict": "supported",
+          "exact_target_bound": true,
+          "verdict_supported": true,
+          "rationale_supported": true,
+          "citations_relevant": true,
+          "basis_overstates_evidence": false,
+          "unsupported_replacement": false,
+          "concern_ids": [],
+          "note": "The verdict and rationale preserve the exact source-supported assertion."
+        }
+      ],
+      "covered_concern_ids": [],
+      "missed_concern_ids": [],
+      "valid_abstention": false,
+      "projected_semantic_pass": false,
+      "raw_semantic_pass": false,
+      "semantic_pass": false,
+      "projection_hides_defect": false,
+      "note": "Pass requires both consumer projection and full raw verdict fidelity; see each finding and verdict judgment."
+    }
+  ]
+}
