@@ -1,0 +1,234 @@
+[
+  {
+    "id": "hf-005",
+    "category": "observational_performance_cause",
+    "pair_group": "hf-pair-03",
+    "sources": [
+      {
+        "id": "hf-005-source-1",
+        "text": "Release diary for the Copperline search service. After the parser package was upgraded, median response time was lower in the following monitoring window. During the same window, the query mix shifted toward short queries and the worker count doubled. The diary contains no matched-load test, rollback comparison or causal attribution. The author describes these as co-occurring changes and leaves their separate effects unmeasured.",
+        "provenance": "reported"
+      }
+    ],
+    "content": "The diary reports lower median response time after the parser upgrade.",
+    "claims": [
+      "The worker count doubled during the same monitoring window."
+    ],
+    "expected": {
+      "/content": "supported",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "accept",
+    "rationale": "The observed ordering and lower monitored median are explicitly reported. The worker-count change is explicitly reported.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "accept"
+    ],
+    "stress_hints": {
+      "/content": "contradicted",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  {
+    "id": "hf-006",
+    "category": "observational_performance_cause",
+    "pair_group": "hf-pair-03",
+    "sources": [
+      {
+        "id": "hf-006-source-1",
+        "text": "Release diary for the Copperline search service. After the parser package was upgraded, median response time was lower in the following monitoring window. During the same window, the query mix shifted toward short queries and the worker count doubled. The diary contains no matched-load test, rollback comparison or causal attribution. The author describes these as co-occurring changes and leaves their separate effects unmeasured.",
+        "provenance": "reported"
+      }
+    ],
+    "content": "The parser upgrade caused the lower median response time.",
+    "claims": [
+      "The worker count doubled during the same monitoring window."
+    ],
+    "expected": {
+      "/content": "insufficient",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "flag",
+    "rationale": "A co-occurring package change was assigned a causal effect despite changed workload and capacity and no causal comparison. Do not assert that the parser had no effect or that extra workers or short queries definitely caused the improvement. No direction or share of a causal effect was isolated.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "flag"
+    ],
+    "stress_hints": {
+      "/content": "supported",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  {
+    "id": "hf-009",
+    "category": "deployment_branch_scope",
+    "pair_group": "hf-pair-05",
+    "sources": [
+      {
+        "id": "hf-009-source-1",
+        "text": "Configuration attestation, deployment group Narwhal. At the recorded checkpoint, the staging namespace ran release r9 with background compaction enabled. Production ran release r8 with background compaction disabled. The attestation binds these values to separate namespace identifiers and states that there was no production rollout in this checkpoint. No production performance result is attached.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "At the checkpoint, background compaction was enabled in the staging namespace.",
+    "claims": [
+      "Production ran release r8 at that checkpoint."
+    ],
+    "expected": {
+      "/content": "supported",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "accept",
+    "rationale": "The attestation explicitly enables compaction in staging. Production release r8 is explicitly attested.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "accept"
+    ],
+    "stress_hints": {
+      "/content": "contradicted",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  {
+    "id": "hf-010",
+    "category": "deployment_branch_scope",
+    "pair_group": "hf-pair-05",
+    "sources": [
+      {
+        "id": "hf-010-source-1",
+        "text": "Configuration attestation, deployment group Narwhal. At the recorded checkpoint, the staging namespace ran release r9 with background compaction enabled. Production ran release r8 with background compaction disabled. The attestation binds these values to separate namespace identifiers and states that there was no production rollout in this checkpoint. No production performance result is attached.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "At the checkpoint, background compaction was enabled in the production namespace.",
+    "claims": [
+      "Production ran release r8 at that checkpoint."
+    ],
+    "expected": {
+      "/content": "contradicted",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "flag",
+    "rationale": "The enabled setting from staging was incorrectly attributed to the separately attested production namespace. Do not invent a production rollout, a performance improvement, or a compaction state outside the checkpoint.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "flag"
+    ],
+    "stress_hints": {
+      "/content": "supported",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  {
+    "id": "hf-017",
+    "category": "logging_scope_absence",
+    "pair_group": "hf-pair-09",
+    "sources": [
+      {
+        "id": "hf-017-source-1",
+        "text": "Access-audit export for repository Delta, interval 16:00-17:00Z. The export contains every write event recorded through the web editor in that interval, and there are none. Command-line and service-token clients write through separate audit channels omitted from this export. The export provides no observations about those channels and makes no claim about the total number of repository writes.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "No web-editor write event was recorded for repository Delta during the interval.",
+    "claims": [],
+    "expected": {
+      "/content": "supported"
+    },
+    "expected_action": "accept",
+    "rationale": "The complete web-editor channel has no recorded write events in the interval.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "accept"
+    ],
+    "stress_hints": {
+      "/content": "contradicted"
+    }
+  },
+  {
+    "id": "hf-018",
+    "category": "logging_scope_absence",
+    "pair_group": "hf-pair-09",
+    "sources": [
+      {
+        "id": "hf-018-source-1",
+        "text": "Access-audit export for repository Delta, interval 16:00-17:00Z. The export contains every write event recorded through the web editor in that interval, and there are none. Command-line and service-token clients write through separate audit channels omitted from this export. The export provides no observations about those channels and makes no claim about the total number of repository writes.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "No write to repository Delta occurred through any client during the interval.",
+    "claims": [],
+    "expected": {
+      "/content": "insufficient"
+    },
+    "expected_action": "flag",
+    "rationale": "An empty export for one channel was treated as proof of no writes across unobserved channels. Do not assert that a command-line or service-token write happened. Those channels are unobserved here, not positive counterexamples.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "flag"
+    ],
+    "stress_hints": {
+      "/content": "supported"
+    }
+  },
+  {
+    "id": "hf-023",
+    "category": "framing_overhead_total",
+    "pair_group": "hf-pair-12",
+    "sources": [
+      {
+        "id": "hf-023-source-1",
+        "text": "Wire-format accounting for upload U19. Four data frames carry six KiB of payload each. A single separate three-KiB manifest is sent in addition to those frames. The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest; the figures already use KiB consistently, and there is no other framing overhead in this accounting.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "The complete upload U19, including its manifest, totaled twenty-seven KiB.",
+    "claims": [
+      "The four data frames carried twenty-four KiB of payload."
+    ],
+    "expected": {
+      "/content": "supported",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "accept",
+    "rationale": "Four times six plus the separate three-KiB manifest equals the explicit twenty-seven-KiB total. The data-frame payload subtotal is four times six KiB.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "accept"
+    ],
+    "stress_hints": {
+      "/content": "contradicted",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  {
+    "id": "hf-024",
+    "category": "framing_overhead_total",
+    "pair_group": "hf-pair-12",
+    "sources": [
+      {
+        "id": "hf-024-source-1",
+        "text": "Wire-format accounting for upload U19. Four data frames carry six KiB of payload each. A single separate three-KiB manifest is sent in addition to those frames. The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest; the figures already use KiB consistently, and there is no other framing overhead in this accounting.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "The complete upload U19, including its manifest, totaled twenty-four KiB.",
+    "claims": [
+      "The four data frames carried twenty-four KiB of payload."
+    ],
+    "expected": {
+      "/content": "contradicted",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "flag",
+    "rationale": "The payload subtotal was presented as the complete upload total despite the expressly additional manifest. Do not add decimal/binary conversion error, compression or further overhead. Units are already consistent and the accounting explicitly excludes other overhead.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "flag"
+    ],
+    "stress_hints": {
+      "/content": "supported",
+      "/claim_records/0/content": "contradicted"
+    }
+  }
+]
