@@ -44,6 +44,8 @@ SOURCE_COUNT = 233
 FAMILY_COUNT = 20
 CELL_COUNT = len(CHECKPOINTS) * len(TASKS) * len(ARMS)
 
+# Pinned. Packs no longer open with it (see EPISODE_HEADER), but the frozen
+# material and material/policy/measure.py still name these header bytes.
 HEADER = (
     "Historical complete controller views. Reported outcomes are historical evidence, not "
     "guarantees. Resolve $ref through each view's values and $literal as literal object "

@@ -1505,11 +1505,39 @@ def _tool_episode():
         return {"body_base64": base64.b64encode(raw).decode(), "body_sha256": c.sha(raw)}
 
     stdout = "/workspace/matching.py\n"
+    # Real-shaped transport detail: the sandbox launch line with host bind
+    # mounts and per-file digest listings of the workspace. None of it may
+    # reach the rendering, and it is what makes the pinned block large.
+    listing = [{"kind": "directory", "mode": 493, "path": "."}] + [
+        {"kind": "file", "mode": 420, "path": f"{name}.py", "sha256": c.sha(name.encode())}
+        for name in ("app", "graph", "matching", "public_checks")
+    ]
+    argv = [
+        "/usr/bin/docker",
+        "run",
+        "--name",
+        "sibyl-coding-3f6a222155ae40f8aa4fdc732e4c3a84",
+        "--mount",
+        "type=bind,src=/home/dev/dev/eval-runs/attempt/controller-tmp/stage,dst=/workspace",
+        "--entrypoint",
+        "/bin/sh",
+        "sha256:" + "9d" * 32,
+    ]
     rows = [
-        ("start", {"request": {"goal": "training"}, "options": {}, "workspace_initial": {}}),
+        (
+            "start",
+            {
+                "request": {"goal": "training"},
+                "options": {"docker_host": "unix:///run/devbox-docker/docker.sock"},
+                "workspace_initial": listing,
+            },
+        ),
         ("model_request", {"body": request, **wire(request)}),
         ("model_response", {"raw": response, "status_code": 200, **wire(response)}),
-        ("tool_call", {"index": 0, "tool_call_id": "call-1", "name": "shell", "command": "ls"}),
+        (
+            "tool_call",
+            {"index": 0, "tool_call_id": "call-1", "name": "shell", "command": "ls", "argv": argv},
+        ),
         (
             "tool_result",
             {
@@ -1522,8 +1550,8 @@ def _tool_episode():
                 "stdout_base64": base64.b64encode(stdout.encode()).decode(),
                 "stderr": "",
                 "stderr_base64": "",
-                "workspace_before": [],
-                "workspace_after": [],
+                "workspace_before": listing,
+                "workspace_after": listing,
             },
         ),
         ("terminal", {"detail": "finished", "exit": 0, "reason": "stop", "usage": {}}),
@@ -1578,7 +1606,15 @@ def test_rendered_episode_is_quoted_evidence_not_a_transcript():
     assert '"role": "assistant"' not in rendered
     assert '"role":"assistant"' not in rendered
     assert '"tool_calls"' not in rendered
-    assert '"tool_call_id"' not in rendered.split("recorded tool call")[0]
+    assert '"tool_call_id"' not in rendered
+    assert "other recorded fields" not in rendered
+    assert not any(line.lstrip().startswith("{") for line in rendered.splitlines())
+    assert not any(
+        line.rstrip().endswith("}") and not line.startswith(er.QUOTE)
+        for line in rendered.splitlines()
+    )
+    # The rendering is no larger than the pinned block bytes it derives from.
+    assert len(rendered.encode()) <= len(block.encode())
     assert rendered.startswith(f'<historical-episode id="{sid}" sha256="{c.sha(raw)}"')
     assert er.OPENING in rendered
     assert er.CLOSING in rendered
@@ -1590,10 +1626,17 @@ def test_rendered_episode_is_quoted_evidence_not_a_transcript():
     assert er.QUOTE + "I'll replace the greedy matching." in rendered
     assert "recorded assistant reply, quoted:" in rendered
     assert er.QUOTE + "/workspace/matching.py" in rendered
+    assert "the recorded agent called tool 'shell'" in rendered
+    assert er.QUOTE + "ls" in rendered
+    assert "workspace unchanged" in rendered
+    assert "/home/dev/" not in rendered
+    assert "docker" not in rendered
+    assert c.sha(b"app") not in rendered
+    assert "run ended: reason stop, exit 0" in rendered
     # Completeness: every event and the outcome are present, in order.
     positions = [rendered.index(f"[s077.e{i} ") for i in range(6)]
     assert positions == sorted(positions)
-    assert 'Recorded outcome: {"status":"passed"}' in rendered
+    assert "Recorded outcome:\n  status, quoted:\n" + er.QUOTE + "passed" in rendered
     assert f'renderer="{er.RENDERER_VERSION}"' in rendered
 
 
