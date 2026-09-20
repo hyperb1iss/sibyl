@@ -24,6 +24,7 @@ from benchmarks.agent_tasks.screen48.contract import (
     public_task,
     sha,
 )
+from benchmarks.agent_tasks.screen48.recall.episode_render import RENDERER_VERSION
 from benchmarks.agent_tasks.screen48.recall.native_evidence import (
     native_evidence,
     returned_native_evidence,
@@ -251,6 +252,11 @@ class RecallAdapter:
                     or prior.get("reader") != base["reader"]
                 ):
                     raise MissingPack("qualified_checkpoint_zero_pack_missing")
+                if prior.get("renderer_version") != RENDERER_VERSION:
+                    # A prior rendered by another renderer cannot be re-derived
+                    # byte for byte here, and carrying it would hide a renderer
+                    # change behind a ranking divergence. Name the real cause.
+                    raise MissingPack("checkpoint_zero_renderer_changed")
                 # The two owner receipts are recorded as evidence, never required
                 # to be equal: the checkpoints run with their own public
                 # configuration, and the contract is byte equality of the memory

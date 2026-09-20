@@ -8,6 +8,9 @@ consolidation cycle over the 233 admitted captures, 1 = after). 48 cells.
 Layout:
 
 - `contract.py`: fixed policy (tasks, arms, budgets, headers, material bindings).
+- `recall/episode_render.py`: renders a pinned episode view as quoted historical evidence
+  (`RENDERER_VERSION`, recorded in every pack). The `<source>` block stays hash-bound to the
+  material; the solver reads the rendering, never a transcript-shaped JSON view.
 - `recall/`: pack preparation over product recall and search owners.
 - `material/`: frozen policy inputs, the 233-source geometry, the summary library.
 - `schedule/`: the frozen 48-cell schedule and task bindings.

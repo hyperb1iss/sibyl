@@ -555,6 +555,10 @@ def _row(task: str, arm: str, family: str, cells: list[dict[str, Any]]) -> dict[
         # No task outcome at all: a missing pack, or a controller, checker or
         # runner failure. Reported apart from a real failure.
         "unknown": unknown,
+        # Cells whose solver stopped on its own without changing the workspace:
+        # the "I already did this" failure the native pack produced on
+        # September 19, counted rather than inferred from the transcript.
+        "premature_completions": sum(cell.get("premature_completion") is True for cell in cells),
         "pass_rate": round(passes / denominator, 6) if denominator else 0.0,
         "cost_usd": round(sum(costs), 6),
         "mean_tool_calls": headroom._mean(
@@ -695,6 +699,7 @@ def run_cells(
                     "status": status,
                     "success": False,
                     "passed": None,
+                    "premature_completion": None,
                     "usage": dict.fromkeys(USAGE_FIELDS),
                     "elapsed_seconds": None,
                     "receipt": None,

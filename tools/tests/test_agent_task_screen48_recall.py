@@ -21,6 +21,7 @@ from uuid import UUID
 
 import pytest
 from benchmarks.agent_tasks.screen48 import contract as c
+from benchmarks.agent_tasks.screen48.recall import episode_render as er
 from benchmarks.agent_tasks.screen48.recall import native_evidence as ne
 from benchmarks.agent_tasks.screen48.recall import native_inventory as ni
 from benchmarks.agent_tasks.screen48.recall import recall_adapter as a
@@ -412,7 +413,9 @@ async def test_native_typed_uuid_hydration_and_public_partial_item(setup, monkey
         checkpoint=0, task=c.TASKS[0], arm="native", native_inventory=inventory
     )
     assert result["status"] == "prepared", result
-    assert setup.catalog.hydrate(sid, original).block in result["memory"]
+    hydrated = setup.catalog.hydrate(sid, original)
+    assert hydrated.rendered in result["memory"]
+    assert hydrated.block not in result["memory"]
     assert "source_bindings" not in result["memory"]
     assert "passage_total" in result["memory"]
     assert seen[0]["types"] is None
@@ -1463,3 +1466,217 @@ async def test_without_the_carry_a_checkpoint_one_raw_cell_needs_no_prior(setup,
     # The study's own contract is untouched: no prior, no pack.
     denied = await setup.adapter.prepare(checkpoint=1, task=c.TASKS[0], arm="raw_retrieval")
     assert denied["reason"] == "qualified_checkpoint_zero_pack_missing"
+
+
+# --- episode rendering: quoted evidence, never the solver's own transcript ----
+
+
+def _tool_episode():
+    """An episode whose transcript carries an assistant tool call and a tool result."""
+    request = {
+        "model": "test",
+        "messages": [
+            {"role": "system", "content": "you are a coding agent"},
+            {"role": "user", "content": "budget"},
+            {"role": "user", "content": "# Worker assignment counter\nfix matching.py"},
+        ],
+    }
+    response = {
+        "choices": [
+            {
+                "finish_reason": "tool_calls",
+                "message": {
+                    "role": "assistant",
+                    "content": "I'll replace the greedy matching.",
+                    "tool_calls": [
+                        {
+                            "id": "call-1",
+                            "type": "function",
+                            "function": {"name": "shell", "arguments": '{"command": "ls"}'},
+                        }
+                    ],
+                },
+            }
+        ]
+    }
+
+    def wire(value):
+        raw = json.dumps(value).encode()
+        return {"body_base64": base64.b64encode(raw).decode(), "body_sha256": c.sha(raw)}
+
+    stdout = "/workspace/matching.py\n"
+    rows = [
+        ("start", {"request": {"goal": "training"}, "options": {}, "workspace_initial": {}}),
+        ("model_request", {"body": request, **wire(request)}),
+        ("model_response", {"raw": response, "status_code": 200, **wire(response)}),
+        ("tool_call", {"index": 0, "tool_call_id": "call-1", "name": "shell", "command": "ls"}),
+        (
+            "tool_result",
+            {
+                "index": 0,
+                "tool_call_id": "call-1",
+                "status": "ok",
+                "returncode": 0,
+                "carried_back": True,
+                "stdout": stdout,
+                "stdout_base64": base64.b64encode(stdout.encode()).decode(),
+                "stderr": "",
+                "stderr_base64": "",
+                "workspace_before": [],
+                "workspace_after": [],
+            },
+        ),
+        ("terminal", {"detail": "finished", "exit": 0, "reason": "stop", "usage": {}}),
+    ]
+    return json.dumps(
+        {
+            "schema_version": "sibyl-learning-episode-v1",
+            "assignment": {"task_id": "augmenting-worker-matching", "arm_id": "no-memory"},
+            "assurance": {},
+            "goal": "# Worker assignment counter\nfix matching.py",
+            "input_memory_pack_sha256": "a" * 64,
+            "outcome": {"status": "passed"},
+            "sealed_isolation": {},
+            "trace": [
+                {
+                    "schema_version": "sibyl-coding-trace-v1",
+                    "attempt_id": "fixture",
+                    "request_id": "fixture",
+                    "index": i,
+                    "kind": kind,
+                    "payload": payload,
+                }
+                for i, (kind, payload) in enumerate(rows)
+            ],
+        }
+    ).encode()
+
+
+def _render_fixture():
+    raw = _tool_episode()
+    sid = str(UUID(int=77))
+    projection = project_episode(sid, raw, prefix="s077")
+    view = encode_episode_views([projection])
+    block = f'<source id="{sid}" sha256="{c.sha(raw)}">\n{evidence_json(view)}\n</source>\n'
+    rendered = er.render_episode(
+        projection.view,
+        source_id=sid,
+        source_sha256=c.sha(raw),
+        training_task="augmenting-worker-matching",
+        training_family="worker-matching",
+    )
+    return er, sid, raw, block, rendered
+
+
+def test_rendered_episode_is_quoted_evidence_not_a_transcript():
+    """Every message and tool exchange is quoted; no live message shape survives."""
+    er, sid, raw, block, rendered = _render_fixture()
+    # The pinned block still carries the transcript shapes the solver misread.
+    assert '"role":"assistant"' in block or '"role": "assistant"' in block
+    assert '"tool_calls"' in block
+    # The rendering carries none of them, and quotes every content line.
+    assert '"role": "assistant"' not in rendered
+    assert '"role":"assistant"' not in rendered
+    assert '"tool_calls"' not in rendered
+    assert '"tool_call_id"' not in rendered.split("recorded tool call")[0]
+    assert rendered.startswith(f'<historical-episode id="{sid}" sha256="{c.sha(raw)}"')
+    assert er.OPENING in rendered
+    assert er.CLOSING in rendered
+    assert rendered.rstrip().endswith("</historical-episode>")
+    assert "Recorded task: augmenting-worker-matching (training family worker-matching)" in rendered
+    assert "Your workspace is different and has had no prior work." in rendered
+    assert "the recorded agent requested tool 'shell', arguments quoted:" in rendered
+    assert er.QUOTE + '{"command": "ls"}' in rendered
+    assert er.QUOTE + "I'll replace the greedy matching." in rendered
+    assert "recorded assistant reply, quoted:" in rendered
+    assert er.QUOTE + "/workspace/matching.py" in rendered
+    # Completeness: every event and the outcome are present, in order.
+    positions = [rendered.index(f"[s077.e{i} ") for i in range(6)]
+    assert positions == sorted(positions)
+    assert 'Recorded outcome: {"status":"passed"}' in rendered
+    assert f'renderer="{er.RENDERER_VERSION}"' in rendered
+
+
+def test_rendering_is_deterministic_and_binds_to_the_pinned_block(setup):
+    """The block bytes stay pinned to the material; the rendering is a versioned derivation."""
+    sid = next(iter(setup.snapshots))
+    row = setup.catalog.rows[sid]
+    first = setup.catalog.hydrate(sid, setup.snapshots[sid])
+    second = setup.catalog.hydrate(sid, setup.snapshots[sid])
+    assert c.sha(first.block.encode()) == row["block_sha256"]
+    assert first.rendered == second.rendered
+    assert first.text == first.rendered != first.block
+    receipt = first.receipt()
+    assert receipt["block_sha256"] == row["block_sha256"]
+    assert receipt["rendered_sha256"] == c.sha(first.rendered.encode())
+    assert receipt["renderer_version"] == er.RENDERER_VERSION
+    # A plain native passage is read as its block and names no renderer.
+    plain = w.Item("passage:1", "<native>\n{}\n</native>\n", {})
+    assert plain.text == plain.block
+    assert "renderer_version" not in plain.receipt()
+
+
+@pytest.mark.asyncio
+async def test_packs_open_with_the_evidence_preface_and_name_the_renderer(setup, monkeypatch):
+    ranked = [snapshot.memory for snapshot in list(setup.snapshots.values())[:RANKED_RAW_HITS]]
+
+    async def raw(*, capture_ids, **kwargs):
+        return RawMemoryRecallResult(
+            tuple(ranked),
+            (
+                CandidateSourceResult.success("raw_fulltext", ranked),
+                CandidateSourceResult.success("raw_vector", ranked),
+            ),
+        )
+
+    monkeypatch.setattr(a, "recall_raw_memory_with_sources", raw)
+    packed = await setup.adapter.prepare(checkpoint=0, task=c.TASKS[0], arm="raw_retrieval")
+    assert packed["status"] == "prepared", packed
+    assert packed["memory"].startswith(c.EPISODE_HEADER)
+    assert packed["renderer_version"] == er.RENDERER_VERSION
+    assert '"role":"assistant"' not in packed["memory"]
+    assert packed["memory"].count("<historical-episode ") == RANKED_RAW_HITS
+    assert packed["memory"].count(er.CLOSING) == RANKED_RAW_HITS
+    for item in packed["selected"]:
+        assert item["renderer_version"] == er.RENDERER_VERSION
+        assert item["rendered_sha256"] != item["block_sha256"]
+    # Token accounting counts the rendered text, not the pinned block.
+    assert packed["counts"]["memory_tokens"] == setup.adapter.counter.count(packed["memory"])
+
+
+@pytest.mark.asyncio
+async def test_cp1_refuses_a_prior_rendered_by_another_renderer(setup, monkeypatch):
+    """A renderer change is named as such, never carried as a ranking divergence."""
+    ranked = [snapshot.memory for snapshot in list(setup.snapshots.values())[:2]]
+
+    async def raw(*, capture_ids, **kwargs):
+        return RawMemoryRecallResult(
+            tuple(ranked),
+            (
+                CandidateSourceResult.success("raw_fulltext", ranked),
+                CandidateSourceResult.success("raw_vector", ranked),
+            ),
+        )
+
+    monkeypatch.setattr(a, "recall_raw_memory_with_sources", raw)
+    prior = await setup.adapter.prepare(checkpoint=0, task=c.TASKS[0], arm="raw_retrieval")
+    assert prior["status"] == "prepared", prior
+    stale = {**prior, "renderer_version": "sibyl-screen48-complete-view-json-v1"}
+    second = await setup.adapter.prepare(
+        checkpoint=1,
+        task=c.TASKS[0],
+        arm="raw_retrieval",
+        prior=stale,
+        prior_sha256=c.digest(stale),
+    )
+    assert second["status"] == "missing_pack"
+    assert second["reason"] == "checkpoint_zero_renderer_changed"
+    same = await setup.adapter.prepare(
+        checkpoint=1,
+        task=c.TASKS[0],
+        arm="raw_retrieval",
+        prior=prior,
+        prior_sha256=c.digest(prior),
+    )
+    assert same["status"] == "prepared", same
+    assert same["renderer_version"] == prior["renderer_version"]

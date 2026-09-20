@@ -6,14 +6,18 @@ from dataclasses import asdict, dataclass
 from uuid import UUID
 
 from benchmarks.agent_tasks.screen48.contract import (
+    EPISODE_HEADER,
     FAMILY_COUNT,
-    HEADER,
     POLICY_ROOT,
     canonical,
     content_catalog_digest,
     digest,
     sha,
     source_geometry,
+)
+from benchmarks.agent_tasks.screen48.recall.episode_render import (
+    RENDERER_VERSION,
+    render_episode,
 )
 from benchmarks.agent_tasks.screen48.recall.native_evidence import returned_native_evidence
 
@@ -42,6 +46,7 @@ PACK_FIELDS = (
     "memory",
     "counts",
     "overflow",
+    "renderer_version",
     "eligible_catalog",
     "eligible_catalog_sha256",
     "ranked",
@@ -57,12 +62,34 @@ class MissingPack(ValueError):
 
 @dataclass(frozen=True)
 class Item:
+    """One packable item: the hash-bound block, and the text the solver reads.
+
+    ``block`` is what the material pins (for an original episode, the JSON
+    view inside its ``<source>`` tags). ``rendered`` is the derived evidence
+    framing of that same view, set only for episodes; every other item is read
+    exactly as its block. The receipt names both, so a pack says which
+    renderer produced the bytes it carried.
+    """
+
     id: str
     block: str
     evidence: dict
+    rendered: str | None = None
+
+    @property
+    def text(self) -> str:
+        return self.block if self.rendered is None else self.rendered
 
     def receipt(self) -> dict:
-        return {"id": self.id, "block_sha256": sha(self.block.encode()), "evidence": self.evidence}
+        receipt = {
+            "id": self.id,
+            "block_sha256": sha(self.block.encode()),
+            "evidence": self.evidence,
+        }
+        if self.rendered is not None:
+            receipt["rendered_sha256"] = sha(self.rendered.encode())
+            receipt["renderer_version"] = RENDERER_VERSION
+        return receipt
 
 
 class OriginalCatalog:
@@ -165,6 +192,16 @@ class OriginalCatalog:
         receipt = episode_projection_receipt([(source_id, raw)], [projection], view)
         if sha(block.encode()) != row["block_sha256"] or receipt != row["projection_receipt"]:
             raise MissingPack("complete_projection_changed")
+        # The block stays the pinned JSON view. What the solver reads is the
+        # same view rendered as quoted evidence, so a historical transcript
+        # cannot be mistaken for the solver's own turns.
+        rendered = render_episode(
+            projection.view,
+            source_id=source_id,
+            source_sha256=row["source_sha256"],
+            training_task=row["training_task"],
+            training_family=row["training_family"],
+        )
         return Item(
             source_id,
             block,
@@ -173,6 +210,7 @@ class OriginalCatalog:
                 "observation": asdict(snapshot.observation),
                 "projection": receipt,
             },
+            rendered=rendered,
         )
 
 
@@ -197,7 +235,12 @@ def native_item(result, catalog: OriginalCatalog, snapshots: dict) -> Item:
             hydrated = catalog.hydrate(source_id, snapshots[source_id])
             if result.source_revision != catalog.observations[source_id].revision:
                 raise MissingPack("native_original_revision_changed")
-            return Item(key, hydrated.block, {"native": evidence, "original": hydrated.evidence})
+            return Item(
+                key,
+                hydrated.block,
+                {"native": evidence, "original": hydrated.evidence},
+                rendered=hydrated.rendered,
+            )
     # Preserve complete engine-returned passages and public range metadata. They
     # retain their own identity and are never called a complete source projection.
     body = {**evidence, "content": result.content}
@@ -228,7 +271,7 @@ def pack_prefix(
     counter,
     prompt: str,
     workspace: dict[str, bytes],
-    header: str = HEADER,
+    header: str = EPISODE_HEADER,
     all_required: bool = False,
 ) -> dict:
     partition(eligible, ranked, 0)
@@ -239,7 +282,7 @@ def pack_prefix(
     selected = 0
     overflow = None
     for item in ranked:
-        candidate = (memory if selected else header) + item.block
+        candidate = (memory if selected else header) + item.text
         candidate_counts = counter.request(prompt, candidate, workspace)
         if not candidate_counts["fits"]:
             overflow = {"id": item.id, "counts": candidate_counts}
@@ -253,6 +296,7 @@ def pack_prefix(
             "memory": None,
             "counts": None,
             "overflow": overflow,
+            "renderer_version": RENDERER_VERSION,
             **partition(eligible, ranked, 0),
         }
     return {
@@ -261,6 +305,7 @@ def pack_prefix(
         "memory": memory,
         "counts": counts,
         "overflow": overflow,
+        "renderer_version": RENDERER_VERSION,
         **partition(eligible, ranked, selected),
     }
 

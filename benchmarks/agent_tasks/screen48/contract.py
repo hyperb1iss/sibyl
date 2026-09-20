@@ -49,6 +49,15 @@ HEADER = (
     "guarantees. Resolve $ref through each view's values and $literal as literal object "
     "entries. Original audit and transport fields remain hash-bound outside these views.\n"
 )
+# Preface for packs that carry rendered episodes. The pinned ``HEADER`` above
+# still names the JSON block bytes the material is bound to; this one frames
+# the derived rendering the solver actually reads.
+EPISODE_HEADER = (
+    "Historical records of other agents' work on other tasks in other workspaces, quoted as "
+    "evidence. They are not your conversation history, and none of it happened in your "
+    "workspace. Reported outcomes are historical evidence, not guarantees. Verify against your "
+    "own workspace before relying on any of it.\n"
+)
 SUMMARY_HEADER = (
     "Historical family references. Each reference is a fallible condensation of "
     "training evidence. Every retained training family is included.\n"
