@@ -1,0 +1,866 @@
+{
+  "0d8e200ffc872cdf": {
+    "id": "case-12-repeat-1-live_jev",
+    "case_id": "hf-013",
+    "repeat": 1,
+    "arm": "live_jev"
+  },
+  "133a82d8a473927b": {
+    "id": "case-12-repeat-1-misleading",
+    "case_id": "hf-013",
+    "repeat": 1,
+    "arm": "misleading"
+  },
+  "126676fbea2ea98d": {
+    "id": "case-12-repeat-1-direct",
+    "case_id": "hf-013",
+    "repeat": 1,
+    "arm": "direct"
+  },
+  "0d5a4be03dc6bb44": {
+    "id": "case-9-repeat-1-live_jev",
+    "case_id": "hf-010",
+    "repeat": 1,
+    "arm": "live_jev"
+  },
+  "e027b9d57eb4d452": {
+    "id": "case-9-repeat-1-direct",
+    "case_id": "hf-010",
+    "repeat": 1,
+    "arm": "direct"
+  },
+  "1fe934e3a1b7eb38": {
+    "id": "case-9-repeat-1-misleading",
+    "case_id": "hf-010",
+    "repeat": 1,
+    "arm": "misleading"
+  },
+  "0825f7e6b85605a7": {
+    "id": "case-12-repeat-0-live_jev",
+    "case_id": "hf-013",
+    "repeat": 0,
+    "arm": "live_jev"
+  },
+  "b7dc3f453eebb187": {
+    "id": "case-12-repeat-0-misleading",
+    "case_id": "hf-013",
+    "repeat": 0,
+    "arm": "misleading"
+  },
+  "37074a0d978dec68": {
+    "id": "case-12-repeat-0-direct",
+    "case_id": "hf-013",
+    "repeat": 0,
+    "arm": "direct"
+  },
+  "aecab4f4dcd5d1fc": {
+    "id": "case-18-repeat-1-live_jev",
+    "case_id": "hf-019",
+    "repeat": 1,
+    "arm": "live_jev"
+  },
+  "db061c804b4f3a48": {
+    "id": "case-18-repeat-1-misleading",
+    "case_id": "hf-019",
+    "repeat": 1,
+    "arm": "misleading"
+  },
+  "9cef3d8f88fcaacd": {
+    "id": "case-18-repeat-1-direct",
+    "case_id": "hf-019",
+    "repeat": 1,
+    "arm": "direct"
+  },
+  "0b02a467088bc777": {
+    "id": "case-21-repeat-0-live_jev",
+    "case_id": "hf-022",
+    "repeat": 0,
+    "arm": "live_jev"
+  },
+  "b067b713fd0cf37b": {
+    "id": "case-21-repeat-0-misleading",
+    "case_id": "hf-022",
+    "repeat": 0,
+    "arm": "misleading"
+  },
+  "dfb7000b35e55773": {
+    "id": "case-21-repeat-0-direct",
+    "case_id": "hf-022",
+    "repeat": 0,
+    "arm": "direct"
+  },
+  "a7db1b0f612eb687": {
+    "id": "case-9-repeat-0-live_jev",
+    "case_id": "hf-010",
+    "repeat": 0,
+    "arm": "live_jev"
+  },
+  "7fc4498c0da252da": {
+    "id": "case-9-repeat-0-direct",
+    "case_id": "hf-010",
+    "repeat": 0,
+    "arm": "direct"
+  },
+  "b90de97d749d7043": {
+    "id": "case-9-repeat-0-misleading",
+    "case_id": "hf-010",
+    "repeat": 0,
+    "arm": "misleading"
+  },
+  "c93ec3df5a888b84": {
+    "id": "case-5-repeat-0-misleading",
+    "case_id": "hf-006",
+    "repeat": 0,
+    "arm": "misleading"
+  },
+  "0c700fdc40dd48ea": {
+    "id": "case-5-repeat-0-live_jev",
+    "case_id": "hf-006",
+    "repeat": 0,
+    "arm": "live_jev"
+  },
+  "e4a59a6e41c75226": {
+    "id": "case-5-repeat-0-direct",
+    "case_id": "hf-006",
+    "repeat": 0,
+    "arm": "direct"
+  },
+  "7feaab5c0306e67e": {
+    "id": "case-3-repeat-1-misleading",
+    "case_id": "hf-004",
+    "repeat": 1,
+    "arm": "misleading"
+  },
+  "a101d402527ffed8": {
+    "id": "case-3-repeat-1-live_jev",
+    "case_id": "hf-004",
+    "repeat": 1,
+    "arm": "live_jev"
+  },
+  "25e5d0ab5137e6fc": {
+    "id": "case-3-repeat-1-direct",
+    "case_id": "hf-004",
+    "repeat": 1,
+    "arm": "direct"
+  },
+  "1dc4e33936dc8b80": {
+    "id": "case-15-repeat-0-direct",
+    "case_id": "hf-016",
+    "repeat": 0,
+    "arm": "direct"
+  },
+  "221c9a6d8657c7c1": {
+    "id": "case-15-repeat-0-misleading",
+    "case_id": "hf-016",
+    "repeat": 0,
+    "arm": "misleading"
+  },
+  "9072376589eb2438": {
+    "id": "case-15-repeat-0-live_jev",
+    "case_id": "hf-016",
+    "repeat": 0,
+    "arm": "live_jev"
+  },
+  "491ea5ebe7e5c7cb": {
+    "id": "case-22-repeat-1-live_jev",
+    "case_id": "hf-023",
+    "repeat": 1,
+    "arm": "live_jev"
+  },
+  "d0b261eba549ff18": {
+    "id": "case-22-repeat-1-misleading",
+    "case_id": "hf-023",
+    "repeat": 1,
+    "arm": "misleading"
+  },
+  "b3abd61d377d83c6": {
+    "id": "case-22-repeat-1-direct",
+    "case_id": "hf-023",
+    "repeat": 1,
+    "arm": "direct"
+  },
+  "bb170efe98d20ce4": {
+    "id": "case-7-repeat-1-direct",
+    "case_id": "hf-008",
+    "repeat": 1,
+    "arm": "direct"
+  },
+  "49ac325eb99281ed": {
+    "id": "case-7-repeat-1-misleading",
+    "case_id": "hf-008",
+    "repeat": 1,
+    "arm": "misleading"
+  },
+  "73bed9d6fe64b0a2": {
+    "id": "case-7-repeat-1-live_jev",
+    "case_id": "hf-008",
+    "repeat": 1,
+    "arm": "live_jev"
+  },
+  "a144d29d1e2f1d14": {
+    "id": "case-19-repeat-1-misleading",
+    "case_id": "hf-020",
+    "repeat": 1,
+    "arm": "misleading"
+  },
+  "7c08593ec7bdef08": {
+    "id": "case-19-repeat-1-direct",
+    "case_id": "hf-020",
+    "repeat": 1,
+    "arm": "direct"
+  },
+  "d552c5ba174cfa9e": {
+    "id": "case-19-repeat-1-live_jev",
+    "case_id": "hf-020",
+    "repeat": 1,
+    "arm": "live_jev"
+  },
+  "ea32d22a54f0ac59": {
+    "id": "case-0-repeat-1-misleading",
+    "case_id": "hf-001",
+    "repeat": 1,
+    "arm": "misleading"
+  },
+  "4b53149f26f308b2": {
+    "id": "case-0-repeat-1-live_jev",
+    "case_id": "hf-001",
+    "repeat": 1,
+    "arm": "live_jev"
+  },
+  "9c1e4afba6d10519": {
+    "id": "case-0-repeat-1-direct",
+    "case_id": "hf-001",
+    "repeat": 1,
+    "arm": "direct"
+  },
+  "685af08fdef4e85f": {
+    "id": "case-15-repeat-1-live_jev",
+    "case_id": "hf-016",
+    "repeat": 1,
+    "arm": "live_jev"
+  },
+  "f4eaedf2dac3a97d": {
+    "id": "case-15-repeat-1-misleading",
+    "case_id": "hf-016",
+    "repeat": 1,
+    "arm": "misleading"
+  },
+  "3a2f02ced40b765e": {
+    "id": "case-15-repeat-1-direct",
+    "case_id": "hf-016",
+    "repeat": 1,
+    "arm": "direct"
+  },
+  "1d3a337080a9fbc0": {
+    "id": "case-7-repeat-0-live_jev",
+    "case_id": "hf-008",
+    "repeat": 0,
+    "arm": "live_jev"
+  },
+  "58bbe150ded9fca4": {
+    "id": "case-7-repeat-0-direct",
+    "case_id": "hf-008",
+    "repeat": 0,
+    "arm": "direct"
+  },
+  "aec9a155e30aa129": {
+    "id": "case-7-repeat-0-misleading",
+    "case_id": "hf-008",
+    "repeat": 0,
+    "arm": "misleading"
+  },
+  "c3f28e912b57d5a1": {
+    "id": "case-5-repeat-1-misleading",
+    "case_id": "hf-006",
+    "repeat": 1,
+    "arm": "misleading"
+  },
+  "ba71c4edccb148af": {
+    "id": "case-5-repeat-1-live_jev",
+    "case_id": "hf-006",
+    "repeat": 1,
+    "arm": "live_jev"
+  },
+  "30aa2560e7c62111": {
+    "id": "case-5-repeat-1-direct",
+    "case_id": "hf-006",
+    "repeat": 1,
+    "arm": "direct"
+  },
+  "7661f1a805bc74c0": {
+    "id": "case-11-repeat-0-misleading",
+    "case_id": "hf-012",
+    "repeat": 0,
+    "arm": "misleading"
+  },
+  "61fc2354b529a3e7": {
+    "id": "case-11-repeat-0-live_jev",
+    "case_id": "hf-012",
+    "repeat": 0,
+    "arm": "live_jev"
+  },
+  "a9e69de3be7057cc": {
+    "id": "case-11-repeat-0-direct",
+    "case_id": "hf-012",
+    "repeat": 0,
+    "arm": "direct"
+  },
+  "b71f357502c3ccf5": {
+    "id": "case-17-repeat-0-misleading",
+    "case_id": "hf-018",
+    "repeat": 0,
+    "arm": "misleading"
+  },
+  "1cb7f8b95d3d8853": {
+    "id": "case-17-repeat-0-live_jev",
+    "case_id": "hf-018",
+    "repeat": 0,
+    "arm": "live_jev"
+  },
+  "7919c86b9d7cc6b4": {
+    "id": "case-17-repeat-0-direct",
+    "case_id": "hf-018",
+    "repeat": 0,
+    "arm": "direct"
+  },
+  "9be796ef0ce12a3f": {
+    "id": "case-10-repeat-0-live_jev",
+    "case_id": "hf-011",
+    "repeat": 0,
+    "arm": "live_jev"
+  },
+  "d8f4c24e3b38f09e": {
+    "id": "case-10-repeat-0-misleading",
+    "case_id": "hf-011",
+    "repeat": 0,
+    "arm": "misleading"
+  },
+  "ac288115b7dc5cc0": {
+    "id": "case-10-repeat-0-direct",
+    "case_id": "hf-011",
+    "repeat": 0,
+    "arm": "direct"
+  },
+  "75d2b55823ba78fb": {
+    "id": "case-4-repeat-0-misleading",
+    "case_id": "hf-005",
+    "repeat": 0,
+    "arm": "misleading"
+  },
+  "577cb379616f1275": {
+    "id": "case-4-repeat-0-live_jev",
+    "case_id": "hf-005",
+    "repeat": 0,
+    "arm": "live_jev"
+  },
+  "203da6ee2c184df7": {
+    "id": "case-4-repeat-0-direct",
+    "case_id": "hf-005",
+    "repeat": 0,
+    "arm": "direct"
+  },
+  "eeec8e32710ef0ec": {
+    "id": "case-4-repeat-1-live_jev",
+    "case_id": "hf-005",
+    "repeat": 1,
+    "arm": "live_jev"
+  },
+  "db2236cf1aae9e0a": {
+    "id": "case-4-repeat-1-direct",
+    "case_id": "hf-005",
+    "repeat": 1,
+    "arm": "direct"
+  },
+  "88986388e2c5b7d3": {
+    "id": "case-4-repeat-1-misleading",
+    "case_id": "hf-005",
+    "repeat": 1,
+    "arm": "misleading"
+  },
+  "ae9ae62f59a7d862": {
+    "id": "case-2-repeat-1-misleading",
+    "case_id": "hf-003",
+    "repeat": 1,
+    "arm": "misleading"
+  },
+  "854e5cb257ed6b11": {
+    "id": "case-2-repeat-1-direct",
+    "case_id": "hf-003",
+    "repeat": 1,
+    "arm": "direct"
+  },
+  "a267b0575930f62a": {
+    "id": "case-2-repeat-1-live_jev",
+    "case_id": "hf-003",
+    "repeat": 1,
+    "arm": "live_jev"
+  },
+  "428200779442bdb9": {
+    "id": "case-6-repeat-0-live_jev",
+    "case_id": "hf-007",
+    "repeat": 0,
+    "arm": "live_jev"
+  },
+  "dfa89ce8c59a5300": {
+    "id": "case-6-repeat-0-misleading",
+    "case_id": "hf-007",
+    "repeat": 0,
+    "arm": "misleading"
+  },
+  "f74b046a708c3da7": {
+    "id": "case-6-repeat-0-direct",
+    "case_id": "hf-007",
+    "repeat": 0,
+    "arm": "direct"
+  },
+  "180b895c7d73316e": {
+    "id": "case-22-repeat-0-direct",
+    "case_id": "hf-023",
+    "repeat": 0,
+    "arm": "direct"
+  },
+  "131efab22842f058": {
+    "id": "case-22-repeat-0-misleading",
+    "case_id": "hf-023",
+    "repeat": 0,
+    "arm": "misleading"
+  },
+  "74d4ff01541226a8": {
+    "id": "case-22-repeat-0-live_jev",
+    "case_id": "hf-023",
+    "repeat": 0,
+    "arm": "live_jev"
+  },
+  "f827a0878fb0ca68": {
+    "id": "case-10-repeat-1-direct",
+    "case_id": "hf-011",
+    "repeat": 1,
+    "arm": "direct"
+  },
+  "3fd77c30f223deac": {
+    "id": "case-10-repeat-1-misleading",
+    "case_id": "hf-011",
+    "repeat": 1,
+    "arm": "misleading"
+  },
+  "523b74108320655a": {
+    "id": "case-10-repeat-1-live_jev",
+    "case_id": "hf-011",
+    "repeat": 1,
+    "arm": "live_jev"
+  },
+  "5923548e39378edd": {
+    "id": "case-14-repeat-0-misleading",
+    "case_id": "hf-015",
+    "repeat": 0,
+    "arm": "misleading"
+  },
+  "9037214b956de040": {
+    "id": "case-14-repeat-0-live_jev",
+    "case_id": "hf-015",
+    "repeat": 0,
+    "arm": "live_jev"
+  },
+  "e6a96cbb19e1a4be": {
+    "id": "case-14-repeat-0-direct",
+    "case_id": "hf-015",
+    "repeat": 0,
+    "arm": "direct"
+  },
+  "648601cbfced3973": {
+    "id": "case-19-repeat-0-live_jev",
+    "case_id": "hf-020",
+    "repeat": 0,
+    "arm": "live_jev"
+  },
+  "9e0017833a4f6d87": {
+    "id": "case-19-repeat-0-direct",
+    "case_id": "hf-020",
+    "repeat": 0,
+    "arm": "direct"
+  },
+  "b5c1e2417fdc9833": {
+    "id": "case-19-repeat-0-misleading",
+    "case_id": "hf-020",
+    "repeat": 0,
+    "arm": "misleading"
+  },
+  "6aa7c6c5474abfcb": {
+    "id": "case-8-repeat-0-live_jev",
+    "case_id": "hf-009",
+    "repeat": 0,
+    "arm": "live_jev"
+  },
+  "b5a7dc3cc428b59b": {
+    "id": "case-8-repeat-0-misleading",
+    "case_id": "hf-009",
+    "repeat": 0,
+    "arm": "misleading"
+  },
+  "13b5bce355093f27": {
+    "id": "case-8-repeat-0-direct",
+    "case_id": "hf-009",
+    "repeat": 0,
+    "arm": "direct"
+  },
+  "46c1e2c926bbc851": {
+    "id": "case-8-repeat-1-misleading",
+    "case_id": "hf-009",
+    "repeat": 1,
+    "arm": "misleading"
+  },
+  "f06a2bbd45781243": {
+    "id": "case-8-repeat-1-live_jev",
+    "case_id": "hf-009",
+    "repeat": 1,
+    "arm": "live_jev"
+  },
+  "59142cf4cc974e60": {
+    "id": "case-8-repeat-1-direct",
+    "case_id": "hf-009",
+    "repeat": 1,
+    "arm": "direct"
+  },
+  "a6a1f2919a8af026": {
+    "id": "case-13-repeat-1-misleading",
+    "case_id": "hf-014",
+    "repeat": 1,
+    "arm": "misleading"
+  },
+  "5efca50f58d16c53": {
+    "id": "case-13-repeat-1-live_jev",
+    "case_id": "hf-014",
+    "repeat": 1,
+    "arm": "live_jev"
+  },
+  "d96714afc5a5a0ad": {
+    "id": "case-13-repeat-1-direct",
+    "case_id": "hf-014",
+    "repeat": 1,
+    "arm": "direct"
+  },
+  "fb5d68aa4ba1cbd5": {
+    "id": "case-18-repeat-0-live_jev",
+    "case_id": "hf-019",
+    "repeat": 0,
+    "arm": "live_jev"
+  },
+  "ec42caa6a108e8e2": {
+    "id": "case-18-repeat-0-misleading",
+    "case_id": "hf-019",
+    "repeat": 0,
+    "arm": "misleading"
+  },
+  "b2adaf8ef19bd134": {
+    "id": "case-18-repeat-0-direct",
+    "case_id": "hf-019",
+    "repeat": 0,
+    "arm": "direct"
+  },
+  "42a3ee238e06e1d3": {
+    "id": "case-6-repeat-1-live_jev",
+    "case_id": "hf-007",
+    "repeat": 1,
+    "arm": "live_jev"
+  },
+  "ebedfd86154e8ff7": {
+    "id": "case-6-repeat-1-direct",
+    "case_id": "hf-007",
+    "repeat": 1,
+    "arm": "direct"
+  },
+  "e38ef70846e9f939": {
+    "id": "case-6-repeat-1-misleading",
+    "case_id": "hf-007",
+    "repeat": 1,
+    "arm": "misleading"
+  },
+  "9ec48e9b645c18bb": {
+    "id": "case-20-repeat-1-direct",
+    "case_id": "hf-021",
+    "repeat": 1,
+    "arm": "direct"
+  },
+  "03e2bf6e18c4d968": {
+    "id": "case-20-repeat-1-misleading",
+    "case_id": "hf-021",
+    "repeat": 1,
+    "arm": "misleading"
+  },
+  "424308440a7d8555": {
+    "id": "case-20-repeat-1-live_jev",
+    "case_id": "hf-021",
+    "repeat": 1,
+    "arm": "live_jev"
+  },
+  "9c4466577ee019b3": {
+    "id": "case-1-repeat-1-misleading",
+    "case_id": "hf-002",
+    "repeat": 1,
+    "arm": "misleading"
+  },
+  "3814f931aef85384": {
+    "id": "case-1-repeat-1-direct",
+    "case_id": "hf-002",
+    "repeat": 1,
+    "arm": "direct"
+  },
+  "a17ad39d226056c9": {
+    "id": "case-1-repeat-1-live_jev",
+    "case_id": "hf-002",
+    "repeat": 1,
+    "arm": "live_jev"
+  },
+  "f1bbec797936e7b3": {
+    "id": "case-13-repeat-0-live_jev",
+    "case_id": "hf-014",
+    "repeat": 0,
+    "arm": "live_jev"
+  },
+  "dc29eff0f5078275": {
+    "id": "case-13-repeat-0-direct",
+    "case_id": "hf-014",
+    "repeat": 0,
+    "arm": "direct"
+  },
+  "0f8aa4c704c37316": {
+    "id": "case-13-repeat-0-misleading",
+    "case_id": "hf-014",
+    "repeat": 0,
+    "arm": "misleading"
+  },
+  "8fd64514493db614": {
+    "id": "case-14-repeat-1-direct",
+    "case_id": "hf-015",
+    "repeat": 1,
+    "arm": "direct"
+  },
+  "d1bc289d4b6fc93a": {
+    "id": "case-14-repeat-1-misleading",
+    "case_id": "hf-015",
+    "repeat": 1,
+    "arm": "misleading"
+  },
+  "b94ffc7d5d422ca3": {
+    "id": "case-14-repeat-1-live_jev",
+    "case_id": "hf-015",
+    "repeat": 1,
+    "arm": "live_jev"
+  },
+  "bc4b69d51e3dd515": {
+    "id": "case-20-repeat-0-misleading",
+    "case_id": "hf-021",
+    "repeat": 0,
+    "arm": "misleading"
+  },
+  "5f209ad395447375": {
+    "id": "case-20-repeat-0-live_jev",
+    "case_id": "hf-021",
+    "repeat": 0,
+    "arm": "live_jev"
+  },
+  "49d98a2f97884b19": {
+    "id": "case-20-repeat-0-direct",
+    "case_id": "hf-021",
+    "repeat": 0,
+    "arm": "direct"
+  },
+  "1f4f8e5381e415ab": {
+    "id": "case-1-repeat-0-direct",
+    "case_id": "hf-002",
+    "repeat": 0,
+    "arm": "direct"
+  },
+  "0d64fc41b1d0fc39": {
+    "id": "case-1-repeat-0-live_jev",
+    "case_id": "hf-002",
+    "repeat": 0,
+    "arm": "live_jev"
+  },
+  "fd93ede524c45041": {
+    "id": "case-1-repeat-0-misleading",
+    "case_id": "hf-002",
+    "repeat": 0,
+    "arm": "misleading"
+  },
+  "86e1d6c99a83eeb0": {
+    "id": "case-16-repeat-1-direct",
+    "case_id": "hf-017",
+    "repeat": 1,
+    "arm": "direct"
+  },
+  "90d0c4e7396cf3c3": {
+    "id": "case-16-repeat-1-misleading",
+    "case_id": "hf-017",
+    "repeat": 1,
+    "arm": "misleading"
+  },
+  "0cea6b19156aedee": {
+    "id": "case-16-repeat-1-live_jev",
+    "case_id": "hf-017",
+    "repeat": 1,
+    "arm": "live_jev"
+  },
+  "a682888131923794": {
+    "id": "case-17-repeat-1-misleading",
+    "case_id": "hf-018",
+    "repeat": 1,
+    "arm": "misleading"
+  },
+  "e474569495a54951": {
+    "id": "case-17-repeat-1-direct",
+    "case_id": "hf-018",
+    "repeat": 1,
+    "arm": "direct"
+  },
+  "2a7247a591989008": {
+    "id": "case-17-repeat-1-live_jev",
+    "case_id": "hf-018",
+    "repeat": 1,
+    "arm": "live_jev"
+  },
+  "e15193060e999dc9": {
+    "id": "case-2-repeat-0-direct",
+    "case_id": "hf-003",
+    "repeat": 0,
+    "arm": "direct"
+  },
+  "01896bfd9c23f2a6": {
+    "id": "case-2-repeat-0-misleading",
+    "case_id": "hf-003",
+    "repeat": 0,
+    "arm": "misleading"
+  },
+  "5457ecba37fb8a5d": {
+    "id": "case-2-repeat-0-live_jev",
+    "case_id": "hf-003",
+    "repeat": 0,
+    "arm": "live_jev"
+  },
+  "6b81353a39bbc8c4": {
+    "id": "case-23-repeat-1-misleading",
+    "case_id": "hf-024",
+    "repeat": 1,
+    "arm": "misleading"
+  },
+  "95e3099188fb1819": {
+    "id": "case-23-repeat-1-direct",
+    "case_id": "hf-024",
+    "repeat": 1,
+    "arm": "direct"
+  },
+  "337c740017e9153f": {
+    "id": "case-23-repeat-1-live_jev",
+    "case_id": "hf-024",
+    "repeat": 1,
+    "arm": "live_jev"
+  },
+  "8c5547449c080c5e": {
+    "id": "case-0-repeat-0-direct",
+    "case_id": "hf-001",
+    "repeat": 0,
+    "arm": "direct"
+  },
+  "d035cf7895cfa1cd": {
+    "id": "case-0-repeat-0-misleading",
+    "case_id": "hf-001",
+    "repeat": 0,
+    "arm": "misleading"
+  },
+  "e76d7625bed54ab5": {
+    "id": "case-0-repeat-0-live_jev",
+    "case_id": "hf-001",
+    "repeat": 0,
+    "arm": "live_jev"
+  },
+  "775ac0836c1c2138": {
+    "id": "case-16-repeat-0-live_jev",
+    "case_id": "hf-017",
+    "repeat": 0,
+    "arm": "live_jev"
+  },
+  "cff3386ff2da0fa0": {
+    "id": "case-16-repeat-0-direct",
+    "case_id": "hf-017",
+    "repeat": 0,
+    "arm": "direct"
+  },
+  "4e9a52c45e7ea7b7": {
+    "id": "case-16-repeat-0-misleading",
+    "case_id": "hf-017",
+    "repeat": 0,
+    "arm": "misleading"
+  },
+  "d73d1892685c5f0e": {
+    "id": "case-3-repeat-0-live_jev",
+    "case_id": "hf-004",
+    "repeat": 0,
+    "arm": "live_jev"
+  },
+  "c990bc6547f7c5af": {
+    "id": "case-3-repeat-0-misleading",
+    "case_id": "hf-004",
+    "repeat": 0,
+    "arm": "misleading"
+  },
+  "9fbd7de3e36976cc": {
+    "id": "case-3-repeat-0-direct",
+    "case_id": "hf-004",
+    "repeat": 0,
+    "arm": "direct"
+  },
+  "e929b1f6a4abb3b4": {
+    "id": "case-11-repeat-1-live_jev",
+    "case_id": "hf-012",
+    "repeat": 1,
+    "arm": "live_jev"
+  },
+  "2a7ac2f94ee2af2c": {
+    "id": "case-11-repeat-1-misleading",
+    "case_id": "hf-012",
+    "repeat": 1,
+    "arm": "misleading"
+  },
+  "ca63503e2a413a9b": {
+    "id": "case-11-repeat-1-direct",
+    "case_id": "hf-012",
+    "repeat": 1,
+    "arm": "direct"
+  },
+  "ef9786892ad312b4": {
+    "id": "case-21-repeat-1-misleading",
+    "case_id": "hf-022",
+    "repeat": 1,
+    "arm": "misleading"
+  },
+  "1b6354235afe978b": {
+    "id": "case-21-repeat-1-live_jev",
+    "case_id": "hf-022",
+    "repeat": 1,
+    "arm": "live_jev"
+  },
+  "b566d4fd96f8ae27": {
+    "id": "case-21-repeat-1-direct",
+    "case_id": "hf-022",
+    "repeat": 1,
+    "arm": "direct"
+  },
+  "87c7969a00526215": {
+    "id": "case-23-repeat-0-misleading",
+    "case_id": "hf-024",
+    "repeat": 0,
+    "arm": "misleading"
+  },
+  "13c750c9faa9ea76": {
+    "id": "case-23-repeat-0-live_jev",
+    "case_id": "hf-024",
+    "repeat": 0,
+    "arm": "live_jev"
+  },
+  "db3f506943ee173a": {
+    "id": "case-23-repeat-0-direct",
+    "case_id": "hf-024",
+    "repeat": 0,
+    "arm": "direct"
+  }
+}

@@ -1,0 +1,707 @@
+[
+  {
+    "id": "hf-001",
+    "category": "submission_versus_completion",
+    "pair_group": "hf-pair-01",
+    "sources": [
+      {
+        "id": "hf-001-source-1",
+        "text": "Task gateway export, request req-P74. At 14:02:11Z the server returned HTTP 202 and assigned queue job j-M8 to the submitted export. This endpoint records acceptance only. The supplied capture ends at that response; it contains no worker status, output artifact, completion callback or later poll. The payload checksum was recorded before queuing.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "The gateway accepted export request req-P74 into its queue.",
+    "claims": [
+      "The gateway assigned job identifier j-M8."
+    ],
+    "expected": {
+      "/content": "supported",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "accept",
+    "rationale": "The HTTP 202 receipt explicitly records acceptance into the queue. The receipt explicitly assigns j-M8.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "accept"
+    ],
+    "stress_hints": {
+      "/content": "contradicted",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  {
+    "id": "hf-002",
+    "category": "submission_versus_completion",
+    "pair_group": "hf-pair-01",
+    "sources": [
+      {
+        "id": "hf-002-source-1",
+        "text": "Task gateway export, request req-P74. At 14:02:11Z the server returned HTTP 202 and assigned queue job j-M8 to the submitted export. This endpoint records acceptance only. The supplied capture ends at that response; it contains no worker status, output artifact, completion callback or later poll. The payload checksum was recorded before queuing.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "The gateway completed export request req-P74.",
+    "claims": [
+      "The gateway assigned job identifier j-M8."
+    ],
+    "expected": {
+      "/content": "insufficient",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "flag",
+    "rationale": "Queue acceptance was upgraded to execution completion without any completion evidence. Do not say the export failed, never ran, or remained queued forever. The supplied capture does not establish any of those outcomes.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "flag"
+    ],
+    "stress_hints": {
+      "/content": "supported",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  {
+    "id": "hf-003",
+    "category": "exclusive_terminal_status",
+    "pair_group": "hf-pair-02",
+    "sources": [
+      {
+        "id": "hf-003-source-1",
+        "text": "Batch-controller ledger for run R83. The terminal enum at sequence 918 is ABORTED. The schema permits exactly one terminal enum from COMPLETED or ABORTED, and the ledger declares sequence 918 final for this run. Reason code: operator_cancel_before_final_write. A scratch segment exists, but it is not a completed output and no output was published. This excerpt concerns R83 only.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "Run R83 ended with terminal status ABORTED.",
+    "claims": [],
+    "expected": {
+      "/content": "supported"
+    },
+    "expected_action": "accept",
+    "rationale": "The final ledger explicitly reports the exclusive ABORTED terminal state.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "accept"
+    ],
+    "stress_hints": {
+      "/content": "contradicted"
+    }
+  },
+  {
+    "id": "hf-004",
+    "category": "exclusive_terminal_status",
+    "pair_group": "hf-pair-02",
+    "sources": [
+      {
+        "id": "hf-004-source-1",
+        "text": "Batch-controller ledger for run R83. The terminal enum at sequence 918 is ABORTED. The schema permits exactly one terminal enum from COMPLETED or ABORTED, and the ledger declares sequence 918 final for this run. Reason code: operator_cancel_before_final_write. A scratch segment exists, but it is not a completed output and no output was published. This excerpt concerns R83 only.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "Run R83 ended with terminal status COMPLETED.",
+    "claims": [],
+    "expected": {
+      "/content": "contradicted"
+    },
+    "expected_action": "flag",
+    "rationale": "The claimed COMPLETED terminal state contradicts the explicitly final and exclusive ABORTED state. Do not infer that every run aborted, that the operator had a particular motive, or that the scratch segment was corrupt.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "flag"
+    ],
+    "stress_hints": {
+      "/content": "supported"
+    }
+  },
+  {
+    "id": "hf-005",
+    "category": "observational_performance_cause",
+    "pair_group": "hf-pair-03",
+    "sources": [
+      {
+        "id": "hf-005-source-1",
+        "text": "Release diary for the Copperline search service. After the parser package was upgraded, median response time was lower in the following monitoring window. During the same window, the query mix shifted toward short queries and the worker count doubled. The diary contains no matched-load test, rollback comparison or causal attribution. The author describes these as co-occurring changes and leaves their separate effects unmeasured.",
+        "provenance": "reported"
+      }
+    ],
+    "content": "The diary reports lower median response time after the parser upgrade.",
+    "claims": [
+      "The worker count doubled during the same monitoring window."
+    ],
+    "expected": {
+      "/content": "supported",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "accept",
+    "rationale": "The observed ordering and lower monitored median are explicitly reported. The worker-count change is explicitly reported.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "accept"
+    ],
+    "stress_hints": {
+      "/content": "contradicted",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  {
+    "id": "hf-006",
+    "category": "observational_performance_cause",
+    "pair_group": "hf-pair-03",
+    "sources": [
+      {
+        "id": "hf-006-source-1",
+        "text": "Release diary for the Copperline search service. After the parser package was upgraded, median response time was lower in the following monitoring window. During the same window, the query mix shifted toward short queries and the worker count doubled. The diary contains no matched-load test, rollback comparison or causal attribution. The author describes these as co-occurring changes and leaves their separate effects unmeasured.",
+        "provenance": "reported"
+      }
+    ],
+    "content": "The parser upgrade caused the lower median response time.",
+    "claims": [
+      "The worker count doubled during the same monitoring window."
+    ],
+    "expected": {
+      "/content": "insufficient",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "flag",
+    "rationale": "A co-occurring package change was assigned a causal effect despite changed workload and capacity and no causal comparison. Do not assert that the parser had no effect or that extra workers or short queries definitely caused the improvement. No direction or share of a causal effect was isolated.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "flag"
+    ],
+    "stress_hints": {
+      "/content": "supported",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  {
+    "id": "hf-007",
+    "category": "cache_condition_boundary",
+    "pair_group": "hf-pair-04",
+    "sources": [
+      {
+        "id": "hf-007-source-1",
+        "text": "Controller test receipt for endpoint /catalog/item on build B17. With the requested item already resident in the cache, this test returned a response within the 25 ms limit. Immediately after eviction, the same request on the same build took 180 ms and failed that limit. The receipt labels these separate warm-cache and cold-cache trials; it provides no distribution for other traffic or builds.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "In the recorded warm-cache trial, build B17 met the 25 ms response limit.",
+    "claims": [],
+    "expected": {
+      "/content": "supported"
+    },
+    "expected_action": "accept",
+    "rationale": "The warm-cache trial expressly met the named response limit.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "accept"
+    ],
+    "stress_hints": {
+      "/content": "contradicted"
+    }
+  },
+  {
+    "id": "hf-008",
+    "category": "cache_condition_boundary",
+    "pair_group": "hf-pair-04",
+    "sources": [
+      {
+        "id": "hf-008-source-1",
+        "text": "Controller test receipt for endpoint /catalog/item on build B17. With the requested item already resident in the cache, this test returned a response within the 25 ms limit. Immediately after eviction, the same request on the same build took 180 ms and failed that limit. The receipt labels these separate warm-cache and cold-cache trials; it provides no distribution for other traffic or builds.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "In the recorded cold-cache trial, build B17 met the 25 ms response limit.",
+    "claims": [],
+    "expected": {
+      "/content": "contradicted"
+    },
+    "expected_action": "flag",
+    "rationale": "The successful warm-cache observation was transferred to the cold-cache trial that explicitly failed the limit. Do not claim every cold request is slow, change the request identity, or infer that the warm-cache observation was invalid.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "flag"
+    ],
+    "stress_hints": {
+      "/content": "supported"
+    }
+  },
+  {
+    "id": "hf-009",
+    "category": "deployment_branch_scope",
+    "pair_group": "hf-pair-05",
+    "sources": [
+      {
+        "id": "hf-009-source-1",
+        "text": "Configuration attestation, deployment group Narwhal. At the recorded checkpoint, the staging namespace ran release r9 with background compaction enabled. Production ran release r8 with background compaction disabled. The attestation binds these values to separate namespace identifiers and states that there was no production rollout in this checkpoint. No production performance result is attached.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "At the checkpoint, background compaction was enabled in the staging namespace.",
+    "claims": [
+      "Production ran release r8 at that checkpoint."
+    ],
+    "expected": {
+      "/content": "supported",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "accept",
+    "rationale": "The attestation explicitly enables compaction in staging. Production release r8 is explicitly attested.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "accept"
+    ],
+    "stress_hints": {
+      "/content": "contradicted",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  {
+    "id": "hf-010",
+    "category": "deployment_branch_scope",
+    "pair_group": "hf-pair-05",
+    "sources": [
+      {
+        "id": "hf-010-source-1",
+        "text": "Configuration attestation, deployment group Narwhal. At the recorded checkpoint, the staging namespace ran release r9 with background compaction enabled. Production ran release r8 with background compaction disabled. The attestation binds these values to separate namespace identifiers and states that there was no production rollout in this checkpoint. No production performance result is attached.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "At the checkpoint, background compaction was enabled in the production namespace.",
+    "claims": [
+      "Production ran release r8 at that checkpoint."
+    ],
+    "expected": {
+      "/content": "contradicted",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "flag",
+    "rationale": "The enabled setting from staging was incorrectly attributed to the separately attested production namespace. Do not invent a production rollout, a performance improvement, or a compaction state outside the checkpoint.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "flag"
+    ],
+    "stress_hints": {
+      "/content": "supported",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  {
+    "id": "hf-011",
+    "category": "superseded_route_receipt",
+    "pair_group": "hf-pair-06",
+    "sources": [
+      {
+        "id": "hf-011-source-1",
+        "text": "Service-router control history for pool Lumen. Revision 41 at 09:10Z selected backend cluster cedar. Revision 42 at 09:18Z selected backend cluster birch after a rollback. The final health probe at 09:20Z names revision 42 as active and records birch as the selected backend; it expressly replaces the revision-41 observation. Both revisions belong to the same pool, not two environments.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "At the final health probe, pool Lumen selected backend cluster birch.",
+    "claims": [
+      "Revision 41 selected cedar before the rollback."
+    ],
+    "expected": {
+      "/content": "supported",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "accept",
+    "rationale": "The final probe explicitly binds active revision 42 to birch. The earlier revision-41 selection of cedar is explicitly recorded.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "accept"
+    ],
+    "stress_hints": {
+      "/content": "contradicted",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  {
+    "id": "hf-012",
+    "category": "superseded_route_receipt",
+    "pair_group": "hf-pair-06",
+    "sources": [
+      {
+        "id": "hf-012-source-1",
+        "text": "Service-router control history for pool Lumen. Revision 41 at 09:10Z selected backend cluster cedar. Revision 42 at 09:18Z selected backend cluster birch after a rollback. The final health probe at 09:20Z names revision 42 as active and records birch as the selected backend; it expressly replaces the revision-41 observation. Both revisions belong to the same pool, not two environments.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "At the final health probe, pool Lumen selected backend cluster cedar.",
+    "claims": [
+      "Revision 41 selected cedar before the rollback."
+    ],
+    "expected": {
+      "/content": "contradicted",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "flag",
+    "rationale": "A superseded earlier selection was presented as the state at the explicitly newer final probe. Do not claim cedar was never selected, that birch stayed selected indefinitely, or that the rollback fixed a performance problem.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "flag"
+    ],
+    "stress_hints": {
+      "/content": "supported",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  {
+    "id": "hf-013",
+    "category": "mixed_transfer_integrity",
+    "pair_group": "hf-pair-07",
+    "sources": [
+      {
+        "id": "hf-013-source-1",
+        "text": "Telemetry relay acceptance receipt for transfer tx-Q5. The relay received the complete byte stream, verified its length against the sender header, and stored it under object key intake/Q5. The sender supplied no content digest, and the relay did not compute or compare one. No downstream parsing, signature verification or semantic validation is included in this receipt.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "The relay stored transfer tx-Q5 under object key intake/Q5.",
+    "claims": [
+      "The relay checked the stream length against the sender header.",
+      "The relay did not perform a content-digest comparison."
+    ],
+    "expected": {
+      "/content": "supported",
+      "/claim_records/0/content": "supported",
+      "/claim_records/1/content": "supported"
+    },
+    "expected_action": "accept",
+    "rationale": "The storage key is expressly recorded. The byte-length check is expressly recorded. The receipt explicitly says no digest comparison occurred.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "accept"
+    ],
+    "stress_hints": {
+      "/content": "contradicted",
+      "/claim_records/0/content": "contradicted",
+      "/claim_records/1/content": "contradicted"
+    }
+  },
+  {
+    "id": "hf-014",
+    "category": "mixed_transfer_integrity",
+    "pair_group": "hf-pair-07",
+    "sources": [
+      {
+        "id": "hf-014-source-1",
+        "text": "Telemetry relay acceptance receipt for transfer tx-Q5. The relay received the complete byte stream, verified its length against the sender header, and stored it under object key intake/Q5. The sender supplied no content digest, and the relay did not compute or compare one. No downstream parsing, signature verification or semantic validation is included in this receipt.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "The relay stored transfer tx-Q5 under object key intake/Q5.",
+    "claims": [
+      "The relay checked the stream length against the sender header.",
+      "The relay performed a content-digest comparison."
+    ],
+    "expected": {
+      "/content": "supported",
+      "/claim_records/0/content": "supported",
+      "/claim_records/1/content": "contradicted"
+    },
+    "expected_action": "flag",
+    "rationale": "The final assertion invents a content-digest comparison explicitly excluded by the receipt; the storage and length assertions remain supported. Do not call the bytes corrupt or authentic, claim no checks at all occurred, or criticize the supported storage and length observations.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "flag"
+    ],
+    "stress_hints": {
+      "/content": "contradicted",
+      "/claim_records/0/content": "contradicted",
+      "/claim_records/1/content": "supported"
+    }
+  },
+  {
+    "id": "hf-015",
+    "category": "deduplicated_count",
+    "pair_group": "hf-pair-08",
+    "sources": [
+      {
+        "id": "hf-015-source-1",
+        "text": "Delivery audit for notification batch K2. The event stream contains thirteen successful receipt events. The audit groups receipts by message ID and finds eleven distinct delivered message IDs; two of those IDs each have a duplicate successful receipt. The audit explicitly distinguishes receipt events from unique delivered messages. No additional message IDs or unsuccessful deliveries are in this batch extract.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "The batch extract records eleven distinct delivered messages.",
+    "claims": [
+      "The event stream contains thirteen successful receipt events."
+    ],
+    "expected": {
+      "/content": "supported",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "accept",
+    "rationale": "The deduplicated audit explicitly counts eleven message IDs. The event-level count of thirteen is explicitly stated.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "accept"
+    ],
+    "stress_hints": {
+      "/content": "contradicted",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  {
+    "id": "hf-016",
+    "category": "deduplicated_count",
+    "pair_group": "hf-pair-08",
+    "sources": [
+      {
+        "id": "hf-016-source-1",
+        "text": "Delivery audit for notification batch K2. The event stream contains thirteen successful receipt events. The audit groups receipts by message ID and finds eleven distinct delivered message IDs; two of those IDs each have a duplicate successful receipt. The audit explicitly distinguishes receipt events from unique delivered messages. No additional message IDs or unsuccessful deliveries are in this batch extract.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "The batch extract records thirteen distinct delivered messages.",
+    "claims": [
+      "The event stream contains thirteen successful receipt events."
+    ],
+    "expected": {
+      "/content": "contradicted",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "flag",
+    "rationale": "A raw receipt-event count was substituted for the distinct-message count despite identified duplicates. Do not infer two failed deliveries, missing messages or duplicate message contents. The duplicate records are receipts, not additional unique messages.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "flag"
+    ],
+    "stress_hints": {
+      "/content": "supported",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  {
+    "id": "hf-017",
+    "category": "logging_scope_absence",
+    "pair_group": "hf-pair-09",
+    "sources": [
+      {
+        "id": "hf-017-source-1",
+        "text": "Access-audit export for repository Delta, interval 16:00-17:00Z. The export contains every write event recorded through the web editor in that interval, and there are none. Command-line and service-token clients write through separate audit channels omitted from this export. The export provides no observations about those channels and makes no claim about the total number of repository writes.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "No web-editor write event was recorded for repository Delta during the interval.",
+    "claims": [],
+    "expected": {
+      "/content": "supported"
+    },
+    "expected_action": "accept",
+    "rationale": "The complete web-editor channel has no recorded write events in the interval.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "accept"
+    ],
+    "stress_hints": {
+      "/content": "contradicted"
+    }
+  },
+  {
+    "id": "hf-018",
+    "category": "logging_scope_absence",
+    "pair_group": "hf-pair-09",
+    "sources": [
+      {
+        "id": "hf-018-source-1",
+        "text": "Access-audit export for repository Delta, interval 16:00-17:00Z. The export contains every write event recorded through the web editor in that interval, and there are none. Command-line and service-token clients write through separate audit channels omitted from this export. The export provides no observations about those channels and makes no claim about the total number of repository writes.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "No write to repository Delta occurred through any client during the interval.",
+    "claims": [],
+    "expected": {
+      "/content": "insufficient"
+    },
+    "expected_action": "flag",
+    "rationale": "An empty export for one channel was treated as proof of no writes across unobserved channels. Do not assert that a command-line or service-token write happened. Those channels are unobserved here, not positive counterexamples.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "flag"
+    ],
+    "stress_hints": {
+      "/content": "supported"
+    }
+  },
+  {
+    "id": "hf-019",
+    "category": "conflicting_replica_observations",
+    "pair_group": "hf-pair-10",
+    "sources": [
+      {
+        "id": "hf-019-source-1",
+        "text": "Observer A receipt for shard M, leadership term 73, sample tick 504. The receipt labels node rook as leader. The observer signed the sample, but this packet includes no lease certificate or quorum decision. The packet explicitly gives this observer no priority over Observer B.",
+        "provenance": "signed"
+      },
+      {
+        "id": "hf-019-source-2",
+        "text": "Observer B receipt for the same shard M, term 73 and tick 504. The receipt labels node wren as leader. This shard permits only one leader in a term at a tick. The packet contains no lease certificate, quorum decision, correction or observer-priority rule to resolve the disagreement with Observer A.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "The two observer receipts disagree about shard M leadership at tick 504.",
+    "claims": [],
+    "expected": {
+      "/content": "supported"
+    },
+    "expected_action": "accept",
+    "rationale": "The matched shard, term and tick have incompatible rook/wren reports without a supplied tie-breaker.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "accept"
+    ],
+    "stress_hints": {
+      "/content": "contradicted"
+    }
+  },
+  {
+    "id": "hf-020",
+    "category": "conflicting_replica_observations",
+    "pair_group": "hf-pair-10",
+    "sources": [
+      {
+        "id": "hf-020-source-1",
+        "text": "Observer A receipt for shard M, leadership term 73, sample tick 504. The receipt labels node rook as leader. The observer signed the sample, but this packet includes no lease certificate or quorum decision. The packet explicitly gives this observer no priority over Observer B.",
+        "provenance": "signed"
+      },
+      {
+        "id": "hf-020-source-2",
+        "text": "Observer B receipt for the same shard M, term 73 and tick 504. The receipt labels node wren as leader. This shard permits only one leader in a term at a tick. The packet contains no lease certificate, quorum decision, correction or observer-priority rule to resolve the disagreement with Observer A.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "The two observer receipts establish rook as shard M leader at tick 504.",
+    "claims": [],
+    "expected": {
+      "/content": "ambiguous"
+    },
+    "expected_action": "flag",
+    "rationale": "The candidate resolves conflicting equal-priority observations in favor of one leader without the required resolving evidence. Do not establish either node as the true leader, invent split-brain operation, or conclude either signed observer is dishonest. A contradiction concerns the reports, not a resolved world state.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "flag",
+      "abstain"
+    ],
+    "stress_hints": {
+      "/content": "supported"
+    }
+  },
+  {
+    "id": "hf-021",
+    "category": "sample_to_fleet",
+    "pair_group": "hf-pair-11",
+    "sources": [
+      {
+        "id": "hf-021-source-1",
+        "text": "Compatibility qualification receipt for decoder release P6. The release decoded every file in the supplied regression bundle, which contains only UTF-8 payloads from the customer portal. No UTF-16, binary transport or third-party exporter input was exercised. The receipt explicitly limits its compatibility conclusion to this bundle and records no observed decoding failure elsewhere.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "Decoder release P6 decoded every file in the supplied regression bundle.",
+    "claims": [
+      "The supplied bundle contains only UTF-8 portal payloads."
+    ],
+    "expected": {
+      "/content": "supported",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "accept",
+    "rationale": "Success for every file in the named closed bundle is expressly reported. The tested bundle scope is explicitly stated.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "accept"
+    ],
+    "stress_hints": {
+      "/content": "contradicted",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  {
+    "id": "hf-022",
+    "category": "sample_to_fleet",
+    "pair_group": "hf-pair-11",
+    "sources": [
+      {
+        "id": "hf-022-source-1",
+        "text": "Compatibility qualification receipt for decoder release P6. The release decoded every file in the supplied regression bundle, which contains only UTF-8 payloads from the customer portal. No UTF-16, binary transport or third-party exporter input was exercised. The receipt explicitly limits its compatibility conclusion to this bundle and records no observed decoding failure elsewhere.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "Decoder release P6 can decode files from every encoding and exporter.",
+    "claims": [
+      "The supplied bundle contains only UTF-8 portal payloads."
+    ],
+    "expected": {
+      "/content": "insufficient",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "flag",
+    "rationale": "Complete success on a bounded homogeneous bundle was generalized to untested encodings and exporters. Do not invent a UTF-16 failure or claim P6 cannot decode any third-party file. No out-of-bundle failure was observed.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "flag"
+    ],
+    "stress_hints": {
+      "/content": "supported",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  {
+    "id": "hf-023",
+    "category": "framing_overhead_total",
+    "pair_group": "hf-pair-12",
+    "sources": [
+      {
+        "id": "hf-023-source-1",
+        "text": "Wire-format accounting for upload U19. Four data frames carry six KiB of payload each. A single separate three-KiB manifest is sent in addition to those frames. The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest; the figures already use KiB consistently, and there is no other framing overhead in this accounting.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "The complete upload U19, including its manifest, totaled twenty-seven KiB.",
+    "claims": [
+      "The four data frames carried twenty-four KiB of payload."
+    ],
+    "expected": {
+      "/content": "supported",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "accept",
+    "rationale": "Four times six plus the separate three-KiB manifest equals the explicit twenty-seven-KiB total. The data-frame payload subtotal is four times six KiB.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "accept"
+    ],
+    "stress_hints": {
+      "/content": "contradicted",
+      "/claim_records/0/content": "contradicted"
+    }
+  },
+  {
+    "id": "hf-024",
+    "category": "framing_overhead_total",
+    "pair_group": "hf-pair-12",
+    "sources": [
+      {
+        "id": "hf-024-source-1",
+        "text": "Wire-format accounting for upload U19. Four data frames carry six KiB of payload each. A single separate three-KiB manifest is sent in addition to those frames. The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest; the figures already use KiB consistently, and there is no other framing overhead in this accounting.",
+        "provenance": "signed"
+      }
+    ],
+    "content": "The complete upload U19, including its manifest, totaled twenty-four KiB.",
+    "claims": [
+      "The four data frames carried twenty-four KiB of payload."
+    ],
+    "expected": {
+      "/content": "contradicted",
+      "/claim_records/0/content": "supported"
+    },
+    "expected_action": "flag",
+    "rationale": "The payload subtotal was presented as the complete upload total despite the expressly additional manifest. Do not add decimal/binary conversion error, compression or further overhead. Units are already consistent and the accounting explicitly excludes other overhead.",
+    "evidence_size_band": "under_1KB",
+    "acceptable_actions": [
+      "flag"
+    ],
+    "stress_hints": {
+      "/content": "supported",
+      "/claim_records/0/content": "contradicted"
+    }
+  }
+]

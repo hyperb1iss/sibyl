@@ -1,0 +1,3054 @@
+[
+  {
+    "blind_id": "e4a59a6e41c75226",
+    "case_id": "hf-006",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "e6021785052c69f52c0c6ee8f1816bdae4390d97bdf3782299ce2421bfdf9424",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The candidate asserts that 'The parser upgrade caused the lower median response time.' The source explicitly states that the diary 'contains no matched-load test, rollback comparison or causal attribution' and describes the parser upgrade, lower response time, query mix shift, and doubled worker count as 'co-occurring changes' with 'their separate effects unmeasured.' This is a reported claim without causal authentication. The source documents only temporal co-occurrence, not causal mechanism or attribution. To claim causality when the source explicitly disclaims causal measurement requires qualification to acknowledge the uncertainty and co-occurrence of alternative explanations."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "aec9a155e30aa129",
+    "case_id": "hf-008",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "e38ef70846e9f939",
+    "case_id": "hf-007",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "cb999f0f776e34d0c3dd9b30a9be57551e4fac56f0993dd2af1fc962ba24b30b",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "qualify",
+          "critique": "The evidence supports the core observation that build B17 met the 25 ms response limit in the warm-cache trial. However, the candidate makes an absolute claim without qualifying the severe scope limitations documented in the source. The source explicitly states it provides data only for a specific endpoint (/catalog/item) under specific conditions (warm-cache), and explicitly notes: 'it provides no distribution for other traffic or builds.' The candidate presents this single positive outcome as an unqualified general success for build B17, when the evidence only confirms performance for one endpoint in one cache state. This misrepresents the evidentiary basis by omitting material scope constraints that are essential to interpreting the finding."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "0d8e200ffc872cdf",
+    "case_id": "hf-013",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "a267b0575930f62a",
+    "case_id": "hf-003",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "eeec8e32710ef0ec",
+    "case_id": "hf-005",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "4d94f0eac2e690142fedd6ef8c63f9652d110498348f8a8bc3cc72acd8399669",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The source text explicitly states that 'The diary contains no matched-load test, rollback comparison or causal attribution' and describes the worker count doubling as a 'co-occurring change' with 'their separate effects unmeasured.' The claim presents this doubling as a factual observation during the monitoring window, which is supported by the evidence. However, any causal connection between the worker count doubling and the response time improvement is unsupported by the source. The claim should be qualified to reflect that this is a coincident observation, not an established causal relationship."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "f3c27a5c8e33a12529af1aa83b741333358753449524d0dd7046e19d6aa5251e",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The source confirms that median response time was lower after the parser upgrade in the monitoring window. However, the source explicitly states that the diary 'contains no matched-load test, rollback comparison or causal attribution' and notes that 'query mix shifted toward short queries and the worker count doubled' during the same window. The claim attributes the lower response time to the parser upgrade, but the evidence presents this as an uncontrolled observation with multiple confounding factors (query mix shift, worker count change) whose separate effects remain unmeasured. The causal link between the upgrade and the improvement is not established by the source."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "2a7247a591989008",
+    "case_id": "hf-018",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "2b4b815eb152feced19135a701089eaf16167c90eb1e46c3bae72f0e42e3cdd8",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_generalization",
+          "disposition": "qualify",
+          "critique": "The candidate claims 'No write to repository Delta occurred through any client during the interval.' The source (a signed access-audit export) provides evidence only about writes through the web editor and explicitly states that 'Command-line and service-token clients write through separate audit channels omitted from this export.' The export contains no observations about those channels and makes no claim about the total number of repository writes. The candidate's universal claim that no writes occurred 'through any client' goes beyond what the evidence supports. The evidence supports only that no writes occurred through the web editor during the interval. To align with the evidence, the claim should be qualified to specify 'through the web editor' or otherwise limited to the scope of the audit export."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "8fd64514493db614",
+    "case_id": "hf-015",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "a682888131923794",
+    "case_id": "hf-018",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "2b4b815eb152feced19135a701089eaf16167c90eb1e46c3bae72f0e42e3cdd8",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_generalization",
+          "disposition": "qualify",
+          "critique": "The source explicitly states it provides only an 'access-audit export for repository Delta' that contains 'every write event recorded through the web editor' and explicitly excludes observation of command-line and service-token clients, which 'write through separate audit channels omitted from this export.' The claim asserts 'No write to repository Delta occurred through any client during the interval' (universal\u2014all clients), but the evidence only supports the narrower observation that no writes occurred through the web editor specifically. The source makes no claim about the total number of repository writes or about other client types. The candidate claim overgeneralizes from partial evidence to an unsupported universal conclusion."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "b3abd61d377d83c6",
+    "case_id": "hf-023",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The claim states 'The four data frames carried twenty-four KiB of payload.' However, the source evidence explicitly states 'Four data frames carry six KiB of payload each,' which totals 24 KiB (6 \u00d7 4 = 24 KiB). The claim itself is actually consistent with this calculation. However, the source further clarifies that the complete upload U19, including the three-KiB manifest, totals twenty-seven KiB. The claim about 24 KiB represents only the data frames without the manifest. This is a partial account that omits the complete picture. While not strictly false, the claim in isolation contradicts the source's assertion about the complete upload total."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "a3ca8b6010650fcf68b6d6a16ed5e98a8fbe9c010a3c4d366e1bfadbaeff0fc5",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The claim states 'The complete upload U19, including its manifest, totaled twenty-seven KiB.' The source evidence states: 'Four data frames carry six KiB of payload each. A single separate three-KiB manifest is sent in addition to those frames... The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' This directly contradicts the mathematical sum: 4 \u00d7 6 KiB + 3 KiB = 24 KiB + 3 KiB = 27 KiB. The source's explicit byte counter reporting of twenty-seven KiB is cited, but the arithmetic presented in the source (6 KiB \u00d7 4 frames + 3 KiB manifest) does not equal twenty-seven KiB; it equals twenty-seven KiB. Upon recalculation: the claim aligns with the source's reported byte counter, but the underlying component values (6+6+6+6+3) sum to 27, which is accurate. The claim is actually supported by the source's explicit statement."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "0d5a4be03dc6bb44",
+    "case_id": "hf-010",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "7880e49c9bf5adacf3863eab8632be518979bd02a397c1968d9dc8848193e076",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The candidate claims 'At the checkpoint, background compaction was enabled in the production namespace.' However, the source evidence explicitly states 'Production ran release r8 with background compaction disabled.' This is a direct factual contradiction regarding the state of background compaction in production at the checkpoint."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "180b895c7d73316e",
+    "case_id": "hf-023",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The claim states 'The four data frames carried twenty-four KiB of payload.' However, the source evidence explicitly states that 'Four data frames carry six KiB of payload each,' which totals 24 KiB. The claim is arithmetically consistent with the source. However, the source also clarifies that 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' The framing and context matter: the claim isolates the four frames' payload contribution (24 KiB) from the manifest (3 KiB), which aligns with the source's breakdown. This claim is supported."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "a3ca8b6010650fcf68b6d6a16ed5e98a8fbe9c010a3c4d366e1bfadbaeff0fc5",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The claim states 'The complete upload U19, including its manifest, totaled twenty-seven KiB.' The source evidence directly states: 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' This claim is directly supported by the source evidence."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "25e5d0ab5137e6fc",
+    "case_id": "hf-004",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "32961edd3ca56a0f0a827f31e4efffaf3edba9d2029890b1cdc382f4a0c85be2",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate asserts that 'Run R83 ended with terminal status COMPLETED.' However, the signed source (hf-004-source-1, cited as s0) explicitly states: 'The terminal enum at sequence 918 is ABORTED' and further confirms 'the schema permits exactly one terminal enum from COMPLETED or ABORTED, and the ledger declares sequence 918 final for this run.' The source is marked as 'signed' provenance, establishing its reliability as a direct observation of the batch-controller ledger. The actual terminal status is ABORTED, not COMPLETED, contradicting the candidate's claim."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "b71f357502c3ccf5",
+    "case_id": "hf-018",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "2b4b815eb152feced19135a701089eaf16167c90eb1e46c3bae72f0e42e3cdd8",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_generalization",
+          "disposition": "qualify",
+          "critique": "The source explicitly states it provides access-audit data only for the web editor channel during the interval, and explicitly disclaims coverage of command-line and service-token client audit channels. The claim asserts 'No write to repository Delta occurred through any client during the interval' - a universal statement covering all clients. However, the evidence covers only web editor writes and makes no observations about the command-line and service-token channels. The signed observation supports a qualified claim limited to the web editor, but cannot support a universal claim about all clients. The claim should be qualified to specify 'through the web editor' or reframed to acknowledge the audit gap for other channels."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "9cef3d8f88fcaacd",
+    "case_id": "hf-019",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "bb170efe98d20ce4",
+    "case_id": "hf-008",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "0f8aa4c704c37316",
+    "case_id": "hf-014",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "d93f12b3037f051fb0163b5ac389a2e7765f16b40c01d481b15b3d4914716f26",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The source explicitly states 'verified its length against the sender header.' The claim phrases this as 'checked the stream length against the sender header.' While these phrases describe the same action in substance, the critical issue is that the source further clarifies in the same receipt: 'The sender supplied no content digest, and the relay did not compute or compare one.' The advisory label marks this as 'contradicted,' and upon careful review of the source language, the framing creates ambiguity. The source confirms length verification occurred, but the overall context of the receipt emphasizes what was NOT done (no digest comparison). The claim as stated is factually supported by the source text, but examining the advisory hint and re-reading the source material reveals the source is documenting the absence of digest comparison, which contextually could be interpreted as emphasizing limitations. However, the source text explicitly says the relay 'verified its length against the sender header,' which directly supports the claim. Upon strict reading of original evidence alone: the claim is supported by explicit source language."
+        },
+        {
+          "claim_path": "/claim_records/1/content",
+          "claim_sha256": "3701da08f014c34d2529fe96d8d3115ac4de43406a2786633b022e10814ae2c6",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The source explicitly states: 'The sender supplied no content digest, and the relay did not compute or compare one.' This directly contradicts the claim that 'The relay performed a content-digest comparison.' The source is unambiguous: the relay did NOT perform a content-digest comparison. This is a clear factual contradiction with signed provenance."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "9fa1657c00449ec80850cfdde4c77be0e57c85589617309624337263e8f24bfc",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The source states the relay 'stored it under object key intake/Q5,' which directly supports the claim. However, the advisory label marks this as 'contradicted,' creating a discrepancy. Upon independent review of the original evidence only: the source explicitly and clearly confirms that the relay stored the transfer under object key 'intake/Q5.' This claim is factually supported by the signed source evidence. The advisory contradiction label appears unsupported by the actual source text. Nevertheless, given the advisory conflict, recommend reconsideration to verify no contextual or temporal nuance was missed in the receipt language."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "5f209ad395447375",
+    "case_id": "hf-021",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "9be796ef0ce12a3f",
+    "case_id": "hf-011",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "221c9a6d8657c7c1",
+    "case_id": "hf-016",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "293060fcf35044a25609376a6c6b62aa78465ca960fb5e8ed2502cabafb2b100",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "qualify",
+          "critique": "The candidate claims 'thirteen distinct delivered messages' but the source evidence explicitly states 'eleven distinct delivered message IDs; two of those IDs each have a duplicate successful receipt.' The source distinguishes between receipt events (thirteen) and distinct delivered messages (eleven). The candidate conflates these two counts."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "b566d4fd96f8ae27",
+    "case_id": "hf-022",
+    "mechanical_action": "error",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "374b12ff0a730a9d34eb2f5c2f067b9624fc62a7e23c4ff3c4e852ef5f17f5f8",
+          "basis": "unsupported_universal_claim",
+          "disposition": "qualify",
+          "critique": "The candidate claims that 'Decoder release P6 can decode files from every encoding and exporter.' However, the source evidence explicitly states: 'No UTF-16, binary transport or third-party exporter input was exercised.' The evidence demonstrates only that P6 decoded files from UTF-8 portal payloads in a specific regression bundle. The source explicitly limits its conclusion: 'The receipt explicitly limits its compatibility conclusion to this bundle and records no observed decoding failure elsewhere.' The universal claim about 'every encoding and exporter' is not supported by evidence that covers only UTF-8 portal payloads. This is a substantial overstatement of the actual demonstrated capability.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "bc4b69d51e3dd515",
+    "case_id": "hf-021",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "b9ba37cd16b0ab2842c6e7a2d148d7cb66efc8a1546469c28907069cf802558c",
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The candidate claims 'Decoder release P6 decoded every file in the supplied regression bundle' as an absolute outcome. However, the source text qualifies this strictly: 'The receipt explicitly limits its compatibility conclusion to this bundle and records no observed decoding failure elsewhere.' This indicates the success is limited to the specific bundle tested and does not support a universal claim about the decoder's capability. The claim should be qualified to reflect the scope-limited nature of the observation."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "cff3386ff2da0fa0",
+    "case_id": "hf-017",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "59142cf4cc974e60",
+    "case_id": "hf-009",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The claim states 'Production ran release r8 at that checkpoint.' However, the source evidence states 'Production ran release r8 with background compaction disabled.' The source does attest that production ran r8, but the claim in the nested claim_record isolates only the release number without the critical condition about compaction being disabled. More importantly, this claim_record is presented as a separate assertion at /claim_records/0/content while the main content assertion at /content states 'At the checkpoint, background compaction was enabled in the staging namespace.' The nested claim focuses on production running r8, which contradicts nothing, but its pairing with the parent claim about background compaction enabled creates ambiguity. Upon review, the nested claim_record/0/content itself is factually supported for the release version, but examining the full context: the parent candidate assertion states background compaction was enabled, and the source shows it was enabled in staging (not production). The claim_record attempts to partition information in a way that may mislead about what system (production vs staging) is being described. The claim should be qualified or removed because it lacks the namespace context necessary to align with the source evidence."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "5ef88d919e4b985ecfc26678771ec178c946605f071e4f07d2e33a7e1eaa61dd",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "missing_condition",
+          "disposition": "qualify",
+          "critique": "The candidate asserts: 'At the checkpoint, background compaction was enabled in the staging namespace.' The source evidence states: 'At the recorded checkpoint, the staging namespace ran release r9 with background compaction enabled.' The factual claim about compaction being enabled in staging is supported. However, the candidate omits the critical condition that staging was running release r9, not r8. The nested claim_record/0/content about production running r8 is separate. The main assertion is technically correct but incomplete\u2014it should specify that this refers to the staging namespace specifically and ideally note the release version (r9) to provide complete context from the source."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "5457ecba37fb8a5d",
+    "case_id": "hf-003",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "aecab4f4dcd5d1fc",
+    "case_id": "hf-019",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "e15193060e999dc9",
+    "case_id": "hf-003",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "854e5cb257ed6b11",
+    "case_id": "hf-003",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "1cb7f8b95d3d8853",
+    "case_id": "hf-018",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "2b4b815eb152feced19135a701089eaf16167c90eb1e46c3bae72f0e42e3cdd8",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_generalization",
+          "disposition": "qualify",
+          "critique": "The claim asserts 'No write to repository Delta occurred through any client during the interval.' However, the cited evidence (s0) explicitly states: 'Command-line and service-token clients write through separate audit channels omitted from this export. The export provides no observations about those channels and makes no claim about the total number of repository writes.' The evidence only documents writes through the web editor (of which there were none), but explicitly excludes two other client channels (command-line and service-token). The claim makes a universal assertion about 'any client' but the evidence only covers one client type and provides no data about the others. This is an unsupported generalization from partial observations to a universal claim."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "4b53149f26f308b2",
+    "case_id": "hf-001",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "ec42caa6a108e8e2",
+    "case_id": "hf-019",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "72130421676e5aab8d7cd867ce08619c15683db174fff243df5929e4494849fd",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            },
+            {
+              "evidence_id": "s1"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'The two observer receipts disagree about shard M leadership at tick 504.' Both signed observations (s0 and s1) confirm this disagreement: Observer A receipt labels node 'rook' as leader for shard M, term 73, tick 504, while Observer B receipt labels node 'wren' as leader for the same shard, term, and tick. The sources explicitly state that 'This shard permits only one leader in a term at a tick,' establishing a contradiction between the two observations. The claim accurately reports the factual disagreement between the observer receipts and is fully supported by the original evidence."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "fb5d68aa4ba1cbd5",
+    "case_id": "hf-019",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "d73d1892685c5f0e",
+    "case_id": "hf-004",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "32961edd3ca56a0f0a827f31e4efffaf3edba9d2029890b1cdc382f4a0c85be2",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "critique": "The candidate claims 'Run R83 ended with terminal status COMPLETED.' However, the signed source evidence explicitly states: 'The terminal enum at sequence 918 is ABORTED' and 'the ledger declares sequence 918 final for this run.' The source further confirms the terminal status is ABORTED with reason code 'operator_cancel_before_final_write.' This is a direct factual contradiction between the claim (COMPLETED) and the authenticated observation (ABORTED)."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "74d4ff01541226a8",
+    "case_id": "hf-023",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The claim states 'The four data frames carried twenty-four KiB of payload.' However, the source evidence explicitly states 'Four data frames carry six KiB of payload each,' which totals 24 KiB. While this calculation is correct, the source also clarifies that there is 'a single separate three-KiB manifest sent in addition to those frames.' The source's explicit statement that 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest' indicates the manifest is a separate component. The claim about the four frames carrying twenty-four KiB is arithmetically consistent with the source (6 KiB \u00d7 4 = 24 KiB), but the source establishes this as only part of the total accounting and emphasizes the manifest as distinct."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "a3ca8b6010650fcf68b6d6a16ed5e98a8fbe9c010a3c4d366e1bfadbaeff0fc5",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The claim states 'The complete upload U19, including its manifest, totaled twenty-seven KiB.' The source text explicitly confirms this: 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' However, a critical detail appears: the source states the figure represents 'twenty-seven KiB' but also notes 'the figures already use KiB consistently, and there is no other framing overhead in this accounting.' This phrasing raises an ambiguity\u2014the source is asserting that 27 KiB is the byte counter's explicit report and that the accounting uses KiB consistently with no additional overhead. The claim itself is supported by the source's direct assertion, but review should confirm whether the source's emphasis on 'no other framing overhead' and consistent KiB usage is being correctly interpreted as confirming the 27 KiB total or as a qualification."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "7919c86b9d7cc6b4",
+    "case_id": "hf-018",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "2b4b815eb152feced19135a701089eaf16167c90eb1e46c3bae72f0e42e3cdd8",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_generalization",
+          "disposition": "qualify",
+          "critique": "The candidate claims 'No write to repository Delta occurred through any client during the interval.' However, the source (s0) explicitly states that the access-audit export 'contains every write event recorded through the web editor in that interval, and there are none.' The source also explicitly acknowledges that 'Command-line and service-token clients write through separate audit channels omitted from this export' and 'makes no claim about the total number of repository writes.' The candidate's claim is an unsupported universal generalization that extends beyond what the source evidence supports. The source only confirms the absence of writes through the web editor; it explicitly disclaims knowledge about writes through other client channels. The claim should be qualified to reflect only the web editor channel or the assertion should be reconsidered."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "1d3a337080a9fbc0",
+    "case_id": "hf-008",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "47b1b86fa74e163c356b739113b4098d2ce88cedb503230fe681ef4d886788f9",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims that in the recorded cold-cache trial, build B17 met the 25 ms response limit. However, the source evidence explicitly states: 'Immediately after eviction, the same request on the same build took 180 ms and failed that limit.' The cold-cache trial (after eviction) resulted in a 180 ms response, which exceeds the 25 ms limit. The source distinguishes between the warm-cache trial (which met the limit) and the cold-cache trial (which failed it). The candidate's claim conflates or misidentifies which cache condition met the limit."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "5efca50f58d16c53",
+    "case_id": "hf-014",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/1/content",
+          "claim_sha256": "3701da08f014c34d2529fe96d8d3115ac4de43406a2786633b022e10814ae2c6",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "critique": "The claim states 'The relay performed a content-digest comparison.' However, the signed source evidence explicitly states: 'The sender supplied no content digest, and the relay did not compute or compare one.' This is a direct factual contradiction with the authenticated observation."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "c3f28e912b57d5a1",
+    "case_id": "hf-006",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "e6021785052c69f52c0c6ee8f1816bdae4390d97bdf3782299ce2421bfdf9424",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The source explicitly states that the diary contains no causal attribution and describes the parser upgrade, lower median response time, query mix shift, and worker count doubling as co-occurring changes with their separate effects unmeasured. The claim asserts a causal relationship ('caused') that the source does not support. The source can establish temporal correlation but explicitly disclaims causal measurement."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "4d94f0eac2e690142fedd6ef8c63f9652d110498348f8a8bc3cc72acd8399669",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The source states 'the worker count doubled' as a fact during the monitoring window. However, the source also states it 'contains no matched-load test, rollback comparison or causal attribution' and describes changes as 'co-occurring' with 'separate effects unmeasured.' This is a release diary with reported observations, not a controlled measurement. The claim presents this observation as if it were definitively established, but the source's own disclaimer indicates uncertainty about the measured conditions and whether this represents a clean measurement rather than an artifact of the monitoring methodology."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "9fbd7de3e36976cc",
+    "case_id": "hf-004",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "32961edd3ca56a0f0a827f31e4efffaf3edba9d2029890b1cdc382f4a0c85be2",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The candidate claims 'Run R83 ended with terminal status COMPLETED.' However, the signed evidence explicitly states: 'The terminal enum at sequence 918 is ABORTED' and 'the ledger declares sequence 918 final for this run.' The source document directly contradicts the candidate's assertion, reporting that R83 terminated with ABORTED status due to operator_cancel_before_final_write, not COMPLETED status."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "db061c804b4f3a48",
+    "case_id": "hf-019",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "f4eaedf2dac3a97d",
+    "case_id": "hf-016",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "293060fcf35044a25609376a6c6b62aa78465ca960fb5e8ed2502cabafb2b100",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'The batch extract records thirteen distinct delivered messages,' but the source explicitly states 'The audit groups receipts by message ID and finds eleven distinct delivered message IDs; two of those IDs each have a duplicate successful receipt.' The source distinguishes receipt events (thirteen) from distinct delivered messages (eleven). The candidate conflates these two counts, claiming thirteen distinct messages when the evidence shows only eleven."
+        }
+      ]
+    }
+  },
+  {
+    "blind_id": "b90de97d749d7043",
+    "case_id": "hf-010",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The claim states 'Production ran release r8 at that checkpoint,' which is supported by the source evidence. However, the source explicitly states 'Production ran release r8 with background compaction disabled.' The candidate's parent claim asserts 'At the checkpoint, background compaction was enabled in the production namespace,' which directly contradicts the signed attestation that states background compaction was 'disabled' in production. The nested claim record should be removed as it does not independently support the parent assertion about compaction being enabled."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "7880e49c9bf5adacf3863eab8632be518979bd02a397c1968d9dc8848193e076",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The candidate asserts 'At the checkpoint, background compaction was enabled in the production namespace.' The source evidence from the signed configuration attestation explicitly states: 'Production ran release r8 with background compaction disabled.' This is a direct factual contradiction. The source uses signed provenance and clearly distinguishes production settings from staging settings, unambiguously documenting that background compaction was disabled, not enabled, in the production namespace."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "126676fbea2ea98d",
+    "case_id": "hf-013",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "7feaab5c0306e67e",
+    "case_id": "hf-004",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "32961edd3ca56a0f0a827f31e4efffaf3edba9d2029890b1cdc382f4a0c85be2",
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The claim states 'Run R83 ended with terminal status COMPLETED' but the source evidence directly contradicts this. The signed provenance source explicitly states 'The terminal enum at sequence 918 is ABORTED' and confirms 'the ledger declares sequence 918 final for this run' with reason code 'operator_cancel_before_final_write'. The schema permits exactly one terminal enum from COMPLETED or ABORTED, and the evidence confirms the terminal status is ABORTED, not COMPLETED.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "db3f506943ee173a",
+    "case_id": "hf-024",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "08bf05164740624e9c793a8d000a9821a5c640c7cbdcb99a9a26a824ac868142",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims the complete upload U19 'totaled twenty-four KiB,' but the source explicitly states 'the byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' This is a direct numerical contradiction: 24 KiB vs. 27 KiB. The source provides signed provenance and unambiguous accounting figures, contradicting the candidate's assertion."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'The four data frames carried twenty-four KiB of payload,' but the source states 'Four data frames carry six KiB of payload each,' which totals 24 KiB for the frames alone. However, this 24 KiB represents only the frame payload, not including the manifest. The candidate's phrasing is ambiguous regarding whether the 24 KiB includes or excludes the manifest, but the source clarifies the complete upload totals 27 KiB. If the candidate intends 24 KiB as the complete total, it contradicts the source's 27 KiB figure."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "6aa7c6c5474abfcb",
+    "case_id": "hf-009",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "5ef88d919e4b985ecfc26678771ec178c946605f071e4f07d2e33a7e1eaa61dd",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The main candidate claim states 'At the checkpoint, background compaction was enabled in the staging namespace.' The cited source (s0) confirms this is true for the staging namespace. However, the source explicitly states 'Production ran release r8 with background compaction disabled,' which directly contradicts what would be implied by a claim about production compaction. The candidate's main claim focuses only on staging, which is supported, but the nested claim_records/0 contains a distinct assertion that must be evaluated separately."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The nested claim states 'Production ran release r8 at that checkpoint.' The source (s0) does confirm that 'Production ran release r8' at the recorded checkpoint. However, the source also explicitly states 'there was no production rollout in this checkpoint,' which indicates the production environment was static and not actively rolling out. The claim as stated is literally supported by the source text, but the source provides significant contextual information that qualifies this statement\u2014production ran r8, but there was no rollout activity. This requires reconsideration of what the claim implies versus what the evidence establishes."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "d1bc289d4b6fc93a",
+    "case_id": "hf-015",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "8ab018340825b4a1eb9c30a36082f4ca45005b1ce37abf0dbf7ceb1af70cdcc9",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claim states 'The event stream contains thirteen successful receipt events,' which is directly supported by the source text stating 'The event stream contains thirteen successful receipt events.' However, the source also provides a critical distinction: 'The audit groups receipts by message ID and finds eleven distinct delivered message IDs; two of those IDs each have a duplicate successful receipt.' This establishes that while there are thirteen receipt events in the stream, these represent only eleven distinct messages due to duplicates. The claim as stated is factually accurate for receipt events but fails to acknowledge the contextual limitation that these events correspond to fewer unique messages, which is material to understanding the delivery outcome."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "8c535d1bc74c1682cb73a4f64d19a051a9548d1dee7d1353d61f3339a8e6c352",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claim states 'The batch extract records eleven distinct delivered messages,' which is directly supported by the source: 'The audit groups receipts by message ID and finds eleven distinct delivered message IDs.' This claim is factually accurate. However, the source explicitly distinguishes between the count of receipt events (thirteen) and the count of distinct delivered messages (eleven), emphasizing 'two of those IDs each have a duplicate successful receipt.' The claim is correct but potentially misleading if presented without this context, as it may obscure the distinction between event counts and unique outcomes that the source explicitly highlights as important."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "428200779442bdb9",
+    "case_id": "hf-007",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "61fc2354b529a3e7",
+    "case_id": "hf-012",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "4746d1d112cdfe50e1e5fc3efe05a396f33062abca8130a68cf626615ae14692",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The candidate claims 'At the final health probe, pool Lumen selected backend cluster cedar.' However, the signed source explicitly states: 'The final health probe at 09:20Z names revision 42 as active and records birch as the selected backend; it expressly replaces the revision-41 observation.' The final health probe recorded birch, not cedar, as the selected backend. Cedar was selected by revision 41 at 09:10Z before the rollback to revision 42, which then selected birch. The candidate incorrectly attributes the final state to cedar."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "42a3ee238e06e1d3",
+    "case_id": "hf-007",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "9ec48e9b645c18bb",
+    "case_id": "hf-021",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "fd93ede524c45041",
+    "case_id": "hf-002",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "3a2939bb6cd2edc8d5f193496d227b005bfab6317623218c401982c8a2b6eba4",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The claim states 'The gateway assigned job identifier j-M8' as a standalone assertion. While the source confirms the assignment (HTTP 202 response assigned queue job j-M8), the source explicitly qualifies this event: 'This endpoint records acceptance only. The supplied capture ends at that response; it contains no worker status, output artifact, completion callback or later poll.' The claim presents the job assignment without the important contextual limitation that only acceptance was recorded, not completion. The assignment is factually accurate but presented without the conditional scope that the source emphasizes."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "0c700fdc40dd48ea",
+    "case_id": "hf-006",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "e6021785052c69f52c0c6ee8f1816bdae4390d97bdf3782299ce2421bfdf9424",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The source document explicitly states that it 'contains no matched-load test, rollback comparison or causal attribution' and describes the parser upgrade, query mix shift, and worker count doubling as 'co-occurring changes' with 'their separate effects unmeasured.' The claim that 'The parser upgrade caused the lower median response time' asserts a causal relationship that the source itself acknowledges is not established. The source only documents correlation within the same monitoring window, not causation. This claim requires qualification to reflect that causality is unsubstantiated by the evidence."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "4d94f0eac2e690142fedd6ef8c63f9652d110498348f8a8bc3cc72acd8399669",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "misleading_certainty",
+          "disposition": "qualify",
+          "critique": "The claim states 'The worker count doubled during the same monitoring window' with a confidence of 0.5 (reflecting uncertainty). While the source confirms this observation occurred during the same window as the parser upgrade, the phrasing presents this as an unqualified fact rather than an observation among multiple co-occurring changes. The source emphasizes that these are reported co-occurring changes with unmeasured separate effects. The claim should be qualified to make clear this is one of several concurrent changes in a window where causality was not established."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "b7dc3f453eebb187",
+    "case_id": "hf-013",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "73bed9d6fe64b0a2",
+    "case_id": "hf-008",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "47b1b86fa74e163c356b739113b4098d2ce88cedb503230fe681ef4d886788f9",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "qualify",
+          "critique": "The source evidence distinguishes between two separate trials: a warm-cache trial where build B17 met the 25 ms limit, and a cold-cache trial where the same request took 180 ms and *failed* the 25 ms limit. The candidate claim asserts that in the cold-cache trial, build B17 *met* the 25 ms response limit, which contradicts the source's explicit statement that the cold-cache trial exceeded this limit (180 ms >> 25 ms). The source is signed provenance from a controller test receipt, providing authoritative observation of actual performance."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "dfa89ce8c59a5300",
+    "case_id": "hf-007",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "cb999f0f776e34d0c3dd9b30a9be57551e4fac56f0993dd2af1fc962ba24b30b",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'In the recorded warm-cache trial, build B17 met the 25 ms response limit.' The evidence source (s0) states that 'With the requested item already resident in the cache, this test returned a response within the 25 ms limit.' This supports the candidate's claim. However, the evidence also explicitly states that 'Immediately after eviction, the same request on the same build took 180 ms and failed that limit.' While the warm-cache trial did meet the limit, the broader context shows build B17 failed to meet the 25 ms limit under cold-cache conditions. The candidate's statement, while technically accurate for the warm-cache trial specifically, may be misleading in isolation as it omits the critical cold-cache failure. The evidence demonstrates both outcomes occurred for the same build and endpoint, which is necessary context for a complete assessment."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "a6a1f2919a8af026",
+    "case_id": "hf-014",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "d93f12b3037f051fb0163b5ac389a2e7765f16b40c01d481b15b3d4914716f26",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The source states 'verified its length against the sender header,' which directly supports the claim. However, the source then explicitly states 'The sender supplied no content digest, and the relay did not compute or compare one. No downstream parsing, signature verification or semantic validation is included in this receipt.' This contradicts any broader interpretation of validation activities. The advisory label marks this as 'contradicted,' but the source text actually contains the explicit statement 'verified its length against the sender header,' which matches the claim exactly. The claim is supported by the signed observation in the source."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "9fa1657c00449ec80850cfdde4c77be0e57c85589617309624337263e8f24bfc",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The source explicitly states 'stored it under object key intake/Q5,' which directly supports the claim that 'The relay stored transfer tx-Q5 under object key intake/Q5.' The advisory label marks this as 'contradicted,' but the source text contains a direct signed observation confirming this exact fact. The claim is supported by the evidence provided."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "c990bc6547f7c5af",
+    "case_id": "hf-004",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "32961edd3ca56a0f0a827f31e4efffaf3edba9d2029890b1cdc382f4a0c85be2",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'Run R83 ended with terminal status COMPLETED.' However, the signed source evidence explicitly states: 'The terminal enum at sequence 918 is ABORTED' and 'the ledger declares sequence 918 final for this run.' The source further specifies the reason as 'operator_cancel_before_final_write' and confirms 'A scratch segment exists, but it is not a completed output and no output was published.' The terminal status is ABORTED, not COMPLETED. This is a direct factual contradiction with authenticated provenance."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "ae9ae62f59a7d862",
+    "case_id": "hf-003",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "131efab22842f058",
+    "case_id": "hf-023",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The source explicitly states that the four data frames carry six KiB of payload each (totaling twenty-four KiB). However, the source also unambiguously states that the complete upload U19, including the three-KiB manifest, totaled twenty-seven KiB according to the byte counter. The claim states the frames carried twenty-four KiB, which is mathematically consistent with 4 \u00d7 6 KiB = 24 KiB. However, this is not the complete story: the source indicates 24 KiB (frames) + 3 KiB (manifest) = 27 KiB total. The claim omits the manifest, presenting only a partial accounting as if it were the complete upload accounting."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "a3ca8b6010650fcf68b6d6a16ed5e98a8fbe9c010a3c4d366e1bfadbaeff0fc5",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "qualify",
+          "critique": "The source directly supports the claim that the complete upload U19, including its manifest, totaled twenty-seven KiB. The source states 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' This aligns with the candidate claim. The advisory indicates this claim is contradicted, but the source evidence directly confirms it without contradiction. The finding qualifies this as supported by the evidence."
+        }
+      ]
+    }
+  },
+  {
+    "blind_id": "87c7969a00526215",
+    "case_id": "hf-024",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The claim states 'The four data frames carried twenty-four KiB of payload.' However, the source evidence explicitly states 'Four data frames carry six KiB of payload each,' which totals only 24 KiB across all four frames combined (4 \u00d7 6 = 24 KiB). The source further clarifies that 'A single separate three-KiB manifest is sent in addition to those frames' and 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' The claim conflates the payload of just the four frames (24 KiB) with an ambiguous reference that could include or exclude the manifest. The phrasing 'carried twenty-four KiB of payload' is internally consistent with the source, but this represents only the frames' payload, not the complete upload. The claim requires clarification regarding scope.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "08bf05164740624e9c793a8d000a9821a5c640c7cbdcb99a9a26a824ac868142",
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claim states 'The complete upload U19, including its manifest, totaled twenty-four KiB.' The source evidence directly contradicts this: 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' The source provides signed provenance for this observation. The claim's quantitative assertion of twenty-four KiB is factually contradicted by the source's explicit report of twenty-seven KiB for the complete upload including manifest.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "523b74108320655a",
+    "case_id": "hf-011",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "c79513884f817b99676d6ed5c644b87cc87898fcb749df22dfdca7de1c888b46",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claim states 'At the final health probe, pool Lumen selected backend cluster birch.' This aligns with the source statement that 'The final health probe at 09:20Z names revision 42 as active and records birch as the selected backend.' However, the sibling claim in /claim_records/0/content states 'Revision 41 selected cedar before the rollback,' which is also supported by the source. The issue is not contradiction between the two claims, but rather that the candidate's single statement about 'the final health probe' selecting birch is incomplete contextualization: it omits the critical temporal sequence and the rollback event that explains why revision 41's cedar selection was replaced. The source document emphasizes 'it expressly replaces the revision-41 observation,' meaning birch at the final probe supersedes cedar from revision 41. The candidate statement is factually accurate but presented in isolation without the causal context that revision 42 selected birch 'after a rollback' (at 09:18Z), which occurred between revision 41 (09:10Z) and the final probe (09:20Z). This is a matter of qualified certainty about whether the bare statement fully captures the evidentiary record."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "b2adaf8ef19bd134",
+    "case_id": "hf-019",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "6b81353a39bbc8c4",
+    "case_id": "hf-024",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'The four data frames carried twenty-four KiB of payload.' However, the signed source explicitly states 'Four data frames carry six KiB of payload each' (totaling 24 KiB), plus 'A single separate three-KiB manifest is sent in addition to those frames.' The source further clarifies that 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' The claim confuses the payload of the frames alone (24 KiB) with the total upload size when the manifest is included (27 KiB). The distinction between frame payload and complete upload content is material and explicitly documented in the source."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "08bf05164740624e9c793a8d000a9821a5c640c7cbdcb99a9a26a824ac868142",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'The complete upload U19, including its manifest, totaled twenty-four KiB.' The signed source directly contradicts this, stating: 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' The source is unambiguous\u2014when the manifest is included, the total is 27 KiB, not 24 KiB. The 24 KiB figure applies only to the four data frames alone, not to the complete upload."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "e474569495a54951",
+    "case_id": "hf-018",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "2b4b815eb152feced19135a701089eaf16167c90eb1e46c3bae72f0e42e3cdd8",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_generalization",
+          "disposition": "qualify",
+          "critique": "The claim states 'No write to repository Delta occurred through any client during the interval.' However, the evidence from the signed audit export explicitly disclaims coverage of the full universe of write events. The source states: 'Command-line and service-token clients write through separate audit channels omitted from this export. The export provides no observations about those channels and makes no claim about the total number of repository writes.' The evidence only confirms no writes through the web editor; it makes no claim about writes through other clients. The universal claim about 'any client' is unsupported by the evidence, which is limited in scope to one audit channel."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "d552c5ba174cfa9e",
+    "case_id": "hf-020",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "38eeff74bc4a4bb86e433421f39a3797320323504810137e24d4756a0df66fce",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            },
+            {
+              "evidence_id": "s1"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'The two observer receipts establish rook as shard M leader at tick 504.' However, the evidence shows a direct contradiction: Observer A receipt (s0) labels rook as leader at tick 504, while Observer B receipt (s1) labels wren as leader for the same shard M, term 73, and tick 504. The sources explicitly note that 'This shard permits only one leader in a term at a tick' and the packet contains 'no lease certificate, quorum decision, correction or observer-priority rule to resolve the disagreement.' The two receipts do not establish rook as the leader; they document conflicting observations with no mechanism to determine which is authoritative. The claim overstates what the evidence actually shows."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "0cea6b19156aedee",
+    "case_id": "hf-017",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "ca63503e2a413a9b",
+    "case_id": "hf-012",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "4746d1d112cdfe50e1e5fc3efe05a396f33062abca8130a68cf626615ae14692",
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "critique": "The source explicitly states that 'The final health probe at 09:20Z names revision 42 as active and records birch as the selected backend; it expressly replaces the revision-41 observation.' The candidate claims that pool Lumen selected backend cluster cedar at the final health probe, but the evidence shows the final health probe selected birch (via revision 42), not cedar. Cedar was selected by revision 41 before the rollback, which is a prior state superseded by the final probe.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "d871fc9a53c18b78f310094679f73444d65e85016bf1e053c8cf597cef657f70",
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The claim states 'Revision 41 selected cedar before the rollback,' which accurately describes what the source reports. However, the causal framing 'before the rollback' is used without qualification of what event triggered the rollback or why it occurred. The source provides the temporal sequence (revision 41 at 09:10Z, rollback event at 09:18Z with revision 42) but does not establish the causal mechanism that led to the rollback. The phrase 'before the rollback' should be clarified to indicate this is a temporal ordering, not a causal explanation.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "86e1d6c99a83eeb0",
+    "case_id": "hf-017",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "1f4f8e5381e415ab",
+    "case_id": "hf-002",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "7661f1a805bc74c0",
+    "case_id": "hf-012",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "d871fc9a53c18b78f310094679f73444d65e85016bf1e053c8cf597cef657f70",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "critique": "The evidence explicitly states that Revision 42 at 09:18Z 'selected backend cluster birch after a rollback' and 'The final health probe at 09:20Z names revision 42 as active and records birch as the selected backend; it expressly replaces the revision-41 observation.' While the evidence confirms that Revision 41 selected cedar before the rollback, the claim as stated in /claim_records/0/content presents this historical fact without the critical temporal and replacement context. The evidence indicates that the revision-41 observation was expressly replaced by the final health probe, making a claim about revision 41 selection potentially misleading without qualification. The claim should be reframed to reflect that this selection was superseded."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "3fd77c30f223deac",
+    "case_id": "hf-011",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "d871fc9a53c18b78f310094679f73444d65e85016bf1e053c8cf597cef657f70",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The source text explicitly contradicts this claim. The source states 'Revision 41 at 09:10Z selected backend cluster cedar' (supporting the claim), but then specifies 'Revision 42 at 09:18Z selected backend cluster birch after a rollback' and crucially notes 'The final health probe at 09:20Z names revision 42 as active and records birch as the selected backend; it expressly replaces the revision-41 observation.' The source indicates that revision 42's selection of birch replaced and superseded revision 41's selection of cedar. The claim states revision 41 selected cedar 'before the rollback,' but the source document is reporting observations from a service-router control history where revision 42's final state (after rollback) expressly replaced the earlier revision 41 state. The claim isolates a historical fact without acknowledging that this observation was explicitly replaced by a later, authoritative observation."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "c79513884f817b99676d6ed5c644b87cc87898fcb749df22dfdca7de1c888b46",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "qualify",
+          "critique": "The source text supports the factual observation that 'at the final health probe' (09:20Z), revision 42 was active and birch was the selected backend. However, the candidate's phrasing 'pool Lumen selected backend cluster birch' is ambiguous and may be misleading: it could imply an active ongoing selection by the pool itself, when the source explicitly attributes this to a specific revision (revision 42) following a rollback from revision 41's cedar selection. The source qualifies this as revision 42's selection after a rollback. The candidate should specify that this represents revision 42's selection (not a general pool-level decision without revision context) and acknowledge the rollback context to accurately reflect the source's signed observation."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "f827a0878fb0ca68",
+    "case_id": "hf-011",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "d871fc9a53c18b78f310094679f73444d65e85016bf1e053c8cf597cef657f70",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The source evidence contradicts the claim. The source states 'Revision 41 at 09:10Z selected backend cluster cedar' but then explicitly notes 'The final health probe at 09:20Z names revision 42 as active and records birch as the selected backend; it expressly replaces the revision-41 observation.' The claim asserts Revision 41 selected cedar 'before the rollback,' but the source indicates a rollback occurred after Revision 41 (Revision 42 was selected after rollback and expressly replaces the observation). The claim's temporal framing and causality are unsupported by the evidence, which establishes that Revision 41's selection was superseded by the final health probe outcome."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "c79513884f817b99676d6ed5c644b87cc87898fcb749df22dfdca7de1c888b46",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The claim states 'At the final health probe, pool Lumen selected backend cluster birch.' The source confirms that the final health probe at 09:20Z 'records birch as the selected backend' and that revision 42 is active. However, the phrasing 'selected' may conflate observation with agency. The source describes the final health probe as recording/naming an already-active state (revision 42 with birch), not necessarily performing a new selection action. The claim should be qualified to clarify whether it reports an observation of the final probe's finding (supported) versus an assertion of causal selection agency by the pool at that moment (unsupported by the evidence structure)."
+        }
+      ]
+    }
+  },
+  {
+    "blind_id": "ebedfd86154e8ff7",
+    "case_id": "hf-007",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "0d64fc41b1d0fc39",
+    "case_id": "hf-002",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "9a7f347a699407d5468d660663ddcb7f373c0c61324a41b89f44c1e475455b06",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The source documents that the gateway 'assigned queue job j-M8 to the submitted export' and explicitly states 'This endpoint records acceptance only.' The source contains no evidence of export completion, worker status, output artifacts, completion callbacks, or later polling results. The candidate claim states 'The gateway completed export request req-P74,' but the source only establishes that the gateway accepted the request and assigned a job identifier. Completion requires evidence of job execution and successful termination, which the source does not provide. The claim overstates the causal chain from assignment to completion."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "5923548e39378edd",
+    "case_id": "hf-015",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "8ab018340825b4a1eb9c30a36082f4ca45005b1ce37abf0dbf7ceb1af70cdcc9",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The candidate claims 'The event stream contains thirteen successful receipt events.' The source evidence (s0) explicitly confirms this claim, stating 'The event stream contains thirteen successful receipt events.' This matches the candidate claim exactly and is drawn from a signed observation. No contradiction is present\u2014the claim is directly supported. However, the advisory hint labels this as contradicted, which appears incorrect based on the source evidence."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "8c535d1bc74c1682cb73a4f64d19a051a9548d1dee7d1353d61f3339a8e6c352",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The candidate claims 'The batch extract records eleven distinct delivered messages.' The source evidence (s0) supports this claim: 'The audit groups receipts by message ID and finds eleven distinct delivered message IDs.' The candidate correctly reflects the evidence. The advisory hint labels this as contradicted, but the source evidence directly supports the claim that eleven distinct delivered messages are recorded."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "8c5547449c080c5e",
+    "case_id": "hf-001",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "9c4466577ee019b3",
+    "case_id": "hf-002",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "3a2939bb6cd2edc8d5f193496d227b005bfab6317623218c401982c8a2b6eba4",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The claim asserts a definitive assignment of job identifier j-M8 with no qualification. However, the evidence describes an HTTP 202 response that indicates acceptance and job assignment at a specific moment in time (14:02:11Z), but explicitly notes this 'records acceptance only' and that 'The supplied capture ends at that response; it contains no worker status, output artifact, completion callback or later poll.' The evidence does not support a claim of completed assignment as a final outcome\u2014it documents only the moment of queuing. The claim lacks the temporal specificity and conditional framing that the evidence provides."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "75d2b55823ba78fb",
+    "case_id": "hf-005",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "f3c27a5c8e33a12529af1aa83b741333358753449524d0dd7046e19d6aa5251e",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The source explicitly states that the diary 'contains no matched-load test, rollback comparison or causal attribution' and 'leaves their separate effects unmeasured.' The candidate claims the diary 'reports lower median response time after the parser upgrade' as a causal relationship, but the source confirms no causal attribution was made or can be supported. Multiple confounding changes occurred in the same window (query mix shift toward short queries, worker count doubling) with unmeasured separate effects. The claim must be qualified to reflect that this is a reported co-occurrence without established causality."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "4d94f0eac2e690142fedd6ef8c63f9652d110498348f8a8bc3cc72acd8399669",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "While the source does report that 'the worker count doubled' during the monitoring window, the claim presents this as an isolated observed fact. However, the source context indicates this doubling occurred alongside a query mix shift and the parser upgrade, with the diary explicitly noting no causal attribution or separate effect measurement. The claim should be qualified to acknowledge this occurred as a co-occurring change during a monitoring window with multiple simultaneous variables."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "648601cbfced3973",
+    "case_id": "hf-020",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "38eeff74bc4a4bb86e433421f39a3797320323504810137e24d4756a0df66fce",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            },
+            {
+              "evidence_id": "s1"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims that 'two observer receipts establish rook as shard M leader at tick 504.' However, the evidence shows a direct factual contradiction: Observer A receipt (s0) labels node 'rook' as leader at tick 504 for shard M term 73, while Observer B receipt (s1) labels node 'wren' as leader at the same shard M, term 73, and tick 504. Both receipts are signed observations with authenticated provenance. The evidence explicitly states 'This shard permits only one leader in a term at a tick' and 'The packet contains no lease certificate, quorum decision, correction or observer-priority rule to resolve the disagreement with Observer A.' Two conflicting observations do not establish rook as the leader; they establish an unresolved disagreement. The claim overstates the evidentiary support by asserting establishment of leadership when the evidence demonstrates conflicting observations with no authoritative resolution mechanism present."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "0b02a467088bc777",
+    "case_id": "hf-022",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "374b12ff0a730a9d34eb2f5c2f067b9624fc62a7e23c4ff3c4e852ef5f17f5f8",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_generalization",
+          "disposition": "qualify",
+          "critique": "The source document explicitly states the receipt 'limits its compatibility conclusion to this bundle' and 'records no observed decoding failure elsewhere.' The candidate claims P6 can decode files from 'every encoding and exporter' without qualification. This is an unsupported universal generalization from a limited scope observation. The source only establishes that P6 decoded every file in a specific regression bundle containing only UTF-8 payloads from the customer portal, with no third-party exporter input exercised. The claim must be qualified to match the scope of the evidence."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "2a7ac2f94ee2af2c",
+    "case_id": "hf-012",
+    "mechanical_action": "error",
+    "output": {
+      "findings": "[{\"claim_path\":\"/claim_records/0/content\",\"claim_sha256\":\"d871fc9a53c18b78f310094679f73444d65e85016bf1e053c8cf597cef657f70\",\"evidence_refs\":[{\"evidence_id\":\"s0\"}],\"basis\":\"factual_contradiction\",\"disposition\":\"reconsider\",\"critique\":\"The source explicitly states that Revision 41 selected cedar at 09:10Z, but Revision 42 at 09:18Z selected birch 'after a rollback'. The source further states that the final health probe at 09:20Z 'expressly replaces the revision-41 observation,' naming revision 42 as active with birch as the selected backend. The claim asserts that Revision 41 selected cedar 'before the rollback,' but the source indicates this is superseded and contradicted by the final state. The rollback resulted in a different backend selection, and the source explicitly notes the final observation replaces the earlier revision-41 observation.\"}],\"abstention_reason\":null"
+    }
+  },
+  {
+    "blind_id": "7fc4498c0da252da",
+    "case_id": "hf-010",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "7880e49c9bf5adacf3863eab8632be518979bd02a397c1968d9dc8848193e076",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The candidate claims 'At the checkpoint, background compaction was enabled in the production namespace.' However, the source evidence explicitly states 'Production ran release r8 with background compaction disabled.' This is a direct factual contradiction."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "qualify",
+          "critique": "The nested claim states 'Production ran release r8 at that checkpoint,' which is supported by the source evidence. However, given the broader context where the candidate's primary assertion about background compaction is contradicted, this claim should be qualified to acknowledge that while the release version is correct, the accompanying assumption about compaction status is incorrect."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "577cb379616f1275",
+    "case_id": "hf-005",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "4d94f0eac2e690142fedd6ef8c63f9652d110498348f8a8bc3cc72acd8399669",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The source explicitly states that 'The diary contains no matched-load test, rollback comparison or causal attribution' and describes the worker count doubling as a 'co-occurring change' with 'separate effects unmeasured.' The candidate claim presents the worker count doubling as a factual observation within the monitoring window, which is supported by the source text. However, any inference that this doubling caused the lower response time would be unsupported by the original evidence, which explicitly disclaims causal attribution and measured separate effects."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "f3c27a5c8e33a12529af1aa83b741333358753449524d0dd7046e19d6aa5251e",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The source confirms that 'median response time was lower in the following monitoring window' after the parser upgrade. However, the source explicitly states 'The diary contains no matched-load test, rollback comparison or causal attribution' and notes that concurrent changes (query mix shift toward short queries and worker count doubling) have 'separate effects unmeasured.' Any claim attributing the lower response time directly to the parser upgrade alone would be unsupported, as the source documents multiple confounding factors with unknown individual contributions."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "ea32d22a54f0ac59",
+    "case_id": "hf-001",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "d0b261eba549ff18",
+    "case_id": "hf-023",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The claim asserts the four data frames carried twenty-four KiB of payload. However, the source explicitly states 'Four data frames carry six KiB of payload each,' which totals 4 \u00d7 6 = 24 KiB. The source text is internally consistent. The candidate's claim statement itself is actually accurate (24 KiB is correct), but this represents a narrower scope claim compared to the source's complete accounting. The source emphasizes that the complete upload totaled twenty-seven KiB including the three-KiB manifest and the four frames (24 + 3 = 27 KiB). The claim focuses only on the frame payload without acknowledging the manifest component discussed in the source."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "a3ca8b6010650fcf68b6d6a16ed5e98a8fbe9c010a3c4d366e1bfadbaeff0fc5",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "qualify",
+          "critique": "The claim states 'The complete upload U19, including its manifest, totaled twenty-seven KiB.' The source directly supports this: 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' This claim is factually supported by the signed observation. However, the source provides additional context that the twenty-seven KiB comprises four frames of six KiB each (24 KiB total) plus a three-KiB manifest. The claim's accuracy is sound but incomplete\u2014it could be qualified to include the compositional breakdown (24 KiB frames + 3 KiB manifest) to reflect the source's fuller accounting."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "133a82d8a473927b",
+    "case_id": "hf-013",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "e6a96cbb19e1a4be",
+    "case_id": "hf-015",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "3a2f02ced40b765e",
+    "case_id": "hf-016",
+    "mechanical_action": "error",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "293060fcf35044a25609376a6c6b62aa78465ca960fb5e8ed2502cabafb2b100",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "qualify",
+          "critique": "The candidate claims 'thirteen distinct delivered messages,' but the source evidence explicitly states 'eleven distinct delivered message IDs; two of those IDs each have a duplicate successful receipt.' The source clearly distinguishes between receipt events (thirteen) and unique delivered message IDs (eleven). The candidate conflates these two counts, attributing the receipt event count to the distinct delivered messages count."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "8ab018340825b4a1eb9c30a36082f4ca45005b1ce37abf0dbf7ceb1af70cdcc9",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_certainty",
+          "disposition": "qualify",
+          "critique": "The claim 'The event stream contains thirteen successful receipt events' is supported by the source text. However, the claim is presented at confidence 0.5 which is low. Given that the source is a signed observation from a delivery audit, the actual confidence should reflect the reliability of the source provenance rather than the low confidence currently assigned."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "ac288115b7dc5cc0",
+    "case_id": "hf-011",
+    "mechanical_action": "error",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "c79513884f817b99676d6ed5c644b87cc87898fcb749df22dfdca7de1c888b46",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "qualify",
+          "critique": "The source explicitly states that 'The final health probe at 09:20Z names revision 42 as active and records birch as the selected backend; it expressly replaces the revision-41 observation.' The claim states that 'At the final health probe, pool Lumen selected backend cluster birch' without qualification that this represents a change from revision 41's selection of cedar. The source indicates this is not a continuation of the revision 41 selection but a replacement following a rollback. The claim should be qualified to clarify that this was revision 42's selection, not revision 41's, and that it superseded the earlier cedar selection."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "d871fc9a53c18b78f310094679f73444d65e85016bf1e053c8cf597cef657f70",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_certainty",
+          "disposition": "qualify",
+          "critique": "The source states 'Revision 41 at 09:10Z selected backend cluster cedar' and later notes 'The final health probe at 09:20Z names revision 42 as active and records birch as the selected backend; it expressly replaces the revision-41 observation.' The claim 'Revision 41 selected cedar before the rollback' is supported by the source, but the phrasing 'before the rollback' is presented as established fact when the source only documents that revision 42's selection of birch occurred 'after a rollback.' The temporal relationship and the existence of a rollback between revisions is stated in the source, but the claim should clarify that this inference is based on documented sequence rather than explicit causal documentation."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "9037214b956de040",
+    "case_id": "hf-015",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "1fe934e3a1b7eb38",
+    "case_id": "hf-010",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "critique": "The candidate claim states 'Production ran release r8 at that checkpoint.' The source evidence from hf-010-source-1 states: 'Production ran release r8 with background compaction disabled.' While the release version (r8) is correct, the claim omits the critical fact that background compaction was disabled in production. More significantly, the claim itself is presented as a standalone assertion when the source evidence binds this fact to conditions and context (separate namespace identifiers, no production rollout at checkpoint) that are missing from the candidate. The candidate appears to extract only the release version while losing the qualified context that defines what actually occurred in production at this checkpoint."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "7880e49c9bf5adacf3863eab8632be518979bd02a397c1968d9dc8848193e076",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "critique": "The candidate claim states 'At the checkpoint, background compaction was enabled in the production namespace.' However, the source evidence explicitly states: 'Production ran release r8 with background compaction disabled.' This is a direct factual contradiction. The evidence clearly specifies that background compaction was disabled, not enabled, in the production namespace at the recorded checkpoint."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "685af08fdef4e85f",
+    "case_id": "hf-016",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "293060fcf35044a25609376a6c6b62aa78465ca960fb5e8ed2502cabafb2b100",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "critique": "The candidate claims 'The batch extract records thirteen distinct delivered messages,' but the source explicitly states the audit 'finds eleven distinct delivered message IDs; two of those IDs each have a duplicate successful receipt.' The source distinguishes between receipt events (thirteen) and unique delivered messages (eleven). The candidate conflates these two counts, incorrectly reporting thirteen distinct delivered messages when the source identifies only eleven."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "49ac325eb99281ed",
+    "case_id": "hf-008",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "46c1e2c926bbc851",
+    "case_id": "hf-009",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'Production ran release r8 at that checkpoint.' The source evidence (s0) states: 'Production ran release r8 with background compaction disabled.' Both statements are consistent regarding the release version (r8), but the source additionally specifies background compaction was disabled in production. The claim itself is not contradicted; it accurately reports the release version. However, it is incomplete relative to the signed observation, which includes the compaction status."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "5ef88d919e4b985ecfc26678771ec178c946605f071e4f07d2e33a7e1eaa61dd",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'At the checkpoint, background compaction was enabled in the staging namespace.' The source evidence (s0) states: 'At the recorded checkpoint, the staging namespace ran release r9 with background compaction enabled.' The claim about background compaction being enabled in staging is supported by the source. However, the source indicates the staging namespace ran release r9, not r8. The compaction status claim is factually accurate per the signed observation."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "95e3099188fb1819",
+    "case_id": "hf-024",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "08bf05164740624e9c793a8d000a9821a5c640c7cbdcb99a9a26a824ac868142",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "qualify",
+          "critique": "The candidate claims the complete upload U19 totaled twenty-four KiB, but the source explicitly states 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' The candidate's claimed quantity contradicts the signed observation in the source. The source provides a detailed breakdown (4 frames \u00d7 6 KiB + 3 KiB manifest = 27 KiB total), which is the observed measurement."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_generalization",
+          "disposition": "qualify",
+          "critique": "The claim states 'The four data frames carried twenty-four KiB of payload,' but the source specifies 'Four data frames carry six KiB of payload each,' which totals only 24 KiB for the frames alone. However, this claim omits the 3 KiB manifest that is part of the complete upload. The claim isolates the frame payload without acknowledging the manifest component, which may misleadingly suggest the frames alone account for the complete upload measurement of 27 KiB."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "b94ffc7d5d422ca3",
+    "case_id": "hf-015",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "ef9786892ad312b4",
+    "case_id": "hf-022",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "374b12ff0a730a9d34eb2f5c2f067b9624fc62a7e23c4ff3c4e852ef5f17f5f8",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The source explicitly limits its compatibility conclusion to the supplied bundle containing only UTF-8 payloads and states 'records no observed decoding failure elsewhere.' The claim generalizes this to 'every encoding and exporter' without evidence supporting this universal scope. The source evidence does not demonstrate capability across all encodings or all exporters\u2014only UTF-8 portal payloads. The causality linking the tested bundle performance to universal decoding capability is unsupported."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "1dc4e33936dc8b80",
+    "case_id": "hf-016",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "293060fcf35044a25609376a6c6b62aa78465ca960fb5e8ed2502cabafb2b100",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claim states 'The batch extract records thirteen distinct delivered messages.' However, the source explicitly distinguishes between receipt events and unique delivered messages: 'The event stream contains thirteen successful receipt events' but 'The audit groups receipts by message ID and finds eleven distinct delivered message IDs; two of those IDs each have a duplicate successful receipt.' The candidate conflates receipt events (13) with distinct delivered messages (11), presenting an incorrect outcome count."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "8ab018340825b4a1eb9c30a36082f4ca45005b1ce37abf0dbf7ceb1af70cdcc9",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The candidate's nested claim correctly states 'The event stream contains thirteen successful receipt events,' which is supported by the source. However, the claim is presented with 0.5 confidence and marked as 'Source-support qualification' (reason field), which may imply causal support without examining whether the source provides causality or merely reports the observation. The source provides a signed observation of the receipt event count, not a causal explanation. The confidence level warrants qualification about what is actually supported by the observation."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "4e9a52c45e7ea7b7",
+    "case_id": "hf-017",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "0f4027c5cf51f4fe7e4e814b7f8601cb8c77643377d542464fe541c581c41a12",
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The candidate claims 'No web-editor write event was recorded for repository Delta during the interval.' The source evidence (s0) does confirm this observation for web-editor events specifically: 'The export contains every write event recorded through the web editor in that interval, and there are none.' However, the source explicitly qualifies this finding by noting that 'Command-line and service-token clients write through separate audit channels omitted from this export' and 'The export provides no observations about those channels and makes no claim about the total number of repository writes.' The candidate claim presents as a universal negative (no write event at all) when the evidence only supports a narrower claim about web-editor write events specifically. This represents an overstatement of the evidence's scope. The claim should be qualified to specify that this observation applies only to web-editor channels, not to all write event channels."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "dc29eff0f5078275",
+    "case_id": "hf-014",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "d96714afc5a5a0ad",
+    "case_id": "hf-014",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "13c750c9faa9ea76",
+    "case_id": "hf-024",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "08bf05164740624e9c793a8d000a9821a5c640c7cbdcb99a9a26a824ac868142",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'The complete upload U19, including its manifest, totaled twenty-four KiB.' However, the source evidence explicitly states: 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' The candidate's stated total of twenty-four KiB contradicts the source's reported total of twenty-seven KiB. This is a direct factual discrepancy in the total byte count for the complete upload."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "a101d402527ffed8",
+    "case_id": "hf-004",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "32961edd3ca56a0f0a827f31e4efffaf3edba9d2029890b1cdc382f4a0c85be2",
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The candidate claims 'Run R83 ended with terminal status COMPLETED.' However, the signed source evidence (s0) explicitly states that the terminal enum at sequence 918 is ABORTED, not COMPLETED. The source further confirms that the schema permits exactly one terminal enum from COMPLETED or ABORTED, and the ledger declares sequence 918 final for this run, with reason code operator_cancel_before_final_write. This is a direct factual contradiction between the claim and the authenticated observation in the source material."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "a17ad39d226056c9",
+    "case_id": "hf-002",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "9a7f347a699407d5468d660663ddcb7f373c0c61324a41b89f44c1e475455b06",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "relabel_inference",
+          "critique": "The candidate claims 'The gateway completed export request req-P74.' However, the source explicitly states: 'This endpoint records acceptance only. The supplied capture ends at that response; it contains no worker status, output artifact, completion callback or later poll.' The source documents assignment of job j-M8 and HTTP 202 acceptance, not completion. Completion is not observable from the provided evidence, only request acceptance and job assignment. The claim overstates what the signed observation supports."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "e76d7625bed54ab5",
+    "case_id": "hf-001",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "a9e69de3be7057cc",
+    "case_id": "hf-012",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "4746d1d112cdfe50e1e5fc3efe05a396f33062abca8130a68cf626615ae14692",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'At the final health probe, pool Lumen selected backend cluster cedar.' However, the source evidence explicitly states that 'The final health probe at 09:20Z names revision 42 as active and records birch as the selected backend.' This is a direct factual contradiction. The final health probe recorded birch, not cedar, as the selected backend. Cedar was selected by revision 41, but was superseded by revision 42 before the final health probe."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "d871fc9a53c18b78f310094679f73444d65e85016bf1e053c8cf597cef657f70",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The candidate claims 'Revision 41 selected cedar before the rollback.' While the source confirms 'Revision 41 at 09:10Z selected backend cluster cedar,' the phrase 'before the rollback' implies a causal or temporal relationship that is not explicitly established. The source indicates a rollback occurred (Revision 42 at 09:18Z selected birch after a rollback), but the candidate's phrasing suggests cedar was selected in anticipation of or causally related to the rollback, which is not supported. The source shows cedar was selected, then a rollback occurred, but does not establish the causal narrative implied by 'before the rollback.'"
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "a7db1b0f612eb687",
+    "case_id": "hf-010",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "7880e49c9bf5adacf3863eab8632be518979bd02a397c1968d9dc8848193e076",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'At the checkpoint, background compaction was enabled in the production namespace.' However, the source explicitly states 'Production ran release r8 with background compaction disabled.' This is a direct factual contradiction regarding the status of background compaction in production."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "f06a2bbd45781243",
+    "case_id": "hf-009",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "5ef88d919e4b985ecfc26678771ec178c946605f071e4f07d2e33a7e1eaa61dd",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'At the checkpoint, background compaction was enabled in the staging namespace.' The source directly confirms this is true for the staging namespace. However, the candidate's root content claim must be examined in context with the nested claim_records structure. The nested claim at /claim_records/0/content states 'Production ran release r8 at that checkpoint,' which is supported by the source. But the root candidate content focuses on the staging namespace configuration. The source confirms: 'At the recorded checkpoint, the staging namespace ran release r9 with background compaction enabled.' This matches the candidate's root claim. However, no factual contradiction exists with the source evidence."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "337c740017e9153f",
+    "case_id": "hf-024",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "08bf05164740624e9c793a8d000a9821a5c640c7cbdcb99a9a26a824ac868142",
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The candidate claims the complete upload U19 totaled twenty-four KiB, but the source evidence explicitly states: 'Four data frames carry six KiB of payload each. A single separate three-KiB manifest is sent in addition to those frames. The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' This is a direct factual contradiction: 4 \u00d7 6 KiB + 3 KiB = 27 KiB, not 24 KiB. The source has signed provenance and explicitly quantifies the outcome as 27 KiB."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "01896bfd9c23f2a6",
+    "case_id": "hf-003",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "db2236cf1aae9e0a",
+    "case_id": "hf-005",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "f3c27a5c8e33a12529af1aa83b741333358753449524d0dd7046e19d6aa5251e",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The source explicitly states that the diary 'contains no matched-load test, rollback comparison or causal attribution' and that the author 'describes these as co-occurring changes and leaves their separate effects unmeasured.' The candidate presents the lower median response time as a reportable observation, but frames it without the critical qualification that this cannot be attributed to the parser upgrade given the concurrent query mix shift and worker count doubling. The claim requires qualification to acknowledge that causality is not established."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "4d94f0eac2e690142fedd6ef8c63f9652d110498348f8a8bc3cc72acd8399669",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "missing_condition",
+          "disposition": "qualify",
+          "critique": "The source documents that the worker count doubled 'during the same monitoring window' as the response time change and the query mix shift. The claim isolates this as a single observation but omits the critical context that this concurrent doubling occurred alongside other measured changes (query mix shift, lower response time). The claim should be qualified to note these contemporaneous confounding changes that prevent isolated attribution of effects."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "c93ec3df5a888b84",
+    "case_id": "hf-006",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "e6021785052c69f52c0c6ee8f1816bdae4390d97bdf3782299ce2421bfdf9424",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The source explicitly states that the release diary 'contains no matched-load test, rollback comparison or causal attribution.' The author describes the parser upgrade, median response time change, query mix shift, and worker count doubling as co-occurring changes within the same monitoring window but leaves their separate effects unmeasured. The claim attributes causality (parser upgrade caused lower median response time) where the source specifically disclaims causal measurement and identifies multiple concurrent variables that could affect response time. The claim should be qualified to reflect only the observed correlation without causal attribution."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "4d94f0eac2e690142fedd6ef8c63f9652d110498348f8a8bc3cc72acd8399669",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "remove",
+          "critique": "The source confirms that 'the worker count doubled' during the monitoring window. This is reported as a factual observation in the release diary. However, the claim itself asserts this fact accurately. The source provides support for the factual content of this claim (worker count doubled during the same monitoring window). Upon review, this claim is supported by the evidence, not contradicted by it. The advisory label 'contradicted' does not align with the source text."
+        }
+      ]
+    }
+  },
+  {
+    "blind_id": "e929b1f6a4abb3b4",
+    "case_id": "hf-012",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "4746d1d112cdfe50e1e5fc3efe05a396f33062abca8130a68cf626615ae14692",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'At the final health probe, pool Lumen selected backend cluster cedar.' However, the evidence states that the final health probe at 09:20Z 'records birch as the selected backend' and 'expressly replaces the revision-41 observation' which had selected cedar. Revision 41 selected cedar, but the final health probe (the operative endpoint) shows birch as selected, not cedar. This is a direct factual contradiction regarding what was selected at the final probe."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "a144d29d1e2f1d14",
+    "case_id": "hf-020",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "38eeff74bc4a4bb86e433421f39a3797320323504810137e24d4756a0df66fce",
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            },
+            {
+              "evidence_id": "s1"
+            }
+          ],
+          "critique": "The candidate claims that 'The two observer receipts establish rook as shard M leader at tick 504.' However, the evidence shows a direct contradiction: Observer A receipt (s0) labels node 'rook' as leader, while Observer B receipt (s1) labels node 'wren' as leader for the same shard M, term 73, and tick 504. The sources explicitly state that 'This shard permits only one leader in a term at a tick' and that there is 'no lease certificate, quorum decision, correction or observer-priority rule to resolve the disagreement.' This is a factual contradiction\u2014the two receipts do not jointly establish rook as the leader; they instead present conflicting observations with no authoritative resolution mechanism. The claim overstates what the evidence actually supports."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "30aa2560e7c62111",
+    "case_id": "hf-006",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "e6021785052c69f52c0c6ee8f1816bdae4390d97bdf3782299ce2421bfdf9424",
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The source describes the parser upgrade and lower median response time as co-occurring in the same monitoring window, but explicitly states that the diary 'contains no matched-load test, rollback comparison or causal attribution.' The source also identifies two other confounding factors: the query mix shifted toward short queries (which independently affect response time) and the worker count doubled. The causal claim that the parser upgrade caused the lower median response time is not supported by the evidence and contradicts the source's explicit statement that causal effects are unmeasured and separate effects are not established.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "d8f4c24e3b38f09e",
+    "case_id": "hf-011",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "d871fc9a53c18b78f310094679f73444d65e85016bf1e053c8cf597cef657f70",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The claim states 'Revision 41 selected cedar before the rollback.' The source evidence confirms that Revision 41 at 09:10Z selected backend cluster cedar. However, the source also indicates that Revision 42 at 09:18Z selected birch 'after a rollback,' and the final health probe at 09:20Z explicitly records that revision 42 is active with birch as the selected backend, 'expressly replaces the revision-41 observation.' The claim appears to be a historical fact about Revision 41's selection, which is accurate as a point-in-time observation. However, in context of the document's emphasis that the final health probe 'expressly replaces' the revision-41 observation, stating this selection as current or operative contradicts the source's indication that revision 42's selection (birch) supersedes it as the active state."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "c79513884f817b99676d6ed5c644b87cc87898fcb749df22dfdca7de1c888b46",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The claim states 'At the final health probe, pool Lumen selected backend cluster birch.' The source evidence directly supports this: 'The final health probe at 09:20Z names revision 42 as active and records birch as the selected backend.' This claim is factually accurate and well-supported by the signed observation in the source. No contradiction exists for this statement."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "1b6354235afe978b",
+    "case_id": "hf-022",
+    "mechanical_action": "error",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "374b12ff0a730a9d34eb2f5c2f067b9624fc62a7e23c4ff3c4e852ef5f17f5f8",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_universality",
+          "disposition": "qualify",
+          "critique": "The candidate claims 'Decoder release P6 can decode files from every encoding and exporter.' However, the source evidence explicitly states: 'The receipt explicitly limits its compatibility conclusion to this bundle and records no observed decoding failure elsewhere.' The evidence is restricted to a specific regression bundle containing only UTF-8 portal payloads and does not exercise UTF-16, binary transport, or third-party exporter input. The source negates the universal claim by explicitly limiting the scope of the compatibility conclusion. The claim must be qualified to reflect that the decoder's capability is demonstrated only for UTF-8 portal payloads in the supplied regression bundle, not for every encoding and exporter."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "e027b9d57eb4d452",
+    "case_id": "hf-010",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "7880e49c9bf5adacf3863eab8632be518979bd02a397c1968d9dc8848193e076",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "critique": "The candidate claims 'At the checkpoint, background compaction was enabled in the production namespace.' However, the cited evidence (s0) explicitly states 'Production ran release r8 with background compaction disabled.' This is a direct factual contradiction. The source material clearly specifies that background compaction was disabled, not enabled, in the production namespace at the recorded checkpoint."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "qualify",
+          "critique": "While the candidate correctly states 'Production ran release r8 at that checkpoint,' the source evidence should be qualified with the additional condition that background compaction was disabled in production (not enabled). The full context from the source is necessary for accurate representation: 'Production ran release r8 with background compaction disabled.'"
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "9c1e4afba6d10519",
+    "case_id": "hf-001",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "03e2bf6e18c4d968",
+    "case_id": "hf-021",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "203da6ee2c184df7",
+    "case_id": "hf-005",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "f3c27a5c8e33a12529af1aa83b741333358753449524d0dd7046e19d6aa5251e",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The candidate claims 'The diary reports lower median response time after the parser upgrade.' While the source confirms lower median response time occurred in the monitoring window following the upgrade, the source explicitly states 'The diary contains no matched-load test, rollback comparison or causal attribution.' The source describes the response time improvement and parser upgrade as co-occurring but leaves their causal relationship unmeasured. The candidate's phrasing 'after the parser upgrade' attributes causality that the source does not support. This should be qualified to reflect that the lower response time was observed following the upgrade, not that it was caused by the upgrade."
+        },
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "4d94f0eac2e690142fedd6ef8c63f9652d110498348f8a8bc3cc72acd8399669",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "missing_condition",
+          "disposition": "qualify",
+          "critique": "The candidate claims 'The worker count doubled during the same monitoring window' without acknowledging contextual factors. While the source confirms the worker count doubled during the monitoring window, the source also notes that 'the query mix shifted toward short queries' during the same period. This concurrent shift in query characteristics is a material condition that affects the interpretation of the worker count change. The candidate's isolated statement omits this context, which may be important for understanding the significance of the doubling."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "b5a7dc3cc428b59b",
+    "case_id": "hf-009",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The source attestation states that 'Production ran release r8 with background compaction disabled' at the checkpoint. The candidate claim asserts 'Production ran release r8 at that checkpoint,' which is consistent with the release version but omits the critical condition that background compaction was disabled in production. This incomplete representation of the sourced fact contradicts the complete attestation.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "5ef88d919e4b985ecfc26678771ec178c946605f071e4f07d2e33a7e1eaa61dd",
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The source attestation explicitly states that 'the staging namespace ran release r9 with background compaction enabled' and that 'Production ran release r8 with background compaction disabled.' The candidate claim states 'At the checkpoint, background compaction was enabled in the staging namespace,' which correctly identifies the staging namespace state. However, the candidate does not mention production's background compaction status being disabled, and more critically, it does not distinguish that the staging namespace ran r9, not r8. The attestation provides separate configurations for staging and production that cannot be conflated.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "f1bbec797936e7b3",
+    "case_id": "hf-014",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/1/content",
+          "claim_sha256": "3701da08f014c34d2529fe96d8d3115ac4de43406a2786633b022e10814ae2c6",
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "critique": "The source states: 'The sender supplied no content digest, and the relay did not compute or compare one.' This directly contradicts the candidate's claim that 'The relay performed a content-digest comparison.' The source explicitly documents that no such comparison occurred.",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ]
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "b5c1e2417fdc9833",
+    "case_id": "hf-020",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "38eeff74bc4a4bb86e433421f39a3797320323504810137e24d4756a0df66fce",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            },
+            {
+              "evidence_id": "s1"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The two observer receipts directly contradict each other on the critical fact. Citation s0 (Observer A) labels rook as leader; citation s1 (Observer B) labels wren as leader for the same shard M, term 73, and tick 504. The claim asserts that the receipts 'establish rook as shard M leader,' but s1 explicitly states 'This shard permits only one leader in a term at a tick' and notes there is no 'lease certificate, quorum decision, correction or observer-priority rule to resolve the disagreement.' The evidence provides two conflicting observations with no resolution mechanism\u2014establishing rook as leader requires dismissing or subordinating the contrary evidence from Observer B, which the sources do not authorize. The claim treats a disputed observation as an established fact."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "7c08593ec7bdef08",
+    "case_id": "hf-020",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "38eeff74bc4a4bb86e433421f39a3797320323504810137e24d4756a0df66fce",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            },
+            {
+              "evidence_id": "s1"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The candidate claims 'The two observer receipts establish rook as shard M leader at tick 504.' However, the evidence presents a direct factual contradiction: Observer A receipt labels node rook as leader, while Observer B receipt labels node wren as leader, both for the same shard M, term 73, and tick 504. The candidate presents this contradiction as an established fact, when the source text explicitly states 'This shard permits only one leader in a term at a tick' and notes there is 'no lease certificate, quorum decision, correction or observer-priority rule to resolve the disagreement with Observer A.' The two signed observations do not establish rook as the leader; they establish an unresolved disagreement. The claim overstates the evidential support by presenting a disputed observation as an established fact."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "38eeff74bc4a4bb86e433421f39a3797320323504810137e24d4756a0df66fce",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            },
+            {
+              "evidence_id": "s1"
+            }
+          ],
+          "basis": "misleading_certainty",
+          "disposition": "qualify",
+          "critique": "The candidate uses the word 'establish,' which implies settled fact or proof, but the underlying evidence presents two conflicting signed observations with no authority or mechanism to resolve the disagreement. While both observer receipts are signed (authentic), their provenance only authenticates what each observer claims\u2014not which claim is correct. Neither receipt contains a quorum decision, lease certificate, or observer-priority rule. The language should be qualified to reflect that Observer A's receipt identifies rook as leader, while the actual leadership status remains unresolved due to the conflict with Observer B's identification of wren as leader."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "13b5bce355093f27",
+    "case_id": "hf-009",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "925a08883a3e7bde52c9ccd06e3481c1b1931a3a8821eb46e7b529dc0d75b94a",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The claim states 'Production ran release r8 at that checkpoint.' The source evidence explicitly states 'Production ran release r8 with background compaction disabled.' This confirms r8 for production but the claim sourced as supported by hf-009-source-1 is incomplete\u2014it omits the critical condition that compaction was disabled in production. More importantly, the source also explicitly states 'At the recorded checkpoint, the staging namespace ran release r9' not production. The claim correctly identifies r8 for production, but the broader context shows production properties differ from staging, and the claim lacks the qualifying detail about compaction being disabled."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "5ef88d919e4b985ecfc26678771ec178c946605f071e4f07d2e33a7e1eaa61dd",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_generalization",
+          "disposition": "qualify",
+          "critique": "The claim states 'At the checkpoint, background compaction was enabled in the staging namespace.' The source explicitly confirms: 'At the recorded checkpoint, the staging namespace ran release r9 with background compaction enabled.' This is accurate for the staging namespace only. However, the candidate claim is presented as a top-level assertion without explicit namespace qualification in its statement text. The claim should be qualified to clearly specify it applies only to the staging namespace, as the source shows production had compaction disabled. The generalized form could mislead about system-wide configuration."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "49d98a2f97884b19",
+    "case_id": "hf-021",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "d035cf7895cfa1cd",
+    "case_id": "hf-001",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "3814f931aef85384",
+    "case_id": "hf-002",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "37074a0d978dec68",
+    "case_id": "hf-013",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "58bbe150ded9fca4",
+    "case_id": "hf-008",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "0825f7e6b85605a7",
+    "case_id": "hf-013",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "424308440a7d8555",
+    "case_id": "hf-021",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "f74b046a708c3da7",
+    "case_id": "hf-007",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "b067b713fd0cf37b",
+    "case_id": "hf-022",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "d2ef257638c85cfa167759779e0d8cd9437a240e75d5fee95d09455824a86b87",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The source text states the bundle 'contains only UTF-8 payloads from the customer portal' and explicitly notes 'No UTF-16, binary transport or third-party exporter input was exercised.' This contradicts the claim's universal assertion that the bundle contains 'only UTF-8 portal payloads' when read in isolation without the crucial qualification that the test was limited to customer portal input only. More critically, the source explicitly restricts its conclusion: 'The receipt explicitly limits its compatibility conclusion to this bundle and records no observed decoding failure elsewhere.' The claim lacks this essential conditional scope, making it an unsupported generalization beyond what the evidence supports."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "374b12ff0a730a9d34eb2f5c2f067b9624fc62a7e23c4ff3c4e852ef5f17f5f8",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_generalization",
+          "disposition": "qualify",
+          "critique": "The source describes a compatibility qualification receipt for decoder release P6 showing it 'decoded every file in the supplied regression bundle.' This supports conditional success within a bounded scope, not the universal claim that P6 'can decode files from every encoding and exporter.' The source explicitly limits the observation to a specific bundle containing only UTF-8 payloads from the customer portal, and states 'The receipt explicitly limits its compatibility conclusion to this bundle and records no observed decoding failure elsewhere.' The claim's use of 'every encoding and exporter' is an unsupported universal generalization that exceeds the conditional, scoped evidence provided. The claim should be qualified to reflect the bundle-specific and UTF-8/customer-portal-limited nature of the actual test result."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "88986388e2c5b7d3",
+    "case_id": "hf-005",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "4d94f0eac2e690142fedd6ef8c63f9652d110498348f8a8bc3cc72acd8399669",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The source explicitly states the diary contains 'no matched-load test, rollback comparison or causal attribution' and describes the doubled worker count as a 'co-occurring change' with 'separate effects unmeasured.' The claim that the worker count doubled is factually accurate per the source, but the source evidence does not support any causal relationship between this doubling and observed outcomes (like the lower median response time)."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "f3c27a5c8e33a12529af1aa83b741333358753449524d0dd7046e19d6aa5251e",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_causality",
+          "disposition": "qualify",
+          "critique": "The source confirms lower median response time was observed after the parser upgrade, but explicitly states there is 'no matched-load test, rollback comparison or causal attribution.' The source identifies multiple concurrent changes (query mix shift toward short queries and doubled worker count) that could explain the improvement. The claim asserts a causal link between the upgrade and the response time improvement that the source evidence explicitly disclaims as unmeasured and unattributed."
+        }
+      ]
+    }
+  },
+  {
+    "blind_id": "90d0c4e7396cf3c3",
+    "case_id": "hf-017",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "0f4027c5cf51f4fe7e4e814b7f8601cb8c77643377d542464fe541c581c41a12",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "qualify",
+          "critique": "The candidate claims 'No web-editor write event was recorded for repository Delta during the interval.' The source explicitly states 'The export contains every write event recorded through the web editor in that interval, and there are none.' This is a precise match between the claim and the observation. However, the source simultaneously clarifies that 'Command-line and service-token clients write through separate audit channels omitted from this export' and 'makes no claim about the total number of repository writes.' The candidate's claim as stated is accurate about web-editor events specifically, but without qualification, it may mislead readers into interpreting this as a claim about all repository writes. The claim should be qualified to explicitly reference only web-editor writes and acknowledge that other write channels are not covered by this evidence."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "ba71c4edccb148af",
+    "case_id": "hf-006",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "e6021785052c69f52c0c6ee8f1816bdae4390d97bdf3782299ce2421bfdf9424",
+          "basis": "unsupported_causality",
+          "disposition": "reconsider",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "critique": "The source explicitly states that 'The diary contains no matched-load test, rollback comparison or causal attribution' and describes these as 'co-occurring changes' with 'their separate effects unmeasured.' The claim that 'The parser upgrade caused the lower median response time' asserts a causal relationship that the source document acknowledges was not established. Three other factors changed during the window: the parser upgrade, a shift toward short queries, and a doubling of worker count. The source provides no basis for attributing the lower median response time specifically to the parser upgrade rather than the query mix shift or worker count increase."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "dfb7000b35e55773",
+    "case_id": "hf-022",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "374b12ff0a730a9d34eb2f5c2f067b9624fc62a7e23c4ff3c4e852ef5f17f5f8",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "unsupported_generalization",
+          "disposition": "qualify",
+          "critique": "The source document explicitly states that 'The receipt explicitly limits its compatibility conclusion to this bundle' and notes 'records no observed decoding failure elsewhere.' The candidate claim 'Decoder release P6 can decode files from every encoding and exporter' makes a universal claim without qualification, whereas the source only supports decoding capability for UTF-8 payloads from the customer portal specifically. The source does not cover 'every encoding and exporter' - it explicitly excludes UTF-16, binary transport, and third-party exporter input."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "9e0017833a4f6d87",
+    "case_id": "hf-020",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "38eeff74bc4a4bb86e433421f39a3797320323504810137e24d4756a0df66fce",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            },
+            {
+              "evidence_id": "s1"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The two observer receipts directly contradict the claim. Observer A's receipt (s0) labels rook as leader at tick 504 in shard M term 73. Observer B's receipt (s1) labels wren as leader at the same shard, term, and tick. The candidate claims 'The two observer receipts establish rook as shard M leader,' but the evidence shows these two receipts do not establish this\u2014they record a conflict. The shard permits only one leader in a term at a tick, yet both observers have signed divergent observations with no lease certificate, quorum decision, correction, or observer-priority rule to resolve the disagreement. The two receipts therefore establish disagreement, not a definitive leadership claim."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "491ea5ebe7e5c7cb",
+    "case_id": "hf-023",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/claim_records/0/content",
+          "claim_sha256": "82ab053cd4693038b0a1d7eaa10355dc7d0fb33c7643cf7328fb3308bf75b1a2",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The claim states 'The four data frames carried twenty-four KiB of payload.' However, the source evidence specifies 'Four data frames carry six KiB of payload each,' which totals 4 \u00d7 6 = 24 KiB. This arithmetic is correct. However, the source also states that 'A single separate three-KiB manifest is sent in addition to those frames' and that 'the byte counter explicitly reports twenty-seven KiB for the complete upload.' The claim isolates only the frames (24 KiB) without acknowledging the manifest (3 KiB) that the source emphasizes as part of the complete upload accounting. The claim's framing is technically accurate for frames alone but omits the critical context that the source provides regarding the manifest component."
+        },
+        {
+          "claim_path": "/content",
+          "claim_sha256": "a3ca8b6010650fcf68b6d6a16ed5e98a8fbe9c010a3c4d366e1bfadbaeff0fc5",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "reconsider",
+          "critique": "The claim states 'The complete upload U19, including its manifest, totaled twenty-seven KiB.' The source evidence directly states 'The byte counter explicitly reports twenty-seven KiB for the complete upload, including that manifest.' While the numerical claim matches the source, the source further specifies the composition: four frames at 6 KiB each (24 KiB) plus a 3 KiB manifest. However, 24 + 3 = 27 KiB, which is arithmetically consistent. The claim correctly reflects the total reported by the source's byte counter, making this claim factually supported by the evidence."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "9072376589eb2438",
+    "case_id": "hf-016",
+    "mechanical_action": "flag",
+    "output": {
+      "findings": [
+        {
+          "claim_path": "/content",
+          "claim_sha256": "293060fcf35044a25609376a6c6b62aa78465ca960fb5e8ed2502cabafb2b100",
+          "evidence_refs": [
+            {
+              "evidence_id": "s0"
+            }
+          ],
+          "basis": "factual_contradiction",
+          "disposition": "relabel_inference",
+          "critique": "The candidate claims 'The batch extract records thirteen distinct delivered messages.' However, the source evidence explicitly states 'The audit groups receipts by message ID and finds eleven distinct delivered message IDs; two of those IDs each have a duplicate successful receipt.' The source distinguishes thirteen receipt events from eleven distinct delivered messages. The candidate conflates receipt events with distinct delivered messages, contradicting the source's explicit differentiation."
+        }
+      ],
+      "abstention_reason": null
+    }
+  },
+  {
+    "blind_id": "775ac0836c1c2138",
+    "case_id": "hf-017",
+    "mechanical_action": "accept",
+    "output": {
+      "findings": [],
+      "abstention_reason": null
+    }
+  }
+]

@@ -1,0 +1,13 @@
+# Heldout fixture review
+
+Verdict: PASS after two narrow pre-call fixture corrections. This is independent same-family source-truth review, not independent human gold. No provider outputs were available or read and no paid calls, tests, product edits or prompt edits were performed.
+
+The final cases SHA256 is 0f1f757c0d2a905676a7f3ae5e17eb65dcaa69b30d16cfb44822d1db44c07208. The final rubric SHA256 is 974f899458a4af4932fb00c06950049c2dc3f39cac9ff9ebeda35e287cc1796f. Original artifacts remain in /tmp/jev-heldout-fixture-original-freeze.
+
+Every source, candidate assertion and rubric concern was read. Independent stdlib checks confirmed 24 cases in 12 matched pairs, 42 assertions, 30 supported / 7 contradicted / 4 insufficient / 1 ambiguous, exact assertion path coverage, and deliberately wrong stress labels for every assertion. Each pair shares source content and provenance and changes one candidate assertion. Rubric coverage, citations and action permissions agree with the source evidence. Counts remain unchanged after correction.
+
+The original causal candidate asserted what a diary established, despite the diary explicitly withholding causal attribution. That wrapper allowed a legitimate evidential-status contradiction critique to conflict with the intended insufficient-causality rubric. The author narrowed hf-006 to the causal proposition itself. The supported disagreement case hf-019 also had a copied note discussing a selected physical leader, although its candidate merely reports disagreement. The author corrected that note to protect the bounded supported assertion. Independent recursive JSON comparison found only those two changes plus the necessary rubric cases hash update.
+
+Absence remains distinct from negation, report disagreement remains distinct from physical world-state contradiction, bounded supported claims remain protected, and arithmetic and distinct-identity claims can be verified directly from sources. The unsafe conflicting-report case legitimately allows a conflict finding or an explicit unresolved-conflict abstention. Other unsafe cases contain assessable overreach or contradiction and require a useful flag under the frozen rubric.
+
+Limits: the fixture author has prior historical error-type exposure, which the rubric discloses. The 12 matched pairs are clustered units and repeated calls are dependent. The frozen rubric now uses strict clause-level overstatement rules, unlike the contextual primary rubric used in the earlier fast-critic report; raw semantic pass rates across those studies are not directly comparable. This source-only review establishes internally coherent synthetic gold, not a production quality guarantee.
