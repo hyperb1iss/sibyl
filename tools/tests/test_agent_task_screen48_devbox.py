@@ -29,6 +29,7 @@ from typing import Any
 
 import pytest
 from benchmarks.agent_tasks.screen48 import checkpoints
+from benchmarks.agent_tasks.screen48 import contract as screen48_contract
 from benchmarks.agent_tasks.screen48.devbox import (
     host_binding,
     owned_db,
@@ -39,6 +40,9 @@ from benchmarks.agent_tasks.screen48.devbox import (
 from benchmarks.agent_tasks.screen48.recall.owners import runtime_pin
 
 from sibyl_core.ai.llm.config import MEMORY_TIMEOUT_SECONDS
+from sibyl_core.embeddings.providers import EmbeddingMetadata
+from sibyl_core.services import content_client, content_models, content_raw_embedding_repair
+from sibyl_core.services.content_raw_embedding_repair import RawEmbeddingRepairResult
 
 
 @pytest.fixture
@@ -581,6 +585,7 @@ def test_the_registry_knows_preflight_and_keeps_it_off_the_database() -> None:
         "checkpoint0",
         "checkpoint1",
         "probe",
+        "repair_raw_embeddings",
     }
 
 
@@ -853,3 +858,93 @@ def test_phase_environment_overrides_an_ambient_memory_timeout() -> None:
 
     assert environ["SIBYL_LLM_MEMORY_TIMEOUT_SECONDS"] == "600"
     assert "SIBYL_LLM_MEMORY_TIMEOUT_SECONDS" in names
+
+
+def _stub_repair_result(status: str, **counts: int) -> Any:
+    return RawEmbeddingRepairResult(status=status, **counts)
+
+
+def _stub_provider() -> Any:
+    class Provider:
+        metadata = EmbeddingMetadata(
+            provider="stub",
+            model="stub-model",
+            dimensions=8,
+            cache_namespace="stub",
+            tokenizer_estimate_method="sha256",
+        )
+
+    return Provider()
+
+
+def test_repair_raw_embeddings_phase_needs_the_database() -> None:
+    """The repair reads and writes the owned database, so it is never a dry phase."""
+    assert "repair_raw_embeddings" in run_phase.PHASES
+    assert "repair_raw_embeddings" not in run_phase.NO_DATABASE_PHASES
+
+
+def test_repair_raw_embeddings_phase_keeps_the_receipt_and_completes(
+    root_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A completed repair lands its receipt in the record and beside it on disk."""
+
+    async def repair(organization_id: str, **_: Any) -> Any:
+        assert organization_id == screen48_contract.ORGANIZATION_ID
+        return _stub_repair_result(content_raw_embedding_repair.REPAIR_COMPLETED)
+
+    monkeypatch.setattr(content_raw_embedding_repair, "repair_raw_capture_embeddings", repair)
+    monkeypatch.setattr(content_models, "configured_raw_memory_embedding_provider", _stub_provider)
+    closed: list[bool] = []
+
+    async def close() -> None:
+        closed.append(True)
+
+    monkeypatch.setattr(content_client, "close_shared_surreal_content_client", close)
+    record: dict[str, Any] = {}
+    output = root_dir / "repair"
+
+    exit_code = run_phase.PHASES["repair_raw_embeddings"](output, [], record)
+
+    receipt = json.loads((output / "repair.json").read_text(encoding="utf-8"))
+    assert exit_code == 0
+    assert receipt["organization_id"] == screen48_contract.ORGANIZATION_ID
+    assert receipt["provider"]["model"] == "stub-model"
+    assert receipt["result"]["status"] == content_raw_embedding_repair.REPAIR_COMPLETED
+    assert receipt["embedded_everything"] is True
+    assert record["repair_raw_embeddings"] == receipt
+    assert closed == [True]
+
+
+@pytest.mark.parametrize(
+    ("status", "counts"),
+    [
+        ("skipped_no_provider", {}),
+        ("skipped_dimension_mismatch", {}),
+        (content_raw_embedding_repair.REPAIR_COMPLETED, {"checked": 233, "failed": 233}),
+        (content_raw_embedding_repair.REPAIR_COMPLETED, {"checked": 233, "pending": 1}),
+    ],
+)
+def test_repair_raw_embeddings_phase_fails_when_rows_were_left_behind(
+    root_dir: Path, monkeypatch: pytest.MonkeyPatch, status: str, counts: dict[str, int]
+) -> None:
+    """A walk that finished with rows still unembedded is a failed phase, not a quiet success."""
+
+    async def repair(organization_id: str, **_: Any) -> Any:
+        return _stub_repair_result(status, **counts)
+
+    monkeypatch.setattr(content_raw_embedding_repair, "repair_raw_capture_embeddings", repair)
+    monkeypatch.setattr(content_models, "configured_raw_memory_embedding_provider", lambda: None)
+    record: dict[str, Any] = {}
+
+    exit_code = run_phase.PHASES["repair_raw_embeddings"](root_dir / "repair", [], record)
+
+    assert exit_code == 1
+    assert record["repair_raw_embeddings"]["provider"] is None
+    assert record["repair_raw_embeddings"]["result"]["status"] == status
+    assert record["repair_raw_embeddings"]["embedded_everything"] is False
+
+
+def test_repair_raw_embeddings_phase_refuses_flags(root_dir: Path) -> None:
+    """The phase has one job and no knobs; a stray flag is a staging mistake."""
+    with pytest.raises(run_phase.PhaseError, match="takes no flags"):
+        run_phase.PHASES["repair_raw_embeddings"](root_dir / "repair", ["--reps", "3"], {})

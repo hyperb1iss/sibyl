@@ -13,11 +13,14 @@ Redis is a hard refusal rather than an override: a stray ``SIBYL_REDIS_*``
 points the coordination backend at a broker this phase does not own, and the
 consolidation work would leave the process.
 
-Five phases are registered. ``cycle`` drives the consolidation cycle between
+Six phases are registered. ``cycle`` drives the consolidation cycle between
 the two checkpoints; ``checkpoint0`` and ``checkpoint1`` prepare the frozen
 schedule's own packs; ``probe`` prepares and runs the floor probe, a diagnostic
-over other catalogued tasks that is never a cell of that schedule; and
-``preflight`` qualifies the staging without the database.
+over other catalogued tasks that is never a cell of that schedule;
+``repair_raw_embeddings`` gives the study organization's raw captures the
+vectors a restore never wrote, so the raw_vector lane has rows to read before
+a probe prepares the raw arm; and ``preflight`` qualifies the staging without
+the database.
 
 The ``preflight`` phase is the exception to all of that: it never starts the
 container and never reads the owner key. It runs every qualification a
@@ -174,6 +177,67 @@ def _probe_phase(output: Path, extra: Sequence[str], record: dict[str, Any]) -> 
 
     del record
     return probe.main([*extra, "--output", str(output)])
+
+
+def _repair_raw_embeddings_phase(output: Path, extra: Sequence[str], record: dict[str, Any]) -> int:
+    """Embed the study organization's raw captures that carry no vector.
+
+    The restored study database holds its 233 originals exactly as the archive
+    wrote them, and an archive carries no embeddings, so every raw_vector read
+    over it returned nothing and the raw arm was BM25 alone. This phase runs
+    the product's own repair against the owned database and keeps its receipt
+    beside the phase record. It refuses to count as done unless the repair
+    actually completed: a pass with no provider or a dimension mismatch leaves
+    the lane exactly as unembedded as it found it, and a probe prepared on top
+    of that would seal the same defect again.
+    """
+    import asyncio
+    from dataclasses import asdict
+
+    from benchmarks.agent_tasks.screen48 import contract
+
+    from sibyl_core.services.content_client import close_shared_surreal_content_client
+    from sibyl_core.services.content_models import configured_raw_memory_embedding_provider
+    from sibyl_core.services.content_raw_embedding_repair import (
+        REPAIR_COMPLETED,
+        repair_raw_capture_embeddings,
+    )
+
+    if extra:
+        raise PhaseError(f"repair_raw_embeddings takes no flags: {' '.join(extra)}")
+    provider = configured_raw_memory_embedding_provider()
+    receipt: dict[str, Any] = {
+        "organization_id": contract.ORGANIZATION_ID,
+        "provider": None if provider is None else asdict(provider.metadata),
+        "started_at": datetime.now(UTC).isoformat(),
+    }
+
+    async def run() -> Any:
+        try:
+            return await repair_raw_capture_embeddings(contract.ORGANIZATION_ID)
+        finally:
+            # The repair rides the shared client; leave no pool socket open on
+            # a closed loop when main() stops the container right after this.
+            await close_shared_surreal_content_client()
+
+    result = asyncio.run(run())
+    receipt["result"] = asdict(result)
+    # Completed is the repair's word for "the walk finished", not "every row
+    # now carries a vector": a revoked key or a rejected write lands in
+    # failed, a contended row in pending, and status stays completed. The
+    # lane is only fair when nothing is left behind; a walk that had nothing
+    # to do is fine.
+    embedded_everything = (
+        result.status == REPAIR_COMPLETED and result.failed == 0 and result.pending == 0
+    )
+    receipt["embedded_everything"] = embedded_everything
+    receipt["finished_at"] = datetime.now(UTC).isoformat()
+    record["repair_raw_embeddings"] = receipt
+    output.mkdir(parents=True, exist_ok=True)
+    (output / "repair.json").write_text(
+        json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return 0 if embedded_everything else 1
 
 
 def _checkpoint_phase(checkpoint: int) -> PhaseRunner:
@@ -374,6 +438,7 @@ PHASES: dict[str, PhaseRunner] = {
     "checkpoint1": _checkpoint_phase(1),
     "preflight": _preflight_phase,
     "probe": _probe_phase,
+    "repair_raw_embeddings": _repair_raw_embeddings_phase,
 }
 
 #: Phases that read nothing out of SurrealDB, so the owned container stays as
