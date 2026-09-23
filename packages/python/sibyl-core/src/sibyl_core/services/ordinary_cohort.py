@@ -511,9 +511,9 @@ async def partition_stored_cohort(org, principal, source_ids, resolver):
     try:
         extractor = await _proposal_extractor(owned, original.prepared.system)
         schema_chars = len(canonical(await extractor.output_schema()))
-        critic_schema_chars = (
-            len(canonical(await owned.output_schema())) if original.prepared.projection_json else 0
-        )
+        # Any cohort of controller episodes is sized with the critic's envelope,
+        # even when the whole group mixes representations.
+        critic_schema_chars = len(canonical(await owned.output_schema()))
     finally:
         if isinstance(owned, _OwnedValidationExtractor):
             await _close_resources(owned.resources)
@@ -562,12 +562,13 @@ def _partition_prepared_cohort(
 
     Embedded episodes grow each cohort from its seed's nearest neighbours, so a
     proposal compares related experience instead of whatever shared a page of
-    identifiers. Episodes without a comparable vector keep first-fit packing.
+    identifiers. Every other episode then joins the most similar cohort that
+    still fits, or the first one when it has no comparable vector, so a cohort
+    of one happens only when the budget forces it.
     """
     group = PartialCohort.model_validate_json(original.input_json)
     cohort_fields = group.model_dump(exclude={"episodes"})
     projection_reuse = ProjectionReuse()
-    bins = []
 
     def fits(episodes):
         if cancelled.is_set():
@@ -578,10 +579,11 @@ def _partition_prepared_cohort(
         partial = PartialCohort.model_validate(
             {**cohort_fields, "episodes": tuple(episodes), "group_id": review_digest(ids)}
         )
+        # Size each cohort in the representation its proposal will use: a group
+        # that mixes controller and plain captures can still yield a cohort of
+        # controller episodes, which goes out as a projection with a critic reserve.
         prepared = _prepare_cohort_input(
-            partial,
-            evidence_mode=COMPLETE_PROJECTION if original.projection_json else "raw_v1",
-            projection_reuse=projection_reuse,
+            partial, evidence_mode="auto", projection_reuse=projection_reuse
         )
         return (
             _cohort_input_chars(
@@ -592,30 +594,32 @@ def _partition_prepared_cohort(
 
     vectors = affinity or {}
     related = [episode for episode in group.episodes if episode.episode_id in vectors]
-    related_bins: list[list] = []
-    alone: list = []
-    if len(related) >= 2:
-        related_bins, alone = _nearest_neighbour_bins(related, vectors, fits)
-    else:
-        related = []
-    related_ids = {episode.episode_id for episode in related}
-    unrelated = sorted(
+    similarity = _similarity(related, vectors) if len(related) >= 2 else {}
+    bins, leftovers = _nearest_neighbour_bins(related, similarity, fits) if similarity else ([], [])
+    leftovers = sorted(
         [
-            *(episode for episode in group.episodes if episode.episode_id not in related_ids),
-            *alone,
+            *leftovers,
+            *(episode for episode in group.episodes if episode.episode_id not in similarity),
         ],
         key=lambda episode: episode.episode_id,
     )
-    for episode in unrelated:
+    for episode in leftovers:
         if cancelled.is_set():
             raise asyncio.CancelledError
-        for bucket in bins:
+        scores = similarity.get(episode.episode_id, {})
+
+        def affinity_to(bucket, scores=scores):
+            known = [scores[member.episode_id] for member in bucket if member.episode_id in scores]
+            return math.fsum(known) / len(known) if known else -math.inf
+
+        # sorted() is stable, so an episode with no comparable vector keeps
+        # plain first-fit order across the cohorts.
+        for bucket in sorted(bins, key=affinity_to, reverse=True):
             if fits([*bucket, episode]):
                 bucket.append(episode)
                 break
         else:
             bins.append([episode])
-    bins.extend(related_bins)
     return [[episode.episode_id for episode in bucket] for bucket in bins]
 
 
@@ -623,58 +627,78 @@ def _partition_prepared_cohort(
 #: neighbours. A rank rather than a similarity cutoff, so it means the same
 #: thing across embedding models and between boilerplate-heavy transcripts and
 #: short notes. On the screen48 captures, paged and budgeted the way the dream
-#: job runs, two neighbours keep 94 percent of a cohort in one task family where
-#: nearest-neighbour growth alone keeps 56 and identifier order keeps 24.
+#: job runs, two neighbours keep 92 percent of a cohort in one task family with
+#: no cohort of one, where nearest-neighbour growth alone keeps 75 and
+#: identifier order keeps 24.
 COHORT_NEIGHBOURS = 2
 
 
-def _nearest_neighbour_bins(episodes, vectors, fits):
-    """Grow cohorts from nearest neighbours; return them with the episodes left alone.
-
-    Each bin starts from the first remaining episode and adds the remaining
-    episode closest to its centroid while that episode counts a member among its
-    own COHORT_NEIGHBOURS nearest neighbours and the bin still fits. Ties break
-    on identifier, so the result depends only on the episodes, their vectors and
-    the budget. A seed nothing reciprocates goes back for first-fit packing.
-    """
-    ordered = sorted(episodes, key=lambda episode: episode.episode_id)
-    ids = [episode.episode_id for episode in ordered]
+def _similarity(episodes, vectors) -> dict[str, dict[str, float]]:
+    """Pairwise cosine similarity of unit vectors, computed once per partition."""
+    ids = sorted(episode.episode_id for episode in episodes)
     similarity: dict[str, dict[str, float]] = {identifier: {} for identifier in ids}
     for index, left in enumerate(ids):
         for right in ids[index + 1 :]:
             value = math.fsum(a * b for a, b in zip(vectors[left], vectors[right], strict=True))
             similarity[left][right] = similarity[right][left] = value
-    neighbours = {
-        identifier: set(
-            sorted(scores, key=lambda other: (-scores[other], other))[:COHORT_NEIGHBOURS]
-        )
-        for identifier, scores in similarity.items()
-    }
-    remaining = list(ordered)
-    bins, alone = [], []
+    return similarity
+
+
+def _nearest_neighbour_bins(episodes, similarity, fits):
+    """Grow cohorts from nearest neighbours; return them with the episodes left over.
+
+    Each bin starts from the first unplaced episode. It repeatedly takes the
+    unplaced episode closest to its centroid among those that count a member
+    among their own COHORT_NEIGHBOURS nearest unplaced neighbours, and skips one
+    that does not fit, so a single oversized episode cannot close the bin for
+    its whole family. Neighbours are ranked among unplaced episodes only, so a
+    family whose first cohort filled still recognises its remaining members.
+    Ties break on identifier, so the result depends only on the episodes, their
+    vectors and the budget. A seed nothing reciprocates is returned as leftover.
+    """
+    remaining = sorted(episodes, key=lambda episode: episode.episode_id)
+    bins, leftovers = [], []
     while remaining:
-        bucket = [remaining.pop(0)]
-        members = {bucket[0].episode_id}
-        while remaining:
+        seed = remaining.pop(0)
+        pool = [seed.episode_id, *(episode.episode_id for episode in remaining)]
+        neighbours = {
+            identifier: set(
+                sorted(
+                    (other for other in pool if other != identifier),
+                    key=lambda other, identifier=identifier: (
+                        -similarity[identifier][other],
+                        other,
+                    ),
+                )[:COHORT_NEIGHBOURS]
+            )
+            for identifier in pool
+        }
+        bucket, members, skipped = [seed], {seed.episode_id}, set()
+        while candidates := [
+            episode
+            for episode in remaining
+            if episode.episode_id not in skipped and neighbours[episode.episode_id] & members
+        ]:
             # A centroid of unit vectors scores a candidate by the sum of its
-            # similarities to the members. remaining stays sorted and max() keeps
+            # similarities to the members. candidates stay sorted and max() keeps
             # the first of equal keys, so a tie goes to the smaller identifier.
             nearest = max(
-                remaining,
+                candidates,
                 key=lambda episode: math.fsum(
                     similarity[member][episode.episode_id] for member in members
                 ),
             )
-            if not neighbours[nearest.episode_id] & members or not fits([*bucket, nearest]):
-                break
-            bucket.append(nearest)
-            members.add(nearest.episode_id)
-            remaining.remove(nearest)
+            if fits([*bucket, nearest]):
+                bucket.append(nearest)
+                members.add(nearest.episode_id)
+                remaining.remove(nearest)
+            else:
+                skipped.add(nearest.episode_id)
         if len(bucket) > 1:
             bins.append(bucket)
         else:
-            alone.extend(bucket)
-    return bins, alone
+            leftovers.append(seed)
+    return bins, leftovers
 
 
 async def prepare_stored_source_packets(org, principal, source_id, resolver):
