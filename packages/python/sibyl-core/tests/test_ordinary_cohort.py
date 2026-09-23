@@ -440,6 +440,40 @@ async def test_partition_grows_cohorts_from_nearest_embedded_neighbours(
     )
 
 
+async def test_partition_stops_a_cohort_at_the_family_boundary_despite_spare_budget(
+    cohort_sources, content_store, monkeypatch
+):
+    sources = await _family_sources(6)
+    install_proposal(monkeypatch, sources)
+    # Room for five: growth alone would top the first family up with the second.
+    _capacity_in_episodes(monkeypatch, 5)
+    for index, source in enumerate(sources):
+        await _embed(content_store, source, _axis(index % 2, tilt=index / 100))
+    ids = [source.id for source in sources]
+    bins = await service.partition_stored_cohort(
+        "org", "owner", ids, AsyncMock(return_value=SourceReadAuthority("owner"))
+    )
+    assert bins == [ids[0::2], ids[1::2]]
+
+
+async def test_partition_packs_an_episode_nothing_reciprocates_first_fit(
+    cohort_sources, content_store, monkeypatch
+):
+    sources = await _family_sources(4)
+    install_proposal(monkeypatch, sources)
+    _capacity_in_episodes(monkeypatch, 5)
+    # The first identifier seeds first, but every other episode's nearest
+    # neighbours are each other, so it stands alone and falls back to packing.
+    await _embed(content_store, sources[0], _axis(3, tilt=0.5))
+    for index in (1, 2, 3):
+        await _embed(content_store, sources[index], _axis(0, tilt=index / 100))
+    ids = [source.id for source in sources]
+    bins = await service.partition_stored_cohort(
+        "org", "owner", ids, AsyncMock(return_value=SourceReadAuthority("owner"))
+    )
+    assert bins == [ids[:1], ids[1:]]
+
+
 async def test_partition_keeps_budget_packing_outside_the_shared_embedding_space(
     cohort_sources, content_store, monkeypatch
 ):

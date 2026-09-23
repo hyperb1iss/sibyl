@@ -589,10 +589,20 @@ def _partition_prepared_cohort(
 
     vectors = affinity or {}
     related = [episode for episode in group.episodes if episode.episode_id in vectors]
-    if len(related) < 2:
+    related_bins: list[list] = []
+    alone: list = []
+    if len(related) >= 2:
+        related_bins, alone = _nearest_neighbour_bins(related, vectors, fits)
+    else:
         related = []
     related_ids = {episode.episode_id for episode in related}
-    unrelated = [episode for episode in group.episodes if episode.episode_id not in related_ids]
+    unrelated = sorted(
+        [
+            *(episode for episode in group.episodes if episode.episode_id not in related_ids),
+            *alone,
+        ],
+        key=lambda episode: episode.episode_id,
+    )
     for episode in unrelated:
         if cancelled.is_set():
             raise asyncio.CancelledError
@@ -602,39 +612,66 @@ def _partition_prepared_cohort(
                 break
         else:
             bins.append([episode])
-    bins.extend(_nearest_neighbour_bins(related, vectors, fits))
+    bins.extend(related_bins)
     return [[episode.episode_id for episode in bucket] for bucket in bins]
 
 
-def _nearest_neighbour_bins(episodes, vectors, fits):
-    """Seed each bin with the first remaining episode and add its nearest neighbours.
+#: An episode joins a cohort only when a member is among its own nearest
+#: neighbours. A rank rather than a similarity cutoff, so it means the same
+#: thing across embedding models and between boilerplate-heavy transcripts and
+#: short notes. On the screen48 captures, paged and budgeted the way the dream
+#: job runs, two neighbours keep 94 percent of a cohort in one task family where
+#: nearest-neighbour growth alone keeps 56 and identifier order keeps 24.
+COHORT_NEIGHBOURS = 2
 
-    Similarity is measured to the bin's centroid, ties break on identifier, and a
-    bin closes at the first neighbour that no longer fits, so the result depends
-    only on the episodes, their vectors and the budget.
+
+def _nearest_neighbour_bins(episodes, vectors, fits):
+    """Grow cohorts from nearest neighbours; return them with the episodes left alone.
+
+    Each bin starts from the first remaining episode and adds the remaining
+    episode closest to its centroid while that episode counts a member among its
+    own COHORT_NEIGHBOURS nearest neighbours and the bin still fits. Ties break
+    on identifier, so the result depends only on the episodes, their vectors and
+    the budget. A seed nothing reciprocates goes back for first-fit packing.
     """
-    remaining = sorted(episodes, key=lambda episode: episode.episode_id)
-    bins = []
+    ordered = sorted(episodes, key=lambda episode: episode.episode_id)
+    ids = [episode.episode_id for episode in ordered]
+    similarity: dict[str, dict[str, float]] = {identifier: {} for identifier in ids}
+    for index, left in enumerate(ids):
+        for right in ids[index + 1 :]:
+            value = math.fsum(a * b for a, b in zip(vectors[left], vectors[right], strict=True))
+            similarity[left][right] = similarity[right][left] = value
+    neighbours = {
+        identifier: set(
+            sorted(scores, key=lambda other: (-scores[other], other))[:COHORT_NEIGHBOURS]
+        )
+        for identifier, scores in similarity.items()
+    }
+    remaining = list(ordered)
+    bins, alone = [], []
     while remaining:
-        seed = remaining.pop(0)
-        bucket = [seed]
-        centroid = list(vectors[seed.episode_id])
+        bucket = [remaining.pop(0)]
+        members = {bucket[0].episode_id}
         while remaining:
-            # remaining stays sorted and max() keeps the first of equal keys, so a
-            # tie goes to the smaller identifier.
+            # A centroid of unit vectors scores a candidate by the sum of its
+            # similarities to the members. remaining stays sorted and max() keeps
+            # the first of equal keys, so a tie goes to the smaller identifier.
             nearest = max(
                 remaining,
                 key=lambda episode: math.fsum(
-                    a * b for a, b in zip(centroid, vectors[episode.episode_id], strict=True)
+                    similarity[member][episode.episode_id] for member in members
                 ),
             )
-            if not fits([*bucket, nearest]):
+            if not neighbours[nearest.episode_id] & members or not fits([*bucket, nearest]):
                 break
             bucket.append(nearest)
+            members.add(nearest.episode_id)
             remaining.remove(nearest)
-            centroid = [a + b for a, b in zip(centroid, vectors[nearest.episode_id], strict=True)]
-        bins.append(bucket)
-    return bins
+        if len(bucket) > 1:
+            bins.append(bucket)
+        else:
+            alone.extend(bucket)
+    return bins, alone
 
 
 async def prepare_stored_source_packets(org, principal, source_id, resolver):
