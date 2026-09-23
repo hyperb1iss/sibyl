@@ -13,7 +13,7 @@ from pydantic_ai.models.test import TestModel
 
 from sibyl_core.ai.llm.extractor import Extractor
 from sibyl_core.backends.surreal import SurrealContentClient
-from sibyl_core.backends.surreal.content_schema import bootstrap_content_schema
+from sibyl_core.backends.surreal.content_schema import EMBEDDING_DIM, bootstrap_content_schema
 from sibyl_core.services import ordinary_cohort as service
 from sibyl_core.services import procedure_validation
 from sibyl_core.services.content_raw_persistence import remember_raw_memory, save_raw_memory
@@ -370,6 +370,91 @@ async def test_ordinary_cohort_budget_partition_keeps_all_source_bytes(
         for source in sources:
             if source.id in bucket:
                 assert source.raw_content in prepared.prepared.prompt
+
+
+def _axis(axis, tilt=0.0):
+    vector = [0.0] * EMBEDDING_DIM
+    vector[axis] = 1.0
+    vector[2] = tilt
+    return vector
+
+
+async def _embed(content_store, source, vector, space="model-a"):
+    await content_store.execute_query(
+        "UPDATE raw_captures SET embedding=$vector, metadata.embedding_metadata=$space "
+        "WHERE uuid=$uuid;",
+        vector=vector,
+        space={"model": space},
+        uuid=source.id,
+    )
+
+
+async def _family_sources(count):
+    sources = [
+        await remember_raw_memory(
+            organization_id="org",
+            principal_id="owner",
+            source_id=f"family-{index}",
+            raw_content=f"Episode {index}: repair evidence.",
+            embedding_provider=None,
+        )
+        for index in range(count)
+    ]
+    return sorted(sources, key=lambda source: source.id)
+
+
+def _capacity_in_episodes(monkeypatch, capacity):
+    from sibyl_core.config import settings
+    from sibyl_core.tasks.ordinary_proposals import PartialCohort
+
+    monkeypatch.setattr(settings, "consolidation_max_input_chars", capacity)
+    monkeypatch.setattr(
+        service,
+        "_cohort_input_chars",
+        lambda prepared, *args, **kwargs: len(
+            PartialCohort.model_validate_json(prepared.input_json).episodes
+        ),
+    )
+
+
+async def test_partition_grows_cohorts_from_nearest_embedded_neighbours(
+    cohort_sources, content_store, monkeypatch
+):
+    sources = await _family_sources(6)
+    install_proposal(monkeypatch, sources)
+    _capacity_in_episodes(monkeypatch, 3)
+    resolver = AsyncMock(return_value=SourceReadAuthority("owner"))
+    ids = [source.id for source in sources]
+    assert await service.partition_stored_cohort("org", "owner", ids, resolver) == [
+        ids[:3],
+        ids[3:],
+    ]
+    # Interleave two families across identifier order, the way unrelated tasks
+    # share a page of random identifiers.
+    for index, source in enumerate(sources):
+        await _embed(content_store, source, _axis(index % 2, tilt=index / 100))
+    bins = await service.partition_stored_cohort("org", "owner", ids, resolver)
+    assert bins == [ids[0::2], ids[1::2]]
+    assert bins == await service.partition_stored_cohort(
+        "org", "owner", list(reversed(ids)), resolver
+    )
+
+
+async def test_partition_keeps_budget_packing_outside_the_shared_embedding_space(
+    cohort_sources, content_store, monkeypatch
+):
+    sources = await _family_sources(6)
+    install_proposal(monkeypatch, sources)
+    _capacity_in_episodes(monkeypatch, 3)
+    for index in (0, 2, 4):
+        await _embed(content_store, sources[index], _axis(0, tilt=index / 100))
+    # One vector from another model is not comparable with the shared space.
+    await _embed(content_store, sources[1], _axis(0), space="model-b")
+    ids = [source.id for source in sources]
+    bins = await service.partition_stored_cohort(
+        "org", "owner", ids, AsyncMock(return_value=SourceReadAuthority("owner"))
+    )
+    assert bins == [ids[1::2], ids[0::2]]
 
 
 async def test_cohort_partition_keeps_event_loop_responsive(cohort_sources, monkeypatch):

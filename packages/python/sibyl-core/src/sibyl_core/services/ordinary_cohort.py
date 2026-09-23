@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from collections.abc import Awaitable, Callable
+import math
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from threading import Event
 
@@ -60,6 +61,10 @@ LET $states=(SELECT * OMIT validation_write_witness FROM source_states WHERE org
 LET $snapshot={captures:$captures,states:$states};
 LET $snapshot_digest=crypto::sha256(type::string($snapshot));
 """
+COHORT_AFFINITY = (
+    "SELECT uuid, embedding, metadata.embedding_metadata AS space FROM raw_captures "
+    "WHERE organization_id=$org AND uuid IN $source_ids AND embedding != NONE ORDER BY uuid;"
+)
 COHORT_GUARD = (
     COHORT_SNAPSHOT
     + "IF $snapshot_digest!=$expected { THROW 'Ordinary cohort sources changed'; };"
@@ -498,6 +503,7 @@ async def partition_stored_cohort(org, principal, source_ids, resolver):
     )
 
     original = await prepare_stored_cohort(org, principal, source_ids, resolver)
+    affinity = await _cohort_affinity(org, original.ids)
     owned, _policy = await validation_extractor()
     try:
         extractor = await _proposal_extractor(owned, original.prepared.system)
@@ -516,9 +522,30 @@ async def partition_stored_cohort(org, principal, source_ids, resolver):
             schema_chars,
             critic_schema_chars,
             cancelled,
+            affinity,
         )
     finally:
         cancelled.set()
+
+
+async def _cohort_affinity(org: str, source_ids: list[str]) -> dict[str, tuple[float, ...]]:
+    """Unit vectors from the embedding space most sources share.
+
+    Vectors from different models or text versions are not comparable, so every
+    source outside the largest space, and every unembedded one, keeps budget-only
+    packing.
+    """
+    spaces: dict[str, dict[str, tuple[float, ...]]] = {}
+    for row in await _query(COHORT_AFFINITY, org=org, source_ids=sorted(source_ids)):
+        vector = row.get("embedding") or ()
+        norm = math.sqrt(math.fsum(value * value for value in vector))
+        if norm:
+            spaces.setdefault(canonical(row.get("space")), {})[row["uuid"]] = tuple(
+                value / norm for value in vector
+            )
+    if not spaces:
+        return {}
+    return min(spaces.items(), key=lambda item: (-len(item[1]), item[0]))[1]
 
 
 def _partition_prepared_cohort(
@@ -526,8 +553,14 @@ def _partition_prepared_cohort(
     schema_chars: int,
     critic_schema_chars: int,
     cancelled: Event,
+    affinity: Mapping[str, tuple[float, ...]] | None = None,
 ) -> list[list[str]]:
-    """Keep pure evidence preparation off the event loop and stop cancelled work."""
+    """Keep pure evidence preparation off the event loop and stop cancelled work.
+
+    Embedded episodes grow each cohort from its seed's nearest neighbours, so a
+    proposal compares related experience instead of whatever shared a page of
+    identifiers. Episodes without a comparable vector keep first-fit packing.
+    """
     group = PartialCohort.model_validate_json(original.input_json)
     cohort_fields = group.model_dump(exclude={"episodes"})
     projection_reuse = ProjectionReuse()
@@ -554,7 +587,13 @@ def _partition_prepared_cohort(
             <= settings.consolidation_max_input_chars
         )
 
-    for episode in group.episodes:
+    vectors = affinity or {}
+    related = [episode for episode in group.episodes if episode.episode_id in vectors]
+    if len(related) < 2:
+        related = []
+    related_ids = {episode.episode_id for episode in related}
+    unrelated = [episode for episode in group.episodes if episode.episode_id not in related_ids]
+    for episode in unrelated:
         if cancelled.is_set():
             raise asyncio.CancelledError
         for bucket in bins:
@@ -563,7 +602,39 @@ def _partition_prepared_cohort(
                 break
         else:
             bins.append([episode])
+    bins.extend(_nearest_neighbour_bins(related, vectors, fits))
     return [[episode.episode_id for episode in bucket] for bucket in bins]
+
+
+def _nearest_neighbour_bins(episodes, vectors, fits):
+    """Seed each bin with the first remaining episode and add its nearest neighbours.
+
+    Similarity is measured to the bin's centroid, ties break on identifier, and a
+    bin closes at the first neighbour that no longer fits, so the result depends
+    only on the episodes, their vectors and the budget.
+    """
+    remaining = sorted(episodes, key=lambda episode: episode.episode_id)
+    bins = []
+    while remaining:
+        seed = remaining.pop(0)
+        bucket = [seed]
+        centroid = list(vectors[seed.episode_id])
+        while remaining:
+            # remaining stays sorted and max() keeps the first of equal keys, so a
+            # tie goes to the smaller identifier.
+            nearest = max(
+                remaining,
+                key=lambda episode: math.fsum(
+                    a * b for a, b in zip(centroid, vectors[episode.episode_id], strict=True)
+                ),
+            )
+            if not fits([*bucket, nearest]):
+                break
+            bucket.append(nearest)
+            remaining.remove(nearest)
+            centroid = [a + b for a, b in zip(centroid, vectors[nearest.episode_id], strict=True)]
+        bins.append(bucket)
+    return bins
 
 
 async def prepare_stored_source_packets(org, principal, source_id, resolver):
