@@ -148,6 +148,7 @@ class FakeRunner:
         arm_id: str,
         output: Path,
         attempt_id: str | None = None,
+        seed: int | None = None,
     ) -> dict[str, Any]:
         self.calls.append(
             {
@@ -156,6 +157,7 @@ class FakeRunner:
                 "arm": arm_id,
                 "output": output,
                 "attempt_id": attempt_id,
+                "seed": seed,
             }
         )
         if task_id in self.raises:
@@ -233,6 +235,25 @@ def test_repetitions_each_get_a_fresh_attempt_id(
     assert sorted(cell["repetition"] for cell in cells if cell["task"] == TASKS[0]) == [0, 1, 2]
     for cell in cells:
         assert (Path(report["root"]) / cell["receipt"]).is_file()
+
+
+def test_repetitions_each_send_their_own_seed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    report, fake = run_screen(
+        tmp_path,
+        monkeypatch,
+        outcomes={task: [True, False, True] for task in TASKS},
+        repetitions=3,
+    )
+    # The template seed is 0, so repetition r asks the controller for seed r.
+    for task in TASKS:
+        sent = sorted(call["seed"] for call in fake.calls if call["task"] == task)
+        assert sent == [0, 1, 2]
+        recorded = {
+            cell["repetition"]: cell["seed"] for cell in report["cells"] if cell["task"] == task
+        }
+        assert recorded == {0: 0, 1: 1, 2: 2}
 
 
 def test_a_raising_runner_becomes_one_bad_cell_not_a_dead_sweep(

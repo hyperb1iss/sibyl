@@ -678,6 +678,7 @@ def run_cells(
                 manifest_path=manifests[task],
                 output=output,
                 relative=f"cells/{task}/{arm}/{repetition}",
+                seed=headroom.repetition_seed(int(template["seed"]), repetition),
             )
             for task, arm in runnable
             for repetition in range(repetitions)

@@ -214,9 +214,16 @@ class FakeRunner:
         arm_id: str,
         output: Path,
         attempt_id: str | None = None,
+        seed: int | None = None,
     ) -> dict[str, Any]:
         self.calls.append(
-            {"manifest": manifest_path, "task": task_id, "arm": arm_id, "attempt_id": attempt_id}
+            {
+                "manifest": manifest_path,
+                "task": task_id,
+                "arm": arm_id,
+                "attempt_id": attempt_id,
+                "seed": seed,
+            }
         )
         output.mkdir(parents=True)
         passed = self.outcomes[(task_id, arm_id)].pop(0)
@@ -311,6 +318,31 @@ def test_a_memory_arm_cites_every_declared_experience_and_no_memory_cites_none(
     assert [row.id for row in manifest.experiences] == declared
     assert manifest.experiment_id == f"screen48-{probe.NAMESPACE}-c1-{TASKS[0]}"
     assert report["checkpoint"] == preparation["checkpoint"]
+
+
+def test_arms_share_a_seed_within_a_repetition_and_repetitions_differ(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakeRunner(all_pass())
+    monkeypatch.setattr(runner, "run_task", fake)
+    output = tmp_path / "out"
+    template = write_template(tmp_path / "artifacts")
+    probe.run_cells(
+        preparation=write_preparation(output),
+        template=template,
+        tasks_root=write_material(tmp_path / "material"),
+        output=output,
+        repetitions=REPETITIONS,
+        workers=2,
+    )
+    for task in TASKS:
+        by_arm = {
+            arm: sorted(c["seed"] for c in fake.calls if (c["task"], c["arm"]) == (task, arm))
+            for arm in ARMS
+        }
+        # Pairing: every arm sees the same seeds. Sampling: no seed repeats within an arm.
+        assert all(seeds == by_arm[ARMS[0]] for seeds in by_arm.values())
+        assert by_arm[ARMS[0]] == [template["seed"] + r for r in range(REPETITIONS)]
 
 
 def test_the_manifest_carries_the_bytes_that_were_sealed_not_a_caller_s_copy(
@@ -908,10 +940,22 @@ class _StoppingRunner(FakeRunner):
     """A runner whose native cells stop after one look and change nothing."""
 
     def __call__(
-        self, manifest_path: Path, *, task_id: str, arm_id: str, output: Path, attempt_id=None
+        self,
+        manifest_path: Path,
+        *,
+        task_id: str,
+        arm_id: str,
+        output: Path,
+        attempt_id=None,
+        seed=None,
     ):
         result = super().__call__(
-            manifest_path, task_id=task_id, arm_id=arm_id, output=output, attempt_id=attempt_id
+            manifest_path,
+            task_id=task_id,
+            arm_id=arm_id,
+            output=output,
+            attempt_id=attempt_id,
+            seed=seed,
         )
         _trace(
             output / headroom.TRACE_NAME,
