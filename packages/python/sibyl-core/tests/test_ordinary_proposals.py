@@ -312,6 +312,47 @@ def test_partial_ordinary_content_free_patterns_are_rejected(goal):
         p.PartialProcedure.model_validate({"kind": "pattern", "goal": goal})
 
 
+def test_partial_ordinary_decision_rules_follow_the_goal_with_their_evidence():
+    rule = assertion("Reject a path that still holds a percent escape after one decode")
+    draft = p.PartialProcedure(
+        kind="pattern", goal=assertion(), decision_rules=[rule], failure_modes=[assertion()]
+    )
+    prepared = p.prepare_partial_proposal(cohort(episode(), episode("second")))
+    assert "decision_rules" in prepared.system
+    candidate = prepared.render(p.PartialProposal(procedure=draft))
+    assert candidate
+    content = candidate.content
+    assert content.index("## /goal") < content.index("## /decision_rules/0")
+    assert content.index("## /decision_rules/0") < content.index("## /failure_modes/0")
+    assert f"{rule.statement} (inferred; evidence: episode first bytes 0:5" in content
+    receipt = candidate.metadata["ordinary_proposal_receipt"]
+    assert "/decision_rules/0" in {span["path"] for span in receipt["spans"]}
+    assert "decision_rules" not in receipt["unspecified_fields"]
+
+
+def test_partial_ordinary_proposal_without_decision_rules_renders_as_before():
+    # Captured from the renderer before decision_rules existed. Evidence origin
+    # re-renders stored proposals and requires identical content, so a change here
+    # breaks provenance for every ordinary memory already published.
+    before = (
+        "# Pattern: Inspect logs\n\n"
+        f"{p.QUALIFICATION}\n\n"
+        "Environment compatibility: unknown.\n"
+        "Unspecified proposal fields: environment, preconditions, required_tools, "
+        "failure_modes, abstain_when, expected_result, actions/0/success_criteria.\n"
+        "Missing fields indicate incomplete proposal coverage, not absent real-world "
+        "conditions.\n\n"
+        "## /goal\n"
+        "Inspect logs (inferred; evidence: episode first bytes 0:5 (sources capture-first))\n\n"
+        "## /actions/0/action\n"
+        "Inspect logs (inferred; evidence: episode first bytes 0:5 (sources capture-first))"
+    )
+    stored = json.loads(proposal().model_dump_json(exclude={"procedure": {"decision_rules"}}))
+    prepared = p.prepare_partial_proposal(cohort(episode(), episode("second")))
+    candidate = prepared.render(p.PartialProposal.model_validate(stored))
+    assert candidate and candidate.content == before
+
+
 # ---------------------------------------------------------------------------
 # Complete-projection citations resolve to the ranges the projection listed
 # ---------------------------------------------------------------------------
