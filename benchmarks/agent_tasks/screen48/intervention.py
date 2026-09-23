@@ -54,7 +54,6 @@ SOURCE_ARMS = (NATIVE_ARM, RAW_ARM)
 #: Every packable item's text ends with one of these, so a sealed pack can be
 #: split back into items and each piece checked against its recorded digest.
 ITEM_CLOSERS = ("</historical-episode>\n", "</native>\n", "</summary>\n")
-RAW_NATIVE_TYPE = "raw_memory"
 
 
 def split_items(memory: str, header: str, selected: Sequence[dict[str, Any]]) -> list[str]:
@@ -141,12 +140,18 @@ def compose(
 
 
 def is_derived(receipt: dict[str, Any]) -> bool:
-    """A native pack item that is not one of the retained raw originals."""
-    try:
-        kind = json.loads(receipt["id"])[0]
-    except (ValueError, TypeError, IndexError) as exc:
-        raise ManifestError(f"native item id is not a typed key: {receipt['id']!r}") from exc
-    return kind != RAW_NATIVE_TYPE
+    """A native pack item that is not one of the study's retained raw originals.
+
+    The recall adapter hydrates a catalog original and records its evidence as
+    ``{"native": ..., "original": ...}``; everything else it returned (a graph
+    entity, or a raw row outside the catalog such as a reflection candidate)
+    keeps the engine's own evidence. The native key's type cannot tell these
+    apart, because a reflection candidate is a raw_memory row too.
+    """
+    evidence = receipt.get("evidence")
+    if not isinstance(evidence, dict):
+        raise ManifestError(f"native item {receipt.get('id')!r} carries no evidence")
+    return "original" not in evidence
 
 
 def summary_block(references: dict[str, Any], family: str) -> str:

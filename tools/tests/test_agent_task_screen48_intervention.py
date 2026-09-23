@@ -44,9 +44,20 @@ def derived_block(identifier: str = "pattern_v3_escape") -> str:
 
 
 def receipt(identifier: str, text: str, *, rendered: bool) -> dict[str, Any]:
-    entry = {"id": identifier, "block_sha256": contract.sha(text.encode())}
+    """A pack receipt as the recall adapter writes it: originals are rendered episodes
+    with ``native`` and ``original`` evidence; anything else keeps flat evidence."""
+    entry: dict[str, Any] = {
+        "id": identifier,
+        "block_sha256": contract.sha(text.encode()),
+        "evidence": {"id": identifier},
+    }
     if rendered:
-        entry = {**entry, "block_sha256": "b" * 64, "rendered_sha256": contract.sha(text.encode())}
+        entry = {
+            **entry,
+            "block_sha256": "b" * 64,
+            "rendered_sha256": contract.sha(text.encode()),
+            "evidence": {"native": {"id": identifier}, "original": {"source_id": identifier}},
+        }
     return entry
 
 
@@ -286,6 +297,14 @@ def test_an_ablation_that_removes_everything_is_a_valid_empty_pack(tmp_path: Pat
     assert minus == ""
     assert document["status"] == "prepared"
     assert preparation["prepared"] == len(intervention.DIAGNOSTIC_ARMS)
+
+
+def test_a_reflection_candidate_raw_row_counts_as_derived() -> None:
+    # A candidate is a raw_memory row too; only a hydrated catalog original is raw.
+    candidate = receipt(native_raw_key("candidate"), derived_block("candidate"), rendered=False)
+    original = receipt(native_raw_key("e1"), episode("e1"), rendered=True)
+    assert intervention.is_derived(candidate) is True
+    assert intervention.is_derived(original) is False
 
 
 def test_an_arm_outside_the_intervention_is_refused(tmp_path: Path, seams) -> None:
