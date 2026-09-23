@@ -20,6 +20,7 @@ TASK = "alpha-task"
 FAMILY = "decoded-root-routing"
 HEADER = contract.EPISODE_HEADER
 PATTERN_ID = json.dumps(["pattern", "pattern_v3_escape"], separators=(",", ":"))
+PASSAGE_ID = json.dumps(["passage", "passage_v3_other"], separators=(",", ":"))
 SUMMARY_TEXT = "unquote alone does not reject a malformed escape such as %ZZ."
 ORACLE = json.dumps(
     {
@@ -37,8 +38,8 @@ def episode(name: str) -> str:
     )
 
 
-def derived_block() -> str:
-    body = {"id": "pattern_v3_escape", "content": "reject %ZZ; decode each segment once"}
+def derived_block(identifier: str = "pattern_v3_escape") -> str:
+    body = {"id": identifier, "content": "reject %ZZ; decode each segment once"}
     return "<native>\n" + json.dumps(body, sort_keys=True) + "\n</native>\n"
 
 
@@ -85,9 +86,13 @@ def write_material(root: Path) -> Path:
     return root
 
 
-def write_source(root: Path, *, with_derived: bool = True) -> Path:
+def write_source(
+    root: Path, *, with_derived: bool = True, with_passage: bool = False, raw_in_native: bool = True
+) -> Path:
     """A prepare-only probe's output: native and raw packs for one task, sealed."""
-    native_items = [(native_raw_key("e1"), episode("e1"), True)]
+    native_items = [(native_raw_key("e1"), episode("e1"), True)] if raw_in_native else []
+    if with_passage:
+        native_items.insert(0, (PASSAGE_ID, derived_block("passage_v3_other"), False))
     if with_derived:
         native_items.insert(0, (PATTERN_ID, derived_block(), False))
     raw_items = [
@@ -117,6 +122,7 @@ def write_source(root: Path, *, with_derived: bool = True) -> Path:
                 "arm": arm,
                 "status": "prepared",
                 "memory_sha256": contract.sha(memory.encode()),
+                "pack_receipt_sha256": contract.digest(document),
                 **paths,
             }
         )
@@ -187,7 +193,8 @@ def test_arms_are_recompositions_of_the_sealed_packs(tmp_path: Path, seams) -> N
     out = tmp_path / "out"
     source = tmp_path / "source"
     assert preparation["prepared"] == len(intervention.DIAGNOSTIC_ARMS)
-    assert preparation["derived_items"] == [PATTERN_ID]
+    assert preparation["targets"] == [PATTERN_ID]
+    assert preparation["targets_named"] is False
     for arm in intervention.SOURCE_ARMS:
         memory, _ = memory_of(out, preparation, arm)
         assert memory == (source / "packs" / "cp1" / TASK / f"{arm}.txt").read_text()
@@ -197,6 +204,9 @@ def test_arms_are_recompositions_of_the_sealed_packs(tmp_path: Path, seams) -> N
     plus, document = memory_of(out, preparation, intervention.PLUS_DERIVED_ARM)
     assert plus == HEADER + derived_block() + episode("e1") + episode("e2") + episode("e3")
     assert document["intervention"]["added"] == [PATTERN_ID]
+    unevicted, document = memory_of(out, preparation, intervention.MINUS_EVICTED_ARM)
+    assert unevicted == HEADER + episode("e1") + episode("e2") + episode("e3")
+    assert document["intervention"]["removed"] == []
     summary, _ = memory_of(out, preparation, intervention.PLUS_SUMMARY_ARM)
     assert summary.startswith(HEADER + f'<summary id="{FAMILY}"')
     assert SUMMARY_TEXT in summary
@@ -214,12 +224,68 @@ def test_an_added_item_displaces_raw_items_from_the_tail_under_the_same_budget(
     assert plus.startswith(HEADER + derived_block())
     assert document["intervention"]["dropped"] == ["e3"]
     assert document["intervention"]["kept"] == [PATTERN_ID, "e1", "e2"]
+    # The matched control drops the same raw tail without adding anything.
+    control, document = memory_of(tmp_path / "out", preparation, intervention.MINUS_EVICTED_ARM)
+    assert control == HEADER + episode("e1") + episode("e2")
+    assert document["intervention"]["removed"] == ["e3"]
 
 
 def test_a_native_pack_without_a_derived_item_is_refused(tmp_path: Path, seams) -> None:
     seams()
     with pytest.raises(ManifestError, match="carries no derived item"):
         build(tmp_path, preparation_root=write_source(tmp_path / "bare", with_derived=False))
+
+
+def test_a_named_target_leaves_other_derived_items_in_place(tmp_path: Path, seams) -> None:
+    seams()
+    source = write_source(tmp_path / "mixed", with_passage=True)
+    preparation = build(tmp_path, preparation_root=source, targets=[PATTERN_ID])
+    assert preparation["targets"] == [PATTERN_ID]
+    assert preparation["untargeted_derived_items"] == [PASSAGE_ID]
+    minus, document = memory_of(tmp_path / "out", preparation, intervention.MINUS_DERIVED_ARM)
+    assert minus == HEADER + derived_block("passage_v3_other") + episode("e1")
+    assert document["intervention"]["removed"] == [PATTERN_ID]
+    plus, document = memory_of(tmp_path / "out", preparation, intervention.PLUS_DERIVED_ARM)
+    assert plus.startswith(HEADER + derived_block() + episode("e1"))
+    assert document["intervention"]["added"] == [PATTERN_ID]
+
+
+@pytest.mark.parametrize(
+    ("target", "message"),
+    [
+        (native_raw_key("e1"), "is a raw original"),
+        (json.dumps(["pattern", "absent"], separators=(",", ":")), "is not in the native pack"),
+    ],
+)
+def test_a_target_must_be_a_derived_item_in_the_native_pack(
+    tmp_path: Path, seams, target: str, message: str
+) -> None:
+    seams()
+    with pytest.raises(ManifestError, match=message):
+        build(tmp_path, targets=[target])
+
+
+def test_edited_receipt_metadata_is_refused_even_with_the_memory_intact(
+    tmp_path: Path, seams
+) -> None:
+    seams()
+    source = write_source(tmp_path / "tampered")
+    receipt_path = source / "packs" / "cp1" / TASK / "native.json"
+    document = json.loads(receipt_path.read_text())
+    document["selected"][1]["id"] = json.dumps(["pattern", "forged"], separators=(",", ":"))
+    receipt_path.write_text(json.dumps(document))
+    with pytest.raises(ManifestError, match="receipt differs from its recorded digest"):
+        build(tmp_path, preparation_root=source)
+
+
+def test_an_ablation_that_removes_everything_is_a_valid_empty_pack(tmp_path: Path, seams) -> None:
+    seams()
+    source = write_source(tmp_path / "lone", raw_in_native=False)
+    preparation = build(tmp_path, preparation_root=source)
+    minus, document = memory_of(tmp_path / "out", preparation, intervention.MINUS_DERIVED_ARM)
+    assert minus == ""
+    assert document["status"] == "prepared"
+    assert preparation["prepared"] == len(intervention.DIAGNOSTIC_ARMS)
 
 
 def test_an_arm_outside_the_intervention_is_refused(tmp_path: Path, seams) -> None:

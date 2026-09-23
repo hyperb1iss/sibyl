@@ -6,13 +6,18 @@ that a prepare-only probe already sealed over one database state. Nothing here
 retrieves, ranks or generates memory; every arm is built from sealed bytes.
 
 - ``native`` and ``raw_retrieval`` are the prepared packs, byte for byte.
-- ``native_minus_derived`` is the native pack with every derived item removed
-  and nothing refilled, so any change is attributable to those items.
-- ``raw_plus_derived`` puts the native pack's derived items first and then the
-  raw pack's items in their ranked order, prefix-packed under the same counter
-  and budget the preparation used; raw items that no longer fit are recorded.
-- ``raw_plus_family_summary`` does the same with the training family's
-  summary-library reference in place of the derived items.
+- ``native_minus_derived`` is the native pack with the targeted derived items
+  removed and nothing refilled, so any change is attributable to those items.
+- ``raw_plus_derived`` puts the targeted items first and then the raw pack's
+  items in their ranked order, prefix-packed under the same counter and budget
+  the preparation used; raw items that no longer fit are recorded as evicted.
+- ``raw_minus_evicted`` is the raw pack without the items ``raw_plus_derived``
+  evicted, and nothing added, so eviction can be told apart from addition.
+- ``raw_plus_family_summary`` puts the training family's summary-library
+  reference first in the same way.
+
+The targets are named by their native item keys; with none named, every
+derived item in the native pack is targeted and the preparation says so.
 
 The three recomposed arms are diagnostic interventions, not production arms,
 and a difference between any two arms here is not a learning claim.
@@ -36,7 +41,15 @@ RAW_ARM = "raw_retrieval"
 MINUS_DERIVED_ARM = "native_minus_derived"
 PLUS_DERIVED_ARM = "raw_plus_derived"
 PLUS_SUMMARY_ARM = "raw_plus_family_summary"
-DIAGNOSTIC_ARMS = (NATIVE_ARM, MINUS_DERIVED_ARM, RAW_ARM, PLUS_DERIVED_ARM, PLUS_SUMMARY_ARM)
+MINUS_EVICTED_ARM = "raw_minus_evicted"
+DIAGNOSTIC_ARMS = (
+    NATIVE_ARM,
+    MINUS_DERIVED_ARM,
+    RAW_ARM,
+    PLUS_DERIVED_ARM,
+    MINUS_EVICTED_ARM,
+    PLUS_SUMMARY_ARM,
+)
 SOURCE_ARMS = (NATIVE_ARM, RAW_ARM)
 #: Every packable item's text ends with one of these, so a sealed pack can be
 #: split back into items and each piece checked against its recorded digest.
@@ -91,10 +104,14 @@ def compose(
     """Prefix-pack ``(id, text)`` items under the counter, as the preparation does.
 
     Items are taken in order until the first that no longer fits; everything
-    from there on is recorded as dropped, never reordered to squeeze in.
+    from there on is recorded as dropped, never reordered to squeeze in. No
+    items at all is a valid empty pack (an ablation can remove everything); only
+    a first item too large for the budget is a missing pack.
     """
     memory = ""
     counts = counter.request(prompt, memory, workspace)
+    if not items:
+        return {"status": "prepared", "memory": "", "counts": counts, "kept": [], "dropped": []}
     kept: list[str] = []
     for index, (identifier, text) in enumerate(items):
         candidate = (memory or header) + text
@@ -144,7 +161,18 @@ def summary_block(references: dict[str, Any], family: str) -> str:
 
 
 def _load_pack(root: Path, cell: dict[str, Any]) -> dict[str, Any]:
+    """Read a sealed pack only if the receipt is the one the preparation recorded.
+
+    The item metadata decides which bytes an intervention removes or adds, so
+    the whole receipt, not only its memory text, has to match its recorded digest.
+    """
     document = strict_json((root / cell["receipt_path"]).read_bytes())
+    if contract.digest(document) != cell.get("pack_receipt_sha256"):
+        raise ManifestError(
+            f"source pack receipt differs from its recorded digest: {cell['receipt_path']}"
+        )
+    if any(document.get(key) != cell[key] for key in ("checkpoint", "task", "arm")):
+        raise ManifestError(f"source pack receipt is outside its cell: {cell['receipt_path']}")
     if document.get("status") != "prepared" or not isinstance(document.get("memory"), str):
         raise ManifestError(f"source pack is not prepared: {cell['receipt_path']}")
     if contract.sha(document["memory"].encode()) != cell["memory_sha256"]:
@@ -182,6 +210,7 @@ def build(
     family: str,
     tokenizer_assets: Path,
     tasks_root: Path,
+    targets: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """Write the arms' packs under ``output`` and return a preparation ``run_cells`` accepts."""
     if unknown := sorted(set(arms) - set(DIAGNOSTIC_ARMS)):
@@ -201,8 +230,23 @@ def build(
         (receipt["id"], text)
         for receipt, text in zip(packs[RAW_ARM]["selected"], raw_texts, strict=True)
     ]
-    derived = [(receipt["id"], text) for receipt, text in native_items if is_derived(receipt)]
-    if not derived and ({MINUS_DERIVED_ARM, PLUS_DERIVED_ARM} & set(arms)):
+    present = {receipt["id"]: receipt for receipt, _ in native_items}
+    if targets is not None:
+        for target in targets:
+            if target not in present:
+                raise ManifestError(f"target {target} is not in the native pack for {task}")
+            if not is_derived(present[target]):
+                raise ManifestError(f"target {target} is a raw original, not a derived item")
+    chosen = (
+        set(targets) if targets is not None else {i for i, r in present.items() if is_derived(r)}
+    )
+    derived = [(receipt["id"], text) for receipt, text in native_items if receipt["id"] in chosen]
+    untargeted = [
+        receipt["id"]
+        for receipt, _ in native_items
+        if is_derived(receipt) and receipt["id"] not in chosen
+    ]
+    if not derived and ({MINUS_DERIVED_ARM, PLUS_DERIVED_ARM, MINUS_EVICTED_ARM} & set(arms)):
         raise ManifestError(f"the native pack for {task} carries no derived item to intervene on")
     counter = checkpoints.build_counter(tokenizer_assets)
     prompt, workspace = probe.material_task_source(tasks_root)(task, contract.POLICY_ROOT)
@@ -240,11 +284,15 @@ def build(
     if MINUS_DERIVED_ARM in arms:
         documents[MINUS_DERIVED_ARM] = recomposed(
             MINUS_DERIVED_ARM,
-            [(receipt["id"], text) for receipt, text in native_items if not is_derived(receipt)],
+            [
+                (receipt["id"], text)
+                for receipt, text in native_items
+                if receipt["id"] not in chosen
+            ],
             {"source": provenance[NATIVE_ARM], "removed": [item_id for item_id, _ in derived]},
         )
-    if PLUS_DERIVED_ARM in arms:
-        documents[PLUS_DERIVED_ARM] = recomposed(
+    if {PLUS_DERIVED_ARM, MINUS_EVICTED_ARM} & set(arms):
+        plus = recomposed(
             PLUS_DERIVED_ARM,
             [*derived, *raw_items],
             {
@@ -252,6 +300,14 @@ def build(
                 "added_from": provenance[NATIVE_ARM],
                 "added": [item_id for item_id, _ in derived],
             },
+        )
+        if PLUS_DERIVED_ARM in arms:
+            documents[PLUS_DERIVED_ARM] = plus
+        evicted = [i for i in plus["intervention"]["dropped"] if i not in chosen]
+        documents[MINUS_EVICTED_ARM] = recomposed(
+            MINUS_EVICTED_ARM,
+            [(item_id, text) for item_id, text in raw_items if item_id not in evicted],
+            {"source": provenance[RAW_ARM], "removed": evicted, "matches": PLUS_DERIVED_ARM},
         )
     if PLUS_SUMMARY_ARM in arms:
         block = summary_block(references, family)
@@ -275,7 +331,9 @@ def build(
             "catalog_sha256": source.get("catalog_sha256"),
             "native_inventory": source.get("native_inventory"),
         },
-        "derived_items": [item_id for item_id, _ in derived],
+        "targets": [item_id for item_id, _ in derived],
+        "targets_named": targets is not None,
+        "untargeted_derived_items": untargeted,
         "denominator": len(arms),
         "prepared": sum(cell["status"] == "prepared" for cell in cells),
         "cells": cells,
@@ -292,6 +350,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--task", required=True)
     parser.add_argument("--family", required=True)
     parser.add_argument("--arms", nargs="+", default=list(DIAGNOSTIC_ARMS))
+    # A native item key, repeatable. Without one, every derived item is targeted.
+    parser.add_argument("--target", action="append", default=None)
     parser.add_argument("--tasks-root", type=Path, default=probe.MATERIAL_ROOT)
     parser.add_argument("--template", type=Path, required=True)
     parser.add_argument("--tokenizer-assets", type=Path, required=True)
@@ -317,6 +377,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         family=args.family,
         tokenizer_assets=Path(args.tokenizer_assets),
         tasks_root=args.tasks_root,
+        targets=args.target,
     )
     if args.build_only:
         sys.stdout.write(
