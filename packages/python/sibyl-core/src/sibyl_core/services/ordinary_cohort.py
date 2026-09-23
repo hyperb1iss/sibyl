@@ -360,6 +360,9 @@ async def _run_cohort(org, principal, original, resolver, extractor, policy, aut
         "source_bindings": original.bindings,
         "snapshot": original.snapshot_sha256,
         "input": original.prepared.input_sha256,
+        # The input digest covers the evidence only, so the instructions bind here:
+        # reworded instructions must not replay a result produced under the old ones.
+        "prompt": original.prepared.prompt_sha256,
         "policy": policy,
         **(
             {"evidence_projection": json.loads(original.prepared.projection_json)}

@@ -328,6 +328,29 @@ async def test_ordinary_cohort_completed_receipt_recovers_without_provider(
     assert json.loads(stages[0]["usage_json"])["requests"] == 1
 
 
+async def test_ordinary_cohort_reworded_instructions_do_not_replay_the_old_result(
+    cohort_sources, monkeypatch, content_store
+):
+    from sibyl_core.tasks import ordinary_proposals
+
+    install_proposal(monkeypatch, cohort_sources)
+    args = (
+        "org",
+        "owner",
+        [s.id for s in cohort_sources],
+        AsyncMock(return_value=SourceReadAuthority("owner")),
+    )
+    _, first = await service.propose_stored_cohort(*args, authorize=AsyncMock())
+    # Same sources and output schema; only the instructions change.
+    monkeypatch.setattr(
+        ordinary_proposals, "REQUEST", ordinary_proposals.REQUEST + " Prefer the shortest rule."
+    )
+    _, second = await service.propose_stored_cohort(*args, authorize=AsyncMock())
+    assert first != second
+    stages = await content_store.execute_query("SELECT * FROM memory_validation_executions;")
+    assert len(stages) == 2
+
+
 async def test_ordinary_cohort_budget_partition_keeps_all_source_bytes(
     cohort_sources, content_store, monkeypatch
 ):
