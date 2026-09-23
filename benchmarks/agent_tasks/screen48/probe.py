@@ -800,6 +800,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--repetitions", type=int, default=DEFAULT_REPETITIONS)
     parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
     parser.add_argument("--api-key-env", default="OPENROUTER_API_KEY")
+    # Seal the packs and stop before any solver call, for a diagnostic that
+    # recomposes them (``intervention``) instead of running them as prepared.
+    parser.add_argument("--prepare-only", action="store_true")
     parser.add_argument("--output", type=Path, required=True)
     return parser
 
@@ -844,6 +847,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             tasks_root=args.tasks_root,
         )
     )
+    if args.prepare_only:
+        sys.stdout.write(f"{PREPARATION_NAME}: {output}/{PREPARATION_NAME}\n")
+        return EXIT_OK if preparation["prepared"] == preparation["denominator"] else EXIT_NO_PACKS
     report = run_cells(
         preparation=preparation,
         template=template,

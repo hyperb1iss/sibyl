@@ -579,7 +579,9 @@ def test_the_environment_cannot_reach_the_binding(
 
 def test_the_registry_knows_preflight_and_keeps_it_off_the_database() -> None:
     assert "preflight" in run_phase.PHASES
-    assert set(run_phase.NO_DATABASE_PHASES) == {"preflight"}
+    # The intervention runs packs an earlier probe phase sealed, so it never
+    # needs the owned container either.
+    assert set(run_phase.NO_DATABASE_PHASES) == {"preflight", "intervention"}
     assert set(run_phase.PHASES) - run_phase.NO_DATABASE_PHASES == {
         "cycle",
         "checkpoint0",
