@@ -86,12 +86,11 @@ PRODUCT_CANDIDATE_LIMIT_CEILING = 200
 #: (``prepared-bundle/entry/count_contract.py`` rejects any quote whose rate
 #: strings are not exactly "5" and "25").
 #:
-#: Caveat carried from the witness: 5/25 is the base tier. The same hashed
-#: document lists a long-context tier of 10/50 per million above a 200K-token
-#: prompt, and consolidation requests in this campaign have run 235K-272K input
-#: tokens. The campaign binds 5/25 unconditionally, so a token-priced row here
-#: is a lower bound whenever its request crossed that threshold. Rows whose
-#: provider usage arrives with ``cost_complete`` are unaffected.
+#: The same hashed witness also lists a long-context tier of 10/50 per million
+#: above a 200K-token prompt. Anthropic's pricing page, read 2026-09-24, bills
+#: the whole 1M-token window of Claude 4.6 and later models at standard rates,
+#: and the contract binds only 5/25, so the cycle prices Opus 5 without that
+#: tier. Receipts from earlier cycles doubled token-priced rows above 200K.
 PRICING_SOURCE: str | None = (
     "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-pricing-20260914/sources.json"
     " (sha256 22623e55aff2bd2ed5c7062148c774f05430b1b6e9a81503f459c839c9597327)"
@@ -99,9 +98,9 @@ PRICING_SOURCE: str | None = (
 DEFAULT_PRICE_INPUT_PER_MILLION: Decimal | None = Decimal("5")
 DEFAULT_PRICE_OUTPUT_PER_MILLION: Decimal | None = Decimal("25")
 
-#: Requests whose input exceeds this many tokens bill at the long-context tier,
-#: which the campaign's pricing witness lists for ``claude-opus-5`` at twice the
-#: base input and output rates.
+#: A request whose input exceeds this many tokens may bill at a long-context
+#: tier. No model in ``MODEL_PRICING`` has one; the doubled rate is kept as the
+#: conservative rule for a model the table does not know.
 LONG_CONTEXT_THRESHOLD_TOKENS = 200_000
 LONG_CONTEXT_MULTIPLIER = Decimal(2)
 
@@ -118,13 +117,13 @@ class ModelRates(NamedTuple):
 #: Each memory model the phase runner can pin. The cycle takes its default
 #: prices, long-context rule and receipt pricing source from the model the
 #: memory surface is set to, so a cycle on Opus 5.5 is not priced as Opus 5.
-#: Anthropic's pricing page bills Opus 5.5's whole context window at standard
-#: rates, so it carries no long-context tier.
+#: Anthropic's pricing page bills the whole context window of both models at
+#: standard rates, so neither carries a long-context tier.
 MODEL_PRICING: dict[str, ModelRates] = {
     "claude-opus-5": ModelRates(
         DEFAULT_PRICE_INPUT_PER_MILLION,
         DEFAULT_PRICE_OUTPUT_PER_MILLION,
-        LONG_CONTEXT_MULTIPLIER,
+        Decimal(1),
         PRICING_SOURCE,
     ),
     "claude-opus-5-5": ModelRates(
@@ -208,7 +207,7 @@ class CycleConfig:
     expected_sources: int = EXPECTED_SOURCES
     skip_provider_preflight: bool = False
     pricing_source: str | None = PRICING_SOURCE
-    long_context_multiplier: Decimal = LONG_CONTEXT_MULTIPLIER
+    long_context_multiplier: Decimal = MODEL_PRICING["claude-opus-5"].long_context_multiplier
 
 
 # --------------------------------------------------------------------------

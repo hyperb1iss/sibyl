@@ -549,9 +549,8 @@ async def test_draining_candidates_clears_the_pending_set(tmp_path: Path, produc
 async def test_cost_ceiling_stops_dispatch_and_seals_the_receipt(
     tmp_path: Path, product: Any
 ) -> None:
-    # 10M input tokens in one request sits in the long-context tier, so it bills
-    # at 10/M for 100 USD per invocation and the first pass alone clears a
-    # 10 USD ceiling.
+    # 10M input tokens at the pinned 5/M is 50 USD per invocation, so the
+    # first pass alone clears a 10 USD ceiling.
     fake = product(
         FakeProduct(
             sources=[f"s{index:03d}" for index in range(233)],
@@ -565,7 +564,7 @@ async def test_cost_ceiling_stops_dispatch_and_seals_the_receipt(
     assert len(fake.calls) == 1, "dispatch must stop at the ceiling, not finish the ring"
     assert receipt["status"] == cycle.STATUS_COST_CEILING
     assert receipt["reasons"][0] == "cost_ceiling_exceeded"
-    assert Decimal(receipt["usage"]["cost_usd_exact"]) == Decimal("100")
+    assert Decimal(receipt["usage"]["cost_usd_exact"]) == Decimal("50")
     assert "drain" not in receipt
 
 
@@ -709,7 +708,8 @@ def test_unrecorded_attempts_are_estimated_from_the_same_stage_kind() -> None:
 
     summary = cycle.summarize_usage(rows, **PRICES)
 
-    # 240K at the long-context 10/M rate is 2.40 an attempt, three attempts.
+    # 240K at the conservative doubled rate for an unknown model, 10/M, is
+    # 2.40 an attempt, three attempts.
     assert Decimal(summary["unrecorded_attempt_estimate_usd_exact"]) == Decimal("7.2")
     assert summary["unrecorded_attempts"] == 3
     assert summary["rows_with_unrecorded_attempts"] == 1
@@ -830,12 +830,13 @@ async def test_the_ceiling_counts_spend_that_hid_in_timeouts(
         return rows
 
     monkeypatch.setattr(cycle, "usage_rows", usage_rows)
-    guard = cycle._CostGuard(make_config(cost_ceiling_usd=Decimal("5")), datetime.now(UTC))
+    guard = cycle._CostGuard(make_config(cost_ceiling_usd=Decimal("3")), datetime.now(UTC))
 
     usage = await guard.measure()
 
-    assert Decimal(usage["cost_usd_exact"]) < Decimal("5")
-    assert Decimal(usage["ceiling_cost_usd_exact"]) > Decimal("5")
+    # 240K at 5/M measures 1.20; three unmeasured attempts add 3.60 more.
+    assert Decimal(usage["cost_usd_exact"]) == Decimal("1.2")
+    assert Decimal(usage["ceiling_cost_usd_exact"]) == Decimal("4.8")
     assert guard.exceeded is True
 
 
@@ -1195,7 +1196,8 @@ def test_a_cycle_with_no_memory_model_keeps_the_campaign_pin(
         Decimal("25"),
     )
     assert config.pricing_source == cycle.PRICING_SOURCE
-    assert config.long_context_multiplier == cycle.LONG_CONTEXT_MULTIPLIER
+    # The contract binds only 5/25; both Opus models bill 1M tokens at standard rates.
+    assert config.long_context_multiplier == Decimal(1)
 
 
 def test_an_unpriced_memory_model_needs_explicit_rates(
