@@ -1218,6 +1218,8 @@ def test_an_unpriced_memory_model_needs_explicit_rates(
 def test_opus_5_5_prices_a_long_context_row_at_its_standard_rate() -> None:
     """Anthropic bills Opus 5.5's whole window at standard rates."""
     rates = cycle.MODEL_PRICING["claude-opus-5-5"]
+    assert rates.price_input_per_million is not None
+    assert rates.price_output_per_million is not None
     row = json.dumps({"input_tokens": 300_000, "output_tokens": 10_000, "requests": 1})
 
     summary = cycle.summarize_usage(
