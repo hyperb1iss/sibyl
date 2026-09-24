@@ -6,13 +6,17 @@ import time
 from typing import Literal
 
 from pydantic import BaseModel, Field, SecretStr
-from pydantic_ai import Agent
+from pydantic_ai import Agent, NativeOutput
 from pydantic_ai.exceptions import ModelHTTPError
 
 from sibyl_core.ai.clients import output_retry_budget
 from sibyl_core.ai.errors import classify_llm_exception
 from sibyl_core.ai.llm.config import LLMConfig, LLMConfigSource, LLMProviderName, LLMSurface
-from sibyl_core.ai.providers import build_model, resolve_provider_model_id
+from sibyl_core.ai.providers import (
+    build_model,
+    rejects_forced_tool_choice,
+    resolve_provider_model_id,
+)
 from sibyl_core.observability import telemetry_registry
 
 ValidationStatus = Literal[
@@ -183,7 +187,11 @@ async def test_surface_config(
     try:
         agent = Agent[object, _SurfaceProbe](
             build_model(config),
-            output_type=_SurfaceProbe,
+            output_type=(
+                NativeOutput(_SurfaceProbe, strict=True)
+                if rejects_forced_tool_choice(config)
+                else _SurfaceProbe
+            ),
             retries=output_retry_budget(1),
         )
         result = await agent.run(

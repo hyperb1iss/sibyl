@@ -118,6 +118,7 @@ async def test_db_config_source_caches_until_invalidated() -> None:
     [
         ("claude-opus-5", None, 32768),
         ("claude-opus-5", "8192", 8192),
+        ("claude-opus-5-5", None, 32768),
         ("claude-haiku-4-5", None, None),
     ],
 )
@@ -130,6 +131,7 @@ async def test_opus_memory_output_default_uses_final_db_model(model, override, e
     result = await source.resolve(LLMSurface.MEMORY)
     assert result.max_tokens.value == expected
     assert result.max_tokens.source == ("db" if override is not None else "default")
+    assert result.effort.value == ("high" if model == "claude-opus-5-5" else None)
     settings.values["llm.memory.model"] = "claude-haiku-4-5"
     await source.invalidate()
     changed = await source.resolve(LLMSurface.MEMORY)

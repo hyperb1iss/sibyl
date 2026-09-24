@@ -157,6 +157,8 @@ def test_config_field_tracks_env_lock_metadata() -> None:
         (LLMSurface.MEMORY, "anthropic", "claude-opus-5", None, 32768),
         (LLMSurface.MEMORY, "anthropic", "claude-opus-5", "8192", 8192),
         (LLMSurface.MEMORY, "anthropic", "claude-opus-5", "65536", 65536),
+        (LLMSurface.MEMORY, "anthropic", "claude-opus-5-5", None, 32768),
+        (LLMSurface.MEMORY, "anthropic", "claude-opus-5-5", "8192", 8192),
         (LLMSurface.DEFAULT, "anthropic", "claude-opus-5", None, None),
         (LLMSurface.MEMORY, "anthropic", "claude-haiku-4-5", None, None),
         (LLMSurface.MEMORY, "openai", "claude-opus-5", None, None),
@@ -173,6 +175,36 @@ async def test_opus_memory_output_default_preserves_explicit_policy(
     assert resolved.to_llm_config().max_tokens == expected
     assert resolved.max_tokens.source == ("env" if override is not None else "default")
     assert resolved.max_tokens.locked_by_env is (override is not None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("surface", "provider", "model", "override", "expected"),
+    [
+        (LLMSurface.MEMORY, "anthropic", "claude-opus-5-5", None, "high"),
+        (LLMSurface.MEMORY, "anthropic", "claude-opus-5-5", "xhigh", "xhigh"),
+        (LLMSurface.MEMORY, "anthropic", "claude-opus-5", None, None),
+        (LLMSurface.MEMORY, "anthropic", "claude-opus-5", "medium", "medium"),
+        (LLMSurface.DEFAULT, "anthropic", "claude-opus-5-5", None, None),
+        (LLMSurface.MEMORY, "openai", "claude-opus-5-5", None, None),
+    ],
+)
+async def test_opus_5_5_memory_effort_is_pinned_above_its_medium_default(
+    surface, provider, model, override, expected
+):
+    environment = {"SIBYL_LLM_PROVIDER": provider, "SIBYL_LLM_MODEL": model}
+    if override is not None:
+        environment["SIBYL_LLM_EFFORT"] = override
+    resolved = await EnvConfigSource(environment).resolve(surface)
+    assert resolved.effort.value == expected
+    assert resolved.to_llm_config().effort == expected
+    assert resolved.effort.source == ("env" if override is not None else "default")
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_effort_is_refused() -> None:
+    with pytest.raises(LLMConfigError, match="Invalid effort"):
+        await EnvConfigSource({"SIBYL_LLM_EFFORT": "maximal"}).resolve(LLMSurface.MEMORY)
 
 
 @pytest.mark.asyncio

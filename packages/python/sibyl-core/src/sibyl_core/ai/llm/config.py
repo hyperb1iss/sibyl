@@ -14,6 +14,7 @@ from sibyl_core.ai.errors import LLMConfigError
 from sibyl_core.ai.registry import ProviderName
 
 LLMProviderName = Literal["anthropic", "gemini", "openai"]
+AnthropicEffort = Literal["low", "medium", "high", "xhigh", "max"]
 
 
 class LLMSurface(StrEnum):
@@ -36,6 +37,16 @@ def default_timeout_seconds(surface: LLMSurface) -> float:
     return MEMORY_TIMEOUT_SECONDS if surface is LLMSurface.MEMORY else DEFAULT_TIMEOUT_SECONDS
 
 
+#: Memory-surface defaults for Anthropic models whose adaptive thinking shares the
+#: output ceiling with the answer: (max_tokens, effort). Opus 5 already runs at
+#: high effort by default, so it sends none. Opus 5.5 defaults to medium, a level
+#: below the depth memory validation was qualified at, so it is pinned to high.
+MEMORY_MODEL_DEFAULTS: dict[str, tuple[int, AnthropicEffort | None]] = {
+    "claude-opus-5": (32_768, None),
+    "claude-opus-5-5": (32_768, "high"),
+}
+
+
 class LLMConfig(BaseModel):
     provider: LLMProviderName
     model: str
@@ -44,6 +55,7 @@ class LLMConfig(BaseModel):
     timeout_seconds: float = Field(default=DEFAULT_TIMEOUT_SECONDS, gt=0.0)
     transport_max_retries: int = Field(default=2, ge=0, strict=True)
     api_key: SecretStr | None = None
+    effort: AnthropicEffort | None = None
 
 
 class ConfigField[T](BaseModel):
@@ -64,23 +76,25 @@ class ResolvedLLMConfig(BaseModel):
     transport_max_retries: ConfigField[int] = Field(
         default_factory=lambda: ConfigField(value=2, source="default")
     )
+    effort: ConfigField[AnthropicEffort | None] = Field(
+        default_factory=lambda: ConfigField(value=None, source="default")
+    )
     cached_at: datetime | None = None
 
     def with_model_defaults(self) -> ResolvedLLMConfig:
-        """Apply defaults after provider/model overrides, preserving explicit limits."""
-        if self.max_tokens.source != "default":
-            return self
-        # Opus 5 shares the output ceiling between adaptive thinking and the answer.
-        max_tokens = (
-            32_768
-            if self.surface is LLMSurface.MEMORY
-            and self.provider.value == "anthropic"
-            and self.model.value == "claude-opus-5"
+        """Apply defaults after provider/model overrides, preserving explicit settings."""
+        defaults = (
+            MEMORY_MODEL_DEFAULTS.get(self.model.value)
+            if self.surface is LLMSurface.MEMORY and self.provider.value == "anthropic"
             else None
         )
-        return self.model_copy(
-            update={"max_tokens": ConfigField[int | None](value=max_tokens, source="default")}
-        )
+        max_tokens, effort = defaults or (None, None)
+        update: dict[str, object] = {}
+        if self.max_tokens.source == "default":
+            update["max_tokens"] = ConfigField[int | None](value=max_tokens, source="default")
+        if self.effort.source == "default":
+            update["effort"] = ConfigField[AnthropicEffort | None](value=effort, source="default")
+        return self.model_copy(update=update)
 
     def to_llm_config(self) -> LLMConfig:
         return LLMConfig(
@@ -91,6 +105,7 @@ class ResolvedLLMConfig(BaseModel):
             timeout_seconds=self.timeout_seconds.value,
             api_key=self.api_key.value,
             transport_max_retries=self.transport_max_retries.value,
+            effort=self.effort.value,
         )
 
 
@@ -121,7 +136,22 @@ class EnvConfigSource:
             ),
             api_key=self._resolve_api_key(provider.value),
             transport_max_retries=self._resolve_transport_retries(surface),
+            effort=self._resolve_effort(surface),
         ).with_model_defaults()
+
+    def _resolve_effort(self, surface: LLMSurface) -> ConfigField[AnthropicEffort | None]:
+        resolved = self._resolve_optional_env(surface, "EFFORT")
+        if resolved is None:
+            return ConfigField(value=None, source="default")
+        env_var, value = resolved
+        if value not in {"low", "medium", "high", "xhigh", "max"}:
+            raise LLMConfigError(f"Invalid effort for {env_var}: {value}", surface=surface.value)
+        return ConfigField[AnthropicEffort | None](
+            value=value,  # type: ignore[arg-type]
+            source="env",
+            locked_by_env=True,
+            env_var=env_var,
+        )
 
     def _resolve_transport_retries(self, surface: LLMSurface) -> ConfigField[int]:
         resolved = self._resolve_int(surface, "TRANSPORT_MAX_RETRIES", default=2)

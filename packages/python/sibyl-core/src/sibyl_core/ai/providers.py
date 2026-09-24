@@ -18,7 +18,7 @@ from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from sibyl_core.ai.errors import LLMConfigError
-from sibyl_core.ai.llm.config import LLMConfig
+from sibyl_core.ai.llm.config import AnthropicEffort, LLMConfig
 from sibyl_core.ai.registry import ModelKind, model_registry
 from sibyl_core.ai.transport import RecordingAnthropicClient, RecordingOpenAIClient
 
@@ -32,6 +32,8 @@ def build_model(config: LLMConfig, *, resources: AsyncExitStack | None = None) -
             settings = _settings(config)
             if resolved_model_profile(config).get("anthropic_disallows_sampling_settings", False):
                 settings.pop("temperature", None)
+            if (effort := anthropic_effort(config)) is not None:
+                settings["anthropic_effort"] = effort
             http_client = RecordingAnthropicClient()
             if resources is not None:
                 resources.push_async_callback(http_client.aclose)
@@ -69,6 +71,35 @@ def build_model(config: LLMConfig, *, resources: AsyncExitStack | None = None) -
             )
 
 
+#: Anthropic models that reject a forced tool choice (``tool_choice`` of type
+#: ``any`` or ``tool``). Tool output forces its output tool, so structured
+#: output on these models has to go through native structured output.
+ANTHROPIC_MODELS_WITHOUT_FORCED_TOOLS = frozenset(
+    {"claude-opus-5-5", "claude-fable-5-1", "claude-mythos-5-1"}
+)
+
+
+def rejects_forced_tool_choice(config: LLMConfig) -> bool:
+    return config.provider == "anthropic" and config.model in ANTHROPIC_MODELS_WITHOUT_FORCED_TOOLS
+
+
+def anthropic_effort(config: LLMConfig) -> AnthropicEffort | None:
+    """The configured effort as this model accepts it.
+
+    A model without effort support gets none, so one process-wide effort cannot
+    break a surface that runs an older model. ``xhigh`` falls back to ``high``
+    where the model tops out there.
+    """
+    if config.provider != "anthropic" or config.effort is None:
+        return None
+    profile = resolved_model_profile(config)
+    if not profile.get("anthropic_supports_effort", False):
+        return None
+    if config.effort == "xhigh" and not profile.get("anthropic_supports_xhigh_effort", False):
+        return "high"
+    return config.effort
+
+
 def resolved_model_profile(config: LLMConfig) -> ModelProfile:
     """Resolve provider schema capabilities without creating a network client."""
     provider = {"anthropic": AnthropicProvider, "openai": OpenAIProvider, "gemini": GoogleProvider}[
@@ -94,8 +125,8 @@ def resolve_provider_model_id(config: LLMConfig) -> str:
     return entry.provider_model_id
 
 
-def _settings(config: LLMConfig) -> dict[str, float | int]:
-    settings: dict[str, float | int] = {
+def _settings(config: LLMConfig) -> dict[str, float | int | str]:
+    settings: dict[str, float | int | str] = {
         "temperature": config.temperature,
         "timeout": config.timeout_seconds,
     }

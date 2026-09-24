@@ -68,7 +68,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 DEFAULT_GROUP_ID = "b60d61fd-d388-4cb0-9581-eca4f583544b"
 DEFAULT_PRINCIPAL_ID = "91bd4035-be71-4e14-a43f-c861fc75699c"
@@ -86,18 +86,71 @@ PRODUCT_CANDIDATE_LIMIT_CEILING = 200
 #: (``prepared-bundle/entry/count_contract.py`` rejects any quote whose rate
 #: strings are not exactly "5" and "25").
 #:
-#: Caveat carried from the witness: 5/25 is the base tier. The same hashed
-#: document lists a long-context tier of 10/50 per million above a 200K-token
-#: prompt, and consolidation requests in this campaign have run 235K-272K input
-#: tokens. The campaign binds 5/25 unconditionally, so a token-priced row here
-#: is a lower bound whenever its request crossed that threshold. Rows whose
-#: provider usage arrives with ``cost_complete`` are unaffected.
+#: The same hashed witness also lists a long-context tier of 10/50 per million
+#: above a 200K-token prompt. Anthropic's pricing page, read 2026-09-24, bills
+#: the whole 1M-token window of Claude 4.6 and later models at standard rates,
+#: and the contract binds only 5/25, so the cycle prices Opus 5 without that
+#: tier. Receipts from earlier cycles doubled token-priced rows above 200K.
 PRICING_SOURCE: str | None = (
     "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-pricing-20260914/sources.json"
     " (sha256 22623e55aff2bd2ed5c7062148c774f05430b1b6e9a81503f459c839c9597327)"
 )
 DEFAULT_PRICE_INPUT_PER_MILLION: Decimal | None = Decimal("5")
 DEFAULT_PRICE_OUTPUT_PER_MILLION: Decimal | None = Decimal("25")
+
+#: A request whose input exceeds this many tokens may bill at a long-context
+#: tier. No model in ``MODEL_PRICING`` has one; the doubled rate is kept as the
+#: conservative rule for a model the table does not know.
+LONG_CONTEXT_THRESHOLD_TOKENS = 200_000
+LONG_CONTEXT_MULTIPLIER = Decimal(2)
+
+
+class ModelRates(NamedTuple):
+    """First-party rates in USD per million tokens, and where they were read."""
+
+    price_input_per_million: Decimal | None
+    price_output_per_million: Decimal | None
+    long_context_multiplier: Decimal
+    pricing_source: str | None
+
+
+#: Each memory model the phase runner can pin. The cycle takes its default
+#: prices, long-context rule and receipt pricing source from the model the
+#: memory surface is set to, so a cycle on Opus 5.5 is not priced as Opus 5.
+#: Anthropic's pricing page bills the whole context window of both models at
+#: standard rates, so neither carries a long-context tier.
+MODEL_PRICING: dict[str, ModelRates] = {
+    "claude-opus-5": ModelRates(
+        DEFAULT_PRICE_INPUT_PER_MILLION,
+        DEFAULT_PRICE_OUTPUT_PER_MILLION,
+        Decimal(1),
+        PRICING_SOURCE,
+    ),
+    "claude-opus-5-5": ModelRates(
+        Decimal("4"),
+        Decimal("20"),
+        Decimal(1),
+        "https://platform.claude.com/docs/en/about-claude/pricing (read 2026-09-24)",
+    ),
+}
+
+#: The pricing source a receipt carries when the operator passed its own rates.
+OPERATOR_PRICING_SOURCE = "operator --price-input/--price-output"
+
+
+def model_pricing() -> ModelRates:
+    """Default rates for the memory model this process runs.
+
+    With no model set, the campaign's Opus 5 pin applies. A model the table
+    does not know gets no default rates, so the operator has to state both
+    prices rather than have it silently priced as Opus 5; its long-context rule
+    stays the conservative one.
+    """
+    model = os.environ.get("SIBYL_LLM_MEMORY_MODEL")
+    if not model:
+        return MODEL_PRICING["claude-opus-5"]
+    return MODEL_PRICING.get(model, ModelRates(None, None, LONG_CONTEXT_MULTIPLIER, None))
+
 
 #: The campaign's own recorded ceiling is 300 USD
 #: (``ordinary-count-outcome-root-20260915-r4bxev1s/acceptance.json``); this
@@ -153,6 +206,8 @@ class CycleConfig:
     price_output_per_million: Decimal
     expected_sources: int = EXPECTED_SOURCES
     skip_provider_preflight: bool = False
+    pricing_source: str | None = PRICING_SOURCE
+    long_context_multiplier: Decimal = MODEL_PRICING["claude-opus-5"].long_context_multiplier
 
 
 # --------------------------------------------------------------------------
@@ -225,12 +280,6 @@ def _as_int(value: object) -> int:
         return 0
 
 
-#: Requests whose input exceeds this many tokens bill at the long-context tier,
-#: which the pricing witness lists at twice the base input and output rates.
-LONG_CONTEXT_THRESHOLD_TOKENS = 200_000
-LONG_CONTEXT_MULTIPLIER = Decimal(2)
-
-
 def _token_cost(
     input_tokens: int,
     output_tokens: int,
@@ -238,10 +287,11 @@ def _token_cost(
     price_input_per_million: Decimal,
     price_output_per_million: Decimal,
     requests: int = 1,
+    long_context_multiplier: Decimal = LONG_CONTEXT_MULTIPLIER,
 ) -> Decimal:
     million = Decimal(1_000_000)
     per_request = input_tokens / max(requests, 1)
-    tier = LONG_CONTEXT_MULTIPLIER if per_request > LONG_CONTEXT_THRESHOLD_TOKENS else Decimal(1)
+    tier = long_context_multiplier if per_request > LONG_CONTEXT_THRESHOLD_TOKENS else Decimal(1)
     return (
         (
             Decimal(input_tokens) * price_input_per_million
@@ -257,6 +307,7 @@ def summarize_usage(
     *,
     price_input_per_million: Decimal,
     price_output_per_million: Decimal,
+    long_context_multiplier: Decimal = LONG_CONTEXT_MULTIPLIER,
 ) -> dict[str, Any]:
     """Sum durable validation-execution usage into a priced total.
 
@@ -322,11 +373,13 @@ def summarize_usage(
             price_input_per_million=price_input_per_million,
             price_output_per_million=price_output_per_million,
             requests=requests,
+            long_context_multiplier=long_context_multiplier,
         )
     unrecorded = estimate_unrecorded_attempts(
         attempts,
         price_input_per_million=price_input_per_million,
         price_output_per_million=price_output_per_million,
+        long_context_multiplier=long_context_multiplier,
     )
     return {
         **totals,
@@ -339,6 +392,7 @@ def summarize_usage(
         ),
         "price_input_per_million": str(price_input_per_million),
         "price_output_per_million": str(price_output_per_million),
+        "long_context_multiplier": str(long_context_multiplier),
     }
 
 
@@ -432,6 +486,7 @@ def estimate_unrecorded_attempts(
     *,
     price_input_per_million: Decimal,
     price_output_per_million: Decimal,
+    long_context_multiplier: Decimal = LONG_CONTEXT_MULTIPLIER,
 ) -> dict[str, Any]:
     """Price attempts that were dispatched and billed but never measured.
 
@@ -478,6 +533,7 @@ def estimate_unrecorded_attempts(
             0,
             price_input_per_million=price_input_per_million,
             price_output_per_million=price_output_per_million,
+            long_context_multiplier=long_context_multiplier,
         )
     return {
         "rows_with_unrecorded_attempts": affected,
@@ -1040,6 +1096,7 @@ class _CostGuard:
             [],
             price_input_per_million=config.price_input_per_million,
             price_output_per_million=config.price_output_per_million,
+            long_context_multiplier=config.long_context_multiplier,
         )
         self.exceeded = False
 
@@ -1049,6 +1106,7 @@ class _CostGuard:
             rows,
             price_input_per_million=self.config.price_input_per_million,
             price_output_per_million=self.config.price_output_per_million,
+            long_context_multiplier=self.config.long_context_multiplier,
         )
         # The ceiling counts the estimate for billed-but-unmeasured attempts,
         # so a run whose spend hid in timeouts still stops.
@@ -1257,7 +1315,8 @@ def _header(config: CycleConfig, started: datetime) -> dict[str, Any]:
             "price_input_per_million": str(config.price_input_per_million),
             "price_output_per_million": str(config.price_output_per_million),
             "expected_sources": config.expected_sources,
-            "pricing_source": PRICING_SOURCE,
+            "pricing_source": config.pricing_source,
+            "long_context_multiplier": str(config.long_context_multiplier),
         },
     }
 
@@ -1437,6 +1496,7 @@ async def run_cycle(config: CycleConfig, output: Path) -> dict[str, Any]:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    rates = model_pricing()
     parser = argparse.ArgumentParser(prog="screen48-cycle", description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
@@ -1448,16 +1508,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--price-input",
         type=Decimal,
-        default=DEFAULT_PRICE_INPUT_PER_MILLION,
-        required=DEFAULT_PRICE_INPUT_PER_MILLION is None,
-        help="USD per million input tokens",
+        default=rates.price_input_per_million,
+        required=rates.price_input_per_million is None,
+        help="USD per million input tokens (default: the memory model's base rate)",
     )
     parser.add_argument(
         "--price-output",
         type=Decimal,
-        default=DEFAULT_PRICE_OUTPUT_PER_MILLION,
-        required=DEFAULT_PRICE_OUTPUT_PER_MILLION is None,
-        help="USD per million output tokens",
+        default=rates.price_output_per_million,
+        required=rates.price_output_per_million is None,
+        help="USD per million output tokens (default: the memory model's base rate)",
     )
     parser.add_argument("--group-id", default=DEFAULT_GROUP_ID)
     parser.add_argument("--principal-id", default=DEFAULT_PRINCIPAL_ID)
@@ -1478,6 +1538,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def config_from_args(args: argparse.Namespace) -> CycleConfig:
+    rates = model_pricing()
+    source = rates.pricing_source
+    if (args.price_input, args.price_output) != rates[:2]:
+        source = OPERATOR_PRICING_SOURCE
     return CycleConfig(
         group_id=args.group_id,
         principal_id=args.principal_id,
@@ -1489,6 +1553,8 @@ def config_from_args(args: argparse.Namespace) -> CycleConfig:
         price_output_per_million=args.price_output,
         expected_sources=args.expected_sources,
         skip_provider_preflight=args.skip_provider_preflight,
+        pricing_source=source,
+        long_context_multiplier=rates.long_context_multiplier,
     )
 
 

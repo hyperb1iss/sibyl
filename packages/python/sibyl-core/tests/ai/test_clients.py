@@ -4,9 +4,10 @@ import asyncio
 
 import pytest
 from pydantic import BaseModel, SecretStr
-from pydantic_ai.output import PromptedOutput
+from pydantic_ai.output import NativeOutput, PromptedOutput, ToolOutput
 
 from sibyl_core.ai.clients import (
+    _config_fingerprint,
     _provider_output_type,
     agent_cache_size,
     get_agent,
@@ -151,6 +152,32 @@ def test_provider_output_type_keeps_text_output_native() -> None:
     )
 
     assert output_type is str
+
+
+@pytest.mark.parametrize(("model", "native"), [("claude-opus-5-5", True), ("claude-opus-5", False)])
+def test_structured_output_never_forces_a_tool_on_a_model_that_rejects_it(
+    model: str, native: bool
+) -> None:
+    config = LLMConfig(provider="anthropic", model=model)
+
+    output_type = _provider_output_type(config, ClientPayload)
+
+    assert isinstance(output_type, NativeOutput) is native
+    if native:
+        assert output_type.outputs is ClientPayload
+        assert output_type.strict is True
+    assert _provider_output_type(config, str) is str
+    explicit = ToolOutput(ClientPayload)
+    assert _provider_output_type(config, explicit) is explicit
+
+
+def test_a_cached_agent_is_never_shared_across_efforts() -> None:
+    def fingerprint(effort: str | None) -> str:
+        return _config_fingerprint(
+            LLMConfig(provider="anthropic", model="claude-opus-5-5", effort=effort)
+        )
+
+    assert len({fingerprint(None), fingerprint("medium"), fingerprint("high")}) == 3
 
 
 def test_build_model_rejects_registry_provider_mismatch() -> None:

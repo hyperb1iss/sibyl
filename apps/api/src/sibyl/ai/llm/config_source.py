@@ -67,6 +67,7 @@ class DBSettingsConfigSource:
             ),
             api_key=await self._resolve_api_key(provider.value),
             transport_max_retries=env_config.transport_max_retries,
+            effort=env_config.effort,
             cached_at=datetime.now(UTC),
         ).with_model_defaults()
         self._cache[surface] = resolved

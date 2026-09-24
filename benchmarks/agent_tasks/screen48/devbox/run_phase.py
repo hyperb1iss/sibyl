@@ -84,6 +84,12 @@ PHASE_ENVIRONMENT = {
     "SIBYL_CONSOLIDATION_MAX_INPUT_CHARS": "800000",
 }
 
+#: A named override for the pinned memory model, for a cycle deliberately run on
+#: a different Opus. Only the listed models are accepted; the cycle's preflight
+#: records whichever model actually ran and prices it from ``cycle.MODEL_PRICING``.
+MEMORY_MODEL_OVERRIDE_ENV = "SCREEN48_MEMORY_MODEL"
+MEMORY_MODEL_CHOICES = frozenset({"claude-opus-5", "claude-opus-5-5"})
+
 #: Passed through from the ambient environment when present, never invented.
 PASSTHROUGH_ENVIRONMENT = (
     "SIBYL_SURREAL_USERNAME",
@@ -154,6 +160,14 @@ def apply_environment(
     for key, value in PHASE_ENVIRONMENT.items():
         target[key] = value
         names.append(key)
+    if override := target.get(MEMORY_MODEL_OVERRIDE_ENV):
+        if override not in MEMORY_MODEL_CHOICES:
+            raise PhaseError(
+                f"{MEMORY_MODEL_OVERRIDE_ENV}={override!r} is not one of "
+                f"{sorted(MEMORY_MODEL_CHOICES)}"
+            )
+        target["SIBYL_LLM_MEMORY_MODEL"] = override
+        names.append(MEMORY_MODEL_OVERRIDE_ENV)
     names.extend(key for key in PASSTHROUGH_ENVIRONMENT if target.get(key))
     return sorted(names)
 
@@ -508,6 +522,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         assert_no_redis()
         record["environment_keys_set"] = apply_environment(eval_issuers_file=args.eval_issuers_file)
+        record["memory_model"] = os.environ.get("SIBYL_LLM_MEMORY_MODEL")
         record["source_commit"] = _source_commit()
     except (PhaseError, OSError, ValueError) as exc:
         record["error"] = f"{type(exc).__name__}: {exc}"

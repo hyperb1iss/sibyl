@@ -70,6 +70,76 @@ def finding(prepared):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("effort", [None, "high"])
+async def test_memory_validation_policy_records_effort_only_when_sent(prepared, effort):
+    from pydantic_ai.models import ModelSettings
+
+    settings = ModelSettings() if effort is None else ModelSettings(anthropic_effort=effort)
+    model = TestModel(custom_output_args={"findings": []}, settings=settings)
+    reader = Extractor(CriticOutput, agent=Agent(model, output_type=CriticOutput))
+
+    result = await run_memory_validation(prepared, reader)
+
+    policy = json.loads(result.configured_policy_json)
+    assert policy.get("effort") == effort
+    assert ("effort" in policy) is (effort is not None)
+    assert policy["output_mode"] == "tool"
+
+
+@pytest.mark.asyncio
+async def test_memory_validation_policy_records_the_mode_the_model_ran(prepared, monkeypatch):
+    """A tool-mode critic on Opus 5.5 runs native output, and the policy says so."""
+    from unittest.mock import AsyncMock
+
+    import httpx2 as httpx
+
+    from sibyl_core.ai import clients, providers
+    from sibyl_core.ai.llm import extractor as extraction
+    from sibyl_core.ai.llm.config import EnvConfigSource, LLMSurface
+    from sibyl_core.ai.transport import RecordingAnthropicClient
+
+    def respond(request):
+        body = json.loads(request.content)
+        assert "tool_choice" not in body
+        return httpx.Response(
+            200,
+            json={
+                "id": "msg_policy",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-opus-5-5",
+                "content": [{"type": "text", "text": '{"findings":[]}'}],
+                "stop_reason": "end_turn",
+                "stop_sequence": None,
+                "usage": {"input_tokens": 10, "output_tokens": 5},
+            },
+        )
+
+    source = EnvConfigSource(
+        {
+            "SIBYL_LLM_MEMORY_PROVIDER": "anthropic",
+            "SIBYL_LLM_MEMORY_MODEL": "claude-opus-5-5",
+            "ANTHROPIC_API_KEY": "offline",
+        }
+    )
+    monkeypatch.setattr(clients, "resolve_llm_config", source.resolve)
+    monkeypatch.setattr(extraction, "reserve_llm_budget", AsyncMock())
+    clients.invalidate_agent_cache()
+    async with RecordingAnthropicClient(transport=httpx.MockTransport(respond)) as http:
+        monkeypatch.setattr(providers, "RecordingAnthropicClient", lambda: http)
+        try:
+            reader = Extractor(CriticOutput, surface=LLMSurface.MEMORY, max_tokens=4096)
+            result = await run_memory_validation(prepared, reader)
+        finally:
+            clients.invalidate_agent_cache()
+
+    policy = json.loads(result.configured_policy_json)
+    assert reader.output_mode == "tool"
+    assert policy["output_mode"] == "native_strict"
+    assert policy["effort"] == "high"
+
+
+@pytest.mark.asyncio
 async def test_memory_validation_no_findings_has_usage_without_fake_review(prepared):
     result = await run_memory_validation(prepared, extractor({"findings": []}))
     assert result.status == "no_findings"

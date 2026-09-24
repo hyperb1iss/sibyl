@@ -12,7 +12,7 @@ from typing import Any
 from pydantic_ai import Agent, NativeOutput
 
 from sibyl_core.ai.llm.config import LLMSurface, resolve_llm_config
-from sibyl_core.ai.llm.extractor import Extractor
+from sibyl_core.ai.llm.extractor import Extractor, effective_output_mode
 from sibyl_core.ai.providers import build_model
 from sibyl_core.ai.transport import transport_policy
 from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
@@ -218,7 +218,7 @@ async def _validation_extractor[T](output_type: type[T]) -> tuple[Extractor[T], 
     resources = AsyncExitStack()
     try:
         model = build_model(config, resources=resources)
-        mode = settings.consolidation_output_mode
+        mode = effective_output_mode(settings.consolidation_output_mode, config)
         agent = Agent(
             model,
             output_type=NativeOutput(output_type, strict=True)
@@ -246,7 +246,7 @@ async def _validation_extractor[T](output_type: type[T]) -> tuple[Extractor[T], 
                 "model_settings": {
                     k: v
                     for k, v in (model.settings or {}).items()
-                    if k in {"temperature", "max_tokens", "timeout"}
+                    if k in {"temperature", "max_tokens", "timeout", "anthropic_effort"}
                 },
                 "max_tokens": config.max_tokens,
                 "output_retries": 2,

@@ -193,8 +193,13 @@ async def test_reflection_schema_budget_closes_allocated_transport(owned_transpo
     assert len(clients) == 1 and clients[0].is_closed
 
 
+@pytest.mark.parametrize(
+    ("model", "effort"), [("claude-opus-5", None), ("claude-opus-5-5", "high")]
+)
 @pytest.mark.parametrize("override", [None, "8192"])
-async def test_opus_memory_output_default_binds_wire_policy_and_reservation(monkeypatch, override):
+async def test_opus_memory_output_default_binds_wire_policy_and_reservation(
+    monkeypatch, override, model, effort
+):
     import json
 
     import httpx2 as httpx
@@ -203,7 +208,7 @@ async def test_opus_memory_output_default_binds_wire_policy_and_reservation(monk
     from sibyl_core.ai.llm.config import EnvConfigSource
     from sibyl_core.ai.transport import RecordingAnthropicClient
 
-    environment = {"SIBYL_LLM_MEMORY_MODEL": "claude-opus-5", "ANTHROPIC_API_KEY": "offline"}
+    environment = {"SIBYL_LLM_MEMORY_MODEL": model, "ANTHROPIC_API_KEY": "offline"}
     if override is not None:
         environment["SIBYL_LLM_MEMORY_MAX_TOKENS"] = override
     monkeypatch.setattr(validation, "resolve_llm_config", EnvConfigSource(environment).resolve)
@@ -222,14 +227,15 @@ async def test_opus_memory_output_default_binds_wire_policy_and_reservation(monk
         requests.append(body)
         assert reservations, "reservation must precede physical dispatch"
         assert body["max_tokens"] == capacity
-        assert "thinking" not in body and "effort" not in body.get("output_config", {})
+        # Opus 5 runs at its own default; Opus 5.5 is pinned above its medium default.
+        assert "thinking" not in body and body.get("output_config", {}).get("effort") == effort
         return httpx.Response(
             200,
             json={
                 "id": "msg_offline",
                 "type": "message",
                 "role": "assistant",
-                "model": "claude-opus-5",
+                "model": model,
                 "content": [
                     {
                         "type": "text",
@@ -251,6 +257,9 @@ async def test_opus_memory_output_default_binds_wire_policy_and_reservation(monk
     parsed = json.loads(policy)
     assert parsed["max_tokens"] == capacity
     assert parsed["model_settings"]["max_tokens"] == capacity
+    # Effort joins the policy only when set, so existing Opus 5 identities are unchanged.
+    assert parsed["model_settings"].get("anthropic_effort") == effort
+    assert ("anthropic_effort" in parsed["model_settings"]) is (effort is not None)
     assert extractor.max_tokens == capacity
     set_budget_enforcer(Budget())
     try:
@@ -266,3 +275,60 @@ async def test_opus_memory_output_default_binds_wire_policy_and_reservation(monk
         len("Synthetic evidence\n" + json.dumps(schema, sort_keys=True)) // 4 + capacity
     ) * 9
     assert reservations == [expected]
+
+
+async def test_memory_validation_runs_native_output_on_a_model_that_rejects_forced_tools(
+    monkeypatch,
+):
+    import json
+
+    import httpx2 as httpx
+
+    from sibyl_core.ai.llm.config import EnvConfigSource
+    from sibyl_core.ai.transport import RecordingAnthropicClient
+
+    environment = {"SIBYL_LLM_MEMORY_MODEL": "claude-opus-5-5", "ANTHROPIC_API_KEY": "offline"}
+    monkeypatch.setattr(validation, "resolve_llm_config", EnvConfigSource(environment).resolve)
+    # The configured default is tool mode, which forces its output tool.
+    monkeypatch.setattr(validation.settings, "consolidation_output_mode", "tool")
+    monkeypatch.setattr(validation.settings, "consolidation_openrouter_provider", None)
+    requests = []
+
+    def respond(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "id": "msg_offline",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-opus-5-5",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": '{"findings":[],"abstention_reason":"Insufficient synthetic evidence"}',
+                    }
+                ],
+                "stop_reason": "end_turn",
+                "stop_sequence": None,
+                "usage": {"input_tokens": 10, "output_tokens": 20},
+            },
+        )
+
+    monkeypatch.setattr(
+        providers,
+        "RecordingAnthropicClient",
+        lambda: RecordingAnthropicClient(transport=httpx.MockTransport(respond)),
+    )
+    extractor, policy = await validation.validation_extractor()
+    try:
+        assert json.loads(policy)["output_mode"] == "native_strict"
+        assert extractor.output_mode == "native_strict"
+        assert await extractor.resolved_output_mode() == "native_strict"
+        assert await extractor.resolved_effort() == "high"
+        result = await extractor.extract_with_usage("Synthetic evidence")
+        assert result.usage.requests == 1
+        assert "tool_choice" not in requests[0] and "tools" not in requests[0]
+        assert requests[0]["output_config"]["format"]["type"] == "json_schema"
+    finally:
+        await validation._close_resources(extractor.resources)

@@ -29,6 +29,13 @@ PRICES = {
     "price_output_per_million": Decimal("25"),
 }
 
+
+@pytest.fixture(autouse=True)
+def campaign_memory_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The cycle's default prices follow the memory model; start every test on the pin."""
+    monkeypatch.delenv("SIBYL_LLM_MEMORY_MODEL", raising=False)
+
+
 #: A live-credential verdict, the shape ``preflight_provider`` returns.
 PREFLIGHT_OK = {
     "provider": "anthropic",
@@ -542,9 +549,8 @@ async def test_draining_candidates_clears_the_pending_set(tmp_path: Path, produc
 async def test_cost_ceiling_stops_dispatch_and_seals_the_receipt(
     tmp_path: Path, product: Any
 ) -> None:
-    # 10M input tokens in one request sits in the long-context tier, so it bills
-    # at 10/M for 100 USD per invocation and the first pass alone clears a
-    # 10 USD ceiling.
+    # 10M input tokens at the pinned 5/M is 50 USD per invocation, so the
+    # first pass alone clears a 10 USD ceiling.
     fake = product(
         FakeProduct(
             sources=[f"s{index:03d}" for index in range(233)],
@@ -558,7 +564,7 @@ async def test_cost_ceiling_stops_dispatch_and_seals_the_receipt(
     assert len(fake.calls) == 1, "dispatch must stop at the ceiling, not finish the ring"
     assert receipt["status"] == cycle.STATUS_COST_CEILING
     assert receipt["reasons"][0] == "cost_ceiling_exceeded"
-    assert Decimal(receipt["usage"]["cost_usd_exact"]) == Decimal("100")
+    assert Decimal(receipt["usage"]["cost_usd_exact"]) == Decimal("50")
     assert "drain" not in receipt
 
 
@@ -702,7 +708,8 @@ def test_unrecorded_attempts_are_estimated_from_the_same_stage_kind() -> None:
 
     summary = cycle.summarize_usage(rows, **PRICES)
 
-    # 240K at the long-context 10/M rate is 2.40 an attempt, three attempts.
+    # 240K at the conservative doubled rate for an unknown model, 10/M, is
+    # 2.40 an attempt, three attempts.
     assert Decimal(summary["unrecorded_attempt_estimate_usd_exact"]) == Decimal("7.2")
     assert summary["unrecorded_attempts"] == 3
     assert summary["rows_with_unrecorded_attempts"] == 1
@@ -823,12 +830,13 @@ async def test_the_ceiling_counts_spend_that_hid_in_timeouts(
         return rows
 
     monkeypatch.setattr(cycle, "usage_rows", usage_rows)
-    guard = cycle._CostGuard(make_config(cost_ceiling_usd=Decimal("5")), datetime.now(UTC))
+    guard = cycle._CostGuard(make_config(cost_ceiling_usd=Decimal("3")), datetime.now(UTC))
 
     usage = await guard.measure()
 
-    assert Decimal(usage["cost_usd_exact"]) < Decimal("5")
-    assert Decimal(usage["ceiling_cost_usd_exact"]) > Decimal("5")
+    # 240K at 5/M measures 1.20; three unmeasured attempts add 3.60 more.
+    assert Decimal(usage["cost_usd_exact"]) == Decimal("1.2")
+    assert Decimal(usage["ceiling_cost_usd_exact"]) == Decimal("4.8")
     assert guard.exceeded is True
 
 
@@ -1152,6 +1160,94 @@ def test_the_skip_flag_is_off_by_default_and_reaches_the_config(tmp_path: Path) 
 
     assert cycle.config_from_args(default).skip_provider_preflight is False
     assert cycle.config_from_args(skipped).skip_provider_preflight is True
+
+
+@pytest.mark.parametrize(
+    ("model", "rates"),
+    [
+        ("claude-opus-5", (Decimal("5"), Decimal("25"))),
+        ("claude-opus-5-5", (Decimal("4"), Decimal("20"))),
+    ],
+)
+def test_a_cycle_is_priced_and_sourced_by_the_memory_model_it_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model: str, rates: tuple[Decimal, Decimal]
+) -> None:
+    monkeypatch.setenv("SIBYL_LLM_MEMORY_MODEL", model)
+    args = cycle.build_parser().parse_args(["--output", str(tmp_path)])
+
+    config = cycle.config_from_args(args)
+
+    assert (config.price_input_per_million, config.price_output_per_million) == rates
+    assert config.pricing_source == cycle.MODEL_PRICING[model].pricing_source
+    header = cycle._header(config, datetime.now(UTC))
+    assert header["config"]["pricing_source"] == config.pricing_source
+    assert header["config"]["long_context_multiplier"] == str(config.long_context_multiplier)
+
+
+def test_a_cycle_with_no_memory_model_keeps_the_campaign_pin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("SIBYL_LLM_MEMORY_MODEL", raising=False)
+
+    config = cycle.config_from_args(cycle.build_parser().parse_args(["--output", str(tmp_path)]))
+
+    assert (config.price_input_per_million, config.price_output_per_million) == (
+        Decimal("5"),
+        Decimal("25"),
+    )
+    assert config.pricing_source == cycle.PRICING_SOURCE
+    # The contract binds only 5/25; both Opus models bill 1M tokens at standard rates.
+    assert config.long_context_multiplier == Decimal(1)
+
+
+def test_an_unpriced_memory_model_needs_explicit_rates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A model missing from the table is never silently priced as Opus 5."""
+    monkeypatch.setenv("SIBYL_LLM_MEMORY_MODEL", "claude-fable-5-1")
+    parser = cycle.build_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--output", str(tmp_path)])
+    args = parser.parse_args(
+        ["--output", str(tmp_path), "--price-input", "10", "--price-output", "50"]
+    )
+    config = cycle.config_from_args(args)
+    assert config.pricing_source == cycle.OPERATOR_PRICING_SOURCE
+    assert config.long_context_multiplier == cycle.LONG_CONTEXT_MULTIPLIER
+
+
+def test_opus_5_5_prices_a_long_context_row_at_its_standard_rate() -> None:
+    """Anthropic bills Opus 5.5's whole window at standard rates."""
+    rates = cycle.MODEL_PRICING["claude-opus-5-5"]
+    assert rates.price_input_per_million is not None
+    assert rates.price_output_per_million is not None
+    row = json.dumps({"input_tokens": 300_000, "output_tokens": 10_000, "requests": 1})
+
+    summary = cycle.summarize_usage(
+        [{"state": "returned", "usage_json": row}],
+        price_input_per_million=rates.price_input_per_million,
+        price_output_per_million=rates.price_output_per_million,
+        long_context_multiplier=rates.long_context_multiplier,
+    )
+
+    # 300K at 4/M plus 10K at 20/M, with no long-context doubling.
+    assert Decimal(summary["cost_usd_exact"]) == Decimal("1.2") + Decimal("0.2")
+    assert summary["long_context_multiplier"] == "1"
+
+
+def test_operator_rates_are_sourced_to_the_operator(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SIBYL_LLM_MEMORY_MODEL", "claude-opus-5-5")
+    args = cycle.build_parser().parse_args(
+        ["--output", str(tmp_path), "--price-input", "10", "--price-output", "50"]
+    )
+
+    config = cycle.config_from_args(args)
+
+    assert config.price_input_per_million == Decimal("10")
+    assert config.pricing_source == cycle.OPERATOR_PRICING_SOURCE
 
 
 def test_a_refused_provider_exits_non_zero(

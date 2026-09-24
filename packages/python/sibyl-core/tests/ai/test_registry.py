@@ -11,6 +11,7 @@ def test_registry_has_initial_llm_entries() -> None:
     assert [entry.alias for entry in entries] == [
         "claude-haiku-4-5",
         "claude-opus-5",
+        "claude-opus-5-5",
         "claude-sonnet-4-6",
         "gemini-3-flash",
         "gemini-3-1-flash-lite",
@@ -18,6 +19,13 @@ def test_registry_has_initial_llm_entries() -> None:
         "gpt-5.4-nano",
     ]
     assert model_registry.embedding_entries() == []
+
+
+def test_registry_prices_opus_5_5_below_opus_5() -> None:
+    entry = model_registry.require("claude-opus-5-5")
+    assert entry.provider == "anthropic" and entry.provider_model_id == "claude-opus-5-5"
+    assert (entry.input_cost_per_mtok_usd, entry.output_cost_per_mtok_usd) == (4.0, 20.0)
+    assert entry.default_temperature is None and entry.max_output_tokens == 128_000
 
 
 def test_registry_lookup_by_alias_and_snapshot() -> None:
