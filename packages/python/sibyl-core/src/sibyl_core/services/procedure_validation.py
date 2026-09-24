@@ -246,7 +246,7 @@ async def _validation_extractor[T](output_type: type[T]) -> tuple[Extractor[T], 
                 "model_settings": {
                     k: v
                     for k, v in (model.settings or {}).items()
-                    if k in {"temperature", "max_tokens", "timeout"}
+                    if k in {"temperature", "max_tokens", "timeout", "anthropic_effort"}
                 },
                 "max_tokens": config.max_tokens,
                 "output_retries": 2,

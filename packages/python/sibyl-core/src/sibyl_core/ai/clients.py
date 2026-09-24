@@ -117,6 +117,7 @@ def _config_fingerprint(config: LLMConfig) -> str:
             str(config.timeout_seconds),
             str(config.transport_max_retries),
             api_key_hash or "",
+            str(config.effort),
         ]
     )
     return hashlib.sha256(payload.encode()).hexdigest()

@@ -193,8 +193,13 @@ async def test_reflection_schema_budget_closes_allocated_transport(owned_transpo
     assert len(clients) == 1 and clients[0].is_closed
 
 
+@pytest.mark.parametrize(
+    ("model", "effort"), [("claude-opus-5", None), ("claude-opus-5-5", "high")]
+)
 @pytest.mark.parametrize("override", [None, "8192"])
-async def test_opus_memory_output_default_binds_wire_policy_and_reservation(monkeypatch, override):
+async def test_opus_memory_output_default_binds_wire_policy_and_reservation(
+    monkeypatch, override, model, effort
+):
     import json
 
     import httpx2 as httpx
@@ -203,7 +208,7 @@ async def test_opus_memory_output_default_binds_wire_policy_and_reservation(monk
     from sibyl_core.ai.llm.config import EnvConfigSource
     from sibyl_core.ai.transport import RecordingAnthropicClient
 
-    environment = {"SIBYL_LLM_MEMORY_MODEL": "claude-opus-5", "ANTHROPIC_API_KEY": "offline"}
+    environment = {"SIBYL_LLM_MEMORY_MODEL": model, "ANTHROPIC_API_KEY": "offline"}
     if override is not None:
         environment["SIBYL_LLM_MEMORY_MAX_TOKENS"] = override
     monkeypatch.setattr(validation, "resolve_llm_config", EnvConfigSource(environment).resolve)
@@ -222,14 +227,15 @@ async def test_opus_memory_output_default_binds_wire_policy_and_reservation(monk
         requests.append(body)
         assert reservations, "reservation must precede physical dispatch"
         assert body["max_tokens"] == capacity
-        assert "thinking" not in body and "effort" not in body.get("output_config", {})
+        # Opus 5 runs at its own default; Opus 5.5 is pinned above its medium default.
+        assert "thinking" not in body and body.get("output_config", {}).get("effort") == effort
         return httpx.Response(
             200,
             json={
                 "id": "msg_offline",
                 "type": "message",
                 "role": "assistant",
-                "model": "claude-opus-5",
+                "model": model,
                 "content": [
                     {
                         "type": "text",
@@ -251,6 +257,9 @@ async def test_opus_memory_output_default_binds_wire_policy_and_reservation(monk
     parsed = json.loads(policy)
     assert parsed["max_tokens"] == capacity
     assert parsed["model_settings"]["max_tokens"] == capacity
+    # Effort joins the policy only when set, so existing Opus 5 identities are unchanged.
+    assert parsed["model_settings"].get("anthropic_effort") == effort
+    assert ("anthropic_effort" in parsed["model_settings"]) is (effort is not None)
     assert extractor.max_tokens == capacity
     set_budget_enforcer(Budget())
     try:

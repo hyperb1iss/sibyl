@@ -32,6 +32,8 @@ def build_model(config: LLMConfig, *, resources: AsyncExitStack | None = None) -
             settings = _settings(config)
             if resolved_model_profile(config).get("anthropic_disallows_sampling_settings", False):
                 settings.pop("temperature", None)
+            if config.effort is not None:
+                settings["anthropic_effort"] = config.effort
             http_client = RecordingAnthropicClient()
             if resources is not None:
                 resources.push_async_callback(http_client.aclose)
@@ -94,8 +96,8 @@ def resolve_provider_model_id(config: LLMConfig) -> str:
     return entry.provider_model_id
 
 
-def _settings(config: LLMConfig) -> dict[str, float | int]:
-    settings: dict[str, float | int] = {
+def _settings(config: LLMConfig) -> dict[str, float | int | str]:
+    settings: dict[str, float | int | str] = {
         "temperature": config.temperature,
         "timeout": config.timeout_seconds,
     }

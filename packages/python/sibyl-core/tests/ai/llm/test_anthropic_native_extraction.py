@@ -81,9 +81,17 @@ def keys(value):
     return set()
 
 
-@pytest.mark.parametrize("model, sampling", [("claude-opus-5", False), ("claude-haiku-4-5", True)])
+@pytest.mark.parametrize(
+    ("model", "sampling", "effort", "cost"),
+    [
+        # 10 input and 2 output tokens at each model's published per-million rates.
+        ("claude-opus-5", False, None, 10 * 5e-6 + 2 * 25e-6),
+        ("claude-opus-5-5", False, "high", 10 * 4e-6 + 2 * 20e-6),
+        ("claude-haiku-4-5", True, None, 10 * 1e-6 + 2 * 5e-6),
+    ],
+)
 async def test_anthropic_native_factory_emits_profile_schema_and_settings(
-    monkeypatch, model, sampling
+    monkeypatch, model, sampling, effort, cost
 ):
     wires = []
 
@@ -103,10 +111,12 @@ async def test_anthropic_native_factory_emits_profile_schema_and_settings(
         assert "anyOf" in keys(declared)
         assert "tools" not in wire
         assert ("temperature" in wire) is sampling
+        assert wire["output_config"].get("effort") == effort
         assert wire["max_tokens"] == 8192
         assert result.output.outcome.kind == "abstention"
         assert result.usage.provider == "anthropic"
         assert result.usage.input_tokens == 10 and result.usage.output_tokens == 2
+        assert result.usage.cost_usd == pytest.approx(cost)
         assert result.usage.transport_usage_complete is True
         assert result.usage.transport_attempts[0].request_id == "req_native"
         assert reserve.await_args.kwargs["attempt_envelope"] == 6
