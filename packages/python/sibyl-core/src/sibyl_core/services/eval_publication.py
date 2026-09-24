@@ -14,7 +14,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from sibyl_core.ai.llm.config import LLMSurface, resolve_llm_config
 from sibyl_core.ai.llm.extractor import effective_output_mode, extraction_schema
-from sibyl_core.ai.providers import resolved_model_profile
+from sibyl_core.ai.providers import anthropic_effort, resolved_model_profile
 from sibyl_core.ai.transport import transport_policy
 from sibyl_core.auth.memory_policy import (
     EVAL_ADMISSION_METADATA_KEY,
@@ -602,34 +602,36 @@ async def _extractor_policy() -> _ExtractorPolicy:
         max_output_tokens = 2_048
     if any(type(value) is not int or value <= 0 for value in (max_input_chars, max_output_tokens)):
         raise ValueError("consolidation build limits must be positive integers")
-    revision = _digest(
-        {
-            "protocol": SCHEMA_VERSION,
-            "rendering": RENDER_VERSION,
-            "evidence_projection": PROJECTION_VERSION,
-            "evidence_validation": EVIDENCE_PROPOSAL_VERSION,
-            "projection_system_sha256": hashlib.sha256(EVIDENCE_SYSTEM_PROMPT.encode()).hexdigest(),
-            "projection_schema_sha256": _digest(EvidenceProposal.model_json_schema()),
-            "system_prompt": SYSTEM_PROMPT,
-            "provider": config.provider.value,
-            "model": config.model.value,
-            "temperature": config.temperature.value,
-            "max_input_chars": max_input_chars,
-            "max_output_tokens": max_output_tokens,
-            "output_retries": OUTPUT_RETRIES,
-            "output_mode": output_mode,
-            "wire_schema_sha256": _digest(
-                extraction_schema(
-                    EvidenceProposal,
-                    output_mode,
-                    profile=resolved_model_profile(config.to_llm_config()),
-                )
-            ),
-            "openrouter_provider": core_config.consolidation_openrouter_provider,
-            "input_budget_unit": "system_user_declared_schema_characters",
-            "transport": transport_policy(config.to_llm_config()),
-        }
-    )
+    revision_inputs: dict[str, object] = {
+        "protocol": SCHEMA_VERSION,
+        "rendering": RENDER_VERSION,
+        "evidence_projection": PROJECTION_VERSION,
+        "evidence_validation": EVIDENCE_PROPOSAL_VERSION,
+        "projection_system_sha256": hashlib.sha256(EVIDENCE_SYSTEM_PROMPT.encode()).hexdigest(),
+        "projection_schema_sha256": _digest(EvidenceProposal.model_json_schema()),
+        "system_prompt": SYSTEM_PROMPT,
+        "provider": config.provider.value,
+        "model": config.model.value,
+        "temperature": config.temperature.value,
+        "max_input_chars": max_input_chars,
+        "max_output_tokens": max_output_tokens,
+        "output_retries": OUTPUT_RETRIES,
+        "output_mode": output_mode,
+        "wire_schema_sha256": _digest(
+            extraction_schema(
+                EvidenceProposal,
+                output_mode,
+                profile=resolved_model_profile(config.to_llm_config()),
+            )
+        ),
+        "openrouter_provider": core_config.consolidation_openrouter_provider,
+        "input_budget_unit": "system_user_declared_schema_characters",
+        "transport": transport_policy(config.to_llm_config()),
+    }
+    # Recorded only when sent, so revisions of runs without effort keep their digest.
+    if (effort := anthropic_effort(config.to_llm_config())) is not None:
+        revision_inputs["effort"] = effort
+    revision = _digest(revision_inputs)
     return _ExtractorPolicy(
         config.model.value,
         revision,

@@ -770,6 +770,9 @@ async def test_consolidation_revision_records_the_mode_the_model_can_run(
     config = (await source.resolve(LLMSurface.MEMORY)).to_llm_config()
     assert policy.output_mode == expected
     assert captured[0]["output_mode"] == expected
+    # Opus 5.5 carries a default effort; Opus 5 sends none and keeps its old digest inputs.
+    assert captured[0].get("effort") == ("high" if model == "claude-opus-5-5" else None)
+    assert ("effort" in captured[0]) is (model == "claude-opus-5-5")
     assert captured[0]["wire_schema_sha256"] == digest(
         extraction.extraction_schema(
             EvidenceProposal, expected, profile=providers.resolved_model_profile(config)
@@ -799,6 +802,29 @@ async def test_effort_is_sent_only_as_the_model_accepts_it(model, configured, se
         model_settings = providers.build_model(config, resources=resources).settings or {}
     assert providers.anthropic_effort(config) == sent
     assert model_settings.get("anthropic_effort") == sent
+
+
+async def test_a_process_wide_effort_leaves_a_model_without_effort_untouched(monkeypatch):
+    wires = []
+
+    def respond(request):
+        wires.append(json.loads(request.content))
+        return httpx.Response(200, json=response(model="claude-haiku-4-5-20251001"))
+
+    async with configured(monkeypatch, respond, model="claude-haiku-4-5") as (extractor, _, _):
+        source = EnvConfigSource(
+            {
+                "SIBYL_LLM_MEMORY_PROVIDER": "anthropic",
+                "SIBYL_LLM_MEMORY_MODEL": "claude-haiku-4-5",
+                "SIBYL_LLM_EFFORT": "high",
+                "ANTHROPIC_API_KEY": "fixture-key",
+            }
+        )
+        monkeypatch.setattr(clients, "resolve_llm_config", source.resolve)
+        assert (await source.resolve(LLMSurface.MEMORY)).effort.value == "high"
+        await extractor.extract_with_usage("Synthetic evidence")
+        assert "effort" not in (wires[0].get("output_config") or {})
+        assert await extractor.resolved_effort() is None
 
 
 async def test_the_agent_that_declared_the_schema_is_the_one_that_runs(monkeypatch):

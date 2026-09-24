@@ -468,19 +468,21 @@ async def run_memory_validation(
     output_type = ProgressCriticOutput if version == PROGRESS_VERSION else CriticOutput
     if extractor.output_type is not output_type:
         raise ValueError("validation requires the shared critic output contract")
-    policy = canonical(
-        {
-            "version": version,
-            "surface": extractor.surface.value,
-            "model_override": extractor.model_override,
-            "output_mode": extractor.output_mode,
-            "output_retries": extractor.output_retries,
-            "max_tokens": extractor.max_tokens,
-            "openrouter_provider": extractor.openrouter_provider,
-            "system_prompt": extractor.system_prompt,
-            "output_schema": output_type.model_json_schema(),
-        }
-    )
+    execution: dict[str, object] = {
+        "version": version,
+        "surface": extractor.surface.value,
+        "model_override": extractor.model_override,
+        "output_mode": await extractor.resolved_output_mode(),
+        "output_retries": extractor.output_retries,
+        "max_tokens": extractor.max_tokens,
+        "openrouter_provider": extractor.openrouter_provider,
+        "system_prompt": extractor.system_prompt,
+        "output_schema": output_type.model_json_schema(),
+    }
+    # Recorded only when sent, so policies of runs without effort keep their bytes.
+    if (effort := await extractor.resolved_effort()) is not None:
+        execution["effort"] = effort
+    policy = canonical(execution)
     result = await extractor.extract_with_usage(prepared.prompt)
     submission = None
     reason = None

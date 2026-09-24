@@ -70,6 +70,23 @@ def finding(prepared):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("effort", [None, "high"])
+async def test_memory_validation_policy_records_effort_only_when_sent(prepared, effort):
+    from pydantic_ai.models import ModelSettings
+
+    settings = ModelSettings() if effort is None else ModelSettings(anthropic_effort=effort)
+    model = TestModel(custom_output_args={"findings": []}, settings=settings)
+    reader = Extractor(CriticOutput, agent=Agent(model, output_type=CriticOutput))
+
+    result = await run_memory_validation(prepared, reader)
+
+    policy = json.loads(result.configured_policy_json)
+    assert policy.get("effort") == effort
+    assert ("effort" in policy) is (effort is not None)
+    assert policy["output_mode"] == "tool"
+
+
+@pytest.mark.asyncio
 async def test_memory_validation_no_findings_has_usage_without_fake_review(prepared):
     result = await run_memory_validation(prepared, extractor({"findings": []}))
     assert result.status == "no_findings"

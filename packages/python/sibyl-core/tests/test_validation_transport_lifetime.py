@@ -324,6 +324,8 @@ async def test_memory_validation_runs_native_output_on_a_model_that_rejects_forc
     try:
         assert json.loads(policy)["output_mode"] == "native_strict"
         assert extractor.output_mode == "native_strict"
+        assert await extractor.resolved_output_mode() == "native_strict"
+        assert await extractor.resolved_effort() == "high"
         result = await extractor.extract_with_usage("Synthetic evidence")
         assert result.usage.requests == 1
         assert "tool_choice" not in requests[0] and "tools" not in requests[0]
