@@ -775,3 +775,29 @@ async def test_consolidation_revision_records_the_mode_the_model_can_run(
             EvidenceProposal, expected, profile=providers.resolved_model_profile(config)
         )
     )
+
+
+@pytest.mark.parametrize(
+    ("model", "configured", "sent"),
+    [
+        ("claude-opus-5-5", "xhigh", "xhigh"),
+        ("claude-sonnet-4-6", "low", "low"),
+        # Sonnet 4.6 accepts effort but tops out at high.
+        ("claude-sonnet-4-6", "xhigh", "high"),
+        # Haiku 4.5 rejects effort outright, so none is sent.
+        ("claude-haiku-4-5", "high", None),
+        ("claude-opus-5-5", None, None),
+    ],
+)
+async def test_effort_is_sent_only_as_the_model_accepts_it(model, configured, sent):
+    from contextlib import AsyncExitStack
+
+    from sibyl_core.ai.llm.config import LLMConfig
+
+    config = LLMConfig(provider="anthropic", model=model, effort=configured)
+    async with AsyncExitStack() as resources:
+        model_settings = providers.build_model(config, resources=resources).settings or {}
+    assert providers.anthropic_effort(config) == sent
+    assert model_settings.get("anthropic_effort") == sent
+
+

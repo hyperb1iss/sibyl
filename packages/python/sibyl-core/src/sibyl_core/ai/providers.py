@@ -18,7 +18,7 @@ from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from sibyl_core.ai.errors import LLMConfigError
-from sibyl_core.ai.llm.config import LLMConfig
+from sibyl_core.ai.llm.config import AnthropicEffort, LLMConfig
 from sibyl_core.ai.registry import ModelKind, model_registry
 from sibyl_core.ai.transport import RecordingAnthropicClient, RecordingOpenAIClient
 
@@ -32,8 +32,8 @@ def build_model(config: LLMConfig, *, resources: AsyncExitStack | None = None) -
             settings = _settings(config)
             if resolved_model_profile(config).get("anthropic_disallows_sampling_settings", False):
                 settings.pop("temperature", None)
-            if config.effort is not None:
-                settings["anthropic_effort"] = config.effort
+            if (effort := anthropic_effort(config)) is not None:
+                settings["anthropic_effort"] = effort
             http_client = RecordingAnthropicClient()
             if resources is not None:
                 resources.push_async_callback(http_client.aclose)
@@ -69,6 +69,23 @@ def build_model(config: LLMConfig, *, resources: AsyncExitStack | None = None) -
                 ),
                 settings=OpenAIResponsesModelSettings(**_settings(config)),
             )
+
+
+def anthropic_effort(config: LLMConfig) -> AnthropicEffort | None:
+    """The configured effort as this model accepts it.
+
+    A model without effort support gets none, so one process-wide effort cannot
+    break a surface that runs an older model. ``xhigh`` falls back to ``high``
+    where the model tops out there.
+    """
+    if config.provider != "anthropic" or config.effort is None:
+        return None
+    profile = resolved_model_profile(config)
+    if not profile.get("anthropic_supports_effort", False):
+        return None
+    if config.effort == "xhigh" and not profile.get("anthropic_supports_xhigh_effort", False):
+        return "high"
+    return config.effort
 
 
 def resolved_model_profile(config: LLMConfig) -> ModelProfile:
