@@ -562,9 +562,10 @@ def _partition_prepared_cohort(
 
     Embedded episodes grow each cohort from its seed's nearest neighbours, so a
     proposal compares related experience instead of whatever shared a page of
-    identifiers. Every other episode then joins the most similar cohort that
-    still fits, or the first one when it has no comparable vector, so a cohort
-    of one happens only when the budget forces it.
+    identifiers. Two grown cohorts that together rank themselves first join
+    when the union fits. Every other episode then joins the most similar cohort
+    that still fits, or the first one when it has no comparable vector, so a
+    cohort of one happens only when the budget forces it.
     """
     group = PartialCohort.model_validate_json(original.input_json)
     cohort_fields = group.model_dump(exclude={"episodes"})
@@ -596,6 +597,7 @@ def _partition_prepared_cohort(
     related = [episode for episode in group.episodes if episode.episode_id in vectors]
     similarity = _similarity(related, vectors) if len(related) >= 2 else {}
     bins, leftovers = _nearest_neighbour_bins(related, similarity, fits) if similarity else ([], [])
+    bins = _merge_separated_bins(bins, similarity, fits)
     leftovers = sorted(
         [
             *leftovers,
@@ -699,6 +701,56 @@ def _nearest_neighbour_bins(episodes, similarity, fits):
         else:
             leftovers.append(seed)
     return bins, leftovers
+
+
+#: How much nearer than the closest outsider a joined cohort's farthest member
+#: must stay, for every member. Rank alone lets two families join once each is
+#: the other's nearest and the budget has room: on the screen48 captures at a
+#: 1.6M-character budget, two such pairs cleared the rank test with the
+#: farthest sibling as distant as the nearest outsider, while every same-family
+#: pair kept it under an eighth of that distance.
+COHORT_MERGE_MARGIN = 2
+
+
+def _merge_separated_bins(bins, similarity, fits):
+    """Join pairs of grown cohorts that sit well apart from everything else.
+
+    Growth only follows an episode's own nearest neighbours into a cohort, so a
+    family whose nearest-neighbour graph has two islands closes as two cohorts
+    at any budget, and each proposes a near duplicate of the other. A pair
+    joins when every episode of the union ranks each of its union siblings
+    ahead of every other ranked episode, its farthest sibling less than
+    1/COHORT_MERGE_MARGIN as far away as its nearest outsider. That requires an
+    outsider: a partition holding nothing but the pair has no contrast to tell
+    one family's two modes from two families. The margin compares distances in
+    the same neighbourhood rather than setting a similarity cutoff, and it is
+    strict, since mixing families costs more than a split. A joined cohort never
+    joins again in the same partition, so one merge cannot open the next and
+    chain families together, and the budget can only veto a union: spare room
+    is never evidence of affinity.
+    """
+    ranked = set(similarity)
+
+    def sits_inside(identifier, union):
+        scores = similarity[identifier]
+        farthest_sibling = 1 - min(scores[other] for other in union if other != identifier)
+        nearest_outsider = 1 - max(score for other, score in scores.items() if other not in union)
+        return COHORT_MERGE_MARGIN * farthest_sibling < nearest_outsider
+
+    merged, joined = list(bins), set()
+    for first in range(len(bins)):
+        for second in range(first + 1, len(bins)):
+            if first in joined or second in joined:
+                continue
+            pair = (*bins[first], *bins[second])
+            union = {episode.episode_id for episode in pair}
+            if not ranked - union or not all(sits_inside(i, union) for i in union):
+                continue
+            episodes = sorted(pair, key=lambda episode: episode.episode_id)
+            if fits(episodes):
+                merged[first], merged[second] = episodes, None
+                joined.update((first, second))
+    return [bucket for bucket in merged if bucket is not None]
 
 
 async def prepare_stored_source_packets(org, principal, source_id, resolver):

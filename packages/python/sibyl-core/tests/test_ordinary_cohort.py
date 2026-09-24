@@ -547,6 +547,129 @@ async def test_partition_skips_an_oversized_neighbour_without_closing_the_cohort
     assert bins == [[ids[0], ids[2], ids[3]], [ids[1]]]
 
 
+def _island_vector(group, index):
+    """Two islands of one family share axis 0; a third family sits on axis 1."""
+    axis = {"a": {0: 1.0, 3: 0.5}, "b": {0: 1.0, 4: 0.5}, "c": {1: 1.0}}[group]
+    return _vector({**axis, 2: index / 100})
+
+
+@pytest.mark.parametrize(("capacity", "joined"), [(8, True), (5, False)])
+async def test_partition_joins_two_islands_of_one_family_that_rank_each_other_first(
+    cohort_sources, content_store, monkeypatch, capacity, joined
+):
+    sources = await _family_sources(9)
+    install_proposal(monkeypatch, sources)
+    _capacity_in_episodes(monkeypatch, capacity)
+    # Each island's two nearest neighbours are its own members, so growth
+    # closes the family as two cohorts; every member still ranks all five
+    # siblings ahead of the other family, which is what joins them.
+    for index, source in enumerate(sources):
+        await _embed(content_store, source, _island_vector("abc"[index // 3], index))
+    ids = [source.id for source in sources]
+    bins = await service.partition_stored_cohort(
+        "org", "owner", ids, AsyncMock(return_value=SourceReadAuthority("owner"))
+    )
+    assert bins == ([ids[:6], ids[6:]] if joined else [ids[:3], ids[3:6], ids[6:]])
+
+
+def _bins(*groups):
+    from types import SimpleNamespace
+
+    return [[SimpleNamespace(episode_id=identifier) for identifier in group] for group in groups]
+
+
+def _scores(groups, pairs, default=0.1):
+    """Similarity between every two identifiers, from explicit pair scores."""
+    ids = [identifier for group in groups for identifier in group]
+    return {
+        left: {
+            right: pairs.get(frozenset((left, right)), default) for right in ids if right != left
+        }
+        for left in ids
+    }
+
+
+def _within(*groups, score=0.95):
+    return {
+        frozenset((left, right)): score
+        for group in groups
+        for left in group
+        for right in group
+        if left < right
+    }
+
+
+def _across(left_group, right_group, score):
+    return {frozenset((left, right)): score for left in left_group for right in right_group}
+
+
+def _merged(bins):
+    return [[episode.episode_id for episode in bucket] for bucket in bins]
+
+
+A, B, C, D = ("a0", "a1"), ("b0", "b1"), ("c0", "c1"), ("d0", "d1")
+
+
+def test_a_merge_needs_every_member_to_rank_the_union_first():
+    groups = (A, B, C)
+    pairs = {**_within(*groups), **_across(A, B, 0.8)}
+    joined = service._merge_separated_bins(_bins(*groups), _scores(groups, pairs), lambda _: True)
+    assert _merged(joined) == [[*A, *B], list(C)]
+
+    # One member ranking an outsider ahead of a union sibling keeps them apart,
+    # and so does an exact tie across the boundary.
+    for outsider in (0.85, 0.8):
+        scores = _scores(groups, {**pairs, frozenset(("a0", "c0")): outsider})
+        apart = service._merge_separated_bins(_bins(*groups), scores, lambda _: True)
+        assert _merged(apart) == [list(A), list(B), list(C)]
+
+
+def test_two_families_that_each_rank_the_other_first_stay_apart_without_a_margin():
+    # Each family is the other's nearest, so every member ranks the union first,
+    # but the other family sits nearly as far away as the next outsider.
+    groups = (A, B, C)
+    pairs = {**_within(*groups, score=0.999), **_across(A, B, 0.88), **_across(A, C, 0.86)}
+    pairs.update(_across(B, C, 0.86))
+    apart = service._merge_separated_bins(_bins(*groups), _scores(groups, pairs), lambda _: True)
+    assert _merged(apart) == [list(A), list(B), list(C)]
+
+
+def test_a_merge_needs_an_outsider_to_rank_against():
+    """A partition of only the pair cannot tell one family's modes from two families."""
+    groups = (A, B)
+    scores = _scores(groups, {**_within(*groups), **_across(A, B, 0.8)})
+    joined = service._merge_separated_bins(_bins(*groups), scores, lambda _: True)
+    assert _merged(joined) == [list(A), list(B)]
+
+
+def test_the_budget_can_veto_a_merge_but_never_justify_one():
+    groups = (A, B, C)
+    scores = _scores(groups, {**_within(*groups), **_across(A, B, 0.8)})
+    vetoed = service._merge_separated_bins(_bins(*groups), scores, lambda episodes: False)
+    assert _merged(vetoed) == [list(A), list(B), list(C)]
+
+
+def test_a_joined_cohort_never_joins_again_in_the_same_partition():
+    # A and B rank each other first; A, B and C together also rank themselves
+    # ahead of D. Letting the merged cohort be a candidate would chain C in.
+    groups = (A, B, C, D)
+    pairs = {
+        **_within(*groups),
+        **_across(A, B, 0.9),
+        **_across(A, C, 0.7),
+        **_across(B, C, 0.7),
+    }
+    joined = service._merge_separated_bins(_bins(*groups), _scores(groups, pairs), lambda _: True)
+    assert _merged(joined) == [[*A, *B], list(C), list(D)]
+
+
+def test_merged_cohorts_do_not_depend_on_bin_order():
+    groups = (C, B, D, A)
+    pairs = {**_within(*groups), **_across(A, B, 0.8)}
+    joined = service._merge_separated_bins(_bins(*groups), _scores(groups, pairs), lambda _: True)
+    assert _merged(joined) == [list(C), [*A, *B], list(D)]
+
+
 async def test_partition_sizes_a_controller_cohort_as_a_projection_in_a_mixed_group(
     cohort_sources, content_store, monkeypatch
 ):
