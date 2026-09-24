@@ -9,10 +9,10 @@ from typing import Any
 from weakref import WeakKeyDictionary
 
 from pydantic_ai import Agent, AgentRetries
-from pydantic_ai.output import PromptedOutput
+from pydantic_ai.output import NativeOutput, PromptedOutput, TextOutput, ToolOutput
 
 from sibyl_core.ai.llm.config import LLMConfig, LLMSurface, resolve_llm_config
-from sibyl_core.ai.providers import build_model
+from sibyl_core.ai.providers import build_model, rejects_forced_tool_choice
 
 AgentOutputType = Any
 AgentCacheKey = tuple[str, str, str, tuple[str, ...], int | None]
@@ -100,6 +100,12 @@ def _output_type_key(output_type: AgentOutputType) -> str:
 def _provider_output_type(config: LLMConfig, output_type: AgentOutputType) -> AgentOutputType:
     if config.provider == "gemini" and output_type is not str:
         return PromptedOutput(output_type)
+    if (
+        rejects_forced_tool_choice(config)
+        and output_type is not str
+        and not isinstance(output_type, NativeOutput | PromptedOutput | TextOutput | ToolOutput)
+    ):
+        return NativeOutput(output_type, strict=True)
     return output_type
 
 

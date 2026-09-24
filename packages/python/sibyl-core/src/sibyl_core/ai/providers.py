@@ -71,6 +71,18 @@ def build_model(config: LLMConfig, *, resources: AsyncExitStack | None = None) -
             )
 
 
+#: Anthropic models that reject a forced tool choice (``tool_choice`` of type
+#: ``any`` or ``tool``). Tool output forces its output tool, so structured
+#: output on these models has to go through native structured output.
+ANTHROPIC_MODELS_WITHOUT_FORCED_TOOLS = frozenset(
+    {"claude-opus-5-5", "claude-fable-5-1", "claude-mythos-5-1"}
+)
+
+
+def rejects_forced_tool_choice(config: LLMConfig) -> bool:
+    return config.provider == "anthropic" and config.model in ANTHROPIC_MODELS_WITHOUT_FORCED_TOOLS
+
+
 def anthropic_effort(config: LLMConfig) -> AnthropicEffort | None:
     """The configured effort as this model accepts it.
 

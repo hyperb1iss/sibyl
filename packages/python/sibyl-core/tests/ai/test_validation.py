@@ -90,6 +90,61 @@ async def test_surface_config_returns_parsed_probe(monkeypatch: pytest.MonkeyPat
     assert result.model == "claude-haiku-4-5-20251001"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("model", "native"), [("claude-opus-5-5", True), ("claude-opus-5", False)])
+async def test_surface_probe_never_forces_a_tool_on_a_model_that_rejects_it(
+    monkeypatch: pytest.MonkeyPatch, model: str, native: bool
+) -> None:
+    import json
+
+    import httpx2 as httpx
+
+    from sibyl_core.ai import providers
+    from sibyl_core.ai.transport import RecordingAnthropicClient
+
+    probe = {"ok": True, "summary": "ready"}
+    wires: list[dict[str, object]] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        wires.append(body)
+        if native:
+            content = [{"type": "text", "text": json.dumps(probe)}]
+        else:
+            tool = body["tools"][0]["name"]
+            content = [{"type": "tool_use", "id": "toolu_probe", "name": tool, "input": probe}]
+        return httpx.Response(
+            200,
+            json={
+                "id": "msg_probe",
+                "type": "message",
+                "role": "assistant",
+                "model": model,
+                "content": content,
+                "stop_reason": "end_turn" if native else "tool_use",
+                "stop_sequence": None,
+                "usage": {"input_tokens": 10, "output_tokens": 5},
+            },
+        )
+
+    monkeypatch.setattr(
+        providers,
+        "RecordingAnthropicClient",
+        lambda: RecordingAnthropicClient(transport=httpx.MockTransport(respond)),
+    )
+    source = StaticConfigSource(
+        LLMConfig(provider="anthropic", model=model, api_key=SecretStr("anthropic-key"))
+    )
+
+    result = await validation.test_surface_config(LLMSurface.MEMORY, source)
+
+    assert result.valid is True, result.error
+    assert result.parsed_output == probe
+    assert ("tool_choice" in wires[0]) is not native
+    if native:
+        assert wires[0]["output_config"]["format"]["type"] == "json_schema"
+
+
 @pytest.mark.parametrize(
     ("status_code", "expected"),
     [

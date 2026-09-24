@@ -801,3 +801,48 @@ async def test_effort_is_sent_only_as_the_model_accepts_it(model, configured, se
     assert model_settings.get("anthropic_effort") == sent
 
 
+async def test_the_agent_that_declared_the_schema_is_the_one_that_runs(monkeypatch):
+    """A surface switched to a model with another output mode waits for a new extractor."""
+    wires = []
+    current = {"model": "claude-opus-5"}
+
+    def respond(request):
+        body = json.loads(request.content)
+        wires.append(body)
+        payload = response(model=body["model"])
+        if "tools" in body:
+            tool = body["tools"][0]["name"]
+            payload["content"] = [
+                {"type": "tool_use", "id": "toolu_fixture", "name": tool, "input": ABSTENTION}
+            ]
+            payload["stop_reason"] = "tool_use"
+        return httpx.Response(200, json=payload)
+
+    async def resolve(surface):
+        return await EnvConfigSource(
+            {
+                "SIBYL_LLM_MEMORY_PROVIDER": "anthropic",
+                "SIBYL_LLM_MEMORY_MODEL": current["model"],
+                "ANTHROPIC_API_KEY": "fixture-key",
+            }
+        ).resolve(surface)
+
+    monkeypatch.setattr(clients, "resolve_llm_config", resolve)
+    monkeypatch.setattr(extraction, "reserve_llm_budget", AsyncMock())
+    clients.invalidate_agent_cache()
+    async with RecordingAnthropicClient(transport=httpx.MockTransport(respond)) as http:
+        monkeypatch.setattr(providers, "RecordingAnthropicClient", lambda: http)
+        try:
+            extractor = Extractor(
+                EvidenceProposal, surface=LLMSurface.MEMORY, max_tokens=8192, system_prompt="p"
+            )
+            assert await extractor.resolved_output_mode() == "tool"
+            await extractor.output_schema()
+            current["model"] = "claude-opus-5-5"
+            clients.invalidate_agent_cache()
+            await extractor.extract_with_usage("Synthetic evidence")
+            assert await extractor.resolved_output_mode() == "tool"
+        finally:
+            clients.invalidate_agent_cache()
+    assert wires[0]["model"] == "claude-opus-5"
+    assert "tool_choice" in wires[0]
