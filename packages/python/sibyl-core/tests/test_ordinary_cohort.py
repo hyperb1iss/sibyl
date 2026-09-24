@@ -572,6 +572,37 @@ async def test_partition_joins_two_islands_of_one_family_that_rank_each_other_fi
     assert bins == ([ids[:6], ids[6:]] if joined else [ids[:3], ids[3:6], ids[6:]])
 
 
+#: Two islands of one family, an outlier nearer the second island, and a
+#: second family. The outlier is a leftover: nothing reciprocates it.
+DISPLACEMENT_LAYOUT = (
+    [{0: 1.0, 3: 0.33, 2: index / 100} for index in range(3)]
+    + [{0: 0.62, 4: 0.45, 5: 0.62}]
+    + [{0: 1.0, 4: 0.33, 2: index / 100} for index in range(4, 7)]
+    + [{1: 1.0, 2: index / 100} for index in range(7, 10)]
+)
+
+
+@pytest.mark.parametrize(("capacity", "joined"), [(6, False), (8, True)])
+async def test_a_join_never_takes_the_room_a_leftover_was_placed_into(
+    cohort_sources, content_store, monkeypatch, capacity, joined
+):
+    sources = await _family_sources(10)
+    install_proposal(monkeypatch, sources)
+    _capacity_in_episodes(monkeypatch, capacity)
+    for source, components in zip(sources, DISPLACEMENT_LAYOUT, strict=True):
+        await _embed(content_store, source, _vector(components))
+    ids = [source.id for source in sources]
+    bins = await service.partition_stored_cohort(
+        "org", "owner", ids, AsyncMock(return_value=SourceReadAuthority("owner"))
+    )
+    # Joining the islands first would fill six places and push the outlier
+    # into the other family's cohort; placing it first keeps it beside its
+    # own island, and the islands join only when all seven fit.
+    family, outlier, other = set(ids[:3] + ids[4:7]), {ids[3]}, set(ids[7:])
+    expected = [family | outlier, other] if joined else [set(ids[:3]), set(ids[3:7]), other]
+    assert [set(bucket) for bucket in bins] == expected
+
+
 def _bins(*groups):
     from types import SimpleNamespace
 
@@ -634,6 +665,47 @@ def test_two_families_that_each_rank_the_other_first_stay_apart_without_a_margin
     assert _merged(apart) == [list(A), list(B), list(C)]
 
 
+@pytest.mark.parametrize(
+    ("outsider", "joined"),
+    # A and B sit 0.25 apart, so the nearest outsider must be more than 0.5 away.
+    [(0.45, True), (0.5, False), (0.6, False)],
+)
+def test_the_farthest_sibling_must_be_under_half_the_nearest_outsider(outsider, joined):
+    groups = (A, B, C)
+    pairs = {**_within(*groups), **_across(A, B, 0.75), frozenset(("a0", "c0")): outsider}
+    result = service._merge_separated_bins(_bins(*groups), _scores(groups, pairs), lambda _: True)
+    assert _merged(result) == ([[*A, *B], list(C)] if joined else [list(A), list(B), list(C)])
+
+
+def test_every_member_of_both_cohorts_must_stand_apart():
+    # Only a member of the second cohort has an outsider close enough to fail.
+    groups = (A, B, C)
+    pairs = {**_within(*groups), **_across(A, B, 0.8), frozenset(("b1", "c0")): 0.7}
+    apart = service._merge_separated_bins(_bins(*groups), _scores(groups, pairs), lambda _: True)
+    assert _merged(apart) == [list(A), list(B), list(C)]
+
+
+def test_an_exact_duplicate_outsider_keeps_a_union_apart():
+    """Identical vectors can score a hair above 1; that must not read as distance."""
+    above_one = 1.0000000000000002
+    groups = (A, B, C)
+    pairs = {
+        **_within(*groups, score=above_one),
+        **_across(A, B, above_one),
+        frozenset(("a0", "c0")): above_one,
+    }
+    apart = service._merge_separated_bins(_bins(*groups), _scores(groups, pairs), lambda _: True)
+    assert _merged(apart) == [list(A), list(B), list(C)]
+
+
+def test_a_cohort_holding_an_episode_without_a_vector_never_joins():
+    groups = (A, B, C)
+    scores = _scores(groups, {**_within(*groups), **_across(A, B, 0.8)})
+    bins = _bins(A, (*B, "x0"), C)
+    apart = service._merge_separated_bins(bins, scores, lambda _: True)
+    assert _merged(apart) == [list(A), [*B, "x0"], list(C)]
+
+
 def test_a_merge_needs_an_outsider_to_rank_against():
     """A partition of only the pair cannot tell one family's modes from two families."""
     groups = (A, B)
@@ -663,11 +735,12 @@ def test_a_joined_cohort_never_joins_again_in_the_same_partition():
     assert _merged(joined) == [[*A, *B], list(C), list(D)]
 
 
-def test_merged_cohorts_do_not_depend_on_bin_order():
-    groups = (C, B, D, A)
-    pairs = {**_within(*groups), **_across(A, B, 0.8)}
-    joined = service._merge_separated_bins(_bins(*groups), _scores(groups, pairs), lambda _: True)
-    assert _merged(joined) == [list(C), [*A, *B], list(D)]
+@pytest.mark.parametrize("order", [(A, B, C, D), (C, B, D, A), (D, C, B, A), (B, D, A, C)])
+def test_merged_cohorts_do_not_depend_on_bin_order(order):
+    pairs = {**_within(*order), **_across(A, B, 0.8)}
+    joined = service._merge_separated_bins(_bins(*order), _scores(order, pairs), lambda _: True)
+    cohorts = {frozenset(bucket) for bucket in _merged(joined)}
+    assert cohorts == {frozenset((*A, *B)), frozenset(C), frozenset(D)}
 
 
 async def test_partition_sizes_a_controller_cohort_as_a_projection_in_a_mixed_group(

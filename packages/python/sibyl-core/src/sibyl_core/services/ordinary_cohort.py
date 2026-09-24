@@ -562,10 +562,10 @@ def _partition_prepared_cohort(
 
     Embedded episodes grow each cohort from its seed's nearest neighbours, so a
     proposal compares related experience instead of whatever shared a page of
-    identifiers. Two grown cohorts that together rank themselves first join
-    when the union fits. Every other episode then joins the most similar cohort
-    that still fits, or the first one when it has no comparable vector, so a
-    cohort of one happens only when the budget forces it.
+    identifiers. Every other episode then joins the most similar cohort that
+    still fits, or the first one when it has no comparable vector, so a cohort
+    of one happens only when the budget forces it. Last, two finished cohorts
+    join when the union stands clearly apart from every other episode and fits.
     """
     group = PartialCohort.model_validate_json(original.input_json)
     cohort_fields = group.model_dump(exclude={"episodes"})
@@ -597,7 +597,6 @@ def _partition_prepared_cohort(
     related = [episode for episode in group.episodes if episode.episode_id in vectors]
     similarity = _similarity(related, vectors) if len(related) >= 2 else {}
     bins, leftovers = _nearest_neighbour_bins(related, similarity, fits) if similarity else ([], [])
-    bins = _merge_separated_bins(bins, similarity, fits)
     leftovers = sorted(
         [
             *leftovers,
@@ -622,6 +621,7 @@ def _partition_prepared_cohort(
                 break
         else:
             bins.append([episode])
+    bins = _merge_separated_bins(bins, similarity, fits)
     return [[episode.episode_id for episode in bucket] for bucket in bins]
 
 
@@ -705,15 +705,17 @@ def _nearest_neighbour_bins(episodes, similarity, fits):
 
 #: How much nearer than the closest outsider a joined cohort's farthest member
 #: must stay, for every member. Rank alone lets two families join once each is
-#: the other's nearest and the budget has room: on the screen48 captures at a
-#: 1.6M-character budget, two such pairs cleared the rank test with the
-#: farthest sibling as distant as the nearest outsider, while every same-family
-#: pair kept it under an eighth of that distance.
+#: the other's nearest and the budget has room: on the screen48 captures, paged
+#: by 100 at a 1.6M-character budget, two pairs of different families cleared
+#: the rank test with their farthest sibling about as distant as the nearest
+#: outsider. The factor was set after seeing those pairs. It also keeps apart
+#: some pairs of one family whose outsiders sit close, trading that recall for
+#: never joining two families.
 COHORT_MERGE_MARGIN = 2
 
 
 def _merge_separated_bins(bins, similarity, fits):
-    """Join pairs of grown cohorts that sit well apart from everything else.
+    """Join pairs of finished cohorts that stand clearly apart from the rest.
 
     Growth only follows an episode's own nearest neighbours into a cohort, so a
     family whose nearest-neighbour graph has two islands closes as two cohorts
@@ -721,20 +723,27 @@ def _merge_separated_bins(bins, similarity, fits):
     joins when every episode of the union ranks each of its union siblings
     ahead of every other ranked episode, its farthest sibling less than
     1/COHORT_MERGE_MARGIN as far away as its nearest outsider. That requires an
-    outsider: a partition holding nothing but the pair has no contrast to tell
-    one family's two modes from two families. The margin compares distances in
-    the same neighbourhood rather than setting a similarity cutoff, and it is
-    strict, since mixing families costs more than a split. A joined cohort never
-    joins again in the same partition, so one merge cannot open the next and
-    chain families together, and the budget can only veto a union: spare room
-    is never evidence of affinity.
+    outsider, since a partition holding nothing but the pair has no contrast to
+    tell one family's two modes from two families, and it requires a vector for
+    every member, since nothing shows where an episode without one belongs. The
+    margin compares distances in one neighbourhood rather than setting a
+    similarity cutoff, and it is strict, since mixing families costs more than
+    a split.
+
+    Joins run after every episode is placed, so a join only unions two whole
+    cohorts and never takes room an episode was placed into. The budget can
+    only veto a union: spare room is never evidence of affinity. A joined
+    cohort never joins again in the same partition, so one join cannot open the
+    next and chain families together.
     """
     ranked = set(similarity)
 
     def sits_inside(identifier, union):
         scores = similarity[identifier]
-        farthest_sibling = 1 - min(scores[other] for other in union if other != identifier)
-        nearest_outsider = 1 - max(score for other, score in scores.items() if other not in union)
+        # Identical vectors can score a hair above 1; a negative distance would
+        # flip the comparison and let an exact-duplicate outsider through.
+        farthest_sibling = max(0.0, 1 - min(scores[o] for o in union if o != identifier))
+        nearest_outsider = max(0.0, 1 - max(v for o, v in scores.items() if o not in union))
         return COHORT_MERGE_MARGIN * farthest_sibling < nearest_outsider
 
     merged, joined = list(bins), set()
@@ -744,7 +753,9 @@ def _merge_separated_bins(bins, similarity, fits):
                 continue
             pair = (*bins[first], *bins[second])
             union = {episode.episode_id for episode in pair}
-            if not ranked - union or not all(sits_inside(i, union) for i in union):
+            if not union <= ranked or not ranked - union:
+                continue
+            if not all(sits_inside(identifier, union) for identifier in union):
                 continue
             episodes = sorted(pair, key=lambda episode: episode.episode_id)
             if fits(episodes):
