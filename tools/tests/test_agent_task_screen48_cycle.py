@@ -29,6 +29,13 @@ PRICES = {
     "price_output_per_million": Decimal("25"),
 }
 
+
+@pytest.fixture(autouse=True)
+def campaign_memory_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The cycle's default prices follow the memory model; start every test on the pin."""
+    monkeypatch.delenv("SIBYL_LLM_MEMORY_MODEL", raising=False)
+
+
 #: A live-credential verdict, the shape ``preflight_provider`` returns.
 PREFLIGHT_OK = {
     "provider": "anthropic",
@@ -1170,9 +1177,59 @@ def test_a_cycle_is_priced_and_sourced_by_the_memory_model_it_runs(
     config = cycle.config_from_args(args)
 
     assert (config.price_input_per_million, config.price_output_per_million) == rates
-    assert config.pricing_source == cycle.MODEL_PRICING[model][2]
+    assert config.pricing_source == cycle.MODEL_PRICING[model].pricing_source
     header = cycle._header(config, datetime.now(UTC))
     assert header["config"]["pricing_source"] == config.pricing_source
+    assert header["config"]["long_context_multiplier"] == str(config.long_context_multiplier)
+
+
+def test_a_cycle_with_no_memory_model_keeps_the_campaign_pin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("SIBYL_LLM_MEMORY_MODEL", raising=False)
+
+    config = cycle.config_from_args(cycle.build_parser().parse_args(["--output", str(tmp_path)]))
+
+    assert (config.price_input_per_million, config.price_output_per_million) == (
+        Decimal("5"),
+        Decimal("25"),
+    )
+    assert config.pricing_source == cycle.PRICING_SOURCE
+    assert config.long_context_multiplier == cycle.LONG_CONTEXT_MULTIPLIER
+
+
+def test_an_unpriced_memory_model_needs_explicit_rates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A model missing from the table is never silently priced as Opus 5."""
+    monkeypatch.setenv("SIBYL_LLM_MEMORY_MODEL", "claude-fable-5-1")
+    parser = cycle.build_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--output", str(tmp_path)])
+    args = parser.parse_args(
+        ["--output", str(tmp_path), "--price-input", "10", "--price-output", "50"]
+    )
+    config = cycle.config_from_args(args)
+    assert config.pricing_source == cycle.OPERATOR_PRICING_SOURCE
+    assert config.long_context_multiplier == cycle.LONG_CONTEXT_MULTIPLIER
+
+
+def test_opus_5_5_prices_a_long_context_row_at_its_standard_rate() -> None:
+    """Anthropic bills Opus 5.5's whole window at standard rates."""
+    rates = cycle.MODEL_PRICING["claude-opus-5-5"]
+    row = json.dumps({"input_tokens": 300_000, "output_tokens": 10_000, "requests": 1})
+
+    summary = cycle.summarize_usage(
+        [{"state": "returned", "usage_json": row}],
+        price_input_per_million=rates.price_input_per_million,
+        price_output_per_million=rates.price_output_per_million,
+        long_context_multiplier=rates.long_context_multiplier,
+    )
+
+    # 300K at 4/M plus 10K at 20/M, with no long-context doubling.
+    assert Decimal(summary["cost_usd_exact"]) == Decimal("1.2") + Decimal("0.2")
+    assert summary["long_context_multiplier"] == "1"
 
 
 def test_operator_rates_are_sourced_to_the_operator(
