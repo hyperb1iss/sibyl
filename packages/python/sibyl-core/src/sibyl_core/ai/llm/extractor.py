@@ -19,10 +19,11 @@ from pydantic_ai.models.openai import OpenAIResponsesModel
 from pydantic_ai.profiles import ModelProfile
 from pydantic_ai.profiles.openai import OpenAIJsonSchemaTransformer
 
+from sibyl_core.ai import clients
 from sibyl_core.ai.clients import get_agent
 from sibyl_core.ai.errors import LLMError, classify_llm_exception
 from sibyl_core.ai.llm.budget import reserve_llm_budget
-from sibyl_core.ai.llm.config import LLMSurface
+from sibyl_core.ai.llm.config import LLMConfig, LLMSurface
 from sibyl_core.ai.transport import (
     FailedExtractionUsage,
     TransportAttempt,
@@ -52,6 +53,24 @@ class ExtractionResult[T]:
 
 
 OutputMode = Literal["tool", "native_strict"]
+
+#: Anthropic models that reject a forced tool choice (``tool_choice`` of type
+#: ``any`` or ``tool``). Tool-mode structured output forces its output tool, so
+#: these models run native structured output instead.
+ANTHROPIC_MODELS_WITHOUT_FORCED_TOOLS = frozenset(
+    {"claude-opus-5-5", "claude-fable-5-1", "claude-mythos-5-1"}
+)
+
+
+def effective_output_mode(output_mode: OutputMode, config: LLMConfig) -> OutputMode:
+    """The structured-output mode a request can actually use on this model."""
+    if (
+        output_mode == "tool"
+        and config.provider == "anthropic"
+        and config.model in ANTHROPIC_MODELS_WITHOUT_FORCED_TOOLS
+    ):
+        return "native_strict"
+    return output_mode
 
 
 def extraction_schema(
@@ -108,12 +127,13 @@ class Extractor[T]:
     ) -> ExtractionResult[T]:
         try:
             agent = await self._get_agent()
-            if self.output_mode == "native_strict" and not isinstance(
+            mode = await self.resolved_output_mode()
+            if mode == "native_strict" and not isinstance(
                 agent.model, OpenAIResponsesModel | AnthropicModel
             ):
                 raise ValueError("native strict extraction requires OpenAI Responses or Anthropic")
             if (
-                self.output_mode == "native_strict"
+                mode == "native_strict"
                 and isinstance(agent.model, AnthropicModel)
                 and not agent.model.profile.get("supports_json_schema_output", False)
             ):
@@ -132,7 +152,7 @@ class Extractor[T]:
             )
             # An unspecified output retry policy estimates one model request;
             # dynamic agent settings and provider work are not bounded here.
-            budget_prompt = self._budget_prompt(prompt, agent)
+            budget_prompt = self._budget_prompt(prompt, agent, mode)
             output_limit = self._budget_output_limit(agent)
             envelope = (transport_retries + 1) * ((self.output_retries or 0) + 1)
 
@@ -189,13 +209,13 @@ class Extractor[T]:
             settings.update(agent.model_settings)
         return settings.get("max_tokens")
 
-    def _budget_prompt(self, prompt: str, agent: Agent[Any, Any]) -> str:
+    def _budget_prompt(self, prompt: str, agent: Agent[Any, Any], mode: OutputMode) -> str:
         instructions = self.system_prompt or ()
         if isinstance(instructions, str):
             instructions = (instructions,)
         schema = extraction_schema(
             self.output_type,
-            self.output_mode,
+            mode,
             profile=agent.model.profile if isinstance(agent.model, Model) else None,
         )
         return "\n".join((*instructions, prompt, json.dumps(schema, sort_keys=True)))
@@ -217,15 +237,29 @@ class Extractor[T]:
 
         return await asyncio.gather(*(run_one(prompt) for prompt in prompts))
 
+    async def resolved_output_mode(self) -> OutputMode:
+        """The mode this extraction runs in on the model its surface resolves to now.
+
+        An agent supplied by the caller already fixed its output type, so its
+        declared mode stands; the caller chooses with ``effective_output_mode``.
+        """
+        if self.output_mode != "tool" or self._agent is not None:
+            return self.output_mode
+        config = (await clients.resolve_llm_config(self.surface)).to_llm_config()
+        if self.model_override is not None:
+            config = config.model_copy(update={"model": self.model_override})
+        return effective_output_mode(self.output_mode, config)
+
     async def output_schema(self) -> dict[str, Any]:
         """Resolve the schema from the same model used for this extraction."""
-        if self.output_mode == "tool":
+        mode = await self.resolved_output_mode()
+        if mode == "tool":
             return extraction_schema(self.output_type)
         agent = await self._get_agent()
         self._prepared_agents[asyncio.get_running_loop()] = agent
         return extraction_schema(
             self.output_type,
-            self.output_mode,
+            mode,
             profile=agent.model.profile if isinstance(agent.model, Model) else None,
         )
 
@@ -236,11 +270,12 @@ class Extractor[T]:
         if prepared is not None:
             return prepared
         output_type: Any = self.output_type
+        mode = await self.resolved_output_mode()
         return await get_agent(
             self.surface,
             output_type=(
                 NativeOutput(output_type, strict=True)
-                if self.output_mode == "native_strict"
+                if mode == "native_strict"
                 else self.output_type
             ),
             system_prompt=self.system_prompt,

@@ -13,7 +13,7 @@ from uuid import NAMESPACE_URL, uuid5
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from sibyl_core.ai.llm.config import LLMSurface, resolve_llm_config
-from sibyl_core.ai.llm.extractor import extraction_schema
+from sibyl_core.ai.llm.extractor import effective_output_mode, extraction_schema
 from sibyl_core.ai.providers import resolved_model_profile
 from sibyl_core.ai.transport import transport_policy
 from sibyl_core.auth.memory_policy import (
@@ -593,6 +593,9 @@ class _ExtractorPolicy:
 async def _extractor_policy() -> _ExtractorPolicy:
     """Resolve one extraction policy snapshot, including the actual build limits."""
     config = await resolve_llm_config(LLMSurface.MEMORY)
+    output_mode = effective_output_mode(
+        core_config.consolidation_output_mode, config.to_llm_config()
+    )
     max_input_chars = core_config.consolidation_max_input_chars
     max_output_tokens = config.max_tokens.value
     if max_output_tokens is None:
@@ -614,11 +617,11 @@ async def _extractor_policy() -> _ExtractorPolicy:
             "max_input_chars": max_input_chars,
             "max_output_tokens": max_output_tokens,
             "output_retries": OUTPUT_RETRIES,
-            "output_mode": core_config.consolidation_output_mode,
+            "output_mode": output_mode,
             "wire_schema_sha256": _digest(
                 extraction_schema(
                     EvidenceProposal,
-                    core_config.consolidation_output_mode,
+                    output_mode,
                     profile=resolved_model_profile(config.to_llm_config()),
                 )
             ),
@@ -632,7 +635,7 @@ async def _extractor_policy() -> _ExtractorPolicy:
         revision,
         max_input_chars,
         max_output_tokens,
-        core_config.consolidation_output_mode,
+        output_mode,
         core_config.consolidation_openrouter_provider,
     )
 

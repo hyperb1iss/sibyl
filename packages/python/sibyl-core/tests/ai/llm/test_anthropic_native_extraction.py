@@ -675,3 +675,103 @@ async def test_anthropic_sdk_wrapping_preserves_terminal_budget_denial(monkeypat
             a["status_code"] for a in denial.details["extraction_usage"]["transport_attempts"]
         ] == [307, 307]
         assert denial.details["extraction_usage"]["cost_complete"] is False
+
+
+def test_tool_mode_moves_to_native_output_only_on_models_that_reject_forced_tools():
+    from sibyl_core.ai.llm.config import LLMConfig
+
+    def mode(output_mode, model, provider="anthropic"):
+        return extraction.effective_output_mode(
+            output_mode, LLMConfig(provider=provider, model=model)
+        )
+
+    assert mode("tool", "claude-opus-5-5") == "native_strict"
+    assert mode("tool", "claude-fable-5-1") == "native_strict"
+    assert mode("tool", "claude-opus-5") == "tool"
+    assert mode("native_strict", "claude-opus-5") == "native_strict"
+    assert mode("tool", "claude-opus-5-5", provider="openai") == "tool"
+
+
+@pytest.mark.parametrize(("model", "native"), [("claude-opus-5-5", True), ("claude-opus-5", False)])
+async def test_a_tool_mode_extractor_never_forces_a_tool_on_a_model_that_rejects_it(
+    monkeypatch, model, native
+):
+    wires = []
+
+    def respond(request):
+        body = json.loads(request.content)
+        wires.append(body)
+        payload = response(model=model)
+        if not native:
+            # Tool mode answers through the forced output tool.
+            tool = body["tools"][0]["name"]
+            payload["content"] = [
+                {"type": "tool_use", "id": "toolu_fixture", "name": tool, "input": ABSTENTION}
+            ]
+            payload["stop_reason"] = "tool_use"
+        return httpx.Response(200, headers={"request-id": "req_tool"}, json=payload)
+
+    source = EnvConfigSource(
+        {
+            "SIBYL_LLM_MEMORY_PROVIDER": "anthropic",
+            "SIBYL_LLM_MEMORY_MODEL": model,
+            "ANTHROPIC_API_KEY": "fixture-key",
+        }
+    )
+    monkeypatch.setattr(clients, "resolve_llm_config", source.resolve)
+    monkeypatch.setattr(extraction, "reserve_llm_budget", AsyncMock())
+    clients.invalidate_agent_cache()
+    async with RecordingAnthropicClient(transport=httpx.MockTransport(respond)) as http:
+        monkeypatch.setattr(providers, "RecordingAnthropicClient", lambda: http)
+        try:
+            # The default output mode is "tool", as memory extraction uses it.
+            extractor = Extractor(
+                EvidenceProposal,
+                surface=LLMSurface.MEMORY,
+                max_tokens=8192,
+                system_prompt="Synthetic policy",
+            )
+            assert await extractor.resolved_output_mode() == ("native_strict" if native else "tool")
+            declared = await extractor.output_schema()
+            result = await extractor.extract_with_usage("Synthetic evidence")
+        finally:
+            clients.invalidate_agent_cache()
+    wire = wires[0]
+    assert ("tool_choice" in wire) is not native
+    assert ("tools" in wire) is not native
+    if native:
+        assert wire["output_config"]["format"] == {"type": "json_schema", "schema": declared}
+    assert result.output.outcome.kind == "abstention"
+
+
+@pytest.mark.parametrize(
+    ("model", "expected"), [("claude-opus-5-5", "native_strict"), ("claude-opus-5", "tool")]
+)
+async def test_consolidation_revision_records_the_mode_the_model_can_run(
+    monkeypatch, model, expected
+):
+    from sibyl_core.services import eval_publication as publication
+
+    source = EnvConfigSource(
+        {"SIBYL_LLM_MEMORY_PROVIDER": "anthropic", "SIBYL_LLM_MEMORY_MODEL": model}
+    )
+    monkeypatch.setattr(publication, "resolve_llm_config", source.resolve)
+    monkeypatch.setattr(publication.core_config, "consolidation_output_mode", "tool")
+    captured = []
+    digest = publication._digest
+
+    def capture(value):
+        if isinstance(value, dict) and "wire_schema_sha256" in value:
+            captured.append(value)
+        return digest(value)
+
+    monkeypatch.setattr(publication, "_digest", capture)
+    policy = await publication._extractor_policy()
+    config = (await source.resolve(LLMSurface.MEMORY)).to_llm_config()
+    assert policy.output_mode == expected
+    assert captured[0]["output_mode"] == expected
+    assert captured[0]["wire_schema_sha256"] == digest(
+        extraction.extraction_schema(
+            EvidenceProposal, expected, profile=providers.resolved_model_profile(config)
+        )
+    )

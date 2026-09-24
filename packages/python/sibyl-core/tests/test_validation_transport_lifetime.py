@@ -275,3 +275,58 @@ async def test_opus_memory_output_default_binds_wire_policy_and_reservation(
         len("Synthetic evidence\n" + json.dumps(schema, sort_keys=True)) // 4 + capacity
     ) * 9
     assert reservations == [expected]
+
+
+async def test_memory_validation_runs_native_output_on_a_model_that_rejects_forced_tools(
+    monkeypatch,
+):
+    import json
+
+    import httpx2 as httpx
+
+    from sibyl_core.ai.llm.config import EnvConfigSource
+    from sibyl_core.ai.transport import RecordingAnthropicClient
+
+    environment = {"SIBYL_LLM_MEMORY_MODEL": "claude-opus-5-5", "ANTHROPIC_API_KEY": "offline"}
+    monkeypatch.setattr(validation, "resolve_llm_config", EnvConfigSource(environment).resolve)
+    # The configured default is tool mode, which forces its output tool.
+    monkeypatch.setattr(validation.settings, "consolidation_output_mode", "tool")
+    monkeypatch.setattr(validation.settings, "consolidation_openrouter_provider", None)
+    requests = []
+
+    def respond(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "id": "msg_offline",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-opus-5-5",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": '{"findings":[],"abstention_reason":"Insufficient synthetic evidence"}',
+                    }
+                ],
+                "stop_reason": "end_turn",
+                "stop_sequence": None,
+                "usage": {"input_tokens": 10, "output_tokens": 20},
+            },
+        )
+
+    monkeypatch.setattr(
+        providers,
+        "RecordingAnthropicClient",
+        lambda: RecordingAnthropicClient(transport=httpx.MockTransport(respond)),
+    )
+    extractor, policy = await validation.validation_extractor()
+    try:
+        assert json.loads(policy)["output_mode"] == "native_strict"
+        assert extractor.output_mode == "native_strict"
+        result = await extractor.extract_with_usage("Synthetic evidence")
+        assert result.usage.requests == 1
+        assert "tool_choice" not in requests[0] and "tools" not in requests[0]
+        assert requests[0]["output_config"]["format"]["type"] == "json_schema"
+    finally:
+        await validation._close_resources(extractor.resources)
