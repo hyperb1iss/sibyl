@@ -872,3 +872,21 @@ async def test_the_agent_that_declared_the_schema_is_the_one_that_runs(monkeypat
             clients.invalidate_agent_cache()
     assert wires[0]["model"] == "claude-opus-5"
     assert "tool_choice" in wires[0]
+
+
+async def test_a_model_that_cannot_be_built_reports_a_classified_error(monkeypatch):
+    """Tool mode now builds its agent to read the mode, so a missing key surfaces here."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    source = EnvConfigSource(
+        {"SIBYL_LLM_MEMORY_PROVIDER": "openai", "SIBYL_LLM_MEMORY_MODEL": "gpt-5.4-nano"}
+    )
+    monkeypatch.setattr(clients, "resolve_llm_config", source.resolve)
+    clients.invalidate_agent_cache()
+    try:
+        extractor = Extractor(EvidenceProposal, surface=LLMSurface.MEMORY)
+        with pytest.raises(LLMError):
+            await extractor.output_schema()
+        with pytest.raises(LLMError):
+            await extractor.resolved_output_mode()
+    finally:
+        clients.invalidate_agent_cache()

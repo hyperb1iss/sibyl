@@ -246,7 +246,14 @@ class Extractor[T]:
 
     async def _prepared_agent(self) -> Agent[Any, Any]:
         """Pin one agent to this loop so mode, schema and run share a model."""
-        agent = await self._get_agent()
+        try:
+            agent = await self._get_agent()
+        except LLMError:
+            raise
+        except Exception as exc:
+            # Building the model can fail before any request, on a missing key
+            # for one; callers get the same classified error extraction raises.
+            raise self._classify(exc) from exc
         if agent is not self._agent:
             self._prepared_agents[asyncio.get_running_loop()] = agent
         return agent
