@@ -646,6 +646,25 @@ def test_a_database_phase_still_drives_the_container(
     assert record["container_id"] is not None
 
 
+def test_the_phase_record_names_the_memory_model_a_cycle_ran_on(
+    root_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(owned_db, "start", lambda *a, **k: {"Id": "x"})
+    monkeypatch.setattr(owned_db, "stop", lambda *a, **k: {"Id": "x"})
+    monkeypatch.setattr(run_phase, "_source_commit", lambda: "deadbeef")
+    monkeypatch.setattr(owned_db, "wait_ready", lambda *a, **k: {"status": "ok"})
+    monkeypatch.setitem(run_phase.PHASES, "cycle", lambda output, extra, record: 0)
+    for key in (*run_phase.PHASE_ENVIRONMENT, "SIBYL_LLM_MEMORY_MODEL"):
+        monkeypatch.setenv(key, "restored-after-this-test")
+    monkeypatch.setenv(run_phase.MEMORY_MODEL_OVERRIDE_ENV, "claude-opus-5-5")
+
+    assert run_phase.main(["cycle", "--output", str(root_dir / "out")]) == 0
+
+    record = json.loads((root_dir / "out" / "phase.json").read_text(encoding="utf-8"))
+    assert record["memory_model"] == "claude-opus-5-5"
+    assert run_phase.MEMORY_MODEL_OVERRIDE_ENV in record["environment_keys_set"]
+
+
 def preflight_binding(root_dir: Path, output: Path) -> Path:
     """A staged root plus a binding, ready for a preflight run."""
     stage_a_root(root_dir)

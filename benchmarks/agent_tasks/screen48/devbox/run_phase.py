@@ -522,6 +522,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         assert_no_redis()
         record["environment_keys_set"] = apply_environment(eval_issuers_file=args.eval_issuers_file)
+        record["memory_model"] = os.environ.get("SIBYL_LLM_MEMORY_MODEL")
         record["source_commit"] = _source_commit()
     except (PhaseError, OSError, ValueError) as exc:
         record["error"] = f"{type(exc).__name__}: {exc}"
