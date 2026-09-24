@@ -860,6 +860,31 @@ def test_phase_environment_overrides_an_ambient_memory_timeout() -> None:
     assert "SIBYL_LLM_MEMORY_TIMEOUT_SECONDS" in names
 
 
+def test_phase_environment_keeps_the_pinned_memory_model_without_an_override() -> None:
+    environ = {"SIBYL_LLM_MEMORY_MODEL": "claude-haiku-4-5"}
+
+    names = run_phase.apply_environment(environ, eval_issuers_file=None)
+
+    assert environ["SIBYL_LLM_MEMORY_MODEL"] == "claude-opus-5"
+    assert run_phase.MEMORY_MODEL_OVERRIDE_ENV not in names
+
+
+def test_a_named_memory_model_override_replaces_the_pin() -> None:
+    environ = {run_phase.MEMORY_MODEL_OVERRIDE_ENV: "claude-opus-5-5"}
+
+    names = run_phase.apply_environment(environ, eval_issuers_file=None)
+
+    assert environ["SIBYL_LLM_MEMORY_MODEL"] == "claude-opus-5-5"
+    assert run_phase.MEMORY_MODEL_OVERRIDE_ENV in names
+
+
+def test_an_unlisted_memory_model_override_is_refused() -> None:
+    environ = {run_phase.MEMORY_MODEL_OVERRIDE_ENV: "claude-haiku-4-5"}
+
+    with pytest.raises(run_phase.PhaseError, match="is not one of"):
+        run_phase.apply_environment(environ, eval_issuers_file=None)
+
+
 def _stub_repair_result(status: str, **counts: int) -> Any:
     return RawEmbeddingRepairResult(status=status, **counts)
 
