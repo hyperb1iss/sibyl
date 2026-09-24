@@ -86,7 +86,7 @@ PHASE_ENVIRONMENT = {
 
 #: A named override for the pinned memory model, for a cycle deliberately run on
 #: a different Opus. Only the listed models are accepted; the cycle's preflight
-#: records whichever model actually ran, and its pricing flags must follow it.
+#: records whichever model actually ran and prices it from ``cycle.MODEL_PRICING``.
 MEMORY_MODEL_OVERRIDE_ENV = "SCREEN48_MEMORY_MODEL"
 MEMORY_MODEL_CHOICES = frozenset({"claude-opus-5", "claude-opus-5-5"})
 

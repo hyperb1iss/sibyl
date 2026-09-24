@@ -1154,6 +1154,41 @@ def test_the_skip_flag_is_off_by_default_and_reaches_the_config(tmp_path: Path) 
     assert cycle.config_from_args(skipped).skip_provider_preflight is True
 
 
+@pytest.mark.parametrize(
+    ("model", "rates"),
+    [
+        ("claude-opus-5", (Decimal("5"), Decimal("25"))),
+        ("claude-opus-5-5", (Decimal("4"), Decimal("20"))),
+    ],
+)
+def test_a_cycle_is_priced_and_sourced_by_the_memory_model_it_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model: str, rates: tuple[Decimal, Decimal]
+) -> None:
+    monkeypatch.setenv("SIBYL_LLM_MEMORY_MODEL", model)
+    args = cycle.build_parser().parse_args(["--output", str(tmp_path)])
+
+    config = cycle.config_from_args(args)
+
+    assert (config.price_input_per_million, config.price_output_per_million) == rates
+    assert config.pricing_source == cycle.MODEL_PRICING[model][2]
+    header = cycle._header(config, datetime.now(UTC))
+    assert header["config"]["pricing_source"] == config.pricing_source
+
+
+def test_operator_rates_are_sourced_to_the_operator(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SIBYL_LLM_MEMORY_MODEL", "claude-opus-5-5")
+    args = cycle.build_parser().parse_args(
+        ["--output", str(tmp_path), "--price-input", "10", "--price-output", "50"]
+    )
+
+    config = cycle.config_from_args(args)
+
+    assert config.price_input_per_million == Decimal("10")
+    assert config.pricing_source == cycle.OPERATOR_PRICING_SOURCE
+
+
 def test_a_refused_provider_exits_non_zero(
     tmp_path: Path, product: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:

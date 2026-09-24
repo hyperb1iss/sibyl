@@ -99,6 +99,31 @@ PRICING_SOURCE: str | None = (
 DEFAULT_PRICE_INPUT_PER_MILLION: Decimal | None = Decimal("5")
 DEFAULT_PRICE_OUTPUT_PER_MILLION: Decimal | None = Decimal("25")
 
+#: Each memory model the phase runner can pin, with its first-party base rates
+#: in USD per million tokens and where those rates were read. The cycle takes
+#: its default prices and its receipt's pricing source from the model the
+#: memory surface is set to, so a cycle on Opus 5.5 is not priced as Opus 5.
+MODEL_PRICING: dict[str, tuple[Decimal, Decimal, str | None]] = {
+    "claude-opus-5": (Decimal("5"), Decimal("25"), PRICING_SOURCE),
+    "claude-opus-5-5": (
+        Decimal("4"),
+        Decimal("20"),
+        "https://platform.claude.com/docs/en/about-claude/models/overview (read 2026-09-23)",
+    ),
+}
+
+#: The pricing source a receipt carries when the operator passed its own rates.
+OPERATOR_PRICING_SOURCE = "operator --price-input/--price-output"
+
+
+def model_pricing() -> tuple[Decimal | None, Decimal | None, str | None]:
+    """Default rates and their source for the memory model this process runs."""
+    model = os.environ.get("SIBYL_LLM_MEMORY_MODEL", "")
+    return MODEL_PRICING.get(
+        model, (DEFAULT_PRICE_INPUT_PER_MILLION, DEFAULT_PRICE_OUTPUT_PER_MILLION, PRICING_SOURCE)
+    )
+
+
 #: The campaign's own recorded ceiling is 300 USD
 #: (``ordinary-count-outcome-root-20260915-r4bxev1s/acceptance.json``); this
 #: lower default is the screen48 diagnostic's own guard and is overridable.
@@ -153,6 +178,7 @@ class CycleConfig:
     price_output_per_million: Decimal
     expected_sources: int = EXPECTED_SOURCES
     skip_provider_preflight: bool = False
+    pricing_source: str | None = PRICING_SOURCE
 
 
 # --------------------------------------------------------------------------
@@ -1257,7 +1283,7 @@ def _header(config: CycleConfig, started: datetime) -> dict[str, Any]:
             "price_input_per_million": str(config.price_input_per_million),
             "price_output_per_million": str(config.price_output_per_million),
             "expected_sources": config.expected_sources,
-            "pricing_source": PRICING_SOURCE,
+            "pricing_source": config.pricing_source,
         },
     }
 
@@ -1437,6 +1463,7 @@ async def run_cycle(config: CycleConfig, output: Path) -> dict[str, Any]:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    price_input, price_output, _ = model_pricing()
     parser = argparse.ArgumentParser(prog="screen48-cycle", description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
@@ -1448,16 +1475,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--price-input",
         type=Decimal,
-        default=DEFAULT_PRICE_INPUT_PER_MILLION,
-        required=DEFAULT_PRICE_INPUT_PER_MILLION is None,
-        help="USD per million input tokens",
+        default=price_input,
+        required=price_input is None,
+        help="USD per million input tokens (default: the memory model's base rate)",
     )
     parser.add_argument(
         "--price-output",
         type=Decimal,
-        default=DEFAULT_PRICE_OUTPUT_PER_MILLION,
-        required=DEFAULT_PRICE_OUTPUT_PER_MILLION is None,
-        help="USD per million output tokens",
+        default=price_output,
+        required=price_output is None,
+        help="USD per million output tokens (default: the memory model's base rate)",
     )
     parser.add_argument("--group-id", default=DEFAULT_GROUP_ID)
     parser.add_argument("--principal-id", default=DEFAULT_PRINCIPAL_ID)
@@ -1478,6 +1505,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def config_from_args(args: argparse.Namespace) -> CycleConfig:
+    price_input, price_output, source = model_pricing()
+    if (args.price_input, args.price_output) != (price_input, price_output):
+        source = OPERATOR_PRICING_SOURCE
     return CycleConfig(
         group_id=args.group_id,
         principal_id=args.principal_id,
@@ -1489,6 +1519,7 @@ def config_from_args(args: argparse.Namespace) -> CycleConfig:
         price_output_per_million=args.price_output,
         expected_sources=args.expected_sources,
         skip_provider_preflight=args.skip_provider_preflight,
+        pricing_source=source,
     )
 
 
