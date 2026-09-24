@@ -741,6 +741,8 @@ def test_merged_cohorts_do_not_depend_on_bin_order(order):
     joined = service._merge_separated_bins(_bins(*order), _scores(order, pairs), lambda _: True)
     cohorts = {frozenset(bucket) for bucket in _merged(joined)}
     assert cohorts == {frozenset((*A, *B)), frozenset(C), frozenset(D)}
+    # A joined cohort lists its episodes by identifier, the order it is sent in.
+    assert [*A, *B] in _merged(joined)
 
 
 async def test_partition_sizes_a_controller_cohort_as_a_projection_in_a_mixed_group(

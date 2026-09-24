@@ -709,8 +709,8 @@ def _nearest_neighbour_bins(episodes, similarity, fits):
 #: by 100 at a 1.6M-character budget, two pairs of different families cleared
 #: the rank test with their farthest sibling about as distant as the nearest
 #: outsider. The factor was set after seeing those pairs. It also keeps apart
-#: some pairs of one family whose outsiders sit close, trading that recall for
-#: never joining two families.
+#: some pairs of one family whose outsiders sit close, giving up that recall
+#: rather than risk joining two families.
 COHORT_MERGE_MARGIN = 2
 
 
