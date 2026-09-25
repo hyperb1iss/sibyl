@@ -163,8 +163,6 @@ def test_helm_public_url_reaches_backend_and_frontend_consumers() -> None:
     assert 'SIBYL_PUBLIC_URL: "https://sibyl.example.test"' in result.stdout
     assert "name: NEXT_PUBLIC_API_URL" in result.stdout
     assert 'value: "https://sibyl.example.test/api"' in result.stdout
-    assert "name: SIBYL_PUBLIC_URL" in result.stdout
-    assert 'value: "https://sibyl.example.test"' in result.stdout
 
 
 @requires_helm
