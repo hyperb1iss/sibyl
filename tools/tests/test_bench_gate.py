@@ -629,6 +629,16 @@ def test_evaluate_report_ai_memory_profile_accepts_full_records() -> None:
     assert failures == []
 
 
+@pytest.mark.parametrize("mode", ["compare", "pre-graphiti", "post-graphiti"])
+def test_evaluate_report_ai_memory_profile_rejects_retired_retrieval_modes(mode: str) -> None:
+    failures = eval_gate.evaluate_report(_ai_memory_report(mode=mode), profile="ai-memory")
+
+    assert (
+        f"runtime['retrieval_mode'] has unsupported retrieval mode {mode!r}; "
+        "expected one of hybrid, native, raw"
+    ) in failures
+
+
 def test_evaluate_report_ai_memory_profile_accepts_local_embedding_runtime() -> None:
     report = _ai_memory_report(mode="hybrid")
     report["schema_version"] = "longmemeval-live-v1"
