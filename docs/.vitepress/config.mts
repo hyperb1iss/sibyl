@@ -18,6 +18,7 @@ export default defineConfig({
     srcExclude: [
         'architecture/[A-Z]*.md',
         'architecture/AUDIT_*/**',
+        '_archive/**',
         'research/**',
         'SCREENSHOTS_NEEDED.md',
     ],
