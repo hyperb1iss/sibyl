@@ -33,6 +33,7 @@ from sibyl_core.tasks.ordinary_packets import (
 )
 from tests.test_episode_evidence import _encoded, _episode
 from tests.test_ordinary_cohort import content_store as content_store
+from tests.validation_policy import memory_model_factory, offline_policy
 
 
 @lru_cache
@@ -252,7 +253,7 @@ async def test_packet_default_budget_actual_sdk_proposer_critic_and_replay(
         monkeypatch.setattr(
             procedure_validation,
             "validation_extractor",
-            AsyncMock(return_value=(reader, '{"model":"offline","transport_retries":0}')),
+            AsyncMock(side_effect=lambda *_: (reader, offline_policy(transport_retries=0))),
         )
         packets = await ordinary_cohort.prepare_stored_source_packets(
             "org", "owner", source.id, resolver
@@ -312,3 +313,39 @@ async def test_packet_default_budget_actual_sdk_proposer_critic_and_replay(
         with pytest.raises(SourceUnavailableError):
             await prepare_stored_reflection("org", "owner", changed.id, resolver)
         assert len(sent) == count
+
+
+async def test_packet_sizing_uses_the_opus_budget_when_none_is_set(content_store, monkeypatch):
+    from pydantic_ai.models.test import TestModel
+
+    from sibyl_core.ai.llm import config as llm_config
+    from sibyl_core.services import content_models
+
+    monkeypatch.setattr(settings, "consolidation_max_input_chars", None)
+    monkeypatch.setattr(content_models, "configured_raw_memory_embedding_provider", lambda: None)
+    source = await remember_raw_memory(
+        organization_id="org",
+        principal_id="owner",
+        source_id="opus-packets",
+        raw_content=oversized_episode().decode(),
+        embedding_provider=None,
+    )
+    reader = Extractor(CriticOutput, agent=Agent(TestModel(), output_type=CriticOutput))
+    monkeypatch.setattr(procedure_validation, "validation_extractor", memory_model_factory(reader))
+    resolver = AsyncMock(return_value=SourceReadAuthority("owner"))
+    pages = {}
+    for model in ("claude-opus-5-5", "claude-haiku-4-5"):
+        monkeypatch.setattr(
+            llm_config,
+            "_config_source",
+            llm_config.EnvConfigSource(
+                {"SIBYL_LLM_MEMORY_PROVIDER": "anthropic", "SIBYL_LLM_MEMORY_MODEL": model}
+            ),
+        )
+        packets = await ordinary_cohort.prepare_stored_source_packets(
+            "org", "owner", source.id, resolver
+        )
+        budget = packets[0].binding["manifest"]["packing_policy"]["max_input_chars"]
+        pages[model] = (len(packets), budget)
+    assert pages["claude-opus-5-5"] == (1, 1_600_000)
+    assert pages["claude-haiku-4-5"][0] > 1 and pages["claude-haiku-4-5"][1] == 40_000

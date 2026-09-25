@@ -22,6 +22,7 @@ from tests.test_eval_publication import proposal as proposal
 from tests.test_eval_publication import rows
 from tests.test_eval_publication_promotion import runtime as runtime
 from tests.test_validation_execution import candidate as candidate
+from tests.validation_policy import offline_policy
 
 
 @pytest.fixture
@@ -62,7 +63,7 @@ async def correction_model(candidate, proposal, monkeypatch):
         return Extractor(
             output_type,
             agent=Agent(TestModel(custom_output_args=output), output_type=output_type),
-        ), '{"model":"offline"}'
+        ), offline_policy()
 
     async def agent(extractor):
         calls.append("correction")
@@ -413,7 +414,7 @@ async def test_signed_two_repairs_preserve_edits_and_reenter_from_child(
     )
 
     async def factory(output_type=CriticOutput):
-        return Extractor(output_type), '{"model":"offline"}'
+        return Extractor(output_type), offline_policy()
 
     async def extract(reader, prompt):
         payload = json.loads(prompt.splitlines()[-1])

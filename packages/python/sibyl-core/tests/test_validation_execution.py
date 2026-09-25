@@ -22,6 +22,7 @@ from tests.test_eval_publication import content_store as content_store
 from tests.test_eval_publication import evidence as evidence
 from tests.test_eval_publication import proposal as proposal
 from tests.test_eval_publication import rows
+from tests.validation_policy import offline_policy
 
 _REAL_EXTRACT = Extractor.extract_with_usage
 
@@ -36,7 +37,9 @@ async def candidate(proposal, monkeypatch):
         agent=Agent(TestModel(custom_output_args={"findings": []}), output_type=CriticOutput),
     )
     monkeypatch.setattr(
-        validation, "validation_extractor", AsyncMock(return_value=(reader, '{"model":"offline"}'))
+        validation,
+        "validation_extractor",
+        AsyncMock(side_effect=lambda *_: (reader, offline_policy())),
     )
     return stored.memory
 
@@ -170,7 +173,7 @@ async def test_validation_execution_actual_sdk_durable_attempts(candidate, monke
         monkeypatch.setattr(
             validation,
             "validation_extractor",
-            AsyncMock(return_value=(reader, '{"model":"offline","transport_retries":2}')),
+            AsyncMock(side_effect=lambda *_: (reader, offline_policy(transport_retries=2))),
         )
         if behavior == "retry":
             result = await validation.validate_stored_procedure(

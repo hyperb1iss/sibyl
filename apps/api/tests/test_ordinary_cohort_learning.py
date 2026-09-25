@@ -135,7 +135,7 @@ def install_model(monkeypatch, source):
         value = output if len(calls) <= 2 else {"findings": []}
         return Extractor(
             CriticOutput, agent=Agent(TestModel(custom_output_args=value), output_type=CriticOutput)
-        ), '{"model":"offline"}'
+        ), '{"max_input_chars":40000,"model":"offline"}'
 
     monkeypatch.setattr(procedure_validation, "validation_extractor", factory)
     return calls
@@ -376,7 +376,7 @@ async def test_ordinary_cohort_correction_recheck_and_publication(cohort_runtime
         return Extractor(
             output_type,
             agent=Agent(TestModel(custom_output_args=output), output_type=output_type),
-        ), '{"model":"offline"}'
+        ), '{"max_input_chars":40000,"model":"offline"}'
 
     monkeypatch.setattr(procedure_validation, "validation_extractor", factory)
     monkeypatch.setattr(procedure_validation, "_validation_extractor", factory)

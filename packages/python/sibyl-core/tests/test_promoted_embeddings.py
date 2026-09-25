@@ -32,6 +32,7 @@ from tests.test_ordinary_cohort import (
 from tests.test_ordinary_cohort import (
     runtime as runtime,
 )
+from tests.validation_policy import offline_policy
 
 
 @pytest.fixture
@@ -50,7 +51,7 @@ async def publication(cohort_sources, content_store, runtime, monkeypatch):
     monkeypatch.setattr(
         procedure_validation,
         "validation_extractor",
-        AsyncMock(return_value=(critic, '{"model":"offline"}')),
+        AsyncMock(side_effect=lambda *_: (critic, offline_policy())),
     )
     validation = await validate_reflection_stage(prepared, resolver)
     binding = await ordinary_promotion_binding(

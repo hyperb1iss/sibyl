@@ -14,7 +14,6 @@ from pydantic import TypeAdapter
 from pydantic_ai import Agent, NativeOutput
 from pydantic_ai.models import Model
 
-from sibyl_core.ai.llm.config import resolve_consolidation_input_budget
 from sibyl_core.ai.llm.extractor import Extractor
 from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
 from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind
@@ -34,7 +33,6 @@ from sibyl_core.services.validation_candidate import ValidationCandidateWrite
 from sibyl_core.services.validation_execution import ValidationExecution, _query
 from sibyl_core.services.validation_stages import run_validation_stage
 from sibyl_core.tasks._evidence_json import canonical
-from sibyl_core.tasks.consolidation import ConsolidationInputBudgetExceeded
 from sibyl_core.tasks.episode_evidence import is_controller_episode
 from sibyl_core.tasks.ordinary_evidence import OrdinarySource
 from sibyl_core.tasks.ordinary_packets import OrdinaryEvidencePacket, prepare_ordinary_packets
@@ -281,6 +279,7 @@ async def propose_stored_cohort(
     from sibyl_core.services.procedure_validation import (
         _close_resources,
         _OwnedValidationExtractor,
+        enforce_policy_input_budget,
         validation_extractor,
     )
 
@@ -293,11 +292,11 @@ async def propose_stored_cohort(
         packet_binding=packet_binding,
         evidence_mode=evidence_mode,
     )
-    budget = await resolve_consolidation_input_budget()
-    if len(original.prepared.prompt) > budget:
-        raise ConsolidationInputBudgetExceeded(len(original.prepared.prompt), budget)
     owned, policy = await validation_extractor()
     try:
+        # The budget frozen with this extractor binds, so a memory model that changed
+        # since the partition refuses an oversized cohort before any send.
+        budget = enforce_policy_input_budget(len(original.prepared.prompt), policy)
         extractor = await _proposal_extractor(owned, original.prepared.system)
         schema = await extractor.output_schema()
         projection_policy = (
@@ -321,8 +320,7 @@ async def propose_stored_cohort(
             len(canonical(await owned.output_schema())) if original.prepared.projection_json else 0,
             budget,
         )
-        if actual > budget:
-            raise ConsolidationInputBudgetExceeded(actual, budget)
+        enforce_policy_input_budget(actual, policy)
         return await _run_cohort(org, principal, original, resolver, extractor, policy, authorize)
     finally:
         if isinstance(owned, _OwnedValidationExtractor):
@@ -501,14 +499,15 @@ async def partition_stored_cohort(org, principal, source_ids, resolver):
     from sibyl_core.services.procedure_validation import (
         _close_resources,
         _OwnedValidationExtractor,
+        policy_input_budget,
         validation_extractor,
     )
 
     original = await prepare_stored_cohort(org, principal, source_ids, resolver)
     affinity = await _cohort_affinity(org, original.ids)
-    budget = await resolve_consolidation_input_budget()
-    owned, _policy = await validation_extractor()
+    owned, policy = await validation_extractor()
     try:
+        budget = policy_input_budget(policy)
         extractor = await _proposal_extractor(owned, original.prepared.system)
         schema_chars = len(canonical(await extractor.output_schema()))
         # Any cohort of controller episodes is sized with the critic's envelope,
@@ -712,15 +711,16 @@ async def prepare_stored_source_packets(org, principal, source_id, resolver):
     from sibyl_core.services.procedure_validation import (
         _close_resources,
         _OwnedValidationExtractor,
+        policy_input_budget,
         validation_extractor,
     )
     from sibyl_core.tasks.memory_validation import packet_critic_input_chars
 
     original = await prepare_stored_cohort(org, principal, [source_id], resolver, allow_single=True)
     group = PartialCohort.model_validate_json(original.prepared.input_json)
-    budget = await resolve_consolidation_input_budget()
-    owned, _policy = await validation_extractor()
+    owned, policy = await validation_extractor()
     try:
+        budget = policy_input_budget(policy)
         proposer = await _proposal_extractor(owned, original.prepared.system)
         proposal_schema = canonical(await proposer.output_schema())
         critic_schema = canonical(await owned.output_schema())

@@ -27,6 +27,7 @@ from sibyl_core.tasks.ordinary_packets import QUALIFICATION, prepare_ordinary_pa
 from sibyl_core.tasks.procedure_review import ReviewSubmission
 from tests.test_episode_evidence import _encoded, _episode
 from tests.test_ordinary_cohort import content_store as content_store
+from tests.validation_policy import offline_policy
 
 
 def install(monkeypatch, output, output_type=CriticOutput):
@@ -36,12 +37,12 @@ def install(monkeypatch, output, output_type=CriticOutput):
     monkeypatch.setattr(
         procedure_validation,
         "validation_extractor",
-        AsyncMock(return_value=(reader, '{"model":"offline"}')),
+        AsyncMock(side_effect=lambda *_: (reader, offline_policy())),
     )
     monkeypatch.setattr(
         procedure_validation,
         "_validation_extractor",
-        AsyncMock(return_value=(reader, '{"model":"offline"}')),
+        AsyncMock(side_effect=lambda *_: (reader, offline_policy())),
     )
     return reader
 

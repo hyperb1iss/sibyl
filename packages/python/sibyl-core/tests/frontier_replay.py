@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
 from urllib.parse import urlparse
 
+from sibyl_core.ai.llm.config import LLMConfig, consolidation_input_budget
 from sibyl_core.ai.llm.extractor import Extractor
 from sibyl_core.backends.surreal import SurrealContentClient
 from sibyl_core.config import settings
@@ -14,6 +15,7 @@ from sibyl_core.services import automatic_procedure, content_client, procedure_v
 from sibyl_core.services.automatic_reflection import automatically_review_reflection
 from sibyl_core.services.eval_publication import _ExtractorPolicy
 from sibyl_core.services.memory_source_validation import SourceReadAuthority
+from sibyl_core.tasks._evidence_json import canonical
 from sibyl_core.tasks.memory_validation import CriticOutput
 
 
@@ -30,8 +32,13 @@ async def main():
     async def session():
         yield client
 
+    # The parent test's tests.validation_policy.offline_policy(), which a script
+    # launched by path cannot import; replay needs the identical policy.
+    budget = consolidation_input_budget(LLMConfig(provider="anthropic", model="offline"))
+    policy = canonical({"model": "offline", "max_input_chars": budget})
+
     async def factory(output_type=CriticOutput):
-        return Extractor(output_type), '{"model":"offline"}'
+        return Extractor(output_type), policy
 
     async def forbidden(*args, **kwargs):
         raise AssertionError("Fresh-process replay attempted provider extraction")
