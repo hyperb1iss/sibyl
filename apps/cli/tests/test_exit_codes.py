@@ -305,9 +305,7 @@ def test_entity_list_exits_nonzero_on_an_invalid_type() -> None:
 
 
 def test_entity_create_exits_nonzero_on_an_invalid_type() -> None:
-    result = CliRunner().invoke(
-        entity.app, ["create", "--name", "x", "--type", "not-a-real-type"]
-    )
+    result = CliRunner().invoke(entity.app, ["create", "--name", "x", "--type", "not-a-real-type"])
 
     assert result.exit_code == 1
 
@@ -416,9 +414,7 @@ def test_update_exits_nonzero_when_a_component_fails() -> None:
 
     with (
         patch.object(update_module, "update_cli", return_value=False),
-        patch.object(
-            update_module, "cli_update_available", return_value=("1.0.0", "2.0.0", True)
-        ),
+        patch.object(update_module, "cli_update_available", return_value=("1.0.0", "2.0.0", True)),
         patch.object(update_module, "get_server_version", return_value=None),
         patch.object(update_module, "is_dev_mode", return_value=False),
     ):
@@ -499,6 +495,9 @@ def test_a_misspelled_context_flag_never_falls_back_to_the_active_one(
     assert result.exit_code == 1
     assert "Unknown context 'stagingg'" in result.stdout
     assert "production" in result.stdout
+    # The flag outranks the active context, so switching it would not help.
+    assert "Pass a known name to --context." in result.stdout
+    assert "context use" not in result.stdout
     get.assert_not_called()
     _ = task_module
 
@@ -514,6 +513,7 @@ def test_a_misspelled_context_env_var_is_also_a_hard_error(
 
     assert result.exit_code == 1
     assert "SIBYL_CONTEXT" in result.stdout
+    assert "Point SIBYL_CONTEXT at a known name, or unset it." in result.stdout
 
 
 def test_a_directory_pin_at_a_deleted_context_is_a_hard_error(
@@ -529,6 +529,7 @@ def test_a_directory_pin_at_a_deleted_context_is_a_hard_error(
 
     assert result.exit_code == 1
     assert "directory pin" in result.stdout
+    assert "sibyl config context link <name>" in result.stdout
 
 
 def test_a_broken_selection_still_lets_you_repair_it(

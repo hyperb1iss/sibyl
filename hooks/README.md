@@ -16,11 +16,10 @@ Then restart Claude Code.
 | ---------------- | -------------- | -------------------------------------------------------- |
 | **SessionStart** | Session begins | Prints the current session bundle and next-step reminder |
 
-The per-prompt context-injection hook (`UserPromptSubmit`) was removed because it
-substituted for the `sibyl` skill instead of nudging the agent to load it. Agents
-should invoke the skill on their own and call `sibyl recall` / `sibyl context pack`
-when they need working memory. Re-running `sibyl local setup` cleans the legacy
-hook out of `~/.claude/settings.json` and removes the orphan script from
+The per-prompt context-injection hook (`UserPromptSubmit`) was removed because it substituted for
+the `sibyl` skill instead of nudging the agent to load it. Agents should invoke the skill on their
+own and call `sibyl context "<goal>"` when they need working memory. Re-running `sibyl local setup`
+cleans the legacy hook out of `~/.claude/settings.json` and removes the orphan script from
 `~/.claude/hooks/sibyl/`.
 
 ## Uninstall
@@ -34,4 +33,5 @@ Or manually: `rm -rf ~/.claude/hooks/sibyl`
 ## Files
 
 - `session-start.py` - Prints the session bundle (active tasks, recent memory, next step)
-- `configure.py` - Registers the SessionStart hook in `~/.claude/settings.json`, preserving any non-Sibyl hooks already present
+- `configure.py` - Registers the SessionStart hook in `~/.claude/settings.json`, preserving any
+  non-Sibyl hooks already present

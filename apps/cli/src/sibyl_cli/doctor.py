@@ -168,7 +168,7 @@ def _load_config_context() -> tuple[list[DoctorCheck], DoctorContext | None]:
                     "context",
                     "fail",
                     f"Active context '{active_name}' is missing.",
-                    "Run 'sibyl context list' and 'sibyl context use <name>'.",
+                    "Run 'sibyl config context list' and 'sibyl config context use <name>'.",
                 )
             )
             return checks, None
@@ -185,7 +185,7 @@ def _load_config_context() -> tuple[list[DoctorCheck], DoctorContext | None]:
                 "context",
                 "warn",
                 "Contexts exist but none is active.",
-                "Run 'sibyl context use <name>' to make writes explicit.",
+                "Run 'sibyl config context use <name>' to make writes explicit.",
             )
         )
         return checks, None
@@ -197,7 +197,7 @@ def _load_config_context() -> tuple[list[DoctorCheck], DoctorContext | None]:
                 "context",
                 "fail",
                 "No server URL is configured.",
-                "Run 'sibyl init' or 'sibyl context create local --use'.",
+                "Run 'sibyl init' or 'sibyl config context create local --use'.",
             )
         )
         return checks, None
