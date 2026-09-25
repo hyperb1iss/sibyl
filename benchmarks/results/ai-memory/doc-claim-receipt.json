@@ -94,7 +94,7 @@
     "docs/testing/longmemeval.md"
   ],
   "fixture": "doc-claim-truth-up-v1",
-  "generated_at": "2026-07-04T00:02:17.054690+00:00",
+  "generated_at": "2026-09-25T20:43:21.473352+00:00",
   "handoffs": [
     {
       "locations": [
@@ -160,7 +160,7 @@
       "status": "PASS",
       "surfaces": [
         "retrieval recall",
-        "canonical LongMemEval-S receipt"
+        "withdrawn LongMemEval-S headline"
       ]
     },
     {
