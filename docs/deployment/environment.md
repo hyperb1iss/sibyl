@@ -437,6 +437,55 @@ document chunks and 1024 for graph vectors both fit the existing indexes. Vector
 `bedrock` and model `cohere.embed-v4:0` whichever scope routed them. Requests batch at up to 96
 texts and about 16 MB each and run concurrently, and throttling retries with jittered backoff.
 
+### Changing the Embedding Model
+
+Every stored vector records the provider, model and dimensions that produced it. When the graph or
+document chunk embedding settings change, the lifecycle repair job (every minute) re-embeds each
+vector whose recorded model differs from the configured one. It works in time-budgeted passes that
+resume where they stopped, including after a restart, and `sibyl debug status` shows each plane's
+progress. Until a row is re-embedded, vector search skips it and lexical search still finds it.
+
+Change embedding settings through the environment and restart every API and worker process. A change
+saved in the settings UI only reaches the process that served the request, and the sweep, which runs
+in the worker, re-embeds toward the worker's configuration.
+
+A graph dimension change rebuilds the graph vector indexes at startup, and the sweep then
+regenerates the cleared vectors. The document chunk vector field is sized once from
+`SIBYL_EMBEDDING_DIMENSIONS`, so a chunk dimension change reports `skipped_dimension_mismatch`
+instead of re-embedding until that field is rebuilt.
+
+Vectors written before Sibyl recorded their model are classified once per plane, the first time the
+sweep runs for it, and the verdict is stored:
+
+| `SIBYL_EMBEDDING_LEGACY_VECTORS` | Unrecorded vectors are                                                                                                                                         |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auto` (default)                 | Re-embedded when any recorded vector names another model, and adopted as the configured model otherwise. Document chunks read the organization's raw captures. |
+| `adopt`                          | Adopted as the configured model                                                                                                                                |
+| `reembed`                        | Re-embedded                                                                                                                                                    |
+
+Upgrading and switching providers in the same deploy needs no extra step when the plane already
+holds vectors recorded under the old model, because `auto` sees it in them. A plane with none (for
+example an organization whose only content is documents crawled before this release, with no raw
+captures) offers no evidence and is adopted, so set `SIBYL_EMBEDDING_LEGACY_VECTORS=reembed` for
+that deploy. To replace vectors that were adopted wrongly, run
+`sibyld db reembed --org-id <id> --plane graph|documents|all`; it only marks them, and the sweep
+does the embedding.
+
+Restored archives keep each vector's recorded model. Vectors restored without one are marked
+unverified and re-embedded.
+
+A row whose text the provider refuses is remembered and not sent again until its text or the
+configured model changes, an import reopens the plane, or `sibyld db reembed` runs; status counts it
+as refused by the provider rather than pending.
+
+| Variable                                        | Default | Description                                                         |
+| ----------------------------------------------- | ------- | ------------------------------------------------------------------- |
+| `SIBYL_EMBEDDING_SWEEP_BUDGET_SECONDS`          | `45`    | Time one lifecycle pass spends re-embedding one plane               |
+| `SIBYL_EMBEDDING_SWEEP_PAGE_SIZE`               | `256`   | Rows read per page (raised to batch size times concurrency)         |
+| `SIBYL_EMBEDDING_SWEEP_BATCH_SIZE`              | `96`    | Texts sent to the provider per request                              |
+| `SIBYL_EMBEDDING_SWEEP_CONCURRENCY`             | `4`     | Most requests in flight; halves on provider throttling, then climbs |
+| `SIBYL_EMBEDDING_SWEEP_VERIFY_INTERVAL_SECONDS` | `3600`  | How long a finished plane skips its table walk                      |
+
 ## Retrieval Tuning
 
 Vector index and reranking knobs. Changing HNSW parameters affects newly built indexes.
