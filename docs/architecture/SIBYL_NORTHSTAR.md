@@ -384,7 +384,7 @@ the retrieval contract directly.
 
 Filtered vector search must be benchmarked before we rely on selective filters for recall quality.
 Official docs show filters combined with KNN queries; they do not settle planner ordering or recall
-behavior under realistic org/project filters. The native spike must measure this.
+behavior under realistic org/project filters. Sibyl's own benchmarks have to measure this.
 
 Authorization is part of retrieval, not a post-processing garnish. The engine should generate
 candidate sets within allowed memory spaces whenever possible, enforce policy again before

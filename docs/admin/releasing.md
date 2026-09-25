@@ -66,9 +66,9 @@ moon run --force root:bench-gate-test root:inventory-lint root:inventory-typeche
 moon run --force bench-longmemeval-v2-release-ci-test
 moon run --force root:doc-claim-gate-test
 moon run --force :check
-moon run e2e:test-browser
-moon run inventory-test
-moon run doc-claim-gate
+moon run --force e2e:test-browser
+moon run --force inventory-test
+moon run --force doc-claim-gate
 ```
 
 Dispatch Nightly Regression for the same base commit. Keep its run ID. The Release workflow refuses
@@ -122,8 +122,9 @@ real cut on the strength of a partial dry run.
 
 Three state changes need the maintainer's explicit approval, given after the dry cut passes and
 named individually: the version bump commit on `main`, the version tag, and the publish run. A green
-dry cut is evidence for the request, not the approval. No agent tags, publishes, or pushes to `main`
-on its own.
+dry cut is evidence for the request, not the approval. A single non-dry dispatch performs all three,
+so every approval must be in hand before that dispatch. No agent tags, publishes, or pushes to
+`main` on its own.
 
 ## Cut and publish
 

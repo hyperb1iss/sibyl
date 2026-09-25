@@ -18,8 +18,9 @@ What varies is how a process reaches SurrealDB:
 | **Embedded SurrealKV** | `SIBYL_SURREAL_DATA_DIR=./path/to/data` | `surrealkv://./path/to/data` | Single-process local dev  |
 | **In-memory**          | neither set                             | `memory://`                  | Tests only                |
 
-`SIBYL_SURREAL_URL` wins when both are set. With neither set, Sibyl falls back to `memory://`, which
-the production config validator rejects.
+Set exactly one of `SIBYL_SURREAL_URL` and `SIBYL_SURREAL_DATA_DIR`; setting both fails config
+validation. With neither set, Sibyl falls back to `memory://`, which the production config validator
+rejects.
 
 ## Server
 
@@ -33,6 +34,8 @@ SIBYL_SURREAL_PASSWORD=<secure-password>
 ```
 
 - Run SurrealDB 3.x as a service and pin the exact server image or tag in production.
+- `moon run dev` uses this mode: it starts a local RocksDB-backed SurrealDB server with data under
+  `.moon/cache/surreal-dev` and points Sibyl at `ws://127.0.0.1:8000/rpc`.
 - Each org gets its own connection-pooled client scoped to its namespace, so queries within an org
   run concurrently.
 
@@ -41,10 +44,11 @@ SIBYL_SURREAL_PASSWORD=<secure-password>
 **Pick this for:** a fresh checkout with zero external services.
 
 ```bash
-SIBYL_SURREAL_DATA_DIR=./.moon/cache/surreal-dev
+SIBYL_SURREAL_DATA_DIR=./data/surreal
 ```
 
-- `moon run dev` starts local SurrealDB backed by SurrealKV automatically.
+- Use a directory of its own. The `moon run dev` server keeps RocksDB data in
+  `.moon/cache/surreal-dev`, so do not point SurrealKV there.
 - Embedded mode is single-writer. Sibyl clamps embedded clients to one connection, so keep it to a
   single process. For real concurrency, run SurrealDB as a server.
 - In production, embedded mode also needs `SIBYL_ALLOW_EMBEDDED_SINGLE_WRITER=1`. Set it only when
@@ -66,5 +70,5 @@ multi-replica deployments.
 
 Back up SurrealDB with logical exports or storage snapshots, and restore Sibyl archives with
 `sibyld migrate import <archive> --source-type surreal-archive --target-mode surreal`. Restore
-accepts only archives and backups produced by Sibyl's own SurrealDB export. See
-[Backup and Restore](../admin/backup-restore.md) for the full procedure.
+accepts only Sibyl's own archives (from `sibyld migrate export`, `merge`, or `consolidate`) and API
+backups. See [Backup and Restore](../admin/backup-restore.md) for the full procedure.

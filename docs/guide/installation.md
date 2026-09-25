@@ -276,8 +276,8 @@ REMOVE NAMESPACE org_<uuid_hex>;
 
 ### Archive Restore Errors
 
-Restore accepts only archives written by `sibyld migrate export` or downloaded from the API backups.
-Validate the archive before restoring it:
+Restore accepts only Sibyl's own archives (from `sibyld migrate export`, `merge`, or `consolidate`)
+and API backups. Validate the archive before restoring it:
 
 ```bash
 sibyld migrate check <archive>

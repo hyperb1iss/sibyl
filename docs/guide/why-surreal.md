@@ -23,8 +23,8 @@ supposed to give you memory, that operational surface would be heavier than the 
   retrieval doesn't have to fan out across stores.
 - **Fewer connection boundaries.** One driver, one auth model, one set of queries. The API and
   worker talk to the same WebSocket endpoint.
-- **One archive format.** `sibyld migrate export` and the API backups write Sibyl's own SurrealDB
-  archive, and `sibyld migrate import` restores it. There is no second format to keep compatible.
+- **One archive contract.** Manifest archives from `sibyld migrate export` and the API backups both
+  restore through `sibyld migrate import`, into the same SurrealDB data plane.
 
 ## Honest tradeoffs
 

@@ -936,7 +936,7 @@ completed two-domain A/A anchor exists. The Web configuration had notes and type
 off and embeddings deferred. It is not a valid regression comparison with the older notes-on 30.38%
 combined anchor.
 
-Two facts in the old release document have since changed:
+Two facts recorded for the 1.3 release have since changed:
 
 - The fulltext query fix merged in [PR 446](https://github.com/hyperb1iss/sibyl/pull/446), commit
   `fdff0cd2`. Current code runs bounded per-field queries. Its full-scale V2 latency and residency
