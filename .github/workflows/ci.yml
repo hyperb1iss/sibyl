@@ -422,7 +422,7 @@ jobs:
           if [[ "$RUNTIME_CHANGED" == "true" || "$CI_CHANGED" == "true" || "$RELEASE_CHANGED" == "true" ]]; then
             moon run trust-gates --force
           elif [[ "$DOCS_CHANGED" == "true" ]]; then
-            moon run doc-claim-gate-test --force
+            moon run doc-claim-gate-test sync-versions-check --force
           fi
 
   build:

@@ -134,14 +134,51 @@ def test_ci_runs_release_and_helm_contract_jobs() -> None:
     assert "profile: production-redis" in workflow
 
 
-# Gates that PR CI already runs through another job, so trust-gates omits them.
+# Gates that PR CI already runs through another job on the same change sets:
+# Static Checks runs the inventory lint and typecheck, Test Suite runs the
+# bench gate. Everything else in the RC bundle belongs in trust-gates.
 TRUST_GATES_COVERED_ELSEWHERE = {
     "~:inventory-lint",
     "~:inventory-typecheck",
     "~:bench-gate-test",
-    "~:release-workflow-test",
-    "~:sync-versions-check",
 }
+# The bundle itself, pinned so a gate cannot leave it without editing this
+# test. Add here when adding to trust-gates; never trim without saying why.
+TRUST_GATES = frozenset(
+    {
+        "~:release-workflow-test",
+        "~:sync-versions-check",
+        "~:inventory-check",
+        "~:inventory-test",
+        "~:dev-script-test",
+        "~:vector-index-bench-test",
+        "~:multi-user-perf-test",
+        "~:chaos-test",
+        "~:storage-access-check",
+        "~:storage-access-test",
+        "~:baseline-test",
+        "~:showcase-test",
+        "~:memory-trust-gate-test",
+        "~:usage-loop-gate-test",
+        "~:trust-control-gate-test",
+        "~:context-quality-gate-test",
+        "~:workspace-trust-gate-test",
+        "~:autonomy-gate-test",
+        "~:reflection-quality-gate-test",
+        "~:forgetting-gate-test",
+        "~:write-path-integrity-gate-test",
+        "~:team-scope-gate-test",
+        "~:auth-session-gate-test",
+        "~:overview-perf-gate-test",
+        "~:synthesis-gate-test",
+        "~:adapter-ingest-gate-test",
+        "~:large-corpus-rehearsal-test",
+        "~:okf-export-gate-test",
+        "~:doc-claim-gate-test",
+        "~:backup-restore-gate-test",
+        "~:enterprise-readiness-evidence-test",
+    }
+)
 
 
 def test_trust_gates_carry_every_root_gate_in_the_rc_bundle() -> None:
@@ -150,11 +187,15 @@ def test_trust_gates_carry_every_root_gate_in_the_rc_bundle() -> None:
     trust_gates = set(tasks["trust-gates"]["deps"])
 
     assert "~:trust-gates" in root_check_deps
+    assert trust_gates == TRUST_GATES
     assert trust_gates.isdisjoint(TRUST_GATES_COVERED_ELSEWHERE)
     assert root_check_deps - {"~:trust-gates"} == TRUST_GATES_COVERED_ELSEWHERE
     assert "command" not in tasks["trust-gates"]
     for dep in trust_gates:
         assert dep.removeprefix("~:") in tasks, dep
+    # The root test task keeps its own gate list; every gate there is in the bundle.
+    root_test_gates = {dep for dep in tasks["test"]["deps"] if dep.startswith("~:")}
+    assert root_test_gates <= trust_gates | TRUST_GATES_COVERED_ELSEWHERE
 
 
 def test_ci_runs_trust_gates_on_pull_requests_without_the_task_cache() -> None:
@@ -171,7 +212,7 @@ def test_ci_runs_trust_gates_on_pull_requests_without_the_task_cache() -> None:
             if "moon run" in line:
                 assert line.strip().endswith("--force"), line
     assert "moon run trust-gates --force" in run_steps[0]
-    assert "moon run doc-claim-gate-test --force" in run_steps[0]
+    assert "moon run doc-claim-gate-test sync-versions-check --force" in run_steps[0]
     moon_cache_steps = [
         step
         for step in job["steps"]
