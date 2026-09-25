@@ -1,6 +1,6 @@
 ---
 title: Retrieval System Architecture
-description: How Sibyl's hybrid graph, vector, and full-text retrieval reaches LongMemEval ceiling
+description: How Sibyl's hybrid graph, vector, and full-text retrieval path works
 ---
 
 # Retrieval System Architecture
@@ -9,8 +9,8 @@ This is the deep architectural reference for Sibyl's retrieval system: the path 
 HTTP request to ranked results, the data shape that path queries against, and the ranking primitives
 that close the gap between hybrid search and answer-quality ceiling.
 
-For the public claim, see [LongMemEval Results](../testing/longmemeval.md). For the user-facing
-search guide, see [Semantic Search](../guide/semantic-search.md).
+For the eval harness and its claim boundary, see [LongMemEval-S](../testing/longmemeval.md). For the
+user-facing search guide, see [Semantic Search](../guide/semantic-search.md).
 
 ## System At A Glance
 
@@ -125,7 +125,7 @@ set:
 | Raw lexical recall | Raw memory text store             | Exact-string matches in preserved sources |
 | Node full-text     | SurrealDB full-text index         | Lexical handles on entity name/content    |
 | Edge full-text     | SurrealDB full-text index         | Lexical handles on relationship facts     |
-| Episode full-text  | SurrealDB full-text index         | Lexical handles on episodic records       |
+| Episode full-text  | SurrealDB full-text index         | Lexical handles on `episode` records      |
 | Node vector        | SurrealDB KNN on `name_embedding` | Semantic similarity to entities           |
 | Edge vector        | SurrealDB KNN on `fact_embedding` | Semantic similarity to relationships      |
 | Graph expansion    | SurrealDB graph traversal         | k-hop neighbors of high-scoring seeds     |
@@ -217,10 +217,14 @@ The current frame families (all interpretable, all hand-crafted, none case-ID-sp
 These are retrieval intents, not benchmark case IDs. The right framing: Sibyl recognizes common
 memory-question shapes and ranks evidence accordingly, without paying an LLM on every query.
 
-::: warning Honest positioning Typed query frames were developed against LongMemEval failure
-patterns. That is acceptable because they generalize to the production memory-question taxonomy, but
-it is not "intelligence that emerged from nowhere." The handcrafted nature is a real claim boundary.
-Memory-R1, A-MEM, and similar systems learn these operations via RL; we have not gone there yet. :::
+::: warning Honest positioning
+
+Typed query frames were developed against LongMemEval failure patterns. That is acceptable because
+they generalize to the production memory-question taxonomy, but it is not "intelligence that emerged
+from nowhere." The handcrafted nature is a real claim boundary. Memory-R1, A-MEM, and similar
+systems learn these operations via RL; we have not gone there yet.
+
+:::
 
 ## Stabilization
 
@@ -242,9 +246,7 @@ Stabilizers currently in play:
 
 Each uses margin thresholds and minimum overlap requirements so the system does not overreact to a
 single strong signal. Evidence-set replacement also has a score guard, so a deep low-score candidate
-cannot enter the top window on lexical overlap alone. The latest published run reaches 500/500 hit@5
-and 96.96% strict R@5; local replay of the current ranker against that artifact projects 97.35%
-strict R@5 with zero hit regressions.
+cannot enter the top window on lexical overlap alone.
 
 ## Embeddings
 
@@ -264,38 +266,37 @@ Embeddings are provider-pluggable: OpenAI today, Gemini supported, local provide
 1024-dim choice is a deliberate trade-off: smaller than `text-embedding-3-small`'s default 1536 to
 keep the HNSW index lean while staying well above the SOTA-comparable floor.
 
-::: tip "No LLM" caveat The full LongMemEval run records "no LLM extraction or LLM reranking." That
-does not mean "no external API calls." The embedding provider is OpenAI, and the embedding API is
-called on every write and every query. A future local-embedding variant will run end-to-end without
-external API dependencies for direct comparison against systems that publish local-embedding
-numbers. :::
+::: tip "No LLM" caveat
 
-A small number of embedding/vector timeouts occur in the long full-run tail (5 relationship
-embedding timeouts at 20s, 3 query embedding/vector search timeouts). The system returns fallback
-results in these cases and the eval passes. Vector timeouts do not produce 5xx responses or broken
-queries.
+A full LongMemEval run records "no LLM extraction or LLM reranking." That does not mean "no external
+API calls." The embedding provider is OpenAI, and the embedding API is called on every write and
+every query. A future local-embedding variant will run end-to-end without external API dependencies
+for direct comparison against systems that publish local-embedding numbers.
+
+:::
+
+Embedding and vector timeouts in the long tail of a full run return fallback results rather than 5xx
+responses or broken queries.
 
 ## Diagnostics
 
-Every run produces diagnostics alongside metrics. From the latest full run:
+Every run produces diagnostics alongside metrics:
 
-- Zero HTTP 500s.
-- Zero tracebacks.
-- 3,000 `surreal_query_failed` warnings: almost all expected relation-cleanup `NotFoundError`s on
+- HTTP 500 and traceback counts.
+- `surreal_query_failed` warnings, most of which are expected relation-cleanup `NotFoundError`s on
   throwaway org teardown.
-- 513 `surreal_query_slow` warnings (informational, no failure).
-- 1 `graph_embedding_failed` (relationship embedding timeout at 20s).
-- 3 `native_entity_vector_search_failed` (query embedding/vector search timeouts).
-- SurrealDB stayed up for the run: `restartCount=0`, `oomKilled=false`, exit code `0`, and peak
-  sampled memory `6.361GiB / 15.61GiB`.
+- `surreal_query_slow` warnings (informational, no failure).
+- `graph_embedding_failed` and `native_entity_vector_search_failed` counts for embedding and vector
+  timeouts.
+- SurrealDB container health: `restartCount`, `oomKilled`, exit code, and peak sampled memory.
 
 The diagnostics surface is the same one a production operator uses: `sibyl debug status`,
 `sibyl logs tail -l error`, `sibyl debug query`. Eval-time diagnostics are not a separate code path.
 
 ## What's Next
 
-The hit-rate ceiling is essentially saturated on LongMemEval-S. The next quality layer targets
-strict recall and ranking order:
+The next quality layer targets strict recall and ranking order on multi-answer, temporal, and
+preference questions:
 
 1. **Query-aware set completion**: for "how many", "total", "order", "first vs second" questions,
    score the top window as a set rather than as independent candidates.
@@ -316,7 +317,7 @@ async enrichment, not into the synchronous query path.
 
 ## Related
 
-- [LongMemEval Results](../testing/longmemeval.md): the public eval claim
+- [LongMemEval-S](../testing/longmemeval.md): the eval harness and claim boundary
 - [AI Memory Landscape](../testing/ai-memory-landscape.md): comparative positioning
 - [Benchmark Methodology](../testing/benchmark-methodology.md): the full eval ladder
 - [Semantic Search](../guide/semantic-search.md): user-facing search guide

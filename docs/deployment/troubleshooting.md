@@ -362,25 +362,6 @@ and the log line was missed.
    - Database not ready
    - Port already bound
 
-### Historical Archive Rehearsal Database Unavailable
-
-**Solutions:**
-
-1. **Confirm the external rehearsal database is reachable:**
-
-   ```bash
-   psql "postgresql://$SIBYL_POSTGRES_USER:$SIBYL_POSTGRES_PASSWORD@$SIBYL_POSTGRES_HOST:$SIBYL_POSTGRES_PORT/$SIBYL_POSTGRES_DB" -c 'select 1'
-   ```
-
-2. **Confirm the retained archive contains the database dump sidecar:**
-
-   ```bash
-   tar -tzf migration-archive.tar.gz | grep postgres.sql
-   ```
-
-3. **Run restore only in explicit rehearsal mode with
-   `--restore-database-dump --source-type legacy-archive --target-mode postgres-rehearsal`.**
-
 ### Kong Gateway Issues
 
 **Solutions:**

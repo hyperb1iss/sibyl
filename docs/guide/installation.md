@@ -118,8 +118,7 @@ For distributed or multi-process dev, opt into Redis explicitly:
 docker compose --env-file /dev/null --profile redis up -d surrealdb redis
 ```
 
-Historical `postgres.sql` archive rehearsal now uses an explicitly managed external PostgreSQL
-database. The default compose file starts only SurrealDB, plus Redis when that profile is requested.
+The default compose file starts only SurrealDB, plus Redis when that profile is requested.
 
 ## Configuration
 
@@ -201,14 +200,8 @@ This starts:
 - Web frontend on port 3337
 - In-process background jobs and schedules
 
-The local FalkorDB/PostgreSQL dev fallback was retired after the v0.6.0 compatibility release. Use
-`sibyld migrate import <archive> --source-type surreal-archive --target-mode surreal` to restore an
-exported Surreal-native archive.
-
-> **Note (2026-07):** The `--source-type legacy-archive` on-ramp for historical FalkorDB/PostgreSQL
-> migration archives was removed in the v0.6–v1.0 line (v0.10.0 was the last release that shipped
-> it). If you still hold a legacy archive, see
-> [Migrating from FalkorDB](./migrating-from-falkor.md).
+To restore an archive exported from another Sibyl instance, run
+`sibyld migrate import <archive> --source-type surreal-archive --target-mode surreal`.
 
 ### Individual Services
 
@@ -281,15 +274,15 @@ or reset the affected org namespace from SurrealQL.
 REMOVE NAMESPACE org_<uuid_hex>;
 ```
 
-### Legacy Graph / Migration Errors
+### Archive Restore Errors
 
-Restore a retained Surreal-native archive with
-`sibyld migrate import <archive> --source-type surreal-archive --target-mode surreal`.
+Restore accepts only Sibyl's own archives (from `sibyld migrate export`, `merge`, or `consolidate`)
+and API backups. Validate the archive before restoring it:
 
-> **Note (2026-07):** The historical `--source-type legacy-archive`, `--restore-database-dump`, and
-> `--target-mode postgres-rehearsal` flags were removed in the v0.6–v1.0 line and no longer exist.
-> Legacy archives must be imported from a release that still carries the on-ramp; see
-> [Migrating from FalkorDB](./migrating-from-falkor.md).
+```bash
+sibyld migrate check <archive>
+sibyld migrate import <archive> --source-type surreal-archive --target-mode surreal
+```
 
 ### OpenAI API Errors
 
@@ -311,11 +304,6 @@ sibyl docker upgrade --tag 1.4.1
 
 When `--tag` is provided, `upgrade` updates the generated `.env` and the pinned Sibyl image
 references in `~/.sibyl/docker/docker-compose.yml`.
-
-### Legacy Runtime Notes
-
-Sibyl's current product surface centers on the knowledge graph, tasks, search, and source ingestion.
-If you are evaluating Sibyl today, you can ignore older experimental internal-runtime material.
 
 ## Next Steps
 

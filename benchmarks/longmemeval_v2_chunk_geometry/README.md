@@ -1,10 +1,8 @@
 # Chunk-geometry measurement harness (v1.2 Track A1, Stage 0/1)
 
-This directory holds the offline measurement code behind
-[`docs/architecture/SIBYL_1_2_IMPLEMENTATION_PLAN.md`](../../docs/architecture/SIBYL_1_2_IMPLEMENTATION_PLAN.md)
-§4 A1, the section that resolved the design fork "are sliced spans first-class
-graph entities" — they are, and they shipped as `EntityType.PASSAGE`. Every
-number quoted in that section was produced here.
+This directory holds the offline measurement code that resolved the 1.2 design
+fork "are sliced spans first-class graph entities". They are, and they shipped
+as `EntityType.PASSAGE`. Every number behind that decision was produced here.
 
 These are **manual research scripts**, not a CI suite. Nothing in this directory
 is wired into a moon task that executes them, because they read two large

@@ -6,13 +6,9 @@
   coalescence added after a cross-system comparison against a production memory system surfaced the
   open-loop finding (see §2).
 - Current release floor: v1.0.2 (1.0 shipped)
-- Supersedes the post-1.0 "future work" framing in [`SIBYL_1_0_ROADMAP.md`](SIBYL_1_0_ROADMAP.md);
-  the product truth remains [`SIBYL_NORTHSTAR.md`](SIBYL_NORTHSTAR.md).
-- Concrete v1.1 execution plan:
-  [`SIBYL_1_1_IMPLEMENTATION_PLAN.md`](SIBYL_1_1_IMPLEMENTATION_PLAN.md).
-- Concrete v1.2 execution plan:
-  [`SIBYL_1_2_IMPLEMENTATION_PLAN.md`](SIBYL_1_2_IMPLEMENTATION_PLAN.md) (2026-07-24) — re-scopes
-  v1.2 to "Retrieve It"; coalescence W1–W3 and TeamMemBench slide to v1.3.
+- The product truth remains [`SIBYL_NORTHSTAR.md`](SIBYL_NORTHSTAR.md).
+- On 2026-07-24 v1.2 was re-scoped to "Retrieve It"; coalescence W1 to W3 and TeamMemBench slid to
+  v1.3.
 
 This roadmap covers the three releases after 1.0. It was assembled from a full-codebase +
 competitive-landscape research pass and a cross-model review, and it is grounded in verified code
@@ -62,8 +58,9 @@ and the benchmarks say no one has solved._
 
 ## 2. Verified starting point
 
-- **Retrieval is at ceiling on LongMemEval-S:** 96.96% strict R@5 / 98.90% R@10 (retrieval recall,
-  no LLM in the path, run `26304777971`). Context-pack: 160/160, p95 84 ms, zero leaks.
+- **LongMemEval-S retrieval:** the pre-1.0 live run this plan started from has been withdrawn as a
+  public claim, so no retrieval number is citable until a current run passes the gate. Context-pack:
+  160/160, p95 84 ms, zero leaks.
 - **Substrate is healthy.** The 2026-05-28 audit (C1–H10 + mediums) is fully remediated:
   transactions wrap destructive cascades; the per-org query lock is now a per-org connection pool; a
   shared ranker and shared RRF serve both retrieval surfaces (two surfaces — `hybrid_search` and
@@ -136,8 +133,8 @@ ships without a receipt.
 ### W1. End-to-end QA-accuracy lane
 
 Add a reader pass over Sibyl's retrieved LongMemEval-S sessions plus the official GPT-4o/`gpt-5.2`
-judge; publish QA accuracy alongside the 96.96% R@5 retrieval number. Closes the miscategorization
-gap where comparison tables read Sibyl's retrieval recall as if it were QA accuracy.
+judge; publish QA accuracy alongside a current retrieval number. Closes the miscategorization gap
+where comparison tables read Sibyl's retrieval recall as if it were QA accuracy.
 
 - Gate `qa-accuracy-gate`: publishable QA-accuracy number from a pinned run; fails if QA accuracy
   drops > 1.0 pp vs the last committed score.

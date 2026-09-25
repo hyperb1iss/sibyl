@@ -33,8 +33,8 @@ Deploy Sibyl to a production Kubernetes cluster using Helm.
                          +----------------------+
 ```
 
-SurrealDB is the active runtime. See [storage-modes.md](../guide/storage-modes.md) for local archive
-rehearsal notes.
+SurrealDB is the only data store. See [Storage Modes](../guide/storage-modes.md) for connection
+options.
 
 ## Quick Start
 
@@ -66,9 +66,6 @@ helm upgrade --install sibyl sibyl/sibyl \
 
 Installing from a source checkout works the same way with the local chart path: replace
 `sibyl/sibyl` with `./charts/sibyl`.
-
-The Helm chart deploys the SurrealDB-backed runtime only. Keep PostgreSQL archive rehearsal sidecars
-and preserved FalkorDB source deployments outside this release chart.
 
 ## Values Configuration
 
@@ -227,12 +224,6 @@ RocksDB-backed PVC is simpler.
 Set `coordinationBackend: "redis"` when running multiple backend or worker replicas. Use Valkey or
 Redis for arq jobs, distributed locks, WebSocket pub/sub, and shared rate limits.
 
-### Archive Rehearsal Sidecars
-
-PostgreSQL is no longer part of the active Kubernetes runtime. Keep PostgreSQL and preserved
-FalkorDB source deployments outside the release chart. Bring them up only for explicit legacy
-`postgres.sql` archive rehearsal or rollback validation during a write-freeze window.
-
 ## Secrets Management
 
 ### Option 1: Kubernetes Secrets
@@ -279,8 +270,8 @@ kubectl apply -f sibyl-secrets-sealed.yaml
 
 ## Schema Bootstrap
 
-Sibyl bootstraps SurrealDB schema inline at startup. The Helm chart no longer runs an Alembic
-pre-upgrade hook for the active runtime.
+Sibyl bootstraps SurrealDB schema inline at startup. The Helm chart runs no pre-upgrade migration
+hook.
 
 ## Ingress Configuration
 

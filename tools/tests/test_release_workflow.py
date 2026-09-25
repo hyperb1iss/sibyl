@@ -583,6 +583,17 @@ def test_release_notes_reject_a_forbidden_benchmark_claim() -> None:
     ]
 
 
+def test_release_notes_reject_the_withdrawn_longmemeval_headline() -> None:
+    receipt, failures = validate_release_notes_claims(
+        "Retrieval holds at 96.96% R@5 and 98.90% R@10 on LongMemEval-S.\n"
+    )
+
+    assert failures
+    assert [claim["phrase"] for claim in receipt["unsupported_claims"]] == ["96.96%", "98.90%"]
+    assert all(claim["path"] == RELEASE_NOTES_SURFACE for claim in receipt["unsupported_claims"])
+    assert all("withdrawn" in claim["reason"] for claim in receipt["unsupported_claims"])
+
+
 def test_python_packages_pin_sibyl_core_to_current_release() -> None:
     version = pep440_version((REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip())
     package_dependencies = {

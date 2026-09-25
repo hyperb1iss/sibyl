@@ -7,24 +7,26 @@ description:
 
 # Benchmarks
 
-Sibyl publishes retrieval quality numbers because saying "we have great memory" without a measured
-metric is not a claim, it's a vibe. The pages in this section record what we measure, how we measure
-it, what the latest scores are, and how those numbers compare to the public AI memory systems
-landscape.
+Saying "we have great memory" without a measured metric is not a claim, it's a vibe. The pages in
+this section record what we measure, how we measure it, which results are citable, and how results
+compare across the public AI memory systems landscape.
 
 ## At A Glance
 
-::: tip Latest LongMemEval-S live run **500/500 `hit@5`** · **96.96% strict `recall@5`** · **98.90%
-`recall@10`** · 94.63 nDCG@5
+::: info No citable LongMemEval-S number right now
 
-Live API path. SurrealDB-native graph + vector retrieval. OpenAI embeddings. No LLM extraction. No
-LLM reranking. Per-question physical tenant isolation. Full artifact and diagnostics published
-([run 26304777971](https://github.com/hyperb1iss/sibyl/actions/runs/26304777971)). :::
+The earlier headline run predates 1.0 and has been withdrawn as a public claim. The live eval
+harness still runs on the API path with SurrealDB-native graph and vector retrieval, OpenAI
+embeddings, no LLM extraction, no LLM reranking, and per-question physical tenant isolation. A new
+number is published only when a current run passes the benchmark gate and the manifest marks it
+citable.
+
+:::
 
 ## Pages In This Section
 
-- [LongMemEval Results](./longmemeval.md): the headline eval claim, full per-type breakdown,
-  configuration, latency, score progression, reproduction commands, claim boundary.
+- [LongMemEval-S](./longmemeval.md): how the live eval runs, what its metrics mean, reproduction
+  commands, and the claim boundary.
 - [LongMemEval-V2](./longmemeval-v2.md): the official full-suite harness path, live Sibyl memory
   adapter contract, and honest-run requirements.
 - [AI Memory Landscape](./ai-memory-landscape.md): honest competitive positioning. The
@@ -46,8 +48,8 @@ Sibyl runs a small ladder of evaluations, each with a specific scope:
 | `LongMemEval Live Full` (CI)  | Full 500-question LongMemEval against ephemeral stack | Public eval claims       |
 | `LongMemEval offline`         | Chroma-backed offline replay                          | Algorithm baseline       |
 
-The full LongMemEval live run is what we cite for public claims. Everything else is a guardrail or a
-baseline. Reporting rules and gate profiles are documented in
+Only a full LongMemEval live run that the manifest marks citable can back a public claim. Everything
+else is a guardrail or a baseline. Reporting rules and gate profiles are documented in
 [Benchmark Methodology](./benchmark-methodology.md).
 
 ## Why The Numbers Are Reproducible
@@ -62,5 +64,5 @@ Every full LongMemEval run uploads:
   corpus text policy, projection settings, extraction settings, concurrency, repeat count.
 
 To verify a published number, download the corresponding artifact, run `jq` against it, and compare
-to the headline. The [LongMemEval Results page](./longmemeval.md#reproducibility) has the exact
+it to the cited value. The [LongMemEval-S page](./longmemeval.md#reproducibility) has the exact
 commands.

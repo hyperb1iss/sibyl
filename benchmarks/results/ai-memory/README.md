@@ -12,7 +12,13 @@ Current committed artifacts:
 - `longmemeval_sibyl_hybrid_20260513.json`
 - `longmemeval_sibyl_raw_rc1_20260610.json`
 - `longmemeval_sibyl_hybrid_rc1_20260610.json`
-- `external/longmemeval_sibyl_live_full_26304777971.json`
+
+Retained history, not citable:
+
+- `external/longmemeval_sibyl_live_full_26304777971.json`: the LongMemEval-S live run behind the
+  withdrawn pre-1.0 headline. It stays as the source of the `history/2026-07-03-live-hybrid.json`
+  baseline summary, but it is off the `citable` ledger and no public doc or release note may cite
+  it.
 
 `manifest.json` is the release ledger. Entries under `citable` must point to full artifacts in this
 directory or committed external archive manifests, and pass the `ai-memory` gate. Entries under

@@ -28,8 +28,8 @@ reserved until their review and promotion workflows are fully explicit.
 Use private scope for personal recall:
 
 ```bash
-sibyl remember "Postgres archive gotcha" \
-  "The restore rehearsal expects a retained postgres.sql payload" \
+sibyl remember "Restore org check" \
+  "sibyld migrate import refuses a backup whose organization differs from --org-id" \
   --scope private
 ```
 

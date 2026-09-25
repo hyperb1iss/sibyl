@@ -8,8 +8,7 @@
 #   2. docker compose --env-file ~/.sibyl/prod.env -f docker-compose.prod.yml up -d
 #   3. Visit http://localhost:3337
 #
-# Default mode is fully Surreal. Legacy imports are file-based migration flows
-# documented in docs/guide/migrating-from-falkor.md, not production services.
+# SurrealDB is the only data store: graph, content, and auth in one instance.
 #
 # Environment Variables (required):
 #   SIBYL_JWT_SECRET          — Random secret for JWT signing (openssl rand -hex 32)

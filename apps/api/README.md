@@ -78,7 +78,7 @@ SIBYL_OPENAI_API_KEY=sk-...       # Required when embedding provider=openai
 **Optional:**
 
 ```bash
-SIBYL_STORE=surreal                   # default; legacy is migration/source-side only
+SIBYL_STORE=surreal                   # the only supported value
 SIBYL_COORDINATION_BACKEND=auto       # auto | local | redis
 SIBYL_SURREAL_URL=ws://127.0.0.1:8000/rpc
 SIBYL_SURREAL_USERNAME=root
@@ -100,10 +100,6 @@ SIBYL_GRAPH_EMBEDDING_PROVIDER=openai
 SIBYL_GRAPH_EMBEDDING_MODEL=text-embedding-3-small
 SIBYL_GRAPH_EMBEDDING_DIMENSIONS=1024
 ```
-
-PostgreSQL settings are only for historical archive rehearsal commands that explicitly restore a
-retained `postgres.sql` payload against an operator-managed database. They are not part of default
-Surreal runtime startup.
 
 Gemini keys can also be supplied through `GEMINI_API_KEY` or `GOOGLE_API_KEY`. Changing embedding
 provider, model, or dimensions changes vector spaces; re-crawl sources and rebuild graph indexes
