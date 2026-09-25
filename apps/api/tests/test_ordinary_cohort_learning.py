@@ -195,7 +195,7 @@ async def test_an_abstaining_cohort_covers_its_sources_until_one_changes(
         return Extractor(
             CriticOutput,
             agent=Agent(TestModel(custom_output_args=abstention), output_type=CriticOutput),
-        ), '{"model":"offline"}'
+        ), '{"max_input_chars":40000,"model":"offline"}'
 
     monkeypatch.setattr(procedure_validation, "validation_extractor", factory)
     first = await reflection.run_reflection_dream_cycle({}, str(org.id), candidate_limit=0)
