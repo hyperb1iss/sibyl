@@ -9,6 +9,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from structlog.testing import capture_logs
 
 from sibyl_core.backends.surreal import (
     SurrealAuthClient,
@@ -28,6 +29,7 @@ from sibyl_core.backends.surreal.schema import (
     bootstrap_schema,
 )
 from sibyl_core.backends.surreal.schema_version import (
+    GRAPH_SCHEMA_CURRENT_VERSION,
     GRAPH_SCHEMA_NAME,
     get_schema_version,
     record_schema_version,
@@ -830,6 +832,53 @@ async def test_live_surreal_server_repairs_partial_graph_required_fields() -> No
                 "updated_at": datetime(2026, 7, 10, 17, 37, 1, tzinfo=UTC),
             }
         ]
+    except Exception:
+        test_failed = True
+        raise
+    finally:
+        await client.close()
+        if test_failed:
+            with suppress(Exception):
+                await _drop_surreal_namespace(client.namespace)
+        else:
+            await _drop_surreal_namespace(client.namespace)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("starting_point", ["fresh", "stamped_v20", "reset"])
+async def test_live_graph_bootstrap_logs_no_failed_queries(starting_point: str) -> None:
+    # A 3.x server fails any statement against a missing table, and the
+    # dedicated client logs every failure as a warning even when the caller
+    # expects and handles it, so bootstrap must never touch absent tables.
+    client = SurrealGraphClient(
+        group_id=str(uuid4()),
+        url=_live_surreal_url(),
+        username=_surreal_username(),
+        password=_surreal_password(),
+    )
+
+    test_failed = False
+    try:
+        if starting_point != "fresh":
+            await bootstrap_schema(client)
+        if starting_point == "stamped_v20":
+            await record_schema_version(
+                client.execute_query,
+                version=20,
+                migrations=(),
+                name=GRAPH_SCHEMA_NAME,
+            )
+
+        with capture_logs() as entries:
+            await bootstrap_schema(client, reset=starting_point == "reset")
+
+        failed_queries = [
+            (entry.get("statement"), entry.get("tables"), entry.get("query_origin"))
+            for entry in entries
+            if entry["event"] == "surreal_query_failed"
+        ]
+        assert failed_queries == []
+        assert await get_schema_version(client.execute_query) == GRAPH_SCHEMA_CURRENT_VERSION
     except Exception:
         test_failed = True
         raise
