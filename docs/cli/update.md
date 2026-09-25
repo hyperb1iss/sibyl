@@ -49,14 +49,16 @@ sibyl update --skills
 
 - The CLI version check compares the installed `sibyl-dev` against PyPI.
 - The container check finds each runtime by its compose file: `~/.sibyl/local/` for
-  [`sibyl up`](./local.md) and `~/.sibyl/docker/` for [`sibyl docker`](./docker.md). Its current
-  version is the image tag of its running API container, or the tag its compose file pins when no
-  API container runs, so an interrupted upgrade that left the pin ahead still counts as behind. A
-  runtime is behind when that tag is older than the one the CLI runs, which is the CLI version (or
-  `SIBYL_IMAGE_TAG` when set). When the CLI is upgraded in the same run, containers follow the
-  version that actually installed, which can differ from PyPI when the tool install is pinned. A
-  newer or custom tag is left alone, and so is every runtime when the CLI is a dev, local, or
-  post-release build, since no image is published for those.
+  [`sibyl up`](./local.md) and `~/.sibyl/docker/` for [`sibyl docker`](./docker.md), matching
+  running containers on the compose file that created them. Its current version is the image tag of
+  its running API container, so an interrupted upgrade that left the pin ahead still counts as
+  behind. The pin only speaks for a runtime with nothing running; one that runs without its API
+  shows "no API container running" and is brought back on the target, unless the pin names a newer
+  release than the CLI. A runtime is behind when that tag is older than the one the CLI runs, which
+  is the CLI version (or `SIBYL_IMAGE_TAG` when set). When the CLI is upgraded in the same run,
+  containers follow the version that actually installed, which can differ from PyPI when the tool
+  install is pinned. A newer or custom tag is left alone, and so is every runtime when the CLI is a
+  dev, local, or post-release build, since no image is published for those.
 - `update` hands the upgrade to the runtime's own command, run through the `sibyl` on PATH with the
   tag passed explicitly: [`sibyl docker upgrade --tag <tag>`](./docker.md#docker-upgrade) or
   [`sibyl local upgrade --tag <tag>`](./local.md#local-upgrade). Both pull the new images before

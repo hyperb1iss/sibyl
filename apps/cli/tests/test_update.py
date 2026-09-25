@@ -1,6 +1,5 @@
 """Tests for the self-updater module."""
 
-import os
 import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -190,15 +189,28 @@ def _plan(
     )
 
 
-def _docker_probe(cmd: list[str], running_tag: str | None) -> subprocess.CompletedProcess[str]:
-    """Answer the read-only Docker probes `update` makes about one runtime."""
-    if cmd[:2] == ["docker", "inspect"]:
-        return subprocess.CompletedProcess(
-            cmd, 0, stdout=f"ghcr.io/hyperb1iss/sibyl-api:{running_tag}\n"
-        )
-    if "ps" in cmd:
-        return subprocess.CompletedProcess(cmd, 0, stdout="abc123\n" if running_tag else "")
-    return subprocess.CompletedProcess(cmd, 0, stdout="")
+def _ps_line(compose: Path, service: str, image: str) -> str:
+    return f"{compose}\t{service}\t{image}"
+
+
+def _docker_probe(
+    cmd: list[str], running_tag: str | None, *, project_up: bool | None = None
+) -> subprocess.CompletedProcess[str]:
+    """Answer `docker ps` for the registered compose files.
+
+    Each one runs SurrealDB while its project is up, plus an API on
+    `running_tag` when that is set.
+    """
+    if cmd[:2] != ["docker", "ps"]:
+        return subprocess.CompletedProcess(cmd, 0, stdout="")
+    up = bool(running_tag) if project_up is None else project_up
+    lines = []
+    for compose in _PINS:
+        if up:
+            lines.append(_ps_line(compose, "surrealdb", "surrealdb/surrealdb:v3.2.4"))
+        if running_tag:
+            lines.append(_ps_line(compose, "api", f"ghcr.io/hyperb1iss/sibyl-api:{running_tag}"))
+    return subprocess.CompletedProcess(cmd, 0, stdout="\n".join(lines) + "\n")
 
 
 def _upgrader(
@@ -293,46 +305,41 @@ class TestContainerRuntimes:
             runtime.compose_file.write_text(content)
             assert runtime.image_tag() is None
 
-    def test_is_running_never_lets_compose_read_a_cwd_env_file(self, tmp_path: Path) -> None:
-        runtime = _runtime(tmp_path)
-        calls: list[list[str]] = []
+    def test_is_running_matches_the_compose_file_not_the_project_name(self, tmp_path: Path) -> None:
+        """Another project in a directory named `docker` must not read as this runtime."""
+        runtime = _runtime(tmp_path, name="docker")
+        foreign = tmp_path / "work" / "shop" / "docker" / "docker-compose.yml"
+        listing = _ps_line(foreign, "api", "mycorp/api:1.0.3") + "\n"
 
-        def fake_run(cmd: list[str], **_: object) -> subprocess.CompletedProcess[str]:
-            calls.append(cmd)
-            return subprocess.CompletedProcess(cmd, 0, stdout="abc123\n")
+        with patch(
+            "sibyl_cli.update.subprocess.run",
+            return_value=subprocess.CompletedProcess([], 0, stdout=listing),
+        ) as run:
+            assert runtime.is_running() is False
+            assert runtime.running_api_tag() is None
+        assert run.call_args.args[0][:3] == ["docker", "ps", "--no-trunc"]
+        assert run.call_args.kwargs["timeout"] == update_module.DOCKER_PROBE_TIMEOUT_SECONDS
 
-        with patch("sibyl_cli.update.subprocess.run", side_effect=fake_run):
+        listing += _ps_line(runtime.compose_file, "api", "ghcr.io/hyperb1iss/sibyl-api:1.4.0")
+        with patch(
+            "sibyl_cli.update.subprocess.run",
+            return_value=subprocess.CompletedProcess([], 0, stdout=listing + "\n"),
+        ):
             assert runtime.is_running() is True
-            runtime.env_file.write_text("SIBYL_IMAGE_TAG=1.4.0\n")
-            assert runtime.is_running() is True
-
-        compose = str(runtime.compose_file)
-        assert calls == [
-            ["docker", "compose", "-f", compose, "--env-file", os.devnull, "ps", "-q"],
-            ["docker", "compose", "-f", compose, "--env-file", str(runtime.env_file), "ps", "-q"],
-        ]
+            assert runtime.running_api_tag() == "1.4.0"
 
     def test_is_running_is_false_without_docker(self, tmp_path: Path) -> None:
         with patch("sibyl_cli.update.subprocess.run", side_effect=FileNotFoundError("docker")):
             assert _runtime(tmp_path).is_running() is False
 
-    def test_running_api_tag_reads_the_api_container_image(self, tmp_path: Path) -> None:
+    def test_running_api_tag_is_none_without_an_api_container(self, tmp_path: Path) -> None:
         runtime = _runtime(tmp_path, tag="1.5.0")
-        seen: list[list[str]] = []
-
-        def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-            seen.append(cmd)
-            assert kwargs["timeout"] == update_module.DOCKER_PROBE_TIMEOUT_SECONDS
-            return _docker_probe(cmd, "1.4.0")
-
-        with patch("sibyl_cli.update.subprocess.run", side_effect=fake_run):
-            assert runtime.running_api_tag() == "1.4.0"
-        assert seen[0][-3:] == ["ps", "-q", "api"]
-        assert seen[1] == ["docker", "inspect", "--format", "{{.Config.Image}}", "abc123"]
-
+        _PINS.append(runtime.compose_file)
         with patch(
-            "sibyl_cli.update.subprocess.run", side_effect=lambda cmd, **_: _docker_probe(cmd, None)
+            "sibyl_cli.update.subprocess.run",
+            side_effect=lambda cmd, **_: _docker_probe(cmd, None, project_up=True),
         ):
+            assert runtime.is_running() is True
             assert runtime.running_api_tag() is None
         with patch(
             "sibyl_cli.update.subprocess.run",
@@ -398,7 +405,7 @@ class TestContainerPlans:
         runtime = _runtime(tmp_path, tag="1.4.0")
         monkeypatch.setattr(update_module, "installed_container_runtimes", lambda: [runtime])
         monkeypatch.setattr(ContainerRuntime, "is_running", lambda _self: True)
-        monkeypatch.setattr(ContainerRuntime, "running_api_tag", lambda _self: None)
+        monkeypatch.setattr(ContainerRuntime, "running_api_tag", lambda _self: "1.4.0")
 
         [plan] = plan_container_upgrades("1.5.0rc2")
 
@@ -453,6 +460,39 @@ class TestContainerPlans:
 
         assert (plan.current_tag, plan.pinned_tag, plan.applies) == ("1.4.0", "1.5.0", True)
         assert "pin says 1.5.0" in plan.status()
+
+    @pytest.mark.parametrize(
+        ("pinned", "target", "applies"),
+        [
+            # Interrupted after Compose stopped the old API: bring it back on the target.
+            ("1.5.0", "1.5.0", True),
+            ("1.4.0", "1.5.0", True),
+            # A pin newer than this CLI must not be moved backwards.
+            ("1.6.0", "1.5.0", False),
+        ],
+    )
+    def test_a_runtime_up_without_its_api_is_not_current(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        pinned: str,
+        target: str,
+        *,
+        applies: bool,
+    ) -> None:
+        monkeypatch.delenv("SIBYL_IMAGE_TAG", raising=False)
+        runtime = _runtime(tmp_path, tag=pinned)
+        monkeypatch.setattr(update_module, "installed_container_runtimes", lambda: [runtime])
+        monkeypatch.setattr(ContainerRuntime, "is_running", lambda _self: True)
+        monkeypatch.setattr(ContainerRuntime, "running_api_tag", lambda _self: None)
+
+        [plan] = plan_container_upgrades(target)
+
+        assert plan.current_tag is None
+        assert plan.api_missing is True
+        assert plan.applies is applies
+        assert f"no API container running (pin says {pinned})" in plan.status()
+        assert "matches" not in plan.status()
 
     def test_the_pin_speaks_only_when_no_api_runs(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

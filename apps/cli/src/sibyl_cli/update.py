@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from packaging.version import InvalidVersion, Version
+from packaging.version import Version
 from rich.panel import Panel
 from rich.table import Table
 
@@ -159,13 +159,7 @@ def get_server_version() -> str | None:
 # ============================================================================
 
 
-def _parse_tag(tag: str | None) -> Version | None:
-    if not tag:
-        return None
-    try:
-        return Version(tag)
-    except InvalidVersion:
-        return None
+_parse_tag = local_runtime.image_tag_version
 
 
 @dataclass(frozen=True)
@@ -183,58 +177,22 @@ class ContainerRuntime:
         except OSError:
             return None
 
-    def _compose(self, *args: str) -> list[str]:
-        # A missing env file must not let Compose load a .env from the cwd.
-        env_file = self.env_file if self.env_file.exists() else Path(os.devnull)
-        return [
-            "docker",
-            "compose",
-            "-f",
-            str(self.compose_file),
-            "--env-file",
-            str(env_file),
-            *args,
-        ]
-
-    @staticmethod
-    def _probe(command: list[str]) -> subprocess.CompletedProcess[str] | None:
-        """Run a read-only Docker probe, or None when Docker did not answer in time."""
-        try:
-            return subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=DOCKER_PROBE_TIMEOUT_SECONDS,
-            )
-        except subprocess.TimeoutExpired:
-            return None
-        except OSError:
-            return subprocess.CompletedProcess(command, 127, stdout="", stderr="")
-
     def is_running(self) -> bool | None:
-        """Whether this compose project has containers, or None when Docker did not answer."""
-        result = self._probe(self._compose("ps", "-q"))
-        if result is None:
-            return None
-        return result.returncode == 0 and bool((result.stdout or "").strip())
+        """Whether this runtime has running containers, or None when Docker did not answer.
+
+        Containers are matched on the compose-file label, so another project
+        in a directory named `docker` or `local` never reads as this one.
+        """
+        containers = local_runtime.containers_for(self.compose_file)
+        return None if containers is None else bool(containers)
 
     def running_api_tag(self) -> str | None:
-        """The image tag of this project's running API container, if one runs.
+        """The image tag of this runtime's running API container, if one runs.
 
         An interrupted upgrade can leave the pin ahead of the containers, so
         what runs is the version that counts.
         """
-        listed = self._probe(self._compose("ps", "-q", "api"))
-        containers = (listed.stdout or "").split() if listed and listed.returncode == 0 else []
-        if not containers:
-            return None
-        container = containers[0]
-        inspected = self._probe(["docker", "inspect", "--format", "{{.Config.Image}}", container])
-        if inspected is None or inspected.returncode != 0:
-            return None
-        repository, _, tag = (inspected.stdout or "").strip().rpartition(":")
-        return tag if repository and "/" not in tag else None
+        return local_runtime.running_api_tag(self.compose_file)
 
     def upgrade_command(self, image_tag: str) -> list[str]:
         """The runtime's own upgrade command, run through the `sibyl` on PATH.
@@ -287,12 +245,23 @@ class ContainerPlan:
     pinned_tag: str | None = None
 
     @property
+    def api_missing(self) -> bool:
+        """The runtime has containers up but no API, e.g. after an interrupted start."""
+        return self.running is True and self.current_tag is None and self.pinned_tag is not None
+
+    @property
     def target_tag(self) -> str | None:
         return self.target.tag
 
     @property
     def behind(self) -> bool:
-        current, target = _parse_tag(self.current_tag), _parse_tag(self.target_tag)
+        target = _parse_tag(self.target_tag)
+        if self.api_missing:
+            # Bringing the API back on the target is the fix, unless the pin
+            # names something newer than this CLI, which must not go backwards.
+            pinned = _parse_tag(self.pinned_tag)
+            return pinned is not None and target is not None and pinned <= target
+        current = _parse_tag(self.current_tag)
         return current is not None and target is not None and current < target
 
     @property
@@ -302,12 +271,22 @@ class ContainerPlan:
 
     def status(self) -> str:
         status = self._status()
-        if self.pinned_tag and self.current_tag and self.pinned_tag != self.current_tag:
+        if (
+            not self.api_missing
+            and self.pinned_tag
+            and self.current_tag
+            and self.pinned_tag != self.current_tag
+        ):
             status += f" [dim](pin says {self.pinned_tag})[/dim]"
         return status
 
     def _status(self) -> str:
         current, target, source = self.current_tag, self.target_tag, self.target.source
+        if self.api_missing:
+            missing = f"no API container running (pin says {self.pinned_tag})"
+            if self.applies:
+                return f"{missing} → [{SUCCESS_GREEN}]{target}[/{SUCCESS_GREEN}]"
+            return f"{missing} [dim](left alone)[/dim]"
         if current is None:
             return "[dim]Unknown image tag[/dim]"
         if target is None:
@@ -339,10 +318,10 @@ def plan_container_upgrades(cli_version: str | None) -> list[ContainerPlan]:
     for runtime in installed_container_runtimes():
         running = runtime.is_running()
         pinned = runtime.image_tag()
-        # What runs is the current version; the pin only speaks for a runtime
-        # with no API container up.
-        running_tag = runtime.running_api_tag() if running else None
-        plans.append(ContainerPlan(runtime, running_tag or pinned, target, running, pinned))
+        # What runs is the current version. The pin only speaks for a runtime
+        # with nothing up; a runtime that runs without its API is not current.
+        current = runtime.running_api_tag() if running else pinned
+        plans.append(ContainerPlan(runtime, current, target, running, pinned))
     return plans
 
 
