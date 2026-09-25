@@ -721,12 +721,16 @@ def validate_candidate_content_agreement(
 class ConsolidationInputBudgetExceeded(ValueError):
     """Complete declared extraction input exceeds its frozen character budget."""
 
-    def __init__(self, actual_chars: int, max_input_chars: int) -> None:
+    def __init__(
+        self, actual_chars: int, max_input_chars: int, *, model: str | None = None
+    ) -> None:
         self.actual_chars = actual_chars
         self.max_input_chars = max_input_chars
+        self.model = model
+        limit = f"the configured limit for {model}" if model else "the configured limit"
         super().__init__(
             f"complete consolidation input has {actual_chars} characters; "
-            f"the configured limit is {max_input_chars} characters"
+            f"{limit} is {max_input_chars} characters"
         )
 
 

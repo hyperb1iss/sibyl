@@ -12,7 +12,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-from sibyl_core.ai.llm.config import LLMSurface, resolve_llm_config
+from sibyl_core.ai.llm.config import LLMSurface, consolidation_input_budget, resolve_llm_config
 from sibyl_core.ai.llm.extractor import effective_output_mode, extraction_schema
 from sibyl_core.ai.providers import anthropic_effort, resolved_model_profile
 from sibyl_core.ai.transport import transport_policy
@@ -596,7 +596,7 @@ async def _extractor_policy() -> _ExtractorPolicy:
     output_mode = effective_output_mode(
         core_config.consolidation_output_mode, config.to_llm_config()
     )
-    max_input_chars = core_config.consolidation_max_input_chars
+    max_input_chars = consolidation_input_budget(config.to_llm_config())
     max_output_tokens = config.max_tokens.value
     if max_output_tokens is None:
         max_output_tokens = 2_048

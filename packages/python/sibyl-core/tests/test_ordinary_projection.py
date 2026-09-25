@@ -30,6 +30,7 @@ from sibyl_core.tasks.ordinary_proposals import (
 from tests.test_episode_evidence import _encoded, _episode
 from tests.test_ordinary_cohort import content_store as content_store
 from tests.test_ordinary_packet_correction import install
+from tests.validation_policy import offline_policy
 
 
 @pytest.fixture
@@ -181,7 +182,7 @@ async def test_complete_projection_actual_sdk_stages_and_protected_replay(
         monkeypatch.setattr(
             procedure_validation,
             "validation_extractor",
-            AsyncMock(return_value=(reader, '{"model":"offline","transport_retries":0}')),
+            AsyncMock(side_effect=lambda *_: (reader, offline_policy(transport_retries=0))),
         )
         resolver = AsyncMock(return_value=SourceReadAuthority("owner"))
         ids = [source.id for source in complete_sources]

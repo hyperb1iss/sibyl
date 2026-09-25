@@ -48,7 +48,7 @@ async def test_automatic_validation_loads_real_dream_candidate(dream_store, monk
     monkeypatch.setattr(
         procedure_validation,
         "validation_extractor",
-        AsyncMock(return_value=(extractor, '{"model":"offline"}')),
+        AsyncMock(return_value=(extractor, '{"max_input_chars":40000,"model":"offline"}')),
     )
     resolver = AsyncMock(return_value=SourceReadAuthority("owner"))
     first = await validate_reflection_stage(prepared, resolver)
@@ -118,7 +118,7 @@ async def test_corrected_candidate_real_writer_replay(dream_store, monkeypatch, 
     monkeypatch.setattr(
         procedure_validation,
         "validation_extractor",
-        AsyncMock(return_value=(extractor, '{"model":"offline"}')),
+        AsyncMock(return_value=(extractor, '{"max_input_chars":40000,"model":"offline"}')),
     )
     outcome = await validate_reflection_stage(parent, resolver, review)
     assert outcome["status"] == "corrected"
@@ -189,16 +189,16 @@ async def test_corrected_candidate_real_writer_replay(dream_store, monkeypatch, 
     monkeypatch.setattr(
         procedure_validation,
         "_validation_extractor",
-        AsyncMock(return_value=(recheck, '{"model":"offline"}')),
+        AsyncMock(return_value=(recheck, '{"max_input_chars":40000,"model":"offline"}')),
     )
     monkeypatch.setattr(
         procedure_validation,
         "validation_extractor",
         AsyncMock(
             side_effect=[
-                (critic, '{"model":"offline"}'),
-                (extractor, '{"model":"offline"}'),
-                (recheck, '{"model":"offline"}'),
+                (critic, '{"max_input_chars":40000,"model":"offline"}'),
+                (extractor, '{"max_input_chars":40000,"model":"offline"}'),
+                (recheck, '{"max_input_chars":40000,"model":"offline"}'),
             ]
         ),
     )
@@ -223,7 +223,7 @@ async def _assert_job_reuses_validation(monkeypatch, resolver, recheck, candidat
     monkeypatch.setattr(
         procedure_validation,
         "validation_extractor",
-        AsyncMock(return_value=(recheck, '{"model":"offline"}')),
+        AsyncMock(return_value=(recheck, '{"max_input_chars":40000,"model":"offline"}')),
     )
     monkeypatch.setattr("sibyl.jobs.ordinary_cohorts.writable_source_authority", resolver)
     monkeypatch.setattr(
@@ -308,7 +308,7 @@ async def test_ordinary_two_repairs_reenter_original_and_child(
     calls = []
 
     async def factory(output_type=CriticOutput):
-        return Extractor(output_type), '{"model":"offline"}'
+        return Extractor(output_type), '{"max_input_chars":40000,"model":"offline"}'
 
     async def extract(reader, prompt):
         payload = json.loads(prompt.splitlines()[-1])

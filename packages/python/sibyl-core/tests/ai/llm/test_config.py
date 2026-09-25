@@ -4,18 +4,23 @@ import pytest
 from pydantic import SecretStr
 
 from sibyl_core.ai.errors import LLMConfigError
+from sibyl_core.ai.llm import config as llm_config
 from sibyl_core.ai.llm.config import (
+    DEFAULT_CONSOLIDATION_MAX_INPUT_CHARS,
     DEFAULT_TIMEOUT_SECONDS,
     MEMORY_TIMEOUT_SECONDS,
     ConfigField,
     EnvConfigSource,
     LLMConfig,
     LLMSurface,
+    consolidation_input_budget,
     get_config_source,
     invalidate_llm_config,
+    resolve_consolidation_input_budget,
     resolve_llm_config,
     set_config_source,
 )
+from sibyl_core.config import CoreConfig, settings
 
 
 @pytest.mark.asyncio
@@ -244,3 +249,75 @@ async def test_memory_timeout_env_overrides_the_raised_default(name: str, expect
     assert resolved.timeout_seconds.source == "env"
     assert resolved.timeout_seconds.locked_by_env is True
     assert resolved.timeout_seconds.env_var == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider", "model", "expected"),
+    [
+        ("anthropic", "claude-opus-5", 1_600_000),
+        ("anthropic", "claude-opus-5-5", 1_600_000),
+        ("anthropic", "claude-haiku-4-5", 40_000),
+        ("openai", "claude-opus-5", 40_000),
+    ],
+)
+async def test_consolidation_budget_follows_the_memory_model_when_unset(
+    monkeypatch, provider, model, expected
+):
+    monkeypatch.setattr(settings, "consolidation_max_input_chars", None)
+    environment = {"SIBYL_LLM_PROVIDER": provider, "SIBYL_LLM_MODEL": model}
+    resolved = await EnvConfigSource(environment).resolve(LLMSurface.MEMORY)
+
+    assert consolidation_input_budget(resolved.to_llm_config()) == expected
+    assert DEFAULT_CONSOLIDATION_MAX_INPUT_CHARS == 40_000
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("explicit", [40_000, 2_000_000])
+async def test_an_explicit_consolidation_budget_wins_over_the_opus_default(monkeypatch, explicit):
+    monkeypatch.setattr(settings, "consolidation_max_input_chars", explicit)
+    opus = await EnvConfigSource(
+        {"SIBYL_LLM_PROVIDER": "anthropic", "SIBYL_LLM_MODEL": "claude-opus-5-5"}
+    ).resolve(LLMSurface.MEMORY)
+
+    assert consolidation_input_budget(opus.to_llm_config()) == explicit
+
+
+def test_the_budget_env_var_is_the_explicit_setting(monkeypatch):
+    monkeypatch.delenv("SIBYL_CONSOLIDATION_MAX_INPUT_CHARS", raising=False)
+    assert CoreConfig().consolidation_max_input_chars is None
+
+    monkeypatch.setenv("SIBYL_CONSOLIDATION_MAX_INPUT_CHARS", "40000")
+    assert CoreConfig().consolidation_max_input_chars == 40_000
+
+    monkeypatch.setenv("SIBYL_CONSOLIDATION_MAX_INPUT_CHARS", "0")
+    with pytest.raises(ValueError, match="greater than 0"):
+        CoreConfig()
+
+
+class _RefusingSource:
+    async def resolve(self, surface: LLMSurface):
+        raise AssertionError("an explicit budget must not resolve the memory model")
+
+    async def invalidate(self, surface: LLMSurface | None = None) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_resolving_the_budget_reads_the_active_memory_model(monkeypatch):
+    monkeypatch.setattr(settings, "consolidation_max_input_chars", None)
+    monkeypatch.setattr(
+        llm_config,
+        "_config_source",
+        EnvConfigSource(
+            {"SIBYL_LLM_MEMORY_PROVIDER": "anthropic", "SIBYL_LLM_MEMORY_MODEL": "claude-opus-5"}
+        ),
+    )
+    assert await resolve_consolidation_input_budget() == 1_600_000
+
+    monkeypatch.setattr(llm_config, "_config_source", EnvConfigSource({}))
+    assert await resolve_consolidation_input_budget() == 40_000
+
+    monkeypatch.setattr(settings, "consolidation_max_input_chars", 123_456)
+    monkeypatch.setattr(llm_config, "_config_source", _RefusingSource())
+    assert await resolve_consolidation_input_budget() == 123_456

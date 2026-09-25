@@ -25,6 +25,7 @@ from sibyl_core.services.reflection_validation import (
 from sibyl_core.services.source_observations import SourceUnavailableError
 from sibyl_core.tasks.memory_validation import CriticOutput
 from tests.test_eval_publication_promotion import runtime as runtime
+from tests.validation_policy import memory_model_factory, offline_policy
 
 
 @pytest.fixture
@@ -79,7 +80,7 @@ def install_proposal(monkeypatch, sources):
     monkeypatch.setattr(
         procedure_validation,
         "validation_extractor",
-        AsyncMock(return_value=(owned, '{"model":"offline"}')),
+        AsyncMock(side_effect=lambda *_: (owned, offline_policy())),
     )
     return output
 
@@ -109,7 +110,7 @@ async def test_ordinary_cohort_actual_stage_replay_and_critic(
     monkeypatch.setattr(
         procedure_validation,
         "validation_extractor",
-        AsyncMock(return_value=(critic, '{"model":"offline"}')),
+        AsyncMock(side_effect=lambda *_: (critic, offline_policy())),
     )
     result = await validate_reflection_stage(parent, resolver)
     assert result["status"] == "no_findings"
@@ -791,6 +792,93 @@ async def test_partition_keeps_budget_packing_outside_the_shared_embedding_space
         "org", "owner", ids, AsyncMock(return_value=SourceReadAuthority("owner"))
     )
     assert bins == [ids[0::2], ids[1::2]]
+
+
+async def _memory_model_cohort(monkeypatch, prefix):
+    """Twenty 3K-character sources: about 60K characters, over 40K and far under 1.6M."""
+    from sibyl_core.config import settings
+
+    sources = [
+        await remember_raw_memory(
+            organization_id="org",
+            principal_id="owner",
+            source_id=f"{prefix}-{i}",
+            raw_content=f"capture-{i}:" + "a" * 3000,
+            embedding_provider=None,
+        )
+        for i in range(20)
+    ]
+    install_proposal(monkeypatch, sources)
+    owned, _ = await procedure_validation.validation_extractor()
+    monkeypatch.setattr(procedure_validation, "validation_extractor", memory_model_factory(owned))
+    monkeypatch.setattr(settings, "consolidation_max_input_chars", None)
+    return sorted(source.id for source in sources)
+
+
+def _use_memory_model(monkeypatch, model):
+    from sibyl_core.ai.llm import config as llm_config
+
+    monkeypatch.setattr(
+        llm_config,
+        "_config_source",
+        llm_config.EnvConfigSource(
+            {"SIBYL_LLM_MEMORY_PROVIDER": "anthropic", "SIBYL_LLM_MEMORY_MODEL": model}
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("model", "whole"), [("claude-opus-5-5", True), ("claude-haiku-4-5", False)]
+)
+async def test_partition_uses_the_memory_models_budget_when_none_is_set(
+    cohort_sources, content_store, monkeypatch, model, whole
+):
+    ids = await _memory_model_cohort(monkeypatch, "model-budget")
+    _use_memory_model(monkeypatch, model)
+    bins = await service.partition_stored_cohort(
+        "org", "owner", ids, AsyncMock(return_value=SourceReadAuthority("owner"))
+    )
+    assert sorted(i for bucket in bins for i in bucket) == ids
+    assert (len(bins) == 1) is whole
+
+
+async def test_proposal_admits_a_cohort_over_40k_on_the_opus_default(
+    cohort_sources, content_store, monkeypatch
+):
+    ids = await _memory_model_cohort(monkeypatch, "opus-proposal")
+    _use_memory_model(monkeypatch, "claude-opus-5-5")
+    candidate, _ = await service.propose_stored_cohort(
+        "org",
+        "owner",
+        ids,
+        AsyncMock(return_value=SourceReadAuthority("owner")),
+        authorize=AsyncMock(),
+    )
+    assert candidate is not None
+    stage = (await content_store.execute_query("SELECT * FROM memory_validation_executions;"))[0]
+    packing = json.loads(stage["request_json"])["policy"]
+    assert json.loads(packing)["max_input_chars"] == 1_600_000
+
+
+async def test_a_model_change_after_partition_refuses_the_cohort_before_any_send(
+    cohort_sources, content_store, monkeypatch
+):
+    from sibyl_core.tasks.consolidation import ConsolidationInputBudgetExceeded
+
+    ids = await _memory_model_cohort(monkeypatch, "model-change")
+    resolver = AsyncMock(return_value=SourceReadAuthority("owner"))
+    _use_memory_model(monkeypatch, "claude-opus-5-5")
+    assert await service.partition_stored_cohort("org", "owner", ids, resolver) == [ids]
+
+    _use_memory_model(monkeypatch, "claude-haiku-4-5")
+    monkeypatch.setattr(
+        Extractor, "extract_with_usage", AsyncMock(side_effect=AssertionError("sent"))
+    )
+    with pytest.raises(ConsolidationInputBudgetExceeded) as refused:
+        await service.propose_stored_cohort("org", "owner", ids, resolver, authorize=AsyncMock())
+    assert refused.value.max_input_chars == 40_000
+    assert "the configured limit for claude-haiku-4-5 is 40000 characters" in str(refused.value)
+    assert await content_store.execute_query("SELECT * FROM memory_validation_executions;") == []
 
 
 async def test_cohort_partition_keeps_event_loop_responsive(cohort_sources, monkeypatch):

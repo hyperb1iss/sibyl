@@ -6,8 +6,10 @@ runs with the owned database up, and the database is stopped in ``finally``
 whatever happens.
 
 ``SIBYL_CONSOLIDATION_MAX_INPUT_CHARS`` is set to 800000, the study's measured
-complete-evidence allowance. The product default is 40000, which would split the
-cohort into packets that cannot carry complete evidence.
+complete-evidence allowance. Unset, the budget follows the memory model: 40000
+for most models, which would split the cohort into packets that cannot carry
+complete evidence, and 1600000 for Opus 5 and 5.5. Pinning it keeps every phase
+on the study's budget whatever model runs it.
 
 Redis is a hard refusal rather than an override: a stray ``SIBYL_REDIS_*``
 points the coordination backend at a broker this phase does not own, and the

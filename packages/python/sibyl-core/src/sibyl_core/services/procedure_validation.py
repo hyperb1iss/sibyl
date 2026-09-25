@@ -11,7 +11,12 @@ from typing import Any
 
 from pydantic_ai import Agent, NativeOutput
 
-from sibyl_core.ai.llm.config import LLMSurface, resolve_llm_config
+from sibyl_core.ai.llm.config import (
+    LLMSurface,
+    consolidation_input_budget,
+    resolve_consolidation_input_budget,
+    resolve_llm_config,
+)
 from sibyl_core.ai.llm.extractor import Extractor, effective_output_mode
 from sibyl_core.ai.providers import build_model
 from sibyl_core.ai.transport import transport_policy
@@ -209,6 +214,21 @@ async def validation_extractor() -> tuple[Extractor[CriticOutput], str]:
     return await _validation_extractor(CriticOutput)
 
 
+def policy_input_budget(policy: str) -> int:
+    """The input budget frozen beside a validation extractor, from the same resolved model."""
+    budget = json.loads(policy).get("max_input_chars")
+    if type(budget) is not int or budget <= 0:
+        raise ValueError("validation policy does not record its input budget")
+    return budget
+
+
+def enforce_policy_input_budget(chars: int, policy: str) -> int:
+    budget = policy_input_budget(policy)
+    if chars > budget:
+        raise ConsolidationInputBudgetExceeded(chars, budget, model=json.loads(policy).get("model"))
+    return budget
+
+
 async def _validation_extractor[T](output_type: type[T]) -> tuple[Extractor[T], str]:
     """Freeze one resolved model and whitelist its effective policy, never repr/key."""
     resolved = await resolve_llm_config(LLMSurface.MEMORY)
@@ -254,7 +274,7 @@ async def _validation_extractor[T](output_type: type[T]) -> tuple[Extractor[T], 
                 "route": settings.consolidation_openrouter_provider,
                 "schema": schema,
                 "transport": transport_policy(config),
-                "max_input_chars": settings.consolidation_max_input_chars,
+                "max_input_chars": consolidation_input_budget(config),
             }
         )
         return extractor, policy
@@ -282,9 +302,12 @@ async def validate_stored_procedure(
         )
         original = replace(original, prepared=prepared)
         extensions["base_input"] = base_input
+    # Refuse before a transport exists. The binding check runs against the budget
+    # frozen with the extractor, so a model change in between still fails closed.
     prompt_chars = len(original.prepared.prompt)
-    if prompt_chars > settings.consolidation_max_input_chars:
-        raise ConsolidationInputBudgetExceeded(prompt_chars, settings.consolidation_max_input_chars)
+    budget = await resolve_consolidation_input_budget()
+    if prompt_chars > budget:
+        raise ConsolidationInputBudgetExceeded(prompt_chars, budget)
     if progress_context is None:
         extractor, policy = await validation_extractor()
     else:
@@ -318,9 +341,9 @@ async def _validate_prepared_procedure(
     authorize: Callable[[], Awaitable[None]],
     request_extensions: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    actual_chars = len(original.prepared.prompt) + len(canonical(await extractor.output_schema()))
-    if actual_chars > settings.consolidation_max_input_chars:
-        raise ConsolidationInputBudgetExceeded(actual_chars, settings.consolidation_max_input_chars)
+    enforce_policy_input_budget(
+        len(original.prepared.prompt) + len(canonical(await extractor.output_schema())), policy
+    )
     request = {
         "org": organization_id,
         "principal": principal_id,

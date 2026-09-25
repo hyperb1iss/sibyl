@@ -2,7 +2,7 @@
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from pydantic import SecretStr
@@ -332,3 +332,125 @@ async def test_memory_validation_runs_native_output_on_a_model_that_rejects_forc
         assert requests[0]["output_config"]["format"]["type"] == "json_schema"
     finally:
         await validation._close_resources(extractor.resources)
+
+
+class _Admitted(Exception):
+    """Raised by the first step after a budget guard: the guard let the input through."""
+
+
+class _Models:
+    """A memory config source that serves one model per resolution, the last repeating."""
+
+    def __init__(self, *models):
+        self.models = list(models)
+
+    async def resolve(self, surface):
+        from sibyl_core.ai.llm.config import EnvConfigSource
+
+        model = self.models.pop(0) if len(self.models) > 1 else self.models[0]
+        environment = {"SIBYL_LLM_MEMORY_MODEL": model, "ANTHROPIC_API_KEY": "offline-only"}
+        return await EnvConfigSource(environment).resolve(surface)
+
+    async def invalidate(self, surface=None):
+        return None
+
+
+@pytest.fixture
+def memory_models(monkeypatch):
+    """Resolve the memory model through the global source, as production does."""
+    from sibyl_core.ai.llm import config as llm_config
+
+    monkeypatch.setattr(validation.settings, "consolidation_max_input_chars", None)
+    monkeypatch.setattr(validation.settings, "consolidation_output_mode", "tool")
+    monkeypatch.setattr(validation.settings, "consolidation_openrouter_provider", None)
+    clients = []
+    constructor = providers.RecordingAnthropicClient
+
+    def create():
+        client = constructor()
+        clients.append(client)
+        return client
+
+    monkeypatch.setattr(providers, "RecordingAnthropicClient", create)
+
+    def use(*models):
+        monkeypatch.setattr(llm_config, "_config_source", _Models(*models))
+
+    return use, clients
+
+
+def _procedure(monkeypatch, chars):
+    original = SimpleNamespace(
+        prepared=SimpleNamespace(prompt="e" * chars, input_sha256="input"),
+        snapshot_sha256="snapshot",
+        source_bindings=[],
+    )
+    monkeypatch.setattr(
+        validation, "prepare_stored_procedure_validation", AsyncMock(return_value=original)
+    )
+    monkeypatch.setattr(validation, "review_digest", Mock(side_effect=_Admitted))
+
+
+@pytest.mark.parametrize("model", ["claude-opus-5", "claude-opus-5-5"])
+async def test_procedure_guards_admit_input_over_40k_on_the_opus_default(
+    memory_models, monkeypatch, model
+):
+    use, clients = memory_models
+    use(model)
+    _procedure(monkeypatch, 100_000)
+    with pytest.raises(_Admitted):
+        await invoke()
+    assert len(clients) == 1 and clients[0].is_closed
+
+
+async def test_procedure_refuses_input_over_40k_on_a_model_without_a_default(
+    memory_models, monkeypatch
+):
+    use, clients = memory_models
+    use("claude-haiku-4-5")
+    _procedure(monkeypatch, 100_000)
+    with pytest.raises(ConsolidationInputBudgetExceeded):
+        await invoke()
+    assert clients == []
+
+
+async def test_a_model_change_after_the_procedure_precheck_fails_closed(memory_models, monkeypatch):
+    use, clients = memory_models
+    use("claude-opus-5-5", "claude-haiku-4-5")
+    _procedure(monkeypatch, 100_000)
+    with pytest.raises(
+        ConsolidationInputBudgetExceeded, match=r"for claude-haiku-4-5\S* is 40000 characters"
+    ):
+        await invoke()
+    assert len(clients) == 1 and clients[0].is_closed
+
+
+@pytest.mark.parametrize("correction", [False, True])
+@pytest.mark.parametrize(
+    ("model", "admitted"), [("claude-opus-5-5", True), ("claude-haiku-4-5", False)]
+)
+async def test_reflection_guard_follows_the_extractors_model(
+    memory_models, monkeypatch, correction, model, admitted
+):
+    from sibyl_core.services import ordinary_publication
+    from sibyl_core.services import reflection_validation as reflection
+    from sibyl_core.tasks import reflection_correction
+
+    use, clients = memory_models
+    use(model)
+    original = SimpleNamespace(
+        memory=SimpleNamespace(), prepared=SimpleNamespace(prompt="e" * 100_000)
+    )
+    monkeypatch.setattr(
+        reflection_correction,
+        "prepare_reflection_correction",
+        lambda prepared, review: "e" * 100_000,
+    )
+    monkeypatch.setattr(
+        ordinary_publication, "ordinary_semantic_digest", Mock(side_effect=_Admitted)
+    )
+    review = object() if correction else None
+    expected = _Admitted if admitted else ConsolidationInputBudgetExceeded
+    with pytest.raises(expected):
+        await reflection.validate_reflection_stage(original, AsyncMock(), review)
+    assert len(clients) == 1 and clients[0].is_closed
