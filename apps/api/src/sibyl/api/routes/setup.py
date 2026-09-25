@@ -15,25 +15,31 @@ from dataclasses import replace
 
 import structlog
 from fastapi import APIRouter, Depends
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from sibyl.config import settings
 from sibyl.persistence.operations_runtime import (
     get_setup_status as get_runtime_setup_status,
     require_setup_mode_or_admin,
-    require_setup_mode_or_auth,
 )
-from sibyl.services.settings import get_settings_service
+from sibyl.services.settings import SettingsService, get_settings_service
 from sibyl_core.ai.bedrock import (
     API_KEY_ENV_VARS as BEDROCK_API_KEY_ENV_VARS,
     bedrock_region_configured,
     resolve_bedrock_credentials,
     resolve_bedrock_settings,
 )
-from sibyl_core.ai.llm.config import LLMProviderName, LLMSurface, get_config_source
+from sibyl_core.ai.errors import LLMConfigError
+from sibyl_core.ai.llm.config import (
+    LLMProviderName,
+    LLMSurface,
+    get_config_source,
+    resolve_llm_config,
+)
 from sibyl_core.ai.validation import KeyValidationResult, check_provider_key
 from sibyl_core.embeddings.providers import sentence_transformers_available
-from sibyl_core.integration import integration_content
+from sibyl_core.integration import agent_setup_markdown, install_commands, setup_command
 
 router = APIRouter(prefix="/setup", tags=["setup"])
 log = structlog.get_logger()
@@ -84,6 +90,50 @@ class SetupStatus(BaseModel):
     bedrock_valid: bool | None = Field(
         default=None, description="True if Bedrock answers (only checked by validate-keys)"
     )
+    providers_configured: bool = Field(
+        default=False,
+        description="True when every model provider this server uses is ready without "
+        "user input: its key is set, or it needs none (cloud IAM or local models)",
+    )
+    configured_providers: list[str] = Field(
+        default_factory=list, description="Names of the ready model providers"
+    )
+
+
+# Providers that authenticate with a key someone pastes in. Any other provider
+# (cloud IAM such as Bedrock, or local embeddings) is ready once it is selected.
+_PROVIDER_KEY_SETTINGS = {
+    "anthropic": "anthropic_api_key",
+    "gemini": "gemini_api_key",
+    "openai": "openai_api_key",
+}
+
+
+async def _setting_or_default(service: SettingsService, key: str, default: str) -> str:
+    value = await service.get(key)
+    return value.strip() if isinstance(value, str) and value.strip() else default
+
+
+async def _server_model_providers() -> tuple[bool, list[str]]:
+    """Report whether the server's chosen model providers need nothing from users."""
+    service = get_settings_service()
+    try:
+        llm_provider = (await resolve_llm_config(LLMSurface.DEFAULT)).provider.value
+    except LLMConfigError:
+        return False, []
+    providers = {
+        llm_provider,
+        await _setting_or_default(service, "embedding_provider", settings.embedding_provider),
+        await _setting_or_default(
+            service, "graph_embedding_provider", settings.graph_embedding_provider
+        ),
+    }
+    ready: list[str] = []
+    for provider in sorted(providers):
+        key_setting = _PROVIDER_KEY_SETTINGS.get(provider)
+        if key_setting is None or bool(await service.get(key_setting)):
+            ready.append(provider)
+    return len(ready) == len(providers), ready
 
 
 class ApiKeyValidation(BaseModel):
@@ -287,6 +337,7 @@ async def get_setup_status(
     anthropic_configured = bool(anthropic_key)
     gemini_configured = bool(gemini_key)
     bedrock_llm, bedrock_embeddings = await bedrock_selection()
+    providers_configured, configured_providers = await _server_model_providers()
 
     return SetupStatus(
         needs_setup=not setup_status.setup_complete,
@@ -304,6 +355,8 @@ async def get_setup_status(
         bedrock_configured=bedrock_configured(),
         bedrock_llm=bedrock_llm,
         bedrock_embeddings=bedrock_embeddings,
+        providers_configured=providers_configured,
+        configured_providers=configured_providers,
     )
 
 
@@ -341,47 +394,67 @@ async def validate_api_keys() -> ApiKeyValidation:
     )
 
 
-class McpClientConfig(BaseModel):
-    """One way to wire Sibyl into an MCP-capable agent."""
+class ConnectInfo(BaseModel):
+    """What a machine needs to connect to this server. Public and secret-free."""
 
-    id: str = Field(description="Stable client identifier")
-    label: str = Field(description="Human-readable client name")
-    kind: str = Field(description='"command" to run in a terminal or "config" to paste into a file')
-    language: str = Field(description="Syntax hint for rendering: bash, json, or toml")
-    snippet: str = Field(description="The command or config text to use")
-    target: str | None = Field(default=None, description="Where a config snippet belongs")
-
-
-class IntegrationResponse(BaseModel):
-    """Everything a user needs to connect Sibyl to a CLI or MCP client."""
-
-    server_url: str = Field(description="Public base URL of this Sibyl server")
-    mcp_url: str = Field(description="MCP endpoint URL")
-    cli_install: str = Field(description="One-liner command to install the sibyl CLI")
-    cli_install_alt: str = Field(description="Alternative install command via uv")
-    mcp_clients: list[McpClientConfig] = Field(
-        description="Per-client MCP setup snippets (Claude Code, Codex, opencode, generic)"
+    server_url: str = Field(description="Public base URL clients connect to")
+    server_version: str = Field(description="Version this server runs")
+    minimum_client_version: str | None = Field(
+        default=None, description="Oldest CLI this server accepts, when a floor is set"
     )
-    prompt_snippet: str = Field(
-        description="Client-agnostic snippet for an agent's system prompt or AGENTS.md"
+    sso_enabled: bool = Field(description="True when sign-in goes through OIDC SSO")
+    local_auth_enabled: bool = Field(description="True when email and password sign-in works")
+    setup_command: str = Field(description="The command that connects a machine")
+    install: dict[str, str] = Field(
+        description="One copyable install-and-setup line per OS: macos, linux, windows"
     )
 
 
-@router.get(
-    "/integration",
-    response_model=IntegrationResponse,
-    dependencies=[Depends(require_setup_mode_or_auth)],
-)
-async def get_integration() -> IntegrationResponse:
-    """Get everything needed to connect Sibyl to a CLI or MCP client.
+def _server_url() -> str:
+    return settings.server_url.rstrip("/")
 
-    Returns the CLI install command, per-client MCP configuration snippets,
-    and the agent prompt snippet. This is the single source of truth behind
-    the web setup wizard and the dashboard connect panel.
 
-    During initial setup: accessible without auth. After setup: requires authentication.
+def _minimum_client_version() -> str | None:
+    return (settings.minimum_client_version or "").strip() or None
+
+
+@router.get("/connect", response_model=ConnectInfo)
+async def get_connect_info() -> ConnectInfo:
+    """Describe how a machine connects to this server.
+
+    Public so the connect card and the agent setup document work before and
+    after sign-in. Everything returned is already visible to anyone who can
+    reach the server: its URL, version, version floor, and sign-in methods.
     """
-    return IntegrationResponse.model_validate(integration_content(settings.server_url))
+    from sibyl import __version__
+
+    server_url = _server_url()
+    return ConnectInfo(
+        server_url=server_url,
+        server_version=__version__,
+        minimum_client_version=_minimum_client_version(),
+        sso_enabled=bool(settings.oidc.providers),
+        local_auth_enabled=settings.local_auth_enabled,
+        setup_command=setup_command(server_url),
+        install=install_commands(server_url),
+    )
+
+
+@router.get("/agent.md", response_class=PlainTextResponse)
+async def get_agent_setup() -> PlainTextResponse:
+    """Markdown an AI coding agent follows to connect this machine.
+
+    Public by design: a person pastes the URL into an agent that has no
+    session yet. It carries only the public connect facts, never credentials.
+    """
+    return PlainTextResponse(
+        agent_setup_markdown(
+            _server_url(),
+            minimum_client_version=_minimum_client_version(),
+            sso=bool(settings.oidc.providers),
+        ),
+        media_type="text/markdown; charset=utf-8",
+    )
 
 
 class ConfigUpdateRequest(BaseModel):

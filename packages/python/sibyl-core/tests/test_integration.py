@@ -1,62 +1,60 @@
-"""Tests for client-agnostic integration content."""
+"""Tests for the shared connect instructions."""
 
 from sibyl_core.integration import (
     AGENT_PROMPT_SNIPPET,
-    integration_content,
-    mcp_clients,
+    agent_setup_markdown,
+    install_commands,
+    setup_command,
 )
 
 
-class TestMcpClients:
-    """MCP client config builders."""
+class TestInstallCommands:
+    """The one line each OS copies."""
 
-    def test_covers_expected_clients(self) -> None:
-        clients = mcp_clients("http://localhost:3334/mcp")
-        assert [c.id for c in clients] == ["claude", "codex", "opencode", "generic"]
+    def test_every_line_ends_with_setup_for_the_server(self) -> None:
+        commands = install_commands("https://sibyl.example.com/")
+        assert set(commands) == {"macos", "linux", "windows"}
+        for line in commands.values():
+            assert line.endswith("sibyl setup https://sibyl.example.com")
 
-    def test_every_snippet_embeds_the_mcp_url(self) -> None:
-        mcp_url = "https://sibyl.example.com/mcp"
-        for client in mcp_clients(mcp_url):
-            assert mcp_url in client.snippet
+    def test_macos_uses_homebrew_and_others_use_an_upgrading_uv_install(self) -> None:
+        commands = install_commands("https://sibyl.example.com")
+        assert commands["macos"].startswith("brew install hyperb1iss/tap/sibyl && ")
+        assert commands["linux"].startswith("uv tool install --upgrade sibyl-dev && ")
+        # Windows PowerShell 5.1 has no `&&`.
+        assert commands["windows"].startswith("uv tool install --upgrade sibyl-dev; ")
 
-    def test_claude_uses_the_mcp_add_command(self) -> None:
-        claude = next(c for c in mcp_clients("http://localhost:3334/mcp") if c.id == "claude")
-        assert claude.kind == "command"
-        assert claude.snippet == "claude mcp add sibyl --transport http http://localhost:3334/mcp"
-
-    def test_config_clients_name_a_target_file(self) -> None:
-        for client in mcp_clients("http://localhost:3334/mcp"):
-            if client.kind == "config":
-                assert client.target
+    def test_setup_command_strips_trailing_slash(self) -> None:
+        assert setup_command("http://localhost:3334/") == "sibyl setup http://localhost:3334"
 
 
-class TestIntegrationContent:
-    """Full integration payload assembly."""
+class TestAgentSetupMarkdown:
+    """The document an agent follows to connect a machine."""
 
-    def test_strips_trailing_slash_from_server_url(self) -> None:
-        content = integration_content("http://localhost:3334/")
-        assert content["server_url"] == "http://localhost:3334"
-        assert content["mcp_url"] == "http://localhost:3334/mcp"
+    def test_tailors_url_floor_and_sso_sign_in(self) -> None:
+        doc = agent_setup_markdown(
+            "https://sibyl.example.com/", minimum_client_version="1.5.0", sso=True
+        )
+        assert "Sibyl server at https://sibyl.example.com\n" in doc
+        assert "`sibyl setup https://sibyl.example.com --yes`" in doc
+        assert "version 1.5.0 or newer" in doc
+        assert "company SSO" in doc
+        assert "`brew install hyperb1iss/tap/sibyl`" in doc
+        assert "`uv tool install --upgrade sibyl-dev`" in doc
+        assert "sibyl whoami" in doc
+        assert "sibyl doctor" in doc
 
-    def test_payload_has_all_onboarding_fields(self) -> None:
-        content = integration_content("http://localhost:3334")
-        assert set(content) == {
-            "server_url",
-            "mcp_url",
-            "cli_install",
-            "cli_install_alt",
-            "mcp_clients",
-            "prompt_snippet",
-        }
-        assert content["cli_install"].startswith("curl -fsSL")
-        assert content["cli_install_alt"] == "brew install hyperb1iss/tap/sibyl && sibyl up"
-        assert len(content["mcp_clients"]) == 4
+    def test_local_auth_server_signs_in_with_password_and_no_floor(self) -> None:
+        doc = agent_setup_markdown("http://localhost:3334", minimum_client_version=None, sso=False)
+        assert "email and password" in doc
+        assert "SSO" not in doc
+        assert "or newer" not in doc
 
-    def test_mcp_clients_serialize_to_dicts(self) -> None:
-        content = integration_content("http://localhost:3334")
-        first = content["mcp_clients"][0]
-        assert isinstance(first, dict)
-        assert set(first) == {"id", "label", "kind", "language", "snippet", "target"}
+    def test_stays_short(self) -> None:
+        doc = agent_setup_markdown(
+            "https://sibyl.example.com", minimum_client_version="1.5.0", sso=True
+        )
+        assert len(doc.splitlines()) <= 40
 
 
 class TestAgentPromptSnippet:

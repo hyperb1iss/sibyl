@@ -1,21 +1,21 @@
-"""Client-agnostic integration content for connecting Sibyl to AI agents.
+"""Connect instructions for a Sibyl server.
 
-Single source of truth for the onboarding surfaces. The web setup wizard and
-dashboard connect panel render the same install command, MCP client configs, and
-agent prompt snippet built here, so the guidance stays consistent everywhere and
-is never Claude-specific.
+Single source of truth for every onboarding surface. The web connect card, the
+agent setup document, and the CLI all build their commands here, so the one
+line a person copies and the steps an agent follows never drift apart.
 """
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
-
-# One-liner installer from the README: starts the local server and web UI.
-CLI_INSTALL_COMMAND = (
-    "curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh"
-)
-# Alternative for users who already manage local tools with Homebrew.
-CLI_INSTALL_COMMAND_ALT = "brew install hyperb1iss/tap/sibyl && sibyl up"
+BREW_FORMULA = "hyperb1iss/tap/sibyl"
+PYPI_PACKAGE = "sibyl-dev"
+# `--upgrade` makes the line idempotent: a plain install leaves an old CLI alone.
+UV_INSTALL_COMMAND = f"uv tool install --upgrade {PYPI_PACKAGE}"
+BREW_INSTALL_COMMAND = f"brew install {BREW_FORMULA}"
+UV_BOOTSTRAP_POSIX = "curl -LsSf https://astral.sh/uv/install.sh | sh"
+UV_BOOTSTRAP_WINDOWS = 'powershell -c "irm https://astral.sh/uv/install.ps1 | iex"'
+# Device approval waits this long for the human to finish signing in.
+LOGIN_TIMEOUT_MINUTES = 10
 
 
 AGENT_PROMPT_SNIPPET = """## Sibyl - Your Persistent Memory
@@ -79,90 +79,65 @@ time to verify the recommended agent setup is in place.
 """
 
 
-@dataclass(frozen=True)
-class McpClient:
-    """One way to wire Sibyl into an MCP-capable agent."""
-
-    id: str
-    label: str
-    kind: str  # "command" to run in a terminal, or "config" to paste into a file
-    language: str  # syntax hint for rendering: bash, json, or toml
-    snippet: str
-    target: str | None = None  # where a "config" snippet belongs
+def setup_command(server_url: str) -> str:
+    """The command that connects a machine to `server_url`."""
+    return f"sibyl setup {server_url.rstrip('/')}"
 
 
-def mcp_clients(mcp_url: str) -> list[McpClient]:
-    """Build per-client MCP setup snippets for a given Sibyl MCP endpoint URL."""
-    generic_config = (
-        "{\n"
-        '  "mcpServers": {\n'
-        '    "sibyl": {\n'
-        '      "type": "http",\n'
-        f'      "url": "{mcp_url}"\n'
-        "    }\n"
-        "  }\n"
-        "}"
-    )
-    opencode_config = (
-        "{\n"
-        '  "$schema": "https://opencode.ai/config.json",\n'
-        '  "mcp": {\n'
-        '    "sibyl": {\n'
-        '      "type": "remote",\n'
-        f'      "url": "{mcp_url}",\n'
-        '      "enabled": true\n'
-        "    }\n"
-        "  }\n"
-        "}"
-    )
-    return [
-        McpClient(
-            id="claude",
-            label="Claude Code",
-            kind="command",
-            language="bash",
-            snippet=f"claude mcp add sibyl --transport http {mcp_url}",
-        ),
-        McpClient(
-            id="codex",
-            label="Codex",
-            kind="command",
-            language="bash",
-            snippet=f"codex mcp add sibyl --url {mcp_url}",
-        ),
-        McpClient(
-            id="opencode",
-            label="opencode",
-            kind="config",
-            language="json",
-            snippet=opencode_config,
-            target="opencode.json",
-        ),
-        McpClient(
-            id="generic",
-            label="Generic MCP",
-            kind="config",
-            language="json",
-            snippet=generic_config,
-            target="your client's MCP config",
-        ),
-    ]
+def install_commands(server_url: str) -> dict[str, str]:
+    """One copyable line per OS: install or upgrade the CLI, then run setup."""
+    setup = setup_command(server_url)
+    return {
+        "macos": f"{BREW_INSTALL_COMMAND} && {setup}",
+        "linux": f"{UV_INSTALL_COMMAND} && {setup}",
+        # Windows PowerShell 5.1 has no `&&`.
+        "windows": f"{UV_INSTALL_COMMAND}; {setup}",
+    }
 
 
-def integration_content(server_url: str) -> dict:
-    """Assemble the full onboarding integration payload for a Sibyl server.
+def agent_setup_markdown(
+    server_url: str,
+    *,
+    minimum_client_version: str | None,
+    sso: bool,
+) -> str:
+    """Instructions an AI coding agent follows to connect this machine.
 
-    `server_url` is the public base URL of the Sibyl API; a trailing slash is
-    tolerated. Returns a JSON-serializable dict consumed by the web setup
-    surfaces and the CLI.
+    Everything here is public: the server URL, the version floor, and whether
+    sign-in goes through SSO. The steps themselves live in `sibyl setup`, so
+    the agent runs the same implementation a person does.
     """
     base = server_url.rstrip("/")
-    mcp_url = f"{base}/mcp"
-    return {
-        "server_url": base,
-        "mcp_url": mcp_url,
-        "cli_install": CLI_INSTALL_COMMAND,
-        "cli_install_alt": CLI_INSTALL_COMMAND_ALT,
-        "mcp_clients": [asdict(client) for client in mcp_clients(mcp_url)],
-        "prompt_snippet": AGENT_PROMPT_SNIPPET,
-    }
+    setup = setup_command(base)
+    floor = (
+        f"\n   This server needs version {minimum_client_version} or newer"
+        " (check with `sibyl --version`)."
+        if minimum_client_version
+        else ""
+    )
+    sign_in = "with your company SSO" if sso else "with your Sibyl email and password"
+    return f"""# Set up Sibyl on this machine
+
+Connect this machine to the Sibyl server at {base}
+Run each step yourself, and skip any step that is already done.
+
+1. Install or upgrade the CLI.{floor}
+   - macOS with Homebrew: `{BREW_INSTALL_COMMAND}`
+   - Anywhere else: `{UV_INSTALL_COMMAND}`
+   - No uv yet? Install it first: `{UV_BOOTSTRAP_POSIX}`
+     (Windows: `{UV_BOOTSTRAP_WINDOWS}`)
+   - If `sibyl` is not on PATH afterwards, run `uv tool update-shell` or call
+     `~/.local/bin/sibyl` directly.
+2. Tell the user: "A browser tab will open. Sign in {sign_in}
+   and approve the code shown there." Never ask for their password yourself.
+3. Run this, allowing up to {LOGIN_TIMEOUT_MINUTES} minutes while the user signs in:
+   `{setup} --yes`
+   It connects the CLI to this server, signs in, installs the Sibyl skill for
+   your agents, and adds a SessionStart hook when Claude Code is installed, so
+   each session starts with Sibyl context. Finished steps are skipped, so
+   re-running it is safe. If your shell tool times out sooner, run it in the
+   background and relay the sign-in code and URL it prints.
+4. Confirm that `sibyl whoami` succeeds and `sibyl doctor` reports no FAIL.
+5. Tell the user what you set up, and that a new agent session picks up the
+   skill. Suggest a first try: `sibyl context "what's in flight"`
+"""

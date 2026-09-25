@@ -106,6 +106,8 @@ ROUTES_WITHOUT_CALLER_IDENTITY: dict[str, str] = {
     "POST /users/password/reset": "sends a reset mail for an email address",
     "POST /users/password/reset/confirm": "redeems a reset token",
     "GET /setup/status": "reports whether the instance is unconfigured",
+    "GET /setup/connect": "public connect facts: URL, version floor, sign-in methods",
+    "GET /setup/agent.md": "agent setup steps built from the public connect facts",
     # Instance-wide settings, gated in the handler body by require_settings_owner
     # rather than by a dependency, so the gate is invisible to the dependency
     # graph and the OpenAPI schema and has to be allowlisted here by name.
