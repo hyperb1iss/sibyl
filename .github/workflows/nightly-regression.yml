@@ -35,7 +35,6 @@ jobs:
       SIBYL_SURREAL_URL: ws://localhost:8000/rpc
       SIBYL_SURREAL_USERNAME: sibyl_ci
       SIBYL_SURREAL_PASSWORD: sibyl_ci_password
-      SIBYL_RETRIEVAL_MODE: compare
       SIBYL_OPENAI_API_KEY: sk-test-key
       SIBYL_ANTHROPIC_API_KEY: sk-ant-test-key
       SIBYL_MOCK_LLM: true
@@ -84,14 +83,6 @@ jobs:
           restore-keys: |
             uv-nightly-${{ runner.os }}-
 
-      - name: Cache retrieval mode history
-        uses: actions/cache@v6
-        with:
-          path: .moon/retrieval-mode-history.json
-          key: retrieval-mode-history-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            retrieval-mode-history-
-
       - name: Start backend server
         run: |
           cd apps/api
@@ -121,22 +112,21 @@ jobs:
       - name: Replay committed baseline corpus
         run: moon run baseline-replay-runtime
 
-      - name: Run context-pack retrieval compare benchmark
-        id: context-pack-compare
+      - name: Run context-pack benchmark
+        id: context-pack
         run: |
           set +e
           moon run core:bench-context -- \
             --cases benchmarks/context_pack_cases.json \
             --auth-manifest .moon/cache/baseline-runtime-manifest.json \
-            --label retrieval-compare \
-            --repeat 20 \
-            --metadata retrieval_mode=compare
+            --label retrieval-native \
+            --repeat 20
           bench_status="$?"
           set -e
 
           latest_report="$(
             find .moon/cache/evals -maxdepth 1 \
-              -name 'eval_context_pack_retrieval_compare_*.json' \
+              -name 'eval_context_pack_retrieval_native_*.json' \
               -printf '%T@ %p\n' \
               | sort -nr \
               | head -1 \
@@ -169,21 +159,7 @@ jobs:
           fi
 
           moon run bench-gate -- "$latest_report" --profile context-pack \
-            --require-metadata retrieval_mode=compare \
             --require-metadata repeat_count=20
-          history_args=()
-          if [[ "${GITHUB_REF_NAME}" != "main" ]]; then
-            history_args+=(--allow-non-main)
-          fi
-
-          moon run retrieval-mode-history -- "$latest_report" \
-            --branch "${GITHUB_REF_NAME}" \
-            --sha "${GITHUB_SHA}" \
-            --run-id "${GITHUB_RUN_ID}" \
-            --run-attempt "${GITHUB_RUN_ATTEMPT}" \
-            --event "${GITHUB_EVENT_NAME}" \
-            --workflow "${GITHUB_WORKFLOW}" \
-            "${history_args[@]}"
 
       - name: Record baseline parity receipt
         if: always()
@@ -208,18 +184,12 @@ jobs:
           path: .moon/cache/nightly/baseline-parity-receipt.txt
           if-no-files-found: error
 
-      - name: Upload context-pack retrieval compare report
-        if: always() && steps.context-pack-compare.outputs.report != ''
+      - name: Upload context-pack report
+        if: always() && steps.context-pack.outputs.report != ''
         uses: actions/upload-artifact@v7
         with:
-          name: context-pack-retrieval-compare
-          path: ${{ steps.context-pack-compare.outputs.report }}
-
-      - name: Upload retrieval mode history
-        uses: actions/upload-artifact@v7
-        with:
-          name: retrieval-mode-history
-          path: .moon/retrieval-mode-history.json
+          name: context-pack-report
+          path: ${{ steps.context-pack.outputs.report }}
 
       - name: Collect diagnostics on failure
         if: failure()

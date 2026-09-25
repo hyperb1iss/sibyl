@@ -767,9 +767,9 @@ tasks:
 
   inventory-test:
     command:
-      uv run pytest tools/tests/test_runtime_surface.py tools/tests/test_retrieval_mode_history.py
-      tools/tests/test_longmemeval_v2_reader_replay.py
-      tools/tests/test_usage_rerank_harness.py tools/tests/test_installer_qualification.py -v
+      uv run pytest tools/tests/test_runtime_surface.py
+      tools/tests/test_longmemeval_v2_reader_replay.py tools/tests/test_usage_rerank_harness.py
+      tools/tests/test_installer_qualification.py -v
     inputs:
       - tools/**/*.py
       - benchmarks/git_provenance.py
@@ -1029,12 +1029,6 @@ tasks:
       - apps/cli/src/sibyl_cli/data/skill-packs/core.md
     options:
       cache: false
-
-  retrieval-mode-history:
-    command: uv run python -m tools.inventory.retrieval_mode_history
-    inputs:
-      - tools/**/*.py
-      - pyproject.toml
 
   bench-evidence:
     command: uv run python tools/bench/evidence_bundle.py
