@@ -150,13 +150,15 @@ async def _check_gemini_key(key: str | None = None) -> tuple[bool, str | None]:
 
 
 async def bedrock_selection() -> tuple[bool, bool]:
-    """Whether Bedrock serves the default LLM surface and document embeddings.
+    """Whether Bedrock serves the default LLM surface and the embedding planes.
 
-    Both require Bedrock to be configured. An AWS environment alone proves
-    nothing: a laptop with a profile, or any IRSA pod, has one while every
-    provider still points at a keyed API.
+    A plane counts only when its provider is set to ``bedrock`` and a Region
+    is known. An AWS environment alone proves nothing: a laptop with a
+    profile, or any IRSA pod, has one while every provider still points at a
+    keyed API. Credentials are not required here because an instance role
+    leaves no environment hint; validate-keys proves them with a real call.
     """
-    if not bedrock_configured():
+    if not bedrock_region_configured():
         return False, False
     try:
         resolved = await get_config_source().resolve(LLMSurface.DEFAULT)
@@ -164,10 +166,26 @@ async def bedrock_selection() -> tuple[bool, bool]:
     except Exception as e:
         log.warning("Could not resolve the default LLM provider", error=str(e))
         llm = False
-    embedding_provider = (
-        await get_settings_service().get("embedding_provider") or settings.embedding_provider
-    )
-    return llm, embedding_provider == "bedrock"
+    document = await effective_embedding_setting("embedding_provider")
+    graph = await effective_embedding_setting("graph_embedding_provider")
+    # The graph plane needs no key on bedrock or local, so either leaves nothing to set.
+    return llm, document == "bedrock" and graph in {"bedrock", "local"}
+
+
+async def effective_embedding_setting(key: str) -> str | None:
+    """An embedding setting as the runtime reads it: environment, database, default.
+
+    Saving a setting writes the environment too, so the environment is what
+    the embedding providers see.
+    """
+    env_value = os.environ.get(f"SIBYL_{key.upper()}", "").strip()
+    if env_value:
+        return env_value
+    stored = await get_settings_service().get(key)
+    if stored:
+        return str(stored)
+    value = getattr(settings, key, None)
+    return None if value is None else str(value)
 
 
 async def _check_bedrock() -> tuple[bool | None, str | None]:

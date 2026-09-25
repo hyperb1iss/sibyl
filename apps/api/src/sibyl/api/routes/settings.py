@@ -171,13 +171,13 @@ _SETTING_DESCRIPTIONS = {
 }
 
 
-async def _reject_unservable_bedrock_dimensions(service, body: UpdateSettingsRequest) -> None:
+async def _reject_unservable_bedrock_dimensions(body: UpdateSettingsRequest) -> None:
     """Refuse a Bedrock plane at a size Cohere Embed v4 cannot produce.
 
     Saving it would make every embedding call on that plane fail until an admin
     notices, so the effective provider and size after this update are checked.
     """
-    from sibyl.config import settings as server_settings
+    from sibyl.api.routes.setup import effective_embedding_setting
 
     for provider_key, dimensions_key in (
         ("embedding_provider", "embedding_dimensions"),
@@ -185,19 +185,13 @@ async def _reject_unservable_bedrock_dimensions(service, body: UpdateSettingsReq
     ):
         if getattr(body, provider_key) is None and getattr(body, dimensions_key) is None:
             continue
-        provider = (
-            getattr(body, provider_key)
-            or await service.get(provider_key)
-            or getattr(server_settings, provider_key)
-        )
+        provider = getattr(body, provider_key) or await effective_embedding_setting(provider_key)
         if provider != "bedrock":
             continue
-        dimensions = (
-            getattr(body, dimensions_key)
-            or await service.get(dimensions_key)
-            or getattr(server_settings, dimensions_key)
+        dimensions = getattr(body, dimensions_key) or await effective_embedding_setting(
+            dimensions_key
         )
-        if int(dimensions) not in COHERE_EMBED_V4_DIMENSIONS:
+        if dimensions is None or int(dimensions) not in COHERE_EMBED_V4_DIMENSIONS:
             supported = ", ".join(str(size) for size in COHERE_EMBED_V4_DIMENSIONS)
             raise HTTPException(
                 status_code=422,
@@ -259,6 +253,8 @@ async def update_settings(
     await require_settings_owner(request)
 
     service = get_settings_service()
+    # Before anything is saved, so a refused size leaves every setting as it was.
+    await _reject_unservable_bedrock_dimensions(body)
     updated: list[str] = []
     validation: dict[str, dict] = {}
 
@@ -319,7 +315,6 @@ async def update_settings(
         else:
             log.warning("Gemini key validation failed", error=error)
 
-    await _reject_unservable_bedrock_dimensions(service, body)
     for key in (
         "embedding_provider",
         "embedding_model",

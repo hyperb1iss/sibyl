@@ -76,6 +76,10 @@ def no_bedrock_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "AWS_WEB_IDENTITY_TOKEN_FILE",
         "AWS_CONTAINER_CREDENTIALS_FULL_URI",
         "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+        "SIBYL_EMBEDDING_PROVIDER",
+        "SIBYL_GRAPH_EMBEDDING_PROVIDER",
+        "SIBYL_EMBEDDING_DIMENSIONS",
+        "SIBYL_GRAPH_EMBEDDING_DIMENSIONS",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -196,9 +200,13 @@ class FakeSetupSettings:
         return self.values.get(key)
 
 
-def _use_providers(monkeypatch, *, llm: str, embeddings: str | None) -> None:
+def _use_providers(
+    monkeypatch, *, llm: str, embeddings: str | None, graph: str | None = None
+) -> None:
     monkeypatch.setattr(setup_routes, "get_config_source", lambda: FakeConfigSource(_resolved(llm)))
     values = {"embedding_provider": embeddings} if embeddings else {}
+    if graph or embeddings:
+        values["graph_embedding_provider"] = graph or embeddings or ""
     monkeypatch.setattr(setup_routes, "get_settings_service", lambda: FakeSetupSettings(values))
 
 
@@ -215,8 +223,35 @@ async def test_an_aws_environment_alone_does_not_mark_bedrock_ready(
     _use_providers(monkeypatch, llm="bedrock", embeddings="bedrock")
     assert await setup_routes.bedrock_selection() == (True, True)
 
+    # A graph plane left on a keyed provider means embeddings are not covered.
+    _use_providers(monkeypatch, llm="bedrock", embeddings="bedrock", graph="openai")
+    assert await setup_routes.bedrock_selection() == (True, False)
+
     monkeypatch.delenv("AWS_REGION")
     assert await setup_routes.bedrock_selection() == (False, False)
+
+
+@pytest.mark.asyncio
+async def test_an_instance_role_needs_only_a_region_once_bedrock_is_selected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AWS_REGION", "us-west-2")
+    _use_providers(monkeypatch, llm="bedrock", embeddings="bedrock")
+
+    assert setup_routes.bedrock_configured() is False
+    assert await setup_routes.bedrock_selection() == (True, True)
+
+
+@pytest.mark.asyncio
+async def test_the_environment_wins_over_a_stale_stored_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AWS_REGION", "us-west-2")
+    monkeypatch.setenv("SIBYL_EMBEDDING_PROVIDER", "bedrock")
+    monkeypatch.setenv("SIBYL_GRAPH_EMBEDDING_PROVIDER", "bedrock")
+    _use_providers(monkeypatch, llm="bedrock", embeddings="openai")
+
+    assert await setup_routes.bedrock_selection() == (True, True)
 
 
 @pytest.mark.asyncio
@@ -249,11 +284,14 @@ async def test_validate_keys_probes_bedrock_only_when_something_uses_it(
         ({"embedding_dimensions": 768}, {"embedding_provider": "gemini"}, False),
     ],
 )
-async def test_settings_refuse_sizes_cohere_cannot_produce(update, stored, rejected) -> None:
+async def test_settings_refuse_sizes_cohere_cannot_produce(
+    monkeypatch: pytest.MonkeyPatch, update, stored, rejected
+) -> None:
     from sibyl.api.routes import settings as settings_routes
 
+    monkeypatch.setattr(setup_routes, "get_settings_service", lambda: FakeSetupSettings(stored))
     body = settings_routes.UpdateSettingsRequest(**update)
-    check = settings_routes._reject_unservable_bedrock_dimensions(FakeSetupSettings(stored), body)
+    check = settings_routes._reject_unservable_bedrock_dimensions(body)
     if rejected:
         with pytest.raises(HTTPException) as caught:
             await check
