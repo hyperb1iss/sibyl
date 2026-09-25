@@ -11,16 +11,12 @@ from __future__ import annotations
 
 import os
 import tempfile
+import tomllib
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-
-try:
-    import tomllib
-except ImportError:
-    import tomli as tomllib
 
 import tomli_w
 
