@@ -110,30 +110,6 @@ export interface CrawlProgressData {
   errors?: number;
 }
 
-export function useCrawlProgress(sourceId: string): CrawlProgressData | undefined {
-  const queryClient = useQueryClient();
-  const [progress, setProgress] = useState<CrawlProgressData | undefined>(
-    queryClient.getQueryData(['crawl_progress', sourceId])
-  );
-
-  useEffect(() => {
-    // Subscribe to query cache changes
-    const unsubscribe = queryClient.getQueryCache().subscribe(event => {
-      if (
-        event.type === 'updated' &&
-        event.query.queryKey[0] === 'crawl_progress' &&
-        event.query.queryKey[1] === sourceId
-      ) {
-        setProgress(event.query.state.data as CrawlProgressData | undefined);
-      }
-    });
-
-    return unsubscribe;
-  }, [queryClient, sourceId]);
-
-  return progress;
-}
-
 /**
  * Track crawl progress for all sources.
  * Returns a map of source_id -> progress data.

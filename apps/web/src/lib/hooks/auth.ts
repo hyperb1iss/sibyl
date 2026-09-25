@@ -69,16 +69,6 @@ export function useSwitchOrg() {
   });
 }
 
-export function useOrg(slug: string, options?: { enabled?: boolean }) {
-  return useQuery({
-    queryKey: queryKeys.orgs.detail(slug),
-    queryFn: () => orgsApi.get(slug),
-    enabled: options?.enabled ?? !!slug,
-    retry: false,
-    staleTime: TIMING.STALE_TIME,
-  });
-}
-
 export function useCreateOrg() {
   const queryClient = useQueryClient();
 
@@ -123,18 +113,6 @@ export function useOrgMembers(slug: string, options?: { enabled?: boolean }) {
     enabled: options?.enabled ?? !!slug,
     retry: false,
     staleTime: TIMING.STALE_TIME,
-  });
-}
-
-export function useAddOrgMember() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: ({ slug, userId, role }: { slug: string; userId: string; role: string }) =>
-      orgsApi.members.add(slug, userId, role),
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.orgs.members(variables.slug) });
-    },
   });
 }
 

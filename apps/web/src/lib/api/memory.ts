@@ -432,11 +432,6 @@ export const rawCapturesApi = {
   },
 
   get: (id: string) => fetchApi<RawCapture>(`/entities/captures/${encodeURIComponent(id)}`),
-  updateReviewState: (id: string, review_state: RawCaptureReviewState) =>
-    fetchApi<RawCapture>(`/entities/captures/${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ review_state }),
-    }),
 };
 
 export const memoryApi = {

@@ -210,22 +210,6 @@ export interface Project {
   updated_at: string | null;
 }
 
-export interface TaskActionResponse {
-  success: boolean;
-  action: string;
-  task_id: string;
-  message: string;
-  data: Record<string, unknown>;
-}
-
-export interface EpicActionResponse {
-  success: boolean;
-  action: string;
-  epic_id: string;
-  message: string;
-  data: Record<string, unknown>;
-}
-
 // =============================================================================
 // Epic Types
 // =============================================================================
@@ -338,42 +322,6 @@ export const tasksApi = {
 
   get: (id: string) => fetchApi<Entity>(`/entities/${id}`),
 
-  // RESTful task workflow endpoints
-  start: (id: string, params?: { assignee?: string }) =>
-    fetchApi<TaskActionResponse>(`/tasks/${id}/start`, {
-      method: 'POST',
-      body: params ? JSON.stringify(params) : undefined,
-    }),
-
-  block: (id: string, reason: string) =>
-    fetchApi<TaskActionResponse>(`/tasks/${id}/block`, {
-      method: 'POST',
-      body: JSON.stringify({ reason }),
-    }),
-
-  unblock: (id: string) =>
-    fetchApi<TaskActionResponse>(`/tasks/${id}/unblock`, {
-      method: 'POST',
-    }),
-
-  review: (id: string, params?: { pr_url?: string; commit_shas?: string[] }) =>
-    fetchApi<TaskActionResponse>(`/tasks/${id}/review`, {
-      method: 'POST',
-      body: params ? JSON.stringify(params) : undefined,
-    }),
-
-  complete: (id: string, params?: { actual_hours?: number; learnings?: string }) =>
-    fetchApi<TaskActionResponse>(`/tasks/${id}/complete`, {
-      method: 'POST',
-      body: params ? JSON.stringify(params) : undefined,
-    }),
-
-  archive: (id: string, params?: { reason?: string }) =>
-    fetchApi<TaskActionResponse>(`/tasks/${id}/archive`, {
-      method: 'POST',
-      body: params ? JSON.stringify(params) : undefined,
-    }),
-
   updateStatus: (id: string, status: TaskStatus) =>
     fetchApi<Entity>(`/entities/${id}`, {
       method: 'PATCH',
@@ -405,15 +353,8 @@ export const projectsApi = {
       }),
     }),
 
-  get: (id: string) => fetchApi<Entity>(`/entities/${id}`),
-
   members: {
     list: (projectId: string) => fetchApi<ProjectMembersResponse>(`/projects/${projectId}/members`),
-    add: (projectId: string, userId: string, role: ProjectRole) =>
-      fetchApi<{ user_id: string; role: string }>(`/projects/${projectId}/members`, {
-        method: 'POST',
-        body: JSON.stringify({ user_id: userId, role }),
-      }),
     updateRole: (projectId: string, userId: string, role: ProjectRole) =>
       fetchApi<{ user_id: string; role: string }>(`/projects/${projectId}/members/${userId}`, {
         method: 'PATCH',
@@ -451,40 +392,6 @@ export const epicsApi = {
         epic: id,
         limit: 200,
       }),
-    }),
-
-  // RESTful epic workflow endpoints
-  start: (id: string) =>
-    fetchApi<EpicActionResponse>(`/epics/${id}/start`, {
-      method: 'POST',
-    }),
-
-  complete: (id: string, params?: { learnings?: string }) =>
-    fetchApi<EpicActionResponse>(`/epics/${id}/complete`, {
-      method: 'POST',
-      body: params ? JSON.stringify(params) : undefined,
-    }),
-
-  archive: (id: string, params?: { reason?: string }) =>
-    fetchApi<EpicActionResponse>(`/epics/${id}/archive`, {
-      method: 'POST',
-      body: params ? JSON.stringify(params) : undefined,
-    }),
-
-  update: (
-    id: string,
-    params: {
-      status?: EpicStatus;
-      priority?: TaskPriority;
-      title?: string;
-      description?: string;
-      assignees?: string[];
-      tags?: string[];
-    }
-  ) =>
-    fetchApi<EpicActionResponse>(`/epics/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(params),
     }),
 };
 

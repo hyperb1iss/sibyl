@@ -9,9 +9,6 @@
 
 export {
   useAdminAudit,
-  useBackup,
-  useBackupCleanup,
-  useBackupJobStatus,
   useBackupSettings,
   useBackups,
   useCreateBackup,
@@ -27,16 +24,13 @@ export {
   useSetupStatus,
   useStats,
   useTelemetrySummary,
-  useTestAIModel,
   useTestLLMSurface,
-  useTestProviderKey,
   useUpdateBackupSettings,
   useUpdateLLMSurface,
   useUpdateSettings,
   useValidateApiKeys,
 } from './hooks/admin';
 export {
-  useAddOrgMember,
   useApiKeys,
   useAuthProviders,
   useChangePassword,
@@ -47,7 +41,6 @@ export {
   useDeleteOrgInvitation,
   useMe,
   useOnboardingProgress,
-  useOrg,
   useOrgInvitations,
   useOrgMembers,
   useOrgs,
@@ -86,7 +79,6 @@ export {
   useStartSourceImport,
   useSynthesisDraft,
   useSynthesisPlan,
-  useUpdateRawCaptureReviewState,
 } from './hooks/memory';
 export { queryKeys } from './hooks/query-keys';
 export { useRealtimeUpdates, useWebSocketStatus } from './hooks/realtime';
@@ -104,7 +96,6 @@ export type { CrawlProgressData } from './hooks/sources';
 export {
   useAllCrawlProgress,
   useCancelCrawl,
-  useCrawlProgress,
   useCrawlSource,
   useCreateSource,
   useDeleteSource,
@@ -114,21 +105,17 @@ export {
   useUpdateSource,
 } from './hooks/sources';
 export {
-  useAddProjectMember,
   useAddTaskNote,
   useEpic,
-  useEpicManage,
   useEpics,
   useEpicTasks,
   useOrgMetrics,
-  useProject,
   useProjectMembers,
   useProjectMetrics,
   useProjectSummaries,
   useProjects,
   useRemoveProjectMember,
   useTask,
-  useTaskManage,
   useTaskNotes,
   useTasks,
   useTaskUpdateStatus,

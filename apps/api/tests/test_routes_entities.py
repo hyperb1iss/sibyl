@@ -55,7 +55,7 @@ class TestListEntitiesRoute:
     async def test_single_project_entities_push_project_filter_into_graph_query(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
         manager = MagicMock()
-        manager._surreal_entity_node_ops.return_value = object()
+        manager.supports_bounded_entity_list = True
         manager.list_by_type = AsyncMock(
             side_effect=[
                 [
@@ -118,6 +118,7 @@ class TestListEntitiesRoute:
     async def test_mixed_project_and_unassigned_entities_keep_python_filtering(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
         manager = MagicMock()
+        manager.supports_bounded_entity_list = True
         manager.list_by_type = AsyncMock(
             side_effect=[
                 [
@@ -229,6 +230,7 @@ class TestListEntitiesRoute:
     async def test_typed_entity_queries_page_past_first_batch(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
         manager = MagicMock()
+        manager.supports_bounded_entity_list = True
         manager.list_by_type = AsyncMock(
             side_effect=[
                 [
@@ -297,7 +299,7 @@ class TestListEntitiesRoute:
     async def test_default_surreal_entity_query_stops_after_page_has_more_probe(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
         manager = MagicMock()
-        manager._surreal_entity_node_ops.return_value = object()
+        manager.supports_bounded_entity_list = True
         manager.list_by_type = AsyncMock(
             return_value=[
                 _entity("ent-1", project_id="proj-1", name="One"),
@@ -349,7 +351,7 @@ class TestListEntitiesRoute:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
         manager = MagicMock()
         manager.supports_lightweight_entity_list = True
-        manager._surreal_entity_node_ops.return_value = object()
+        manager.supports_bounded_entity_list = True
         manager.list_by_type = AsyncMock(
             return_value=[
                 _entity(
@@ -402,7 +404,7 @@ class TestListEntitiesRoute:
     async def test_default_legacy_entity_query_keeps_exhaustive_sorting(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
         manager = MagicMock()
-        manager._surreal_entity_node_ops.return_value = None
+        manager.supports_bounded_entity_list = False
         older = _entity("older-returned-first", project_id=None, name="Older")
         newer = _entity("newer-returned-second", project_id=None, name="Newer")
         older.updated_at = datetime(2024, 1, 1, tzinfo=UTC)
@@ -450,7 +452,7 @@ class TestListEntitiesRoute:
     async def test_untyped_project_filters_apply_to_bounded_batch(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
         manager = MagicMock()
-        manager._surreal_entity_node_ops.return_value = None
+        manager.supports_bounded_entity_list = False
         archived_page = [
             _entity("ent-archived-1", project_id="proj-1", name="Archived 1", archived=True),
             _entity("ent-archived-2", project_id="proj-1", name="Archived 2", archived=True),
@@ -498,7 +500,7 @@ class TestListEntitiesRoute:
     async def test_default_entity_list_filters_to_accessible_projects_and_unassigned(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
         manager = MagicMock()
-        manager._surreal_entity_node_ops.return_value = object()
+        manager.supports_bounded_entity_list = True
         manager.list_by_type = AsyncMock(
             return_value=[
                 _entity("ent-match", project_id="proj-1", name="Match"),
@@ -543,7 +545,7 @@ class TestListEntitiesRoute:
     async def test_project_entity_list_filters_projects_by_entity_id(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
         manager = MagicMock()
-        manager._surreal_entity_node_ops.return_value = object()
+        manager.supports_bounded_entity_list = True
         manager.list_by_type = AsyncMock(
             return_value=[
                 _entity(
@@ -599,7 +601,7 @@ class TestListEntitiesRoute:
     async def test_untyped_entity_list_filters_private_project_fixture_shapes(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
         manager = MagicMock()
-        manager._surreal_entity_node_ops.return_value = object()
+        manager.supports_bounded_entity_list = True
         manager.list_by_type = AsyncMock()
         manager.list_all = AsyncMock(
             return_value=[
@@ -665,7 +667,7 @@ class TestListEntitiesRoute:
     ) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
         manager = MagicMock()
-        manager._surreal_entity_node_ops.return_value = object()
+        manager.supports_bounded_entity_list = True
         manager.list_by_type = AsyncMock()
         manager.list_all = AsyncMock(
             return_value=[

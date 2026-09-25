@@ -9,7 +9,6 @@ from sibyl_core.services.memory_contract import (
     ReflectionPromotionPreview,
     ReflectionPromotionResult,
     ReflectionWriteResult,
-    WriteMode,
 )
 from sibyl_core.services.memory_correction import (
     apply_memory_correction,
@@ -44,7 +43,6 @@ __all__ = [
     "ReflectionPromotionPreview",
     "ReflectionPromotionResult",
     "ReflectionWriteResult",
-    "WriteMode",
     "apply_memory_correction",
     "persist_reflection_candidate",
     "persist_reflection_source",

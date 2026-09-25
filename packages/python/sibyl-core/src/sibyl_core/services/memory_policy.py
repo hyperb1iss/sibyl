@@ -34,7 +34,6 @@ from sibyl_core.models.reflection import (
 from sibyl_core.services.memory_contract import (
     ReflectionPromotionPreview,
     ReflectionPromotionResult,
-    WriteMode,
 )
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory
 
@@ -116,7 +115,7 @@ def _authorize_reflection_write(
 
 def _policy_metadata(decisions: Sequence[MemoryPolicyDecision]) -> dict[str, Any]:
     return {
-        "native_write_mode": WriteMode.ENABLED.value,
+        "native_write_mode": "enabled",
         "memory_scope": decisions[0].memory_scope.value,
         "scope_key": decisions[0].scope_key,
         "policy_allowed": all(decision.allowed for decision in decisions),
