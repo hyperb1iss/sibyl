@@ -52,7 +52,7 @@ export function CompletionStep({ onFinish }: CompletionStepProps) {
               <span className="w-5 h-5 rounded bg-sc-green/15 text-sc-green flex items-center justify-center shrink-0 mt-0.5">
                 <Zap className="w-3 h-3" />
               </span>
-              <span>Connect Sibyl to your AI agent via the CLI or MCP</span>
+              <span>Connect another machine any time with sibyl setup</span>
             </li>
           </ul>
         </div>

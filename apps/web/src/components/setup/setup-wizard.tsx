@@ -38,7 +38,9 @@ function getStoredStep(steps: SetupStep[]): SetupStep {
 }
 
 export function SetupWizard({ initialStatus, onComplete }: SetupWizardProps) {
-  const steps = setupSteps(initialStatus);
+  // Fixed at mount: saving keys refreshes the status, and a list rebuilt from it
+  // would drop the step the owner is standing on.
+  const [steps] = useState(() => setupSteps(initialStatus));
   const [step, setStep] = useState<SetupStep>(() => getStoredStep(steps));
 
   // Persist step to sessionStorage so tab switches don't reset progress

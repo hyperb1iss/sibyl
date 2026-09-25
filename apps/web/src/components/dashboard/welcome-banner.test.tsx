@@ -4,6 +4,7 @@ import { render, screen } from '@/test/utils';
 const hooks = vi.hoisted(() => ({
   useSetupStatus: vi.fn(),
   useOnboardingProgress: vi.fn(),
+  useMe: vi.fn(),
 }));
 const storage = vi.hoisted(() => ({
   getItem: vi.fn(),
@@ -11,7 +12,10 @@ const storage = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/hooks/admin', () => ({ useSetupStatus: hooks.useSetupStatus }));
-vi.mock('@/lib/hooks/auth', () => ({ useOnboardingProgress: hooks.useOnboardingProgress }));
+vi.mock('@/lib/hooks/auth', () => ({
+  useOnboardingProgress: hooks.useOnboardingProgress,
+  useMe: hooks.useMe,
+}));
 vi.mock('@/components/dashboard/connect-agent-modal', () => ({
   ConnectAgentModal: () => <div data-testid="connect-agent-modal" />,
 }));
@@ -30,6 +34,7 @@ describe('WelcomeBanner', () => {
         anthropic_valid: false,
       },
     });
+    hooks.useMe.mockReturnValue({ data: { user: { is_admin: true } } });
     hooks.useOnboardingProgress.mockReturnValue({
       checklist: {
         connected_agent: false,
@@ -74,6 +79,14 @@ describe('WelcomeBanner', () => {
     render(<WelcomeBanner totalEntities={0} />);
 
     expect(screen.getByText('Models need setup')).toBeInTheDocument();
+  });
+
+  it('never tells a member that models need setup', () => {
+    hooks.useMe.mockReturnValue({ data: { user: { is_admin: false } } });
+
+    render(<WelcomeBanner totalEntities={0} />);
+
+    expect(screen.queryByText('Models need setup')).not.toBeInTheDocument();
   });
 
   it('shows no model status until the server has answered', () => {

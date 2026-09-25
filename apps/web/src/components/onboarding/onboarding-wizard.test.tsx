@@ -149,6 +149,30 @@ describe('OnboardingWizard', () => {
 
     expect(await screen.findByText('Connect your tools')).toBeInTheDocument();
   });
+
+  it('keeps an owner moving forward after saving keys refreshes the status', async () => {
+    signInAs(true);
+    hooks.useSetupStatus.mockReturnValue({ data: setupStatus(false) });
+    hooks.useConnectInfo.mockReturnValue({
+      data: connectInfo('https://sibyl.example.com', true),
+      isLoading: false,
+      isError: false,
+    });
+    const user = userEvent.setup();
+    const { rerender } = render(<OnboardingWizard onComplete={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: /get started/i }));
+    expect(await screen.findByText('Configure API Keys')).toBeInTheDocument();
+
+    // Saving keys refetches setup status, which now reports providers ready.
+    hooks.useSetupStatus.mockReturnValue({ data: setupStatus(true, ['anthropic', 'openai']) });
+    rerender(<OnboardingWizard onComplete={vi.fn()} />);
+
+    expect(screen.getByText('Step 2 of 5')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+
+    expect(await screen.findByText('Connect your tools')).toBeInTheDocument();
+    expect(screen.getByText('Step 3 of 5')).toBeInTheDocument();
+  });
 });
 
 describe('onboardingSteps', () => {

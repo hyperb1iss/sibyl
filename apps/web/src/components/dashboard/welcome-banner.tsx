@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { ConnectAgentModal } from '@/components/dashboard/connect-agent-modal';
 import { ArrowRight, BookOpen, Check, Network, Search, Xmark } from '@/components/ui/icons';
 import { useSetupStatus } from '@/lib/hooks/admin';
-import { useOnboardingProgress } from '@/lib/hooks/auth';
+import { useMe, useOnboardingProgress } from '@/lib/hooks/auth';
 
 /** Minimum entities before automatically hiding the welcome banner */
 const WELCOME_BANNER_ENTITY_THRESHOLD = 10;
@@ -23,6 +23,7 @@ export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) 
   const [mounted, setMounted] = useState(false);
   const [showConnectModal, setShowConnectModal] = useState(false);
   const { data: setupStatus } = useSetupStatus({ validateKeys: false });
+  const { data: me } = useMe();
   const { checklist, markConnectedAgent, markAddedSource, markTriedSearch } =
     useOnboardingProgress();
 
@@ -48,9 +49,11 @@ export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) 
 
   const isNewUser = totalEntities === 0;
   // Keys are one way to be ready; a server-side provider such as Bedrock needs none.
-  // Server rendering never has the status, so the pill waits for the client.
-  const modelsKnown = mounted && setupStatus !== undefined;
+  // Server rendering never has the status, so the pill waits for the client, and
+  // "needs setup" is only worth showing to an admin who can act on it.
   const modelsReady = setupStatus?.providers_configured === true;
+  const showModels =
+    mounted && setupStatus !== undefined && (modelsReady || me?.user.is_admin === true);
 
   return (
     <div className="relative bg-gradient-to-r from-sc-purple/10 via-sc-cyan/5 to-sc-coral/10 border border-sc-purple/20 rounded-xl sm:rounded-xl p-4 sm:p-6 mb-4 sm:mb-6 animate-fade-in overflow-hidden">
@@ -178,7 +181,7 @@ export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) 
 
         {/* Status indicators */}
         <div className="flex flex-wrap items-center gap-3 text-xs">
-          {modelsKnown && (
+          {showModels && (
             <div className="flex items-center gap-1.5">
               <div
                 className={`w-2 h-2 rounded-full ${modelsReady ? 'bg-sc-green shadow-[0_0_6px_color-mix(in_oklch,var(--sc-green)_60%,transparent)]' : 'bg-sc-fg-subtle'}`}

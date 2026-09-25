@@ -44,10 +44,14 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
   const updatePreferences = useUpdatePreferences();
   const { data: me } = useMe();
   const { data: setupStatus } = useSetupStatus();
-  const steps = onboardingSteps(setupStatus, me?.user.is_admin === true);
+  // The list is fixed once the user leaves welcome: saving keys refreshes the
+  // status, and a rebuilt list would drop the step they are standing on.
+  const [frozenSteps, setFrozenSteps] = useState<OnboardingStep[] | null>(null);
+  const steps = frozenSteps ?? onboardingSteps(setupStatus, me?.user.is_admin === true);
   const stepIndex = steps.indexOf(step);
 
   const goNext = useCallback(() => {
+    setFrozenSteps(steps);
     setStep(steps[stepIndex + 1] ?? 'complete');
   }, [steps, stepIndex]);
 

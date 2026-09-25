@@ -82,6 +82,10 @@ describe('SetupWizard Step Persistence', () => {
 // =============================================================================
 
 describe('setupSteps', () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+  });
+
   const status = (providersConfigured: boolean) =>
     ({
       needs_setup: true,
@@ -110,5 +114,31 @@ describe('setupSteps', () => {
 
     expect(await screen.findByText('Create Admin Account')).toBeInTheDocument();
     expect(screen.queryByText('Configure API Keys')).not.toBeInTheDocument();
+  });
+
+  it('continues to the admin account after saving keys refreshes the status', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<SetupWizard initialStatus={status(false)} onComplete={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: "Let's Get Started" }));
+    expect(await screen.findByText('Configure API Keys')).toBeInTheDocument();
+
+    // The page refetches setup status after the save and passes the new one down.
+    rerender(
+      <SetupWizard
+        initialStatus={
+          {
+            ...status(true),
+            anthropic_configured: true,
+            openai_configured: true,
+          } as unknown as SetupStatus
+        }
+        onComplete={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('Step 2 of 3')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+
+    expect(await screen.findByText('Create Admin Account')).toBeInTheDocument();
   });
 });

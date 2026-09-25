@@ -41,7 +41,7 @@ export function WelcomeStep({ onNext, configuredProviders = [] }: WelcomeStepPro
         <Feature
           icon={<Code aria-hidden="true" width={20} height={20} />}
           title="Works With Any Agent"
-          description="Use the sibyl CLI or connect any MCP client: Claude Code, Codex, opencode, OpenClaw, and more"
+          description="Claude Code, Codex, and any other coding agent connect with one command"
         />
       </div>
 
