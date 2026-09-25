@@ -61,6 +61,10 @@ dmypy.json
 .env.local
 openrouter.key
 
+# Leftover local secrets from the retired Tilt stack. The directory is gone,
+# but old checkouts may still hold real API keys here; never stage them.
+infra/local/secrets.yaml
+
 # OS
 .DS_Store
 Thumbs.db
