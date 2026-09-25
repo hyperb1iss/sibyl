@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
 import shlex
+import signal
 import subprocess
 import time
 from pathlib import Path
@@ -758,7 +760,20 @@ wait_for_api_ready 123
     )
 
 
-def test_stop_dev_disables_default_compose_env_file(tmp_path: Path) -> None:
+DEV_STACK_PATTERN_ARGV0 = "uvicorn decoy sibyl.main:create_dev_app"
+
+
+def _stop_dev_sandbox(tmp_path: Path) -> tuple[Path, dict[str, str], Path]:
+    """A copy of stop-dev.sh under a private repo root, with docker stubbed.
+
+    The script derives its repo root from its own path and only stops processes
+    running from inside that root, so running the copy keeps the test away from
+    any real dev stack on the machine.
+    """
+    root = tmp_path / "repo"
+    (root / "tools/dev").mkdir(parents=True)
+    for name in ("stop-dev.sh", "process-tree.sh"):
+        (root / "tools/dev" / name).write_bytes((REPO_ROOT / "tools/dev" / name).read_bytes())
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     docker_args = tmp_path / "docker-args.txt"
@@ -771,31 +786,124 @@ exit 0
         encoding="utf-8",
     )
     docker.chmod(0o755)
-
     env = {
         **os.environ,
         "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
         "DOCKER_ARGS_LOG": str(docker_args),
     }
+    return root, env, docker_args
+
+
+def _spawn_dev_stack_decoy(cwd: Path) -> subprocess.Popen[bytes]:
+    """A process whose command line matches the stop script's uvicorn pattern.
+
+    bash keeps the pattern in its own argv as $0, and sleep runs as its child, so
+    the pair looks like a dev API to pgrep -f without starting one. The script
+    has two statements because bash execs a lone command in place, which would
+    leave a bare sleep with no pattern in its argv.
+    """
+    bash = which("bash")
+    pgrep = which("pgrep")
+    assert bash is not None
+    assert pgrep is not None
+    proc = subprocess.Popen(  # noqa: S603
+        [bash, "-c", "sleep 300; :", DEV_STACK_PATTERN_ARGV0],
+        cwd=cwd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        listing = subprocess.run(  # noqa: S603
+            [pgrep, "-f", DEV_STACK_PATTERN_ARGV0], capture_output=True, text=True, check=False
+        )
+        if str(proc.pid) in listing.stdout.split():
+            return proc
+        time.sleep(0.05)
+    proc.kill()
+    raise AssertionError("decoy never became visible to pgrep")
+
+
+def _run_stop_dev(root: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
     bash = which("bash")
     assert bash is not None
-
-    result = subprocess.run(  # noqa: S603
-        [bash, "tools/dev/stop-dev.sh"],
-        cwd=REPO_ROOT,
+    return subprocess.run(  # noqa: S603
+        [bash, str(root / "tools/dev/stop-dev.sh")],
+        cwd=root,
         env=env,
         text=True,
         capture_output=True,
         check=False,
     )
 
+
+def _wait_for_exit(proc: subprocess.Popen[bytes], seconds: float) -> int | None:
+    try:
+        return proc.wait(timeout=seconds)
+    except subprocess.TimeoutExpired:
+        return None
+
+
+def _reap_decoy(proc: subprocess.Popen[bytes]) -> None:
+    """Kill the decoy's whole process group, so its sleep child never outlives the test."""
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(proc.pid, signal.SIGKILL)
+    if proc.poll() is None:
+        proc.wait(timeout=5)
+
+
+def test_stop_dev_disables_default_compose_env_file(tmp_path: Path) -> None:
+    root, env, docker_args = _stop_dev_sandbox(tmp_path)
+
+    result = _run_stop_dev(root, env)
+
     assert result.returncode == 0, result.stderr
+    assert "No matching Sibyl dev processes found." in result.stdout
     assert docker_args.read_text(encoding="utf-8").splitlines() == [
         "compose",
         "--env-file",
         "/dev/null",
         "down",
     ]
+
+
+def test_stop_dev_stops_matching_processes_running_from_its_own_workspace(
+    tmp_path: Path,
+) -> None:
+    root, env, _docker_args = _stop_dev_sandbox(tmp_path)
+    decoy = _spawn_dev_stack_decoy(root)
+    try:
+        result = _run_stop_dev(root, env)
+
+        assert result.returncode == 0, result.stderr
+        assert "No matching Sibyl dev processes found." not in result.stdout
+        assert _wait_for_exit(decoy, seconds=15) is not None
+    finally:
+        _reap_decoy(decoy)
+
+
+def test_stop_dev_leaves_another_workspaces_dev_stack_alone(tmp_path: Path) -> None:
+    """A worktree's stop, or a test that runs it, must not kill the checkout next door.
+
+    Every checkout of this repo runs the same uvicorn and next commands, and the
+    stop script finds them by command line across the whole machine. Before the
+    workspace check, any run of this test suite stopped the live dev stack.
+    """
+    root, env, _docker_args = _stop_dev_sandbox(tmp_path)
+    elsewhere = tmp_path / "other-checkout"
+    elsewhere.mkdir()
+    decoy = _spawn_dev_stack_decoy(elsewhere)
+    try:
+        result = _run_stop_dev(root, env)
+
+        assert result.returncode == 0, result.stderr
+        assert "No matching Sibyl dev processes found." in result.stdout
+        assert _wait_for_exit(decoy, seconds=2) is None, (
+            "stop-dev.sh killed a process outside its workspace"
+        )
+    finally:
+        _reap_decoy(decoy)
 
 
 def test_launch_command_uses_separate_process_group() -> None:
