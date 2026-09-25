@@ -35,8 +35,9 @@ MARKUP = re.compile(r"\[/?[\w #.<>-]*\]")
 
 # A suggestion runs from `sibyl` to the first character that cannot be part
 # of one shell command: quotes, backticks, chaining, commas, parentheses, and
-# a period that ends a sentence rather than sitting inside a token.
-SUGGESTION = re.compile(r"(?<![\w/.~-])sibyl[ \t]+((?:[^\n\0`'\"&|;,().]|\.(?!\s|$))+)")
+# a period that ends a sentence rather than sitting inside a token or an
+# ellipsis.
+SUGGESTION = re.compile(r"(?<![\w/.~-])sibyl[ \t]+((?:[^\n\0`'\"&|;,().]|\.{3}|\.(?!\s|$))+)")
 
 # Strings that mention `sibyl` followed by prose rather than a command. Keyed
 # by file and suggestion so a new occurrence elsewhere is still checked.
@@ -269,6 +270,7 @@ def test_scanner_reads_fstrings_and_markup(tmp_path: Path) -> None:
         "c = (\n    'Run \\'sibyl init\\' '\n    'or \\'sibyl up --pull\\'.'\n)\n"
         "d = ['sibyl', 'docker', 'upgrade', '--tag', tag]\n"
         "e = 'Run sibyl context. It builds a pack from ~/.sibyl/local.'\n"
+        "f = 'Try sibyl local ... for more'\n"
     )
     found = [(s.line, s.text) for s in iter_suggestions(tmp_path)]
     assert found == [
@@ -279,6 +281,7 @@ def test_scanner_reads_fstrings_and_markup(tmp_path: Path) -> None:
         (5, "up --pull"),
         (8, "docker upgrade --tag <value>"),
         (9, "context"),
+        (10, "local ... for more"),
     ]
 
 
