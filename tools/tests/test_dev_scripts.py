@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -846,10 +847,8 @@ def _wait_for_exit(proc: subprocess.Popen[bytes], seconds: float) -> int | None:
 
 def _reap_decoy(proc: subprocess.Popen[bytes]) -> None:
     """Kill the decoy's whole process group, so its sleep child never outlives the test."""
-    try:
+    with contextlib.suppress(ProcessLookupError):
         os.killpg(proc.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
     if proc.poll() is None:
         proc.wait(timeout=5)
 
