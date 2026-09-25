@@ -109,7 +109,6 @@ export function ProjectContextProvider({ children }: { children: ReactNode }) {
     userChangedSelection.current = false;
 
     const params = new URLSearchParams(searchParams);
-    params.delete('project'); // Remove legacy single 'project' param
 
     if (selectedProjects.length > 0) {
       params.set('projects', selectedProjects.join(','));
