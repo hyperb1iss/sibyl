@@ -20,9 +20,7 @@ export default defineConfig({
         'architecture/AUDIT_*/**',
         '_archive/**',
         'research/**',
-        'testing/PERMISSION_TEST_STRATEGY.md',
         'SCREENSHOTS_NEEDED.md',
-        'design/quality-gates-ai-agents.md',
     ],
 
     head: [
@@ -125,11 +123,6 @@ export default defineConfig({
                     items: [
                         { text: 'Storage Modes', link: '/guide/storage-modes' },
                         { text: 'Why SurrealDB', link: '/guide/why-surreal' },
-                        { text: 'Migrating from FalkorDB', link: '/guide/migrating-from-falkor' },
-                        {
-                            text: 'SurrealDB Release Notes',
-                            link: '/guide/surrealdb-migration-release-notes',
-                        },
                     ],
                 },
                 {
