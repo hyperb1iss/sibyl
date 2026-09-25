@@ -598,7 +598,7 @@ def test_python_packages_pin_sibyl_core_to_current_release() -> None:
     version = pep440_version((REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip())
     package_dependencies = {
         "apps/cli/pyproject.toml": set(),
-        "apps/api/pyproject.toml": {"embeddings", "graph", "graphrag", "llm"},
+        "apps/api/pyproject.toml": {"bedrock", "embeddings", "graph", "graphrag", "llm"},
     }
 
     for path, extras in package_dependencies.items():
@@ -625,7 +625,10 @@ def test_python_package_build_verifies_cli_bundle_data() -> None:
     assert "must declare exactly one sibyl-core dependency" in script
     assert "pep440_version" in script
     assert "expected_requirements" in script
-    assert '"sibyld-*.whl": (expected_core, {"embeddings", "graph", "graphrag", "llm"})' in script
+    assert (
+        '"sibyld-*.whl": (expected_core, {"bedrock", "embeddings", "graph", "graphrag", "llm"})'
+        in script
+    )
     assert "expected_core" in script
 
 

@@ -46,6 +46,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Amazon Bedrock: SigV4 signing and the AWS credential chain (IRSA, SSO,
+# instance roles) for Claude through the Anthropic SDK's Bedrock clients and
+# for Cohere embeddings on bedrock-runtime.
+bedrock = [
+    "anthropic[bedrock]>=1.0.0,<2",
+    # The Cohere embedding path signs requests with botocore directly.
+    "boto3>=1.28.57,<2",
+    "botocore>=1.31.57,<2",
+]
 embeddings = [
     "google-genai>=2.23.0",
 ]
@@ -68,7 +77,7 @@ reranking = [
 
 [dependency-groups]
 dev = [
-    "anthropic>=1.0.0,<2",
+    "anthropic[bedrock]>=1.0.0,<2",
     "httpx2>=2.5.0,<3",
     "pytest",
     "pytest-asyncio",
