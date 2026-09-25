@@ -513,7 +513,7 @@ def configured_raw_memory_embedding_provider() -> EmbeddingProvider | None:
         )
 
     config = content_embeddings.configured_content_embedding()
-    if not config.api_key:
+    if not config.ready:
         return None
 
     if (

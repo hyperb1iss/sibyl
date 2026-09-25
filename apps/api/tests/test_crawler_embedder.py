@@ -97,3 +97,38 @@ async def test_gemini_embed_chunks_formats_document_titles(
     assert call["contents"][0].parts[0].text == (
         "title: Guide / Embeddings | text: Surrounding context\n\nChunk body"
     )
+
+
+@pytest.mark.asyncio
+async def test_bedrock_embeds_chunks_through_cohere(monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+
+    import httpx
+
+    from sibyl_core.embeddings import bedrock as cohere
+
+    requests: list[dict] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        requests.append(body)
+        vectors = [[0.5] * body["output_dimension"] for _ in body["texts"]]
+        return httpx.Response(200, json={"embeddings": {"float": vectors}})
+
+    for name in ("SIBYL_BEDROCK_API_KEY", "AWS_BEARER_TOKEN_BEDROCK", "SIBYL_BEDROCK_PROFILE"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("SIBYL_BEDROCK_REGION", "us-west-2")
+    monkeypatch.setenv("SIBYL_BEDROCK_API_KEY", "bedrock-key")
+    client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+    monkeypatch.setattr(cohere.BedrockEmbeddingProvider, "_http_client", lambda self: client)
+    service = FakeSettingsService({"embedding_provider": "bedrock", "embedding_dimensions": "1536"})
+    monkeypatch.setattr(embedder_module, "get_settings_service", lambda: service)
+
+    embedder = EmbeddingService()
+    vectors = await embedder.embed_texts(["alpha", "beta"])
+    query = await embedder.embed_text("alpha?")
+
+    assert [len(vector) for vector in vectors] == [1536, 1536]
+    assert len(query) == 1536
+    assert [body["input_type"] for body in requests] == ["search_document", "search_query"]
+    assert all(body["output_dimension"] == 1536 for body in requests)

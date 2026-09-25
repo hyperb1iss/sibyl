@@ -273,7 +273,7 @@ class CoreConfig(BaseSettings):
         return self
 
     # Embedding configuration
-    embedding_provider: Literal["openai", "gemini"] = Field(
+    embedding_provider: Literal["openai", "gemini", "bedrock"] = Field(
         default="openai",
         description="Provider for document chunk embeddings",
     )
@@ -287,7 +287,7 @@ class CoreConfig(BaseSettings):
         le=3072,
         description="Document chunk embedding vector dimensions",
     )
-    graph_embedding_provider: Literal["openai", "gemini", "local"] = Field(
+    graph_embedding_provider: Literal["openai", "gemini", "local", "bedrock"] = Field(
         default="openai",
         description="Provider for graph node and relationship embeddings",
     )

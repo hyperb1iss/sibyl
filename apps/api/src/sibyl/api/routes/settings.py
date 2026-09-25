@@ -75,14 +75,18 @@ class UpdateSettingsRequest(BaseModel):
     anthropic_api_key: str | None = Field(default=None, description="Anthropic API key")
     gemini_api_key: str | None = Field(default=None, description="Gemini API key")
     embedding_provider: str | None = Field(
-        default=None, pattern="^(openai|gemini)$", description="Document embedding provider"
+        default=None,
+        pattern="^(openai|gemini|bedrock)$",
+        description="Document embedding provider",
     )
     embedding_model: str | None = Field(default=None, description="Document embedding model")
     embedding_dimensions: int | None = Field(
         default=None, ge=128, le=3072, description="Document embedding dimensions"
     )
     graph_embedding_provider: str | None = Field(
-        default=None, pattern="^(openai|gemini|local)$", description="Graph embedding provider"
+        default=None,
+        pattern="^(openai|gemini|local|bedrock)$",
+        description="Graph embedding provider",
     )
     graph_embedding_model: str | None = Field(default=None, description="Graph embedding model")
     graph_embedding_dimensions: int | None = Field(
