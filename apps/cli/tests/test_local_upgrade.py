@@ -166,6 +166,19 @@ def test_a_failed_start_that_left_nothing_running_says_to_start_it(
     assert "Retry the start with" not in result.output
 
 
+def test_the_start_advice_spells_out_the_tag_even_for_this_clis_own(
+    local_runtime: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Under `update` the tag is always this build's default, but the typed `sibyl` may be older."""
+    monkeypatch.setattr(local, "DEFAULT_IMAGE_TAG", "1.5.0")
+    compose = FakeCompose(fail=("up -d",), down_after_up=True)
+
+    result = _invoke(monkeypatch, compose, healthy=[])
+
+    assert result.exit_code == 1
+    assert "SIBYL_IMAGE_TAG=1.5.0 sibyl up" in result.output
+
+
 def test_sibyl_up_keeps_a_newer_surrealdb(
     local_runtime: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -296,6 +309,7 @@ def test_a_stopped_instance_is_not_started(
 
     assert result.exit_code == 0, result.output
     assert "nothing to upgrade in place" in result.output
+    assert "SIBYL_IMAGE_TAG=1.5.0 sibyl up --pull" in result.output
     assert compose.calls == [("ps -q", "docker-compose.yml")]
     assert local_runtime.read_bytes() == before
 

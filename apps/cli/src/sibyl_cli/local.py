@@ -636,8 +636,7 @@ def upgrade(
                 info("Upgrade it with: sibyl docker upgrade")
                 return
             info("The local instance is not running, so there is nothing to upgrade in place.")
-            prefix = "" if tag == DEFAULT_IMAGE_TAG else f"SIBYL_IMAGE_TAG={tag} "
-            info(f"Start it on {tag} with: {prefix}sibyl up --pull")
+            info(f"Start it on {tag} with: SIBYL_IMAGE_TAG={tag} sibyl up --pull")
             return
 
         current_text = SIBYL_LOCAL_COMPOSE.read_text()
@@ -679,13 +678,18 @@ def upgrade(
         "version, and an older API must not start against a newer schema."
     )
     info("Inspect the failure with: sibyl local logs")
-    if _compose_project_running():
+    # The tag is always spelled out: the `sibyl` a user types may be an older
+    # build than this one, and its own default would start an older API.
+    still_running = _compose_project_running()
+    if still_running:
         info(f"Retry the start with: sibyl local upgrade --tag {tag}")
-    else:
+    elif still_running is False:
         # Nothing is left for `local upgrade` to recreate, so the retry is a
         # start, which keeps the SurrealDB image the pins name.
-        prefix = "" if tag == DEFAULT_IMAGE_TAG else f"SIBYL_IMAGE_TAG={tag} "
-        info(f"Nothing is running now. Start it again with: {prefix}sibyl up")
+        info(f"Nothing is running now. Start it again with: SIBYL_IMAGE_TAG={tag} sibyl up")
+    else:
+        info("Check what is still running with: sibyl local status")
+        info(f"Then retry with: sibyl local upgrade --tag {tag}")
     raise typer.Exit(1)
 
 
