@@ -36,13 +36,6 @@ on:
       - "uv.lock"
   workflow_dispatch:
     inputs:
-      retrieval_mode:
-        description: "Retrieval mode to evaluate"
-        type: choice
-        options:
-          - native
-          - compare
-        default: native
       repeat:
         description: "Repeat count per case (higher = lower variance)"
         type: string
@@ -141,7 +134,6 @@ concurrency:
 
 env:
   COMPOSE_PROJECT_NAME: sibyl-eval
-  EVAL_RETRIEVAL_MODE: ${{ inputs.retrieval_mode || 'native' }}
   EVAL_REPEAT: ${{ inputs.repeat || '20' }}
   LONGMEMEVAL_SMOKE_LIMIT: ${{ inputs.longmemeval_smoke_limit || '25' }}
   LONGMEMEVAL_LOCAL_SMOKE_LIMIT:
@@ -187,7 +179,6 @@ jobs:
       SIBYL_SURREAL_URL: ws://localhost:8000/rpc
       SIBYL_SURREAL_USERNAME: sibyl_ci
       SIBYL_SURREAL_PASSWORD: sibyl_ci_password
-      SIBYL_RETRIEVAL_MODE: ${{ inputs.retrieval_mode || 'native' }}
       SIBYL_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       SIBYL_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     steps:
@@ -278,10 +269,9 @@ jobs:
           moon run core:bench-context -- \
             --cases benchmarks/context_pack_cases.json \
             --auth-manifest .moon/cache/baseline-runtime-manifest.json \
-            --label "retrieval-${EVAL_RETRIEVAL_MODE}" \
+            --label retrieval-native \
             --timeout 30 \
-            --repeat "${EVAL_REPEAT}" \
-            --metadata "retrieval_mode=${EVAL_RETRIEVAL_MODE}"
+            --repeat "${EVAL_REPEAT}"
           bench_status="$?"
           set -e
 
@@ -318,7 +308,6 @@ jobs:
           moon run bench-gate -- "${{ steps.eval.outputs.report }}" \
             --profile context-pack \
             --require-accounting \
-            --require-metadata "retrieval_mode=${EVAL_RETRIEVAL_MODE}" \
             --require-metadata "repeat_count=${EVAL_REPEAT}"
 
       - name: Upload eval report
