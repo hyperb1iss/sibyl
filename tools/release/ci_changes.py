@@ -110,7 +110,6 @@ _DOCUMENTATION_ROOTS = {
     "LICENSE",
     "NOTICE",
     "README.md",
-    "docs.md",
 }
 _RUNTIME_ROOTS = {
     ".env.example",
@@ -149,7 +148,6 @@ _API_IMAGE_INPUTS = {
 _WEB_IMAGE_INPUTS = {
     "apps/web/Dockerfile",
     "apps/web/package.json",
-    "apps/web/pnpm-lock.yaml",
     "package.json",
     "pnpm-lock.yaml",
 }

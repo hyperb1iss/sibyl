@@ -26,7 +26,7 @@ tasks:
     command: pnpm install
     inputs:
     - package.json
-    - pnpm-lock.yaml
+    - /pnpm-lock.yaml
     preset: server
   lint:
     script: git ls-files -z '*.md' | xargs -0 npx prettier --check

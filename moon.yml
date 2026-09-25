@@ -999,7 +999,7 @@ tasks:
     inputs:
       - tools/bench/longmemeval_v2_rig.py
       - tools/bench/longmemeval_v2_pack_compare.py
-      - benchmarks/longmemeval_v2/**/*.json
+      - benchmarks/longmemeval_v2_official_source.py
       - pyproject.toml
     options:
       cache: false
@@ -1017,7 +1017,6 @@ tasks:
     command: uv run python tools/bench/longmemeval_v2_pack_compare.py
     inputs:
       - tools/bench/longmemeval_v2_pack_compare.py
-      - benchmarks/longmemeval_v2/**/*.json
       - pyproject.toml
     options:
       cache: false
@@ -1084,7 +1083,7 @@ tasks:
       cache: false
 
   agent-task-test:
-    command: uv run pytest tools/tests/test_agent_task_transfer_report.py tools/tests/test_agent_task_sealed_report.py tools/tests/test_agent_task_sealed_evaluator.py tools/tests/test_agent_task_learning_run.py tools/tests/test_agent_task_runner.py tools/tests/test_agent_task_coding_controller.py tools/tests/test_agent_task_development_corpus.py tools/tests/test_agent_task_learning_corpus.py tools/tests/test_agent_task_screen48_recall.py tools/tests/test_agent_task_screen48_launch.py tools/tests/test_agent_task_screen48_cycle.py tools/tests/test_agent_task_screen48_checkpoints.py tools/tests/test_agent_task_screen48_devbox.py tools/tests/test_agent_task_screen48_headroom.py tools/tests/test_agent_task_screen48_probe.py -v
+    command: uv run pytest tools/tests/test_agent_task_transfer_report.py tools/tests/test_agent_task_sealed_report.py tools/tests/test_agent_task_sealed_evaluator.py tools/tests/test_agent_task_learning_run.py tools/tests/test_agent_task_runner.py tools/tests/test_agent_task_coding_controller.py tools/tests/test_agent_task_development_corpus.py tools/tests/test_agent_task_learning_corpus.py tools/tests/test_agent_task_screen48_recall.py tools/tests/test_agent_task_screen48_launch.py tools/tests/test_agent_task_screen48_cycle.py tools/tests/test_agent_task_screen48_checkpoints.py tools/tests/test_agent_task_screen48_devbox.py tools/tests/test_agent_task_screen48_headroom.py tools/tests/test_agent_task_screen48_probe.py tools/tests/test_agent_task_screen48_intervention.py -v
     inputs:
       - apps/api/src/**/*.py
       - packages/python/sibyl-core/src/**/*.py
@@ -1104,6 +1103,7 @@ tasks:
       - tools/tests/test_agent_task_screen48_devbox.py
       - tools/tests/test_agent_task_screen48_headroom.py
       - tools/tests/test_agent_task_screen48_probe.py
+      - tools/tests/test_agent_task_screen48_intervention.py
       - benchmarks/agent_tasks/development/**/*
       - benchmarks/agent_tasks/screen48/material/**/*
       - benchmarks/agent_tasks/screen48/schedule/**/*
@@ -1115,6 +1115,7 @@ tasks:
       uv run pytest tools/tests/test_agent_task_transfer_report.py tools/tests/test_agent_task_sealed_report.py tools/tests/test_agent_task_sealed_evaluator.py tools/tests/test_agent_task_learning_run.py tools/tests/test_agent_task_runner.py tools/tests/test_agent_task_coding_controller.py
       tools/tests/test_agent_task_development_corpus.py tools/tests/test_agent_task_learning_corpus.py
       tools/tests/test_agent_task_screen48_recall.py tools/tests/test_agent_task_screen48_launch.py tools/tests/test_agent_task_screen48_cycle.py tools/tests/test_agent_task_screen48_checkpoints.py tools/tests/test_agent_task_screen48_devbox.py tools/tests/test_agent_task_screen48_headroom.py tools/tests/test_agent_task_screen48_probe.py
+      tools/tests/test_agent_task_screen48_intervention.py
       tools/tests/test_evidence_bundle.py
       tools/tests/test_benchmark_git_provenance.py tools/tests/test_bench_gate.py
       tools/tests/test_compare_eval_reports.py tools/tests/test_context_pack_eval_script.py
@@ -1122,6 +1123,7 @@ tasks:
       tools/tests/test_longmemeval_bench.py tools/tests/test_longmemeval_live.py
       tools/tests/test_longmemeval_qa_accounting.py
       tools/tests/test_longmemeval_replay.py
+      tools/tests/test_longmemeval_ranking_levers.py
       tools/tests/test_longmemeval_v2_probe.py tools/tests/test_longmemeval_v2_official.py
       tools/tests/test_operational_outcome_rendering.py
       tools/tests/test_longmemeval_v2_official_source.py
@@ -1131,6 +1133,7 @@ tasks:
       tools/tests/test_longmemeval_v2_repair_project.py
       tools/tests/test_longmemeval_v2_live_smoke.py
       tools/tests/test_longmemeval_v2_projection_audit.py
+      tools/tests/test_longmemeval_v2_render_bundle.py
       tools/tests/test_longmemeval_v2_ablations.py
       tools/tests/test_longmemeval_v2_causal_ablation.py
       tools/tests/test_longmemeval_v2_pack_compare.py
@@ -1398,11 +1401,12 @@ tasks:
       cache: false
 
   usage-loop-gate-test:
-    command: uv run pytest tools/tests/test_usage_loop_gate.py -v
+    command: uv run pytest tools/tests/test_usage_loop_gate.py tools/tests/test_dogfood_receipts.py -v
     inputs:
       - tools/trust/**/*.py
       - tools/tests/conftest.py
       - tools/tests/test_usage_loop_gate.py
+      - tools/tests/test_dogfood_receipts.py
       - apps/api/src/sibyl/jobs/consolidation.py
       - packages/python/sibyl-core/src/sibyl_core/retrieval/**/*.py
       - pyproject.toml
@@ -1797,13 +1801,6 @@ tasks:
       - pyproject.toml
       - apps/api/pyproject.toml
 
-  auth-readonly:
-    command: uv run sibyld migrate auth-readonly
-    inputs:
-      - apps/api/src/**/*.py
-      - pyproject.toml
-      - apps/api/pyproject.toml
-
   # ==========================================================================
   # Coverage
   # ==========================================================================
@@ -1987,7 +1984,13 @@ tasks:
       cache: false
 
   bench-live-smoke:
+    description:
+      Read-only live retrieval smoke. Needs a running Sibyl API with data on localhost:3334 and a
+      `sibyl` CLI login for auth; every test skips when search is unreachable or auth is missing.
+      Set SIBYL_ASSERT_LIVE_LATENCY=1 to enforce the latency budgets.
     command: uv run pytest packages/python/sibyl-core/tests/test_retrieval_live.py -v -s
+    env:
+      SIBYL_LIVE_RETRIEVAL_TESTS: "1"
     options:
       cache: false
 

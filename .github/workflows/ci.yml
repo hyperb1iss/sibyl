@@ -303,7 +303,7 @@ jobs:
           path: |
             .moon/cache
             apps/web/.next/cache
-          key: moon-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-${{ hashFiles('uv.lock', 'apps/web/pnpm-lock.yaml') }}
+          key: moon-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-${{ hashFiles('uv.lock', 'pnpm-lock.yaml') }}
           restore-keys: |
             moon-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-
 
@@ -463,7 +463,7 @@ jobs:
           path: |
             .moon/cache
             apps/web/.next/cache
-          key: moon-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-${{ hashFiles('uv.lock', 'apps/web/pnpm-lock.yaml') }}
+          key: moon-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-${{ hashFiles('uv.lock', 'pnpm-lock.yaml') }}
           restore-keys: |
             moon-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-
 
@@ -553,7 +553,7 @@ jobs:
           path: |
             .moon/cache
             apps/web/.next/cache
-          key: moon-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-${{ hashFiles('uv.lock', 'apps/web/pnpm-lock.yaml') }}
+          key: moon-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-${{ hashFiles('uv.lock', 'pnpm-lock.yaml') }}
           restore-keys: |
             moon-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-
 
@@ -796,7 +796,7 @@ jobs:
           path: |
             .moon/cache
             apps/web/.next/cache
-          key: moon-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-${{ hashFiles('uv.lock', 'apps/web/pnpm-lock.yaml') }}
+          key: moon-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-${{ hashFiles('uv.lock', 'pnpm-lock.yaml') }}
           restore-keys: |
             moon-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-
 
@@ -923,7 +923,7 @@ jobs:
           path: |
             .moon/cache
             apps/web/.next/cache
-          key: moon-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-${{ hashFiles('uv.lock', 'apps/web/pnpm-lock.yaml') }}
+          key: moon-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-${{ hashFiles('uv.lock', 'pnpm-lock.yaml') }}
           restore-keys: |
             moon-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-
 

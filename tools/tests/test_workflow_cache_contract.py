@@ -91,6 +91,22 @@ def test_moon_output_caches_restore_only_matching_toolchains() -> None:
             )
 
 
+def test_moon_output_cache_keys_hash_files_that_exist() -> None:
+    # hashFiles() hashes a missing path as nothing, so a deleted lockfile
+    # silently drops out of the key instead of failing the workflow.
+    caches = list(_moon_output_caches(_workflow_paths(WORKFLOWS_DIR)))
+
+    assert caches, "no moon output caches found"
+    for label, cache in caches:
+        key = str(cache.get("key", ""))
+        for match in HASH_FILES_PATTERN.finditer(key):
+            for argument in QUOTED_ARGUMENT_PATTERN.finditer(match.group(1)):
+                path = argument.group(2)
+                if any(char in path for char in "*?["):
+                    continue
+                assert (REPO_ROOT / path).is_file(), f"cache key in {label} hashes missing {path}"
+
+
 def test_every_moon_setup_uses_the_repo_proto_version() -> None:
     setup_steps = list(_action_steps(_workflow_paths(WORKFLOWS_DIR), "moonrepo/setup-toolchain@"))
 

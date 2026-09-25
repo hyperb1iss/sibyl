@@ -108,7 +108,7 @@ jobs:
           path: |
             .moon/cache
             apps/web/.next/cache
-          key: moon-release-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-${{ hashFiles('uv.lock', 'apps/web/pnpm-lock.yaml') }}
+          key: moon-release-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-${{ hashFiles('uv.lock', 'pnpm-lock.yaml') }}
           restore-keys: |
             moon-release-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-
 
