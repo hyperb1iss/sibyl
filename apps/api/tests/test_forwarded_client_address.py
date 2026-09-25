@@ -178,12 +178,28 @@ def test_empty_setting_keeps_the_default(trust: TrustSetter) -> None:
     assert trust(" , ") == ["127.0.0.1", "::1"]
 
 
-def test_uvicorn_forwarded_allow_ips_is_honored_until_the_sibyl_setting_is_set(
+def test_uvicorn_forwarded_allow_ips_applies_only_while_the_sibyl_setting_is_unset(
     trust: TrustSetter,
 ) -> None:
     assert trust(None, uvicorn_env="172.18.0.0/16") == ["172.18.0.0/16"]
-    assert trust("", uvicorn_env="172.18.0.0/16") == ["172.18.0.0/16"]
     assert trust(TRUSTED_RANGE, uvicorn_env="172.18.0.0/16") == [TRUSTED_RANGE]
+    # Set, even to nothing, the Sibyl setting wins, and empty means loopback only.
+    assert trust("", uvicorn_env="172.18.0.0/16") == list(LOOPBACK_FORWARDED_ALLOW_IPS)
+    assert trust(" , ", uvicorn_env="172.18.0.0/16") == list(LOOPBACK_FORWARDED_ALLOW_IPS)
+
+
+def test_empty_sibyl_setting_overrides_uvicorns_variable_end_to_end(trust: TrustSetter) -> None:
+    trust("", uvicorn_env="*")
+
+    with capture_logs() as logs:
+        app = _served_app()
+
+    # Uvicorn gets the explicit loopback list, so its own "*" never takes effect.
+    assert not [
+        entry for entry in logs if entry["event"] == "forwarded_allow_ips_trusts_every_peer"
+    ]
+    assert _resolved_client(_peer(app, UNTRUSTED_PEER), CLIENT_A) == UNTRUSTED_PEER
+    assert _resolved_client(_peer(app, "127.0.0.1"), CLIENT_A) == CLIENT_A
 
 
 def test_star_trusts_every_peer_and_warns(trust: TrustSetter) -> None:
@@ -318,6 +334,10 @@ def test_malformed_uvicorn_variable_names_itself(monkeypatch: pytest.MonkeyPatch
 
     with pytest.raises(ValueError, match="FORWARDED_ALLOW_IPS"):
         Settings()
+
+    # Once the Sibyl setting is set, even to nothing, uvicorn's variable is not read at all.
+    monkeypatch.setenv("SIBYL_FORWARDED_ALLOW_IPS", "")
+    assert Settings().forwarded_allow_ips == list(LOOPBACK_FORWARDED_ALLOW_IPS)
 
 
 def test_dev_reload_server_receives_the_trust_list(

@@ -42,9 +42,11 @@ def _broad_entries(trusted: list[str]) -> list[str]:
 
 
 def _configured_by() -> str:
-    if os.environ.get("SIBYL_FORWARDED_ALLOW_IPS", "").strip():
-        return "SIBYL_FORWARDED_ALLOW_IPS"
-    if os.environ.get("FORWARDED_ALLOW_IPS", "").strip():
+    # Mirrors Settings: uvicorn's variable only counts while the Sibyl one is unset.
+    if (
+        "SIBYL_FORWARDED_ALLOW_IPS" not in os.environ
+        and os.environ.get("FORWARDED_ALLOW_IPS", "").strip()
+    ):
         return "FORWARDED_ALLOW_IPS"
     return "SIBYL_FORWARDED_ALLOW_IPS"
 

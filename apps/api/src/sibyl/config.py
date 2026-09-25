@@ -214,7 +214,9 @@ def parse_forwarded_allow_ips(value: object) -> list[str]:
 
 
 def _default_forwarded_allow_ips() -> list[str]:
-    # Uvicorn's own variable keeps working for deployments that already set it.
+    # Only consulted while SIBYL_FORWARDED_ALLOW_IPS is unset. Sibyl always hands
+    # uvicorn an explicit list, which makes uvicorn ignore its own variable, so
+    # deployments that already set FORWARDED_ALLOW_IPS keep working through here.
     try:
         configured = parse_forwarded_allow_ips(os.environ.get("FORWARDED_ALLOW_IPS"))
     except ValueError as exc:
@@ -486,15 +488,18 @@ class Settings(BaseSettings):
         description=(
             "Comma-separated IPs and CIDR ranges of reverse proxies trusted to report the "
             "client address through X-Forwarded-For. Rate limits, audit logs, sessions, and "
-            "the break-glass allowlist all key on the address this resolves. Empty keeps the "
-            "loopback default; '*' trusts every peer, so any client can choose its address."
+            "the break-glass allowlist all key on the address this resolves. Empty means "
+            "loopback only; while unset, uvicorn's own FORWARDED_ALLOW_IPS applies if set. "
+            "'*' trusts every peer, so any client can choose its address."
         ),
     )
 
     @field_validator("forwarded_allow_ips", mode="before")
     @classmethod
     def normalize_forwarded_allow_ips(cls, value: object) -> list[str]:
-        return parse_forwarded_allow_ips(value) or _default_forwarded_allow_ips()
+        # A set value wins even when it is empty, which means loopback only. The
+        # default factory has already applied FORWARDED_ALLOW_IPS when it is unset.
+        return parse_forwarded_allow_ips(value) or list(LOOPBACK_FORWARDED_ALLOW_IPS)
 
     metrics_scrape_token: SecretStr = Field(
         default=SecretStr(""),

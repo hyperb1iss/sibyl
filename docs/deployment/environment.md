@@ -227,8 +227,10 @@ audit records, and the break-glass allowlist. Trusted peers also set the request
 
 **Accepted values.**
 
-- Empty or unset keeps the loopback default (`127.0.0.1` and `::1`). Uvicorn's own
-  `FORWARDED_ALLOW_IPS` variable is still honored while the Sibyl setting is unset.
+- Unset keeps the loopback default (`127.0.0.1` and `::1`), unless uvicorn's own
+  `FORWARDED_ALLOW_IPS` variable is set, in which case its list applies.
+- Set but empty (or only commas and spaces) means loopback only. Once the Sibyl variable exists in
+  the environment, even empty, `FORWARDED_ALLOW_IPS` is ignored.
 - A configured list replaces the loopback default rather than adding to it. Include `127.0.0.0/8` if
   a proxy in the same pod or on the same host also fronts the backend; some sidecar proxies connect
   from loopback addresses other than `127.0.0.1`.

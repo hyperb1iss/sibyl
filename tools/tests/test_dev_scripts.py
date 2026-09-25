@@ -594,6 +594,46 @@ def test_compose_command_prefers_quiet_docker_compose_provider(tmp_path: Path) -
     ]
 
 
+@pytest.mark.parametrize(
+    ("sibyl_value", "uvicorn_value", "expected"),
+    [
+        (None, None, "127.0.0.1,::1"),
+        (None, "10.20.0.0/16", "10.20.0.0/16"),
+        (None, " , ", "127.0.0.1,::1"),
+        ("10.30.0.0/16", "10.20.0.0/16", "10.30.0.0/16"),
+        # Set, even to nothing, the Sibyl setting wins, and empty means loopback only.
+        ("", "10.20.0.0/16", "127.0.0.1,::1"),
+        (" , ", "*", "127.0.0.1,::1"),
+    ],
+)
+def test_dev_trust_list_resolves_like_sibyld(
+    sibyl_value: str | None, uvicorn_value: str | None, expected: str
+) -> None:
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in {"SIBYL_FORWARDED_ALLOW_IPS", "FORWARDED_ALLOW_IPS"}
+    }
+    if sibyl_value is not None:
+        env["SIBYL_FORWARDED_ALLOW_IPS"] = sibyl_value
+    if uvicorn_value is not None:
+        env["FORWARDED_ALLOW_IPS"] = uvicorn_value
+    bash = which("bash")
+    assert bash is not None
+
+    result = subprocess.run(  # noqa: S603
+        [bash, "-c", "source tools/dev/run-surreal-dev.sh; resolve_forwarded_allow_ips"],
+        cwd=REPO_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == f"{expected}\n"
+
+
 def test_dev_main_allows_empty_extra_commands_with_nounset() -> None:
     env = {
         **os.environ,
