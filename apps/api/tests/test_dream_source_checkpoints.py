@@ -9,6 +9,7 @@ import pytest
 from sibyl.jobs import reflection
 from sibyl_core.backends.surreal import SurrealContentClient
 from sibyl_core.backends.surreal.content_schema import bootstrap_content_schema
+from sibyl_core.services.memory_source_validation import SourceReadAuthority
 from sibyl_core.services.surreal_content import remember_raw_memory, save_raw_memory
 
 
@@ -26,6 +27,12 @@ async def dream_store(monkeypatch):
         "sibyl_core.services.content_models.configured_raw_memory_embedding_provider", lambda: None
     )
     monkeypatch.setattr(reflection, "_resolve_accessible_projects", AsyncMock(return_value=set()))
+    # Fixture principals exist only as source owners, never in the auth store,
+    # so the send gate is stubbed the same way the read gate is above.
+    monkeypatch.setattr(
+        "sibyl.jobs.ordinary_cohorts.writable_source_authority",
+        AsyncMock(side_effect=lambda org, principal: SourceReadAuthority(principal)),
+    )
     try:
         yield client
     finally:

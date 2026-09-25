@@ -11,6 +11,7 @@ from uuid import uuid4
 
 import structlog
 
+from sibyl.persistence.auth_common import InvalidAuthClaimsError, UserNotFoundError
 from sibyl.persistence.auth_runtime import (
     log_memory_audit_event,
     resolve_accessible_project_graph_ids,
@@ -43,7 +44,7 @@ from sibyl_core.services.memory_autonomy import (
 from sibyl_core.services.memory_source_validation import SourceReadAuthority
 from sibyl_core.services.observed_sources import load_authorized_source_snapshot
 from sibyl_core.services.ordinary_cohort import ReflectedSources, reflected_sources
-from sibyl_core.services.source_observations import SourceUnavailableError
+from sibyl_core.services.source_observations import SourceUnavailableError, observe_raw_capture
 from sibyl_core.services.source_state_store import RawSourceSnapshot
 from sibyl_core.services.surreal_content import (
     MemoryScope,
@@ -229,6 +230,8 @@ async def _reflect_dream_sources(
         seed_id=sources[0].id if sources else None,
         sources=len(sources),
         walked=len(walked),
+        observation_misses=len(selection.unobserved),
+        unsendable=selection.unsendable,
     )
     from sibyl.jobs.ordinary_cohorts import reflect_cohorts
 
@@ -284,6 +287,12 @@ class _DreamSelection:
     as a neighbour of a fresh seed, where a family member that arrived later
     can meet it. Current observations are read in batches before anything is
     authorized, so a reflected source is ruled out without authorizing it.
+
+    Selection applies the provider-send gate as well as the read gate. A
+    source its owner may still read but not send, such as a departed member's
+    private captures or a project where they are now a viewer, fails every
+    cohort preparation and never completes, so selecting it would only take a
+    place on every page. It is unavailable until its owner's access returns.
     """
 
     group_id: str
@@ -296,6 +305,13 @@ class _DreamSelection:
     errors: dict[str, Exception] = field(default_factory=dict)
     authorized: dict[str, str] = field(default_factory=dict)
     observed: dict[str, tuple[str, int]] = field(default_factory=dict)
+    #: Each principal's send authority, resolved once per run; None when the
+    #: send gate refuses them outright.
+    send_authorities: dict[str, SourceReadAuthority | None] = field(default_factory=dict)
+    #: Candidates with no readable source state, which fall back to a full
+    #: authorization; logged so a regression in the batched read shows up.
+    unobserved: set[str] = field(default_factory=set)
+    unsendable: int = 0
 
     @classmethod
     async def load(cls, group_id: str, limit: int) -> _DreamSelection:
@@ -312,34 +328,66 @@ class _DreamSelection:
         return "paged" if key in self.paged else None
 
     async def prefetch(self, memories: list[RawMemory]) -> None:
-        missing = [memory.id for memory in memories if memory.id not in self.observed]
-        self.observed.update(await current_source_observations(self.group_id, missing))
+        missing = [
+            memory.id
+            for memory in memories
+            if memory.id not in self.observed and memory.id not in self.unobserved
+        ]
+        if not missing:
+            return
+        found = await current_source_observations(self.group_id, missing)
+        self.observed.update(found)
+        self.unobserved.update(set(missing) - set(found))
 
     async def authorize(self, source: RawMemory) -> str:
-        """Load the authorized snapshot; name the source's pass at its observation."""
+        """Apply both gates to the source; name its pass at its current observation."""
         if source.id in self.authorized:
             return self.authorized[source.id]
         try:
-            work = await _load_dream_work(self.group_id, source)
+            outcome = await self._authorize(source)
         except SourceUnavailableError:
-            work = None
+            outcome = "unavailable"
         except Exception as exc:
             # Selected so the failure reaches the receipt, as before.
             self.errors[source.id] = exc
-            self.authorized[source.id] = "fresh"
-            return "fresh"
-        if work is None:
-            outcome = "unavailable"
-        else:
-            observation = work.snapshot.observation
-            prior = self.prior_pass(
-                source, (observation.effective_incarnation, observation.generation)
-            )
-            outcome = prior or "fresh"
-            if outcome != "covered":
-                self.selected[source.id] = work
+            outcome = "fresh"
         self.authorized[source.id] = outcome
         return outcome
+
+    async def _authorize(self, source: RawMemory) -> str:
+        work = await _load_dream_work(self.group_id, source)
+        if work is None:
+            return "unavailable"
+        observation = work.snapshot.observation
+        prior = self.prior_pass(source, (observation.effective_incarnation, observation.generation))
+        if prior == "covered":
+            return "covered"
+        # The same check cohort preparation makes, on the snapshot just loaded.
+        try:
+            observe_raw_capture(work.snapshot.memory, await self._send_authority(source))
+        except SourceUnavailableError:
+            self.unsendable += 1
+            raise
+        self.selected[source.id] = work
+        return prior or "fresh"
+
+    async def _send_authority(self, source: RawMemory) -> SourceReadAuthority:
+        from sibyl.jobs import ordinary_cohorts
+
+        principal = source.principal_id or ""
+        if principal not in self.send_authorities:
+            try:
+                authority = await ordinary_cohorts.writable_source_authority(
+                    self.group_id, principal
+                )
+            except (SourceUnavailableError, InvalidAuthClaimsError, UserNotFoundError):
+                # A principal the auth store no longer knows cannot send either.
+                authority = None
+            self.send_authorities[principal] = authority
+        authority = self.send_authorities[principal]
+        if authority is None:
+            raise SourceUnavailableError
+        return authority
 
     async def fresh(self, source: RawMemory) -> bool:
         if self.prior_pass(source, self.observed.get(source.id)) is not None:
@@ -351,10 +399,15 @@ class _DreamSelection:
         if prior == "covered" or (prior == "paged" and self.returning == 0):
             return False
         outcome = await self.authorize(source)
-        if outcome == "paged" and self.returning > 0:
+        if outcome not in {"fresh", "paged"}:
+            return False
+        # Either read can show the source was reflected alone; an error while
+        # authorizing it must not let it past the limit as fresh.
+        if "paged" in {prior, outcome}:
+            if self.returning == 0:
+                return False
             self.returning -= 1
-            return True
-        return outcome == "fresh"
+        return True
 
 
 async def _dream_page(

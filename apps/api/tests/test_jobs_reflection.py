@@ -687,7 +687,7 @@ class _DreamCorpus:
         if source.id in self.covered:
             self.rechecked.append(source.id)
         observation = SimpleNamespace(effective_incarnation="inc", generation=1)
-        return SimpleNamespace(snapshot=SimpleNamespace(observation=observation))
+        return SimpleNamespace(snapshot=SimpleNamespace(observation=observation, memory=source))
 
     async def reflect(self, org, sources, *, dry_run):
         page = [source.id for source in sources]
@@ -720,6 +720,14 @@ class _DreamCorpus:
         ):
             monkeypatch.setattr(reflection, name, fake)
         monkeypatch.setattr(ordinary_cohorts, "reflect_cohorts", self.reflect)
+        from sibyl_core.services.memory_source_validation import SourceReadAuthority
+
+        monkeypatch.setattr(
+            ordinary_cohorts,
+            "writable_source_authority",
+            AsyncMock(return_value=SourceReadAuthority(USER_ID)),
+        )
+        monkeypatch.setattr(reflection, "observe_raw_capture", lambda memory, authority: None)
 
 
 async def test_sources_reflected_alone_cannot_stall_the_cursor(monkeypatch) -> None:
@@ -754,3 +762,112 @@ async def test_sources_reflected_alone_cannot_stall_the_cursor(monkeypatch) -> N
     assert len(corpus.pages) <= 2 * len(corpus.fresh) // limit
     # A covered source is ruled out by its observation, never authorized again.
     assert corpus.rechecked == []
+
+
+def _selection(monkeypatch, send, *, returning=10):
+    """A run's selection whose snapshot load succeeds and whose send gate is `send`."""
+    from sibyl.jobs import ordinary_cohorts, reflection
+    from sibyl_core.services.ordinary_cohort import ReflectedSources
+
+    async def load_work(group_id, source):
+        observation = SimpleNamespace(effective_incarnation="inc", generation=1)
+        return SimpleNamespace(snapshot=SimpleNamespace(observation=observation, memory=source))
+
+    monkeypatch.setattr(reflection, "_load_dream_work", load_work)
+    monkeypatch.setattr(ordinary_cohorts, "writable_source_authority", send)
+    return reflection._DreamSelection(
+        ORG_ID, ReflectedSources(frozenset(), frozenset()), frozenset(), returning=returning
+    )
+
+
+async def test_selection_refuses_a_project_source_its_owner_can_no_longer_send(
+    monkeypatch,
+) -> None:
+    from sibyl_core.services.memory_source_validation import SourceReadAuthority
+
+    # Demoted to viewer on "ops": still readable, so the read gate passes, but
+    # the send authority keeps only projects its owner can still write.
+    send = AsyncMock(return_value=SourceReadAuthority(USER_ID, projects=frozenset({"docs"})))
+    selection = _selection(monkeypatch, send)
+    stamp = {"revision": 1, "observed_revision": 1}
+    ops = _raw_memory(
+        id="ops", memory_scope=MemoryScope.PROJECT, project_id="ops", scope_key="ops", **stamp
+    )
+    docs = _raw_memory(
+        id="docs", memory_scope=MemoryScope.PROJECT, project_id="docs", scope_key="docs", **stamp
+    )
+    private = _raw_memory(id="private", **stamp)
+
+    assert await selection.fresh(ops) is False
+    assert await selection.authorize(ops) == "unavailable"
+    assert await selection.fresh(docs) is True
+    assert await selection.fresh(private) is True
+    assert set(selection.selected) == {"docs", "private"}
+    assert selection.unsendable == 1
+    # One send-gate resolution per principal per run.
+    send.assert_awaited_once_with(ORG_ID, USER_ID)
+
+
+@pytest.mark.parametrize("refusal", ["unavailable", "unknown_user", "invalid_claims"])
+async def test_selection_refuses_every_source_of_a_principal_the_send_gate_refuses(
+    monkeypatch, refusal
+) -> None:
+    from sibyl.persistence.auth_common import InvalidAuthClaimsError, UserNotFoundError
+    from sibyl_core.services.source_observations import SourceUnavailableError
+
+    error = {
+        "unavailable": SourceUnavailableError(),
+        "unknown_user": UserNotFoundError("gone"),
+        "invalid_claims": InvalidAuthClaimsError("gone"),
+    }[refusal]
+    send = AsyncMock(side_effect=error)
+    selection = _selection(monkeypatch, send)
+    sources = [
+        _raw_memory(id=f"left-{index}", revision=1, observed_revision=1) for index in range(3)
+    ]
+
+    assert [await selection.fresh(source) for source in sources] == [False] * 3
+    assert [await selection.neighbour(source) for source in sources] == [False] * 3
+    assert selection.selected == {}
+    assert selection.errors == {}
+    send.assert_awaited_once_with(ORG_ID, USER_ID)
+
+
+async def test_an_erroring_source_reflected_alone_still_counts_against_the_limit(
+    monkeypatch,
+) -> None:
+    from sibyl.jobs import reflection
+    from sibyl_core.services.memory_source_validation import SourceReadAuthority
+
+    selection = _selection(
+        monkeypatch, AsyncMock(return_value=SourceReadAuthority(USER_ID)), returning=1
+    )
+    sources = [
+        _raw_memory(id=f"alone-{index}", revision=1, observed_revision=1) for index in range(2)
+    ]
+    selection.paged = frozenset((USER_ID, source.id, "inc", 1) for source in sources)
+    selection.observed = {source.id: ("inc", 1) for source in sources}
+    monkeypatch.setattr(reflection, "_load_dream_work", AsyncMock(side_effect=RuntimeError("down")))
+
+    # The failure is still carried to the receipt, but the source takes a
+    # returning place rather than slipping in as fresh.
+    assert await selection.neighbour(sources[0]) is True
+    assert await selection.neighbour(sources[1]) is False
+    assert set(selection.errors) == {"alone-0"}
+
+
+async def test_selection_counts_candidates_without_a_readable_observation(monkeypatch) -> None:
+    from sibyl.jobs import reflection
+    from sibyl_core.services.memory_source_validation import SourceReadAuthority
+
+    selection = _selection(monkeypatch, AsyncMock(return_value=SourceReadAuthority(USER_ID)))
+    read = AsyncMock(return_value={"seen": ("inc", 1)})
+    monkeypatch.setattr(reflection, "current_source_observations", read)
+    batch = [_raw_memory(id="seen"), _raw_memory(id="lost")]
+
+    await selection.prefetch(batch)
+    await selection.prefetch(batch)
+
+    # The miss falls back to full authorization and is logged once, not reread.
+    assert selection.unobserved == {"lost"}
+    read.assert_awaited_once_with(ORG_ID, ["seen", "lost"])

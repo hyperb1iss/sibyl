@@ -273,6 +273,74 @@ async def test_a_covered_source_is_ruled_out_before_authorization(cohort_runtime
     assert sorted(authorized) == sorted(fresh)
 
 
+async def _departed_member_sources(cohort_runtime):
+    """Two private captures by a member who then leaves the organization."""
+    from sibyl.persistence.surreal.auth import (
+        SurrealOrganizationMembershipRepository,
+        SurrealUserRepository,
+    )
+    from sibyl.persistence.surreal.auth_runtime._common import _auth_client_scope
+
+    org, _context, client, _runtime = cohort_runtime
+    async with _auth_client_scope() as auth:
+        member = await SurrealUserRepository.from_client(auth).create_local_user(
+            email="departed@example.test", password="fixture-password-123", name="Departed"
+        )
+        memberships = SurrealOrganizationMembershipRepository.from_client(auth)
+        await memberships.add_member(
+            organization_id=org.id, user_id=member.id, role=OrganizationRole.MEMBER
+        )
+    member_context = await ordinary_cohorts.resolve_auth_context(
+        claims={"sub": str(member.id), "org": str(org.id)}
+    )
+    for body in [
+        "Restart the worker after rotating the queue credentials.",
+        "The worker kept the old credentials until it restarted.",
+    ]:
+        await memory_raw.remember_raw(
+            RawMemoryRememberRequest(raw_content=body),
+            http_request=SimpleNamespace(headers={}, client=None),
+            org=org,
+            ctx=member_context,
+        )
+    async with _auth_client_scope() as auth:
+        await SurrealOrganizationMembershipRepository.from_client(auth).remove_member(
+            organization_id=org.id, user_id=member.id
+        )
+    rows = await client.execute_query(
+        "SELECT uuid FROM raw_captures WHERE principal_id = $member;", member=str(member.id)
+    )
+    return sorted(row["uuid"] for row in rows)
+
+
+async def test_a_departed_members_sources_neither_seed_nor_fill_a_page(cohort_runtime, monkeypatch):
+    org, _context, _client, _runtime = cohort_runtime
+    departed = await _departed_member_sources(cohort_runtime)
+    assert len(departed) == 2
+    # Still readable by their owner's own principal: the read gate alone lets
+    # them through, but no cohort of theirs can ever reach a provider.
+    from sibyl_core.services.content_raw_persistence import get_raw_memory
+
+    for identifier in departed:
+        memory = await get_raw_memory(organization_id=str(org.id), memory_id=identifier)
+        assert memory is not None
+        assert await reflection._load_dream_work(str(org.id), memory) is not None
+    fresh = [source for source in await capture(cohort_runtime) if source["uuid"] not in departed]
+    assert len(fresh) == 2
+    pages = []
+
+    async def partition_free(org_id, sources, *, dry_run):
+        pages.append(sorted(source.id for source in sources))
+        return [], {source.id for source in sources}
+
+    monkeypatch.setattr(ordinary_cohorts, "reflect_cohorts", partition_free)
+    for _ in range(3):
+        await reflection._reflect_dream_sources(
+            group_id=str(org.id), run_id="departed", dry_run=True, limit=20
+        )
+    assert pages == [sorted(source["uuid"] for source in fresh)] * 3, departed
+
+
 async def test_ordinary_cohort_candidate_write_failure_retains_execution_and_replays(
     cohort_runtime, monkeypatch
 ):
@@ -507,7 +575,10 @@ async def test_ordinary_cohort_preparation_denial_never_falls_back(cohort_runtim
     factory = AsyncMock(side_effect=AssertionError("provider preparation after denied authority"))
     monkeypatch.setattr(procedure_validation, "validation_extractor", factory)
     receipt = await reflection.run_reflection_dream_cycle({}, str(org.id))
-    assert receipt["failed"] == 1
+    # A viewer's sources fail the send gate, so selection refuses them before
+    # any preparation rather than paging them into a cohort that must fail.
+    assert receipt["failed"] == 0
+    assert receipt["sources_scanned"] == 0
     assert receipt["sources_reflected"] == 0
     factory.assert_not_awaited()
     assert not await client.execute_query("SELECT * FROM dream_source_checkpoints;")
