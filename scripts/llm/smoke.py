@@ -228,13 +228,13 @@ FIXTURE: tuple[SmokeChunk, ...] = (
     ),
     SmokeChunk(
         "chunk-09",
-        "Graphiti compatibility is migration-only. FalkorDB archives can be imported, but the "
-        "default memory loop should stay Surreal-native.",
-        "Legacy migration",
+        "Backup archives bundle graph, content, and auth payloads behind one archive manifest. "
+        "Imports warn about unrecognized payloads and skip them instead of guessing their shape.",
+        "Archive portability",
         (
-            ExpectedEntity("Graphiti compatibility", "warning"),
-            ExpectedEntity("FalkorDB archives", "concept"),
-            ExpectedEntity("Surreal-native memory loop", "pattern"),
+            ExpectedEntity("unrecognized payloads", "warning"),
+            ExpectedEntity("backup archives", "concept"),
+            ExpectedEntity("archive manifest", "pattern"),
         ),
     ),
     SmokeChunk(
@@ -338,13 +338,13 @@ FIXTURE: tuple[SmokeChunk, ...] = (
     ),
     SmokeChunk(
         "chunk-19",
-        "SQLModel and Alembic remain for legacy migration surfaces, while PostgreSQL is no longer "
-        "part of the default runtime.",
-        "Legacy database boundary",
+        "SurrealDB backs the graph, content, and auth stores. The surrealdb Python SDK reaches it "
+        "over WebSocket RPC, and SurrealKV persists the embedded dev database.",
+        "Storage runtime",
         (
-            ExpectedEntity("SQLModel", "tool"),
-            ExpectedEntity("Alembic", "tool"),
-            ExpectedEntity("PostgreSQL", "tool"),
+            ExpectedEntity("SurrealDB", "tool"),
+            ExpectedEntity("surrealdb Python SDK", "tool"),
+            ExpectedEntity("SurrealKV", "tool"),
         ),
     ),
     SmokeChunk(

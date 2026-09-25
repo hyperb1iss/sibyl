@@ -31,7 +31,7 @@ def _merge_metadata(current: dict[str, Any], patch: dict[str, Any]) -> dict[str,
 class MockGraphClient:
     """Mock GraphClient for testing.
 
-    Simulates a connected graph client without actual FalkorDB connection.
+    Simulates a connected graph client without a live SurrealDB connection.
     """
 
     _connected: bool = True
