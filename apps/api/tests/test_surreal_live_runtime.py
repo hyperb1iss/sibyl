@@ -1870,3 +1870,59 @@ async def test_live_chunk_sweep_reads_raw_evidence_and_filters_the_chunk_lane(
     finally:
         await client.close()
         await _drop_surreal_namespace(namespace)
+
+
+@pytest.mark.asyncio
+async def test_live_chunk_sweep_refuses_a_size_the_stored_field_cannot_hold(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sibyl_core.embeddings.provenance import document_chunk_embedding_metadata
+    from sibyl_core.services import content_client, document_embedding_sweep as chunk_module
+    from sibyl_core.services.embedding_sweep import SWEEP_SKIPPED_DIMENSION_MISMATCH
+
+    namespace = f"chunk_dims_live_{uuid4().hex}"
+    organization_id = str(uuid4())
+    client = SurrealContentClient(
+        url=_live_surreal_url(),
+        username=_surreal_username(),
+        password=_surreal_password(),
+        namespace=namespace,
+        database="content",
+    )
+    wider = document_chunk_embedding_metadata(
+        provider="deterministic", model="wider", dimensions=EMBEDDING_DIM * 2
+    )
+    embedded: list[object] = []
+
+    async def embed_chunks(rows):
+        embedded.extend(rows)
+        return [[0.0] * (EMBEDDING_DIM * 2) for _ in rows], dict(wider)
+
+    try:
+        await bootstrap_content_schema(client, reset=True)
+        await content_client.select_many(
+            client,
+            "CREATE document_chunks CONTENT $record RETURN NONE;",
+            record={
+                "uuid": "chunk",
+                "organization_id": organization_id,
+                "document_id": "doc",
+                "content": "body",
+                "embedding": [1.0, *([0.0] * (EMBEDDING_DIM - 1))],
+                "embedding_metadata": {**wider, "dimensions": EMBEDDING_DIM, "model": "old"},
+            },
+        )
+        # The operator raised SIBYL_EMBEDDING_DIMENSIONS and restarted; the
+        # stored field kept its original size.
+        monkeypatch.setattr(chunk_module, "EMBEDDING_DIM", EMBEDDING_DIM * 2)
+
+        result = await chunk_module.sweep_document_chunk_embeddings(
+            organization_id, stamp=wider, embed_chunks=embed_chunks, client=client
+        )
+
+        assert result.status == SWEEP_SKIPPED_DIMENSION_MISMATCH
+        assert result.schema_dimensions == EMBEDDING_DIM
+        assert embedded == []
+    finally:
+        await client.close()
+        await _drop_surreal_namespace(namespace)

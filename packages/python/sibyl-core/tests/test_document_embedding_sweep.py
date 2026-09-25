@@ -194,3 +194,23 @@ async def test_fresh_chunk_stamps_are_not_evidence_about_older_chunks(content_st
 
     assert result.legacy_decision == LegacyVectorDecision.ADOPT.value
     assert (await _state(org))["legacy_basis"] == LegacyVectorBasis.NO_PRIOR_EVIDENCE.value
+
+
+async def test_chunk_sweep_reads_the_size_the_database_declares(content_store, monkeypatch) -> None:
+    from sibyl_core.services import document_embedding_sweep as chunk_module
+
+    org = str(uuid4())
+    await _chunk(org, "stale", stamp=PREVIOUS)
+    wider = {**CURRENT, "dimensions": EMBEDDING_DIM * 2}
+    embed = ChunkEmbedder(wider)
+    # The configured size moved; the stored field did not.
+    monkeypatch.setattr(chunk_module, "EMBEDDING_DIM", EMBEDDING_DIM * 2)
+
+    result = await sweep_document_chunk_embeddings(org, stamp=wider, embed_chunks=embed)
+
+    assert result.status == SWEEP_SKIPPED_DIMENSION_MISMATCH
+    assert (result.provider_dimensions, result.schema_dimensions) == (
+        EMBEDDING_DIM * 2,
+        EMBEDDING_DIM,
+    )
+    assert embed.rows == []

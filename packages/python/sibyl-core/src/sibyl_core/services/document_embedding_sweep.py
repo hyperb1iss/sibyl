@@ -18,6 +18,7 @@ from typing import Any
 
 from sibyl_core.backends.surreal import SurrealContentClient
 from sibyl_core.backends.surreal.content_schema import EMBEDDING_DIM
+from sibyl_core.backends.surreal.schema_invariants import fetch_vector_field_dimension
 from sibyl_core.embeddings.provenance import UNVERIFIED_EMBEDDING_PROVIDER
 from sibyl_core.services import content_client
 from sibyl_core.services.embedding_sweep import (
@@ -69,17 +70,27 @@ def document_chunk_sweep_table(dimensions: int = EMBEDDING_DIM) -> SweepTable:
     )
 
 
-def document_chunk_embedding_plane(
+async def document_chunk_embedding_plane(
     organization_id: str,
     *,
     client: SurrealContentClient,
     stamp: EmbeddingStamp,
     embed_chunks: ChunkEmbedder,
 ) -> SweepPlane:
-    table = document_chunk_sweep_table()
+    """Build the chunk plane against the chunk vector field as the database declares it.
+
+    The content schema sizes that field once and never resizes it, so the
+    configured dimension can move past it; the declared size is the one a
+    write must fit.
+    """
 
     async def execute(query: str, **params: object) -> object:
         return await content_client.select_many(client, query, **params)
+
+    declared = await fetch_vector_field_dimension(
+        client.execute_query, "document_chunks", "embedding"
+    )
+    table = document_chunk_sweep_table(declared or EMBEDDING_DIM)
 
     async def embed(
         _table: SweepTable, rows: Sequence[SweepRow]
@@ -138,7 +149,7 @@ async def decide_document_chunk_legacy_vectors(
     if stamp is None:
         return None
     async with _content_session(client) as session:
-        plane = document_chunk_embedding_plane(
+        plane = await document_chunk_embedding_plane(
             organization_id, client=session, stamp=stamp, embed_chunks=embed_chunks
         )
         return await ensure_legacy_decision(plane)
@@ -162,7 +173,7 @@ async def sweep_document_chunk_embeddings(
             plane=DOCUMENT_CHUNK_EMBEDDING_PLANE, status=SWEEP_SKIPPED_NO_PROVIDER
         )
     async with _content_session(client) as session:
-        plane = document_chunk_embedding_plane(
+        plane = await document_chunk_embedding_plane(
             organization_id, client=session, stamp=stamp, embed_chunks=embed_chunks
         )
         return await run_embedding_sweep(plane, **options)
@@ -177,11 +188,14 @@ async def mark_document_chunk_embeddings_for_reembed(
         async def execute(query: str, **params: object) -> object:
             return await content_client.select_many(session, query, **params)
 
+        declared = await fetch_vector_field_dimension(
+            session.execute_query, "document_chunks", "embedding"
+        )
         return await mark_plane_for_reembed(
             plane=DOCUMENT_CHUNK_EMBEDDING_PLANE,
             organization_id=organization_id,
             execute=execute,
-            tables=(document_chunk_sweep_table(),),
+            tables=(document_chunk_sweep_table(declared or EMBEDDING_DIM),),
         )
 
 
