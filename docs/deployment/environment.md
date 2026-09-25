@@ -386,10 +386,9 @@ detail.
 
 ## Worker Configuration
 
-| Variable                | Default | Description                                                         |
-| ----------------------- | ------- | ------------------------------------------------------------------- |
-| `SIBYL_RUN_WORKER`      | `false` | Embed a worker in the API process when Redis coordination is active |
-| `SIBYL_WORKER_MAX_JOBS` | (auto)  | Override maximum concurrent background jobs (1-1024)                |
+| Variable                | Default | Description                                          |
+| ----------------------- | ------- | ---------------------------------------------------- |
+| `SIBYL_WORKER_MAX_JOBS` | (auto)  | Override maximum concurrent background jobs (1-1024) |
 
 When `SIBYL_WORKER_MAX_JOBS` is unset, the limit is derived from CPU count (2x cores, minimum 3)
 capped by the effective content-client pool size.

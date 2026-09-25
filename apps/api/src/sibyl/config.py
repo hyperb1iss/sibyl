@@ -786,26 +786,6 @@ class Settings(BaseSettings):
         description="Seconds to wait before reconnecting the raw capture live query",
     )
 
-    # Knowledge repository configuration
-    knowledge_repo_path: Path = Field(
-        default=Path(__file__).parent.parent.parent.parent,
-        description="Path to knowledge repository root",
-    )
-
-    # Content paths (relative to knowledge_repo_path)
-    wisdom_path: str = Field(
-        default="docs/wisdom",
-        description="Path to wisdom documentation",
-    )
-    templates_path: str = Field(
-        default="templates",
-        description="Path to templates directory",
-    )
-    configs_path: str = Field(
-        default="configs",
-        description="Path to config templates directory",
-    )
-
     # Ingestion configuration
     chunk_max_tokens: int = Field(
         default=1000,
