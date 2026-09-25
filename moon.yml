@@ -870,6 +870,13 @@ tasks:
       - install.sh
       - tools/tests/test_workflow_cache_contract.py
       - tools/release/*.py
+      # Release notes are validated through the doc claim gate, which scans
+      # the claim corpus and every public doc surface.
+      - tools/trust/doc_claim_gate.py
+      - docs/**/*.md
+      - README.md
+      - apps/*/README.md
+      - packages/python/*/README.md
       - apps/e2e/moon.yml
       - .github/workflows/release.yml
       - .github/workflows/publish.yml
@@ -1679,6 +1686,9 @@ tasks:
     inputs:
       - tools/trust/doc_claim_gate.py
       - docs/**/*.md
+      - README.md
+      - apps/*/README.md
+      - packages/python/*/README.md
       - docs/.vitepress/**/*
       - benchmarks/results/ai-memory/**/*.json
       - pyproject.toml
@@ -1696,6 +1706,9 @@ tasks:
       - tools/tests/conftest.py
       - tools/tests/test_doc_claim_gate.py
       - docs/**/*.md
+      - README.md
+      - apps/*/README.md
+      - packages/python/*/README.md
       - benchmarks/results/ai-memory/**/*.json
       - pyproject.toml
       - moon.yml

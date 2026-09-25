@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -201,14 +202,45 @@ FORBIDDEN_CLAIMS: tuple[ForbiddenClaim, ...] = (
         phrase="OpenAI-free LongMemEval-S run",
         reason="every recorded LongMemEval-S run uses OpenAI embeddings",
     ),
-    ForbiddenClaim(
-        phrase="96.96%",
-        reason="the pre-1.0 LongMemEval-S headline R@5 (run 26304777971) was withdrawn",
+)
+
+# Public surfaces that are not claim-corpus docs but must still never repeat a withdrawn
+# claim: the repo README, every docs page, and the app and package READMEs (sibyl-core's
+# is its PyPI description). They are only scanned for withdrawn claims, so they do not
+# have to carry claim-axis phrases.
+PUBLIC_SCAN_GLOBS: tuple[str, ...] = (
+    "README.md",
+    "docs/**/*.md",
+    "apps/*/README.md",
+    "packages/python/*/README.md",
+)
+
+# The pre-1.0 LongMemEval-S headline (run 26304777971) was withdrawn as a public claim.
+# The exact values match anywhere. Rounded forms (96.9x or 97 for R@5, 98.9x or 99 for
+# R@10) match only within a short same-cell window of an explicit recall@k or
+# LongMemEval token, so unrelated percentages and competitor numbers stay clean.
+_WITHDRAWN_GAP = r"[^%|]{0,40}?"
+_WITHDRAWN_R5_VALUE = r"(?<![\d.])(?:96\.9\d?|97(?:\.0+)?)\s?%"
+_WITHDRAWN_R10_VALUE = r"(?<![\d.])(?:98\.9\d?|99(?:\.0+)?)\s?%"
+_WITHDRAWN_R5_CONTEXT = (
+    r"(?:\bR@\s?5\b|\brecall(?:_all)?@5\b|\bstrict\s+(?:multi-answer\s+)?recall\b|\bLongMemEval)"
+)
+_WITHDRAWN_R10_CONTEXT = r"(?:\bR@\s?10\b|\brecall(?:_all)?@10\b|\bLongMemEval)"
+WITHDRAWN_HEADLINE_PATTERN = re.compile(
+    "|".join(
+        (
+            r"(?<![\d.])(?:96\.96|98\.90|0\.9696)(?!\d)%?",
+            rf"{_WITHDRAWN_R5_VALUE}(?={_WITHDRAWN_GAP}{_WITHDRAWN_R5_CONTEXT})",
+            rf"{_WITHDRAWN_R5_CONTEXT}{_WITHDRAWN_GAP}{_WITHDRAWN_R5_VALUE}",
+            rf"{_WITHDRAWN_R10_VALUE}(?={_WITHDRAWN_GAP}{_WITHDRAWN_R10_CONTEXT})",
+            rf"{_WITHDRAWN_R10_CONTEXT}{_WITHDRAWN_GAP}{_WITHDRAWN_R10_VALUE}",
+        )
     ),
-    ForbiddenClaim(
-        phrase="98.90%",
-        reason="the pre-1.0 LongMemEval-S headline R@10 (run 26304777971) was withdrawn",
-    ),
+    re.IGNORECASE,
+)
+WITHDRAWN_HEADLINE_REASON = (
+    "matches the withdrawn pre-1.0 LongMemEval-S headline from run 26304777971, "
+    "including rounded forms"
 )
 
 DOC_CLAIM_BUDGETS = {
@@ -291,14 +323,37 @@ def load_claim_docs(repo_root: Path = REPO_ROOT) -> dict[str, str]:
     return docs
 
 
-def build_doc_claim_receipt(docs: Mapping[str, str] | None = None) -> dict[str, Any]:
+def load_public_docs(repo_root: Path = REPO_ROOT) -> dict[str, str]:
+    docs: dict[str, str] = {}
+    for pattern in PUBLIC_SCAN_GLOBS:
+        for path in sorted(repo_root.glob(pattern)):
+            relative = path.relative_to(repo_root)
+            if any(part == "node_modules" or part.startswith(".") for part in relative.parts):
+                continue
+            if path.is_file():
+                docs[relative.as_posix()] = path.read_text(encoding="utf-8")
+    return docs
+
+
+def build_doc_claim_receipt(
+    docs: Mapping[str, str] | None = None,
+    *,
+    public_docs: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
     active_docs = dict(docs) if docs is not None else load_claim_docs()
+    scanned_docs = {
+        **(dict(public_docs) if public_docs is not None else load_public_docs()),
+        **active_docs,
+    }
     requirements = [
         _evaluate_requirement(requirement, active_docs) for requirement in CLAIM_REQUIREMENTS
     ]
     handoffs = _phrase_report(V12_HANDOFF_PHRASES, active_docs)
     approval_boundaries = _phrase_report(APPROVAL_BOUNDARY_PHRASES, active_docs)
-    unsupported_claims = _find_forbidden_claims(active_docs)
+    unsupported_claims = [
+        *_find_forbidden_claims(active_docs),
+        *_find_withdrawn_claims(scanned_docs),
+    ]
     documented_count = sum(1 for requirement in requirements if requirement["status"] == "PASS")
     handoff_count = sum(1 for item in handoffs if item["locations"])
     approval_boundary_count = sum(1 for item in approval_boundaries if item["locations"])
@@ -315,6 +370,7 @@ def build_doc_claim_receipt(docs: Mapping[str, str] | None = None) -> dict[str, 
         "budgets": dict(DOC_CLAIM_BUDGETS),
         "metrics": metrics,
         "docs": sorted(active_docs),
+        "public_scan_doc_count": len(scanned_docs),
         "requirements": requirements,
         "handoffs": handoffs,
         "approval_boundaries": approval_boundaries,
@@ -487,6 +543,18 @@ def _find_forbidden_claims(docs: Mapping[str, str]) -> list[dict[str, str]]:
                     }
                 )
     return matches
+
+
+def _find_withdrawn_claims(docs: Mapping[str, str]) -> list[dict[str, str]]:
+    return [
+        {
+            "path": path,
+            "phrase": " ".join(match.group(0).split()),
+            "reason": WITHDRAWN_HEADLINE_REASON,
+        }
+        for path, text in sorted(docs.items())
+        for match in WITHDRAWN_HEADLINE_PATTERN.finditer(text)
+    ]
 
 
 def _validate_receipt_metrics(metrics: dict[str, Any]) -> list[str]:

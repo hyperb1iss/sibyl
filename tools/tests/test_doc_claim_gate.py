@@ -202,3 +202,66 @@ def test_root_moon_tasks_expose_doc_claim_gate() -> None:
         "tools/tests/test_doc_claim_gate.py",
         "-v",
     ]
+
+
+WITHDRAWN_HEADLINE_VARIANTS = (
+    "Strict recall is 96.96% R@5 on LongMemEval-S.",
+    "Strict recall rounds to 97% R@5.",
+    "LongMemEval-S retrieval: ~97% strict recall.",
+    "`recall@10` = **99%** on the live run.",
+)
+
+
+@pytest.mark.parametrize("variant", WITHDRAWN_HEADLINE_VARIANTS)
+@pytest.mark.parametrize(
+    "path",
+    ["README.md", "docs/guide/quick-start.md", "packages/python/sibyl-core/README.md"],
+)
+def test_withdrawn_headline_fails_on_public_surfaces_outside_the_claim_corpus(
+    path: str, variant: str
+) -> None:
+    public_docs = doc_claim_gate.load_public_docs()
+    assert path in public_docs
+    assert path not in doc_claim_gate.CLAIM_DOC_PATHS
+    public_docs[path] += f"\n{variant}\n"
+
+    receipt = doc_claim_gate.build_doc_claim_receipt(public_docs=public_docs)
+
+    assert receipt["metrics"]["unsupported_public_claim_count"] == 1
+    claim = receipt["unsupported_claims"][0]
+    assert claim["path"] == path
+    assert claim["reason"] == doc_claim_gate.WITHDRAWN_HEADLINE_REASON
+    assert doc_claim_gate.validate_doc_claim_receipt(receipt)[0] == (
+        "metric 'unsupported_public_claim_count' exceeds budget 0: 1"
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Memweave reports 98.0% R@5 and 99.11% R@10 on a held-out split.",
+        "MemPalace raw is 96.6% R@5; agentmemory is 95.2% R@5 and 98.6% R@10.",
+        "The HNSW index keeps 99% recall at ef=40.",
+        "97% of requests finish under the latency budget.",
+        "Replay projected 97.35% strict R@5 before the run was withdrawn.",
+    ],
+)
+def test_withdrawn_headline_pattern_ignores_other_percentages(text: str) -> None:
+    assert doc_claim_gate.WITHDRAWN_HEADLINE_PATTERN.search(text) is None
+
+
+def test_public_scan_covers_readmes_and_every_docs_page() -> None:
+    public_docs = doc_claim_gate.load_public_docs()
+    docs_pages = {
+        path.relative_to(REPO_ROOT).as_posix()
+        for path in (REPO_ROOT / "docs").rglob("*.md")
+        if not any(
+            part == "node_modules" or part.startswith(".")
+            for part in path.relative_to(REPO_ROOT).parts
+        )
+    }
+
+    assert "README.md" in public_docs
+    assert "packages/python/sibyl-core/README.md" in public_docs
+    assert docs_pages <= set(public_docs)
+    assert doc_claim_gate.build_doc_claim_receipt()["public_scan_doc_count"] >= len(docs_pages)
