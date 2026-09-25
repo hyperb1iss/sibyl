@@ -18,10 +18,12 @@ from sibyl_core.backends.surreal.records import (
     normalize_records as _normalize_records,
     query_error as _query_error,
 )
+from sibyl_core.backends.surreal.schema_embedding_states import REOPEN_EMBEDDING_STATES
 from sibyl_core.backends.surreal.schema_invariants import (
     drop_undeclared_fields as _drop_undeclared_fields,
     fetch_declared_fields,
 )
+from sibyl_core.embeddings.provenance import mark_unverified_vector
 from sibyl_core.migrate import validation_receipt_archive
 
 log = structlog.get_logger()
@@ -299,10 +301,48 @@ async def _repair_restored_capture_embeddings(
     return receipts
 
 
-def _restored_capture_organizations(
-    tables: Mapping[str, object], scope: Sequence[str] | None
+async def _restored_embedding_follow_up(
+    client: SurrealContentClient,
+    tables: Mapping[str, object],
+    scope: Sequence[str] | None,
+    *,
+    repair_captures: bool,
+) -> dict[str, dict[str, int | str]]:
+    await _reopen_restored_chunk_planes(client, tables, scope)
+    if not repair_captures:
+        return {}
+    return await _repair_restored_capture_embeddings(
+        client, _restored_capture_organizations(tables, scope)
+    )
+
+
+async def _reopen_restored_chunk_planes(
+    client: SurrealContentClient,
+    tables: Mapping[str, object],
+    scope: Sequence[str] | None,
+) -> None:
+    """Send the embedding sweep back over the chunks a restore just wrote.
+
+    A plane that already finished a pass would otherwise skip its walk until
+    the verify interval lapses. A failure here only delays that, so it never
+    fails the restore.
+    """
+    organizations = _restored_row_organizations(tables, "document_chunks", scope)
+    if not organizations:
+        return
+    try:
+        await client.execute_query(REOPEN_EMBEDDING_STATES, organizations=organizations)
+    except Exception as exc:
+        log.warning(
+            "content_archive_restore_embedding_reopen_failed",
+            error_type=type(exc).__name__,
+        )
+
+
+def _restored_row_organizations(
+    tables: Mapping[str, object], table: str, scope: Sequence[str] | None
 ) -> list[str]:
-    rows = tables.get("raw_captures")
+    rows = tables.get(table)
     seen: dict[str, None] = {}
     for row in rows if isinstance(rows, list) else []:
         organization_id = row.get("organization_id") if isinstance(row, dict) else None
@@ -312,6 +352,12 @@ def _restored_capture_organizations(
         allowed = {str(item) for item in scope}
         return [organization_id for organization_id in seen if organization_id in allowed]
     return list(seen)
+
+
+def _restored_capture_organizations(
+    tables: Mapping[str, object], scope: Sequence[str] | None
+) -> list[str]:
+    return _restored_row_organizations(tables, "raw_captures", scope)
 
 
 def build_surreal_content_client() -> SurrealContentClient:
@@ -852,6 +898,8 @@ async def _prepare_auxiliary_content_restore(client, tables, organization_id, *,
                 record.setdefault("response_body", {})
             if spec.name == "document_chunks":
                 record["embedding"] = _deserialize_vector(record.get("embedding"))
+                # Archives from before chunk stamps carry vectors of unknown origin.
+                mark_unverified_vector(record, has_vector=bool(record.get("embedding")))
             record[spec.target_identity_field] = identity
             record, dropped = _drop_undeclared_fields(record, declared)
             if dropped:
@@ -1026,10 +1074,10 @@ async def restore_content_archive_payload(
                 table: sorted(names) for table, names in sorted(dropped_fields.items())
             },
             embedding_repair=(
-                await _repair_restored_capture_embeddings(
-                    client, _restored_capture_organizations(tables, scope)
+                await _restored_embedding_follow_up(
+                    client, tables, scope, repair_captures=bool(restored_ids)
                 )
-                if not errors and restored_ids
+                if not errors
                 else {}
             ),
         )
