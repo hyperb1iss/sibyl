@@ -11,12 +11,14 @@ import os
 import re
 import secrets
 import shutil
+import stat
 import subprocess
 import tempfile
 import time
 import webbrowser
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
 from pathlib import Path
@@ -76,6 +78,16 @@ def _version_to_image_tag(version: str) -> str:
     if match:
         return f"{match.group(1)}-rc.{match.group(2)}"
     return version
+
+
+def image_tag_version(tag: str | None) -> Version | None:
+    """A Sibyl image tag as a comparable version (`1.0.0-rc.8` sorts below `1.0.0`)."""
+    if not tag:
+        return None
+    try:
+        return Version(tag)
+    except InvalidVersion:
+        return None
 
 
 def release_image_tag(version: str) -> str | None:
@@ -419,11 +431,84 @@ def container_owner(name: str = "sibyl-api") -> str | None:
     return None
 
 
-def upgrade_command_for_running_server() -> str:
-    """The upgrade command for whichever runtime owns the running API container."""
-    if container_owner() == "docker":
-        return "sibyl docker upgrade"
-    return "sibyl local upgrade"
+def upgrade_advice_for_running_server() -> str:
+    """How to upgrade whichever runtime owns the running API container."""
+    owner = container_owner()
+    if owner == "docker":
+        return "run [bold]sibyl docker upgrade[/bold]"
+    if owner == "local":
+        return "run [bold]sibyl local upgrade[/bold]"
+    return (
+        "run [bold]sibyl local upgrade[/bold] or [bold]sibyl docker upgrade[/bold], "
+        "whichever runtime started it (the container does not say)"
+    )
+
+
+@dataclass(frozen=True)
+class ComposeContainer:
+    """A running container and the compose file and service that created it."""
+
+    config_files: tuple[Path, ...]
+    service: str
+    image: str
+
+    @property
+    def image_tag(self) -> str | None:
+        repository, _, tag = self.image.rpartition(":")
+        return tag if repository and "/" not in tag else None
+
+
+def running_compose_containers() -> list[ComposeContainer] | None:
+    """Every running container Compose labelled, or None when Docker did not answer."""
+    fields = (
+        '{{.Label "com.docker.compose.project.config_files"}}',
+        '{{.Label "com.docker.compose.service"}}',
+        "{{.Image}}",
+    )
+    try:
+        result = subprocess.run(
+            ["docker", "ps", "--no-trunc", "--format", "\t".join(fields)],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=DOCKER_PROBE_TIMEOUT_SECONDS,
+        )
+    except FileNotFoundError:
+        return []  # No Docker installed means nothing of ours runs.
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    containers = []
+    for line in (result.stdout or "").splitlines():
+        config_files, _, rest = line.partition("\t")
+        service, _, image = rest.partition("\t")
+        files = tuple(Path(f).resolve() for f in config_files.split(",") if f)
+        if files:
+            containers.append(ComposeContainer(files, service, image.strip()))
+    return containers
+
+
+def containers_for(compose_file: Path) -> list[ComposeContainer] | None:
+    """The running containers `compose_file` created, or None when Docker did not answer.
+
+    Matching on the compose-file label, not the project name, keeps an
+    unrelated project in a directory that happens to be called `local` or
+    `docker` from reading as this runtime.
+    """
+    containers = running_compose_containers()
+    if containers is None:
+        return None
+    target = compose_file.resolve()
+    return [container for container in containers if target in container.config_files]
+
+
+def running_api_tag(compose_file: Path) -> str | None:
+    """The image tag of the API container `compose_file` runs, if one runs."""
+    for container in containers_for(compose_file) or []:
+        if container.service == "api":
+            return container.image_tag
+    return None
 
 
 def get_api_keys_from_env() -> tuple[str, str]:
@@ -493,8 +578,8 @@ def start(
         console.print(f"  [{NEON_CYAN}]API:[/{NEON_CYAN}]       http://localhost:3334")
         console.print()
         console.print(
-            "To move to updated server images without leaving it down, run "
-            f"[bold]{upgrade_command_for_running_server()}[/bold]."
+            "To move to updated server images without leaving it down, "
+            f"{upgrade_advice_for_running_server()}."
         )
         return
 
@@ -559,18 +644,19 @@ def start(
 
 
 def _compose_project_running() -> bool | None:
-    """Whether this compose project has containers, or None when Compose cannot say.
+    """Whether this runtime has running containers, or None when Docker cannot say.
 
     Unlike the name-based `is_running`, this cannot mistake the Docker
-    runtime's `sibyl-api` container for this one.
+    runtime's `sibyl-api` container, or another project's, for this one.
     """
-    try:
-        result = run_compose(["ps", "-q"], capture=True, timeout=DOCKER_PROBE_TIMEOUT_SECONDS)
-    except subprocess.TimeoutExpired:
-        return None
-    if result.returncode != 0:
-        return None
-    return bool((result.stdout or "").strip())
+    containers = containers_for(SIBYL_LOCAL_COMPOSE)
+    return None if containers is None else bool(containers)
+
+
+def _remove_orphaned_staged_files() -> None:
+    """Drop staged copies a killed upgrade left behind; the lock says none is in use."""
+    for orphan in SIBYL_LOCAL_DIR.glob("docker-compose.*.next.yml"):
+        orphan.unlink(missing_ok=True)
 
 
 @contextmanager
@@ -623,11 +709,36 @@ def upgrade(
 
     tag = image_tag or DEFAULT_IMAGE_TAG
     with _upgrade_lock():
+        _remove_orphaned_staged_files()
         running = _compose_project_running()
         if running is None:
-            error("Docker Compose could not report the local instance's state. Nothing changed.")
+            error("Docker could not report the local instance's state. Nothing changed.")
             info("Inspect it with: sibyl local status")
             raise typer.Exit(1)
+
+        current_text = SIBYL_LOCAL_COMPOSE.read_text()
+        previous_tag = pinned_image_tag(current_text)
+        if previous_tag is None:
+            error(f"Could not read the image tag from {SIBYL_LOCAL_COMPOSE}. Nothing changed.")
+            raise typer.Exit(1)
+        # What runs outranks the pin, which an interrupted upgrade leaves ahead.
+        current_tag = (running_api_tag(SIBYL_LOCAL_COMPOSE) if running else None) or previous_tag
+        tag_version, current_version = image_tag_version(tag), image_tag_version(current_tag)
+        if (
+            image_tag is None
+            and tag_version is not None
+            and current_version is not None
+            and tag_version < current_version
+        ):
+            # A CLI older than the server would move the API backwards onto a
+            # schema the newer one may already have migrated.
+            error(
+                f"The local instance is on {current_tag}, newer than this CLI's {tag}. "
+                "Nothing changed."
+            )
+            info("Upgrade the CLI first, or pass --tag to choose the version deliberately.")
+            raise typer.Exit(1)
+
         if not running:
             if container_owner() == "docker":
                 info(
@@ -639,13 +750,7 @@ def upgrade(
             info(f"Start it on {tag} with: SIBYL_IMAGE_TAG={tag} sibyl up --pull")
             return
 
-        current_text = SIBYL_LOCAL_COMPOSE.read_text()
-        previous_tag = pinned_image_tag(current_text)
-        if previous_tag is None:
-            error(f"Could not read the image tag from {SIBYL_LOCAL_COMPOSE}. Nothing changed.")
-            raise typer.Exit(1)
         target = compose_config_for(tag, yaml.safe_load(current_text))
-
         staged = _staged_compose_file()
         try:
             write_compose_file(target, staged)
@@ -656,6 +761,8 @@ def upgrade(
                     f"the pin stays on {previous_tag}."
                 )
                 raise typer.Exit(1)
+            # mkstemp creates the copy 0600; the live file keeps the mode it had.
+            os.chmod(staged, stat.S_IMODE(SIBYL_LOCAL_COMPOSE.stat().st_mode))
             os.replace(staged, SIBYL_LOCAL_COMPOSE)
         finally:
             staged.unlink(missing_ok=True)

@@ -77,20 +77,26 @@ data, and an older API must not run against a schema a newer one migrated. If th
 start or do not report healthy within two minutes, the command keeps the new pins, says so, and
 points at `sibyl local logs`; a slow migration may still finish, which `sibyl local status` shows.
 Re-running the same `sibyl local upgrade --tag <tag>` retries the start. When nothing is left
-running, it says to start it with `sibyl up` instead, which keeps the SurrealDB image the pins name.
+running, it says to start it with `SIBYL_IMAGE_TAG=<tag> sibyl up` instead, which keeps the
+SurrealDB image the pins name.
 
-A stopped instance is not started. The command stops with nothing changed when Docker Compose cannot
-report the state, when the current tag cannot be read, or when another `sibyl local upgrade` is
-already running. When the running Sibyl belongs to the [`sibyl docker`](./docker.md) runtime, it
-says so and names `sibyl docker upgrade` instead.
+Without `--tag` the target is this CLI's image, and the command refuses with nothing changed when
+the instance already runs, or pins, a newer release than that, since the API must not move backwards
+onto a schema a newer one migrated. Pass `--tag` to choose an older version deliberately.
+
+A stopped instance is not started. The command stops with nothing changed when Docker cannot report
+the state, when the current tag cannot be read, or when another `sibyl local upgrade` is already
+running. Containers are matched on the compose file that created them, not the project name, so
+another project in a directory called `local` does not count. When the running Sibyl belongs to the
+[`sibyl docker`](./docker.md) runtime, it says so and names `sibyl docker upgrade` instead.
 
 ```bash
 sibyl local upgrade [options]
 ```
 
-| Option  | Default          | Description                 |
-| ------- | ---------------- | --------------------------- |
-| `--tag` | this CLI's image | Server image tag to move to |
+| Option  | Default          | Description                                             |
+| ------- | ---------------- | ------------------------------------------------------- |
+| `--tag` | this CLI's image | Server image tag to move to; required to move backwards |
 
 [`sibyl update`](./update.md) runs this for a running local instance after it upgrades the CLI.
 

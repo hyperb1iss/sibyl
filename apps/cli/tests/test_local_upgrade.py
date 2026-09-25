@@ -12,6 +12,7 @@ from typer.testing import CliRunner
 
 from sibyl_cli import local
 from sibyl_cli.docker_storage import SURREAL_IMAGE_REFERENCE, upgraded_surreal_image
+from sibyl_cli.local import ComposeContainer
 from sibyl_cli.main import app
 
 
@@ -39,12 +40,14 @@ class FakeCompose:
         self,
         *,
         running: bool = True,
+        running_tag: str = "1.4.0",
         fail: tuple[str, ...] = (),
         ps_fails: bool = False,
         ps_hangs: bool = False,
         down_after_up: bool = False,
     ) -> None:
         self.running = running
+        self.running_tag = running_tag
         self.down_after_up = down_after_up
         self.fail = list(fail)
         self.ps_fails = ps_fails
@@ -64,24 +67,39 @@ class FakeCompose:
         self.calls.append((name, "staged" if compose_file else path.name))
         if compose_file:
             self.staged_files.append(compose_file)
-        if name == "ps -q":
-            if self.ps_hangs:
-                raise subprocess.TimeoutExpired(args, timeout or 0)
-            if self.ps_fails:
-                return subprocess.CompletedProcess(args, 1, stdout="")
-            return subprocess.CompletedProcess(args, 0, stdout="abc\n" if self.running else "")
         failed = bool(self.fail) and self.fail[0] == name
         if failed:
             self.fail.pop(0)
             if name == "up -d" and self.down_after_up:
                 self.running = False
+        elif name == "up -d":
+            self.running = True
+            self.running_tag = local.pinned_image_tag(path.read_text()) or self.running_tag
         return subprocess.CompletedProcess(args, 1 if failed else 0, stdout="")
 
+    def containers(self) -> list[ComposeContainer] | None:
+        """What `docker ps` reports for this runtime's compose file."""
+        if self.ps_fails or self.ps_hangs:
+            return None
+        if not self.running:
+            return []
+        files = (local.SIBYL_LOCAL_COMPOSE.resolve(),)
+        return [
+            ComposeContainer(files, "surrealdb", "surrealdb/surrealdb:v3.2.4"),
+            ComposeContainer(files, "api", f"ghcr.io/hyperb1iss/sibyl-api:{self.running_tag}"),
+        ]
 
-def _invoke(monkeypatch: pytest.MonkeyPatch, compose: FakeCompose, healthy: list[bool]):
+
+def _invoke(
+    monkeypatch: pytest.MonkeyPatch,
+    compose: FakeCompose,
+    healthy: list[bool],
+    args: tuple[str, ...] = ("--tag", "1.5.0"),
+):
     monkeypatch.setattr(local, "run_compose", compose)
+    monkeypatch.setattr(local, "running_compose_containers", compose.containers)
     monkeypatch.setattr(local, "wait_for_healthy", lambda timeout=120: healthy.pop(0))
-    return CliRunner().invoke(app, ["local", "upgrade", "--tag", "1.5.0"])
+    return CliRunner().invoke(app, ["local", "upgrade", *args])
 
 
 def _pin(compose: Path) -> str | None:
@@ -101,7 +119,7 @@ def test_a_failed_pull_changes_nothing(
     assert local_runtime.read_bytes() == before
     assert not list(local_runtime.parent.glob("docker-compose.*.next.yml"))
     # The running containers were never stopped or recreated.
-    assert compose.calls == [("ps -q", "docker-compose.yml"), ("pull --quiet", "staged")]
+    assert compose.calls == [("pull --quiet", "staged")]
 
 
 def test_images_are_pulled_before_anything_restarts(
@@ -113,11 +131,7 @@ def test_images_are_pulled_before_anything_restarts(
 
     assert result.exit_code == 0, result.output
     assert _pin(local_runtime) == "1.5.0"
-    assert compose.calls == [
-        ("ps -q", "docker-compose.yml"),
-        ("pull --quiet", "staged"),
-        ("up -d", "docker-compose.yml"),
-    ]
+    assert compose.calls == [("pull --quiet", "staged"), ("up -d", "docker-compose.yml")]
 
 
 @pytest.mark.parametrize(
@@ -281,7 +295,7 @@ def test_an_unanswered_state_probe_changes_nothing(
     assert result.exit_code == 1
     assert "could not report" in result.output
     assert "sibyl up --pull" not in result.output
-    assert compose.calls == [("ps -q", "docker-compose.yml")]
+    assert compose.calls == []
     assert local_runtime.read_bytes() == before
 
 
@@ -295,7 +309,7 @@ def test_an_unreadable_pin_refuses_to_upgrade(
 
     assert result.exit_code == 1
     assert "Could not read the image tag" in result.output
-    assert compose.calls == [("ps -q", "docker-compose.yml")]
+    assert compose.calls == []
     assert local_runtime.read_text() == "services: {}\n"
 
 
@@ -310,7 +324,7 @@ def test_a_stopped_instance_is_not_started(
     assert result.exit_code == 0, result.output
     assert "nothing to upgrade in place" in result.output
     assert "SIBYL_IMAGE_TAG=1.5.0 sibyl up --pull" in result.output
-    assert compose.calls == [("ps -q", "docker-compose.yml")]
+    assert compose.calls == []
     assert local_runtime.read_bytes() == before
 
 
@@ -396,3 +410,132 @@ def test_compose_config_for_only_moves_the_sibyl_images() -> None:
     assert services["surrealdb"]["image"] == SURREAL_IMAGE_REFERENCE
     # The shared default is never mutated.
     assert local.COMPOSE_CONFIG["services"]["api"]["image"].endswith(f":{local.DEFAULT_IMAGE_TAG}")
+
+
+@pytest.mark.parametrize(
+    ("running", "running_tag", "pin", "says"),
+    [
+        # The server already runs a newer API than this CLI's.
+        (True, "1.6.0", "1.6.0", "on 1.6.0, newer than this CLI's 1.5.0"),
+        # An interrupted upgrade left the pin behind what runs.
+        (True, "1.6.0", "1.4.0", "on 1.6.0, newer than this CLI's 1.5.0"),
+        # Nothing runs, but the pins name a newer release.
+        (False, "1.4.0", "1.6.0", "on 1.6.0, newer than this CLI's 1.5.0"),
+        # rc tags compare as releases: 1.5.0-rc.2 is older than 1.5.0.
+        (True, "1.5.1-rc.1", "1.5.1-rc.1", "on 1.5.1-rc.1, newer than this CLI's 1.5.0"),
+    ],
+)
+def test_a_tagless_upgrade_never_moves_the_api_backwards(
+    local_runtime: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    running: bool,
+    running_tag: str,
+    pin: str,
+    says: str,
+) -> None:
+    """`sibyl up` and the installer both advise the tagless form, and the CLI can be older."""
+    monkeypatch.setattr(local, "DEFAULT_IMAGE_TAG", "1.5.0")
+    local.write_compose_file(local.compose_config_for(pin))
+    before = local_runtime.read_bytes()
+    compose = FakeCompose(running=running, running_tag=running_tag)
+
+    result = _invoke(monkeypatch, compose, healthy=[], args=())
+
+    assert result.exit_code == 1
+    assert says in result.output
+    assert "pass --tag" in result.output
+    assert compose.calls == []
+    assert local_runtime.read_bytes() == before
+
+
+def test_an_explicit_tag_may_move_the_api_backwards(
+    local_runtime: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local.write_compose_file(local.compose_config_for("1.6.0"))
+    compose = FakeCompose(running_tag="1.6.0")
+
+    result = _invoke(monkeypatch, compose, healthy=[True])
+
+    assert result.exit_code == 0, result.output
+    assert _pin(local_runtime) == "1.5.0"
+
+
+def test_a_tagless_upgrade_moves_forward_to_this_clis_tag(
+    local_runtime: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(local, "DEFAULT_IMAGE_TAG", "1.5.0")
+    compose = FakeCompose(running_tag="1.5.0-rc.2")
+    local.write_compose_file(local.compose_config_for("1.5.0-rc.2"))
+
+    result = _invoke(monkeypatch, compose, healthy=[True], args=())
+
+    assert result.exit_code == 0, result.output
+    assert _pin(local_runtime) == "1.5.0"
+
+
+def test_a_killed_upgrade_leaves_no_staged_files_behind(
+    local_runtime: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    orphan = local_runtime.with_name("docker-compose.k1ll3d.next.yml")
+    orphan.write_text("services: {}\n")
+
+    result = _invoke(monkeypatch, FakeCompose(), healthy=[True])
+
+    assert result.exit_code == 0, result.output
+    assert not orphan.exists()
+    assert not list(local_runtime.parent.glob("docker-compose.*.next.yml"))
+
+
+def test_the_swap_keeps_the_compose_files_mode(
+    local_runtime: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local_runtime.chmod(0o644)
+
+    result = _invoke(monkeypatch, FakeCompose(), healthy=[True])
+
+    assert result.exit_code == 0, result.output
+    assert _pin(local_runtime) == "1.5.0"
+    assert local_runtime.stat().st_mode & 0o777 == 0o644
+
+
+def test_an_unknown_owner_names_both_upgrades(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(local, "container_owner", lambda name="sibyl-api": None)
+
+    advice = local.upgrade_advice_for_running_server()
+
+    assert "sibyl local upgrade" in advice
+    assert "sibyl docker upgrade" in advice
+    assert "does not say" in advice
+
+
+def test_containers_are_matched_on_the_compose_file_not_the_directory_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ours = tmp_path / ".sibyl" / "local" / "docker-compose.yml"
+    foreign = tmp_path / "work" / "shop" / "local" / "docker-compose.yml"
+    listing = (
+        f"{foreign}\tapi\tmycorp/api:1.0.3\n"
+        f"{ours}\tapi\tghcr.io/hyperb1iss/sibyl-api:1.4.0\n"
+        f"{ours}\tsurrealdb\tsurrealdb/surrealdb:v3.2.4\n"
+        "\t\tbare-container:latest\n"
+    )
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert cmd[:3] == ["docker", "ps", "--no-trunc"]
+        assert kwargs["timeout"] == local.DOCKER_PROBE_TIMEOUT_SECONDS
+        return subprocess.CompletedProcess(cmd, 0, stdout=listing)
+
+    monkeypatch.setattr(local.subprocess, "run", fake_run)
+
+    ours_running = local.containers_for(ours)
+    assert ours_running is not None
+    assert [c.service for c in ours_running] == ["api", "surrealdb"]
+    assert local.running_api_tag(ours) == "1.4.0"
+    assert local.containers_for(foreign.with_name("other.yml")) == []
+
+    def wedged(cmd: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(cmd, 10)
+
+    monkeypatch.setattr(local.subprocess, "run", wedged)
+    assert local.containers_for(ours) is None
