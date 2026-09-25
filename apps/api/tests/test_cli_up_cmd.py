@@ -178,6 +178,7 @@ def test_configure_requested_worker_mode_skips_extra_worker_for_local_runtime(
     env = {"SIBYL_STORE": "surreal", "SIBYL_COORDINATION_BACKEND": "auto"}
     up_cmd._configure_requested_worker_mode(env, with_worker=True)
 
+    assert env == {"SIBYL_STORE": "surreal", "SIBYL_COORDINATION_BACKEND": "auto"}
     info.assert_called_once_with("Local coordination already runs jobs and schedules in-process")
     warn.assert_not_called()
 
@@ -192,6 +193,7 @@ def test_configure_requested_worker_mode_defaults_to_local_runtime(monkeypatch) 
     env: dict[str, str] = {}
     up_cmd._configure_requested_worker_mode(env, with_worker=True)
 
+    assert env == {}
     info.assert_called_once_with("Local coordination already runs jobs and schedules in-process")
     warn.assert_not_called()
 
@@ -206,6 +208,7 @@ def test_configure_requested_worker_mode_treats_legacy_auto_as_local(monkeypatch
     env = {"SIBYL_STORE": "legacy", "SIBYL_COORDINATION_BACKEND": "auto"}
     up_cmd._configure_requested_worker_mode(env, with_worker=True)
 
+    assert env == {"SIBYL_STORE": "legacy", "SIBYL_COORDINATION_BACKEND": "auto"}
     info.assert_called_once_with("Local coordination already runs jobs and schedules in-process")
     warn.assert_not_called()
 
@@ -220,6 +223,7 @@ def test_configure_requested_worker_mode_warns_for_surreal_redis(monkeypatch) ->
     env = {"SIBYL_STORE": "surreal", "SIBYL_COORDINATION_BACKEND": "redis"}
     up_cmd._configure_requested_worker_mode(env, with_worker=True)
 
+    assert env == {"SIBYL_STORE": "surreal", "SIBYL_COORDINATION_BACKEND": "redis"}
     warn.assert_called_once_with("`--with-worker` is only supported with Redis coordination")
     info.assert_called_once_with(
         "Run `moon run api:worker` or `uv run sibyld worker` in another shell."
