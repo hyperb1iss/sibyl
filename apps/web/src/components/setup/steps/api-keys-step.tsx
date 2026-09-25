@@ -37,7 +37,9 @@ export function ApiKeysStep({ initialStatus, onBack, onValidated }: ApiKeysStepP
   const geminiConfigured =
     settings?.settings?.gemini_api_key?.configured ?? initialStatus?.gemini_configured ?? false;
   const embeddingsConfigured = openaiConfigured || geminiConfigured;
-  const requiredConfigured = anthropicConfigured && embeddingsConfigured;
+  // AWS credentials let Amazon Bedrock serve both Claude and Cohere embeddings.
+  const bedrockConfigured = initialStatus?.bedrock_configured ?? false;
+  const requiredConfigured = bedrockConfigured || (anthropicConfigured && embeddingsConfigured);
 
   // Validation status
   const openaiValid =
@@ -153,8 +155,9 @@ export function ApiKeysStep({ initialStatus, onBack, onValidated }: ApiKeysStepP
         </div>
         <h2 className="text-xl font-semibold text-sc-fg-primary mb-2">Configure API Keys</h2>
         <p className="text-sc-fg-muted text-sm max-w-md mx-auto">
-          Sibyl needs Anthropic for entity extraction and either OpenAI or Gemini for embeddings.
-          Enter keys below to save them securely.
+          {bedrockConfigured
+            ? 'Amazon Bedrock credentials were found, so Claude and Cohere embeddings run through AWS and these keys are optional.'
+            : 'Sibyl needs Anthropic for entity extraction and either OpenAI or Gemini for embeddings. Enter keys below to save them securely.'}
         </p>
       </div>
 
