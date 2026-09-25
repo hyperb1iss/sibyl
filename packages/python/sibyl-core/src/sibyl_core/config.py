@@ -335,6 +335,53 @@ class CoreConfig(BaseSettings):
         ),
     )
 
+    # Embedding model sweep: re-embeds graph and document chunk vectors whose
+    # recorded model differs from the configured one.
+    embedding_legacy_vectors: Literal["auto", "adopt", "reembed"] = Field(
+        default="auto",
+        description=(
+            "How the first sweep treats vectors written before Sibyl recorded which model "
+            "produced them. auto adopts them only when every recorded vector in the same "
+            "plane already matches the configured model; adopt trusts them as the "
+            "configured model; reembed replaces them. Read once per plane, then persisted."
+        ),
+    )
+    embedding_sweep_budget_seconds: float = Field(
+        default=45.0,
+        gt=0.0,
+        le=3600.0,
+        description="Wall-clock budget one lifecycle pass spends re-embedding one plane.",
+    )
+    embedding_sweep_page_size: int = Field(
+        default=256,
+        ge=1,
+        le=4096,
+        description="Rows the embedding sweep reads from the store per page.",
+    )
+    embedding_sweep_batch_size: int = Field(
+        default=96,
+        ge=1,
+        le=2048,
+        description="Texts the embedding sweep sends to the provider per request.",
+    )
+    embedding_sweep_concurrency: int = Field(
+        default=4,
+        ge=1,
+        le=64,
+        description=(
+            "Most embedding requests the sweep keeps in flight; halves on provider "
+            "throttling and climbs back after successful requests."
+        ),
+    )
+    embedding_sweep_verify_interval_seconds: float = Field(
+        default=3600.0,
+        ge=0.0,
+        description=(
+            "How long a plane that finished a full sweep for the configured model skips "
+            "its table walk. Imports and dimension rebuilds reopen the plane at once."
+        ),
+    )
+
     # Retrieval: cross-encoder reranking (optional).
     # Requires the `reranking` extra (sentence-transformers); when the extra is
     # absent the path degrades to the fused order rather than raising.

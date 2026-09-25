@@ -84,6 +84,7 @@ DEFINE FIELD IF NOT EXISTS start_char ON document_chunks TYPE int DEFAULT 0;
 DEFINE FIELD IF NOT EXISTS end_char ON document_chunks TYPE int DEFAULT 0;
 DEFINE FIELD IF NOT EXISTS heading_path ON document_chunks TYPE array<string> DEFAULT [];
 DEFINE FIELD IF NOT EXISTS embedding ON document_chunks TYPE option<array<float, {EMBEDDING_DIM}>>;
+DEFINE FIELD IF NOT EXISTS embedding_metadata ON document_chunks TYPE option<object> FLEXIBLE;
 DEFINE FIELD IF NOT EXISTS language ON document_chunks TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS is_complete ON document_chunks TYPE bool DEFAULT true;
 DEFINE FIELD IF NOT EXISTS has_entities ON document_chunks TYPE bool DEFAULT false;
