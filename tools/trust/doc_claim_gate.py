@@ -199,7 +199,15 @@ FORBIDDEN_CLAIMS: tuple[ForbiddenClaim, ...] = (
     ),
     ForbiddenClaim(
         phrase="OpenAI-free LongMemEval-S run",
-        reason="the citable LongMemEval-S run uses OpenAI embeddings",
+        reason="every recorded LongMemEval-S run uses OpenAI embeddings",
+    ),
+    ForbiddenClaim(
+        phrase="96.96%",
+        reason="the pre-1.0 LongMemEval-S headline R@5 (run 26304777971) was withdrawn",
+    ),
+    ForbiddenClaim(
+        phrase="98.90%",
+        reason="the pre-1.0 LongMemEval-S headline R@10 (run 26304777971) was withdrawn",
     ),
 )
 
