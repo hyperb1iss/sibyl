@@ -440,7 +440,7 @@
           <tr><td class="nowrap"><a href="https://github.com/hyperb1iss/sibyl/pull/661">#661</a></td><td>Dream pages seeded by a source and filled with its nearest pending neighbours, with coverage and send-gate checks. Verified, merging.</td><td>Recall on the real job path 76.7% with 9 cross-family pairs (was 40.4% and 39).</td></tr>
         </tbody>
       </table></div>
-      <p class="measure">The intervention probe (task <span class="id">b7bc8bf4</span>) gives the only native-over-raw signal so far: 14/18 against 9/20 on cdn-batch-map, a paired +6 of 18 at p = 0.11. That clears the pre-stated +4 threshold but isn't significant. Removing the derived items takes back only 2 of the 6, a family summary adds nothing over raw, and a task with opaque keys shows no negative transfer (10/10 in both arms). One more finding from the probe: the promoted pattern itself was excluded from native recall as out of scope, and the mechanism reached the solver only through two raw candidate rows (task <span class="id">3ed9000e</span>).</p>
+      <p class="measure">The intervention probe (task <span class="id">b7bc8bf4</span>) gives the only native-over-raw signal so far: 14/18 against 9/20 on cdn-batch-map, a paired +6 of 18 at p = 0.11. That clears the pre-stated +4 threshold but isn't significant. On the 16 repetitions where both arms finished, removing the derived items cost only 2 of those wins (11/18 overall against 14/18), a family summary adds nothing over raw, and a task with opaque keys shows no negative transfer (10/10 in both arms). One more finding from the probe: the promoted pattern itself was excluded from native recall as out of scope, and the mechanism reached the solver only through two raw candidate rows (task <span class="id">3ed9000e</span>).</p>
 
       <h3>What a user meets first</h3>
       <p class="measure">The September 22 demo prep and the proof work surfaced trust defects, and every one of them is still present on main. Each is small and reproduced. The gap that matters most is in process: PR CI never runs the <code>:check</code> bundle, so a delegated-scope regression from PR 525 shipped through 11 days of green PRs and surfaced only at the 1.4.0 dry cut.</p>
@@ -555,6 +555,7 @@
           <tr><td>Also required</td><td>A positive native-minus-derived ablation, negative-transfer bounds on the exception cases, repeated-mistake rates, and cost per success with consolidation cost amortized in.</td></tr>
           <tr><td>Power preflight</td><td>From the screen's variance, pick the repetitions per instance (2 to 6), favouring instances over repetitions. The sealed design must have at least 80% power to detect +5 over the best simple control within the $300 cap. If it doesn't, no claim-bearing run happens and the gate stays where it is.</td></tr>
           <tr><td>Interim look</td><td>One pre-registered analysis at half the attempts, with alpha spending (O'Brien-Fleming boundaries). It can stop for futility, or for success only if the boundary is crossed. The final analysis uses the adjusted threshold.</td></tr>
+          <tr><td>Multiplicity</td><td>The primary endpoint is the pooled paired difference across families, clustered by instance. cdn-batch-map is pre-registered as the primary family. Per-family claims are secondary: a family may be named in the note only if the pooled gate passes and its own lower bound stays positive after Holm adjustment across the families tested. Nominal per-family bounds are reported but never carry a claim on their own.</td></tr>
           <tr><td>Integrity</td><td>Voided cells (provider errors, harness faults) are rerun under the same seeds and listed, and failures stay in the denominators. Nothing is rerun for any other reason.</td></tr>
         </tbody>
       </table></div>
@@ -563,7 +564,8 @@
         <thead><tr><th>Outcome</th><th>Release note</th></tr></thead>
         <tbody>
           <tr><td>Gate passes in every family</td><td>A bounded claim: native memory improved task success by the measured margin on these families at this budget, with the ablation and cost.</td></tr>
-          <tr><td>Gate passes in some families</td><td>The claim is scoped to the passing families, and the others are reported with their numbers.</td></tr>
+          <tr><td>Pooled gate passes, some families pass</td><td>The claim is stated for the pooled result and names only the families whose Holm-adjusted bounds are positive. The others are reported with their numbers.</td></tr>
+          <tr><td>Pooled gate fails, one family passes nominally</td><td>No claim. The family result is reported as exploratory, with its unadjusted and adjusted bounds.</td></tr>
           <tr><td>Native beats no memory but not the simple control</td><td>Memory helps, but consolidation's added value is unproven. The numbers are reported.</td></tr>
           <tr><td>Canary stop, or no power within the cap</td><td>No study ran. The note says why and what the canary showed.</td></tr>
         </tbody>
@@ -699,7 +701,7 @@
           <span class="phase-name">P2</span>
           <div class="phase-title">Canary, cycle, study, capacity fixes</div>
           <p class="measure">$20 canary, then the $75 fresh cycle, the power preflight and the sealed study with its interim look. Capacity fixes land against the load harness.</p>
-          <span class="exit"><b>Exit:</b> the study verdict is recorded either way, and the scale gates pass.</span>
+          <span class="exit"><b>Exit:</b> the canary has run, the sealed study is unsealed or stopped, and the scale gates pass. The study verdict feeds the release note whenever it lands and never holds P3.</span>
         </li>
         <li>
           <span class="phase-name">P3</span>
@@ -750,7 +752,7 @@
       <h2>Risk register</h2>
       <div class="callout risk measure">
         <span class="label">Biggest risk to the thesis</span>
-        <p><strong>Consolidation may add little beyond better raw retrieval.</strong> The intervention already hints at it: removing the promoted items took back only 2 of native's 6 extra wins. The earliest cheap signal is the $20 canary after <span class="id">3ed9000e</span> and <span class="id">f1093a5a</span>. If the promoted mechanism now reaches the solver but removing it still changes nothing, pause the study and investigate consumption. That result stops the spend; it doesn't prove zero benefit.</p>
+        <p><strong>Consolidation may add little beyond better raw retrieval.</strong> The intervention already hints at it: on the 16 paired repetitions, removing the promoted items cost only 2 of native's 6 extra wins. The earliest cheap signal is the $20 canary after <span class="id">3ed9000e</span> and <span class="id">f1093a5a</span>. If the promoted mechanism now reaches the solver but removing it still changes nothing, pause the study and investigate consumption. That result stops the spend; it doesn't prove zero benefit.</p>
       </div>
       <div class="table-wrap"><table>
         <thead><tr><th>Risk</th><th>Earliest signal</th><th>Response</th></tr></thead>
@@ -758,7 +760,7 @@
           <tr><td>New task families lack headroom or validity.</td><td>The $30 screen.</td><td>Iterate on instances before spending further, or scope the study to the families that qualify.</td></tr>
           <tr><td>A capacity bottleneck sits inside the Surreal engine rather than our code.</td><td>The residency bisect in P1.</td><td>Report upstream with a reproducer, and change our query or write shape around it. Pin a fixed version if one exists.</td></tr>
           <tr><td>Migration identity remapping collides with records that already exist.</td><td>The first rehearsal's reconciliation ledger.</td><td>An additive-with-dedup policy and an explicit exception ledger. The rollback path is rehearsed before the pilot.</td></tr>
-          <tr><td>The SHARED and private-extraction decisions stall workstream one.</td><td>No decision by the end of P0.</td><td>Ship the fail-closed default (SHARED stays denied, extraction unified on the stricter policy) and revisit in 1.6.</td></tr>
+          <tr><td>The legacy SHARED mapping turns out larger than sized.</td><td>The P1 estimate for the read branch and backfill exceeds a medium task.</td><td>Keep the workstream-one gate blocked. Ship the read branch and the team mapping for rows that map cleanly, tombstone the rest with an exception ledger, and keep the stricter private-extraction policy as decided.</td></tr>
           <tr><td>Spend overruns.</td><td>A stage near its cap.</td><td>Stage caps, the harness cost guard, and the product spend guard. Stop and report rather than borrow.</td></tr>
           <tr><td>Local infrastructure wedges during long runs.</td><td>OrbStack stops answering (four incidents so far).</td><td>Run long jobs on the devbox or native Surreal, with liveness probes that use real timeouts.</td></tr>
           <tr><td>Merge bandwidth becomes the bottleneck.</td><td>Verified PRs waiting more than a day.</td><td>Batch merges at phase boundaries, and use stacked PRs with one verification each.</td></tr>
