@@ -225,8 +225,7 @@ RocksDB-backed PVC is simpler.
 ### Coordination Requirements
 
 Set `coordinationBackend: "redis"` when running multiple backend or worker replicas. Use Valkey or
-Redis for arq jobs, distributed locks, WebSocket pub/sub, and shared rate limits. The local Tilt
-demo uses the official `valkey/valkey` Helm chart.
+Redis for arq jobs, distributed locks, WebSocket pub/sub, and shared rate limits.
 
 ### Archive Rehearsal Sidecars
 

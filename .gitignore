@@ -61,13 +61,9 @@ dmypy.json
 .env.local
 openrouter.key
 
-# Docker
-falkordb_data/
-
-# Kubernetes / Tilt
+# Leftover local secrets from the retired Tilt stack. The directory is gone,
+# but old checkouts may still hold real API keys here; never stage them.
 infra/local/secrets.yaml
-.tiltbuild/
-tilt_modules/
 
 # OS
 .DS_Store

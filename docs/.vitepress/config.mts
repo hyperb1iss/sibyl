@@ -291,7 +291,6 @@ export default defineConfig({
                     text: 'Local Development',
                     items: [
                         { text: 'Docker Compose', link: '/deployment/docker-compose' },
-                        { text: 'Tilt & Minikube', link: '/deployment/tilt-minikube' },
                     ],
                 },
                 {
