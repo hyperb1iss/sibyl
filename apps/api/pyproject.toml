@@ -57,6 +57,8 @@ dependencies = [
     "authlib>=1.7.2,<1.8",
     "pyjwt[crypto]>=2.13.0,<3",
     "itsdangerous>=2.2,<3",
+    # Transactional email (SMTP uses the standard library)
+    "resend>=2.47.0,<3",
 ]
 
 [project.optional-dependencies]

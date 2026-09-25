@@ -3236,6 +3236,19 @@ wheels = [
 ]
 
 [[package]]
+name = "resend"
+version = "2.47.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "requests" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/08/d7/12f9decf70586a3ff5c9ec315d6751e026f906f7395b78334e39cb2647c4/resend-2.47.0.tar.gz", hash = "sha256:c92900e1c45f6c77e09cbfb29467671b87a62ee21baf8959e60047f3667fb652", size = 61527, upload-time = "2026-09-18T14:58:34.84Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ac/a9/28c1e359a3d972931c2c586f11efc08066c2e1ca9de7701ef0fbe923d814/resend-2.47.0-py2.py3-none-any.whl", hash = "sha256:04369afdff1741bc21c83dc68effad3b1635057b2db0f9d70b6be611310c9aed", size = 93346, upload-time = "2026-09-18T14:58:33.096Z" },
+]
+
+[[package]]
 name = "rich"
 version = "15.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3711,6 +3724,7 @@ dependencies = [
     { name = "mcp" },
     { name = "pyjwt", extra = ["crypto"] },
     { name = "pyyaml" },
+    { name = "resend" },
     { name = "rich" },
     { name = "sibyl-core", extra = ["crawler", "embeddings", "graph", "graphrag", "llm"] },
     { name = "slowapi" },
@@ -3772,6 +3786,7 @@ requires-dist = [
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.13.0,<3" },
     { name = "python-louvain", marker = "extra == 'graphrag'", specifier = ">=0.16" },
     { name = "pyyaml", specifier = ">=6.0" },
+    { name = "resend", specifier = ">=2.47.0,<3" },
     { name = "rich", specifier = ">=13.0" },
     { name = "sibyl-core", extras = ["crawler", "embeddings", "graph", "graphrag", "llm"], editable = "packages/python/sibyl-core" },
     { name = "slowapi", specifier = ">=0.1.9" },
