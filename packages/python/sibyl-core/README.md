@@ -44,8 +44,7 @@ src/sibyl_core/
 │   ├── sources.py        # Source, Document
 │   ├── context.py        # Context-pack models
 │   ├── reflection.py     # Reflection candidate models
-│   ├── synthesis.py      # Synthesis plan and artifact models
-│   └── responses.py      # API response models
+│   └── synthesis.py      # Synthesis plan and artifact models
 ├── backends/surreal/     # Driver, schema, table operations
 ├── retrieval/            # Native context retrieval, fusion (RRF), dedup
 │   ├── query_planning.py # Structured query planning for the accurate retrieval lane

@@ -44,7 +44,6 @@ from sibyl_core.services.memory_contract import (
     ReflectionPromotionPreview,
     ReflectionPromotionResult,
     ReflectionWriteResult,
-    WriteMode,
     _ReflectionPromotionPlan,
     _RelationshipWriteReceipt,
 )
@@ -481,7 +480,7 @@ async def persist_reflection_candidate(
 
     receipt = {
         **policy_metadata,
-        "native_write_mode": WriteMode.ENABLED.value,
+        "native_write_mode": "enabled",
         "native_write_path": native_write_path,
         "native_relationship_count": relationship_receipt.created,
         "native_relationship_requested_count": relationship_receipt.requested,

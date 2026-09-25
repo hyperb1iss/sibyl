@@ -9,9 +9,6 @@ from sibyl_core.models.tasks import SimilarTaskInfo, TaskEstimate, TaskStatus
 
 log = structlog.get_logger()
 
-# Backwards compatibility alias
-SimilarTask = SimilarTaskInfo
-
 
 async def estimate_task_effort(
     entity_manager: Any,

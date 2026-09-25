@@ -1,10 +1,7 @@
 """Tests for task effort estimation."""
 
 from sibyl_core.models.tasks import SimilarTaskInfo, TaskEstimate
-from sibyl_core.tasks.estimation import (
-    SimilarTask,  # Backwards compat alias
-    calculate_project_estimate,
-)
+from sibyl_core.tasks.estimation import calculate_project_estimate
 
 
 class TestSimilarTaskInfo:
@@ -22,10 +19,6 @@ class TestSimilarTaskInfo:
         assert task.title == "Implement OAuth"
         assert task.similarity_score == 0.85
         assert task.actual_hours == 4.5
-
-    def test_backwards_compat_alias(self) -> None:
-        """Test SimilarTask backwards compatibility alias."""
-        assert SimilarTask is SimilarTaskInfo
 
 
 class TestTaskEstimate:
