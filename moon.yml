@@ -855,13 +855,17 @@ tasks:
 
   dev-script-test:
     command:
-      uv run pytest tools/tests/test_dev_scripts.py tools/tests/test_surreal_migration_moon_tasks.py
+      uv run pytest tools/tests/test_dev_scripts.py tools/tests/test_moon_sibyld_commands.py
       -v
     inputs:
       - tools/dev/*.sh
       - tools/tests/conftest.py
       - tools/tests/test_dev_scripts.py
-      - tools/tests/test_surreal_migration_moon_tasks.py
+      - tools/tests/test_moon_sibyld_commands.py
+      - apps/api/src/sibyl/cli/**/*.py
+      - .moon/workspace.yml
+      - .moon/tasks/*.yml
+      - "**/moon.yml"
       - pyproject.toml
       - moon.yml
 
