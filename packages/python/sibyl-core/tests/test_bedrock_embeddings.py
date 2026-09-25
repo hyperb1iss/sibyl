@@ -192,6 +192,17 @@ def test_unsupported_models_and_dimensions_fail_clearly(model, dimensions, match
         provider_with(FakeBedrock(), meta=metadata(model, dimensions))
 
 
+async def test_arn_models_pass_through_with_only_dimensions_checked():
+    arn = "arn:aws:bedrock:us-west-2:123456789012:application-inference-profile/embed"
+    fake = FakeBedrock()
+    provider = provider_with(fake, meta=metadata(arn, 1024))
+    await provider.embed_texts(["hello"])
+    assert fake.requests[0].url.path.endswith("/invoke")
+    assert arn.split("/")[-1] in fake.requests[0].url.path
+    with pytest.raises(BedrockConfigError, match="not 768"):
+        provider_with(FakeBedrock(), meta=metadata(arn, 768))
+
+
 def test_metadata_tags_bedrock_with_the_scope_free_model():
     provider = provider_with(FakeBedrock(), meta=metadata("us.cohere.embed-v4:0", 1024))
     assert provider.metadata.provider == "bedrock"
@@ -269,6 +280,25 @@ async def test_graph_embeddings_default_to_cohere_at_the_graph_index_size(monkey
 
     monkeypatch.setenv("SIBYL_BEDROCK_INFERENCE_SCOPE", "global")
     assert providers.configured_embedding_provider() is not provider
+
+
+def test_a_bad_bedrock_setting_fails_loudly_instead_of_disabling(monkeypatch):
+    monkeypatch.setenv("SIBYL_GRAPH_EMBEDDING_PROVIDER", "bedrock")
+    monkeypatch.setenv("SIBYL_EMBEDDING_PROVIDER", "bedrock")
+    monkeypatch.setenv("SIBYL_BEDROCK_INFERENCE_SCOPE", "mars")
+    with pytest.raises(BedrockConfigError, match="SIBYL_BEDROCK_INFERENCE_SCOPE"):
+        asyncio.run(_configured())
+    with pytest.raises(BedrockConfigError, match="SIBYL_BEDROCK_INFERENCE_SCOPE"):
+        content_embeddings.configured_content_embedding()
+
+
+@pytest.mark.parametrize("field", ["embedding", "graph_embedding"])
+def test_startup_refuses_sizes_cohere_cannot_produce(field):
+    from sibyl_core.config import CoreConfig
+
+    with pytest.raises(ValueError, match="cannot be served by Cohere"):
+        CoreConfig(**{f"{field}_provider": "bedrock", f"{field}_dimensions": 768})
+    assert CoreConfig(**{f"{field}_provider": "bedrock", f"{field}_dimensions": 1024})
 
 
 def test_graph_embeddings_disable_without_a_region(monkeypatch):

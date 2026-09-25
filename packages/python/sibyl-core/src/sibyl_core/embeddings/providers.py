@@ -678,14 +678,14 @@ def configured_embedding_provider() -> EmbeddingProvider | None:
 
     cache_identity = "local"
     if provider == "bedrock":
-        from sibyl_core.ai.bedrock import BedrockConfigError, resolve_bedrock_settings
+        from sibyl_core.ai.bedrock import bedrock_region_configured, resolve_bedrock_settings
 
-        try:
-            # A region is the only required setting; credentials resolve per request.
-            cache_identity = resolve_bedrock_settings().fingerprint
-        except BedrockConfigError as exc:
-            log.info("graph_embeddings_disabled", provider=provider, reason=str(exc))
+        # A missing region disables graph embeddings like a missing key does;
+        # any other bad Bedrock setting is a misconfiguration and raises.
+        if not bedrock_region_configured():
+            log.info("graph_embeddings_disabled", provider=provider, reason="missing_region")
             return None
+        cache_identity = resolve_bedrock_settings().fingerprint
         api_key = ""
     elif provider == "local":
         api_key = ""

@@ -17,6 +17,7 @@ from sibyl.persistence.operations_runtime import (
     require_settings_owner,
 )
 from sibyl.services.settings import get_settings_service
+from sibyl_core.ai.bedrock import COHERE_EMBED_V4_DIMENSIONS
 from sibyl_core.ai.llm.config import LLMProviderName
 from sibyl_core.ai.validation import KeyValidationResult, check_provider_key
 
@@ -170,6 +171,43 @@ _SETTING_DESCRIPTIONS = {
 }
 
 
+async def _reject_unservable_bedrock_dimensions(service, body: UpdateSettingsRequest) -> None:
+    """Refuse a Bedrock plane at a size Cohere Embed v4 cannot produce.
+
+    Saving it would make every embedding call on that plane fail until an admin
+    notices, so the effective provider and size after this update are checked.
+    """
+    from sibyl.config import settings as server_settings
+
+    for provider_key, dimensions_key in (
+        ("embedding_provider", "embedding_dimensions"),
+        ("graph_embedding_provider", "graph_embedding_dimensions"),
+    ):
+        if getattr(body, provider_key) is None and getattr(body, dimensions_key) is None:
+            continue
+        provider = (
+            getattr(body, provider_key)
+            or await service.get(provider_key)
+            or getattr(server_settings, provider_key)
+        )
+        if provider != "bedrock":
+            continue
+        dimensions = (
+            getattr(body, dimensions_key)
+            or await service.get(dimensions_key)
+            or getattr(server_settings, dimensions_key)
+        )
+        if int(dimensions) not in COHERE_EMBED_V4_DIMENSIONS:
+            supported = ", ".join(str(size) for size in COHERE_EMBED_V4_DIMENSIONS)
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"{dimensions_key}={dimensions} cannot be served by Cohere Embed v4 on "
+                    f"Bedrock; use {supported}"
+                ),
+            )
+
+
 def _write_runtime_env(key: str, value: object) -> None:
     for env_var in _SETTING_ENV_WRITES.get(key, ()):
         os.environ[env_var] = str(value)
@@ -281,6 +319,7 @@ async def update_settings(
         else:
             log.warning("Gemini key validation failed", error=error)
 
+    await _reject_unservable_bedrock_dimensions(service, body)
     for key in (
         "embedding_provider",
         "embedding_model",

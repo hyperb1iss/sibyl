@@ -109,6 +109,7 @@ class EmbeddingService:
         if self._client is None or self._client_provider != config.provider:
             service = get_settings_service()
             self._client_provider = config.provider
+            self._client_identity = None
 
             if config.provider == "gemini":
                 api_key = await service.get_gemini_key()
@@ -132,6 +133,10 @@ class EmbeddingService:
 
         return self._client
 
+    def _batch_size(self, config: ResolvedEmbeddingConfig, total: int) -> int:
+        """Bedrock batches to Cohere's limits and runs them concurrently itself."""
+        return max(total, 1) if config.provider == "bedrock" else self.batch_size
+
     def _bedrock_provider(self, config: ResolvedEmbeddingConfig) -> Any:
         """Cohere on Bedrock, rebuilt when the model, size or AWS settings change."""
         from sibyl_core.ai.bedrock import resolve_bedrock_settings
@@ -140,7 +145,11 @@ class EmbeddingService:
 
         bedrock = resolve_bedrock_settings()
         identity = (config.model, config.dimensions, bedrock.fingerprint)
-        if self._client is None or self._client_identity != identity:
+        if (
+            self._client is None
+            or self._client_provider != "bedrock"
+            or self._client_identity != identity
+        ):
             self._client = BedrockEmbeddingProvider(
                 metadata=EmbeddingMetadata(
                     provider="bedrock",
@@ -231,10 +240,11 @@ class EmbeddingService:
 
         config = await self._resolve_config()
         embeddings: list[Embedding] = []
+        batch_size = self._batch_size(config, len(texts))
 
         # Process in batches
-        for i in range(0, len(texts), self.batch_size):
-            batch = texts[i : i + self.batch_size]
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i : i + batch_size]
 
             embeddings.extend(await self._embed_texts_with_config(batch, config, kind="document"))
 
@@ -275,9 +285,10 @@ class EmbeddingService:
 
         config = await self._resolve_config()
         embeddings: list[Embedding] = []
-        for i in range(0, len(texts), self.batch_size):
-            batch = texts[i : i + self.batch_size]
-            title_batch = titles[i : i + self.batch_size]
+        batch_size = self._batch_size(config, len(texts))
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i : i + batch_size]
+            title_batch = titles[i : i + batch_size]
             embeddings.extend(
                 await self._embed_texts_with_config(
                     batch,

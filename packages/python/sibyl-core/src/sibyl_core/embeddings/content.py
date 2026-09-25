@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from sibyl_core.ai.bedrock import (
     DEFAULT_BEDROCK_EMBEDDING_MODEL,
-    BedrockConfigError,
+    bedrock_region_configured,
     resolve_bedrock_settings,
 )
 from sibyl_core.config import settings
@@ -21,7 +21,7 @@ class ContentEmbeddingConfig:
 
     ``bedrock_identity`` fingerprints the Bedrock region, profile, scope and
     optional API key, or stays ``None`` when Bedrock has no region. Bedrock
-    has no API key of its own, so it is ready whenever that identity exists.
+    needs no API key, so it is ready whenever that identity exists.
     """
 
     provider: EmbeddingProviderName
@@ -107,10 +107,10 @@ def _configured_api_key(provider: EmbeddingProviderName) -> str | None:
 
 
 def _bedrock_identity() -> str | None:
-    try:
-        return resolve_bedrock_settings().fingerprint
-    except BedrockConfigError:
+    """``None`` without a region, like a missing key; other bad settings raise."""
+    if not bedrock_region_configured():
         return None
+    return resolve_bedrock_settings().fingerprint
 
 
 __all__ = [

@@ -132,3 +132,27 @@ async def test_bedrock_embeds_chunks_through_cohere(monkeypatch: pytest.MonkeyPa
     assert len(query) == 1536
     assert [body["input_type"] for body in requests] == ["search_document", "search_query"]
     assert all(body["output_dimension"] == 1536 for body in requests)
+
+
+@pytest.mark.asyncio
+async def test_switching_back_to_bedrock_rebuilds_the_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sibyl_core.embeddings.bedrock import BedrockEmbeddingProvider
+
+    monkeypatch.setenv("SIBYL_BEDROCK_REGION", "us-west-2")
+    monkeypatch.setenv("SIBYL_BEDROCK_API_KEY", "bedrock-key")
+    monkeypatch.delenv("SIBYL_BEDROCK_PROFILE", raising=False)
+    service = FakeSettingsService({"openai_api_key": "sk-test"})
+    service.get_openai_key = AsyncMock(return_value="sk-test")  # type: ignore[attr-defined]
+    monkeypatch.setattr(embedder_module, "get_settings_service", lambda: service)
+    embedder = EmbeddingService()
+    bedrock = embedder_module.ResolvedEmbeddingConfig("bedrock", "cohere.embed-v4:0", 1536)
+    openai = embedder_module.ResolvedEmbeddingConfig("openai", "text-embedding-3-small", 1536)
+
+    first = await embedder._get_client(bedrock)
+    assert isinstance(first, BedrockEmbeddingProvider)
+    assert not isinstance(await embedder._get_client(openai), BedrockEmbeddingProvider)
+    assert isinstance(await embedder._get_client(bedrock), BedrockEmbeddingProvider)
+    assert embedder._batch_size(bedrock, 250) == 250
+    assert embedder._batch_size(openai, 250) == embedder.batch_size

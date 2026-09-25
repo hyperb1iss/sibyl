@@ -24,10 +24,13 @@ from urllib.parse import quote
 import httpx
 
 from sibyl_core.ai.bedrock import (
+    COHERE_EMBED_V4_DIMENSIONS,
     BedrockConfigError,
     BedrockSettings,
     bedrock_embedding_model_id,
+    is_arn,
     remove_geo_prefix,
+    require_botocore,
     resolve_bedrock_settings,
     sigv4_headers,
 )
@@ -36,7 +39,6 @@ if TYPE_CHECKING:
     from sibyl_core.embeddings.providers import EmbeddingInputKind, EmbeddingMetadata
 
 COHERE_EMBED_V4_PREFIX = "cohere.embed-v4"
-COHERE_EMBED_V4_DIMENSIONS = (256, 512, 1024, 1536)
 #: Per-call and per-request limits from the Cohere Embed v4 model card. The
 #: byte budget leaves headroom under the documented ~20 MB payload cap.
 COHERE_EMBED_MAX_TEXTS = 96
@@ -71,8 +73,12 @@ class BedrockEmbeddingError(RuntimeError):
 
 
 def validate_cohere_embedding(model: str, dimensions: int) -> None:
-    """Fail at configuration time on a model or size Cohere v4 cannot serve."""
-    if not remove_geo_prefix(model).startswith(COHERE_EMBED_V4_PREFIX):
+    """Fail at configuration time on a model or size Cohere v4 cannot serve.
+
+    An ARN (application inference profile or provisioned throughput) hides the
+    model, so only its dimensions are checked.
+    """
+    if not is_arn(model) and not remove_geo_prefix(model).startswith(COHERE_EMBED_V4_PREFIX):
         raise BedrockConfigError(
             f"Bedrock embeddings support Cohere Embed v4 (cohere.embed-v4:0), not {model!r}"
         )
@@ -130,6 +136,8 @@ class BedrockEmbeddingProvider:
             input_kind_sensitive=True,
         )
         self._settings = settings or resolve_bedrock_settings()
+        if not self._settings.api_key:
+            require_botocore()
         self._client = client
         self._clients: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, httpx.AsyncClient] = (
             weakref.WeakKeyDictionary()
