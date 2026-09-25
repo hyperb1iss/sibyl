@@ -170,9 +170,10 @@ def write_env_file(*, image_tag: str, surreal_password: str, jwt_secret: str) ->
     os.chmod(SIBYL_DOCKER_ENV, 0o600)
 
 
-def write_compose_file(config: dict[str, Any]) -> None:
+def write_compose_file(config: dict[str, Any], path: Path | None = None) -> None:
     SIBYL_DOCKER_DIR.mkdir(parents=True, exist_ok=True)
-    SIBYL_DOCKER_COMPOSE.write_text(yaml.dump(config, default_flow_style=False, sort_keys=False))
+    target = path or SIBYL_DOCKER_COMPOSE
+    target.write_text(yaml.dump(config, default_flow_style=False, sort_keys=False))
 
 
 def _retag_managed_image(image: str, image_tag: str) -> str:
@@ -182,7 +183,7 @@ def _retag_managed_image(image: str, image_tag: str) -> str:
     return image
 
 
-def update_configured_image_tag(image_tag: str) -> None:
+def write_env_image_tag(image_tag: str) -> None:
     content = SIBYL_DOCKER_ENV.read_text()
     lines = []
     wrote_tag = False
@@ -195,16 +196,6 @@ def update_configured_image_tag(image_tag: str) -> None:
     if not wrote_tag:
         lines.append(f"SIBYL_IMAGE_TAG={image_tag}")
     SIBYL_DOCKER_ENV.write_text("\n".join(lines) + "\n")
-
-    config = yaml.safe_load(SIBYL_DOCKER_COMPOSE.read_text()) or {}
-    services = config.get("services", {})
-    for service in services.values():
-        if not isinstance(service, dict):
-            continue
-        image = service.get("image")
-        if isinstance(image, str):
-            service["image"] = _retag_managed_image(image, image_tag)
-    write_compose_file(config)
 
 
 def _surreal_version(tag: str) -> Version | None:
@@ -230,15 +221,13 @@ def _surreal_image_override() -> str | None:
     return None
 
 
-def update_surreal_image() -> None:
+def _plan_surreal_image(service: dict[str, Any]) -> None:
     """Move an older CLI-written SurrealDB default up to the server this CLI runs.
 
     Only the default inside `${SIBYL_SURREAL_IMAGE:-...}` moves, and never
     backwards, so SIBYL_SURREAL_IMAGE still wins and a hand-written image stays.
     """
-    config = yaml.safe_load(SIBYL_DOCKER_COMPOSE.read_text()) or {}
-    service = config.get("services", {}).get("surrealdb")
-    image = service.get("image") if isinstance(service, dict) else None
+    image = service.get("image")
     if not isinstance(image, str):
         return
 
@@ -251,28 +240,44 @@ def update_surreal_image() -> None:
             warn(f"Leaving the SurrealDB image {image} as written; this CLI runs {SURREAL_IMAGE}.")
             return
         service["image"] = SURREAL_IMAGE_REFERENCE
-        write_compose_file(config)
-        info(f"Moved the SurrealDB image from {match['tag']} to {shipped_tag}")
+        info(f"Upgrading SurrealDB from {match['tag']} to {shipped_tag}")
 
     override = _surreal_image_override()
     if override and override != SURREAL_IMAGE:
         warn(f"SIBYL_SURREAL_IMAGE keeps SurrealDB on {override}; this CLI runs {SURREAL_IMAGE}.")
 
 
-def compose_command(args: list[str]) -> list[str]:
+def upgraded_compose_config(config: dict[str, Any], image_tag: str | None) -> dict[str, Any]:
+    """The compose config an upgrade moves to, leaving `config` as it is."""
+    target = deepcopy(config)
+    services = target.get("services") or {}
+    for name, service in services.items():
+        if not isinstance(service, dict):
+            continue
+        image = service.get("image")
+        if image_tag and isinstance(image, str):
+            service["image"] = _retag_managed_image(image, image_tag)
+        if name == "surrealdb":
+            _plan_surreal_image(service)
+    return target
+
+
+def compose_command(args: list[str], compose_file: Path | None = None) -> list[str]:
     return [
         "docker",
         "compose",
         "-f",
-        str(SIBYL_DOCKER_COMPOSE),
+        str(compose_file or SIBYL_DOCKER_COMPOSE),
         "--env-file",
         str(SIBYL_DOCKER_ENV),
         *args,
     ]
 
 
-def run_compose(args: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(compose_command(args), text=True, check=False)
+def run_compose(
+    args: list[str], compose_file: Path | None = None
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(compose_command(args, compose_file), text=True, check=False)
 
 
 def require_configured() -> None:
@@ -399,14 +404,29 @@ def upgrade(
     """Pull current images and recreate containers."""
     require_configured()
     require_docker()
+    current = yaml.safe_load(SIBYL_DOCKER_COMPOSE.read_text()) or {}
+    target = upgraded_compose_config(current, image_tag)
+
+    # Pull the target images from a staged copy first. A failed pull leaves the
+    # compose file describing the containers that are still running, so the
+    # pins never claim an upgrade that did not happen.
+    staged = SIBYL_DOCKER_DIR / "docker-compose.upgrade.yml"
+    try:
+        write_compose_file(target, staged)
+        pulled = run_compose(["pull"], staged)
+        if pulled.returncode != 0:
+            error("Failed to pull the upgrade images; the deployment and its pins are unchanged.")
+            raise typer.Exit(pulled.returncode)
+        if target != current:
+            staged.replace(SIBYL_DOCKER_COMPOSE)
+    finally:
+        staged.unlink(missing_ok=True)
     if image_tag:
-        update_configured_image_tag(image_tag)
-    update_surreal_image()
+        write_env_image_tag(image_tag)
+
     # The api waits on `surrealdb: service_healthy`, so Compose recreates
     # SurrealDB on its new image and waits for it before the new API starts.
-    result = run_compose(["pull"])
-    if result.returncode == 0:
-        result = run_compose(["up", "-d"])
+    result = run_compose(["up", "-d"])
     if result.returncode != 0:
         error("Failed to upgrade Docker deployment.")
         raise typer.Exit(result.returncode)
