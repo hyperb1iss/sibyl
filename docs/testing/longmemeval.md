@@ -158,7 +158,6 @@ longmemeval_wait_for_memory_projection: false
 longmemeval_graph_hnsw_efc: 150
 longmemeval_graph_hnsw_m: 12
 longmemeval_graph_knn_ef: 40
-longmemeval_native_fusion_backend: python_rrf
 run_longmemeval_full: true
 ```
 
