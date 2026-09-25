@@ -498,9 +498,13 @@ export default function AIServicesPage() {
     setIsValidating(true);
     try {
       const result = await revalidate();
-      const embeddingValid = result.data?.openai_valid || result.data?.gemini_valid;
       const bedrockValid = result.data?.bedrock_valid === true;
-      if (bedrockValid || (embeddingValid && result.data?.anthropic_valid)) {
+      const embeddingValid =
+        result.data?.openai_valid ||
+        result.data?.gemini_valid ||
+        (bedrockValid && result.data?.bedrock_embeddings);
+      const llmValid = result.data?.anthropic_valid || (bedrockValid && result.data?.bedrock_llm);
+      if (embeddingValid && llmValid) {
         toast.success('All API keys validated successfully');
       } else {
         toast.error('Some API keys failed validation');

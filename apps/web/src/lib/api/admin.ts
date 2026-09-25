@@ -122,8 +122,12 @@ export interface SetupStatus {
   openai_valid: boolean | null;
   anthropic_valid: boolean | null;
   gemini_valid: boolean | null;
-  /** An AWS region and credential source are present, so Bedrock needs no API keys. */
+  /** An AWS region and credential source are present. */
   bedrock_configured?: boolean;
+  /** Bedrock is configured and the default LLM surface uses it, so no Anthropic key is needed. */
+  bedrock_llm?: boolean;
+  /** Bedrock is configured and document embeddings use it, so no embedding key is needed. */
+  bedrock_embeddings?: boolean;
   bedrock_valid?: boolean | null;
 }
 
@@ -134,9 +138,11 @@ export interface ApiKeyValidation {
   openai_error: string | null;
   anthropic_error: string | null;
   gemini_error: string | null;
-  /** Null when Bedrock is not configured, so it was not probed. */
+  /** Null when nothing uses Bedrock, so it was not probed. */
   bedrock_valid?: boolean | null;
   bedrock_error?: string | null;
+  bedrock_llm?: boolean;
+  bedrock_embeddings?: boolean;
 }
 
 /** One way to wire Sibyl into an MCP-capable agent. */

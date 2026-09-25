@@ -27,7 +27,7 @@ from sibyl_core.ai.bedrock import (
     API_KEY_ENV_VARS as BEDROCK_API_KEY_ENV_VARS,
     bedrock_region_configured,
 )
-from sibyl_core.ai.llm.config import LLMProviderName
+from sibyl_core.ai.llm.config import LLMProviderName, LLMSurface, get_config_source
 from sibyl_core.ai.validation import KeyValidationResult, check_provider_key
 from sibyl_core.integration import integration_content
 
@@ -67,10 +67,15 @@ class SetupStatus(BaseModel):
     )
     bedrock_configured: bool = Field(
         default=False,
-        description=(
-            "True when an AWS region and an AWS credential source are present, so Claude "
-            "and Cohere can run through Amazon Bedrock without API keys"
-        ),
+        description="True when an AWS region and an AWS credential source are present",
+    )
+    bedrock_llm: bool = Field(
+        default=False,
+        description="True when Bedrock is configured and the default LLM surface uses it",
+    )
+    bedrock_embeddings: bool = Field(
+        default=False,
+        description="True when Bedrock is configured and document embeddings use it",
     )
     bedrock_valid: bool | None = Field(
         default=None, description="True if Bedrock answers (only checked by validate-keys)"
@@ -89,9 +94,11 @@ class ApiKeyValidation(BaseModel):
     )
     gemini_error: str | None = Field(default=None, description="Error message if Gemini fails")
     bedrock_valid: bool | None = Field(
-        default=None, description="True if Bedrock answers; None when Bedrock is not configured"
+        default=None, description="True if Bedrock answers; None when nothing uses Bedrock"
     )
     bedrock_error: str | None = Field(default=None, description="Error message if Bedrock fails")
+    bedrock_llm: bool = Field(default=False, description="The default LLM surface uses Bedrock")
+    bedrock_embeddings: bool = Field(default=False, description="Document embeddings use Bedrock")
 
 
 async def _check_openai_key(key: str | None = None) -> tuple[bool, str | None]:
@@ -142,9 +149,30 @@ async def _check_gemini_key(key: str | None = None) -> tuple[bool, str | None]:
     return await _check_provider_key("gemini", key)
 
 
-async def _check_bedrock() -> tuple[bool | None, str | None]:
-    """Probe Bedrock through the AWS credential chain, only when it is configured."""
+async def bedrock_selection() -> tuple[bool, bool]:
+    """Whether Bedrock serves the default LLM surface and document embeddings.
+
+    Both require Bedrock to be configured. An AWS environment alone proves
+    nothing: a laptop with a profile, or any IRSA pod, has one while every
+    provider still points at a keyed API.
+    """
     if not bedrock_configured():
+        return False, False
+    try:
+        resolved = await get_config_source().resolve(LLMSurface.DEFAULT)
+        llm = resolved.provider.value == "bedrock"
+    except Exception as e:
+        log.warning("Could not resolve the default LLM provider", error=str(e))
+        llm = False
+    embedding_provider = (
+        await get_settings_service().get("embedding_provider") or settings.embedding_provider
+    )
+    return llm, embedding_provider == "bedrock"
+
+
+async def _check_bedrock() -> tuple[bool | None, str | None]:
+    """Probe Bedrock through the AWS credential chain, only when something uses it."""
+    if not any(await bedrock_selection()):
         return None, None
     try:
         result = await check_provider_key("bedrock", None)
@@ -225,6 +253,7 @@ async def get_setup_status(
     openai_configured = bool(openai_key)
     anthropic_configured = bool(anthropic_key)
     gemini_configured = bool(gemini_key)
+    bedrock_llm, bedrock_embeddings = await bedrock_selection()
 
     return SetupStatus(
         needs_setup=not setup_status.setup_complete,
@@ -240,6 +269,8 @@ async def get_setup_status(
         anthropic_valid=None,
         gemini_valid=None,
         bedrock_configured=bedrock_configured(),
+        bedrock_llm=bedrock_llm,
+        bedrock_embeddings=bedrock_embeddings,
     )
 
 
@@ -261,6 +292,7 @@ async def validate_api_keys() -> ApiKeyValidation:
     anthropic_valid, anthropic_error = await _check_anthropic_key()
     gemini_valid, gemini_error = await _check_gemini_key()
     bedrock_valid, bedrock_error = await _check_bedrock()
+    bedrock_llm, bedrock_embeddings = await bedrock_selection()
 
     return ApiKeyValidation(
         openai_valid=openai_valid,
@@ -271,6 +303,8 @@ async def validate_api_keys() -> ApiKeyValidation:
         gemini_error=gemini_error,
         bedrock_valid=bedrock_valid,
         bedrock_error=bedrock_error,
+        bedrock_llm=bedrock_llm,
+        bedrock_embeddings=bedrock_embeddings,
     )
 
 

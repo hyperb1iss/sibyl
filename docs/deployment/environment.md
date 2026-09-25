@@ -221,26 +221,31 @@ v4 when an embedding provider is `bedrock`. It needs no API key: requests sign w
 credential chain, which covers IRSA web identity and EKS Pod Identity on Kubernetes, SSO profiles,
 static keys and instance roles.
 
-| Variable                        | Default  | Description                                                             |
-| ------------------------------- | -------- | ----------------------------------------------------------------------- |
-| `SIBYL_BEDROCK_REGION`          | (unset)  | Bedrock Region; falls back to `AWS_REGION`, then `AWS_DEFAULT_REGION`   |
-| `SIBYL_BEDROCK_INFERENCE_SCOPE` | `us`     | `us` (US data residency), `global`, or `regional` (foundation-model ID) |
-| `SIBYL_BEDROCK_API`             | `invoke` | `invoke` (InvokeModel on bedrock-runtime) or `mantle` (bedrock-mantle)  |
-| `SIBYL_BEDROCK_PROFILE`         | (unset)  | AWS profile for local development                                       |
-| `SIBYL_BEDROCK_API_KEY`         | (unset)  | Bedrock API key, sent as a bearer token instead of SigV4 signing        |
+| Variable                        | Default  | Description                                                                                  |
+| ------------------------------- | -------- | -------------------------------------------------------------------------------------------- |
+| `SIBYL_BEDROCK_REGION`          | (unset)  | Bedrock Region; falls back to `AWS_REGION`, then `AWS_DEFAULT_REGION`                        |
+| `SIBYL_BEDROCK_INFERENCE_SCOPE` | `us`     | Geographic profile (`us`, `eu`, `apac`, `jp`, `au`, `ca`, `us-gov`), `global`, or `regional` |
+| `SIBYL_BEDROCK_API`             | `invoke` | `invoke` (InvokeModel on bedrock-runtime) or `mantle` (bedrock-mantle)                       |
+| `SIBYL_BEDROCK_PROFILE`         | (unset)  | AWS profile for local development                                                            |
+| `SIBYL_BEDROCK_API_KEY`         | (unset)  | Bedrock API key, sent as a bearer token instead of SigV4 signing                             |
 
-A region is required; without one every Bedrock call fails with a message naming these variables.
-`SIBYL_BEDROCK_API_KEY` falls back to `AWS_BEARER_TOKEN_BEDROCK`, and it cannot be combined with
-`SIBYL_BEDROCK_PROFILE`. The Anthropic SDK also reads `AWS_BEARER_TOKEN_BEDROCK` on its own, so a
-stray value in the environment silently replaces SigV4 signing.
+A region is required. Without one, every Bedrock LLM call fails with a message naming these
+variables, and Bedrock embeddings stay off the way a missing API key turns off the other providers.
+Any other invalid Bedrock setting raises wherever it is used. `SIBYL_BEDROCK_API_KEY` falls back to
+`AWS_BEARER_TOKEN_BEDROCK` (and to `ANTHROPIC_AWS_API_KEY` on `mantle`, which its SDK client also
+reads), and it cannot be combined with `SIBYL_BEDROCK_PROFILE`. The Anthropic SDK reads those
+variables on its own, so a stray value in the environment replaces SigV4 signing.
+
+The scope defaults to `us` whatever the Region, so a deployment outside the US sets it explicitly:
+`eu` for an EU Region, for example.
 
 Configure models by their Claude alias, as on the `anthropic` provider. Sibyl maps the alias to the
 Bedrock ID through the inference scope, so `claude-opus-5-5` becomes `us.anthropic.claude-opus-5-5`
 under `us` and `global.anthropic.claude-opus-5-5` under `global`. An ID that already names an
-inference profile is sent as given. Most current Claude models and Cohere Embed v4 offer no
-in-Region on-demand throughput, so `regional` only works where the model card lists In-Region
-support. Effort, memory-surface defaults and the forced-tool rule all key by alias, so a raw Bedrock
-ID behaves exactly like its alias.
+inference profile, or an application inference profile or provisioned throughput ARN, is sent as
+given. Most current Claude models and Cohere Embed v4 offer no in-Region on-demand throughput, so
+`regional` only works where the model card lists In-Region support. Effort, memory-surface defaults
+and the forced-tool rule all key by alias, so a raw Bedrock ID behaves exactly like its alias.
 
 Bedrock rejects native structured output (`output_config.format`) for Claude Opus 4.8, Opus 5, Opus
 5.5 and Sonnet 5, and for every model on bedrock-mantle. On those models Sibyl uses tool output

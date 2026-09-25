@@ -188,17 +188,75 @@ def test_setup_marks_bedrock_configured_from_region_and_credential_hints(environ
     assert setup_routes.bedrock_configured(environ) is expected
 
 
+class FakeSetupSettings:
+    def __init__(self, values: dict[str, str] | None = None) -> None:
+        self.values = values or {}
+
+    async def get(self, key: str) -> str | None:
+        return self.values.get(key)
+
+
+def _use_providers(monkeypatch, *, llm: str, embeddings: str | None) -> None:
+    monkeypatch.setattr(setup_routes, "get_config_source", lambda: FakeConfigSource(_resolved(llm)))
+    values = {"embedding_provider": embeddings} if embeddings else {}
+    monkeypatch.setattr(setup_routes, "get_settings_service", lambda: FakeSetupSettings(values))
+
+
 @pytest.mark.asyncio
-async def test_validate_keys_skips_bedrock_when_it_is_not_configured(
+async def test_an_aws_environment_alone_does_not_mark_bedrock_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AWS_REGION", "us-west-2")
+    monkeypatch.setenv("AWS_PROFILE", "dev")
+    _use_providers(monkeypatch, llm="anthropic", embeddings=None)
+
+    assert await setup_routes.bedrock_selection() == (False, False)
+
+    _use_providers(monkeypatch, llm="bedrock", embeddings="bedrock")
+    assert await setup_routes.bedrock_selection() == (True, True)
+
+    monkeypatch.delenv("AWS_REGION")
+    assert await setup_routes.bedrock_selection() == (False, False)
+
+
+@pytest.mark.asyncio
+async def test_validate_keys_probes_bedrock_only_when_something_uses_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     check = AsyncMock(return_value=_key_result())
     monkeypatch.setattr(setup_routes, "check_provider_key", check)
+    monkeypatch.setenv("AWS_REGION", "us-west-2")
+    monkeypatch.setenv("AWS_WEB_IDENTITY_TOKEN_FILE", "/var/run/token")
 
+    _use_providers(monkeypatch, llm="anthropic", embeddings="openai")
     assert await setup_routes._check_bedrock() == (None, None)
     check.assert_not_awaited()
 
-    monkeypatch.setenv("AWS_REGION", "us-west-2")
-    monkeypatch.setenv("AWS_WEB_IDENTITY_TOKEN_FILE", "/var/run/token")
+    _use_providers(monkeypatch, llm="bedrock", embeddings="openai")
     assert await setup_routes._check_bedrock() == (True, None)
     check.assert_awaited_once_with("bedrock", None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("update", "stored", "rejected"),
+    [
+        ({"embedding_provider": "bedrock", "embedding_dimensions": 768}, {}, True),
+        ({"embedding_provider": "bedrock"}, {"embedding_dimensions": "768"}, True),
+        ({"embedding_dimensions": 3072}, {"embedding_provider": "bedrock"}, True),
+        ({"graph_embedding_provider": "bedrock"}, {}, False),
+        ({"embedding_provider": "bedrock", "embedding_dimensions": 1536}, {}, False),
+        ({"embedding_dimensions": 768}, {"embedding_provider": "gemini"}, False),
+    ],
+)
+async def test_settings_refuse_sizes_cohere_cannot_produce(update, stored, rejected) -> None:
+    from sibyl.api.routes import settings as settings_routes
+
+    body = settings_routes.UpdateSettingsRequest(**update)
+    check = settings_routes._reject_unservable_bedrock_dimensions(FakeSetupSettings(stored), body)
+    if rejected:
+        with pytest.raises(HTTPException) as caught:
+            await check
+        assert caught.value.status_code == 422
+    else:
+        await check
