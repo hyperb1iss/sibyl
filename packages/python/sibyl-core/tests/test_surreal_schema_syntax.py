@@ -1318,9 +1318,9 @@ def test_current_graph_maintenance_skips_orphan_cleanup() -> None:
 
 @pytest.mark.asyncio
 async def test_graph_bootstrap_cleans_relations_before_enforcement() -> None:
-    client = _RecordingSchemaClient()
+    client = _RecordingSchemaClient(schema_version=GRAPH_SCHEMA_CURRENT_VERSION)
 
-    await bootstrap_schema(client)  # type: ignore[arg-type]
+    await bootstrap_schema(client, force=True)  # type: ignore[arg-type]
 
     relation_define_index = next(
         index
@@ -1336,12 +1336,20 @@ async def test_graph_bootstrap_cleans_relations_before_enforcement() -> None:
 
 
 @pytest.mark.asyncio
-async def test_graph_bootstrap_skips_missing_relation_cleanup_on_new_schema() -> None:
-    client = _RecordingSchemaClient(missing_tables={"relates_to"})
+@pytest.mark.parametrize("reset", [False, True])
+async def test_graph_bootstrap_skips_relation_cleanup_without_recorded_schema(
+    reset: bool,
+) -> None:
+    client = _RecordingSchemaClient(missing_tables={"relates_to", "mentions"})
 
-    await bootstrap_schema(client)  # type: ignore[arg-type]
+    await bootstrap_schema(client, reset=reset)  # type: ignore[arg-type]
 
+    assert not any("DELETE FROM relates_to" in statement for statement in client.calls)
+    assert not any("DELETE FROM mentions" in statement for statement in client.calls)
+    assert not any("episodes = episodes ??" in statement for statement in client.calls)
     assert any("DEFINE TABLE OVERWRITE relates_to" in statement for statement in client.calls)
+    assert any("DEFINE TABLE OVERWRITE mentions" in statement for statement in client.calls)
+    assert client.schema_version == GRAPH_SCHEMA_CURRENT_VERSION
 
 
 @pytest.mark.asyncio

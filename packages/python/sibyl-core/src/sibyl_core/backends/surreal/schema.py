@@ -1284,10 +1284,14 @@ async def _bootstrap_owned_schema(
             await _reconcile_embedding_dimension(driver, ownership)
             return
 
+    # Orphaned edges can only exist in a namespace that already recorded a
+    # schema. A new namespace or a reset has no relation tables yet, and a 3.x
+    # server fails DELETE and UPDATE on a missing table with NotFound.
+    relation_cleanup = (RELATION_EDGE_CLEANUP_DEFINITIONS,) if current_version > 0 else ()
     compatible_blocks = (
         ANALYZER_DEFINITIONS,
         render_surreal_compatible_sql(NODE_DEFINITIONS, url=driver._url),
-        RELATION_EDGE_CLEANUP_DEFINITIONS,
+        *relation_cleanup,
         render_surreal_compatible_sql(EDGE_DEFINITIONS, url=driver._url),
     )
     for block in compatible_blocks:
