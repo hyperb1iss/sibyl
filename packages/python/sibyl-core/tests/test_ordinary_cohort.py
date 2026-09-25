@@ -495,8 +495,9 @@ async def test_partition_places_an_unreciprocated_episode_in_its_nearest_cohort(
     install_proposal(monkeypatch, sources)
     _capacity_in_episodes(monkeypatch, capacity)
     # The first identifier seeds first, but every other episode's nearest
-    # neighbours are each other, so nothing reciprocates it. It joins the most
-    # similar cohort with room, and stands alone only when the budget says so.
+    # neighbours are each other, so nothing reciprocates it. It joins the
+    # cohort holding its own nearest neighbours when that has room, and stands
+    # alone only when the budget says so.
     await _embed(content_store, sources[0], _axis(3, tilt=0.5))
     for index in (1, 2, 3):
         await _embed(content_store, sources[index], _axis(0, tilt=index / 100))
@@ -505,6 +506,28 @@ async def test_partition_places_an_unreciprocated_episode_in_its_nearest_cohort(
         "org", "owner", ids, AsyncMock(return_value=SourceReadAuthority("owner"))
     )
     assert bins == ([ids[1:] + ids[:1]] if capacity == 5 else [ids[1:], ids[:1]])
+
+
+async def test_partition_never_places_a_leftover_where_its_neighbours_are_not(
+    cohort_sources, content_store, monkeypatch
+):
+    sources = await _family_sources(8)
+    install_proposal(monkeypatch, sources)
+    _capacity_in_episodes(monkeypatch, 4)
+    # The first identifier is an unreciprocated seed whose nearest neighbours
+    # all sit in the first family's cohort, which the budget fills. The second
+    # family's cohort has room, but none of the leftover's neighbours, so it
+    # stands alone rather than mixing into an unrelated cohort.
+    await _embed(content_store, sources[0], _vector({0: 0.6, 3: 0.8}))
+    for index in range(1, 5):
+        await _embed(content_store, sources[index], _axis(0, tilt=index / 100))
+    for index in range(5, 8):
+        await _embed(content_store, sources[index], _axis(1, tilt=index / 100))
+    ids = [source.id for source in sources]
+    bins = await service.partition_stored_cohort(
+        "org", "owner", ids, AsyncMock(return_value=SourceReadAuthority("owner"))
+    )
+    assert bins == [ids[1:5], ids[5:8], ids[:1]]
 
 
 async def test_partition_ranks_neighbours_among_unplaced_episodes(
@@ -970,3 +993,86 @@ async def test_partition_worker_preserves_preparation_failure(cohort_sources, mo
             [source.id for source in cohort_sources],
             AsyncMock(return_value=SourceReadAuthority("owner")),
         )
+
+
+def _coverage_row(uuid, sources, *, procedure=True, error=None, **request):
+    bindings = [{"source_id": s, "incarnation": f"inc-{s}", "generation": 1} for s in sources]
+    return {
+        "uuid": uuid,
+        "principal_id": "owner",
+        "request_json": json.dumps(
+            {"kind": service.VERSION, "source_bindings": bindings, **request}
+        ),
+        "result_json": json.dumps(
+            {
+                "proposal": {"procedure": {"kind": "pattern"} if procedure else None},
+                "validation_error": error,
+            }
+        ),
+    }
+
+
+def _page(index, pages=2, manifest="m1"):
+    return {"manifest": {"id": manifest, "pages": [{}] * pages}, "index": index}
+
+
+async def test_reflected_sources_count_only_proposals_that_finished(monkeypatch):
+    from sibyl_core.services.validation_candidate import ValidationCandidateWrite
+
+    def candidate(uuid):
+        return ValidationCandidateWrite(uuid, "", "", {}).id
+
+    rows = [
+        _coverage_row("abstained", ["a1", "a2"], procedure=False),
+        _coverage_row("stored", ["s1", "s2"]),
+        _coverage_row("retired", ["r1", "r2"]),
+        # Returned, but the candidate was never written: replay must stay possible.
+        _coverage_row("unwritten", ["u1", "u2"]),
+        _coverage_row("invalid", ["i1", "i2"], procedure=False, error="bad support"),
+        _coverage_row("single", ["o1"], procedure=False),
+        _coverage_row("other-kind", ["k1", "k2"], procedure=False, kind="other"),
+        # Every page of one manifest reflects the source alone; a missing page,
+        # or pages from different manifests, do not.
+        _coverage_row("whole-0", ["w1"], procedure=False, evidence_packet=_page(0)),
+        _coverage_row("whole-1", ["w1"], evidence_packet=_page(1)),
+        _coverage_row("half-0", ["h1"], procedure=False, evidence_packet=_page(0)),
+        _coverage_row("mixed-0", ["x1"], procedure=False, evidence_packet=_page(0)),
+        _coverage_row("mixed-1", ["x1"], procedure=False, evidence_packet=_page(1, manifest="m2")),
+        _coverage_row("lost-0", ["l1"], procedure=False, evidence_packet=_page(0)),
+        _coverage_row("lost-1", ["l1"], evidence_packet=_page(1)),
+    ]
+    stored = [{"uuid": candidate(uuid)} for uuid in ("stored", "whole-1")]
+    retired = [{"source_id": candidate("retired")}]
+
+    async def query(statement, **params):
+        if statement == service.COHORT_COVERAGE:
+            assert params == {"org": "org", "kind": service.VERSION}
+            return rows
+        expected = ("stored", "retired", "unwritten", "whole-1", "lost-1")
+        assert params["keys"] == [
+            {"org": "org", "id": identifier}
+            for identifier in sorted(candidate(uuid) for uuid in expected)
+        ]
+        return stored if statement == service.COHORT_CANDIDATES_STORED else retired
+
+    monkeypatch.setattr(service, "_query", query)
+    reflected = await service.reflected_sources("org")
+    assert reflected.cohort == {
+        ("owner", source, f"inc-{source}", 1) for source in ("a1", "a2", "s1", "s2", "r1", "r2")
+    }
+    assert reflected.alone == {("owner", "w1", "inc-w1", 1)}
+
+
+async def test_the_dream_reads_use_their_indexes(content_store):
+    from tests.test_validation_dependencies import assert_index
+
+    execution = await content_store.execute_query(
+        service.COHORT_COVERAGE.replace(";", " EXPLAIN;"), org="org", kind=service.VERSION
+    )
+    assert_index(execution, "memory_validation_execution_org_state")
+    checkpoint = await content_store.execute_query(
+        "SELECT source_id, request_json FROM dream_source_checkpoints "
+        "WHERE organization_id = $org AND completion_json != NONE EXPLAIN;",
+        org="org",
+    )
+    assert_index(checkpoint, "dream_checkpoint_source")

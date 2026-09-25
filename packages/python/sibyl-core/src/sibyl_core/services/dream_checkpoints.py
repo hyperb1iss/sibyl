@@ -359,6 +359,71 @@ async def checkpoint_prepared_candidates(
     return frozen
 
 
+#: One source observation: (principal, source, incarnation, generation).
+SourceObservationKey = tuple[str, str, str, int]
+
+
+#: Current observations by exact identity lookup, one per {org, id} key. An
+#: IN list on the identity index's last field scans the organization's whole
+#: prefix on Surreal 3.x, a closure does not see the query's own parameters on
+#: the embedded engine, and a key field read inside WHERE defeats the 3.x
+#: index, so each lookup binds its key's fields to scalars first.
+SOURCE_OBSERVATIONS = (
+    "RETURN array::flatten(array::map($keys, |$key| { LET $org = $key.org; LET $id = $key.id; "
+    "RETURN (SELECT source_id, incarnation, generation FROM source_states "
+    "WHERE organization_id = $org AND source_kind = 'raw_capture' "
+    "AND source_id = $id AND deleted = false); }));"
+)
+
+
+async def completed_dream_sources(organization_id: str) -> frozenset[SourceObservationKey]:
+    """Source observations whose individual dream pass completed."""
+    async with content_client.surreal_content_client() as client:
+        rows = await content_client.select_many(
+            client,
+            "SELECT source_id, request_json FROM dream_source_checkpoints "
+            "WHERE organization_id = $org AND completion_json != NONE;",
+            org=organization_id,
+        )
+    completed: set[SourceObservationKey] = set()
+    for row in rows:
+        request = json.loads(str(row["request_json"]))
+        completed.add(
+            (
+                str(request["principal_id"]),
+                str(row["source_id"]),
+                str(request["incarnation"]),
+                int(request["generation"]),
+            )
+        )
+    return frozenset(completed)
+
+
+async def current_source_observations(
+    organization_id: str, source_ids: list[str]
+) -> dict[str, tuple[str, int]]:
+    """Each live raw source's current (incarnation, generation), in one read.
+
+    A cheap stand-in for the authorized snapshot when the only question is
+    whether an observation was already reflected: it proves nothing about
+    access, so it may only rule a source out, never let one through.
+    """
+    if not source_ids:
+        return {}
+    async with content_client.surreal_content_client() as client:
+        rows = await content_client.select_many(
+            client,
+            SOURCE_OBSERVATIONS,
+            keys=[{"org": organization_id, "id": source} for source in sorted(set(source_ids))],
+        )
+    observed: dict[str, tuple[str, int]] = {}
+    for row in rows:
+        incarnation, generation = row.get("incarnation"), row.get("generation")
+        if isinstance(incarnation, str) and isinstance(generation, int):
+            observed[str(row["source_id"])] = (incarnation, generation)
+    return observed
+
+
 async def load_dream_cursor(organization_id: str) -> tuple[str, int]:
     """Read dispatch progress, never a successful-consumption acknowledgement."""
     async with content_client.surreal_content_client() as client:

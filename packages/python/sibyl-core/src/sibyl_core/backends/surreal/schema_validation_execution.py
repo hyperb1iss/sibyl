@@ -136,6 +136,13 @@ DEFINE EVENT IF NOT EXISTS purge_validation_dependents ON memory_validation_exec
 """
 
 
+#: The dream job reads one organization's returned proposals every run. The
+#: table lives in the shared content namespace, so without this index that
+#: read scans every organization's validation history.
+VALIDATION_EXECUTION_ORGANIZATION_STATE_INDEX = """
+DEFINE INDEX IF NOT EXISTS memory_validation_execution_org_state ON memory_validation_executions FIELDS organization_id, state;
+"""
+
 VALIDATION_OWNER_INDEX_REPAIR = """
 DEFINE INDEX OVERWRITE memory_validation_execution_owner ON memory_validation_executions FIELDS parent_id;
 """

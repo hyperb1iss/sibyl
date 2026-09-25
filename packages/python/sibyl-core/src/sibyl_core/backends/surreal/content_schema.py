@@ -34,6 +34,7 @@ from sibyl_core.backends.surreal.schema_validation_execution import (
     VALIDATION_DEPENDENCY_SCHEMA,
     VALIDATION_DEPENDENCY_SOURCE_PURGE_EVENT,
     VALIDATION_DEPENDENCY_UPGRADE,
+    VALIDATION_EXECUTION_ORGANIZATION_STATE_INDEX,
     VALIDATION_EXECUTION_SCHEMA,
     VALIDATION_ORIGIN_SCHEMA,
     VALIDATION_OWNER_INDEX_REPAIR,
@@ -100,7 +101,7 @@ CONTENT_TABLES = (
     "backups",
     "reflection_supersessions",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 45
+CONTENT_SCHEMA_CURRENT_VERSION = 46
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -1083,6 +1084,11 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             version=45,
             name="content_reflection_supersessions",
             statements=tuple(split_statements(CONTENT_REFLECTION_SUPERSESSION_DEFINITIONS)),
+        ),
+        SchemaMigration(
+            version=46,
+            name="content_validation_execution_organization_state",
+            statements=tuple(split_statements(VALIDATION_EXECUTION_ORGANIZATION_STATE_INDEX)),
         ),
     )
 

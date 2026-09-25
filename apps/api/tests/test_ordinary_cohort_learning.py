@@ -165,18 +165,180 @@ async def test_ordinary_cohort_public_capture_scheduled_publish_recall(cohort_ru
     from sibyl_core.services.validation_promotion import validated_graph_current
 
     assert await validated_graph_current(str(org.id), candidate.metadata["promoted_entity_id"])
-    # Identical cohort work may be selected again, but its durable proposal is reused.
+    # A completed cohort's sources are not selected again, so nothing redispatches.
     before = await client.execute_query(
         "SELECT uuid, result_json FROM memory_validation_executions ORDER BY uuid;"
     )
     monkeypatch.setattr(
         Extractor, "extract_with_usage", AsyncMock(side_effect=AssertionError("redispatch"))
     )
-    await reflection.run_reflection_dream_cycle({}, str(org.id))
+    again = await reflection.run_reflection_dream_cycle({}, str(org.id))
+    assert again["sources_scanned"] == 0, again
     after = await client.execute_query(
         "SELECT uuid, result_json FROM memory_validation_executions ORDER BY uuid;"
     )
     assert before == after
+
+
+async def test_an_abstaining_cohort_covers_its_sources_until_one_changes(
+    cohort_runtime, monkeypatch
+):
+    from dataclasses import replace
+
+    from sibyl_core.services.content_raw_persistence import get_raw_memory, save_raw_memory
+
+    org, _context, client, _runtime = cohort_runtime
+    sources = await capture(cohort_runtime)
+    abstention = {"procedure": None, "abstention_reason": "One configuration change is no habit."}
+
+    async def factory():
+        return Extractor(
+            CriticOutput,
+            agent=Agent(TestModel(custom_output_args=abstention), output_type=CriticOutput),
+        ), '{"max_input_chars":40000,"model":"offline"}'
+
+    monkeypatch.setattr(procedure_validation, "validation_extractor", factory)
+    first = await reflection.run_reflection_dream_cycle({}, str(org.id), candidate_limit=0)
+    assert first["failed"] == 0, first
+    assert first["sources"][0]["source_ids"] == sorted(s["uuid"] for s in sources)
+    assert first["sources"][0]["candidate_count"] == 0
+    stages = await client.execute_query("SELECT * FROM memory_validation_executions;")
+    assert [stage["state"] for stage in stages] == ["returned"]
+
+    second = await reflection.run_reflection_dream_cycle({}, str(org.id), candidate_limit=0)
+    assert second["sources_scanned"] == 0, second
+
+    # A new observation of one source is new evidence; its unchanged sibling
+    # stays covered, so the changed source is reflected on its own.
+    memory = await get_raw_memory(organization_id=str(org.id), memory_id=sources[0]["uuid"])
+    assert memory is not None
+    await save_raw_memory(
+        replace(memory, raw_content=memory.raw_content + " The loaded value was stale."),
+        expected_revision=memory.revision,
+        embedding_provider=None,
+    )
+    third = await reflection.run_reflection_dream_cycle({}, str(org.id), candidate_limit=0)
+    assert [item.get("source_id") for item in third["sources"]] == [memory.id], third
+
+
+async def test_a_covered_source_is_ruled_out_before_authorization(cohort_runtime, monkeypatch):
+    from sibyl_core.services.dream_checkpoints import current_source_observations
+    from sibyl_core.services.ordinary_cohort import ReflectedSources
+
+    org, context, client, _runtime = cohort_runtime
+    for index in range(40):
+        await memory_raw.remember_raw(
+            RawMemoryRememberRequest(raw_content=f"Observation {index}: the config reloaded."),
+            http_request=SimpleNamespace(headers={}, client=None),
+            org=org,
+            ctx=context,
+        )
+    ids = sorted(
+        row["uuid"] for row in await client.execute_query("SELECT uuid FROM raw_captures;")
+    )
+    observed = await current_source_observations(str(org.id), ids)
+    assert set(observed) == set(ids)
+    fresh = set(ids[::10])
+    covered = frozenset(
+        (context.user_id, identifier, *observed[identifier])
+        for identifier in ids
+        if identifier not in fresh
+    )
+    monkeypatch.setattr(
+        reflection,
+        "reflected_sources",
+        AsyncMock(return_value=ReflectedSources(covered, frozenset())),
+    )
+    authorized = []
+    load = reflection._load_dream_work
+
+    async def counted(group_id, source):
+        authorized.append(source.id)
+        return await load(group_id, source)
+
+    monkeypatch.setattr(reflection, "_load_dream_work", counted)
+    pages = []
+
+    async def partition_free(org_id, sources, *, dry_run):
+        pages.append(sorted(source.id for source in sources))
+        return [], {source.id for source in sources}
+
+    monkeypatch.setattr(ordinary_cohorts, "reflect_cohorts", partition_free)
+    # The walk wraps the whole corpus to find four fresh sources, and only
+    # those four are ever authorized.
+    await reflection._reflect_dream_sources(
+        group_id=str(org.id), run_id="covered", dry_run=True, limit=20
+    )
+    assert pages == [sorted(fresh)]
+    assert sorted(authorized) == sorted(fresh)
+
+
+async def _departed_member_sources(cohort_runtime):
+    """Two private captures by a member who then leaves the organization."""
+    from sibyl.persistence.surreal.auth import (
+        SurrealOrganizationMembershipRepository,
+        SurrealUserRepository,
+    )
+    from sibyl.persistence.surreal.auth_runtime._common import _auth_client_scope
+
+    org, _context, client, _runtime = cohort_runtime
+    async with _auth_client_scope() as auth:
+        member = await SurrealUserRepository.from_client(auth).create_local_user(
+            email="departed@example.test", password="fixture-password-123", name="Departed"
+        )
+        memberships = SurrealOrganizationMembershipRepository.from_client(auth)
+        await memberships.add_member(
+            organization_id=org.id, user_id=member.id, role=OrganizationRole.MEMBER
+        )
+    member_context = await ordinary_cohorts.resolve_auth_context(
+        claims={"sub": str(member.id), "org": str(org.id)}
+    )
+    for body in [
+        "Restart the worker after rotating the queue credentials.",
+        "The worker kept the old credentials until it restarted.",
+    ]:
+        await memory_raw.remember_raw(
+            RawMemoryRememberRequest(raw_content=body),
+            http_request=SimpleNamespace(headers={}, client=None),
+            org=org,
+            ctx=member_context,
+        )
+    async with _auth_client_scope() as auth:
+        await SurrealOrganizationMembershipRepository.from_client(auth).remove_member(
+            organization_id=org.id, user_id=member.id
+        )
+    rows = await client.execute_query(
+        "SELECT uuid FROM raw_captures WHERE principal_id = $member;", member=str(member.id)
+    )
+    return sorted(row["uuid"] for row in rows)
+
+
+async def test_a_departed_members_sources_neither_seed_nor_fill_a_page(cohort_runtime, monkeypatch):
+    org, _context, _client, _runtime = cohort_runtime
+    departed = await _departed_member_sources(cohort_runtime)
+    assert len(departed) == 2
+    # Still readable by their owner's own principal: the read gate alone lets
+    # them through, but no cohort of theirs can ever reach a provider.
+    from sibyl_core.services.content_raw_persistence import get_raw_memory
+
+    for identifier in departed:
+        memory = await get_raw_memory(organization_id=str(org.id), memory_id=identifier)
+        assert memory is not None
+        assert await reflection._load_dream_work(str(org.id), memory) is not None
+    fresh = [source for source in await capture(cohort_runtime) if source["uuid"] not in departed]
+    assert len(fresh) == 2
+    pages = []
+
+    async def partition_free(org_id, sources, *, dry_run):
+        pages.append(sorted(source.id for source in sources))
+        return [], {source.id for source in sources}
+
+    monkeypatch.setattr(ordinary_cohorts, "reflect_cohorts", partition_free)
+    for _ in range(3):
+        await reflection._reflect_dream_sources(
+            group_id=str(org.id), run_id="departed", dry_run=True, limit=20
+        )
+    assert pages == [sorted(source["uuid"] for source in fresh)] * 3, departed
 
 
 async def test_ordinary_cohort_candidate_write_failure_retains_execution_and_replays(
@@ -413,7 +575,10 @@ async def test_ordinary_cohort_preparation_denial_never_falls_back(cohort_runtim
     factory = AsyncMock(side_effect=AssertionError("provider preparation after denied authority"))
     monkeypatch.setattr(procedure_validation, "validation_extractor", factory)
     receipt = await reflection.run_reflection_dream_cycle({}, str(org.id))
-    assert receipt["failed"] == 1
+    # A viewer's sources fail the send gate, so selection refuses them before
+    # any preparation rather than paging them into a cohort that must fail.
+    assert receipt["failed"] == 0
+    assert receipt["sources_scanned"] == 0
     assert receipt["sources_reflected"] == 0
     factory.assert_not_awaited()
     assert not await client.execute_query("SELECT * FROM dream_source_checkpoints;")

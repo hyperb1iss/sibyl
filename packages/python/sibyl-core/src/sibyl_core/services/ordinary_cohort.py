@@ -22,6 +22,7 @@ from sibyl_core.services.content_raw_persistence import (
     get_raw_memory,
     remember_reflection_candidate_review,
 )
+from sibyl_core.services.dream_checkpoints import SourceObservationKey
 from sibyl_core.services.memory_source_validation import (
     SourceAuthorityResolver,
     SourceReadAuthority,
@@ -62,6 +63,23 @@ LET $snapshot_digest=crypto::sha256(type::string($snapshot));
 COHORT_AFFINITY = (
     "SELECT uuid, embedding, metadata.embedding_metadata AS space FROM raw_captures "
     "WHERE organization_id=$org AND uuid IN $source_ids AND embedding != NONE ORDER BY uuid;"
+)
+COHORT_COVERAGE = (
+    "SELECT uuid, principal_id, request_json, result_json FROM memory_validation_executions "
+    "WHERE organization_id=$org AND state='returned' AND purged=false "
+    # CONTAINS rather than string::contains: the embedded engine abandons the
+    # organization index for a WHERE clause holding a function call.
+    "AND request_json CONTAINS $kind;"
+)
+# Exact identity lookups over {org, id} keys, shaped like SOURCE_OBSERVATIONS.
+COHORT_CANDIDATES_STORED = (
+    "RETURN array::flatten(array::map($keys, |$key| { LET $org = $key.org; LET $id = $key.id; "
+    "RETURN (SELECT uuid FROM raw_captures WHERE uuid = $id AND organization_id = $org); }));"
+)
+COHORT_CANDIDATES_RETIRED = (
+    "RETURN array::flatten(array::map($keys, |$key| { LET $org = $key.org; LET $id = $key.id; "
+    "RETURN (SELECT source_id FROM source_states WHERE organization_id = $org "
+    "AND source_kind = 'raw_capture' AND source_id = $id); }));"
 )
 COHORT_GUARD = (
     COHORT_SNAPSHOT
@@ -469,6 +487,82 @@ async def _run_cohort(org, principal, original, resolver, extractor, policy, aut
         raise
 
 
+@dataclass(frozen=True)
+class ReflectedSources:
+    """Source observations the dream cycle already reflected, by how.
+
+    Each entry is (principal, source, incarnation, generation), so a source
+    whose content or incarnation changed is reflected again.
+    """
+
+    #: Bound into a completed cohort of two or more sources.
+    cohort: frozenset[SourceObservationKey]
+    #: Reflected alone: every page of its packet manifest completed.
+    alone: frozenset[SourceObservationKey]
+
+
+async def reflected_sources(org: str) -> ReflectedSources:
+    """What completed ordinary proposals have already reflected.
+
+    A proposal completes once it returned and either abstained or left its
+    candidate behind, still stored or retired with a source state. One that
+    returned but whose candidate was never written stays incomplete, so the
+    dream job selects its sources again and replays the stored result instead
+    of losing it. Failed, fenced and unresolved proposals never complete. A
+    cohort of two or more sources covers each source it bound; a single
+    source's packet pages cover it only once every page of the same manifest
+    completed, since one page reflects only part of it.
+    """
+    rows = []
+    for row in await _query(COHORT_COVERAGE, org=org, kind=VERSION):
+        request = json.loads(row["request_json"])
+        result = json.loads(row.get("result_json") or "null")
+        if request.get("kind") != VERSION or not isinstance(result, dict):
+            continue
+        if result.get("validation_error") is not None:
+            continue
+        abstained = (result.get("proposal") or {}).get("procedure") is None
+        # The candidate identity derives from the execution alone, so it is
+        # known without replaying the proposal.
+        candidate = "" if abstained else ValidationCandidateWrite(row["uuid"], "", "", {}).id
+        rows.append((row["principal_id"], request, candidate))
+    candidates = sorted({candidate for _, _, candidate in rows if candidate})
+    kept = set()
+    if candidates:
+        keys = [{"org": org, "id": candidate} for candidate in candidates]
+        stored = await _query(COHORT_CANDIDATES_STORED, keys=keys)
+        retired = await _query(COHORT_CANDIDATES_RETIRED, keys=keys)
+        kept.update(row["uuid"] for row in stored)
+        kept.update(row["source_id"] for row in retired)
+    cohort: set[SourceObservationKey] = set()
+    pages: dict[tuple[SourceObservationKey, str], set[int]] = {}
+    page_counts: dict[tuple[SourceObservationKey, str], int] = {}
+    for principal, request, candidate in rows:
+        if candidate and candidate not in kept:
+            continue
+        observed = [
+            (principal, b["source_id"], b["incarnation"], b["generation"])
+            for b in request.get("source_bindings") or []
+        ]
+        packet = request.get("evidence_packet")
+        if packet is None:
+            if len(observed) >= 2:
+                cohort.update(observed)
+            continue
+        if len(observed) != 1:
+            continue
+        manifest = packet["manifest"]
+        key = (observed[0], canonical(manifest))
+        pages.setdefault(key, set()).add(packet["index"])
+        page_counts[key] = len(manifest["pages"])
+    alone = {
+        source
+        for (source, manifest), done in pages.items()
+        if done == set(range(page_counts[(source, manifest)]))
+    }
+    return ReflectedSources(frozenset(cohort), frozenset(alone))
+
+
 async def _proposal_extractor(owned, system: str):
     model = (await owned._get_agent()).model
     if not isinstance(model, Model):
@@ -563,10 +657,13 @@ def _partition_prepared_cohort(
 
     Embedded episodes grow each cohort from its seed's nearest neighbours, so a
     proposal compares related experience instead of whatever shared a page of
-    identifiers. Every other episode then joins the most similar cohort that
-    still fits, or the first one when it has no comparable vector, so a cohort
-    of one happens only when the budget forces it. Last, two finished cohorts
-    join when the union stands clearly apart from every other episode and fits.
+    identifiers. An embedded episode that growth leaves over then joins the
+    most similar cohort that fits among those holding one of its own nearest
+    neighbours, and otherwise stands alone: room in an unrelated cohort is no
+    evidence that it belongs there. An episode with no comparable vector joins
+    the first cohort that fits, since nothing shows where it belongs. Last, two
+    finished cohorts join when the union stands clearly apart from every other
+    episode and fits.
     """
     group = PartialCohort.model_validate_json(original.input_json)
     cohort_fields = group.model_dump(exclude={"episodes"})
@@ -613,6 +710,7 @@ def _partition_prepared_cohort(
         if cancelled.is_set():
             raise asyncio.CancelledError
         scores = similarity.get(episode.episode_id, {})
+        nearest = _nearest_ranked(scores)
 
         def affinity_to(bucket, scores=scores):
             known = [scores[member.episode_id] for member in bucket if member.episode_id in scores]
@@ -621,6 +719,8 @@ def _partition_prepared_cohort(
         # sorted() is stable, so an episode with no comparable vector keeps
         # plain first-fit order across the cohorts.
         for bucket in sorted(bins, key=affinity_to, reverse=True):
+            if nearest is not None and nearest.isdisjoint(m.episode_id for m in bucket):
+                continue
             if fits([*bucket, episode]):
                 bucket.append(episode)
                 break
@@ -634,10 +734,16 @@ def _partition_prepared_cohort(
 #: neighbours. A rank rather than a similarity cutoff, so it means the same
 #: thing across embedding models and between boilerplate-heavy transcripts and
 #: short notes. On the screen48 captures, paged and budgeted the way the dream
-#: job runs, two neighbours keep 92 percent of a cohort in one task family with
-#: no cohort of one, where nearest-neighbour growth alone keeps 75 and
-#: identifier order keeps 24.
+#: job runs, two neighbours keep 92 percent of a cohort in one task family,
+#: where nearest-neighbour growth alone keeps 75 and identifier order keeps 24.
 COHORT_NEIGHBOURS = 2
+
+
+def _nearest_ranked(scores: Mapping[str, float]) -> frozenset[str] | None:
+    """An episode's COHORT_NEIGHBOURS nearest ranked episodes; None without a vector."""
+    if not scores:
+        return None
+    return frozenset(sorted(scores, key=lambda other: (-scores[other], other))[:COHORT_NEIGHBOURS])
 
 
 def _similarity(episodes, vectors) -> dict[str, dict[str, float]]:
