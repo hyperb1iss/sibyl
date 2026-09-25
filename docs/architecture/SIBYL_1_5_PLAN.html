@@ -367,7 +367,7 @@
       <li><a href="#sequence">Sequence</a></li>
       <li><a href="#spend">Spend and scope</a></li>
       <li><a href="#risks">Risk register</a></li>
-      <li><a href="#decisions">Open decisions</a></li>
+      <li><a href="#decisions">Decisions taken</a></li>
       <li><a href="#first">First slice</a></li>
       <li><a href="#evidence">Evidence</a></li>
     </ol>
@@ -397,7 +397,7 @@
           <li><a href="#sequence">Sequence</a></li>
           <li><a href="#spend">Spend and scope</a></li>
           <li><a href="#risks">Risk register</a></li>
-          <li><a href="#decisions">Open decisions</a></li>
+          <li><a href="#decisions">Decisions taken</a></li>
           <li><a href="#first">First execution slice</a></li>
           <li><a href="#evidence">Evidence</a></li>
         </ol>
@@ -477,13 +477,13 @@
           <tr><td><span class="id">c5ecc5b4</span> <span class="tag block">first</span></td><td>PR CI runs lint, typecheck and tests but never <code>moon run :check</code>. Trust gates run only at the release RC, uncached.</td><td>A PR job runs the trust gate tasks (team-scope, doc-claim, and whatever else <code>:check</code> adds) with correct moon inputs.</td><td><span class="size s">S</span></td></tr>
           <tr><td><span class="id">672d5084</span></td><td>Default <code>sibyl context</code> recall returns memories from other projects.</td><td>Scope default recall to the linked project plus explicitly shared scopes. <code>--all</code> stays as a labelled opt-in.</td><td><span class="size m">M</span></td></tr>
           <tr><td><span class="id">952d4340</span></td><td>Every web page defaults to All Projects and shows other projects' cards.</td><td>Default to the selected or most recent project and persist the choice. All Projects becomes an explicit selection.</td><td><span class="size s">S</span></td></tr>
-          <tr><td><span class="id">78b4010c</span> <span class="id">d9e4b5bd</span></td><td><code>authorize_memory_read</code> has no SHARED branch, so raw recall drops SHARED rows while listing returns them. Legacy shared captures are denied to every reader.</td><td>Decide what SHARED means (team, org, or retired), then add the read branch or backfill and tombstone. Needs your call.</td><td><span class="size m">M</span></td></tr>
+          <tr><td><span class="id">78b4010c</span> <span class="id">d9e4b5bd</span></td><td><code>authorize_memory_read</code> has no SHARED branch, so raw recall drops SHARED rows while listing returns them. Legacy shared captures are denied to every reader.</td><td>Retire SHARED for new writes and map legacy rows to team: add the read branch for the mapped scope, backfill the legacy rows, and tombstone what cannot map.</td><td><span class="size m">M</span></td></tr>
           <tr><td><span class="id">3ed9000e</span></td><td>A promoted pattern from a scoped cycle is excluded from native recall as out of scope, while its superseded draft stays recallable.</td><td>Fix the inventory's scope resolution for promoted private patterns, and make superseded drafts unrecallable. Shared with workstream two.</td><td><span class="size m">M</span></td></tr>
           <tr><td><span class="id">a3e39787</span></td><td>After a raw source is revised, three old relationship generations stay readable.</td><td>Bind relationship reads to the source's current observation across search, explore, REST and cache. In progress since September 11.</td><td><span class="size l">L</span></td></tr>
           <tr><td><span class="id">21495240</span></td><td>Deleting a <code>raw_memory:</code> id returns 500, and the CLI buffers the write forever.</td><td>Route raw ids to the correction lifecycle or return a 4xx with remediation. Never buffer a write the server can't accept.</td><td><span class="size s">S</span></td></tr>
           <tr><td><span class="id">468693b1</span></td><td>The CLI maps five correction actions; restore, hide, redact and mark-sensitive exist only in the API.</td><td>Add the missing actions (restore aliased as <code>undo</code>), each with a preview line.</td><td><span class="size s">S</span></td></tr>
           <tr><td><span class="id">6ec73846</span></td><td>An entity PATCH between backfill enqueue and drain leaves an embedding that's never refreshed.</td><td>Give the update path ownership of re-embedding and enqueue on write.</td><td><span class="size m">M</span></td></tr>
-          <tr><td><span class="id">47640192</span></td><td>The two projection paths disagree on whether private prose may be extracted. Not a leak today; rows inherit private stamps.</td><td>Pick one policy and unify both paths on it. Needs your call.</td><td><span class="size s">S</span></td></tr>
+          <tr><td><span class="id">47640192</span></td><td>The two projection paths disagree on whether private prose may be extracted. Not a leak today; rows inherit private stamps.</td><td>Refuse private prose on both paths, matching <code>project_memory_entities</code>.</td><td><span class="size s">S</span></td></tr>
           <tr><td><span class="id">e23ccd49</span></td><td>The Next.js dev server exposed a credential in its process title.</td><td>Rotate, trace how the value reaches argv, remove the path, and verify value-free inspection after restart.</td><td><span class="size s">S</span></td></tr>
           <tr><td><span class="id">1a156f2b</span> <span class="id">5a978550</span></td><td>Pending writes that reference mutated task ids never drain. <code>sibyl health</code> reports healthy while auth storage is down.</td><td>Recheck the first against PR 615 and close or fix it. Have health round-trip a trivial auth-storage read.</td><td><span class="size s">S</span></td></tr>
         </tbody>
@@ -768,14 +768,15 @@
 
     <section id="decisions">
       <span class="sec-num">15</span>
-      <h2>Open decisions</h2>
+      <h2>Decisions taken</h2>
+      <p class="measure">These are settled and the plan builds on them. Each has a line of reasoning so the choice can be revisited if the reasoning stops holding. Say so if one is wrong, and the plan changes.</p>
       <div class="decisions measure">
-        <div class="decision"><span class="q">Spend: approve the staged ceiling of $435.</span><span class="rec">Each stage unlocks only when the previous gate passes. The first spend is $40 (live smokes and the headroom screen).</span></div>
-        <div class="decision"><span class="q">SHARED scope: map it to team, map it to org, or retire it?</span><span class="rec">Recommendation: retire it for new writes and map legacy rows to team. No production writer exists today (<span class="id">78b4010c</span>, <span class="id">d9e4b5bd</span>).</span></div>
-        <div class="decision"><span class="q">Private prose extraction: extract and stamp private, or refuse?</span><span class="rec">Recommendation: refuse on both paths, matching <code>project_memory_entities</code>. It's simpler to audit and loses nothing a private recall needs (<span class="id">47640192</span>).</span></div>
-        <div class="decision"><span class="q">Jev: merge #641, hold #626, archive the experiments?</span><span class="rec">Recommendation: yes. The Jev lane is yours to overrule.</span></div>
-        <div class="decision"><span class="q">Viewer reflection: keep the #661 behaviour?</span><span class="rec">Recommendation: keep it. Org viewers' lone private sources no longer get an individual pass, which matches what a cohort already required.</span></div>
-        <div class="decision"><span class="q">Team pilot: authorize the live migration, and confirm the pilot doesn't block 1.5.0.</span><span class="rec">Recommendation: the pilot runs on the RC and can finish in 1.5.1.</span></div>
+        <div class="decision"><span class="q">Spend is capped at $435, staged behind gates.</span><span class="rec">Sibyl is an open-source project paid for out of pocket. The first $40 (live smokes and the headroom screen) is the only spend before a gate, and a canary stop ends the study at about $60.</span></div>
+        <div class="decision"><span class="q">SHARED scope is retired for new writes; legacy rows map to team.</span><span class="rec">No production writer of SHARED exists today, and team is the scope those captures were meant to reach (<span class="id">78b4010c</span>, <span class="id">d9e4b5bd</span>).</span></div>
+        <div class="decision"><span class="q">Private prose is not extracted on either projection path.</span><span class="rec">Matches <code>project_memory_entities</code>, is simpler to audit, and loses nothing a private recall needs (<span class="id">47640192</span>).</span></div>
+        <div class="decision"><span class="q">Jev: #641 merges, #626 waits for the real-data gate, experiments 628 to 646 are archived as one evidence branch.</span><span class="rec">A disabled experiment does not justify a per-capture backfill, and the standalone perf win stands on its own.</span></div>
+        <div class="decision"><span class="q">The #661 viewer behaviour stays.</span><span class="rec">Org viewers' lone private sources no longer get an individual reflection pass, which is what a cohort already required of them.</span></div>
+        <div class="decision"><span class="q">The team pilot runs on the release candidate and does not block the 1.5.0 cut.</span><span class="rec">The rehearsals are the release gate; the live migration into the team server gets its own go-ahead when P3 arrives.</span></div>
       </div>
     </section>
 
