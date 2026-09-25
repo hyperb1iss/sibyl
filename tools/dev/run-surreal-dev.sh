@@ -31,36 +31,10 @@ usage() {
 Usage: moon run dev -- [options]
 
 Options:
-  --ignore-legacy   Start SurrealDB dev even if local legacy data is detected
   --lan             Bind the API for access from other devices on the local network
   --print-env       Print resolved runtime environment and exit
   --help            Show this help
 EOF
-}
-
-docker_legacy_setup_detected() {
-  local project_name="${COMPOSE_PROJECT_NAME:-sibyl}"
-  local compose_ps=""
-  local volumes=""
-
-  if ! command -v docker >/dev/null 2>&1; then
-    return 1
-  fi
-
-  compose_ps="$(docker compose --env-file /dev/null ps -a --format json 2>/dev/null || true)"
-  if [[ "$compose_ps" == *'"Service":"falkordb"'* || "$compose_ps" == *'"Service":"postgres"'* ]]; then
-    return 0
-  fi
-
-  volumes="$(docker volume ls --format '{{.Name}}' 2>/dev/null || true)"
-  if grep -qx "${project_name}_falkordb_data" <<<"$volumes"; then
-    return 0
-  fi
-  if grep -qx "${project_name}_postgres_data" <<<"$volumes"; then
-    return 0
-  fi
-
-  return 1
 }
 
 docker_is_podman_emulation() {
@@ -139,50 +113,6 @@ run_compose() {
   fi
 
   "${command[@]}" --env-file /dev/null "$@"
-}
-
-surreal_runtime_data_detected() {
-  local surreal_data_dir="${1:-}"
-
-  if [[ -z "$surreal_data_dir" ]]; then
-    surreal_data_dir="$(resolve_surreal_volume_dir)"
-  elif [[ "$surreal_data_dir" != /* ]]; then
-    surreal_data_dir="$repo_root/${surreal_data_dir#./}"
-  fi
-
-  [[ -d "$surreal_data_dir" ]] || return 1
-  [[ -e "$surreal_data_dir/.sibyl-migrated" ]] && return 0
-  [[ -e "$surreal_data_dir/sibyl.db/CURRENT" ]] && return 0
-  [[ -e "$surreal_data_dir/sibyl.db/IDENTITY" ]] && return 0
-  [[ -d "$surreal_data_dir/sibyl.db" ]] || return 1
-  find "$surreal_data_dir/sibyl.db" -mindepth 1 -maxdepth 1 -type f -print -quit 2>/dev/null | grep -q .
-}
-
-warn_if_legacy_setup_detected() {
-  if [[ "$SIBYL_STORE" != "surreal" || "${SIBYL_DEV_SKIP_LEGACY_CHECK:-}" == "1" ]]; then
-    return 0
-  fi
-  if ! docker_legacy_setup_detected; then
-    return 0
-  fi
-  if surreal_runtime_data_detected; then
-    return 0
-  fi
-
-  cat <<'EOF'
-⚠️  Local legacy data detected.
-   `moon run dev` now starts the SurrealDB runtime by default.
-
-   Import a previously exported archive with:
-     uv run --directory apps/api sibyld migrate import <archive> \
-       --source-type legacy-archive \
-       --target-mode surreal \
-       --yes --clean
-
-   Start a fresh SurrealDB dev runtime:
-     moon run dev -- --ignore-legacy
-EOF
-  return 1
 }
 
 resolve_coordination_backend() {
@@ -469,17 +399,12 @@ cleanup() {
 
 main() {
   local print_env=false
-  local ignore_legacy=false
   local lan_mode=false
 
   while (($# > 0)); do
     case "$1" in
       --print-env)
         print_env=true
-        shift
-        ;;
-      --ignore-legacy)
-        ignore_legacy=true
         shift
         ;;
       --lan)
@@ -638,10 +563,6 @@ main() {
       printf 'SIBYL_REDIS_PORT=%s\n' "$SIBYL_REDIS_PORT"
     fi
     return 0
-  fi
-
-  if [[ "$ignore_legacy" != true ]] && ! warn_if_legacy_setup_detected; then
-    return 1
   fi
 
   echo "🔮 Store: $SIBYL_STORE"
