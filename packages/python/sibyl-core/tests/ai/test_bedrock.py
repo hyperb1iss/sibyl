@@ -144,6 +144,9 @@ def test_inference_profile_arns_keep_the_rules_of_the_model_they_name(monkeypatc
     )
     opaque = "arn:aws:bedrock:us-west-2:123456789012:application-inference-profile/abc123"
     assert canonical_model_alias(opaque) == opaque
+    llama = "arn:aws:bedrock:us-west-2:123456789012:inference-profile/us.meta.llama4-maverick-17b"
+    with pytest.raises(LLMConfigError, match=r"names us\.meta"):
+        providers.resolve_provider_model_id(bedrock_config(llama))
 
 
 def test_dated_names_for_versioned_models_map_to_real_ids(monkeypatch):

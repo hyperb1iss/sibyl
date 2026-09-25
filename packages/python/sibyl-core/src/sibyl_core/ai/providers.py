@@ -255,7 +255,15 @@ def _bedrock_model_id(config: LLMConfig) -> str:
     """
     model = config.model.strip()
     if is_arn(model):
-        # Application inference profiles and provisioned throughput: sent as given.
+        # Sent as given. An inference-profile or foundation-model ARN still has
+        # to name a Claude model; an opaque one cannot be checked.
+        named = arn_model_id(model)
+        if named is not None and not canonical_model_alias(named).startswith("claude-"):
+            raise LLMConfigError(
+                f"Bedrock serves Claude models here; {config.model} names {named}",
+                provider="bedrock",
+                model=config.model,
+            )
         return model
     alias = canonical_model_alias(model)
     entry = model_registry.get(alias, kind=ModelKind.LLM)

@@ -80,6 +80,8 @@ def no_bedrock_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "SIBYL_GRAPH_EMBEDDING_PROVIDER",
         "SIBYL_EMBEDDING_DIMENSIONS",
         "SIBYL_GRAPH_EMBEDDING_DIMENSIONS",
+        "SIBYL_BEDROCK_API",
+        "ANTHROPIC_AWS_API_KEY",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -229,6 +231,43 @@ async def test_an_aws_environment_alone_does_not_mark_bedrock_ready(
 
     monkeypatch.delenv("AWS_REGION")
     assert await setup_routes.bedrock_selection() == (False, False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("installed", [True, False])
+async def test_a_local_graph_plane_counts_only_with_its_dependency(
+    monkeypatch: pytest.MonkeyPatch, installed: bool
+) -> None:
+    monkeypatch.setenv("AWS_REGION", "us-west-2")
+    monkeypatch.setattr(setup_routes, "sentence_transformers_available", lambda: installed)
+    _use_providers(monkeypatch, llm="bedrock", embeddings="bedrock", graph="local")
+
+    assert await setup_routes.bedrock_selection() == (True, installed)
+
+
+@pytest.mark.asyncio
+async def test_validate_keys_proves_sigv4_when_embeddings_use_bedrock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AWS_REGION", "us-west-2")
+    monkeypatch.setenv("SIBYL_BEDROCK_API", "mantle")
+    monkeypatch.setenv("ANTHROPIC_AWS_API_KEY", "claude-only-key")
+    monkeypatch.setattr(setup_routes, "check_provider_key", AsyncMock(return_value=_key_result()))
+    proved: list[object] = []
+
+    async def prove(settings):
+        proved.append(settings)
+        raise RuntimeError("No AWS credentials found for Amazon Bedrock")
+
+    monkeypatch.setattr(setup_routes, "resolve_bedrock_credentials", prove)
+    _use_providers(monkeypatch, llm="bedrock", embeddings="bedrock")
+
+    valid, error = await setup_routes._check_bedrock()
+
+    assert valid is False
+    assert "No AWS credentials" in (error or "")
+    assert proved
+    assert proved[0].claude_api_key is None
 
 
 @pytest.mark.asyncio

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
+from dataclasses import replace
 
 import structlog
 from fastapi import APIRouter, Depends
@@ -26,9 +27,12 @@ from sibyl.services.settings import get_settings_service
 from sibyl_core.ai.bedrock import (
     API_KEY_ENV_VARS as BEDROCK_API_KEY_ENV_VARS,
     bedrock_region_configured,
+    resolve_bedrock_credentials,
+    resolve_bedrock_settings,
 )
 from sibyl_core.ai.llm.config import LLMProviderName, LLMSurface, get_config_source
 from sibyl_core.ai.validation import KeyValidationResult, check_provider_key
+from sibyl_core.embeddings.providers import sentence_transformers_available
 from sibyl_core.integration import integration_content
 
 router = APIRouter(prefix="/setup", tags=["setup"])
@@ -168,8 +172,10 @@ async def bedrock_selection() -> tuple[bool, bool]:
         llm = False
     document = await effective_embedding_setting("embedding_provider")
     graph = await effective_embedding_setting("graph_embedding_provider")
-    # The graph plane needs no key on bedrock or local, so either leaves nothing to set.
-    return llm, document == "bedrock" and graph in {"bedrock", "local"}
+    # The graph plane needs no key on bedrock, or on local when its optional
+    # sentence-transformers dependency is installed (sibyld does not ship it).
+    graph_covered = graph == "bedrock" or (graph == "local" and sentence_transformers_available())
+    return llm, document == "bedrock" and graph_covered
 
 
 async def effective_embedding_setting(key: str) -> str | None:
@@ -189,11 +195,20 @@ async def effective_embedding_setting(key: str) -> str | None:
 
 
 async def _check_bedrock() -> tuple[bool | None, str | None]:
-    """Probe Bedrock through the AWS credential chain, only when something uses it."""
-    if not any(await bedrock_selection()):
+    """Probe Bedrock through the AWS credential chain, only when something uses it.
+
+    The Claude probe proves the Claude client's credentials. On Mantle those
+    can be a key only that client reads, so embeddings routed to Bedrock also
+    prove the credentials their own requests sign with.
+    """
+    llm, embeddings = await bedrock_selection()
+    if not (llm or embeddings):
         return None, None
     try:
         result = await check_provider_key("bedrock", None)
+        if result.valid and embeddings:
+            bedrock = resolve_bedrock_settings()
+            await resolve_bedrock_credentials(replace(bedrock, mantle_api_key=None))
     except Exception as e:
         log.warning("Bedrock validation failed", error=str(e))
         return False, str(e)
