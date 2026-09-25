@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import re
 import secrets
 import subprocess
 from copy import deepcopy
@@ -12,15 +11,16 @@ from typing import Annotated, Any
 
 import typer
 import yaml
-from packaging.version import InvalidVersion, Version
 
 from sibyl_cli import config_store
 from sibyl_cli.common import NEON_CYAN, console, error, info, success, warn
 from sibyl_cli.docker_storage import (
+    MANAGED_SURREAL_IMAGE,
     SURREAL_IMAGE,
     SURREAL_IMAGE_REFERENCE,
     surreal_data_mount,
     surreal_volume_initializer,
+    upgraded_surreal_image,
 )
 from sibyl_cli.local import DEFAULT_IMAGE_TAG, check_docker, check_docker_compose
 
@@ -40,7 +40,6 @@ MANAGED_IMAGE_REPOSITORIES = (
 )
 # The shape `init` writes for the SurrealDB image. Anything else in that slot
 # was edited by hand, and upgrade leaves it alone.
-MANAGED_SURREAL_IMAGE = re.compile(r"\$\{SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:(?P<tag>[^}]+)\}")
 
 
 def compose_config(
@@ -198,13 +197,6 @@ def write_env_image_tag(image_tag: str) -> None:
     SIBYL_DOCKER_ENV.write_text("\n".join(lines) + "\n")
 
 
-def _surreal_version(tag: str) -> Version | None:
-    try:
-        return Version(tag.removeprefix("v"))
-    except InvalidVersion:
-        return None
-
-
 def _surreal_image_override() -> str | None:
     """The SIBYL_SURREAL_IMAGE value Compose interpolates, if one is set.
 
@@ -232,15 +224,14 @@ def _plan_surreal_image(service: dict[str, Any]) -> None:
         return
 
     if image != SURREAL_IMAGE_REFERENCE:
-        match = MANAGED_SURREAL_IMAGE.fullmatch(image)
-        shipped_tag = SURREAL_IMAGE.rpartition(":")[2]
-        current = _surreal_version(match["tag"]) if match else None
-        shipped = _surreal_version(shipped_tag)
-        if match is None or current is None or shipped is None or current > shipped:
+        moved = upgraded_surreal_image(image)
+        if moved is None:
             warn(f"Leaving the SurrealDB image {image} as written; this CLI runs {SURREAL_IMAGE}.")
             return
-        service["image"] = SURREAL_IMAGE_REFERENCE
-        info(f"Upgrading SurrealDB from {match['tag']} to {shipped_tag}")
+        service["image"] = moved
+        match = MANAGED_SURREAL_IMAGE.fullmatch(image)
+        shipped_tag = SURREAL_IMAGE.rpartition(":")[2]
+        info(f"Upgrading SurrealDB from {match['tag'] if match else image} to {shipped_tag}")
 
     override = _surreal_image_override()
     if override and override != SURREAL_IMAGE:
