@@ -26,7 +26,7 @@ If neither applies, the regular Sibyl skill is the right one.
 ## Consolidating Personal Surreal Instances into One Target
 
 Use this when the user has multiple current Sibyl instances and wants to merge their graph/content
-into a hosted canonical org, such as Eternia.
+into one hosted canonical org.
 
 The safe default is content consolidation only:
 
@@ -44,12 +44,12 @@ uv run --directory apps/api sibyld migrate consolidate \
   --source laptop=<laptop-org-id> \
   --source desktop=<desktop-org-id> \
   --canonical-org-id <target-org-id> \
-  --canonical-org-name "Stefanie Jane" \
-  --canonical-org-slug stefanie-jane \
-  --target-host eternia \
+  --canonical-org-name "<owner>" \
+  --canonical-org-slug <owner-slug> \
+  --target-host <your-host> \
   --target-sudo \
-  --server-url https://sibyl.hyperbliss.tech \
-  --context-name eternia \
+  --server-url https://sibyl.example.com \
+  --context-name <your-context> \
   --setup-cli
 ```
 
@@ -61,12 +61,12 @@ after the dry run is clean:
 uv run --directory apps/api sibyld migrate consolidate \
   --source local=<local-org-id> \
   --canonical-org-id <target-org-id> \
-  --canonical-org-name "Stefanie Jane" \
-  --canonical-org-slug stefanie-jane \
-  --target-host eternia \
+  --canonical-org-name "<owner>" \
+  --canonical-org-slug <owner-slug> \
+  --target-host <your-host> \
   --target-sudo \
-  --server-url https://sibyl.hyperbliss.tech \
-  --context-name eternia \
+  --server-url https://sibyl.example.com \
+  --context-name <your-context> \
   --setup-cli \
   --apply
 ```
@@ -84,7 +84,7 @@ SIBYL_SURREAL_PASSWORD=root \
 uv run --directory apps/api sibyld migrate consolidate \
   --source local=<local-org-id> \
   --canonical-org-id <target-org-id> \
-  --target-host eternia \
+  --target-host <your-host> \
   --target-sudo \
   --apply
 ```
@@ -104,11 +104,11 @@ After the live import, verify both stores:
 
 ```bash
 # Graph parity: expected/actual entities, relationships, episodes, mentions.
-ssh eternia 'sudo -n docker compose --project-directory /opt/sibyl exec -T backend \
+ssh <your-host> 'sudo -n docker compose --project-directory /opt/sibyl exec -T backend \
   sibyld migrate verify /tmp/sibyl-consolidated.tar.gz --org-id <target-org-id>'
 
 # Content parity: compare row_counts from content.json with an org-scoped content export.
-ssh eternia 'sudo -n docker compose --project-directory /opt/sibyl exec -T backend \
+ssh <your-host> 'sudo -n docker compose --project-directory /opt/sibyl exec -T backend \
   python - <<'"'"'PY'"'"'
 from sibyl.cli.common import run_async
 from sibyl.persistence.content_archive import export_content_archive_payload
@@ -124,7 +124,7 @@ PY'
 ```
 
 `--setup-cli` creates/activates the local context and starts normal browser/device auth. Do not pass
-passwords in shell history or process args; run `sibyl auth login https://... --context eternia`
+passwords in shell history or process args; run `sibyl auth login https://sibyl.example.com --context <your-context>`
 interactively if setup needs to be finished by hand.
 
 For already-collected archives, skip SSH exports and pass them directly:
@@ -134,7 +134,7 @@ uv run --directory apps/api sibyld migrate consolidate \
   --archive ~/sibyl-exports/laptop.tar.gz \
   --archive ~/sibyl-exports/desktop.tar.gz \
   --canonical-org-id <target-org-id> \
-  --target-host eternia
+  --target-host <your-host>
 ```
 
 Keep `--skip-auth` semantics. The helper intentionally preserves the target's working users,
