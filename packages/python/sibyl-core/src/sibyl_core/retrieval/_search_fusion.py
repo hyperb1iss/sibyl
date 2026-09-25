@@ -268,7 +268,7 @@ def _rank_fused_candidates(
 
 
 def _cut_at_distinct_items(
-    ranked: list[FusedCandidate],
+    ranked: Sequence[FusedCandidate],
     *,
     limit: int,
     distinct_key: DistinctKey | None,
@@ -280,18 +280,28 @@ def _cut_at_distinct_items(
     receive ``limit`` rows holding fewer than ``limit`` items and serve a short
     answer with candidates left over. A row that shares its key with one
     already kept rides along without spending the budget, so the caller still
-    sees every copy the cut reached and picks among them itself. Rows without
+    sees the copies the cut reached and picks among them itself. Rows without
     a key count as their own item, and no key function means rows are items.
+
+    Riders are capped at ``limit`` too, so the list never exceeds twice the
+    limit however many rows share a key. Every downstream stage, the coverage
+    re-rank included, then works on a pool bounded by the caller's limit
+    rather than by how many projects' copies of one name a reader can see.
     """
     if distinct_key is None:
-        return ranked[:limit]
+        return list(ranked[:limit])
     kept: list[FusedCandidate] = []
     seen: set[tuple[str, str]] = set()
+    riders = 0
     for entry in ranked:
         candidate = entry[0]
         key = distinct_key(candidate)
         identity = ("key", key) if key else ("id", candidate.id)
-        if identity not in seen:
+        if identity in seen:
+            if riders >= limit:
+                continue
+            riders += 1
+        else:
             if len(seen) >= limit:
                 break
             seen.add(identity)

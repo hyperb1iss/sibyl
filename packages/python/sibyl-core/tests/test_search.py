@@ -1862,6 +1862,47 @@ def test_fused_cut_counts_distinct_items_when_the_caller_names_them() -> None:
     ]
 
 
+def test_fused_cut_caps_rows_that_ride_along_on_a_kept_key() -> None:
+    def fused(identifier: str, name: str) -> fusion_module.FusedCandidate:
+        candidate = RetrievalCandidate(
+            id=identifier,
+            type="episode",
+            name=name,
+            content="",
+            score=1.0,
+            source=None,
+            metadata={},
+        )
+        return (candidate, 1.0, {})
+
+    # One name seen in a thousand projects, then the distinct items behind it.
+    ranked = [
+        *(fused(f"shared-{index}", "Shared name") for index in range(1000)),
+        *(fused(f"distinct-{index}", f"Distinct {index}") for index in range(10)),
+    ]
+
+    kept = fusion_module._cut_at_distinct_items(
+        ranked,
+        limit=4,
+        distinct_key=lambda candidate: candidate.name,
+    )
+
+    ids = [entry[0].id for entry in kept]
+    # The first row of the shared key plus at most `limit` riders, and the
+    # skipped riders do not stop the cut from reaching the distinct items.
+    assert ids == [
+        "shared-0",
+        "shared-1",
+        "shared-2",
+        "shared-3",
+        "shared-4",
+        "distinct-0",
+        "distinct-1",
+        "distinct-2",
+    ]
+    assert len(kept) <= 2 * 4
+
+
 def test_graph_path_metadata_survives_fusion_with_direct_hit() -> None:
     plan = build_context_retrieval_plan(
         query="surreal live query decision",
