@@ -35,6 +35,7 @@ const CUSTOM_MODEL = '__custom__';
 
 const PROVIDERS: Array<{ value: LLMProviderName; label: string }> = [
   { value: 'anthropic', label: 'Anthropic' },
+  { value: 'bedrock', label: 'Amazon Bedrock' },
   { value: 'gemini', label: 'Gemini' },
   { value: 'openai', label: 'OpenAI' },
 ];
@@ -50,7 +51,9 @@ interface SurfaceDraft {
 }
 
 function normalizeProvider(value: unknown): LLMProviderName {
-  return value === 'gemini' || value === 'openai' || value === 'anthropic' ? value : 'anthropic';
+  return PROVIDERS.some(provider => provider.value === value)
+    ? (value as LLMProviderName)
+    : 'anthropic';
 }
 
 function fieldText(value: string | number | null) {
@@ -58,7 +61,12 @@ function fieldText(value: string | number | null) {
 }
 
 function modelsForProvider(entries: AIModelEntry[], provider: LLMProviderName) {
-  return entries.filter(entry => entry.kind === 'llm' && entry.provider === provider);
+  // Bedrock serves registry models under their own aliases, mapped server-side.
+  return entries.filter(
+    entry =>
+      entry.kind === 'llm' &&
+      (entry.provider === provider || Boolean(entry.platform_model_ids?.[provider]))
+  );
 }
 
 function recommendedModel(
@@ -278,6 +286,7 @@ export function LLMSurfaceRow({
   };
 
   const keyReady = surface.api_key.configured;
+  const usesAwsCredentials = surface.provider.value === 'bedrock';
 
   return (
     <div className="border-b border-sc-fg-subtle/5 px-6 py-5 last:border-b-0">
@@ -285,7 +294,9 @@ export function LLMSurfaceRow({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-base font-semibold text-sc-fg-primary">{label}</h3>
-            {keyReady ? (
+            {usesAwsCredentials ? (
+              <StatusPill tone="info">AWS credentials</StatusPill>
+            ) : keyReady ? (
               <StatusPill tone="success" icon={Check}>
                 Key ready
               </StatusPill>

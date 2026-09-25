@@ -9,12 +9,15 @@ from pydantic import BaseModel, Field, SecretStr
 from pydantic_ai import Agent, NativeOutput
 from pydantic_ai.exceptions import ModelHTTPError
 
+from sibyl_core.ai.bedrock import BedrockConfigError, resolve_bedrock_credentials
 from sibyl_core.ai.clients import output_retry_budget
-from sibyl_core.ai.errors import classify_llm_exception
+from sibyl_core.ai.errors import LLMConfigError, classify_llm_exception
 from sibyl_core.ai.llm.config import LLMConfig, LLMConfigSource, LLMProviderName, LLMSurface
 from sibyl_core.ai.providers import (
+    BEDROCK_NOT_CONFIGURED,
+    bedrock_settings,
     build_model,
-    rejects_forced_tool_choice,
+    prefers_native_output,
     resolve_provider_model_id,
 )
 from sibyl_core.observability import telemetry_registry
@@ -26,6 +29,7 @@ ValidationStatus = Literal[
     "rate_limited",
     "model_not_found",
     "permission_denied",
+    "missing_credentials",
 ]
 
 PROBE_MAX_TOKENS = 128
@@ -72,19 +76,24 @@ class _SurfaceProbe(BaseModel):
     summary: str = Field(description="Short confirmation text.")
 
 
-async def check_provider_key(provider: LLMProviderName, key: str) -> KeyValidationResult:
+async def check_provider_key(provider: LLMProviderName, key: str | None) -> KeyValidationResult:
+    """Prove a provider answers with these credentials by making a minimal call.
+
+    Bedrock needs no key: it signs with the AWS credential chain, so the probe
+    first proves a region and credentials resolve, then sends the call.
+    """
     model = _cheapest_probe_model(provider)
     started_at = time.perf_counter()
     try:
-        result = await _run_text_probe(
-            LLMConfig(
-                provider=provider,
-                model=model,
-                max_tokens=PROBE_MAX_TOKENS,
-                timeout_seconds=10,
-                api_key=SecretStr(key),
-            )
+        config = LLMConfig(
+            provider=provider,
+            model=model,
+            max_tokens=PROBE_MAX_TOKENS,
+            timeout_seconds=10,
+            api_key=SecretStr(key) if key else None,
         )
+        await _require_provider_credentials(config)
+        result = await _run_text_probe(config)
         latency_ms = _elapsed_ms(started_at)
         telemetry_registry().record_llm_call(
             surface="provider_key_validation",
@@ -126,17 +135,18 @@ async def check_provider_key(provider: LLMProviderName, key: str) -> KeyValidati
 async def check_model_availability(
     provider: LLMProviderName,
     provider_model_id: str,
-    key: str,
+    key: str | None,
 ) -> ModelValidationResult:
     config = LLMConfig(
         provider=provider,
         model=provider_model_id,
         max_tokens=PROBE_MAX_TOKENS,
         timeout_seconds=10,
-        api_key=SecretStr(key),
+        api_key=SecretStr(key) if key else None,
     )
     started_at = time.perf_counter()
     try:
+        await _require_provider_credentials(config)
         result = await _run_text_probe(config)
         latency_ms = _elapsed_ms(started_at)
         telemetry_registry().record_llm_call(
@@ -185,11 +195,12 @@ async def test_surface_config(
     config = resolved.to_llm_config()
     started_at = time.perf_counter()
     try:
+        await _require_provider_credentials(config)
         agent = Agent[object, _SurfaceProbe](
             build_model(config),
             output_type=(
                 NativeOutput(_SurfaceProbe, strict=True)
-                if rejects_forced_tool_choice(config)
+                if prefers_native_output(config)
                 else _SurfaceProbe
             ),
             retries=output_retry_budget(1),
@@ -238,6 +249,22 @@ async def test_surface_config(
         )
 
 
+async def _require_provider_credentials(config: LLMConfig) -> None:
+    """Fail fast with a fix-it message when Bedrock has no region or credentials."""
+    if config.provider != "bedrock":
+        return
+    api_key = config.api_key.get_secret_value() if config.api_key else None
+    try:
+        await resolve_bedrock_credentials(bedrock_settings(api_key=api_key))
+    except BedrockConfigError as exc:
+        raise LLMConfigError(
+            str(exc),
+            provider="bedrock",
+            model=config.model,
+            details={"reason": BEDROCK_NOT_CONFIGURED},
+        ) from exc
+
+
 async def _run_text_probe(config: LLMConfig):
     agent = Agent(build_model(config), output_type=str, retries=output_retry_budget(0))
     return await agent.run("Reply with the single word ok.")
@@ -246,13 +273,18 @@ async def _run_text_probe(config: LLMConfig):
 def _cheapest_probe_model(provider: LLMProviderName) -> str:
     return {
         "anthropic": "claude-haiku-4-5",
+        "bedrock": "claude-haiku-4-5",
         "gemini": "gemini-3-1-flash-lite",
         "openai": "gpt-5.4-nano",
     }[provider]
 
 
 def _status_for_exception(exc: Exception) -> ValidationStatus:
+    if _is_missing_credentials(exc):
+        return "missing_credentials"
     if isinstance(exc, ModelHTTPError):
+        if exc.status_code == 400 and _is_bedrock_unknown_model(exc):
+            return "model_not_found"
         return _status_for_http_code(exc.status_code)
 
     error = classify_llm_exception(exc)
@@ -271,6 +303,38 @@ def _status_for_http_code(status_code: int) -> ValidationStatus:
     if status_code == 429:
         return "rate_limited"
     return "network"
+
+
+def _is_missing_credentials(exc: BaseException) -> bool:
+    """Missing Bedrock settings, AWS credentials or an SDK's credentials, however wrapped.
+
+    The Anthropic SDK's own "Could not resolve authentication method" for a
+    missing first-party key lands here too.
+    """
+    current: BaseException | None = exc
+    while current is not None:
+        if isinstance(current, LLMConfigError) and (
+            current.details.get("reason") == BEDROCK_NOT_CONFIGURED
+        ):
+            return True
+        if type(current).__name__ in {"NoCredentialsError", "PartialCredentialsError"}:
+            return True
+        message = str(current).lower()
+        if "could not resolve" in message and "credentials" in message:
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def _is_bedrock_unknown_model(exc: ModelHTTPError) -> bool:
+    """Bedrock answers an unknown or unroutable model ID with a 400 ValidationException."""
+    body = exc.body if isinstance(exc.body, dict) else {}
+    message = str(body.get("message") or "")
+    return (
+        "model identifier is invalid" in message
+        or "on-demand throughput isn" in message
+        or "inference profile" in message
+    )
 
 
 def _elapsed_ms(started_at: float) -> float:

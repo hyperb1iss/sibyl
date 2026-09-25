@@ -137,9 +137,12 @@ class CoreConfig(BaseSettings):
     )
 
     # LLM Provider configuration
-    llm_provider: Literal["openai", "anthropic"] = Field(
+    # Mirrors SIBYL_LLM_PROVIDER, which the LLM config source reads per surface.
+    # It must accept every provider that source does, or the process fails to
+    # start on a valid setting.
+    llm_provider: Literal["anthropic", "bedrock", "gemini", "openai"] = Field(
         default="anthropic",
-        description="LLM provider for entity extraction",
+        description="Default LLM provider for every surface",
     )
     llm_model: str = Field(
         default="claude-haiku-4-5",
@@ -253,6 +256,8 @@ class CoreConfig(BaseSettings):
                 if dimensions is not None:
                     object.__setattr__(self, "graph_embedding_dimensions", dimensions)
 
+        _check_bedrock_embedding_dimensions(self)
+
         if self.environment == "production":
             resolved = self.resolved_surreal_url
             if resolved.startswith("memory://"):
@@ -270,7 +275,7 @@ class CoreConfig(BaseSettings):
         return self
 
     # Embedding configuration
-    embedding_provider: Literal["openai", "gemini"] = Field(
+    embedding_provider: Literal["openai", "gemini", "bedrock"] = Field(
         default="openai",
         description="Provider for document chunk embeddings",
     )
@@ -284,7 +289,7 @@ class CoreConfig(BaseSettings):
         le=3072,
         description="Document chunk embedding vector dimensions",
     )
-    graph_embedding_provider: Literal["openai", "gemini", "local"] = Field(
+    graph_embedding_provider: Literal["openai", "gemini", "local", "bedrock"] = Field(
         default="openai",
         description="Provider for graph node and relationship embeddings",
     )
@@ -389,6 +394,26 @@ class CoreConfig(BaseSettings):
             "graph": self.surreal_graph_pool_size,
         }[client_kind]
         return override or self.surreal_pool_size
+
+
+def _check_bedrock_embedding_dimensions(config: "CoreConfig") -> None:
+    """Refuse to start on a vector size Cohere Embed v4 cannot produce."""
+    from sibyl_core.ai.bedrock import COHERE_EMBED_V4_DIMENSIONS
+
+    for provider_field, dimensions_field in (
+        ("embedding_provider", "embedding_dimensions"),
+        ("graph_embedding_provider", "graph_embedding_dimensions"),
+    ):
+        dimensions = getattr(config, dimensions_field)
+        if (
+            getattr(config, provider_field) == "bedrock"
+            and dimensions not in COHERE_EMBED_V4_DIMENSIONS
+        ):
+            supported = ", ".join(str(size) for size in COHERE_EMBED_V4_DIMENSIONS)
+            raise ValueError(
+                f"SIBYL_{dimensions_field.upper()}={dimensions} cannot be served by Cohere "
+                f"Embed v4 on Bedrock; use {supported}"
+            )
 
 
 def _local_embedding_dimensions(model: str) -> int | None:

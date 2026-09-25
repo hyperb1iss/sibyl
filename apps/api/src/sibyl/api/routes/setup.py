@@ -9,6 +9,10 @@ Config update endpoints are admin-only after initial setup.
 
 from __future__ import annotations
 
+import os
+from collections.abc import Mapping
+from dataclasses import replace
+
 import structlog
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -20,8 +24,15 @@ from sibyl.persistence.operations_runtime import (
     require_setup_mode_or_auth,
 )
 from sibyl.services.settings import get_settings_service
-from sibyl_core.ai.llm.config import LLMProviderName
+from sibyl_core.ai.bedrock import (
+    API_KEY_ENV_VARS as BEDROCK_API_KEY_ENV_VARS,
+    bedrock_region_configured,
+    resolve_bedrock_credentials,
+    resolve_bedrock_settings,
+)
+from sibyl_core.ai.llm.config import LLMProviderName, LLMSurface, get_config_source
 from sibyl_core.ai.validation import KeyValidationResult, check_provider_key
+from sibyl_core.embeddings.providers import sentence_transformers_available
 from sibyl_core.integration import integration_content
 
 router = APIRouter(prefix="/setup", tags=["setup"])
@@ -58,6 +69,21 @@ class SetupStatus(BaseModel):
     gemini_valid: bool | None = Field(
         default=None, description="True if Gemini key works (only checked if configured)"
     )
+    bedrock_configured: bool = Field(
+        default=False,
+        description="True when an AWS region and an AWS credential source are present",
+    )
+    bedrock_llm: bool = Field(
+        default=False,
+        description="True when Bedrock is configured and the default LLM surface uses it",
+    )
+    bedrock_embeddings: bool = Field(
+        default=False,
+        description="True when Bedrock is configured and document embeddings use it",
+    )
+    bedrock_valid: bool | None = Field(
+        default=None, description="True if Bedrock answers (only checked by validate-keys)"
+    )
 
 
 class ApiKeyValidation(BaseModel):
@@ -71,6 +97,12 @@ class ApiKeyValidation(BaseModel):
         default=None, description="Error message if Anthropic fails"
     )
     gemini_error: str | None = Field(default=None, description="Error message if Gemini fails")
+    bedrock_valid: bool | None = Field(
+        default=None, description="True if Bedrock answers; None when nothing uses Bedrock"
+    )
+    bedrock_error: str | None = Field(default=None, description="Error message if Bedrock fails")
+    bedrock_llm: bool = Field(default=False, description="The default LLM surface uses Bedrock")
+    bedrock_embeddings: bool = Field(default=False, description="Document embeddings use Bedrock")
 
 
 async def _check_openai_key(key: str | None = None) -> tuple[bool, str | None]:
@@ -119,6 +151,90 @@ async def _check_gemini_key(key: str | None = None) -> tuple[bool, str | None]:
         return False, "No API key configured"
 
     return await _check_provider_key("gemini", key)
+
+
+async def bedrock_selection() -> tuple[bool, bool]:
+    """Whether Bedrock serves the default LLM surface and the embedding planes.
+
+    A plane counts only when its provider is set to ``bedrock`` and a Region
+    is known. An AWS environment alone proves nothing: a laptop with a
+    profile, or any IRSA pod, has one while every provider still points at a
+    keyed API. Credentials are not required here because an instance role
+    leaves no environment hint; validate-keys proves them with a real call.
+    """
+    if not bedrock_region_configured():
+        return False, False
+    try:
+        resolved = await get_config_source().resolve(LLMSurface.DEFAULT)
+        llm = resolved.provider.value == "bedrock"
+    except Exception as e:
+        log.warning("Could not resolve the default LLM provider", error=str(e))
+        llm = False
+    document = await effective_embedding_setting("embedding_provider")
+    graph = await effective_embedding_setting("graph_embedding_provider")
+    # The graph plane needs no key on bedrock, or on local when its optional
+    # sentence-transformers dependency is installed (sibyld does not ship it).
+    graph_covered = graph == "bedrock" or (graph == "local" and sentence_transformers_available())
+    return llm, document == "bedrock" and graph_covered
+
+
+async def effective_embedding_setting(key: str) -> str | None:
+    """An embedding setting as the runtime reads it: environment, database, default.
+
+    Saving a setting writes the environment too, so the environment is what
+    the embedding providers see.
+    """
+    env_value = os.environ.get(f"SIBYL_{key.upper()}", "").strip()
+    if env_value:
+        return env_value
+    stored = await get_settings_service().get(key)
+    if stored:
+        return str(stored)
+    value = getattr(settings, key, None)
+    return None if value is None else str(value)
+
+
+async def _check_bedrock() -> tuple[bool | None, str | None]:
+    """Probe Bedrock through the AWS credential chain, only when something uses it.
+
+    The Claude probe proves the Claude client's credentials. On Mantle those
+    can be a key only that client reads, so embeddings routed to Bedrock also
+    prove the credentials their own requests sign with.
+    """
+    llm, embeddings = await bedrock_selection()
+    if not (llm or embeddings):
+        return None, None
+    try:
+        result = await check_provider_key("bedrock", None)
+        if result.valid and embeddings:
+            bedrock = resolve_bedrock_settings()
+            await resolve_bedrock_credentials(replace(bedrock, mantle_api_key=None))
+    except Exception as e:
+        log.warning("Bedrock validation failed", error=str(e))
+        return False, str(e)
+    return result.valid, _validation_error(result)
+
+
+def bedrock_configured(environ: Mapping[str, str] | None = None) -> bool:
+    """A region plus any AWS credential source; proving it works is validate-keys' job."""
+    env = os.environ if environ is None else environ
+    if not bedrock_region_configured(env):
+        return False
+    return any(env.get(name, "").strip() for name in _AWS_CREDENTIAL_HINTS)
+
+
+#: Environment variables that point the AWS credential chain at a source: a
+#: Bedrock API key, static keys, a profile, IRSA web identity, EKS Pod Identity
+#: or an ECS task role. Instance roles leave no hint, so validate-keys probes.
+_AWS_CREDENTIAL_HINTS = (
+    *BEDROCK_API_KEY_ENV_VARS,
+    "SIBYL_BEDROCK_PROFILE",
+    "AWS_PROFILE",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_WEB_IDENTITY_TOKEN_FILE",
+    "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+    "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+)
 
 
 async def _check_provider_key(
@@ -170,6 +286,7 @@ async def get_setup_status(
     openai_configured = bool(openai_key)
     anthropic_configured = bool(anthropic_key)
     gemini_configured = bool(gemini_key)
+    bedrock_llm, bedrock_embeddings = await bedrock_selection()
 
     return SetupStatus(
         needs_setup=not setup_status.setup_complete,
@@ -184,6 +301,9 @@ async def get_setup_status(
         openai_valid=None,
         anthropic_valid=None,
         gemini_valid=None,
+        bedrock_configured=bedrock_configured(),
+        bedrock_llm=bedrock_llm,
+        bedrock_embeddings=bedrock_embeddings,
     )
 
 
@@ -204,6 +324,8 @@ async def validate_api_keys() -> ApiKeyValidation:
     openai_valid, openai_error = await _check_openai_key()
     anthropic_valid, anthropic_error = await _check_anthropic_key()
     gemini_valid, gemini_error = await _check_gemini_key()
+    bedrock_valid, bedrock_error = await _check_bedrock()
+    bedrock_llm, bedrock_embeddings = await bedrock_selection()
 
     return ApiKeyValidation(
         openai_valid=openai_valid,
@@ -212,6 +334,10 @@ async def validate_api_keys() -> ApiKeyValidation:
         openai_error=openai_error,
         anthropic_error=anthropic_error,
         gemini_error=gemini_error,
+        bedrock_valid=bedrock_valid,
+        bedrock_error=bedrock_error,
+        bedrock_llm=bedrock_llm,
+        bedrock_embeddings=bedrock_embeddings,
     )
 
 

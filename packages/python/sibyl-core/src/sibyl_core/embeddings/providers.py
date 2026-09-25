@@ -28,7 +28,7 @@ from sibyl_core.models.entities import Entity, Relationship
 log = structlog.get_logger()
 
 type EmbeddingInputKind = Literal["query", "document"]
-type EmbeddingProviderName = Literal["openai", "gemini", "local"]
+type EmbeddingProviderName = Literal["openai", "gemini", "local", "bedrock"]
 type _ConfiguredProviderCacheKey = tuple[EmbeddingProviderName, str, int, str]
 
 _OPENAI_EMBEDDING_INPUT_MAX_TOKENS = 6000
@@ -630,6 +630,13 @@ def create_embedding_provider(
             ),
             max_size=max_cache_size,
         )
+    if provider == "bedrock":
+        from sibyl_core.embeddings.bedrock import BedrockEmbeddingProvider
+
+        return CachedEmbeddingProvider(
+            BedrockEmbeddingProvider(metadata=metadata, client=client),
+            max_size=max_cache_size,
+        )
     return CachedEmbeddingProvider(
         OpenAIEmbeddingProvider(
             metadata=metadata,
@@ -659,7 +666,7 @@ def configured_embedding_provider() -> EmbeddingProvider | None:
     provider = (
         os.getenv("SIBYL_GRAPH_EMBEDDING_PROVIDER") or settings.graph_embedding_provider
     ).strip()
-    if provider not in ("gemini", "local", "openai"):
+    if provider not in ("bedrock", "gemini", "local", "openai"):
         raise ValueError(f"unsupported native graph embedding provider: {provider}")
 
     model = _configured_graph_embedding_model(provider)
@@ -669,7 +676,18 @@ def configured_embedding_provider() -> EmbeddingProvider | None:
         log.info("graph_embeddings_disabled", provider=provider, reason="missing_dependency")
         return None
 
-    if provider == "local":
+    cache_identity = "local"
+    if provider == "bedrock":
+        from sibyl_core.ai.bedrock import bedrock_region_configured, resolve_bedrock_settings
+
+        # A missing region disables graph embeddings like a missing key does;
+        # any other bad Bedrock setting is a misconfiguration and raises.
+        if not bedrock_region_configured():
+            log.info("graph_embeddings_disabled", provider=provider, reason="missing_region")
+            return None
+        cache_identity = resolve_bedrock_settings().fingerprint
+        api_key = ""
+    elif provider == "local":
         api_key = ""
     elif provider == "gemini":
         api_key = (
@@ -685,7 +703,7 @@ def configured_embedding_provider() -> EmbeddingProvider | None:
             or settings.openai_api_key.get_secret_value()
         )
 
-    if provider != "local" and not api_key:
+    if provider in ("gemini", "openai") and not api_key:
         log.info("graph_embeddings_disabled", provider=provider, reason="missing_key")
         return None
 
@@ -694,7 +712,7 @@ def configured_embedding_provider() -> EmbeddingProvider | None:
         provider=provider_name,
         model=model,
         dimensions=dimensions,
-        cache_identity=api_key or "local",
+        cache_identity=api_key or cache_identity,
     )
     if cache_entry is None:
         return create_embedding_provider(
@@ -748,6 +766,10 @@ def _configured_graph_embedding_model(provider: str) -> str:
     configured = settings.graph_embedding_model.strip()
     if provider == "gemini" and configured == _OPENAI_GRAPH_EMBEDDING_MODEL:
         return "gemini-embedding-2"
+    if provider == "bedrock" and configured == _OPENAI_GRAPH_EMBEDDING_MODEL:
+        from sibyl_core.ai.bedrock import DEFAULT_BEDROCK_EMBEDDING_MODEL
+
+        return DEFAULT_BEDROCK_EMBEDDING_MODEL
     if provider == "local" and configured == _OPENAI_GRAPH_EMBEDDING_MODEL:
         return DEFAULT_LOCAL_EMBEDDING_MODEL
     return configured

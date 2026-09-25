@@ -83,7 +83,10 @@ function model(alias: string, provider: LLMProviderName, useCases: string[]): AI
 }
 
 const entries = [
-  model('claude-haiku-4-5', 'anthropic', ['default', 'extraction']),
+  {
+    ...model('claude-haiku-4-5', 'anthropic', ['default', 'extraction']),
+    platform_model_ids: { bedrock: 'anthropic.claude-haiku-4-5-20251001-v1:0' },
+  },
   model('claude-sonnet-4-6', 'anthropic', ['synthesis']),
   model('gemini-3-flash', 'gemini', ['extraction']),
 ];
@@ -173,6 +176,32 @@ describe('LLMSurfaceRow', () => {
     expect(await screen.findByText('Test passed')).toBeInTheDocument();
     expect(screen.getByText('42 ms')).toBeInTheDocument();
     expect(screen.getByText('3 in / 4 out')).toBeInTheDocument();
+  });
+
+  it('routes Claude through Amazon Bedrock without asking for a key', async () => {
+    const { user } = renderCrawler();
+
+    await user.click(screen.getAllByRole('combobox')[0]);
+    await user.click(await screen.findByRole('option', { name: 'Amazon Bedrock' }));
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(updateMutateAsync).toHaveBeenCalledWith({
+      surface: 'crawler',
+      request: {
+        provider: 'bedrock',
+        model: 'claude-haiku-4-5',
+        temperature: 0,
+        timeout_seconds: 60,
+      },
+    });
+  });
+
+  it('shows AWS credentials instead of a key state for Bedrock surfaces', () => {
+    const bedrock = surface('crawler', 'bedrock', 'claude-haiku-4-5');
+    renderCrawler({ ...bedrock, api_key: secretField(false, 'default') });
+
+    expect(screen.getByText('AWS credentials')).toBeInTheDocument();
+    expect(screen.queryByText('Missing key')).not.toBeInTheDocument();
   });
 
   it('disables environment-locked fields', () => {

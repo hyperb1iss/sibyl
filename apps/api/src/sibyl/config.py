@@ -537,9 +537,12 @@ class Settings(BaseSettings):
     )
 
     # LLM Provider configuration
-    llm_provider: Literal["openai", "anthropic"] = Field(
+    # Mirrors SIBYL_LLM_PROVIDER, which the LLM config source reads per surface.
+    # It must accept every provider that source does, or the process fails to
+    # start on a valid setting.
+    llm_provider: Literal["anthropic", "bedrock", "gemini", "openai"] = Field(
         default="anthropic",
-        description="LLM provider for entity extraction (openai or anthropic)",
+        description="Default LLM provider for every surface",
     )
     llm_model: str = Field(
         default="claude-haiku-4-5",
@@ -680,7 +683,7 @@ class Settings(BaseSettings):
             )
         return self
 
-    embedding_provider: Literal["openai", "gemini"] = Field(
+    embedding_provider: Literal["openai", "gemini", "bedrock"] = Field(
         default="openai",
         description="Provider for document chunk embeddings",
     )
@@ -694,7 +697,7 @@ class Settings(BaseSettings):
         le=3072,
         description="Document chunk embedding vector dimensions",
     )
-    graph_embedding_provider: Literal["openai", "gemini", "local"] = Field(
+    graph_embedding_provider: Literal["openai", "gemini", "local", "bedrock"] = Field(
         default="openai",
         description="Provider for graph node and relationship embeddings",
     )

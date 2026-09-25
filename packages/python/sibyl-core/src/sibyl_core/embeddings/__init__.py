@@ -4,6 +4,10 @@ from importlib import import_module
 from typing import Any
 
 _EXPORTS = {
+    "BedrockEmbeddingProvider": (
+        "sibyl_core.embeddings.bedrock",
+        "BedrockEmbeddingProvider",
+    ),
     "CachedEmbeddingProvider": (
         "sibyl_core.embeddings.providers",
         "CachedEmbeddingProvider",

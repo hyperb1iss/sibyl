@@ -202,17 +202,71 @@ Redis/Valkey is optional. The default Surreal runtime uses local in-process coor
 
 ## LLM Configuration
 
-| Variable                           | Default            | Description                                     |
-| ---------------------------------- | ------------------ | ----------------------------------------------- |
-| `SIBYL_LLM_PROVIDER`               | `anthropic`        | LLM provider: anthropic, gemini or openai       |
-| `SIBYL_LLM_MODEL`                  | `claude-haiku-4-5` | LLM model for entity extraction                 |
-| `SIBYL_LLM_TIMEOUT_SECONDS`        | `60`               | Per-attempt read timeout                        |
-| `SIBYL_LLM_MEMORY_TIMEOUT_SECONDS` | `600`              | Per-attempt read timeout for the memory surface |
+| Variable                           | Default            | Description                                      |
+| ---------------------------------- | ------------------ | ------------------------------------------------ |
+| `SIBYL_LLM_PROVIDER`               | `anthropic`        | LLM provider: anthropic, bedrock, gemini, openai |
+| `SIBYL_LLM_MODEL`                  | `claude-haiku-4-5` | LLM model for entity extraction                  |
+| `SIBYL_LLM_TIMEOUT_SECONDS`        | `60`               | Per-attempt read timeout                         |
+| `SIBYL_LLM_MEMORY_TIMEOUT_SECONDS` | `600`              | Per-attempt read timeout for the memory surface  |
 
 Any `SIBYL_LLM_*` setting also takes a per-surface form, `SIBYL_LLM_<SURFACE>_<SETTING>`, for the
 `DEFAULT`, `CRAWLER`, `MEMORY` and `SYNTHESIS` surfaces, and the surface form wins. Consolidation
 runs on the memory surface and sends a whole cohort in one non-streaming request, so that surface
 waits ten minutes per attempt rather than one.
+
+### Amazon Bedrock
+
+The `bedrock` provider serves Claude through Amazon Bedrock, and the same settings back Cohere Embed
+v4 when an embedding provider is `bedrock`. It needs no API key: requests sign with the default AWS
+credential chain, which covers IRSA web identity and EKS Pod Identity on Kubernetes, SSO profiles,
+static keys and instance roles.
+
+| Variable                        | Default  | Description                                                                                  |
+| ------------------------------- | -------- | -------------------------------------------------------------------------------------------- |
+| `SIBYL_BEDROCK_REGION`          | (unset)  | Bedrock Region; falls back to `AWS_REGION`, then `AWS_DEFAULT_REGION`                        |
+| `SIBYL_BEDROCK_INFERENCE_SCOPE` | `us`     | Geographic profile (`us`, `eu`, `apac`, `jp`, `au`, `ca`, `us-gov`), `global`, or `regional` |
+| `SIBYL_BEDROCK_API`             | `invoke` | `invoke` (InvokeModel on bedrock-runtime) or `mantle` (bedrock-mantle)                       |
+| `SIBYL_BEDROCK_PROFILE`         | (unset)  | AWS profile for local development                                                            |
+| `SIBYL_BEDROCK_API_KEY`         | (unset)  | Bedrock API key, sent as a bearer token instead of SigV4 signing                             |
+
+A region is required. Without one, every Bedrock LLM call fails with a message naming these
+variables, and Bedrock embeddings stay off the way a missing API key turns off the other providers.
+Any other invalid Bedrock setting raises wherever it is used. `SIBYL_BEDROCK_API_KEY` falls back to
+`AWS_BEARER_TOKEN_BEDROCK`, and it cannot be combined with `SIBYL_BEDROCK_PROFILE`. On `mantle`, the
+Claude client also takes `ANTHROPIC_AWS_API_KEY` when no profile is set, because its SDK client
+reads it; Cohere requests never use that key. The Anthropic SDK reads these variables on its own, so
+a stray value in the environment replaces SigV4 signing.
+
+The scope defaults to `us` whatever the Region, so a deployment outside the US sets it explicitly:
+`eu` for an EU Region, for example.
+
+Configure models by their Claude alias, as on the `anthropic` provider. Sibyl maps the alias to the
+Bedrock ID through the inference scope, so `claude-opus-5-5` becomes `us.anthropic.claude-opus-5-5`
+under `us` and `global.anthropic.claude-opus-5-5` under `global`. An ID that already names an
+inference profile, or any Bedrock ARN, is sent as given. Most current Claude models and Cohere Embed
+v4 offer no in-Region on-demand throughput, so `regional` only works where the model card lists
+In-Region support. Effort, memory-surface defaults and the forced-tool rule all key by alias, so a
+raw Bedrock ID, or an inference-profile or foundation-model ARN, behaves exactly like its alias. An
+application inference profile or provisioned throughput ARN hides the model behind it, so it gets
+none of those Claude-specific rules; route Opus 5 and Opus 5.5 through an inference profile ID
+instead.
+
+Bedrock rejects native structured output (`output_config.format`) for Claude Opus 4.8, Opus 5, Opus
+5.5 and Sonnet 5, and for every model on bedrock-mantle. On those models Sibyl uses tool output
+instead, and Opus 5.5, which also refuses a forced tool choice, asks with `tool_choice: auto`. An
+explicit `SIBYL_CONSOLIDATION_OUTPUT_MODE=native_strict` fails before any request on those routes.
+Opus 5.5 keeps its 1M-token context window on Bedrock with no beta header.
+
+The IAM role needs `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream` on each
+inference profile it routes through and on the foundation models behind it in every destination
+Region, for example `arn:aws:bedrock:*:<account>:inference-profile/us.anthropic.claude-*`,
+`arn:aws:bedrock:*::foundation-model/anthropic.claude-*` and the matching `cohere.embed-v4:0`
+resources. The `mantle` API takes `bedrock-mantle:CreateInference` instead, serves in-Region IDs
+only, and runs in fewer Regions, so `invoke` is the default.
+
+The provider **Test** button and `/api/settings/ai/keys/bedrock/test` first prove a region and
+credentials resolve, then make one minimal Claude Haiku 4.5 call. A missing region or credential
+reports `missing_credentials`, and an unknown model reports `model_not_found`.
 
 ### Consolidation Input Budget
 
@@ -222,10 +276,11 @@ waits ten minutes per attempt rather than one.
 | `SIBYL_CONSOLIDATION_RUN_MAX_TOKENS`  | `10000000`        | Token ceiling one reflection dream run may reserve across all of its model calls |
 
 Unset, each request takes the memory model's own budget: 1,600,000 characters for `claude-opus-5`
-and `claude-opus-5-5` on the `anthropic` provider, and 40,000 for every other model. The lookup
-matches the model id exactly, so a dated id, a `[1m]` suffix or an `anthropic/`-prefixed OpenRouter
-id gets 40,000. When the variable is set, its value replaces the model's budget, even a value equal
-to a default.
+and `claude-opus-5-5` on the `anthropic` and `bedrock` providers, and 40,000 for every other model.
+The lookup matches the model alias exactly, so a dated id, a `[1m]` suffix or an
+`anthropic/`-prefixed OpenRouter id gets 40,000, while a Bedrock ID such as
+`us.anthropic.claude-opus-5-5` counts as its alias. When the variable is set, its value replaces the
+model's budget, even a value equal to a default.
 
 At the Opus default one consolidation request can carry about 420K input tokens (screen48 evidence
 ran about 3.8 characters per token). A lower value shrinks every such request and splits large task
@@ -261,19 +316,27 @@ never binds.
 Document chunk embeddings and graph node/relationship embeddings are configured separately. The
 graph embedding dimensions also size the native Surreal vector indexes.
 
-| Variable                           | Default                  | Description                                         |
-| ---------------------------------- | ------------------------ | --------------------------------------------------- |
-| `SIBYL_EMBEDDING_PROVIDER`         | `openai`                 | Document chunk embedding provider: openai or gemini |
-| `SIBYL_EMBEDDING_MODEL`            | `text-embedding-3-small` | Document chunk embedding model                      |
-| `SIBYL_EMBEDDING_DIMENSIONS`       | `1536`                   | Document chunk embedding vector dimensions          |
-| `SIBYL_GRAPH_EMBEDDING_PROVIDER`   | `openai`                 | Graph embedding provider: openai, gemini, or local  |
-| `SIBYL_GRAPH_EMBEDDING_MODEL`      | `text-embedding-3-small` | Graph node/relationship embedding model             |
-| `SIBYL_GRAPH_EMBEDDING_DIMENSIONS` | `1024`                   | Graph embedding dimensions (sizes vector indexes)   |
+| Variable                           | Default                  | Description                                                   |
+| ---------------------------------- | ------------------------ | ------------------------------------------------------------- |
+| `SIBYL_EMBEDDING_PROVIDER`         | `openai`                 | Document chunk embedding provider: openai, gemini, or bedrock |
+| `SIBYL_EMBEDDING_MODEL`            | `text-embedding-3-small` | Document chunk embedding model                                |
+| `SIBYL_EMBEDDING_DIMENSIONS`       | `1536`                   | Document chunk embedding vector dimensions                    |
+| `SIBYL_GRAPH_EMBEDDING_PROVIDER`   | `openai`                 | Graph embedding provider: openai, gemini, local, or bedrock   |
+| `SIBYL_GRAPH_EMBEDDING_MODEL`      | `text-embedding-3-small` | Graph node/relationship embedding model                       |
+| `SIBYL_GRAPH_EMBEDDING_DIMENSIONS` | `1024`                   | Graph embedding dimensions (sizes vector indexes)             |
 
 The `local` graph embedding provider runs sentence-transformers models in-process with no API key.
 When `SIBYL_GRAPH_EMBEDDING_PROVIDER=local` and no model is set, the model defaults to
 `sentence-transformers/all-MiniLM-L6-v2` and the dimensions are derived from the model. Document
-chunk embeddings (`SIBYL_EMBEDDING_PROVIDER`) support `openai` and `gemini` only.
+chunk embeddings (`SIBYL_EMBEDDING_PROVIDER`) support `openai`, `gemini` and `bedrock`.
+
+The `bedrock` provider embeds with Cohere Embed v4 (`cohere.embed-v4:0`, the default when the model
+is left at the OpenAI default) through the [Amazon Bedrock](#amazon-bedrock) settings above, and the
+inference scope routes it like Claude. Queries embed as `search_query` and documents as
+`search_document`. The dimensions must be 256, 512, 1024 or 1536, so the defaults of 1536 for
+document chunks and 1024 for graph vectors both fit the existing indexes. Vectors record provider
+`bedrock` and model `cohere.embed-v4:0` whichever scope routed them. Requests batch at up to 96
+texts and about 16 MB each and run concurrently, and throttling retries with jittered backoff.
 
 ## Retrieval Tuning
 
@@ -303,6 +366,10 @@ installed, the path degrades cleanly to the fused order instead of raising.
 | `SIBYL_OPENAI_API_KEY`    | (empty) | OpenAI API key (required for embeddings) |
 | `SIBYL_ANTHROPIC_API_KEY` | (empty) | Anthropic API key                        |
 | `SIBYL_GEMINI_API_KEY`    | (empty) | Gemini API key (for Google embeddings)   |
+
+The `bedrock` provider needs none of these: it signs with AWS credentials, or a Bedrock API key from
+`SIBYL_BEDROCK_API_KEY`. That key comes from the environment only and is never stored in the
+database.
 
 ### Lookup Priority
 

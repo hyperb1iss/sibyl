@@ -236,6 +236,10 @@ kubectl create secret generic sibyl-secrets -n sibyl \
   --from-literal=SIBYL_ANTHROPIC_API_KEY=sk-ant-...
 ```
 
+On AWS with the `bedrock` provider, leave the two provider keys out. Claude and Cohere embeddings
+then authenticate through the service account's IAM role; see
+[Amazon Bedrock](./helm-chart.md#amazon-bedrock) in the Helm chart guide.
+
 ### Option 2: External Secrets Operator
 
 ```yaml

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -19,6 +19,8 @@ from sibyl.crypto import mask_secret
 from sibyl.persistence.operations_runtime import require_settings_owner
 from sibyl.services.settings import get_settings_service
 from sibyl_core.ai.llm.config import (
+    ANTHROPIC_FAMILY,
+    LLM_PROVIDERS,
     ConfigField,
     LLMProviderName,
     LLMSurface,
@@ -188,17 +190,20 @@ async def test_provider_key(
     request: Request,
     provider: LLMProviderName,
 ) -> KeyValidationResult:
+    """Probe a provider with its configured key; Bedrock probes the AWS credential chain."""
     await require_settings_owner(request)
-    key = await resolve_provider_api_key(get_settings_service(), provider)
-    if key.value is None:
-        raise HTTPException(status_code=400, detail=f"No {provider} API key configured")
-    return await check_provider_key(provider, key.value.get_secret_value())
+    key = await _provider_key(provider)
+    return await check_provider_key(provider, key)
 
 
 @router.post("/models/{model_alias}/test", response_model=ModelValidationResult)
 async def test_model_availability(
     request: Request,
     model_alias: str,
+    provider: LLMProviderName | None = Query(  # noqa: PT028 - a route, not a pytest test
+        default=None,
+        description="Serve the model through this provider instead of its own, such as bedrock",
+    ),
 ) -> ModelValidationResult:
     await require_settings_owner(request)
     entry = model_registry.get(model_alias)
@@ -207,19 +212,31 @@ async def test_model_availability(
     if entry.kind is not ModelKind.LLM:
         raise HTTPException(status_code=400, detail=f"Model is not an LLM: {model_alias}")
 
-    raw_provider = entry.provider
-    if raw_provider not in {"anthropic", "gemini", "openai"}:
+    raw_provider = provider or entry.provider
+    if raw_provider not in LLM_PROVIDERS:
         raise HTTPException(status_code=400, detail=f"Provider is not supported: {raw_provider}")
-    provider = raw_provider
+    if raw_provider != entry.provider and raw_provider not in entry.platform_model_ids:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model {model_alias} is not served by provider {raw_provider}",
+        )
+    target = cast("LLMProviderName", raw_provider)
+    key = await _provider_key(target)
+    return await check_model_availability(
+        target,
+        entry.alias if target == "bedrock" else entry.provider_model_id,
+        key,
+    )
 
+
+async def _provider_key(provider: LLMProviderName) -> str | None:
+    """The configured key, which only Bedrock may lack."""
     key = await resolve_provider_api_key(get_settings_service(), provider)
     if key.value is None:
+        if provider == "bedrock":
+            return None
         raise HTTPException(status_code=400, detail=f"No {provider} API key configured")
-    return await check_model_availability(
-        provider,
-        entry.provider_model_id,
-        key.value.get_secret_value(),
-    )
+    return key.value.get_secret_value()
 
 
 @router.get("/registry", response_model=RegistryResponse)
@@ -336,7 +353,9 @@ def _validate_model_selection(
     entry = model_registry.get(model, kind=ModelKind.LLM)
     if entry is None:
         return "unverified_model"
-    if entry.provider != provider:
+    if entry.provider != provider and not (
+        provider == "bedrock" and entry.provider in ANTHROPIC_FAMILY
+    ):
         raise HTTPException(
             status_code=422,
             detail=f"Model {model} belongs to provider {entry.provider}, not {provider}",

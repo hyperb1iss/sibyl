@@ -8,6 +8,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from sibyl_core.ai.bedrock import split_bedrock_model_id
+
 ProviderName = Literal["anthropic", "gemini", "openai", "cohere", "voyageai", "bedrock"]
 
 
@@ -29,6 +31,10 @@ class ModelEntry(BaseModel):
     kind: ModelKind
     provider: ProviderName
     provider_model_id: str
+    #: The same model's ID on another platform that serves it, keyed by that
+    #: platform's provider name. Bedrock IDs are foundation-model IDs; the
+    #: configured inference scope adds the ``us.`` or ``global.`` prefix.
+    platform_model_ids: dict[ProviderName, str] = {}
     pydantic_ai_model_class: str
     use_cases: tuple[str, ...] = ()
     capabilities: frozenset[ModelCapability] = frozenset()
@@ -120,6 +126,7 @@ def _default_model_class(provider: ProviderName, kind: ModelKind) -> str:
         return "Embedder"
     return {
         "anthropic": "AnthropicModel",
+        "bedrock": "AnthropicModel",
         "gemini": "GoogleModel",
         "openai": "OpenAIResponsesModel",
     }.get(provider, "UnknownModel")
@@ -132,6 +139,7 @@ _DEFAULT_ENTRIES = [
         kind=ModelKind.LLM,
         provider="anthropic",
         provider_model_id="claude-haiku-4-5-20251001",
+        platform_model_ids={"bedrock": "anthropic.claude-haiku-4-5-20251001-v1:0"},
         pydantic_ai_model_class="AnthropicModel",
         use_cases=("extraction", "default"),
         capabilities=frozenset(
@@ -150,6 +158,7 @@ _DEFAULT_ENTRIES = [
         kind=ModelKind.LLM,
         provider="anthropic",
         provider_model_id="claude-opus-5",
+        platform_model_ids={"bedrock": "anthropic.claude-opus-5"},
         pydantic_ai_model_class="AnthropicModel",
         use_cases=("native-structured-quality",),
         capabilities=frozenset(
@@ -173,6 +182,7 @@ _DEFAULT_ENTRIES = [
         kind=ModelKind.LLM,
         provider="anthropic",
         provider_model_id="claude-opus-5-5",
+        platform_model_ids={"bedrock": "anthropic.claude-opus-5-5"},
         pydantic_ai_model_class="AnthropicModel",
         use_cases=("native-structured-quality",),
         capabilities=frozenset(
@@ -196,6 +206,7 @@ _DEFAULT_ENTRIES = [
         kind=ModelKind.LLM,
         provider="anthropic",
         provider_model_id="claude-sonnet-4-6",
+        platform_model_ids={"bedrock": "anthropic.claude-sonnet-4-6"},
         pydantic_ai_model_class="AnthropicModel",
         use_cases=("synthesis", "quality"),
         capabilities=frozenset(
@@ -298,6 +309,18 @@ _DEFAULT_ENTRIES = [
 ]
 
 model_registry = ModelRegistry()
+
+
+def canonical_model_alias(model: str) -> str:
+    """The registry alias behind a snapshot or a Bedrock model ID, if known.
+
+    ``us.anthropic.claude-opus-5-5`` and ``claude-opus-5-5`` resolve to the
+    same alias, so model rules keyed by alias hold on every platform. An
+    unknown model keeps its bare name with any Bedrock prefix removed.
+    """
+    name = split_bedrock_model_id(model)[1]
+    entry = model_registry.get(model) or model_registry.get(name)
+    return entry.alias if entry is not None else name
 
 
 def llm_entries() -> list[ModelEntry]:

@@ -15,6 +15,7 @@ from google.genai import types
 
 from sibyl.config import settings
 from sibyl.services.settings import get_settings_service
+from sibyl_core.ai.bedrock import DEFAULT_BEDROCK_EMBEDDING_MODEL
 from sibyl_core.embeddings.gemini import (
     build_gemini_contents,
     format_gemini_embedding_text,
@@ -27,7 +28,7 @@ log = structlog.get_logger()
 
 # Type alias for embeddings
 Embedding = list[float]
-EmbeddingProvider = Literal["openai", "gemini"]
+EmbeddingProvider = Literal["openai", "gemini", "bedrock"]
 EmbeddingInputKind = Literal["query", "document"]
 
 
@@ -64,6 +65,7 @@ class EmbeddingService:
         self.batch_size = batch_size
         self._client: object | None = None
         self._client_provider: EmbeddingProvider | None = None
+        self._client_identity: tuple[object, ...] | None = None
 
     async def _resolve_config(self) -> ResolvedEmbeddingConfig:
         service = get_settings_service()
@@ -88,19 +90,26 @@ class EmbeddingService:
             return "openai"
         if provider == "gemini":
             return "gemini"
+        if provider == "bedrock":
+            return "bedrock"
         raise ValueError(f"Unsupported embedding provider: {provider}")
 
     @staticmethod
     def _default_model(provider: EmbeddingProvider) -> str:
         if provider == "gemini":
             return "gemini-embedding-2"
+        if provider == "bedrock":
+            return DEFAULT_BEDROCK_EMBEDDING_MODEL
         return settings.embedding_model
 
     async def _get_client(self, config: ResolvedEmbeddingConfig) -> object:
         """Lazily initialize the configured provider client."""
+        if config.provider == "bedrock":
+            return self._bedrock_provider(config)
         if self._client is None or self._client_provider != config.provider:
             service = get_settings_service()
             self._client_provider = config.provider
+            self._client_identity = None
 
             if config.provider == "gemini":
                 api_key = await service.get_gemini_key()
@@ -122,6 +131,37 @@ class EmbeddingService:
 
             self._client = AsyncOpenAI(api_key=api_key)
 
+        return self._client
+
+    def _batch_size(self, config: ResolvedEmbeddingConfig, total: int) -> int:
+        """Bedrock batches to Cohere's limits and runs them concurrently itself."""
+        return max(total, 1) if config.provider == "bedrock" else self.batch_size
+
+    def _bedrock_provider(self, config: ResolvedEmbeddingConfig) -> Any:
+        """Cohere on Bedrock, rebuilt when the model, size or AWS settings change."""
+        from sibyl_core.ai.bedrock import resolve_bedrock_settings
+        from sibyl_core.embeddings.bedrock import BedrockEmbeddingProvider
+        from sibyl_core.embeddings.providers import EmbeddingMetadata
+
+        bedrock = resolve_bedrock_settings()
+        identity = (config.model, config.dimensions, bedrock.fingerprint)
+        if (
+            self._client is None
+            or self._client_provider != "bedrock"
+            or self._client_identity != identity
+        ):
+            self._client = BedrockEmbeddingProvider(
+                metadata=EmbeddingMetadata(
+                    provider="bedrock",
+                    model=config.model,
+                    dimensions=config.dimensions,
+                    cache_namespace="document",
+                    tokenizer_estimate_method="provider-default",
+                ),
+                settings=bedrock,
+            )
+            self._client_provider = "bedrock"
+            self._client_identity = identity
         return self._client
 
     async def embed_text(self, text: str) -> Embedding:
@@ -146,6 +186,9 @@ class EmbeddingService:
         titles: list[str | None] | None = None,
     ) -> list[Embedding]:
         client = await self._get_client(config)
+
+        if config.provider == "bedrock":
+            return await cast("Any", client).embed_texts(texts, input_kind=kind)
 
         if config.provider == "gemini":
             gemini_client = cast("Any", client)
@@ -197,10 +240,11 @@ class EmbeddingService:
 
         config = await self._resolve_config()
         embeddings: list[Embedding] = []
+        batch_size = self._batch_size(config, len(texts))
 
         # Process in batches
-        for i in range(0, len(texts), self.batch_size):
-            batch = texts[i : i + self.batch_size]
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i : i + batch_size]
 
             embeddings.extend(await self._embed_texts_with_config(batch, config, kind="document"))
 
@@ -241,9 +285,10 @@ class EmbeddingService:
 
         config = await self._resolve_config()
         embeddings: list[Embedding] = []
-        for i in range(0, len(texts), self.batch_size):
-            batch = texts[i : i + self.batch_size]
-            title_batch = titles[i : i + self.batch_size]
+        batch_size = self._batch_size(config, len(texts))
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i : i + batch_size]
+            title_batch = titles[i : i + batch_size]
             embeddings.extend(
                 await self._embed_texts_with_config(
                     batch,

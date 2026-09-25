@@ -10,8 +10,10 @@ from typing import cast
 from pydantic import SecretStr
 
 from sibyl.services.settings import SettingsService
+from sibyl_core.ai.bedrock import API_KEY_ENV_VARS as BEDROCK_API_KEY_ENV_VARS
 from sibyl_core.ai.errors import LLMConfigError
 from sibyl_core.ai.llm.config import (
+    LLM_PROVIDERS,
     ConfigField,
     EnvConfigSource,
     LLMProviderName,
@@ -20,10 +22,13 @@ from sibyl_core.ai.llm.config import (
 )
 
 _CACHE_TTL_SECONDS = 60
-_PROVIDERS: frozenset[str] = frozenset({"anthropic", "gemini", "openai"})
+_PROVIDERS: frozenset[str] = LLM_PROVIDERS
 
-_PROVIDER_KEY_SETTINGS: dict[LLMProviderName, tuple[str, tuple[str, ...]]] = {
+_PROVIDER_KEY_SETTINGS: dict[LLMProviderName, tuple[str | None, tuple[str, ...]]] = {
     "anthropic": ("anthropic_api_key", ("SIBYL_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY")),
+    # Bedrock signs with the AWS credential chain; an optional Bedrock API key
+    # comes from the environment only and is never stored in the database.
+    "bedrock": (None, BEDROCK_API_KEY_ENV_VARS),
     "gemini": ("gemini_api_key", ("SIBYL_GEMINI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY")),
     "openai": ("openai_api_key", ("SIBYL_OPENAI_API_KEY", "OPENAI_API_KEY")),
 }
@@ -176,6 +181,8 @@ async def resolve_provider_api_key(
             env_var=env_var,
         )
 
+    if setting_key is None:
+        return ConfigField(value=None, source="default")
     db_value = await settings_service.get_database_value(setting_key)
     if db_value is None:
         return ConfigField(value=None, source="default")

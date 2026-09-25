@@ -11,8 +11,9 @@ from weakref import WeakKeyDictionary
 from pydantic_ai import Agent, AgentRetries
 from pydantic_ai.output import NativeOutput, PromptedOutput, TextOutput, ToolOutput
 
+from sibyl_core.ai.bedrock import BedrockConfigError, resolve_bedrock_settings
 from sibyl_core.ai.llm.config import LLMConfig, LLMSurface, resolve_llm_config
-from sibyl_core.ai.providers import build_model, rejects_forced_tool_choice
+from sibyl_core.ai.providers import build_model, prefers_native_output
 
 AgentOutputType = Any
 AgentCacheKey = tuple[str, str, str, tuple[str, ...], int | None]
@@ -101,9 +102,9 @@ def _provider_output_type(config: LLMConfig, output_type: AgentOutputType) -> Ag
     if config.provider == "gemini" and output_type is not str:
         return PromptedOutput(output_type)
     if (
-        rejects_forced_tool_choice(config)
-        and output_type is not str
+        output_type is not str
         and not isinstance(output_type, NativeOutput | PromptedOutput | TextOutput | ToolOutput)
+        and prefers_native_output(config)
     ):
         return NativeOutput(output_type, strict=True)
     return output_type
@@ -124,6 +125,17 @@ def _config_fingerprint(config: LLMConfig) -> str:
             str(config.transport_max_retries),
             api_key_hash or "",
             str(config.effort),
+            _provider_fingerprint(config),
         ]
     )
     return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def _provider_fingerprint(config: LLMConfig) -> str:
+    """Connection settings outside ``LLMConfig`` that change the built model."""
+    if config.provider != "bedrock":
+        return ""
+    try:
+        return resolve_bedrock_settings().fingerprint
+    except BedrockConfigError:
+        return ""

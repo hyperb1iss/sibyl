@@ -122,6 +122,13 @@ export interface SetupStatus {
   openai_valid: boolean | null;
   anthropic_valid: boolean | null;
   gemini_valid: boolean | null;
+  /** An AWS region and credential source are present. */
+  bedrock_configured?: boolean;
+  /** Bedrock is configured and the default LLM surface uses it, so no Anthropic key is needed. */
+  bedrock_llm?: boolean;
+  /** Bedrock is configured and document embeddings use it, so no embedding key is needed. */
+  bedrock_embeddings?: boolean;
+  bedrock_valid?: boolean | null;
 }
 
 export interface ApiKeyValidation {
@@ -131,6 +138,11 @@ export interface ApiKeyValidation {
   openai_error: string | null;
   anthropic_error: string | null;
   gemini_error: string | null;
+  /** Null when nothing uses Bedrock, so it was not probed. */
+  bedrock_valid?: boolean | null;
+  bedrock_error?: string | null;
+  bedrock_llm?: boolean;
+  bedrock_embeddings?: boolean;
 }
 
 /** One way to wire Sibyl into an MCP-capable agent. */
@@ -186,10 +198,10 @@ export interface UpdateSettingsRequest {
   openai_api_key?: string;
   anthropic_api_key?: string;
   gemini_api_key?: string;
-  embedding_provider?: 'openai' | 'gemini';
+  embedding_provider?: 'openai' | 'gemini' | 'bedrock';
   embedding_model?: string;
   embedding_dimensions?: number;
-  graph_embedding_provider?: 'openai' | 'gemini';
+  graph_embedding_provider?: 'openai' | 'gemini' | 'bedrock';
   graph_embedding_model?: string;
   graph_embedding_dimensions?: number;
 }
@@ -204,7 +216,7 @@ export interface DeleteSettingResponse {
   key: string;
 }
 
-export type LLMProviderName = 'anthropic' | 'gemini' | 'openai';
+export type LLMProviderName = 'anthropic' | 'bedrock' | 'gemini' | 'openai';
 export type LLMSurface = 'default' | 'crawler' | 'memory' | 'synthesis';
 export type AIModelKind = 'llm' | 'embedding';
 export type LLMConfigSource = 'env' | 'db' | 'default';
@@ -214,7 +226,8 @@ export type LLMValidationStatus =
   | 'network'
   | 'rate_limited'
   | 'model_not_found'
-  | 'permission_denied';
+  | 'permission_denied'
+  | 'missing_credentials';
 
 export interface LLMConfigValueField {
   value: string | number | null;
@@ -267,6 +280,8 @@ export interface AIModelEntry {
   kind: AIModelKind;
   provider: string;
   provider_model_id: string;
+  /** The same model's ID on other platforms, such as `bedrock`. */
+  platform_model_ids?: Record<string, string>;
   pydantic_ai_model_class: string;
   use_cases: string[];
   capabilities: string[];

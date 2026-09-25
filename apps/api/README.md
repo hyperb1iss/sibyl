@@ -68,9 +68,10 @@ SIBYL_JWT_SECRET=...              # Auth (required in production; dev auto-gener
 SIBYL_ANTHROPIC_API_KEY=...       # Required when LLM provider=anthropic
 # SIBYL_OPENAI_API_KEY=sk-...     # Required when LLM provider=openai
 # SIBYL_GEMINI_API_KEY=...        # Required when LLM provider=gemini
+# LLM provider=bedrock needs no key: AWS credentials plus AWS_REGION
 
-# Embeddings: choose OpenAI or Gemini
-SIBYL_EMBEDDING_PROVIDER=openai   # openai | gemini
+# Embeddings: choose OpenAI, Gemini or Amazon Bedrock (Cohere Embed v4)
+SIBYL_EMBEDDING_PROVIDER=openai   # openai | gemini | bedrock
 SIBYL_OPENAI_API_KEY=sk-...       # Required when embedding provider=openai
 # SIBYL_GEMINI_API_KEY=...        # Required when embedding provider=gemini
 ```
@@ -85,7 +86,7 @@ SIBYL_SURREAL_USERNAME=root
 SIBYL_SURREAL_PASSWORD=root
 SIBYL_REDIS_HOST=127.0.0.1            # only needed for Redis coordination
 SIBYL_REDIS_PORT=6381
-SIBYL_LLM_PROVIDER=anthropic          # anthropic | openai | gemini
+SIBYL_LLM_PROVIDER=anthropic          # anthropic | bedrock | openai | gemini
 SIBYL_LLM_MODEL=claude-haiku-4-5
 SIBYL_LLM_CRAWLER_MODEL=claude-haiku-4-5
 SIBYL_LLM_SYNTHESIS_MODEL=claude-sonnet-4-6
@@ -99,6 +100,9 @@ SIBYL_EMBEDDING_DIMENSIONS=1536
 SIBYL_GRAPH_EMBEDDING_PROVIDER=openai
 SIBYL_GRAPH_EMBEDDING_MODEL=text-embedding-3-small
 SIBYL_GRAPH_EMBEDDING_DIMENSIONS=1024
+# Amazon Bedrock (provider=bedrock) signs with the AWS credential chain
+SIBYL_BEDROCK_REGION=us-west-2        # falls back to AWS_REGION
+SIBYL_BEDROCK_INFERENCE_SCOPE=us      # us | global | regional
 ```
 
 Gemini keys can also be supplied through `GEMINI_API_KEY` or `GOOGLE_API_KEY`. Changing embedding

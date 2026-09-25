@@ -60,7 +60,7 @@ import {
 } from '@/lib/hooks';
 
 type ApiKeySettingKey = 'openai_api_key' | 'anthropic_api_key' | 'gemini_api_key';
-type EmbeddingProvider = 'openai' | 'gemini';
+type EmbeddingProvider = 'openai' | 'gemini' | 'bedrock';
 
 interface EmbeddingConfigState {
   embedding_provider: EmbeddingProvider;
@@ -73,6 +73,7 @@ interface EmbeddingConfigState {
 
 const OPENAI_EMBEDDING_MODEL = 'text-embedding-3-small';
 const GEMINI_EMBEDDING_MODEL = 'gemini-embedding-2';
+const BEDROCK_EMBEDDING_MODEL = 'cohere.embed-v4:0';
 
 const DEFAULT_EMBEDDING_CONFIG: EmbeddingConfigState = {
   embedding_provider: 'openai',
@@ -142,11 +143,13 @@ const API_KEYS: Array<{
 ];
 
 function defaultModelForProvider(provider: EmbeddingProvider): string {
-  return provider === 'gemini' ? GEMINI_EMBEDDING_MODEL : OPENAI_EMBEDDING_MODEL;
+  if (provider === 'gemini') return GEMINI_EMBEDDING_MODEL;
+  if (provider === 'bedrock') return BEDROCK_EMBEDDING_MODEL;
+  return OPENAI_EMBEDDING_MODEL;
 }
 
 function parseProvider(value: string | null | undefined, fallback: EmbeddingProvider) {
-  return value === 'gemini' || value === 'openai' ? value : fallback;
+  return value === 'gemini' || value === 'openai' || value === 'bedrock' ? value : fallback;
 }
 
 function readSetting(
@@ -402,6 +405,7 @@ function EmbeddingPanel({
             <SelectContent>
               <SelectItem value="openai">OpenAI</SelectItem>
               <SelectItem value="gemini">Gemini</SelectItem>
+              <SelectItem value="bedrock">Amazon Bedrock</SelectItem>
             </SelectContent>
           </Select>
         </SettingsField>
@@ -494,8 +498,13 @@ export default function AIServicesPage() {
     setIsValidating(true);
     try {
       const result = await revalidate();
-      const embeddingValid = result.data?.openai_valid || result.data?.gemini_valid;
-      if (embeddingValid && result.data?.anthropic_valid) {
+      const bedrockValid = result.data?.bedrock_valid === true;
+      const embeddingValid =
+        result.data?.openai_valid ||
+        result.data?.gemini_valid ||
+        (bedrockValid && result.data?.bedrock_embeddings);
+      const llmValid = result.data?.anthropic_valid || (bedrockValid && result.data?.bedrock_llm);
+      if (embeddingValid && llmValid) {
         toast.success('All API keys validated successfully');
       } else {
         toast.error('Some API keys failed validation');

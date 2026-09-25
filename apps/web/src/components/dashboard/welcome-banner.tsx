@@ -52,7 +52,10 @@ export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) 
   const geminiReady = setupStatus?.gemini_valid === true || setupStatus?.gemini_configured === true;
   const anthropicReady =
     setupStatus?.anthropic_valid === true || setupStatus?.anthropic_configured === true;
-  const apisReady = (openaiReady || geminiReady) && anthropicReady;
+  // Bedrock covers a plane only when that plane is routed to it.
+  const llmReady = anthropicReady || setupStatus?.bedrock_llm === true;
+  const embeddingsReady = openaiReady || geminiReady || setupStatus?.bedrock_embeddings === true;
+  const apisReady = llmReady && embeddingsReady;
 
   return (
     <div className="relative bg-gradient-to-r from-sc-purple/10 via-sc-cyan/5 to-sc-coral/10 border border-sc-purple/20 rounded-xl sm:rounded-xl p-4 sm:p-6 mb-4 sm:mb-6 animate-fade-in overflow-hidden">
