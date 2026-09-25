@@ -431,5 +431,6 @@ def test_root_moon_tasks_expose_usage_loop_gate() -> None:
         "run",
         "pytest",
         "tools/tests/test_usage_loop_gate.py",
+        "tools/tests/test_dogfood_receipts.py",
         "-v",
     ]
