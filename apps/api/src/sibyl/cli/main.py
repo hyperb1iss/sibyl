@@ -194,6 +194,8 @@ def _serve_with_reload(host: str, port: int) -> None:
     console.print(f"[dim]Docs: http://{host}:{port}/api/docs[/dim]")
     console.print("[dim]Debug stacks: kill -USR1 <api-child-pid>[/dim]\n")
 
+    from sibyl.proxy_trust import forwarded_allow_ips_cli_args
+
     env = os.environ.copy()
     env.setdefault("PYTHONFAULTHANDLER", "1")
     env.setdefault("SIBYL_DEV_DIAGNOSTICS", "1")
@@ -216,6 +218,7 @@ def _serve_with_reload(host: str, port: int) -> None:
             "5",
             "--log-level",
             "warning",
+            *forwarded_allow_ips_cli_args(),
         ],
         env=env,
     )

@@ -456,6 +456,7 @@ main() {
   export SIBYL_EMAIL_OUTBOX_PATH="${SIBYL_EMAIL_OUTBOX_PATH:-$repo_root/.moon/cache/auth-flow-email-outbox.jsonl}"
 
   local api_reload_dir=""
+  local forwarded_allow_ips=""
   local default_api_command=""
   local surreal_url="${SIBYL_SURREAL_URL:-}"
   local coordination_backend=""
@@ -467,7 +468,10 @@ main() {
   local extra_commands=()
 
   printf -v api_reload_dir "%q" "$repo_root/apps/api/src"
-  default_api_command="uv run --directory apps/api python -m uvicorn sibyl.main:create_dev_app --factory --host ${SIBYL_SERVER_HOST} --port ${SIBYL_SERVER_PORT} --reload --reload-dir $api_reload_dir --timeout-graceful-shutdown 5 --log-level warning"
+  # Trusted proxies resolve the way sibyld resolves them: the Sibyl setting,
+  # then uvicorn's own variable, then both loopback addresses.
+  printf -v forwarded_allow_ips "%q" "${SIBYL_FORWARDED_ALLOW_IPS:-${FORWARDED_ALLOW_IPS:-127.0.0.1,::1}}"
+  default_api_command="uv run --directory apps/api python -m uvicorn sibyl.main:create_dev_app --factory --host ${SIBYL_SERVER_HOST} --port ${SIBYL_SERVER_PORT} --reload --reload-dir $api_reload_dir --timeout-graceful-shutdown 5 --log-level warning --forwarded-allow-ips $forwarded_allow_ips"
   local api_command="${SIBYL_DEV_API_COMMAND:-$default_api_command}"
 
   coordination_backend="$(resolve_coordination_backend)"

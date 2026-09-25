@@ -10,8 +10,12 @@ from sibyl.config import settings
 def _get_key(request: Request) -> str:
     """Get rate limit key from request.
 
-    Uses JWT user ID if authenticated, otherwise falls back to IP address.
-    This prevents authenticated users from being grouped with anonymous traffic.
+    Uses JWT user ID if authenticated, otherwise falls back to the client
+    address. That address is the one uvicorn resolved from X-Forwarded-For
+    when the direct peer is a trusted proxy (SIBYL_FORWARDED_ALLOW_IPS), so
+    users behind one ingress get their own buckets instead of sharing the
+    proxy's. This prevents authenticated users from being grouped with
+    anonymous traffic.
     """
     # Try to get user ID from JWT claims
     claims = getattr(request.state, "jwt_claims", None)
