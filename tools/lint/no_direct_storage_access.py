@@ -21,23 +21,11 @@ DEFAULT_TARGETS = (
     REPO_ROOT / "packages/python/sibyl-core/src/sibyl_core/services/link_graph_status.py",
     REPO_ROOT / "packages/python/sibyl-core/src/sibyl_core/tools",
 )
+# Third-party stacks a dependency bump could bring back. First-party legacy modules are
+# deleted, so importing one fails on its own and needs no entry here.
 FORBIDDEN_MODULE_PREFIXES = {
     "graphiti": "Graphiti runtime import",
     "graphiti" + "_core": "Graphiti runtime import",
-    "sibyl.db": "legacy SQL session import",
-    "sibyl.db.connection": "legacy SQL session import",
-    "sibyl.persistence.legacy": "legacy persistence runtime import",
-    "sibyl.auth.api_keys": "legacy auth manager import",
-    "sibyl.auth.audit": "legacy auth manager import",
-    "sibyl.auth.device_authorization": "legacy auth manager import",
-    "sibyl.auth.invitations": "legacy auth manager import",
-    "sibyl.auth.memberships": "legacy auth manager import",
-    "sibyl.auth.organizations": "legacy auth manager import",
-    "sibyl.auth.password_reset": "legacy auth manager import",
-    "sibyl.auth.rls": "RLS SQL session wrapper import",
-    "sibyl.auth.sessions": "legacy auth manager import",
-    "sibyl.auth.users": "legacy auth manager import",
-    "sibyl_core.graph": "legacy graph runtime import",
     "sqlalchemy": "raw SQLAlchemy import",
     "sqlmodel": "raw SQLModel import",
 }
