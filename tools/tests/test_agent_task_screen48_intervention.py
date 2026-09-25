@@ -164,7 +164,7 @@ def seams(monkeypatch: pytest.MonkeyPatch):
 
 
 def build(tmp_path: Path, **overrides: Any) -> dict[str, Any]:
-    arguments = {
+    arguments: dict[str, Any] = {
         "preparation_root": write_source(tmp_path / "source"),
         "output": tmp_path / "out",
         "task": TASK,
