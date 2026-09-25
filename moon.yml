@@ -848,13 +848,17 @@ tasks:
 
   dev-script-test:
     command:
-      uv run pytest tools/tests/test_dev_scripts.py tools/tests/test_surreal_migration_moon_tasks.py
+      uv run pytest tools/tests/test_dev_scripts.py tools/tests/test_moon_sibyld_commands.py
       -v
     inputs:
       - tools/dev/*.sh
       - tools/tests/conftest.py
       - tools/tests/test_dev_scripts.py
-      - tools/tests/test_surreal_migration_moon_tasks.py
+      - tools/tests/test_moon_sibyld_commands.py
+      - apps/api/src/sibyl/cli/**/*.py
+      - .moon/workspace.yml
+      - .moon/tasks/*.yml
+      - "**/moon.yml"
       - pyproject.toml
       - moon.yml
 
@@ -1748,44 +1752,6 @@ tasks:
       - tools/tests/test_enterprise_readiness_evidence.py
       - pyproject.toml
       - moon.yml
-
-  migrate-rehearse:
-    command: uv run sibyld migrate rehearse
-    inputs:
-      - apps/api/src/**/*.py
-      - packages/python/sibyl-core/src/**/*.py
-      - tools/**/*.py
-      - baselines/**/*.jsonl
-      - .moon/cache/baseline-runtime-manifest.json
-      - pyproject.toml
-      - apps/api/pyproject.toml
-      - packages/python/sibyl-core/pyproject.toml
-
-  migrate-cutover:
-    command: uv run sibyld migrate cutover
-    inputs:
-      - apps/api/src/**/*.py
-      - packages/python/sibyl-core/src/**/*.py
-      - tools/**/*.py
-      - baselines/**/*.jsonl
-      - .moon/cache/baseline-runtime-manifest.json
-      - pyproject.toml
-      - apps/api/pyproject.toml
-      - packages/python/sibyl-core/pyproject.toml
-
-  auth-flow-replay:
-    command: uv run sibyld migrate auth-flow
-    inputs:
-      - apps/api/src/**/*.py
-      - pyproject.toml
-      - apps/api/pyproject.toml
-
-  auth-flow-compare:
-    command: uv run sibyld migrate auth-flow-compare
-    inputs:
-      - apps/api/src/**/*.py
-      - pyproject.toml
-      - apps/api/pyproject.toml
 
   # ==========================================================================
   # Coverage
