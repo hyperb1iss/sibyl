@@ -215,14 +215,24 @@ existing release to chart defaults, silently discarding every other override.
 
 {{/*
 Update strategy for a Deployment that mounts the validation receipts claim.
-An explicit strategy wins; a single fixed replica defaults to Recreate.
+An explicit strategy wins. A single fixed replica rolls with maxSurge 0 so no
+surge pod ever competes for a ReadWriteOnce claim. The default stays type
+RollingUpdate rather than Recreate: the API server defaults rollingUpdate on
+every existing Deployment, no applier owns that field, and server-side apply
+can never remove it, so switching type to Recreate is rejected on upgrade.
 */}}
 {{- define "sibyl.receiptsStrategy" -}}
-{{- if .strategy }}
+{{- if .strategy -}}
+{{- if and (eq (toString .strategy.type) "Recreate") .strategy.rollingUpdate -}}
+{{- fail "strategy.rollingUpdate may not be set when strategy.type is Recreate" -}}
+{{- end -}}
 strategy:
   {{- toYaml .strategy | nindent 2 }}
-{{- else if and (not .autoscaling.enabled) (le (int .replicaCount) 1) }}
+{{- else if and (not .autoscaling.enabled) (le (int .replicaCount) 1) -}}
 strategy:
-  type: Recreate
-{{- end }}
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 0
+    maxUnavailable: 1
+{{- end -}}
 {{- end }}

@@ -977,14 +977,20 @@ def _receipt_deployments(*overrides: str) -> dict[str, dict]:
 def test_helm_receipt_pods_keep_claim_private_and_attachable() -> None:
     """Block-storage CSI drivers re-apply fsGroup on every mount, adding group
     bits the private receipts directory refuses, and an RWO claim cannot
-    attach to a rolling-update surge pod scheduled onto another node."""
+    attach to a rolling-update surge pod scheduled onto another node. The
+    default keeps type RollingUpdate: switching an existing Deployment to
+    Recreate is rejected under server-side apply, because the API-defaulted
+    rollingUpdate field has no owner and can never be removed."""
     deployments = _receipt_deployments()
     for name in ("sibyl-backend", "sibyl-worker"):
         deployment = deployments[name]
         security = deployment["spec"]["template"]["spec"]["securityContext"]
         assert security["fsGroup"] == API_SERVICE_GID
         assert security["fsGroupChangePolicy"] == "OnRootMismatch"
-        assert deployment["spec"]["strategy"] == {"type": "Recreate"}
+        assert deployment["spec"]["strategy"] == {
+            "type": "RollingUpdate",
+            "rollingUpdate": {"maxSurge": 0, "maxUnavailable": 1},
+        }
 
     scaled = _receipt_deployments(
         "--set", "backend.replicaCount=2", "--set", "worker.autoscaling.enabled=true"
@@ -992,16 +998,40 @@ def test_helm_receipt_pods_keep_claim_private_and_attachable() -> None:
     assert "strategy" not in scaled["sibyl-backend"]["spec"]
     assert "strategy" not in scaled["sibyl-worker"]["spec"]
 
-    explicit = _receipt_deployments(
+    explicit = _receipt_deployments("--set", "backend.strategy.type=Recreate")
+    assert explicit["sibyl-backend"]["spec"]["strategy"] == {"type": "Recreate"}
+
+    invalid = _helm_template(
         "--set",
-        "backend.strategy.type=RollingUpdate",
+        "backend.existingSecret=runtime-secret",
         "--set",
-        "backend.strategy.rollingUpdate.maxSurge=0",
+        "backend.strategy.type=Recreate",
+        "--set",
+        "backend.strategy.rollingUpdate.maxSurge=1",
     )
-    assert explicit["sibyl-backend"]["spec"]["strategy"] == {
-        "type": "RollingUpdate",
-        "rollingUpdate": {"maxSurge": 0},
-    }
+    assert invalid.returncode != 0
+    assert "may not be set when strategy.type is Recreate" in invalid.stderr
+
+
+@requires_helm
+def test_helm_receipt_strategy_leaves_no_whitespace_lines() -> None:
+    rendered = _helm_template(
+        "--set",
+        "backend.existingSecret=runtime-secret",
+        "--set",
+        "coordinationBackend=redis",
+        "--set",
+        "backend.redis.password=fixture-only",
+        "--set",
+        "worker.enabled=true",
+    )
+    assert rendered.returncode == 0, rendered.stderr
+    blank_with_spaces = [
+        number
+        for number, line in enumerate(rendered.stdout.splitlines(), start=1)
+        if line and not line.strip()
+    ]
+    assert blank_with_spaces == []
 
 
 def test_production_compose_validation_receipts_share_durable_state() -> None:

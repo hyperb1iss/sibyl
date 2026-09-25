@@ -60,9 +60,10 @@ backend:
   # -- Number of replicas (ignored if autoscaling is enabled)
   replicaCount: 1
 
-  # -- Deployment update strategy. Empty selects Recreate for a single fixed
-  # replica, because a surge pod on another node cannot attach an RWO
-  # receipts claim, and the Kubernetes RollingUpdate default otherwise.
+  # -- Deployment update strategy. Empty rolls a single fixed replica with
+  # maxSurge 0 and maxUnavailable 1, because a surge pod on another node
+  # cannot attach an RWO receipts claim, and uses the Kubernetes
+  # RollingUpdate default otherwise.
   strategy: {}
 
   image:
