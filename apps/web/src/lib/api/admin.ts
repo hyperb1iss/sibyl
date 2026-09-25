@@ -298,29 +298,6 @@ export interface LLMTestResult {
   error: string | null;
 }
 
-export interface ProviderKeyTestResult {
-  provider: LLMProviderName;
-  model: string;
-  status: LLMValidationStatus;
-  valid: boolean;
-  latency_ms: number;
-  input_tokens: number | null;
-  output_tokens: number | null;
-  error: string | null;
-}
-
-export interface ModelAvailabilityTestResult {
-  provider: LLMProviderName;
-  requested_model: string;
-  resolved_model: string | null;
-  status: LLMValidationStatus;
-  valid: boolean;
-  latency_ms: number;
-  input_tokens: number | null;
-  output_tokens: number | null;
-  error: string | null;
-}
-
 // Backup/Restore Types
 export interface BackupData {
   version: string;
@@ -402,22 +379,6 @@ export interface CreateBackupResponse {
   status: string;
   message: string;
   archive_contents: string[];
-}
-
-export interface BackupJobStatus {
-  job_id: string;
-  function: string;
-  status: string;
-  enqueue_time: string | null;
-  start_time: string | null;
-  finish_time: string | null;
-  result: unknown;
-  error: string | null;
-}
-
-export interface CleanupResponse {
-  job_id: string;
-  message: string;
 }
 
 export type BackgroundJobStatus = 'queued' | 'in_progress' | 'complete' | 'deferred' | 'not_found';
@@ -543,7 +504,6 @@ export const backupsApi = {
   },
   list: (limit = 50, offset = 0) =>
     fetchApi<BackupListResponse>(`/backups?limit=${limit}&offset=${offset}`),
-  get: (backupId: string) => fetchApi<BackupInfo>(`/backups/${backupId}`),
   create: (data?: CreateBackupRequest) =>
     fetchApi<CreateBackupResponse>('/backups', {
       method: 'POST',
@@ -554,12 +514,6 @@ export const backupsApi = {
       method: 'DELETE',
     }),
   download: (backupId: string) => `/api/backups/${backupId}/download`,
-  cleanup: (retentionDays?: number) =>
-    fetchApi<CleanupResponse>('/backups/cleanup', {
-      method: 'POST',
-      body: JSON.stringify(retentionDays ? { retention_days: retentionDays } : {}),
-    }),
-  jobStatus: (jobId: string) => fetchApi<BackupJobStatus>(`/backups/jobs/${jobId}`),
 };
 
 export const setupApi = {
@@ -598,16 +552,6 @@ export const settingsApi = {
 
     testLLMSurface: (surface: LLMSurface) =>
       fetchApi<LLMTestResult>(`/settings/ai/llm/${surface}/test`, {
-        method: 'POST',
-      }),
-
-    testProviderKey: (provider: LLMProviderName) =>
-      fetchApi<ProviderKeyTestResult>(`/settings/ai/keys/${provider}/test`, {
-        method: 'POST',
-      }),
-
-    testModel: (modelAlias: string) =>
-      fetchApi<ModelAvailabilityTestResult>(`/settings/ai/models/${modelAlias}/test`, {
         method: 'POST',
       }),
 

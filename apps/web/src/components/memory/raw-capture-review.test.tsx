@@ -13,7 +13,6 @@ const toast = vi.hoisted(() => ({
 const hooks = vi.hoisted(() => ({
   useRawCaptures: vi.fn(),
   useRawCapture: vi.fn(),
-  useUpdateRawCaptureReviewState: vi.fn(),
 }));
 
 vi.mock('next/navigation', () => ({
@@ -69,10 +68,6 @@ describe('RawCaptureReview', () => {
       data: captureList,
       isLoading: false,
       error: null,
-    });
-    hooks.useUpdateRawCaptureReviewState.mockReturnValue({
-      mutateAsync: vi.fn(),
-      isPending: false,
     });
     hooks.useRawCapture.mockImplementation((id: string) => ({
       data:

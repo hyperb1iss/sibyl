@@ -10,7 +10,6 @@ import type {
   ProjectRole,
   ProjectSummariesResponse,
   TaskListResponse,
-  TaskPriority,
   TaskStatus,
   TaskSummary,
 } from '../api/work-items';
@@ -114,70 +113,6 @@ export function useTask(id: string) {
   });
 }
 
-export function useTaskManage() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: ({
-      action,
-      entity_id,
-      params,
-    }: {
-      action:
-        | 'start_task'
-        | 'block_task'
-        | 'unblock_task'
-        | 'submit_review'
-        | 'complete_task'
-        | 'archive';
-      entity_id: string;
-      params?: {
-        assignee?: string;
-        blocker?: string;
-        reason?: string;
-        commit_shas?: string[];
-        pr_url?: string;
-        actual_hours?: number;
-        learnings?: string;
-      };
-    }) => {
-      // Route to RESTful endpoints based on action
-      switch (action) {
-        case 'start_task':
-          return tasksApi.start(
-            entity_id,
-            params?.assignee ? { assignee: params.assignee } : undefined
-          );
-        case 'block_task':
-          return tasksApi.block(entity_id, params?.blocker || params?.reason || 'Blocked');
-        case 'unblock_task':
-          return tasksApi.unblock(entity_id);
-        case 'submit_review':
-          return tasksApi.review(entity_id, {
-            pr_url: params?.pr_url,
-            commit_shas: params?.commit_shas,
-          });
-        case 'complete_task':
-          return tasksApi.complete(entity_id, {
-            actual_hours: params?.actual_hours,
-            learnings: params?.learnings,
-          });
-        case 'archive':
-          return tasksApi.archive(
-            entity_id,
-            params?.reason ? { reason: params.reason } : undefined
-          );
-        default:
-          throw new Error(`Unknown action: ${action}`);
-      }
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all });
-      queryClient.invalidateQueries({ queryKey: ['metrics'] });
-    },
-  });
-}
-
 export function useTaskUpdateStatus() {
   const queryClient = useQueryClient();
 
@@ -235,15 +170,6 @@ export function useProjects(
   });
 }
 
-export function useProject(id: string) {
-  return useQuery({
-    queryKey: queryKeys.projects.detail(id),
-    queryFn: () => projectsApi.get(id),
-    enabled: !!id,
-    staleTime: TIMING.STALE_TIME,
-  });
-}
-
 export function useProjectMembers(projectId: string, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: queryKeys.projects.members(projectId),
@@ -251,25 +177,6 @@ export function useProjectMembers(projectId: string, options?: { enabled?: boole
     enabled: options?.enabled ?? !!projectId,
     retry: false,
     staleTime: TIMING.STALE_TIME,
-  });
-}
-
-export function useAddProjectMember() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: ({
-      projectId,
-      userId,
-      role,
-    }: {
-      projectId: string;
-      userId: string;
-      role: ProjectRole;
-    }) => projectsApi.members.add(projectId, userId, role),
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.projects.members(variables.projectId) });
-    },
   });
 }
 
@@ -344,63 +251,6 @@ export function useEpicTasks(epicId: string) {
     queryFn: () => epicsApi.tasks(epicId),
     enabled: !!epicId,
     staleTime: TIMING.STALE_TIME,
-  });
-}
-
-export function useEpicManage() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: ({
-      action,
-      entity_id,
-      params,
-    }: {
-      action: 'start_epic' | 'complete_epic' | 'archive_epic' | 'update_epic';
-      entity_id: string;
-      params?: {
-        learnings?: string;
-        reason?: string;
-        status?: EpicStatus;
-        priority?: TaskPriority;
-        title?: string;
-        description?: string;
-        assignees?: string[];
-        tags?: string[];
-      };
-    }) => {
-      // Route to RESTful endpoints based on action
-      switch (action) {
-        case 'start_epic':
-          return epicsApi.start(entity_id);
-        case 'complete_epic':
-          return epicsApi.complete(
-            entity_id,
-            params?.learnings ? { learnings: params.learnings } : undefined
-          );
-        case 'archive_epic':
-          return epicsApi.archive(
-            entity_id,
-            params?.reason ? { reason: params.reason } : undefined
-          );
-        case 'update_epic':
-          return epicsApi.update(entity_id, {
-            status: params?.status,
-            priority: params?.priority,
-            title: params?.title,
-            description: params?.description,
-            assignees: params?.assignees,
-            tags: params?.tags,
-          });
-        default:
-          throw new Error(`Unknown action: ${action}`);
-      }
-    },
-    onSuccess: () => {
-      // Invalidate epics list and related queries
-      queryClient.invalidateQueries({ queryKey: queryKeys.epics.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all });
-    },
   });
 }
 

@@ -9,7 +9,6 @@ import type {
   MemorySpaceListResponse,
   RawCapture,
   RawCaptureListResponse,
-  RawCaptureReviewState,
   SessionBundleResponse,
   SourceAdapterListResponse,
   SourceImportResumeRequest,
@@ -61,19 +60,6 @@ export function useSessionBundle(
     queryFn: () => sessionApi.bundle(params),
     enabled: options?.enabled ?? true,
     initialData: options?.initialData,
-  });
-}
-
-export function useUpdateRawCaptureReviewState() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: ({ id, reviewState }: { id: string; reviewState: RawCaptureReviewState }) =>
-      rawCapturesApi.updateReviewState(id, reviewState),
-    onSuccess: (data, variables) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.rawCaptures.all });
-      queryClient.setQueryData(queryKeys.rawCaptures.detail(variables.id), data);
-    },
   });
 }
 

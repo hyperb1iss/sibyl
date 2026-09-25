@@ -5,7 +5,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   AdminAuditListResponse,
   AIModelKind,
-  LLMProviderName,
   LLMSurface,
   StatsResponse,
   UpdateLLMSurfaceRequest,
@@ -181,18 +180,6 @@ export function useTestLLMSurface() {
   });
 }
 
-export function useTestProviderKey() {
-  return useMutation({
-    mutationFn: (provider: LLMProviderName) => settingsApi.ai.testProviderKey(provider),
-  });
-}
-
-export function useTestAIModel() {
-  return useMutation({
-    mutationFn: (modelAlias: string) => settingsApi.ai.testModel(modelAlias),
-  });
-}
-
 // =============================================================================
 // Backup Management Hooks
 // =============================================================================
@@ -273,18 +260,6 @@ export function useRunMaintenanceJob() {
 }
 
 /**
- * Get details of a specific backup.
- */
-export function useBackup(backupId: string, options?: { enabled?: boolean }) {
-  return useQuery({
-    queryKey: queryKeys.backups.detail(backupId),
-    queryFn: () => backupsApi.get(backupId),
-    enabled: (options?.enabled ?? true) && !!backupId,
-    staleTime: 10000,
-  });
-}
-
-/**
  * Create a new backup.
  */
 export function useCreateBackup() {
@@ -308,45 +283,6 @@ export function useDeleteBackup() {
     mutationFn: (backupId: string) => backupsApi.delete(backupId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.backups.list });
-    },
-  });
-}
-
-/**
- * Trigger backup cleanup.
- */
-export function useBackupCleanup() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (retentionDays?: number) => backupsApi.cleanup(retentionDays),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.backups.list });
-    },
-  });
-}
-
-/**
- * Get status of a backup job.
- */
-export function useBackupJobStatus(jobId: string, options?: { enabled?: boolean }) {
-  const enabled = (options?.enabled ?? true) && !!jobId;
-  const wsStatus = useWebSocketStatus(enabled);
-
-  return useQuery({
-    queryKey: queryKeys.backups.jobStatus(jobId),
-    queryFn: () => backupsApi.jobStatus(jobId),
-    enabled,
-    staleTime: 2000,
-    refetchInterval: query => {
-      if (wsStatus === 'connected') {
-        return false;
-      }
-      const status = query.state.data?.status;
-      if (status === 'complete' || status === 'not_found') {
-        return false;
-      }
-      return 3000;
     },
   });
 }
