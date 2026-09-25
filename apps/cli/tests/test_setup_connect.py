@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import httpx
 import pytest
 import typer
 from typer.testing import CliRunner
 
-from sibyl_cli import config_store, connect, doctor, setup
+from sibyl_cli import config_store, connect, doctor, setup, state
 from sibyl_cli.main import app
 
 SERVER = "https://sibyl.example.com"
@@ -38,6 +39,9 @@ class FakeServer:
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(config_store.Path, "home", lambda: tmp_path)
+    # `-C` stores a process-wide override; keep it from leaking between tests.
+    monkeypatch.setattr(state, "_context_override", None)
+    monkeypatch.setattr(state, "_ignore_selection", False)
     monkeypatch.setattr(setup, "CLAUDE_HOOKS_DIR", tmp_path / ".claude" / "hooks" / "sibyl")
     monkeypatch.setattr(setup, "CLAUDE_SETTINGS_FILE", tmp_path / ".claude" / "settings.json")
     monkeypatch.setattr(doctor, "CLAUDE_SETTINGS_PATH", tmp_path / ".claude" / "settings.json")
@@ -299,3 +303,48 @@ def test_normalize_server_url_accepts_what_people_paste(raw: str, expected: str)
 def test_normalize_server_url_rejects_other_schemes() -> None:
     with pytest.raises(typer.BadParameter):
         connect.normalize_server_url("ftp://sibyl.example.com")
+
+
+def test_setup_without_a_url_honors_the_context_flag(home: Path, server: FakeServer) -> None:
+    config_store.create_context("local", server_url="http://localhost:3334", set_active=True)
+    config_store.create_context("team", server_url=SERVER)
+    server.signed_in = "ada@example.com"
+
+    result = CliRunner().invoke(app, ["-C", "team", "setup", "--yes"])
+
+    assert result.exit_code == 0, result.output
+    assert f"Sibyl setup {SERVER}" in result.output
+    assert "team (active)" in result.output
+
+
+def test_probe_reads_version_and_floor_from_the_public_health_route(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[str] = []
+
+    def fake_get(url: str, **kwargs: object) -> httpx.Response:
+        requests.append(url)
+        return httpx.Response(
+            200,
+            json={"status": "healthy", "version": "1.4.1"},
+            headers={"X-Sibyl-Version": "1.4.1", "X-Sibyl-Min-Client": "1.4.0"},
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr(connect.httpx, "get", fake_get)
+
+    assert connect.probe_server(SERVER, insecure=False) == ("1.4.1", "1.4.0")
+    assert requests == [f"{SERVER}/api/health"]
+
+
+def test_whoami_treats_a_rejected_login_as_signed_out(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = config_store.create_context("team", server_url=SERVER)
+
+    async def rejected(self: object, path: str, **kwargs: object) -> dict:
+        raise connect.SibylClientError("Unauthorized", status_code=401)
+
+    monkeypatch.setattr(connect.SibylClient, "get", rejected)
+
+    assert connect.whoami(ctx) is None

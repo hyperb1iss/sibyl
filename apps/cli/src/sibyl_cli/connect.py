@@ -101,10 +101,10 @@ def _matching_contexts(server_url: str, name: str | None) -> list[config_store.C
 def _context_for(server_url: str, name: str | None) -> tuple[config_store.Context, str]:
     """Select the context for `server_url`, creating one when none points there."""
     matches = _matching_contexts(server_url, name)
-    active = config_store.get_active_context_name()
+    current = config_store.resolve_context_name()
     if matches:
-        chosen = next((ctx for ctx in matches if ctx.name == active), matches[0])
-        if chosen.name == active:
+        chosen = next((ctx for ctx in matches if ctx.name == current), matches[0])
+        if chosen.name == current:
             return chosen, f"{chosen.name} (active)"
         config_store.set_active_context(chosen.name)
         clear_client_cache()
@@ -209,11 +209,11 @@ def setup_cmd(
     if url:
         server_url = normalize_server_url(url)
     else:
-        active = config_store.get_active_context()
-        if active is None:
+        current = config_store.resolve_effective_context()
+        if current is None:
             error("Which server? Run: sibyl setup https://your-sibyl-server")
             raise typer.Exit(1)
-        server_url = normalize_server_url(active.server_url)
+        server_url = normalize_server_url(current.server_url)
 
     console.print()
     console.print(f"[{ELECTRIC_PURPLE}]◈[/{ELECTRIC_PURPLE}] [bold]Sibyl setup[/bold] {server_url}")
