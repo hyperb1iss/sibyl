@@ -1,14 +1,17 @@
 """Self-updater for Sibyl easy install deployments.
 
-Updates CLI, Docker containers, and skills/hooks.
-Only works for uv tool installs, not development/source installs.
+Updates the CLI, the container runtime `sibyl up` or `sibyl docker` set up,
+and skills/hooks. Only works for uv tool installs, not development/source
+installs.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import urllib.request
+from dataclasses import dataclass
 from importlib.metadata import version as pkg_version
 from pathlib import Path
 from typing import Annotated
@@ -18,6 +21,8 @@ from packaging.version import Version
 from rich.panel import Panel
 from rich.table import Table
 
+from sibyl_cli import docker as docker_runtime
+from sibyl_cli import local as local_runtime
 from sibyl_cli.common import (
     ELECTRIC_PURPLE,
     ELECTRIC_YELLOW,
@@ -38,18 +43,9 @@ app = typer.Typer(help="Update Sibyl components")
 # ============================================================================
 
 PYPI_URL = "https://pypi.org/pypi/sibyl-dev/json"
-DOCKER_HUB_API = "https://hub.docker.com/v2/repositories"
 
-# Images we manage
-SIBYL_IMAGES = [
-    "surrealdb/surrealdb",
-    # Add sibyl images when published to Docker Hub
-    # "hyperbliss/sibyld",
-    # "hyperbliss/sibyl-web",
-]
-
-SIBYL_LOCAL_DIR = Path.home() / ".sibyl"
-SIBYL_LOCAL_COMPOSE = SIBYL_LOCAL_DIR / "docker-compose.yml"
+# `update --check` must finish even when a wedged daemon never answers.
+DOCKER_PROBE_TIMEOUT_SECONDS = local_runtime.DOCKER_PROBE_TIMEOUT_SECONDS
 
 
 # ============================================================================
@@ -158,76 +154,205 @@ def get_server_version() -> str | None:
     return str(version) if version else None
 
 
-def get_local_image_digest(image: str) -> str | None:
-    """Get digest of locally pulled image."""
-    try:
-        result = subprocess.run(
-            ["docker", "inspect", "--format", "{{index .RepoDigests 0}}", image],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            # Extract just the digest part
-            digest = result.stdout.strip()
-            if "@" in digest:
-                return digest.split("@")[1]
-            return digest
-    except Exception:
-        pass
-    return None
+# ============================================================================
+# Container Runtimes
+# ============================================================================
 
 
-def get_remote_image_digest(image: str, tag: str = "latest") -> str | None:
-    """Get latest digest from Docker Hub."""
-    try:
-        # Parse image name
-        if "/" in image:
-            namespace, repo = image.split("/", 1)
+_parse_tag = local_runtime.image_tag_version
+
+
+@dataclass(frozen=True)
+class ContainerRuntime:
+    """A compose runtime that `sibyl up` or `sibyl docker init` wrote to disk."""
+
+    name: str
+    compose_file: Path
+    env_file: Path
+
+    def image_tag(self) -> str | None:
+        """The tag of the API image the compose file pins."""
+        try:
+            return local_runtime.pinned_image_tag(self.compose_file.read_text())
+        except OSError:
+            return None
+
+    def is_running(self) -> bool | None:
+        """Whether this runtime has running containers, or None when Docker did not answer.
+
+        Containers are matched on the compose-file label, so another project
+        in a directory named `docker` or `local` never reads as this one.
+        """
+        containers = local_runtime.containers_for(self.compose_file)
+        return None if containers is None else bool(containers)
+
+    def running_api_tag(self) -> str | None:
+        """The image tag of this runtime's running API container, if one runs.
+
+        An interrupted upgrade can leave the pin ahead of the containers, so
+        what runs is the version that counts.
+        """
+        return local_runtime.running_api_tag(self.compose_file)
+
+    def api_state(self) -> local_runtime.ApiState | None:
+        """Whether this runtime's API container runs, and its tag when that can be told."""
+        return local_runtime.running_api_state(self.compose_file)
+
+    def upgrade_command(self, image_tag: str) -> list[str]:
+        """The runtime's own upgrade command, run through the `sibyl` on PATH.
+
+        Both pull before they restart anything, so a missing image leaves the
+        running server alone.
+        """
+        return ["sibyl", self.name, "upgrade", "--tag", image_tag]
+
+
+def installed_container_runtimes() -> list[ContainerRuntime]:
+    """Runtimes with a compose file at the path their own commands write."""
+    runtimes = [
+        ContainerRuntime(
+            "docker", docker_runtime.SIBYL_DOCKER_COMPOSE, docker_runtime.SIBYL_DOCKER_ENV
+        ),
+        ContainerRuntime("local", local_runtime.SIBYL_LOCAL_COMPOSE, local_runtime.SIBYL_LOCAL_ENV),
+    ]
+    return [runtime for runtime in runtimes if runtime.compose_file.exists()]
+
+
+@dataclass(frozen=True)
+class ContainerTarget:
+    """The server image tag the containers should run, or why there is none."""
+
+    tag: str | None
+    source: str = "CLI"
+    reason: str | None = None
+
+
+def container_target(cli_version: str | None) -> ContainerTarget:
+    """The tag a CLI at `cli_version` runs, following the rule `sibyl up` uses."""
+    if override := os.getenv("SIBYL_IMAGE_TAG"):
+        return ContainerTarget(override, source="SIBYL_IMAGE_TAG")
+    if not cli_version:
+        return ContainerTarget(None, reason="CLI version unknown")
+    if tag := local_runtime.release_image_tag(cli_version):
+        return ContainerTarget(tag)
+    return ContainerTarget(None, reason=f"CLI {cli_version} is not a release with an image")
+
+
+@dataclass(frozen=True)
+class ContainerPlan:
+    """Where one runtime stands against the server image its CLI expects."""
+
+    runtime: ContainerRuntime
+    current_tag: str | None
+    target: ContainerTarget
+    running: bool | None
+    pinned_tag: str | None = None
+    owner_unknown: bool = False
+
+    @property
+    def api_missing(self) -> bool:
+        """The runtime has containers up but no API, e.g. after an interrupted start."""
+        return self.running is True and self.current_tag is None and self.pinned_tag is not None
+
+    @property
+    def target_tag(self) -> str | None:
+        return self.target.tag
+
+    @property
+    def behind(self) -> bool:
+        target = _parse_tag(self.target_tag)
+        if self.api_missing:
+            # Bringing the API back on the target is the fix, unless the pin
+            # names something newer than this CLI, which must not go backwards.
+            pinned = _parse_tag(self.pinned_tag)
+            return pinned is not None and target is not None and pinned <= target
+        current = _parse_tag(self.current_tag)
+        return current is not None and target is not None and current < target
+
+    @property
+    def applies(self) -> bool:
+        """Only a runtime known to be running is upgraded; `update` never starts one."""
+        return self.behind and self.running is True
+
+    def status(self) -> str:
+        status = self._status()
+        if (
+            not self.api_missing
+            and self.pinned_tag
+            and self.current_tag
+            and self.pinned_tag != self.current_tag
+        ):
+            status += f" [dim](pin says {self.pinned_tag})[/dim]"
+        return status
+
+    def _status(self) -> str:
+        current, target, source = self.current_tag, self.target_tag, self.target.source
+        if self.owner_unknown:
+            return (
+                f"{current or 'unknown'} [dim](a running sibyl-api container is claimed by "
+                "neither runtime's compose file, so its owner is unknown; left alone. Upgrade it "
+                "with sibyl local upgrade or sibyl docker upgrade, whichever started it)[/dim]"
+            )
+        if self.api_missing:
+            missing = f"no API container running (pin says {self.pinned_tag})"
+            if self.applies:
+                return f"{missing} → [{SUCCESS_GREEN}]{target}[/{SUCCESS_GREEN}]"
+            return f"{missing} [dim](left alone)[/dim]"
+        if current is None:
+            return "[dim]Unknown image tag[/dim]"
+        if target is None:
+            return f"{current} [dim]({self.target.reason}, left alone)[/dim]"
+        if self.applies:
+            return f"{current} → [{SUCCESS_GREEN}]{target}[/{SUCCESS_GREEN}]"
+        if self.behind and self.running is None:
+            return f"{current} [dim](Docker did not answer, state unknown; left alone)[/dim]"
+        if self.behind and self.runtime.name == "local":
+            return f"{current} [dim](stopped; the next `sibyl up` runs {target})[/dim]"
+        if self.behind:
+            return (
+                f"{current} [dim](stopped; `sibyl docker upgrade --tag {target}` "
+                "moves it and starts it)[/dim]"
+            )
+        if _parse_tag(current) is None:
+            return f"{current} [dim](custom tag, left alone)[/dim]"
+        if _parse_tag(target) is None:
+            return f"{current} [dim]({source} {target} is not a release, left alone)[/dim]"
+        if _parse_tag(current) == _parse_tag(target):
+            return f"[{SUCCESS_GREEN}]{current}[/{SUCCESS_GREEN}] (matches {source})"
+        return f"{current} [dim](newer than {source} {target}, left alone)[/dim]"
+
+
+def plan_container_upgrades(cli_version: str | None) -> list[ContainerPlan]:
+    """Compare each installed runtime with the image tag `cli_version` runs."""
+    target = container_target(cli_version)
+    runtimes = installed_container_runtimes()
+    known = (*local_runtime.known_compose_files(), *(r.compose_file for r in runtimes))
+    unclaimed: bool | None = None
+    plans = []
+    for runtime in runtimes:
+        running = runtime.is_running()
+        pinned = runtime.image_tag()
+        owner_unknown = False
+        if running:
+            # What runs is the current version. An API whose tag cannot be told
+            # (an image ID, say) falls back to the pin; a runtime up without its
+            # API is not current at all.
+            api = runtime.api_state()
+            if api is None or (api.present and api.tag is None):
+                current = pinned
+            else:
+                current = api.tag if api.present else None
         else:
-            namespace = "library"
-            repo = image
-
-        url = f"{DOCKER_HUB_API}/{namespace}/{repo}/tags/{tag}"
-        req = urllib.request.Request(
-            url,
-            headers={"Accept": "application/json", "User-Agent": "sibyl-updater/1.0"},
-        )
-        with urllib.request.urlopen(req, timeout=10) as response:
-            data = json.loads(response.read().decode())
-            # Get the digest from the response
-            digest = data.get("digest")
-            if digest:
-                return digest
-            # Try images array
-            images = data.get("images", [])
-            if images:
-                return images[0].get("digest")
-    except Exception:
-        pass
-    return None
-
-
-def check_container_updates() -> tuple[int, int, list[str]]:
-    """Check for container image updates.
-
-    Returns (total_images, updates_available, list_of_updatable_images)
-    """
-    if not SIBYL_LOCAL_COMPOSE.exists():
-        return 0, 0, []
-
-    updates = []
-    total = 0
-
-    for image in SIBYL_IMAGES:
-        total += 1
-        local_digest = get_local_image_digest(image)
-        remote_digest = get_remote_image_digest(image)
-
-        if local_digest and remote_digest and local_digest != remote_digest:
-            updates.append(image)
-
-    return total, len(updates), updates
+            current = pinned
+            if running is False:
+                if unclaimed is None:
+                    unclaimed = local_runtime.unclaimed_api_running(known)
+                if unclaimed:
+                    # A server no label ties to either runtime is still a running
+                    # server, so this one must not read as stopped.
+                    running, owner_unknown = None, True
+        plans.append(ContainerPlan(runtime, current, target, running, pinned, owner_unknown))
+    return plans
 
 
 # ============================================================================
@@ -277,57 +402,54 @@ def sync_skills_after_cli_update() -> bool:
     return False
 
 
-def update_containers(restart: bool = True) -> bool:
-    """Update Docker containers."""
-    if not SIBYL_LOCAL_COMPOSE.exists():
-        warn("No local Sibyl installation found")
+def upgrade_container_runtime(plan: ContainerPlan) -> bool:
+    """Hand a running runtime to its own upgrade command, then check the pin it left."""
+    target = plan.target_tag
+    if target is None:
+        return False
+    command = plan.runtime.upgrade_command(target)
+    shown = " ".join(command)
+    info(f"Running {shown}")
+    # The `sibyl` on PATH may be a different build than this process, so the
+    # tag travels explicitly instead of being derived from its version.
+    env = {**os.environ, "SIBYL_IMAGE_TAG": target}
+    try:
+        result = subprocess.run(command, check=False, env=env)
+    except OSError as exc:
+        error(f"Could not run {shown}: {exc}")
         return False
 
-    info("Pulling container images...")
-
-    # Check if containers are running
-    compose_cmd = [
-        "docker",
-        "compose",
-        "-f",
-        str(SIBYL_LOCAL_COMPOSE),
-        "--env-file",
-        "/dev/null",
-    ]
-
-    ps_result = subprocess.run(
-        [*compose_cmd, "ps", "-q"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    was_running = bool(ps_result.stdout.strip())
-
-    # Pull new images
-    result = subprocess.run(
-        [*compose_cmd, "pull"],
-        capture_output=False,
-        check=False,
-    )
-
-    if result.returncode != 0:
-        error("Failed to pull container images")
+    pinned = plan.runtime.image_tag()
+    running_tag = plan.runtime.running_api_tag()
+    name = plan.runtime.name
+    if result.returncode == 0 and pinned == target and running_tag == target:
+        success(f"The {name} runtime now runs {target}")
+        return True
+    if result.returncode == 0 and running_tag is None:
+        # `docker upgrade` does not wait for health, so an API that exits right
+        # after `up -d` only shows up here.
+        error(f"{shown} finished, but no {name} API container is running {target}.")
+        info(f"Inspect it with: sibyl {name} logs")
+        return False
+    if result.returncode == 0:
+        found = running_tag if running_tag != target else pinned
+        error(f"{shown} finished, but the {name} runtime is on {found}, not {target}.")
         return False
 
-    # Restart if was running
-    if was_running and restart:
-        info("Restarting containers with new images...")
-        result = subprocess.run(
-            [*compose_cmd, "up", "-d"],
-            capture_output=False,
-            check=False,
-        )
-        if result.returncode != 0:
-            error("Failed to restart containers")
-            return False
-
-    success("Containers updated")
-    return True
+    error(f"{shown} failed")
+    if name == "local":
+        # `local upgrade` already said which it was: nothing changed, or the
+        # new version is pinned and did not come up healthy.
+        return False
+    # `docker upgrade` pulls before it touches the pin, so an unchanged pin
+    # means the pull failed and a moved one means the start did.
+    if pinned != target:
+        info(f"Nothing changed; the {name} runtime still pins {pinned}.")
+        return False
+    warn(f"The {target} images are pulled and pinned, but the {name} runtime did not start.")
+    info("Start it with: sibyl docker up")
+    info("Inspect the failure with: sibyl docker logs")
+    return False
 
 
 def update_skills() -> bool:
@@ -355,7 +477,7 @@ def update(
     ] = False,
     containers_only: Annotated[
         bool,
-        typer.Option("--containers", help="Only update Docker containers"),
+        typer.Option("--containers", help="Only upgrade the running container runtime"),
     ] = False,
     skills_only: Annotated[
         bool,
@@ -368,8 +490,9 @@ def update(
 ) -> None:
     """Check for and apply Sibyl updates.
 
-    Updates the CLI, Docker containers, and Claude/Codex skills/hooks.
-    Only works for easy install deployments (uv tool install).
+    Updates the CLI, the running `sibyl up` or `sibyl docker` runtime, and
+    Claude/Codex skills/hooks. Only works for easy install deployments
+    (uv tool install).
     """
     # Check for dev mode
     if is_dev_mode():
@@ -397,10 +520,18 @@ def update(
     if do_cli:
         cli_current, cli_latest, cli_has_update = cli_update_available()
 
-    # Check container updates
-    container_total, container_updates, _container_list = 0, 0, []
+    # Containers follow the CLI this run leaves installed, so the server never
+    # lands ahead of the client that talks to it.
+    container_plans: list[ContainerPlan] = []
     if do_containers:
-        container_total, container_updates, _container_list = check_container_updates()
+        installed = cli_current if do_cli else get_current_cli_version()
+        container_plans = plan_container_upgrades(cli_latest if cli_has_update else installed)
+    # A runtime that is behind but not upgraded here, or whose tag cannot be
+    # read, is not "up to date" even when nothing is left to apply.
+    needs_attention = any(
+        (plan.behind and not plan.applies) or plan.current_tag is None or plan.owner_unknown
+        for plan in container_plans
+    )
 
     # Skills are always "updateable" (we just re-copy)
 
@@ -438,17 +569,11 @@ def update(
         else:
             table.add_row("Server", f"[{SUCCESS_GREEN}]{server_version}[/{SUCCESS_GREEN}]")
 
-    if do_containers:
-        if container_total == 0:
-            table.add_row("Containers", "[dim]Not installed[/dim]")
-        elif container_updates > 0:
-            table.add_row(
-                "Containers",
-                f"[{SUCCESS_GREEN}]{container_updates} image(s) to update[/{SUCCESS_GREEN}]",
-            )
-            has_updates = True
-        else:
-            table.add_row("Containers", f"[{SUCCESS_GREEN}]Up to date[/{SUCCESS_GREEN}]")
+    if do_containers and not container_plans:
+        table.add_row("Containers", "[dim]Not installed[/dim]")
+    for plan in container_plans:
+        table.add_row(f"Containers ({plan.runtime.name})", plan.status())
+        has_updates = has_updates or plan.applies
 
     if do_skills:
         table.add_row("Skills", "[dim]Will refresh[/dim]")
@@ -476,13 +601,14 @@ def update(
     if check_only:
         if has_updates:
             console.print(f"Run [{NEON_CYAN}]sibyl update[/{NEON_CYAN}] to apply updates.")
-        else:
+        elif not needs_attention:
             success("Everything is up to date!")
         return
 
     # If no updates and not forcing skills refresh
     if not has_updates and not do_skills:
-        success("Everything is up to date!")
+        if not needs_attention:
+            success("Everything is up to date!")
         return
 
     # Confirm
@@ -496,11 +622,27 @@ def update(
     # Apply updates
     all_success = True
 
-    if do_cli and cli_has_update and not update_cli():
+    cli_failed = do_cli and cli_has_update and not update_cli()
+    if cli_failed:
         all_success = False
+    elif do_containers and cli_has_update:
+        # A constrained tool install can "upgrade" without moving, so the
+        # containers follow the version that actually landed, not PyPI.
+        landed = get_current_cli_version()
+        if landed is None:
+            warn("Could not read the CLI version after the upgrade.")
+        elif landed != cli_latest:
+            warn(f"The CLI is on {landed}, not {cli_latest}; containers follow {landed}.")
+        container_plans = plan_container_upgrades(landed)
 
-    if do_containers and container_updates > 0 and not update_containers():
-        all_success = False
+    to_upgrade = [plan for plan in container_plans if plan.applies]
+    if to_upgrade and cli_failed:
+        warn("Skipped the container upgrade because the CLI upgrade did not finish.")
+        info("Re-run it once the CLI is current: sibyl update --containers")
+    else:
+        for plan in to_upgrade:
+            if not upgrade_container_runtime(plan):
+                all_success = False
 
     if do_skills:
         info("Refreshing skills and hooks...")
