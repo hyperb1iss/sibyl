@@ -687,12 +687,6 @@ CURRENT_SCHEMA_MAINTENANCE_DEFINITIONS = ENTITY_DENORMALIZATION_MAINTENANCE_DEFI
 
 GRAPH_TABLES = ("entity", "episode")
 GRAPH_EDGES = ("relates_to", "mentions")
-REMOVED_GRAPH_TABLES = ("community", "saga")
-REMOVED_GRAPH_EDGES = ("has_episode", "next_episode", "has_member")
-REMOVED_GRAPH_OBJECTS = (*REMOVED_GRAPH_EDGES, *REMOVED_GRAPH_TABLES)
-DEAD_GRAPH_OBJECT_REMOVAL_DEFINITIONS = "\n".join(
-    f"REMOVE TABLE IF EXISTS {table};" for table in REMOVED_GRAPH_OBJECTS
-)
 GRAPH_SCHEMA_MIGRATIONS = (
     SchemaMigration(
         version=2,
@@ -710,7 +704,13 @@ GRAPH_SCHEMA_MIGRATIONS = (
     SchemaMigration(
         version=4,
         name="drop_dead_graph_objects",
-        statements=tuple(split_statements(DEAD_GRAPH_OBJECT_REMOVAL_DEFINITIONS)),
+        statements=(
+            "REMOVE TABLE IF EXISTS has_episode;",
+            "REMOVE TABLE IF EXISTS next_episode;",
+            "REMOVE TABLE IF EXISTS has_member;",
+            "REMOVE TABLE IF EXISTS community;",
+            "REMOVE TABLE IF EXISTS saga;",
+        ),
     ),
     SchemaMigration(
         version=5,
@@ -1075,68 +1075,6 @@ def _is_missing_table_error(error: Exception) -> bool:
     return "the table" in message and "does not exist" in message
 
 
-def _coerce_count(value: object) -> int:
-    if isinstance(value, bool):
-        return int(value)
-    if isinstance(value, int | float):
-        return int(value)
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return 0
-    return 0
-
-
-def _first_count_value(value: object) -> object:
-    value_map = _object_mapping(value)
-    if value_map is not None:
-        if "result" in value_map:
-            return _first_count_value(value_map.get("result"))
-        count = value_map.get("count")
-        if count is not None:
-            return count
-        return value_map.get("cnt", 0)
-    if isinstance(value, list):
-        for item in value:
-            count = _first_count_value(item)
-            if count is not None:
-                return count
-    return None
-
-
-async def _dead_graph_object_count(
-    driver: SchemaDriver, table: str, *, ownership: SchemaOwnership | None = None
-) -> int:
-    _validate_identifier(table)
-    try:
-        execute = ownership.read if ownership is not None else driver.execute_query
-        result = await execute(f"SELECT count() AS count FROM {table} GROUP ALL;")
-    except Exception as exc:
-        if _is_missing_table_error(exc):
-            return 0
-        raise
-    return _coerce_count(_first_count_value(result))
-
-
-async def _ensure_removed_graph_objects_empty(
-    driver: SchemaDriver, *, ownership: SchemaOwnership | None = None
-) -> None:
-    occupied: dict[str, int] = {}
-    for table in REMOVED_GRAPH_OBJECTS:
-        count = await _dead_graph_object_count(driver, table, ownership=ownership)
-        if count:
-            occupied[table] = count
-
-    if occupied:
-        summary = ", ".join(f"{table}={count}" for table, count in occupied.items())
-        msg = (
-            "Dead graph objects still contain rows; export or clear them before "
-            f"graph schema v{GRAPH_SCHEMA_CURRENT_VERSION} migration: {summary}"
-        )
-        raise RuntimeError(msg)
-
-
 async def _assert_graph_migrations_safe(
     driver: SchemaDriver,
     *,
@@ -1323,7 +1261,7 @@ async def _bootstrap_owned_schema(
     current_version = 0
     if reset:
         await retire_source_states(ownership.mutate, kind=SourceKind.GRAPH_ENTITY)
-        for table in (*GRAPH_EDGES, *GRAPH_TABLES, *REMOVED_GRAPH_EDGES, *REMOVED_GRAPH_TABLES):
+        for table in (*GRAPH_EDGES, *GRAPH_TABLES):
             await ownership.mutate(f"REMOVE TABLE IF EXISTS {table};")
         await ownership.mutate(f"REMOVE TABLE IF EXISTS {SCHEMA_VERSION_TABLE};")
     else:
@@ -1337,7 +1275,6 @@ async def _bootstrap_owned_schema(
             await _assert_graph_migrations_safe(
                 driver, current_version=current_version, ownership=ownership
             )
-            await _ensure_removed_graph_objects_empty(driver, ownership=ownership)
             await apply_schema_migrations(
                 ownership.read,
                 _graph_schema_migrations(url=driver._url, ownership=ownership),
@@ -1346,7 +1283,6 @@ async def _bootstrap_owned_schema(
             )
             await _reconcile_embedding_dimension(driver, ownership)
             return
-        await _ensure_removed_graph_objects_empty(driver, ownership=ownership)
 
     compatible_blocks = (
         ANALYZER_DEFINITIONS,
@@ -1445,7 +1381,6 @@ async def drop_all_indexes(
 
 __all__ = [
     "ANALYZER_DEFINITIONS",
-    "DEAD_GRAPH_OBJECT_REMOVAL_DEFINITIONS",
     "EDGE_DEFINITIONS",
     "EMBEDDING_DIM",
     "EMBEDDING_VECTOR_FIELDS",
@@ -1471,9 +1406,6 @@ __all__ = [
     "PARENT_TASK_CANONICALIZATION_DEFINITIONS",
     "RELATION_CREATED_AT_CURSOR_MIGRATION_DEFINITIONS",
     "RELATION_EDGE_CLEANUP_DEFINITIONS",
-    "REMOVED_GRAPH_EDGES",
-    "REMOVED_GRAPH_OBJECTS",
-    "REMOVED_GRAPH_TABLES",
     "EmbeddingVectorField",
     "_graph_schema_migrations",
     "bootstrap_schema",

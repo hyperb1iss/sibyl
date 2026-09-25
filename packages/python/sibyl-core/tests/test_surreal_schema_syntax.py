@@ -57,7 +57,6 @@ from sibyl_core.backends.surreal.content_schema import (
 )
 from sibyl_core.backends.surreal.schema import (
     CURRENT_SCHEMA_MAINTENANCE_DEFINITIONS,
-    DEAD_GRAPH_OBJECT_REMOVAL_DEFINITIONS,
     EDGE_DEFINITIONS,
     EMBEDDING_DIM,
     ENTITY_ACTOR_ATTRIBUTION_DEFINITIONS,
@@ -77,8 +76,6 @@ from sibyl_core.backends.surreal.schema import (
     RELATION_EDGE_CLEANUP_DEFINITIONS,
     RELATION_ENDPOINT_BACKFILL_DEFINITIONS,
     RELATION_ENDPOINT_SCHEMA_DEFINITIONS,
-    REMOVED_GRAPH_EDGES,
-    REMOVED_GRAPH_TABLES,
     _graph_schema_migrations,
     bootstrap_schema,
     render_fulltext_compatible_sql,
@@ -91,6 +88,10 @@ from sibyl_core.backends.surreal.schema_version import (
 )
 from sibyl_core.models.entities import EntityType
 
+# Graph schema v4 removed these Graphiti tables.
+_DEAD_GRAPH_EDGES = ("has_episode", "next_episode", "has_member")
+_DEAD_GRAPH_TABLES = ("community", "saga")
+
 
 class _RecordingSchemaClient:
     def __init__(
@@ -98,12 +99,10 @@ class _RecordingSchemaClient:
         duplicate_index_name: str = "",
         schema_version: int = 0,
         missing_tables: set[str] | None = None,
-        table_counts: dict[str, int] | None = None,
     ) -> None:
         self.duplicate_index_name = duplicate_index_name
         self.schema_version = schema_version
         self.missing_tables = missing_tables or set()
-        self.table_counts = table_counts or {}
         self.calls: list[str] = []
         self._url = ""
         self.group_id = "org_123"
@@ -138,11 +137,6 @@ class _RecordingSchemaClient:
             return {"indexes": {}}
         if stripped.startswith("SELECT version FROM schema_version"):
             return [{"version": self.schema_version}]
-        if stripped.startswith("SELECT count() AS count FROM "):
-            table = stripped.removeprefix("SELECT count() AS count FROM ").split()[0]
-            if table in self.missing_tables:
-                raise RuntimeError(f"The table '{table}' does not exist")
-            return [{"count": self.table_counts.get(table, 0)}]
         if stripped.startswith("UPSERT schema_version:"):
             version = params.get("version")
             self.schema_version = int(version) if isinstance(version, int | str | float) else 0
@@ -906,7 +900,7 @@ def test_graph_relation_tables_are_enforced() -> None:
 
     assert "relates_to SCHEMAFULL TYPE RELATION IN entity OUT entity ENFORCED" in EDGE_DEFINITIONS
     assert "mentions SCHEMAFULL TYPE RELATION IN episode OUT entity ENFORCED" in EDGE_DEFINITIONS
-    for relation in REMOVED_GRAPH_EDGES:
+    for relation in _DEAD_GRAPH_EDGES:
         assert f"DEFINE TABLE OVERWRITE {relation}" not in EDGE_DEFINITIONS
 
 
@@ -948,8 +942,7 @@ def test_dead_graph_object_removal_is_versioned() -> None:
         statement for migration in GRAPH_SCHEMA_MIGRATIONS for statement in migration.statements
     )
 
-    for table in (*REMOVED_GRAPH_EDGES, *REMOVED_GRAPH_TABLES):
-        assert f"REMOVE TABLE IF EXISTS {table}" in DEAD_GRAPH_OBJECT_REMOVAL_DEFINITIONS
+    for table in (*_DEAD_GRAPH_EDGES, *_DEAD_GRAPH_TABLES):
         assert f"REMOVE TABLE IF EXISTS {table}" in migration_sql
 
 
@@ -1305,7 +1298,7 @@ def test_graph_entity_revision_is_versioned() -> None:
 def test_graph_relation_cleanup_covers_all_relation_tables() -> None:
     for relation in ("relates_to", "mentions"):
         assert f"DELETE FROM {relation}" in RELATION_EDGE_CLEANUP_DEFINITIONS
-    for relation in REMOVED_GRAPH_EDGES:
+    for relation in _DEAD_GRAPH_EDGES:
         assert f"DELETE FROM {relation}" not in RELATION_EDGE_CLEANUP_DEFINITIONS
 
     assert "SELECT VALUE id FROM entity" in RELATION_EDGE_CLEANUP_DEFINITIONS
@@ -1315,7 +1308,7 @@ def test_graph_relation_cleanup_covers_all_relation_tables() -> None:
 
 
 def test_current_graph_maintenance_skips_orphan_cleanup() -> None:
-    for relation in ("relates_to", "mentions", *REMOVED_GRAPH_EDGES):
+    for relation in ("relates_to", "mentions", *_DEAD_GRAPH_EDGES):
         assert f"DELETE FROM {relation}" not in CURRENT_SCHEMA_MAINTENANCE_DEFINITIONS
 
     assert "SELECT VALUE id FROM entity" not in CURRENT_SCHEMA_MAINTENANCE_DEFINITIONS
@@ -1378,7 +1371,7 @@ async def test_graph_bootstrap_applies_migrations_without_full_rebuild() -> None
     assert any("idx_mentions_source_created" in statement for statement in client.calls)
     assert sum("UPDATE relates_to SET" in statement for statement in client.calls) == 11
     assert sum("UPDATE mentions SET" in statement for statement in client.calls) == 3
-    for table in (*REMOVED_GRAPH_EDGES, *REMOVED_GRAPH_TABLES):
+    for table in (*_DEAD_GRAPH_EDGES, *_DEAD_GRAPH_TABLES):
         assert any(f"REMOVE TABLE IF EXISTS {table}" in statement for statement in client.calls)
     assert not any("DELETE FROM relates_to" in statement for statement in client.calls)
     assert client.schema_version == GRAPH_SCHEMA_CURRENT_VERSION
@@ -1388,7 +1381,7 @@ async def test_graph_bootstrap_applies_migrations_without_full_rebuild() -> None
 async def test_graph_bootstrap_applies_dead_graph_drop_without_full_rebuild() -> None:
     client = _RecordingSchemaClient(
         schema_version=3,
-        missing_tables=set(REMOVED_GRAPH_EDGES + REMOVED_GRAPH_TABLES),
+        missing_tables={*_DEAD_GRAPH_EDGES, *_DEAD_GRAPH_TABLES},
     )
 
     await bootstrap_schema(client)  # type: ignore[arg-type]
@@ -1397,23 +1390,25 @@ async def test_graph_bootstrap_applies_dead_graph_drop_without_full_rebuild() ->
     assert not any("DEFINE TABLE OVERWRITE relates_to" in statement for statement in client.calls)
     assert sum("UPDATE relates_to SET" in statement for statement in client.calls) == 10
     assert sum("UPDATE mentions SET" in statement for statement in client.calls) == 2
-    for table in (*REMOVED_GRAPH_EDGES, *REMOVED_GRAPH_TABLES):
+    for table in (*_DEAD_GRAPH_EDGES, *_DEAD_GRAPH_TABLES):
         assert any(f"REMOVE TABLE IF EXISTS {table}" in statement for statement in client.calls)
     assert client.schema_version == GRAPH_SCHEMA_CURRENT_VERSION
 
 
 @pytest.mark.asyncio
-async def test_graph_bootstrap_refuses_dead_graph_drop_with_rows() -> None:
-    client = _RecordingSchemaClient(
-        schema_version=3,
-        table_counts={"community": 2, "has_member": 1},
-    )
+@pytest.mark.parametrize("schema_version", [0, 3, 20])
+async def test_graph_bootstrap_never_reads_dead_graph_tables(schema_version: int) -> None:
+    # A 3.x server fails any read of a table v4 removed, and the client logs
+    # every failed query as a warning, so bootstrap must not look at them.
+    client = _RecordingSchemaClient(schema_version=schema_version)
 
-    with pytest.raises(RuntimeError, match="community=2"):
-        await bootstrap_schema(client)  # type: ignore[arg-type]
+    await bootstrap_schema(client)  # type: ignore[arg-type]
 
-    assert not any("REMOVE TABLE IF EXISTS community" in statement for statement in client.calls)
-    assert client.schema_version == 3
+    for table in (*_DEAD_GRAPH_EDGES, *_DEAD_GRAPH_TABLES):
+        assert not any(f"FROM {table}" in statement for statement in client.calls), (
+            f"bootstrap read removed table {table}"
+        )
+    assert client.schema_version == GRAPH_SCHEMA_CURRENT_VERSION
 
 
 @pytest.mark.asyncio

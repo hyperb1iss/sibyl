@@ -175,18 +175,18 @@ async def test_embedded_bootstrap_continues_after_long_operation(runtime, monkey
     assert await runtime.client.execute_query("SELECT VALUE id FROM embedded_renewal:complete;")
 
 
-@pytest.mark.parametrize("slow_read", ["version", "count", "page"])
+@pytest.mark.parametrize("slow_read", ["version", "page", "rebuild_intent"])
 async def test_embedded_migration_renews_all_owned_reads(runtime, monkeypatch, slow_read):
     original = runtime.client.execute_query
     await original("UPDATE schema_version:graph SET version = 22;")
-    for table in schema.REMOVED_GRAPH_OBJECTS:
-        await original(f"DEFINE TABLE IF NOT EXISTS {table} SCHEMALESS;")
     claimed = False
     delayed = False
     prefix = {
         "version": "SELECT version FROM schema_version",
-        "count": "SELECT count() AS count FROM",
         "page": "SELECT id, uuid FROM entity WITH INDEX",
+        # The dimension reconcile reads the rebuild intent and then the recorded
+        # dimension, so a lease that lapsed during the first fails the second.
+        "rebuild_intent": "SELECT embedding_rebuild_dimension FROM schema_version",
     }[slow_read]
 
     async def slow_owned_read(statement, **params):
