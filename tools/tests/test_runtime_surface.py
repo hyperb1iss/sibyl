@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import ipaddress
 import json
 import shutil
 import subprocess
@@ -25,6 +26,8 @@ from tools.inventory.runtime_surface import (
     parse_dependency_name,
 )
 from tools.trust.enterprise_readiness_evidence import SIBYL_HELM_RENDER_ARGS
+
+from sibyl.config import parse_forwarded_allow_ips
 
 EXPECTED_ROUTER_COUNT = 31
 EXPECTED_HTTP_ROUTE_COUNT = 3
@@ -71,6 +74,38 @@ def test_install_surfaces_default_to_local_first_auth() -> None:
     assert "providers: []" in helm_values
     assert "silent_refresh_enabled: false" in helm_values
     assert "extra_providers_enabled: false" in helm_values
+
+
+def test_ansible_stack_trusts_caddy_for_the_client_address() -> None:
+    defaults = yaml.safe_load(
+        (REPO_ROOT / "infra/ansible/roles/sibyl/defaults/main.yml").read_text(encoding="utf-8")
+    )
+    ansible_env = (REPO_ROOT / "infra/ansible/roles/sibyl/templates/env.j2").read_text(
+        encoding="utf-8"
+    )
+    compose = yaml.safe_load(
+        (REPO_ROOT / "infra/ansible/roles/sibyl/files/docker-compose.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    helm_values = yaml.safe_load((REPO_ROOT / "charts/sibyl/values.yaml").read_text("utf-8"))
+
+    default = defaults["sibyl_forwarded_allow_ips"]
+    assert "SIBYL_FORWARDED_ALLOW_IPS={{ sibyl_forwarded_allow_ips }}" in ansible_env
+    backend_env = compose["services"]["backend"]["environment"]
+    assert backend_env["SIBYL_FORWARDED_ALLOW_IPS"] == f"${{SIBYL_FORWARDED_ALLOW_IPS:-{default}}}"
+    assert helm_values["backend"]["forwardedAllowIps"] == ""
+
+    # Caddy's bridge address comes from Docker's default address pools
+    # (172.17-31.0.0/16, then 192.168.0.0/16 in /20 slices), so the backend
+    # must trust all of them, and the backend itself must accept the value.
+    trusted = [ipaddress.IPv4Network(entry) for entry in parse_forwarded_allow_ips(default)]
+    docker_pools = [ipaddress.IPv4Network(f"172.{octet}.0.0/16") for octet in range(17, 32)]
+    docker_pools += list(ipaddress.IPv4Network("192.168.0.0/16").subnets(new_prefix=20))
+    for pool in docker_pools:
+        assert any(pool.subnet_of(network) for network in trusted), pool
+    # Tailnet clients reach Caddy from CGNAT space and must never be trusted.
+    assert not any(network.overlaps(ipaddress.IPv4Network("100.64.0.0/10")) for network in trusted)
 
 
 def test_helm_runtime_secret_requires_stable_settings_key() -> None:

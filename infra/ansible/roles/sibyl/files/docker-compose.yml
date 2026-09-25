@@ -79,6 +79,9 @@ services:
       SIBYL_PUBLIC_SIGNUPS_ENABLED: ${SIBYL_PUBLIC_SIGNUPS_ENABLED:-false}
       SIBYL_BREAK_GLASS_ENABLED: ${SIBYL_BREAK_GLASS_ENABLED:-false}
       SIBYL_MCP_AUTH_MODE: ${SIBYL_MCP_AUTH_MODE:-auto}
+      # Caddy reaches the backend over this compose bridge; trust Docker's
+      # default pools so logins key on the real client, not Caddy.
+      SIBYL_FORWARDED_ALLOW_IPS: ${SIBYL_FORWARDED_ALLOW_IPS:-172.16.0.0/12,192.168.0.0/16}
       SIBYL_COOKIE_DOMAIN: ${SIBYL_DOMAIN}
       SIBYL_COOKIE_SECURE: "true"
       SIBYL_SERVER_HOST: 0.0.0.0

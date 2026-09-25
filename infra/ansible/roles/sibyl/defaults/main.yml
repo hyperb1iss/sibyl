@@ -23,6 +23,18 @@ sibyl_break_glass_enabled: false
 # MCP bearer-token enforcement: on | auto | off.
 sibyl_mcp_auth_mode: "auto"
 
+# Reverse proxies the backend trusts to report the client address through
+# X-Forwarded-For (SIBYL_FORWARDED_ALLOW_IPS). Caddy is the only ingress and
+# reaches the backend over the compose bridge, whose subnet Docker assigns
+# from its default address pools at network creation, so the default trusts
+# those pools. The backend publishes no host port, which leaves compose
+# containers and the host bridge as its only possible peers, and Caddy
+# replaces any X-Forwarded-For a client sends with the address it saw.
+# Without this, every login shares Caddy's rate-limit bucket. Narrow it to
+# the network's subnet (docker network inspect sibyl-network) if you like,
+# and change it if the Docker daemon sets custom default-address-pools.
+sibyl_forwarded_allow_ips: "172.16.0.0/12,192.168.0.0/16"
+
 # Transactional email. Leave SMTP host empty to disable live delivery.
 # Set sibyl_email_outbox_path when you want JSONL break-glass recovery.
 sibyl_resend_api_key: ""
