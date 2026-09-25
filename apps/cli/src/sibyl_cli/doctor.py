@@ -368,7 +368,7 @@ def _check_skill_stub() -> DoctorCheck:
             "skill-stub",
             "fail",
             "Sibyl skill stub is not installed in any assistant root.",
-            "Run 'sibyl skill install' or 'sibyl local setup'.",
+            "Run 'sibyl setup' or 'sibyl skill install'.",
         )
     if missing:
         return DoctorCheck(
@@ -422,7 +422,7 @@ def _check_session_hook() -> DoctorCheck:
         "session-hook",
         "warn",
         "SessionStart hook is not registered in Claude settings.",
-        "Run 'sibyl local setup' to install the wake-up bundle hook.",
+        "Run 'sibyl setup' to install the wake-up bundle hook.",
     )
 
 

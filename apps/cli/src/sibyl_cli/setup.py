@@ -277,14 +277,17 @@ def configure_claude_hooks() -> bool:
     """Update Claude Code settings.json with Sibyl hooks."""
     CLAUDE_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-    # Load existing settings
+    # Load existing settings. An unreadable file is the user's, not ours to
+    # replace: rewriting it from an empty dict would drop every other setting.
     try:
         if CLAUDE_SETTINGS_FILE.exists():
             settings = json.loads(CLAUDE_SETTINGS_FILE.read_text())
         else:
             settings = {}
     except json.JSONDecodeError:
-        settings = {}
+        return False
+    if not isinstance(settings, dict):
+        return False
 
     # Backup if there are existing hooks
     existing_hooks = settings.get("hooks", {})
