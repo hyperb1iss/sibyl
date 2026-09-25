@@ -1397,7 +1397,7 @@ def _coverage_result(
 class MockGraphClientForDedup:
     """Mock GraphClient for deduplication tests.
 
-    Simulates FalkorDB client with controllable entity embeddings
+    Simulates a graph client with controllable entity embeddings
     for testing vectorized similarity operations.
     """
 

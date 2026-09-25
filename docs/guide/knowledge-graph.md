@@ -10,16 +10,10 @@ works by meaning. This guide explains how the graph works.
 
 ## Architecture Overview
 
-Sibyl runs on a unified SurrealDB backend by default:
+Sibyl runs on one SurrealDB backend. Graph, content, auth, tasks, and memory share one data plane.
+See [Storage Modes](./storage-modes.md) for the connection options.
 
-| Runtime | Storage                                                                     |
-| ------- | --------------------------------------------------------------------------- |
-| Default | Graph, content, auth, tasks, and memory in one SurrealDB-backed data plane. |
-
-Existing FalkorDB installs should migrate through the archive playbook instead of starting new
-legacy runtimes. See [storage-modes.md](./storage-modes.md).
-
-### SurrealDB (default)
+### SurrealDB
 
 SurrealDB is a multi-model database. Sibyl uses it as the native graph, content, auth, task, and
 memory store, with `org_<uuid_hex>` namespaces for per-org isolation. It provides:
@@ -27,12 +21,6 @@ memory store, with `org_<uuid_hex>` namespaces for per-org isolation. It provide
 - **SurrealQL queries**: graph traversal, full-text, and vector search in one language
 - **HNSW vector indexes**: native embedding support for semantic recall
 - **Embedded or remote**: SurrealKV for dev, WebSocket/HTTP for services
-
-### Legacy FalkorDB Archives
-
-FalkorDB was Sibyl's original Graphiti graph store. It now appears only as a migration source in old
-archives or retained production installs that have not cut over yet. Active graph, content, RAG, and
-auth runtime paths use SurrealDB.
 
 ### Graph Services
 
@@ -46,9 +34,8 @@ from sibyl_core.retrieval.search import context_search
 
 ## Node Types
 
-SurrealDB records use Sibyl entity and relationship types directly. Current runtime memories use
-`entity` records; legacy `Episodic`/`Entity` archive shapes remain readable for migration
-verification.
+SurrealDB records use Sibyl entity and relationship types directly. Runtime memories are `entity`
+records, typed by `entity_type`.
 
 ### Episode Entities
 
@@ -267,8 +254,7 @@ result = await driver.execute_query(
 )
 ```
 
-Cypher (`MATCH`) applies only to legacy archive migration. Runtime queries against the active
-SurrealDB store use SurrealQL.
+Every Sibyl query is SurrealQL. There is no Cypher surface.
 
 ## Best Practices
 

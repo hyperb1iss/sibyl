@@ -1,163 +1,16 @@
-"""Resilience utilities for handling transient failures."""
+"""Timeout utilities for bounding slow async operations."""
 
 import asyncio
 import functools
-import random
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, ParamSpec, TypeVar
+from typing import ParamSpec, TypeVar
 
 import structlog
-
-if TYPE_CHECKING:
-    RedisTimeoutError = TimeoutError
-else:
-    try:
-        from redis.exceptions import TimeoutError as RedisTimeoutError
-    except ImportError:
-        RedisTimeoutError = TimeoutError
 
 log = structlog.get_logger()
 
 P = ParamSpec("P")
 T = TypeVar("T")
-
-
-class RetryConfig:
-    """Configuration for retry behavior."""
-
-    def __init__(
-        self,
-        max_attempts: int = 3,
-        base_delay: float = 0.5,
-        max_delay: float = 10.0,
-        exponential_base: float = 2.0,
-        jitter: bool = True,
-        retryable_exceptions: tuple[type[Exception], ...] = (
-            ConnectionError,
-            TimeoutError,
-            OSError,
-        ),
-    ) -> None:
-        """Initialize retry configuration.
-
-        Args:
-            max_attempts: Maximum number of attempts (including first try)
-            base_delay: Initial delay between retries in seconds
-            max_delay: Maximum delay between retries
-            exponential_base: Base for exponential backoff
-            jitter: Add random jitter to delays
-            retryable_exceptions: Tuple of exception types to retry on
-        """
-        self.max_attempts = max_attempts
-        self.base_delay = base_delay
-        self.max_delay = max_delay
-        self.exponential_base = exponential_base
-        self.jitter = jitter
-        self.retryable_exceptions = retryable_exceptions
-
-
-# Default configurations for different scenarios
-# Note: RedisTimeoutError is a subclass of redis.exceptions.RedisError, not TimeoutError
-GRAPH_RETRY = RetryConfig(
-    max_attempts=3,
-    base_delay=1.0,  # Longer initial delay for graph ops under load
-    max_delay=10.0,  # More time between retries for heavy operations
-    retryable_exceptions=(ConnectionError, TimeoutError, OSError, RedisTimeoutError),
-)
-
-SEARCH_RETRY = RetryConfig(
-    max_attempts=2,
-    base_delay=0.5,
-    max_delay=3.0,
-    retryable_exceptions=(ConnectionError, TimeoutError, RedisTimeoutError),
-)
-
-
-def calculate_delay(attempt: int, config: RetryConfig) -> float:
-    """Calculate delay for a given attempt with exponential backoff.
-
-    Args:
-        attempt: Current attempt number (0-indexed)
-        config: Retry configuration
-
-    Returns:
-        Delay in seconds
-    """
-    delay = config.base_delay * (config.exponential_base**attempt)
-    delay = min(delay, config.max_delay)
-
-    if config.jitter:
-        # Add up to 25% jitter (non-cryptographic, just for retry backoff)
-        jitter_range = delay * 0.25
-        delay += random.uniform(-jitter_range, jitter_range)
-
-    return max(0.0, delay)
-
-
-def retry(
-    config: RetryConfig | None = None,
-    on_retry: Callable[[int, Exception], None] | None = None,
-) -> Callable[[Callable[P, Awaitable[T]]], Callable[P, Awaitable[T]]]:
-    """Decorator for adding retry logic to async functions.
-
-    Args:
-        config: Retry configuration (defaults to GRAPH_RETRY)
-        on_retry: Optional callback called on each retry with (attempt, exception)
-
-    Returns:
-        Decorated function with retry logic
-
-    Example:
-        @retry(config=GRAPH_RETRY)
-        async def fetch_data():
-            ...
-    """
-    if config is None:
-        config = GRAPH_RETRY
-
-    def decorator(func: Callable[P, Awaitable[T]]) -> Callable[P, Awaitable[T]]:
-        @functools.wraps(func)
-        async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
-            last_exception: BaseException | None = None
-
-            for attempt in range(config.max_attempts):
-                try:
-                    return await func(*args, **kwargs)
-                except config.retryable_exceptions as e:
-                    last_exception = e
-
-                    if attempt < config.max_attempts - 1:
-                        delay = calculate_delay(attempt, config)
-                        log.warning(
-                            "Retrying after transient failure",
-                            function=getattr(func, "__name__", "<unknown>"),
-                            attempt=attempt + 1,
-                            max_attempts=config.max_attempts,
-                            delay=f"{delay:.2f}s",
-                            error=str(e),
-                        )
-
-                        if on_retry:
-                            on_retry(attempt + 1, e)
-
-                        await asyncio.sleep(delay)
-                    else:
-                        # Use log.error (not exception) to avoid traceback spam
-                        log.error(
-                            "All retry attempts exhausted",
-                            function=getattr(func, "__name__", "<unknown>"),
-                            attempts=config.max_attempts,
-                            error=str(e),
-                        )
-
-            # Should never reach here, but satisfy type checker
-            if last_exception:
-                raise last_exception
-            raise RuntimeError("Retry logic error")
-
-        return wrapper
-
-    return decorator
 
 
 async def with_timeout[R](

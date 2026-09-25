@@ -82,16 +82,6 @@ class HealthStatus:
 
 
 @dataclass
-class RebuildResult:
-    """Result of an index rebuild operation."""
-
-    success: bool
-    indices_rebuilt: list[str]
-    duration_seconds: float
-    message: str
-
-
-@dataclass
 class ServerState:
     """Tracks server runtime state."""
 
@@ -180,52 +170,6 @@ async def health_check(*, organization_id: str | None = None) -> HealthStatus:
         search_latency_ms=search_latency_ms,
         last_sync=None,  # TODO: Track last sync time
         errors=errors,
-    )
-
-
-async def rebuild_indices(
-    index_type: str | None = None,
-) -> RebuildResult:
-    """Rebuild graph indices for better query performance.
-
-    Args:
-        index_type: Specific index to rebuild. Options:
-            - "search": Rebuild search/embedding indices
-            - "relationships": Rebuild relationship indices
-            - "all": Rebuild all indices (default)
-
-    Returns:
-        RebuildResult with rebuild status.
-    """
-    log.info("Rebuilding indices", index_type=index_type)
-
-    start_time = time.time()
-    indices_rebuilt: list[str] = []
-    target = (index_type or "all").strip().lower()
-    valid_targets = {"search", "relationships", "all"}
-
-    if target not in valid_targets:
-        return RebuildResult(
-            success=False,
-            indices_rebuilt=[],
-            duration_seconds=time.time() - start_time,
-            message=(
-                f"Unknown index type: {target}. Valid options are: search, relationships, all."
-            ),
-        )
-
-    log.warning(
-        "index_rebuild_not_implemented",
-        index_type=target,
-    )
-    return RebuildResult(
-        success=False,
-        indices_rebuilt=indices_rebuilt,
-        duration_seconds=time.time() - start_time,
-        message=(
-            "Index rebuild is not implemented for the current compatibility graph runtime. "
-            f"Requested target: {target}."
-        ),
     )
 
 

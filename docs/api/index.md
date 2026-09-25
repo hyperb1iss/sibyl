@@ -9,8 +9,8 @@ same daemon (`sibyld`) and share one SurrealDB-native runtime for graph, content
 ```
 Sibyl Combined App (Starlette, port 3334)
 |-- /api/*    --> FastAPI REST endpoints (31 routers)
+|-- /api/ws   --> WebSocket for real-time updates
 |-- /mcp      --> MCP streamable-http transport (13 tools, 2 resources)
-|-- /ws       --> WebSocket for real-time updates
 '-- Lifespan  --> Coordination runtime + session management
 ```
 
@@ -159,11 +159,11 @@ X-RateLimit-Reset: 1704067200
 
 ## WebSocket Events
 
-Real-time updates are available via WebSocket at `/ws`:
+Real-time updates are available via WebSocket at `/api/ws`:
 
 ```javascript
 // Browser clients authenticate with the existing sibyl_access_token cookie.
-const ws = new WebSocket("ws://localhost:3334/ws");
+const ws = new WebSocket("ws://localhost:3334/api/ws");
 
 ws.onmessage = (event) => {
   const data = JSON.parse(event.data);

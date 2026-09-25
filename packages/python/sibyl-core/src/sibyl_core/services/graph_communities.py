@@ -12,7 +12,6 @@ from sibyl_core.services.graph_community_clusters import (
 )
 from sibyl_core.services.graph_community_detection import (
     detect_communities,
-    detect_communities_leiden,
     detect_communities_louvain,
     export_to_networkx,
     link_hierarchy,
@@ -79,7 +78,6 @@ __all__ = [
     "GraphSnapshot",
     "HierarchicalGraphData",
     "detect_communities",
-    "detect_communities_leiden",
     "detect_communities_louvain",
     "export_to_networkx",
     "get_cluster_nodes",

@@ -166,14 +166,14 @@ non-directory targets.
 The loader is deliberately tiny. It points the agent back at the installed CLI, which serves the
 full, version-matched guidance as **skill packs built into the binary**:
 
-| Pack        | What it covers                                                         |
-| ----------- | ---------------------------------------------------------------------- |
-| `contract`  | Default five-verb agent contract (~1k tokens), loaded at session start |
-| `core`      | The full context → act → remember → reflect loop and command contract  |
-| `quick`     | Minimal verb table for subagents (~500 tokens)                         |
-| `workflows` | Longer task, project, memory, and debugging workflows                  |
-| `examples`  | Concrete CLI examples for context, tasks, memory, and projects         |
-| `migration` | Legacy Graphiti/FalkorDB migration guidance                            |
+| Pack        | What it covers                                                          |
+| ----------- | ----------------------------------------------------------------------- |
+| `contract`  | Default five-verb agent contract (~1k tokens), loaded at session start  |
+| `core`      | The full context → act → remember → reflect loop and command contract   |
+| `quick`     | Minimal verb table for subagents (~500 tokens)                          |
+| `workflows` | Longer task, project, memory, and debugging workflows                   |
+| `examples`  | Concrete CLI examples for context, tasks, memory, and projects          |
+| `migration` | Consolidating instances and replaying project memory into a team server |
 
 ```bash
 sibyl skill list           # List the packs this CLI version can serve

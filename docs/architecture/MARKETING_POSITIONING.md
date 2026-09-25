@@ -98,40 +98,34 @@ docs home. Do NOT open any surface on the genre's "sessions start cold / your AI
 is single-app framing Mem0 and Zep already own, and our closest rival (Hindsight) opens with it
 verbatim. Lead with sovereignty plus the cross-agent wedge instead.
 
-### 5. The proof: one number, one run, everywhere
+### 5. The proof: no number until a current run earns one
 
-**96.96% strict R@5 on LongMemEval-S, live API path, no LLM in the retrieval path.**
+**No public benchmark number today.** The pre-1.0 LongMemEval-S headline (run `26304777971`, sha
+`36032a25`) has been withdrawn. Its receipt stays in the benchmark history, but no surface cites it.
 
-This is our credibility moat _and_ our biggest discipline risk. The whole "honest benchmarks"
-counter-position only works if the number is identical on every surface and cited to one run. The
+Exact, reproducible numbers are still our credibility moat _and_ our biggest discipline risk. The
 category is in a trust crisis: MemPalace immolated its credibility overclaiming 100%, and Mem0 and
 Zep are in a public benchmark mud-fight. Being the site whose numbers are exact, caveated, and
-reproducible is a real wedge. Being the site whose README and landing page cite _different_ ceiling
-numbers throws that away.
+reproducible is a real wedge, and a withdrawn number that lingers on one surface throws that away.
 
-Canonical result: run `26304777971`, sha `36032a25`,
+Until a new run is promoted, the proof is the method: live API path, per-question physical tenant
+isolation, strict multi-answer recall, no LLM in the retrieval path. See
 [`docs/testing/longmemeval.md`](../testing/longmemeval.md).
-
-| Metric      | Value                          |
-| ----------- | ------------------------------ |
-| `hit@5`     | 100.00%                        |
-| `recall@5`  | **96.96%** strict multi-answer |
-| `recall@10` | **98.90%**                     |
-| `ndcg@5`    | 94.63%                         |
-| Search p50  | 584 ms                         |
-| Search p95  | 1,115 ms                       |
 
 Rules for every benchmark mention:
 
-1. **One run.** Cite run `26304777971` until a newer run is promoted to canonical in
-   `longmemeval.md`. When that happens, propagate to every surface in the same change.
-2. **Never round up.** 96.96%, not 97%. The precision is the honesty signal.
-3. **Always carry the caveat.** `hit@5 = 100%` and strict `recall@5 = 96.96%` measure different
-   things, and retrieval recall is a different axis from end-to-end QA accuracy. The retrieval-vs-QA
-   distinction travels with the number, every time. See
+1. **Manifest first.** A number appears on a surface only when
+   `benchmarks/results/ai-memory/manifest.json` lists its artifact as citable and the doc claim gate
+   passes. When a run is promoted, propagate it to every surface in the same change.
+2. **One run.** Every surface cites the same run.
+3. **Never round up.** Report the exact value. The precision is the honesty signal.
+4. **Always carry the caveat.** `hit@k` and strict `recall@k` measure different things, and
+   retrieval recall is a different axis from end-to-end QA accuracy. The retrieval-vs-QA distinction
+   travels with the number, every time. See
    [`ai-memory-landscape.md`](../testing/ai-memory-landscape.md).
-4. **Name the honest gaps.** No published QA-accuracy number yet, OpenAI embeddings, one dataset, no
-   principled forgetting. Stating them is the asset, not the liability.
+5. **Name the honest gaps.** No citable retrieval number yet, no published QA-accuracy number,
+   OpenAI embeddings, one dataset, no principled forgetting. Stating them is the asset, not the
+   liability.
 
 ### 6. The character
 
@@ -172,13 +166,13 @@ platform"), and do not hide it (it is the retention story).
 Each surface renders the spine at its own length. The wedge and the phrase are constant; the detail
 scales.
 
-| Surface                  | Lead                                                                  | Carries                                              |
-| ------------------------ | --------------------------------------------------------------------- | ---------------------------------------------------- |
-| **sibyl.ist hero**       | Wedge headline, cross-agent-memory subhead with the shell-native hook | install one-liner, hit@5 badge, two CTAs             |
-| **GitHub README lede**   | land-grab inversion + cross-agent memory, codemode as the how         | quickstart, the proof number, "What You Get" breadth |
-| **VitePress docs home**  | Wedge as `hero.text`, land-grab inversion as the problem framing      | the loop, breadth features, quickstart               |
-| **Meta / OG / keywords** | "cross-agent memory" first keyword                                    | self-hosted, LongMemEval, the agent names            |
-| **Social / launch**      | Wedge, the honest benchmark, solo-in-the-open                         | screenshots, the graph, the star count               |
+| Surface                  | Lead                                                                  | Carries                                   |
+| ------------------------ | --------------------------------------------------------------------- | ----------------------------------------- |
+| **sibyl.ist hero**       | Wedge headline, cross-agent-memory subhead with the shell-native hook | install one-liner, two CTAs               |
+| **GitHub README lede**   | land-grab inversion + cross-agent memory, codemode as the how         | quickstart, "What You Get" breadth        |
+| **VitePress docs home**  | Wedge as `hero.text`, land-grab inversion as the problem framing      | the loop, breadth features, quickstart    |
+| **Meta / OG / keywords** | "cross-agent memory" first keyword                                    | self-hosted, LongMemEval, the agent names |
+| **Social / launch**      | Wedge, the honest benchmark, solo-in-the-open                         | screenshots, the graph, the star count    |
 
 Consistency checklist before any launch surface ships:
 
@@ -186,8 +180,8 @@ Consistency checklist before any launch surface ships:
 - [ ] Does NOT open on the "sessions start cold / your AI forgets" trope; uses the land-grab
       sovereignty inversion instead.
 - [ ] Uses "cross-agent memory" as the category phrase.
-- [ ] Benchmark number is 96.96% R@5 / 98.90% R@10, cited to run `26304777971`, with the
-      retrieval-vs-QA caveat.
+- [ ] Carries no benchmark number unless the manifest marks a current run citable, and any number it
+      does carry keeps the retrieval-vs-QA caveat.
 - [ ] License stated accurately: Apache-2.0 across the whole tree (server, CLI, core).
 - [ ] Self-host-free flank is loud, not buried.
 - [ ] Codemode / shell-native present as the how, not the headline.

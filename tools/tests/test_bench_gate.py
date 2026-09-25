@@ -518,6 +518,29 @@ def test_evaluate_report_context_pack_profile_rejects_missing_release_metadata()
     assert "label 'context-pack' must include retrieval mode 'native'" in failures
 
 
+@pytest.mark.parametrize("mode", ["compare", "pre-graphiti", "post-graphiti"])
+def test_evaluate_report_context_pack_profile_rejects_retired_retrieval_modes(mode: str) -> None:
+    report = {
+        "label": f"retrieval-{mode}",
+        "metrics": {
+            "pass_rate": 1.0,
+            "latency_p95_ms": 500.0,
+            "source_metadata_coverage": 1.0,
+            "facet_order_match_rate": 1.0,
+            "leak_count": 0.0,
+            "forbidden_term_matches": 0.0,
+        },
+        "metadata": {**RELEASE_METADATA, "retrieval_mode": mode},
+    }
+
+    failures = eval_gate.evaluate_report(report, profile="context-pack")
+
+    assert (
+        f"metadata['retrieval_mode'] has unsupported retrieval mode {mode!r}; "
+        "expected one of native"
+    ) in failures
+
+
 def test_evaluate_report_context_pack_profile_rejects_embedding_dimension_mismatch() -> None:
     metadata = dict(RELEASE_METADATA)
     metadata.update(
@@ -604,6 +627,16 @@ def test_evaluate_report_ai_memory_profile_accepts_full_records() -> None:
     failures = eval_gate.evaluate_report(report, profile="ai-memory")
 
     assert failures == []
+
+
+@pytest.mark.parametrize("mode", ["compare", "pre-graphiti", "post-graphiti"])
+def test_evaluate_report_ai_memory_profile_rejects_retired_retrieval_modes(mode: str) -> None:
+    failures = eval_gate.evaluate_report(_ai_memory_report(mode=mode), profile="ai-memory")
+
+    assert (
+        f"runtime['retrieval_mode'] has unsupported retrieval mode {mode!r}; "
+        "expected one of hybrid, native, raw"
+    ) in failures
 
 
 def test_evaluate_report_ai_memory_profile_accepts_local_embedding_runtime() -> None:
@@ -2494,18 +2527,13 @@ def test_ai_memory_manifest_tracks_full_citable_artifacts() -> None:
         assert "artifact" not in entry
         assert "external_artifact_manifest" not in entry
 
-    history_regressions = [
-        entry for entry in manifest["no_regression"] if "baseline_history" in entry
-    ]
-    assert history_regressions == [
-        {
-            "candidate": "external/longmemeval_sibyl_live_full_26304777971.json",
-            "baseline_history": "latest-citable-hybrid",
-            "profile": "ai-memory",
-            "metrics": ["recall@5"],
-            "max_regression": {"recall@5": 0.005},
-        }
-    ]
+    # The pre-1.0 LongMemEval-S live run was withdrawn as a public claim. Its
+    # external manifest stays as history, but it must not return to the
+    # citable ledger or anchor a no-regression entry.
+    withdrawn = "external/longmemeval_sibyl_live_full_26304777971.json"
+    assert (manifest_path.parent / withdrawn).exists()
+    assert all(entry.get("external_artifact_manifest") != withdrawn for entry in citable)
+    assert all(entry["candidate"] != withdrawn for entry in manifest["no_regression"])
     assert eval_gate.validate_ai_memory_manifest(manifest_path) == []
 
 

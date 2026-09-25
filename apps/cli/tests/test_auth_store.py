@@ -444,37 +444,3 @@ class TestTokenExpiry:
             )
             is False
         )
-
-
-class TestMigrateLegacyTokens:
-    """Tests for legacy token migration."""
-
-    def test_removes_root_level_tokens(self, tmp_path: Path) -> None:
-        """Migration removes legacy root-level tokens."""
-        test_file = tmp_path / "auth.json"
-        legacy_data = {
-            "access_token": "old_token",
-            "refresh_token": "old_refresh",
-            "access_token_expires_at": 12345,
-            "servers": {},
-        }
-        test_file.write_text(json.dumps(legacy_data))
-
-        auth_store.migrate_legacy_tokens(test_file)
-
-        data = json.loads(test_file.read_text())
-        assert "access_token" not in data
-        assert "refresh_token" not in data
-        assert "access_token_expires_at" not in data
-        assert "servers" in data
-
-    def test_noop_if_no_legacy_tokens(self, tmp_path: Path) -> None:
-        """Migration is noop if no legacy tokens."""
-        test_file = tmp_path / "auth.json"
-        modern_data = {"servers": {"http://localhost:3334": {"access_token": "new"}}}
-        test_file.write_text(json.dumps(modern_data))
-
-        auth_store.migrate_legacy_tokens(test_file)
-
-        data = json.loads(test_file.read_text())
-        assert data == modern_data

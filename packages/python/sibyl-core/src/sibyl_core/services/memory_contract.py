@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from sibyl_core.auth.memory_policy import MemoryPolicyDecision
@@ -14,11 +13,6 @@ from sibyl_core.tools.responses import AddResponse
 
 if TYPE_CHECKING:
     from sibyl_core.services.memory_source_validation import SourceReadAuthority
-
-
-class WriteMode(StrEnum):
-    DISABLED = "disabled"
-    ENABLED = "enabled"
 
 
 @dataclass(frozen=True, slots=True)

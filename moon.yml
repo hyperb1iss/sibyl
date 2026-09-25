@@ -31,17 +31,6 @@ tasks:
     options:
       persistent: true
 
-  # Alias kept for muscle memory; will be removed in a future release.
-  dev-surreal:
-    command: bash tools/dev/run-surreal-dev.sh
-    env:
-      FORCE_COLOR: "1"
-      SIBYL_STORE: "surreal"
-      SIBYL_COORDINATION_BACKEND: "local"
-    preset: server
-    options:
-      persistent: true
-
   dev-api:
     script: |
       docker compose --env-file /dev/null up -d surrealdb
@@ -344,21 +333,13 @@ tasks:
     options:
       cache: false
 
-  inventory:
+  inventory-check:
     command: uv run python tools/inventory/runtime_surface.py
     inputs:
       - tools/**/*.py
-      - docs/_archive/SURREALDB_GRAPHITI_EXIT_INVENTORY.md
       - apps/api/src/**/*.py
-      - packages/python/sibyl-core/src/**/*.py
-      - "**/pyproject.toml"
-
-  inventory-check:
-    command: uv run python tools/inventory/runtime_surface.py --check
-    inputs:
-      - tools/**/*.py
-      - docs/_archive/SURREALDB_GRAPHITI_EXIT_INVENTORY.md
-      - apps/api/src/**/*.py
+      - apps/cli/src/**/*.py
+      - hooks/**/*.py
       - packages/python/sibyl-core/src/**/*.py
       - "**/pyproject.toml"
 
@@ -767,9 +748,9 @@ tasks:
 
   inventory-test:
     command:
-      uv run pytest tools/tests/test_runtime_surface.py tools/tests/test_retrieval_mode_history.py
-      tools/tests/test_longmemeval_v2_reader_replay.py
-      tools/tests/test_usage_rerank_harness.py tools/tests/test_installer_qualification.py -v
+      uv run pytest tools/tests/test_runtime_surface.py
+      tools/tests/test_longmemeval_v2_reader_replay.py tools/tests/test_usage_rerank_harness.py
+      tools/tests/test_installer_qualification.py -v
     inputs:
       - tools/**/*.py
       - benchmarks/git_provenance.py
@@ -778,15 +759,11 @@ tasks:
       - apps/api/src/sibyl/api/app.py
       - docs/**/*.md
       - benchmarks/longmemeval_v2_reader_replay_replication.py
-      - docs/_archive/SURREALDB_GRAPHITI_EXIT_INVENTORY.md
       - README.md
       - AGENTS.md
       - CLAUDE.md
-      - Tiltfile
       - .env.example
       - .env.quickstart.example
-      - .env.quickstart.test
-      - .env.test.example
       - apps/**/*.example
       - apps/**/*.md
       - apps/**/*.mdx
@@ -841,6 +818,8 @@ tasks:
       - apps/api/moon.yml
       - packages/python/sibyl-core/moon.yml
       - apps/api/src/**/*.py
+      - apps/cli/src/**/*.py
+      - hooks/**/*.py
       - packages/python/sibyl-core/src/**/*.py
       - "**/pyproject.toml"
 
@@ -855,13 +834,17 @@ tasks:
 
   dev-script-test:
     command:
-      uv run pytest tools/tests/test_dev_scripts.py tools/tests/test_surreal_migration_moon_tasks.py
+      uv run pytest tools/tests/test_dev_scripts.py tools/tests/test_moon_sibyld_commands.py
       -v
     inputs:
       - tools/dev/*.sh
       - tools/tests/conftest.py
       - tools/tests/test_dev_scripts.py
-      - tools/tests/test_surreal_migration_moon_tasks.py
+      - tools/tests/test_moon_sibyld_commands.py
+      - apps/api/src/sibyl/cli/**/*.py
+      - .moon/workspace.yml
+      - .moon/tasks/*.yml
+      - "**/moon.yml"
       - pyproject.toml
       - moon.yml
 
@@ -877,6 +860,13 @@ tasks:
       - install.sh
       - tools/tests/test_workflow_cache_contract.py
       - tools/release/*.py
+      # Release notes are validated through the doc claim gate, which scans
+      # the claim corpus and every public doc surface.
+      - tools/trust/doc_claim_gate.py
+      - docs/**/*.md
+      - README.md
+      - apps/*/README.md
+      - packages/python/*/README.md
       - apps/e2e/moon.yml
       - .github/workflows/release.yml
       - .github/workflows/publish.yml
@@ -885,7 +875,6 @@ tasks:
       - apps/cli/pyproject.toml
       - .github/workflows/release.yml
       - .github/workflows/publish.yml
-      - .github/workflows/publish-dogfood-images.yml
       # The image CVE gate is shared by release, publish and CI, and this task
       # asserts the three stay in agreement. Without these the cache would
       # report a stale green after the gate itself changed.
@@ -928,7 +917,7 @@ tasks:
       expected_core = f"=={version}"
       expected_requirements = {
           "sibyl_dev-*.whl": (expected_core, set()),
-          "sibyld-*.whl": (expected_core, {"crawler", "embeddings", "graph", "graphrag", "llm"}),
+          "sibyld-*.whl": (expected_core, {"embeddings", "graph", "graphrag", "llm"}),
       }
       core_requirement = re.compile(
           r"^sibyl-core(?:\[(?P<extras>[^\]]+)\])?\s*(?P<specifier>==\s*[^;,\s]+)"
@@ -1029,12 +1018,6 @@ tasks:
       - apps/cli/src/sibyl_cli/data/skill-packs/core.md
     options:
       cache: false
-
-  retrieval-mode-history:
-    command: uv run python -m tools.inventory.retrieval_mode_history
-    inputs:
-      - tools/**/*.py
-      - pyproject.toml
 
   bench-evidence:
     command: uv run python tools/bench/evidence_bundle.py
@@ -1690,9 +1673,16 @@ tasks:
 
   doc-claim-gate:
     command: uv run python -m tools.trust.doc_claim_gate
+    # The gate runs docs:build itself. Depending on it orders the two, so a
+    # combined `moon run docs:build doc-claim-gate` cannot race on the dist.
+    deps:
+      - docs:build
     inputs:
       - tools/trust/doc_claim_gate.py
       - docs/**/*.md
+      - README.md
+      - apps/*/README.md
+      - packages/python/*/README.md
       - docs/.vitepress/**/*
       - benchmarks/results/ai-memory/**/*.json
       - pyproject.toml
@@ -1710,6 +1700,9 @@ tasks:
       - tools/tests/conftest.py
       - tools/tests/test_doc_claim_gate.py
       - docs/**/*.md
+      - README.md
+      - apps/*/README.md
+      - packages/python/*/README.md
       - benchmarks/results/ai-memory/**/*.json
       - pyproject.toml
       - moon.yml
@@ -1762,44 +1755,6 @@ tasks:
       - tools/tests/test_enterprise_readiness_evidence.py
       - pyproject.toml
       - moon.yml
-
-  migrate-rehearse:
-    command: uv run sibyld migrate rehearse
-    inputs:
-      - apps/api/src/**/*.py
-      - packages/python/sibyl-core/src/**/*.py
-      - tools/**/*.py
-      - baselines/**/*.jsonl
-      - .moon/cache/baseline-runtime-manifest.json
-      - pyproject.toml
-      - apps/api/pyproject.toml
-      - packages/python/sibyl-core/pyproject.toml
-
-  migrate-cutover:
-    command: uv run sibyld migrate cutover
-    inputs:
-      - apps/api/src/**/*.py
-      - packages/python/sibyl-core/src/**/*.py
-      - tools/**/*.py
-      - baselines/**/*.jsonl
-      - .moon/cache/baseline-runtime-manifest.json
-      - pyproject.toml
-      - apps/api/pyproject.toml
-      - packages/python/sibyl-core/pyproject.toml
-
-  auth-flow-replay:
-    command: uv run sibyld migrate auth-flow
-    inputs:
-      - apps/api/src/**/*.py
-      - pyproject.toml
-      - apps/api/pyproject.toml
-
-  auth-flow-compare:
-    command: uv run sibyld migrate auth-flow-compare
-    inputs:
-      - apps/api/src/**/*.py
-      - pyproject.toml
-      - apps/api/pyproject.toml
 
   # ==========================================================================
   # Coverage

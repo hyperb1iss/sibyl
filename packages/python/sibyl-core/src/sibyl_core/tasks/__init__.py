@@ -11,7 +11,6 @@ from sibyl_core.tasks.dependencies import (
     suggest_task_order,
 )
 from sibyl_core.tasks.estimation import (
-    SimilarTask,  # Backwards compat alias for SimilarTaskInfo
     batch_estimate,
     calculate_project_estimate,
     estimate_task_effort,
@@ -26,7 +25,6 @@ from sibyl_core.tasks.workflow import (
 __all__ = [
     "CycleResult",
     "DependencyResult",
-    "SimilarTask",  # Deprecated alias for SimilarTaskInfo
     "SimilarTaskInfo",
     "TaskEstimate",
     # Workflow

@@ -273,7 +273,6 @@ async def get_hierarchical_graph(
                 config=CommunityConfig(
                     resolutions=[1.0], min_community_size=2, max_levels=1, store_in_graph=False
                 ),
-                algorithm="louvain",
             )
             if detected:
                 for community in detected:

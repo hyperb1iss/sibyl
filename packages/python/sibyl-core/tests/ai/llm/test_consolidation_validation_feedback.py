@@ -106,7 +106,8 @@ async def test_validation_feedback_retains_attempts(monkeypatch, recover, transp
             attempts = failed["transport_attempts"]
             assert all(not attempt["usage_known"] for attempt in attempts)
 
-    assert reserve.await_args.kwargs["attempt_envelope"] == 9
+    # One attempt up front; retries reserve as they dispatch (was the 9-attempt envelope).
+    assert reserve.await_args.kwargs["attempt_envelope"] == 1
     assert reserve.await_args.kwargs["output_token_limit"] == 2048
     assert len(attempts) == len(requests) == (2 if recover else 3) + int(transport_retry)
     feedback_request = requests[1 + int(transport_retry)]

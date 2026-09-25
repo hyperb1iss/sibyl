@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from sibyl_core.ai.errors import LLMBudgetExceededError
 from sibyl_core.ai.transport import observe_transport_attempts
 from sibyl_core.services.validation_execution import (
     ValidationExecution,
@@ -58,6 +59,11 @@ async def run_validation_stage(
             with observe_transport_attempts(execution):
                 result = await run()
         except (Exception, asyncio.CancelledError) as failure:
+            # A budget refusal before any dispatch sent nothing to a provider.
+            # Recording it would fail the stage for good, since a failed row is
+            # never claimed again, so the claim is released for a later run.
+            if isinstance(failure, LLMBudgetExceededError) and await execution.release():
+                raise
             try:
                 await execution.record_failure(failure)
             except Exception:

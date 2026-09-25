@@ -58,8 +58,7 @@ global:
 
 ## Schema Bootstrap
 
-Sibyl bootstraps SurrealDB schemas at application startup. The chart does not run Alembic or
-PostgreSQL migration jobs.
+Sibyl bootstraps SurrealDB schemas at application startup. The chart runs no separate migration job.
 
 ## Authentication Defaults
 

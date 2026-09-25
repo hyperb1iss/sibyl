@@ -199,20 +199,6 @@ Forgetting the organization scope routes a graph query to the wrong namespace or
 Content and auth queries must include the resolved organization predicate so shared tables do not
 cross tenants.
 
-### PostgreSQL and Migration
-
-PostgreSQL is retained only for migration and archive rehearsal, not for the default runtime. Where
-PostgreSQL is used for rehearsal, row-level security policies provide org isolation within that
-database. Migration and archive operations use explicit `sibyld migrate` commands:
-
-```bash
-sibyld migrate import migration-archive.tar.gz \
-  --source-type legacy-archive \
-  --target-mode postgres-rehearsal \
-  --restore-database-dump \
-  --yes
-```
-
 ## Project Members API
 
 ### Add Member

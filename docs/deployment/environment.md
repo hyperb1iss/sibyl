@@ -35,8 +35,8 @@ versions as fallbacks.
 | `SIBYL_AUTH_STORE`           | `surreal` | Auth persistence. Only `surreal` is supported     |
 | `SIBYL_COORDINATION_BACKEND` | `auto`    | Jobs, locks, pub/sub: `auto`, `local`, or `redis` |
 
-`auto` resolves to local in-process coordination for the default Surreal runtime. Use `redis` for
-multi-pod deployments. See [storage-modes.md](../guide/storage-modes.md) for the full mode matrix.
+`auto` resolves to local in-process coordination unless Redis settings are present. Use `redis` for
+multi-pod deployments. See [Storage Modes](../guide/storage-modes.md) for the connection options.
 
 ## SurrealDB
 
@@ -189,29 +189,6 @@ Fallbacks:
 | `SIBYL_RATE_LIMIT_DEFAULT` | `100/minute` | Default rate limit                      |
 | `SIBYL_RATE_LIMIT_STORAGE` | `memory://`  | Storage backend (memory:// or redis://) |
 
-## PostgreSQL (migration/rehearsal only)
-
-PostgreSQL is not part of the Sibyl runtime and is not read by the `Settings` model. It is consumed
-only by the standalone `migrate` CLI when explicitly restoring a retained `postgres.sql` payload
-against an operator-managed PostgreSQL database. Structured auth and content archive export reads
-SurrealDB. Remove any stale `SIBYL_AUTH_STORE=postgres` value before starting the API.
-
-The variables below are **not** `SIBYL_` Settings fields. They are read directly by the migration
-tooling for a rehearsal database connection and are ignored by the running API and worker.
-
-| Variable                      | Default     | Description                                 |
-| ----------------------------- | ----------- | ------------------------------------------- |
-| `SIBYL_POSTGRES_HOST`         | `localhost` | External rehearsal database host            |
-| `SIBYL_POSTGRES_PORT`         | `5433`      | External rehearsal database port            |
-| `SIBYL_POSTGRES_USER`         | `sibyl`     | External rehearsal database username        |
-| `SIBYL_POSTGRES_PASSWORD`     | `sibyl_dev` | External rehearsal database password        |
-| `SIBYL_POSTGRES_DB`           | `sibyl`     | External rehearsal database name            |
-| `SIBYL_POSTGRES_POOL_SIZE`    | `10`        | External rehearsal database connection pool |
-| `SIBYL_POSTGRES_MAX_OVERFLOW` | `20`        | External rehearsal database overflow limit  |
-
-Configure them only when running a migration that explicitly restores a retained `postgres.sql`
-payload. They have no effect on the default Surreal runtime.
-
 ## Redis/Valkey Coordination
 
 Redis/Valkey is optional. The default Surreal runtime uses local in-process coordination.
@@ -239,9 +216,10 @@ waits ten minutes per attempt rather than one.
 
 ### Consolidation Input Budget
 
-| Variable                              | Default           | Description                                                          |
-| ------------------------------------- | ----------------- | -------------------------------------------------------------------- |
-| `SIBYL_CONSOLIDATION_MAX_INPUT_CHARS` | unset (per model) | Character cap on one consolidation request: system, evidence, schema |
+| Variable                              | Default           | Description                                                                      |
+| ------------------------------------- | ----------------- | -------------------------------------------------------------------------------- |
+| `SIBYL_CONSOLIDATION_MAX_INPUT_CHARS` | unset (per model) | Character cap on one consolidation request: system, evidence, schema             |
+| `SIBYL_CONSOLIDATION_RUN_MAX_TOKENS`  | `10000000`        | Token ceiling one reflection dream run may reserve across all of its model calls |
 
 Unset, each request takes the memory model's own budget: 1,600,000 characters for `claude-opus-5`
 and `claude-opus-5-5` on the `anthropic` provider, and 40,000 for every other model. The lookup
@@ -249,12 +227,34 @@ matches the model id exactly, so a dated id, a `[1m]` suffix or an `anthropic/`-
 id gets 40,000. When the variable is set, its value replaces the model's budget, even a value equal
 to a default.
 
-This variable is the operator's knob for capping dream spend. At the Opus default one consolidation
-request can carry about 420K input tokens (screen48 evidence ran about 3.8 characters per token),
-and the nightly dream cycle's proposal, critique and correction requests are not counted against the
-monthly LLM token budgets. A lower value shrinks every such request and splits large task families
-into more, smaller cohorts. The budget is recorded in each validation policy, so changing it, or
-changing the memory model, re-sends consolidation work that was in flight or only partly complete.
+At the Opus default one consolidation request can carry about 420K input tokens (screen48 evidence
+ran about 3.8 characters per token). A lower value shrinks every such request and splits large task
+families into more, smaller cohorts. The budget is recorded in each validation policy, so changing
+it, or changing the memory model, re-sends consolidation work that was in flight or only partly
+complete.
+
+### Dream Run Spend
+
+The nightly dream cycle's proposal, critique and correction calls reserve against the monthly LLM
+token budgets of the source's owner and the organization, the same buckets the extraction jobs use,
+and each call settles to the tokens it used once it returns, in the month it was reserved. On the
+Anthropic and OpenAI transports a call reserves one attempt up front and each retry reserves another
+as it dispatches, so a call that succeeds first time never holds its full retry envelope. Other
+providers reserve every output attempt up front, since their retries are not observed one by one.
+
+A refusal that arrives before a request is sent releases that stage instead of failing it, so a
+proposal, critique or correction the budget refused runs again once there is room. The refusal is
+listed in the run report with its budget details, and the run continues with the next cohort.
+
+`SIBYL_CONSOLIDATION_RUN_MAX_TOKENS` caps what one run may reserve in total. When the next
+reservation would cross it, that call is refused, the run stops admitting cohorts and candidates,
+and the receipt records `stopped_reason: run_token_ceiling` with the reserved, refunded and
+committed totals under `spend`. Cohorts the run did not reach stay pending and are picked up when
+the dream walk next reaches them; pending candidates are drained on the next run. Individual
+reflection passes make no model call and are not stopped by the ceiling. At the Opus input budget a
+joined cohort's proposal and critique reserve about 0.9M tokens, so the default admits about ten
+such cohorts a night; at a 40,000-character budget a call reserves about 11K tokens and the default
+never binds.
 
 ## Embeddings
 
@@ -386,10 +386,9 @@ detail.
 
 ## Worker Configuration
 
-| Variable                | Default | Description                                                         |
-| ----------------------- | ------- | ------------------------------------------------------------------- |
-| `SIBYL_RUN_WORKER`      | `false` | Embed a worker in the API process when Redis coordination is active |
-| `SIBYL_WORKER_MAX_JOBS` | (auto)  | Override maximum concurrent background jobs (1-1024)                |
+| Variable                | Default | Description                                          |
+| ----------------------- | ------- | ---------------------------------------------------- |
+| `SIBYL_WORKER_MAX_JOBS` | (auto)  | Override maximum concurrent background jobs (1-1024) |
 
 When `SIBYL_WORKER_MAX_JOBS` is unset, the limit is derived from CPU count (2x cores, minimum 3)
 capped by the effective content-client pool size.
@@ -448,35 +447,6 @@ SIBYL_SMTP_STARTTLS=true
 SIBYL_EMAIL_FROM=Sibyl <sibyl@example.com>
 ```
 
-### Migration Archive Rehearsal
-
-Use PostgreSQL settings only when explicitly restoring or validating a retained `postgres.sql`
-payload. New production deployments should use the fully Surreal example above.
-
-```bash
-SIBYL_ENVIRONMENT=production
-SIBYL_JWT_SECRET=<generate with: openssl rand -hex 32>
-SIBYL_SETTINGS_KEY=<generate with: openssl rand -base64 32 | tr '+/' '-_'>
-SIBYL_PUBLIC_URL=https://sibyl.example.com
-
-# Surreal target
-SIBYL_SURREAL_URL=ws://prod-surrealdb.internal:8000/rpc
-SIBYL_SURREAL_USERNAME=root
-SIBYL_SURREAL_PASSWORD=<secure-password>
-
-# Optional historical archive rehearsal database
-SIBYL_POSTGRES_HOST=prod-postgres.internal
-SIBYL_POSTGRES_PORT=5433
-SIBYL_POSTGRES_PASSWORD=<secure-password>
-
-# LLM
-SIBYL_OPENAI_API_KEY=sk-...
-SIBYL_ANTHROPIC_API_KEY=sk-ant-...
-
-# Rate limiting with Redis
-SIBYL_RATE_LIMIT_STORAGE=redis://prod-redis.internal:6379
-```
-
 ### Kubernetes ConfigMap
 
 Non-secret environment variables in ConfigMap:
@@ -514,9 +484,7 @@ stringData:
   SIBYL_SETTINGS_KEY: "<fernet-key>" # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
   SIBYL_OPENAI_API_KEY: "sk-..." # Optional if using DB-stored keys
   SIBYL_ANTHROPIC_API_KEY: "sk-ant-..." # Optional if using DB-stored keys
-  SIBYL_SURREAL_PASSWORD: "<surreal-password>" # For surreal mode
-  # Migration/archive only:
-  # SIBYL_POSTGRES_PASSWORD: "<db-password>"
+  SIBYL_SURREAL_PASSWORD: "<surreal-password>"
 ```
 
 ## Running Multiple Instances
@@ -589,8 +557,5 @@ settings.fully_surreal         # always True; graph, content, and auth are Surre
 settings.resolved_coordination_backend  # resolves "auto" to "local" or "redis"
 ```
 
-Sibyl is fully SurrealDB-backed, so `fully_surreal` always returns `True`. There are no PostgreSQL
-connection helpers or relational-shape flags on `Settings` (`postgres_url`, `postgres_url_sync`,
-`uses_relational_auth`, and `requires_relational_support` do not exist). PostgreSQL connection
-details live with the migration tooling described under
-[PostgreSQL (migration/rehearsal only)](#postgresql-migrationrehearsal-only).
+Sibyl is fully SurrealDB-backed, so `fully_surreal` always returns `True`. `Settings` has no
+relational connection helpers.

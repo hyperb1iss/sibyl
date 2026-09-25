@@ -114,9 +114,7 @@ def _mcp_transport_security(bind_host: str, bind_port: int) -> TransportSecurity
     )
 
 
-def create_combined_app(
-    host: str | None = None, port: int | None = None, *, embed_worker: bool = False
-) -> Starlette:
+def create_combined_app(host: str | None = None, port: int | None = None) -> Starlette:
     """Create a combined Starlette app with MCP and REST API.
 
     Routes:
@@ -127,7 +125,6 @@ def create_combined_app(
     Args:
         host: Bind host to include in MCP transport validation
         port: Bind port to include in MCP transport validation
-        embed_worker: If True, run arq worker in-process (for dev mode)
 
     Returns:
         Combined Starlette application
@@ -187,12 +184,6 @@ def create_combined_app(
 
         runtime_services = RuntimeServices(log=log)
         await runtime_services.startup()
-
-        if embed_worker:
-            if coordination_backend == "local":
-                log.info("Local queue broker runs in-process; no embedded worker task needed")
-            else:
-                log.warning("Embedded worker disabled in surreal mode", store=settings.store)
 
         # The MCP session manager needs to be started for streamable HTTP
         try:
@@ -279,18 +270,9 @@ def run_server(
 
 
 def create_dev_app() -> Starlette:
-    """Factory for dev mode.
-
-    Set SIBYL_RUN_WORKER=true to embed the arq worker in-process.
-    Note: arq Worker doesn't handle cancellation gracefully, so avoid using
-    with --reload. For dev with hot-reload, run worker separately:
-        uv run arq sibyl.jobs.WorkerSettings
-    """
-    import os
-
+    """Factory for dev mode, with signal diagnostics enabled."""
     _enable_dev_signal_diagnostics()
-    embed_worker = os.getenv("SIBYL_RUN_WORKER", "").lower() in ("true", "1", "yes")
-    return create_combined_app(embed_worker=embed_worker)
+    return create_combined_app()
 
 
 def main() -> None:

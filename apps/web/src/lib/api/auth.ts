@@ -56,11 +56,6 @@ export interface OrgCreateResponse {
   access_token: string;
 }
 
-export interface OrgGetResponse {
-  organization: { id: string; slug: string; name: string };
-  role: string;
-}
-
 export interface OrgMember {
   user: {
     id: string;
@@ -321,7 +316,6 @@ export const profileApi = {
 
 export const orgsApi = {
   list: () => fetchApi<OrgListResponse>('/orgs'),
-  get: (slug: string) => fetchApi<OrgGetResponse>(`/orgs/${encodeURIComponent(slug)}`),
   create: (data: OrgCreateRequest) =>
     fetchApi<OrgCreateResponse>('/orgs', {
       method: 'POST',
@@ -346,11 +340,6 @@ export const orgsApi = {
   members: {
     list: (slug: string) =>
       fetchApi<OrgMembersResponse>(`/orgs/${encodeURIComponent(slug)}/members`),
-    add: (slug: string, userId: string, role: string) =>
-      fetchApi<{ user_id: string; role: string }>(`/orgs/${encodeURIComponent(slug)}/members`, {
-        method: 'POST',
-        body: JSON.stringify({ user_id: userId, role }),
-      }),
     updateRole: (slug: string, userId: string, role: string) =>
       fetchApi<{ user_id: string; role: string }>(
         `/orgs/${encodeURIComponent(slug)}/members/${userId}`,

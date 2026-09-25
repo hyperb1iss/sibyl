@@ -114,8 +114,6 @@ _DOCUMENTATION_ROOTS = {
 _RUNTIME_ROOTS = {
     ".env.example",
     ".env.quickstart.example",
-    ".env.quickstart.test",
-    ".env.test.example",
     ".irisconfig",
     ".pre-commit-config.yaml",
     ".prettierignore",
@@ -137,7 +135,7 @@ _RUNTIME_ROOTS = {
     "setup-dev.sh",
     "uv.lock",
 }
-_RELEASE_ROOTS = {"Tiltfile", "VERSION", "install.sh"}
+_RELEASE_ROOTS = {"VERSION", "install.sh"}
 _API_IMAGE_INPUTS = {
     "apps/api/Dockerfile",
     "apps/api/pyproject.toml",
@@ -155,7 +153,6 @@ _RELEASE_WORKFLOWS = {
     ".github/workflows/ci.yml",
     ".github/workflows/image-cve-gate.yml",
     ".github/workflows/nightly-regression.yml",
-    ".github/workflows/publish-dogfood-images.yml",
     ".github/workflows/publish.yml",
     ".github/workflows/release.yml",
 }

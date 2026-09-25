@@ -25,6 +25,9 @@ class RecordingBudgetEnforcer:
     ) -> None:
         self.calls.append((context, surface, estimated_tokens))
 
+    async def settle(self, context: LLMBudgetContext, **kwargs: int | str) -> None:
+        self.settlements = [*getattr(self, "settlements", []), (context, kwargs)]
+
 
 @pytest.fixture(autouse=True)
 def reset_budget_enforcer() -> None:

@@ -76,10 +76,6 @@ spec:
             - name: NEXT_PUBLIC_API_URL
               value: {{ printf "%s/api" (trimSuffix "/" .Values.publicUrl) | quote }}
             {{- end }}
-            {{- if and (not (hasKey .Values.frontend.env "SIBYL_PUBLIC_URL")) .Values.publicUrl }}
-            - name: SIBYL_PUBLIC_URL
-              value: {{ trimSuffix "/" .Values.publicUrl | quote }}
-            {{- end }}
             # WebSocket derives URL from window.location behind shared ingress
             - name: HOSTNAME
               value: "0.0.0.0"

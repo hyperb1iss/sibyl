@@ -12,27 +12,18 @@ Sibyl consists of four components plus one unified storage backend:
 | **Backend**   | FastAPI + MCP server (sibyld serve) | 3334   |
 | **Worker**    | arq job queue processor             | -      |
 | **Frontend**  | Next.js 16 web UI                   | 3337   |
-| **SurrealDB** | Graph + content + auth (default)    | 8000\* |
+| **SurrealDB** | Graph + content + auth              | 8000\* |
 
 \*Default internal ports. External mappings vary by deployment mode.
 
-> **Migration-only:** PostgreSQL is **not** a deployed Sibyl component. It is consumed only by the
-> standalone `migrate` CLI when restoring a retained `postgres.sql` archive against an
-> operator-managed database (default port `5433`). It never runs as an ambient sidecar in any
-> supported deployment.
-
 ## Runtime Boundary
 
-- SurrealDB is the only required data service for new local, single-host, and supported production
-  deployments.
+- SurrealDB is the only data service Sibyl needs, for local, single-host, and production deployments
+  alike.
 - Redis/Valkey coordination is explicit opt-in. Use it for multi-process or multi-replica
   deployments by setting `SIBYL_COORDINATION_BACKEND=redis` or Helm `coordinationBackend: redis`.
-- PostgreSQL and preserved FalkorDB installs are migration sources or archive-rehearsal inputs, not
-  ambient sidecars for current deployments.
-- Rollback is bounded by the write-freeze window. Before SurrealDB accepts new production writes,
-  traffic can return to the preserved source deployment. After writes reopen on SurrealDB, recovery
-  uses Surreal backups, archive receipts, and deliberate replay, not an instant switch back to
-  legacy services.
+- Recovery uses SurrealDB backups and Sibyl archive restores. See
+  [Backup And Restore](../admin/backup-restore.md).
 
 ```
                                    +------------------+
@@ -68,9 +59,7 @@ Sibyl consists of four components plus one unified storage backend:
                                    +------------------+
 ```
 
-PostgreSQL is retained only as an external archive-rehearsal target. See
-[storage-modes.md](../guide/storage-modes.md) and
-[migrating-from-falkor.md](../guide/migrating-from-falkor.md).
+See [Storage Modes](../guide/storage-modes.md) for how each process connects to SurrealDB.
 
 ## Deployment Modes
 
@@ -83,17 +72,7 @@ PostgreSQL is retained only as an external archive-rehearsal target. See
 - SurrealDB runs in Docker
 - [Docker Compose Guide](docker-compose.md)
 
-### 2. Local Kubernetes (Tilt + Minikube)
-
-**Best for:** Testing Kubernetes manifests locally, developing with full K8s stack.
-
-- Full Kubernetes environment locally
-- Kong Gateway for routing
-- SurrealDB with TiKV and Valkey coordination
-- Automatic image builds on code changes
-- [Tilt/Minikube Guide](tilt-minikube.md)
-
-### 3. Production Kubernetes
+### 2. Production Kubernetes
 
 **Best for:** Production deployments with HA and scaling.
 
@@ -104,7 +83,7 @@ PostgreSQL is retained only as an external archive-rehearsal target. See
 - [Kubernetes Guide](kubernetes.md)
 - [Helm Chart Reference](helm-chart.md)
 
-### 4. Single Host (Ansible)
+### 3. Single Host (Ansible)
 
 **Best for:** A personal instance on one small cloud VM.
 
@@ -116,16 +95,16 @@ PostgreSQL is retained only as an external archive-rehearsal target. See
 
 ## Quick Comparison
 
-| Feature               | Docker Compose | Tilt/Minikube | Production K8s | Single Host |
-| --------------------- | -------------- | ------------- | -------------- | ----------- |
-| Setup time            | 1 minute       | 5-10 minutes  | Varies         | ~10 minutes |
-| Hot reload            | Yes            | Yes           | No             | No          |
-| Kong Gateway          | No             | Yes           | Yes            | No          |
-| TLS                   | No             | Yes (Caddy)   | Yes            | Yes (Caddy) |
-| Autoscaling           | No             | No            | Yes (HPA)      | No          |
-| Multi-replica         | No             | Yes           | Yes            | No          |
-| Resource requirements | Low            | Medium        | High           | Low         |
-| Production-like       | No             | Mostly        | Yes            | Mostly      |
+| Feature               | Docker Compose | Production K8s | Single Host |
+| --------------------- | -------------- | -------------- | ----------- |
+| Setup time            | 1 minute       | Varies         | ~10 minutes |
+| Hot reload            | Yes            | No             | No          |
+| Kong Gateway          | No             | Yes            | No          |
+| TLS                   | No             | Yes            | Yes (Caddy) |
+| Autoscaling           | No             | Yes (HPA)      | No          |
+| Multi-replica         | No             | Yes            | No          |
+| Resource requirements | Low            | High           | Low         |
+| Production-like       | No             | Yes            | Mostly      |
 
 ## Port Mappings by Environment
 
@@ -137,16 +116,6 @@ PostgreSQL is retained only as an external archive-rehearsal target. See
 | Frontend            | 3337      | 3337           | Next.js UI             |
 | SurrealDB (default) | 8000      | 8000           | ws/http, RPC at `/rpc` |
 | Redis/Valkey        | 6381      | 6379           | Optional coordination  |
-
-### Tilt/Minikube
-
-All services accessed via `https://sibyl.local`:
-
-| Path    | Service  | Notes        |
-| ------- | -------- | ------------ |
-| /api/\* | Backend  | REST API     |
-| /mcp    | Backend  | MCP protocol |
-| /       | Frontend | Next.js UI   |
 
 ## Next Steps
 

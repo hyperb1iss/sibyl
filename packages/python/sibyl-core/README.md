@@ -44,8 +44,7 @@ src/sibyl_core/
 │   ├── sources.py        # Source, Document
 │   ├── context.py        # Context-pack models
 │   ├── reflection.py     # Reflection candidate models
-│   ├── synthesis.py      # Synthesis plan and artifact models
-│   └── responses.py      # API response models
+│   └── synthesis.py      # Synthesis plan and artifact models
 ├── backends/surreal/     # Driver, schema, table operations
 ├── retrieval/            # Native context retrieval, fusion (RRF), dedup
 │   ├── query_planning.py # Structured query planning for the accurate retrieval lane
@@ -109,14 +108,15 @@ results = await manager.search(query="authentication patterns", limit=20)
 
 ### Write Concurrency
 
-The SurrealDB driver serializes WebSocket operations per client, and org-scoped graph access should
-use a per-org client (`get_graph_client(group_id=...)` returns one scoped to the org namespace).
+Each org gets a dedicated, connection-pooled client scoped to its namespace
+(`get_graph_client(group_id=...)`). The pool hands out independent sockets, so queries within an org
+run concurrently. Embedded and `memory://` URLs are clamped to a single connection.
 
 ```python
-# Native write path, no LLM extraction
+# Direct write, no embedding call
 await manager.create_direct(entity)
 
-# Compatibility path with LLM-backed extraction
+# Direct write that also generates the native embedding
 await manager.create(entity)
 ```
 
@@ -252,34 +252,24 @@ live probe to `scripts/llm/verify_registry.py`.
 manager = EntityManager(client, group_id=str(org.id))
 ```
 
-**Node shapes:** Native retrieval queries direct Surreal records. Archive compatibility keeps old
-`Episodic`/`Entity` records readable without Graphiti.
+**Node shapes:** Native retrieval queries direct Surreal records, typed by `entity_type`.
 
 ```surql
 SELECT * FROM entity WHERE entity_type = $type;
 ```
 
-**Creation paths:** direct native writes first, LLM-backed extraction when explicitly needed.
+**Creation paths:** both write directly; `create` also generates the embedding.
 
 ```python
-await manager.create_direct(entity)  # Native write path, no LLM
-await manager.create(entity)  # Compatibility extraction path
+await manager.create_direct(entity)  # Direct write, no embedding call
+await manager.create(entity)  # Direct write plus native embedding
 ```
-
-## Legacy Compatibility
-
-Legacy Graphiti-shaped records remain readable through Sibyl-owned Surreal projection and archive
-code. The package no longer exposes a Graphiti compatibility extra or installs the Graphiti Core
-package.
 
 ## Testing
 
 ```bash
 # With mock LLM (fast, deterministic)
 SIBYL_MOCK_LLM=true uv run pytest tests/
-
-# Live model tests (costs money)
-uv run pytest tests/live --live-models
 
 # Retrieval benchmark suite
 moon run core:bench-retrieval

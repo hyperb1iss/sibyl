@@ -79,16 +79,6 @@
   },
   "overrides": [
     {
-      "includes": ["src/stories/assets/*.svg"],
-      "linter": {
-        "rules": {
-          "a11y": {
-            "noSvgWithoutTitle": "off"
-          }
-        }
-      }
-    },
-    {
       "includes": ["*.config.ts", "*.config.js"],
       "linter": {
         "rules": {

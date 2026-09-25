@@ -351,7 +351,8 @@ jobs:
           fi
 
           if [[ "$HOOKS_CHANGED" == "true" ]]; then
-            moon run hooks:lint hooks:typecheck
+            # Hooks ship with the runtime, and hooks-only changes skip trust-gates.
+            moon run hooks:lint hooks:typecheck root:inventory-check
             ran_any=true
           fi
 
@@ -761,6 +762,9 @@ jobs:
       SIBYL_OPENAI_API_KEY: sk-test-key
       SIBYL_ANTHROPIC_API_KEY: sk-ant-test-key
       SIBYL_MOCK_LLM: true
+      # The API writes transactional mail here and the auth replay reads the
+      # password-reset link back out of it.
+      SIBYL_EMAIL_OUTBOX_PATH: /tmp/sibyl-e2e-email-outbox.jsonl
     steps:
       - uses: actions/checkout@v7
         with:

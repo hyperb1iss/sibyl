@@ -222,6 +222,9 @@ async def test_opus_memory_output_default_binds_wire_policy_and_reservation(
         async def reserve(self, context, *, surface, estimated_tokens):
             reservations.append(estimated_tokens)
 
+        async def settle(self, context, *, surface, reserved_tokens, actual_tokens, period=None):
+            pass
+
     def respond(request):
         body = json.loads(request.content)
         requests.append(body)
@@ -271,9 +274,8 @@ async def test_opus_memory_output_default_binds_wire_policy_and_reservation(
         await validation._close_resources(extractor.resources)
     assert len(requests) == 1
     schema = await extractor.output_schema()
-    expected = (
-        len("Synthetic evidence\n" + json.dumps(schema, sort_keys=True)) // 4 + capacity
-    ) * 9
+    expected = len("Synthetic evidence\n" + json.dumps(schema, sort_keys=True)) // 4 + capacity
+    # One attempt is reserved up front; retries reserve as they dispatch.
     assert reservations == [expected]
 
 

@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 from weakref import WeakKeyDictionary
 
+import structlog
 from pydantic import BaseModel, Field, TypeAdapter
 from pydantic_ai import Agent, NativeOutput
 from pydantic_ai.messages import ModelResponse
@@ -21,16 +22,26 @@ from pydantic_ai.profiles.openai import OpenAIJsonSchemaTransformer
 
 from sibyl_core.ai.clients import get_agent
 from sibyl_core.ai.errors import LLMError, classify_llm_exception
-from sibyl_core.ai.llm.budget import reserve_llm_budget
+from sibyl_core.ai.llm.budget import (
+    LLMReservation,
+    collect_llm_reservations,
+    estimate_llm_tokens,
+    reserve_llm_budget,
+    settle_llm_reservations,
+)
 from sibyl_core.ai.llm.config import LLMConfig, LLMSurface
 from sibyl_core.ai.providers import rejects_forced_tool_choice
 from sibyl_core.ai.transport import (
     FailedExtractionUsage,
+    RecordingAnthropicClient,
+    RecordingOpenAIClient,
     TransportAttempt,
     collect_transport_attempts,
     reserve_uncovered_transport_attempts,
 )
 from sibyl_core.observability import elapsed_ms, telemetry_registry
+
+log = structlog.get_logger()
 
 
 class ExtractionUsage(BaseModel):
@@ -134,16 +145,16 @@ class Extractor[T]:
                 or agent.model.client.base_url.port not in (None, 443)
             ):
                 raise ValueError("OpenRouter routing requires the OpenRouter API origin")
-            transport_retries = (
-                agent.model.client.max_retries
-                if isinstance(agent.model, OpenAIResponsesModel | AnthropicModel)
-                else 0
-            )
-            # An unspecified output retry policy estimates one model request;
-            # dynamic agent settings and provider work are not bounded here.
+            # Dynamic agent settings and provider work are not bounded here.
             budget_prompt = self._budget_prompt(prompt, agent, mode)
             output_limit = self._budget_output_limit(agent)
-            envelope = (transport_retries + 1) * ((self.output_retries or 0) + 1)
+            attempt_tokens = estimate_llm_tokens(budget_prompt, output_token_limit=output_limit)
+            # A recording transport reserves every HTTP hop as it dispatches, an
+            # SDK retry and an output retry alike, so one attempt up front
+            # suffices. Any other model's retries never pass through that hook,
+            # so its output retries are reserved up front as before.
+            recorded = _records_transport(agent.model)
+            up_front = 1 if recorded else (self.output_retries or 0) + 1
 
             async def reserve(envelope: int = 1) -> None:
                 await reserve_llm_budget(
@@ -153,11 +164,26 @@ class Extractor[T]:
                     attempt_envelope=envelope,
                 )
 
-            await reserve(envelope)
-            with reserve_uncovered_transport_attempts(envelope, reserve):
-                result = await agent.run(
-                    prompt,
-                    model_settings=self._model_settings(),
+            with collect_llm_reservations() as reservations:
+                await reserve(up_front)
+                try:
+                    with reserve_uncovered_transport_attempts(up_front, reserve):
+                        result = await agent.run(
+                            prompt,
+                            model_settings=self._model_settings(),
+                        )
+                except BaseException:
+                    # Usage is unknown after a failure. A recorded call keeps one
+                    # attempt's estimate per dispatched hop, and hops that never
+                    # left keep nothing; an unrecorded call keeps its reservation.
+                    if recorded:
+                        await self._settle(reservations, attempt_tokens * len(attempts))
+                    raise
+                usage = _extraction_usage(result, attempts)
+                reserved_total = sum(item.tokens for item in reservations)
+                await self._settle(
+                    reservations,
+                    usage.total_tokens if usage.total_tokens > 0 else reserved_total,
                 )
             telemetry_registry().record_llm_call(
                 surface=self.surface.value,
@@ -166,10 +192,7 @@ class Extractor[T]:
                 status="ok",
                 duration_ms=elapsed_ms(started_at),
             )
-            return ExtractionResult(
-                output=result.output,
-                usage=_extraction_usage(result, attempts),
-            )
+            return ExtractionResult(output=result.output, usage=usage)
         except asyncio.CancelledError as exc:
             exc.__dict__["extraction_usage"] = FailedExtractionUsage(
                 transport_attempts=attempts
@@ -188,6 +211,25 @@ class Extractor[T]:
                 transport_attempts=attempts
             ).model_dump(mode="json")
             raise error from exc
+
+    async def _settle(self, reservations: list[LLMReservation], actual_tokens: int) -> None:
+        """Hand back the unused part of a reservation; a settle failure never fails the call."""
+        if not reservations:
+            return
+        try:
+            await settle_llm_reservations(
+                surface=self.surface.value,
+                reservations=reservations,
+                actual_tokens=actual_tokens,
+            )
+        except Exception:
+            log.warning(
+                "llm_budget_settle_failed",
+                surface=self.surface.value,
+                reserved_tokens=sum(item.tokens for item in reservations),
+                actual_tokens=actual_tokens,
+                exc_info=True,
+            )
 
     def _budget_output_limit(self, agent: Agent[Any, Any]) -> int | None:
         """Use known static settings; dynamic settings and absent limits stay unknown."""
@@ -308,6 +350,14 @@ class Extractor[T]:
             model=self.model_override,
             surface=self.surface.value,
         )
+
+
+def _records_transport(model: object) -> bool:
+    """True when every HTTP hop of this model passes through Sibyl's recording client."""
+    if not isinstance(model, OpenAIResponsesModel | AnthropicModel):
+        return False
+    http = getattr(model.client, "_client", None)
+    return isinstance(http, RecordingOpenAIClient | RecordingAnthropicClient)
 
 
 def _model_settings(max_tokens: int | None) -> ModelSettings | None:

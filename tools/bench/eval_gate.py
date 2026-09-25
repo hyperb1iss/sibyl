@@ -72,10 +72,8 @@ _AI_MEMORY_ANSWER_KEYS = (
     "expected_result_ids",
 )
 _AI_MEMORY_RANKING_KEYS = ("ranked_ids", "ranked_session_ids", "ranked_result_ids", "result_ids")
-_CONTEXT_PACK_RETRIEVAL_MODES = frozenset(("pre-graphiti", "post-graphiti", "native", "compare"))
-_AI_MEMORY_RETRIEVAL_MODES = frozenset(
-    ("pre-graphiti", "post-graphiti", "native", "compare", "raw", "hybrid")
-)
+_CONTEXT_PACK_RETRIEVAL_MODES = frozenset(("native",))
+_AI_MEMORY_RETRIEVAL_MODES = frozenset(("native", "raw", "hybrid"))
 _RELEASE_METADATA_FIELDS = (
     "retrieval_mode",
     "embedding_provider",

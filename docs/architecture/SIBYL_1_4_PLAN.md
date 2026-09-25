@@ -934,9 +934,9 @@ The latest official LongMemEval-V2 campaign remains the August 26 attempt. Web S
 (23.33%) with 54.92-second median memory-query latency. Enterprise Small lost its runner; no
 completed two-domain A/A anchor exists. The Web configuration had notes and typed-stream retrieval
 off and embeddings deferred. It is not a valid regression comparison with the older notes-on 30.38%
-combined anchor. [Recorded configuration and diagnosis](SIBYL_1_3_RELEASE_STATUS_2026-08-29.md)
+combined anchor.
 
-Two facts in the old release document have since changed:
+Two facts recorded for the 1.3 release have since changed:
 
 - The fulltext query fix merged in [PR 446](https://github.com/hyperb1iss/sibyl/pull/446), commit
   `fdff0cd2`. Current code runs bounded per-field queries. Its full-scale V2 latency and residency

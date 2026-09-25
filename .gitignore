@@ -61,13 +61,9 @@ dmypy.json
 .env.local
 openrouter.key
 
-# Docker
-falkordb_data/
-
-# Kubernetes / Tilt
+# Leftover local secrets from the retired Tilt stack. The directory is gone,
+# but old checkouts may still hold real API keys here; never stage them.
 infra/local/secrets.yaml
-.tiltbuild/
-tilt_modules/
 
 # OS
 .DS_Store
@@ -89,13 +85,9 @@ backups/
 !apps/web/src/app/(main)/settings/admin/backups/
 !apps/web/src/app/(main)/settings/admin/backups/page.tsx
 *.sql
-!docs/schemas/*.sql
 
 # generated docs
 docs/research/*
-!docs/research/rust-port/
-docs/research/rust-port/*
-!docs/research/rust-port/INVENTORY.md
 
 # Memory consolidation exports (dogfood archive tarballs kept on disk, not committed)
 sibyl-consolidation/

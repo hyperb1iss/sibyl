@@ -714,7 +714,7 @@ class TestGetHealth:
         """Health should report unhealthy on connection failure."""
 
         async def failing_client() -> None:
-            raise ConnectionError("Cannot connect to FalkorDB")
+            raise ConnectionError("Cannot connect to SurrealDB")
 
         with patch("sibyl_core.tools.health.get_graph_client", failing_client):
             result = await get_health()

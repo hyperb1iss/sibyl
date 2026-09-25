@@ -12,8 +12,7 @@ Typical pipeline:
 
 This is an optional capability. Local cross-encoder reranking requires the
 ``reranking`` extra (sentence-transformers); when it is absent the path degrades
-to the fused order rather than raising. API-based reranking (Cohere) requires the
-``cohere`` package and an API key. Both default to off.
+to the fused order rather than raising. It defaults to off.
 """
 
 from __future__ import annotations
@@ -438,94 +437,3 @@ async def rerank_results[T](
                 metadata={"reranking_failed": str(e)},
             )
         raise
-
-
-async def cohere_rerank[T](
-    query: str,
-    results: list[tuple[T, float]],
-    api_key: str | None = None,
-    model: str = "rerank-english-v3.0",
-    top_k: int = 20,
-) -> RerankResult:
-    """Rerank using Cohere's Rerank API.
-
-    Alternative to local cross-encoder when:
-    - Better accuracy needed (Cohere models are larger)
-    - No GPU available for local inference
-    - Willing to pay for API calls
-
-    Args:
-        query: Original search query.
-        results: Initial results.
-        api_key: Cohere API key (uses COHERE_API_KEY env var if not provided).
-        model: Cohere rerank model name.
-        top_k: Number of top results to return.
-
-    Returns:
-        RerankResult with reranked results.
-    """
-    import os
-
-    api_key = api_key or os.environ.get("COHERE_API_KEY")
-    if not api_key:
-        log.warning("cohere_api_key_not_found")
-        return RerankResult(
-            results=results,
-            reranked_count=0,
-            model_name=None,
-            metadata={"reranking_skipped": "no_api_key"},
-        )
-
-    try:
-        import cohere
-
-        client = cohere.Client(api_key)
-
-        # Prepare documents
-        documents = [_extract_content(entity)[:2000] for entity, _ in results[: top_k * 2]]
-
-        # Call Cohere Rerank API
-        response = client.rerank(
-            query=query,
-            documents=documents,
-            top_n=top_k,
-            model=model,
-        )
-
-        # Map results back to entities
-        entity_map = {i: entity for i, (entity, _) in enumerate(results)}
-        reranked: list[tuple[T, float]] = []
-
-        for result in response.results:
-            idx = result.index
-            if idx in entity_map:
-                reranked.append((entity_map[idx], result.relevance_score))
-
-        return RerankResult(
-            results=reranked,
-            reranked_count=len(reranked),
-            model_name=model,
-            metadata={
-                "api": "cohere",
-                "original_count": len(results),
-                "top_n": top_k,
-            },
-        )
-
-    except ImportError:
-        log.warning("cohere_not_installed")
-        return RerankResult(
-            results=results,
-            reranked_count=0,
-            model_name=None,
-            metadata={"reranking_skipped": "cohere_not_installed"},
-        )
-
-    except Exception as e:
-        log.exception("cohere_rerank_failed", error=str(e))
-        return RerankResult(
-            results=results,
-            reranked_count=0,
-            model_name=model,
-            metadata={"reranking_failed": str(e)},
-        )

@@ -34,8 +34,7 @@ dependencies = [
     # Auth primitives (JWT, password hashing)
     "pyjwt>=2.10",
     "cryptography>=50.0.0",
-    # Async & HTTP
-    "anyio>=4.14.2",
+    # HTTP
     "httpx>=0.27",
     # Lexical normalization; must stay the same Snowball English implementation
     # the SurrealDB fulltext analyzers run, or the ranker and the index disagree
@@ -47,17 +46,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-crawler = [
-    "crawl4ai>=0.9.2",
-    "mistune>=3.3.4",
-]
 embeddings = [
     "google-genai>=2.23.0",
 ]
 graph = [
     "surrealdb>=2.0.0,<3.0",
+    # Embedding-similarity dedup in the retrieval stack
+    "numpy>=2.5.1",
 ]
 graphrag = [
+    "networkx>=3.0",
     "python-louvain>=0.16",
 ]
 llm = [
@@ -67,20 +65,11 @@ llm = [
 reranking = [
     "sentence-transformers>=5.6.1",
 ]
-runtime = [
-    "anthropic>=1.0.0,<2",
-    "crawl4ai>=0.9.2",
-    "google-genai>=2.23.0",
-    "mistune>=3.3.4",
-    "pydantic-ai-slim[anthropic,google,openai]>=2.42.0,<3",
-    "python-louvain>=0.16",
-    "sentence-transformers>=5.6.1",
-    "surrealdb>=2.0.0,<3.0",
-]
 
 [dependency-groups]
 dev = [
     "anthropic>=1.0.0,<2",
+    "httpx2>=2.5.0,<3",
     "pytest",
     "pytest-asyncio",
     "pytest-cov>=7.0.0",
@@ -89,8 +78,8 @@ dev = [
     # the graph backend, the numeric stack, and the pydantic-ai client layer.
     # They stay optional for the published package (graph/llm extras) but the
     # test env must install them or the graph/eval/ai modules fail collection.
-    # Heavy extras (sentence-transformers, crawl4ai) are left out on purpose;
-    # their tests importorskip so CI stays fast.
+    # The heavy reranking extra (sentence-transformers) is left out on purpose
+    # so CI stays fast; its tests mock the cross-encoder instead.
     "surrealdb>=2.0.0,<3.0",
     "numpy>=2.5.1",
     "pydantic-ai-slim[anthropic,google,openai]>=2.42.0,<3",

@@ -4,16 +4,16 @@ toolchains:
   default: system
 tasks:
   lint:
-    command: npx prettier --check '**/*.md' '**/*.yaml' '**/*.yml'
+    script: git ls-files -z '*.md' '*.yaml' '*.yml' | xargs -0 npx prettier --check
     inputs:
       - "@group(sources)"
   fix:
-    command: npx prettier --write '**/*.md' '**/*.yaml' '**/*.yml'
+    script: git ls-files -z '*.md' '*.yaml' '*.yml' | xargs -0 npx prettier --write
     inputs:
       - "@group(sources)"
     preset: server
   format:
-    command: npx prettier --write '**/*.md' '**/*.yaml' '**/*.yml'
+    script: git ls-files -z '*.md' '*.yaml' '*.yml' | xargs -0 npx prettier --write
     inputs:
       - "@group(sources)"
     preset: server

@@ -736,3 +736,266 @@ async def test_ordinary_cohort_native_final_policy_race(cohort_runtime, monkeypa
     assert (candidates[0]["uuid"] in {memory.id for memory in recalled}) is not raced
     stages = await execute("SELECT usage_json FROM memory_validation_executions;")
     assert sum(json.loads(stage["usage_json"])["requests"] for stage in stages) == 2
+
+
+class _RecordingBudget:
+    def __init__(self):
+        self.reservations = []
+        self.settlements = []
+
+    async def reserve(self, context, *, surface, estimated_tokens):
+        self.reservations.append((context, surface, estimated_tokens))
+
+    async def settle(self, context, *, surface, reserved_tokens, actual_tokens, period=None):
+        self.settlements.append((context, surface, reserved_tokens, actual_tokens))
+
+
+async def test_dream_cohorts_reserve_against_the_owner_and_organization_budgets(
+    cohort_runtime, monkeypatch
+):
+    from sibyl_core.ai.llm.budget import set_budget_enforcer
+
+    org, _context, _client, _runtime = cohort_runtime
+    sources = await capture(cohort_runtime)
+    install_model(monkeypatch, sources[0])
+    budget = _RecordingBudget()
+    set_budget_enforcer(budget)
+    try:
+        receipt = await reflection.run_reflection_dream_cycle({}, str(org.id))
+    finally:
+        set_budget_enforcer(None)
+
+    assert receipt["sources"][0]["outcome"] == "reflected"
+    assert budget.reservations, "the proposal never reserved against a budget"
+    owners = {context.user_id for context, _surface, _tokens in budget.reservations}
+    organizations = {context.organization_id for context, _surface, _tokens in budget.reservations}
+    assert owners == {str(sources[0]["principal_id"])}
+    assert organizations == {str(org.id)}
+    assert all(tokens > 0 for _context, _surface, tokens in budget.reservations)
+    for context, _surface, reserved, actual in budget.settlements:
+        assert (context.user_id, context.organization_id) == (
+            str(sources[0]["principal_id"]),
+            str(org.id),
+        )
+        assert reserved > 0
+        assert actual >= 0
+    spend = receipt["spend"]
+    assert spend["cap_tokens"] == reflection.settings.consolidation_run_max_tokens
+    assert spend["reserved_tokens"] == sum(t for _c, _s, t in budget.reservations)
+    assert 0 <= spend["committed_tokens"] <= spend["reserved_tokens"] + spend["charged_tokens"]
+    assert spend["stopped_reason"] is None
+    assert receipt["stopped_reason"] is None
+    assert receipt["budget_refused"] == 0
+
+
+async def test_dream_run_stops_admitting_work_at_its_token_ceiling(cohort_runtime, monkeypatch):
+    from sibyl_core.ai.llm.budget import RUN_TOKEN_CEILING, set_budget_enforcer
+
+    org, _context, _client, _runtime = cohort_runtime
+    sources = await capture(cohort_runtime)
+    install_model(monkeypatch, sources[0])
+    monkeypatch.setattr(reflection.settings, "consolidation_run_max_tokens", 1)
+    budget = _RecordingBudget()
+    set_budget_enforcer(budget)
+    try:
+        receipt = await reflection.run_reflection_dream_cycle({}, str(org.id), candidate_limit=0)
+    finally:
+        set_budget_enforcer(None)
+
+    cohort = receipt["sources"][0]
+    assert cohort["outcome"] == "error"
+    assert cohort["reason"] == RUN_TOKEN_CEILING
+    assert cohort["budget"]["kind"] == RUN_TOKEN_CEILING
+    assert cohort["budget"]["run_cap_tokens"] == 1
+    assert cohort["budget"]["committed_tokens"] == 0
+    assert cohort["budget"]["requested_tokens"] > 1
+    # The ceiling refused the call before the monthly buckets saw it.
+    assert budget.reservations == []
+    assert receipt["stopped_reason"] == RUN_TOKEN_CEILING
+    assert receipt["spend"]["refusals"] == 1
+    assert receipt["spend"]["exhausted"] is True
+    assert receipt["spend"]["committed_tokens"] == 0
+    assert receipt["budget_refused"] == 1
+    assert receipt["failed"] == 1
+
+
+async def test_a_run_ceiling_leaves_later_cohorts_pending_with_a_receipt(
+    cohort_runtime, monkeypatch
+):
+    """Once the ledger is exhausted, a cohort is skipped with a reason and stays pending."""
+    from sibyl.jobs import ordinary_cohorts
+    from sibyl_core.ai.errors import LLMRunBudgetExceededError
+    from sibyl_core.ai.llm.budget import RUN_TOKEN_CEILING, llm_run_spend_ledger
+    from sibyl_core.services.content_raw_persistence import get_raw_memory
+
+    org, _context, _client, _runtime = cohort_runtime
+    sources = await capture(cohort_runtime)
+    calls = install_model(monkeypatch, sources[0])
+    loaded = [
+        await get_raw_memory(organization_id=str(org.id), memory_id=row["uuid"]) for row in sources
+    ]
+
+    with llm_run_spend_ledger(1) as ledger:
+        with pytest.raises(LLMRunBudgetExceededError):
+            ledger.admit(surface="memory", estimated_tokens=2)
+        results, consumed = await ordinary_cohorts.reflect_cohorts(
+            str(org.id), loaded, dry_run=False
+        )
+
+    assert results == [
+        {
+            "source_ids": sorted(row["uuid"] for row in sources),
+            "outcome": "skip",
+            "reason": RUN_TOKEN_CEILING,
+            "stage_kind": "ordinary_cohort",
+        }
+    ]
+    assert consumed == {row["uuid"] for row in sources}
+    assert calls == [], "a skipped cohort must not build an extractor"
+
+
+@pytest.mark.parametrize("kind", ["ceiling", "monthly"])
+@pytest.mark.parametrize(("stage", "at"), [("proposal", 1), ("critic", 2)])
+async def test_a_budget_refusal_leaves_the_stage_free_to_run_next_time(
+    cohort_runtime, monkeypatch, stage, at, kind
+):
+    """A refusal before dispatch releases its claim; the next run completes the stage.
+
+    Recording the refusal as a failed stage would block it for good, because a
+    failed execution is never claimed again and its sources stay uncovered.
+    """
+    from tests.budget_refusal import refuse_reservation
+
+    org, _context, client, _runtime = cohort_runtime
+    sources = await capture(cohort_runtime)
+    calls = install_model(monkeypatch, sources[0])
+    refuse_reservation(monkeypatch, at=at, kind=kind)
+
+    first = await reflection.run_reflection_dream_cycle({}, str(org.id))
+    rows = await client.execute_query("SELECT state, error_type FROM memory_validation_executions;")
+    assert all(row["state"] != "failed" for row in rows), rows
+    assert first["budget_refused"] == 1, first
+    refused = first["sources"][0] if stage == "proposal" else first["candidates"][0]
+    assert refused["outcome"] == "error"
+    assert refused["budget"] is not None
+    if stage == "proposal":
+        assert rows == []
+        assert first["sources_reflected"] == 0
+    else:
+        assert [row["state"] for row in rows] == ["returned"]
+        assert first["promoted"] == 0
+    assert first["stopped_reason"] == ("run_token_ceiling" if kind == "ceiling" else None)
+    if stage == "proposal":
+        # install_model hands out its proposal output by call count, and the
+        # refused run already used those calls; the next run starts afresh.
+        calls.clear()
+
+    second = await reflection.run_reflection_dream_cycle({}, str(org.id))
+    assert second["failed"] == 0, second
+    assert second["promoted"] == 1, second
+    rows = await client.execute_query("SELECT state FROM memory_validation_executions;")
+    assert sorted(row["state"] for row in rows) == ["returned", "returned"]
+
+
+async def test_individual_passes_run_after_the_ceiling_is_reached(cohort_runtime, monkeypatch):
+    """Individual passes use the heuristic writer and cost no tokens, so they are never skipped."""
+    from sibyl.jobs import ordinary_cohorts
+    from sibyl_core.ai.errors import LLMRunBudgetExceededError
+    from sibyl_core.ai.llm.budget import get_llm_run_spend_ledger
+
+    org, _context, _client, _runtime = cohort_runtime
+    await capture(cohort_runtime)
+
+    async def exhaust(org_id, sources, *, dry_run):
+        ledger = get_llm_run_spend_ledger()
+        with pytest.raises(LLMRunBudgetExceededError):
+            ledger.admit(surface="memory", estimated_tokens=ledger.cap_tokens + 1)
+        return [], set()
+
+    passes = []
+
+    async def individual(**kwargs):
+        passes.append(kwargs["source"].id)
+        return {"source_id": kwargs["source"].id, "outcome": "reflected"}
+
+    monkeypatch.setattr(ordinary_cohorts, "reflect_cohorts", exhaust)
+    monkeypatch.setattr(reflection, "_reflect_dream_source", individual)
+
+    receipt = await reflection.run_reflection_dream_cycle({}, str(org.id), candidate_limit=0)
+
+    assert len(passes) == 2
+    assert receipt["stopped_reason"] == "run_token_ceiling"
+    assert receipt["sources_reflected"] == 2
+
+
+def _packet_pages(monkeypatch, pages=2):
+    from types import SimpleNamespace
+
+    from sibyl.jobs import ordinary_cohorts
+
+    manifest = {"source_id": "source", "pages": list(range(pages))}
+    packets = [
+        SimpleNamespace(binding={"manifest": manifest, "index": index}, sha256=str(index))
+        for index in range(pages)
+    ]
+    monkeypatch.setattr(
+        ordinary_cohorts, "prepare_stored_source_packets", AsyncMock(return_value=packets)
+    )
+    monkeypatch.setattr(ordinary_cohorts, "writable_source_authority", AsyncMock())
+
+
+async def test_a_packet_page_refused_by_the_ceiling_lands_in_the_receipt(monkeypatch):
+    from sibyl.jobs import ordinary_cohorts
+    from sibyl_core.ai.errors import LLMRunBudgetExceededError
+
+    _packet_pages(monkeypatch)
+    refusal = LLMRunBudgetExceededError(
+        "LLM run token ceiling reached",
+        surface="memory",
+        details={"kind": "run_token_ceiling", "run_cap_tokens": 1},
+    )
+    monkeypatch.setattr(ordinary_cohorts, "propose_stored_cohort", AsyncMock(side_effect=refusal))
+
+    result = await ordinary_cohorts._reflect_packet_source("org", "owner", "source")
+
+    assert result["outcome"] == "error"
+    assert result["source_pass_complete"] is False
+    assert [page["outcome"] for page in result["pages"]] == ["failed", "failed"]
+    assert all(page["reason"] == "run_token_ceiling" for page in result["pages"])
+    assert all(page["budget"]["kind"] == "run_token_ceiling" for page in result["pages"])
+    assert reflection._budget_refusals([result]) == 2
+
+
+async def test_packet_pages_reserve_against_the_owner_and_organization(monkeypatch):
+    from sibyl.jobs import ordinary_cohorts
+    from sibyl_core.ai.llm.budget import reserve_llm_budget, set_budget_enforcer
+
+    _packet_pages(monkeypatch)
+
+    async def propose(*args, **kwargs):
+        await reserve_llm_budget(surface="memory", prompt="page evidence")
+        return None, "execution"
+
+    monkeypatch.setattr(ordinary_cohorts, "propose_stored_cohort", propose)
+    budget = _RecordingBudget()
+    set_budget_enforcer(budget)
+    try:
+        result = await ordinary_cohorts._reflect_packet_source("org", "owner", "source")
+    finally:
+        set_budget_enforcer(None)
+
+    assert result["source_pass_complete"] is True
+    assert [(c.user_id, c.organization_id) for c, _s, _t in budget.reservations] == [
+        ("owner", "org"),
+        ("owner", "org"),
+    ]
+
+
+def test_budget_refusals_count_items_and_packet_pages():
+    results = [
+        {"outcome": "error", "budget": {"kind": "run_token_ceiling"}},
+        {"outcome": "reflected"},
+        {"outcome": "error", "pages": [{"budget": {}}, {"outcome": "returned"}, {"budget": {}}]},
+    ]
+
+    assert reflection._budget_refusals(results) == 3

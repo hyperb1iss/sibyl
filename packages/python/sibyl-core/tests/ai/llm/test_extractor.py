@@ -14,7 +14,12 @@ from pydantic_ai.models.test import TestModel
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import RequestUsage
 
-from sibyl_core.ai.errors import LLMProviderError, LLMRateLimitError, LLMValidationError
+from sibyl_core.ai.errors import (
+    LLMError,
+    LLMProviderError,
+    LLMRateLimitError,
+    LLMValidationError,
+)
 from sibyl_core.ai.llm import Extractor
 from sibyl_core.ai.llm.budget import LLMBudgetContext, llm_budget_context, set_budget_enforcer
 
@@ -27,6 +32,7 @@ class Payload(BaseModel):
 class RecordingBudgetEnforcer:
     def __init__(self) -> None:
         self.calls: list[tuple[LLMBudgetContext, str, int]] = []
+        self.settlements: list[tuple[str, int, int]] = []
 
     async def reserve(
         self,
@@ -36,6 +42,17 @@ class RecordingBudgetEnforcer:
         estimated_tokens: int,
     ) -> None:
         self.calls.append((context, surface, estimated_tokens))
+
+    async def settle(
+        self,
+        context: LLMBudgetContext,
+        *,
+        surface: str,
+        reserved_tokens: int,
+        actual_tokens: int,
+        period: str | None = None,
+    ) -> None:
+        self.settlements.append((surface, reserved_tokens, actual_tokens))
 
 
 @pytest.fixture(autouse=True)
@@ -161,7 +178,59 @@ async def test_extractor_reserves_budget_before_provider_call() -> None:
     context, surface, tokens = enforcer.calls[0]
     assert context.user_id == "user-1"
     assert surface == "default"
-    assert tokens > 11  # Declared output schema and retry envelope are included.
+    assert tokens > 11  # The declared output schema is included.
+    # One attempt is reserved up front, then the call settles to what it used.
+    assert len(enforcer.settlements) == 1
+    settled_surface, reserved, actual = enforcer.settlements[0]
+    assert (settled_surface, reserved) == ("default", tokens)
+    assert 0 < actual != reserved
+
+
+@pytest.mark.asyncio
+async def test_an_unrecorded_model_reserves_its_output_retries_up_front() -> None:
+    """A model without Sibyl's recording transport cannot reserve its retries as they go.
+
+    Gemini and test models alike: their output retries never pass through the
+    per-hop hook, so the extractor reserves every output attempt before the
+    first call, and a failed call keeps that reservation since its real usage
+    is unknown.
+    """
+    enforcer = RecordingBudgetEnforcer()
+    set_budget_enforcer(enforcer)
+    calls: list[int] = []
+
+    async def invalid(_: list[ModelMessage], __: AgentInfo) -> ModelResponse:
+        calls.append(1)
+        return ModelResponse(parts=[TextPart('{"nope": 1}')])
+
+    agent = Agent(FunctionModel(invalid), output_type=Payload, retries={"output": 2})
+    extractor = Extractor(Payload, agent=agent, output_retries=2, max_tokens=10)
+
+    with llm_budget_context(user_id="user-1", organization_id="org-1"), pytest.raises(LLMError):
+        await extractor.extract("abcd" * 100)
+
+    assert len(calls) == 3
+    assert len(enforcer.calls) == 1
+    one_attempt = enforcer.calls[0][2] // 3
+    assert enforcer.calls[0][2] == one_attempt * 3
+    assert enforcer.settlements == []
+
+
+@pytest.mark.asyncio
+async def test_an_unrecorded_model_settles_a_success_to_reported_usage() -> None:
+    enforcer = RecordingBudgetEnforcer()
+    set_budget_enforcer(enforcer)
+    agent = Agent(
+        TestModel(custom_output_args={"name": "Sibyl", "score": 0.9}), output_type=Payload
+    )
+    extractor = Extractor(Payload, agent=agent, output_retries=2, max_tokens=10)
+
+    with llm_budget_context(user_id="user-1", organization_id="org-1"):
+        result = await extractor.extract_with_usage("abcd")
+
+    assert len(enforcer.calls) == 1
+    reserved = enforcer.calls[0][2]
+    assert enforcer.settlements == [("default", reserved, result.usage.total_tokens)]
 
 
 async def _invalid_json_response(_: list[ModelMessage], __: AgentInfo) -> ModelResponse:
