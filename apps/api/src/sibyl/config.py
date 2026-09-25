@@ -1,6 +1,7 @@
 """Configuration management for Sibyl MCP Server."""
 
 import base64
+import contextlib
 import os
 import secrets
 from datetime import UTC, datetime
@@ -197,10 +198,16 @@ def parse_forwarded_allow_ips(value: object) -> list[str]:
     normalized: list[str] = []
     for entry in cleaned:
         try:
-            address = ip_network(entry, strict=False) if "/" in entry else ip_address(entry)
+            # Strict, like uvicorn: a range with host bits set would parse here but
+            # match nothing there, so both sides must reject it.
+            address = ip_network(entry) if "/" in entry else ip_address(entry)
         except ValueError as exc:
+            hint = ""
+            if "/" in entry:
+                with contextlib.suppress(ValueError):
+                    hint = f" (did you mean {ip_network(entry, strict=False)}?)"
             raise ValueError(
-                f"forwarded_allow_ips entry {entry!r} is not an IP address or CIDR range"
+                f"forwarded_allow_ips entry {entry!r} is not an IP address or CIDR range{hint}"
             ) from exc
         normalized.append(str(address))
     return list(dict.fromkeys(normalized))

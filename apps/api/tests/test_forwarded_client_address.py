@@ -204,6 +204,37 @@ def test_star_trusts_every_peer_and_warns(trust: TrustSetter) -> None:
     assert _resolved_client(stranger, f"{CLIENT_A}, {CLIENT_B}") == CLIENT_A
 
 
+@pytest.mark.parametrize("catch_all", ["0.0.0.0/0", "::/0", f"{TRUSTED_RANGE},0.0.0.0/0"])
+def test_catch_all_ranges_warn_like_star(trust: TrustSetter, catch_all: str) -> None:
+    trust(catch_all)
+
+    with capture_logs() as logs:
+        app = _served_app()
+
+    warnings = [
+        entry for entry in logs if entry["event"] == "forwarded_allow_ips_trusts_every_peer"
+    ]
+    assert len(warnings) == 1
+    assert warnings[0]["entries"] == [entry for entry in catch_all.split(",") if "/0" in entry]
+
+    if "0.0.0.0/0" in catch_all.split(","):
+        # Every IPv4 hop is trusted, so the leftmost entry, which the client wrote, wins.
+        stranger = _peer(app, UNTRUSTED_PEER)
+        assert _resolved_client(stranger, f"{CLIENT_A}, {CLIENT_B}") == CLIENT_A
+
+
+def test_warning_names_uvicorns_variable_when_that_set_the_list(trust: TrustSetter) -> None:
+    trust(None, uvicorn_env="*")
+
+    with capture_logs() as logs:
+        _served_app()
+
+    [warning] = [
+        entry for entry in logs if entry["event"] == "forwarded_allow_ips_trusts_every_peer"
+    ]
+    assert warning["setting"] == "FORWARDED_ALLOW_IPS"
+
+
 def test_listed_proxies_do_not_warn(trust: TrustSetter) -> None:
     trust(TRUSTED_RANGE)
 
@@ -216,7 +247,7 @@ def test_listed_proxies_do_not_warn(trust: TrustSetter) -> None:
 
 
 def test_entries_are_normalized_and_deduplicated(trust: TrustSetter) -> None:
-    assert trust(" 10.20.3.4/16 ,::1, 10.20.0.0/16,2001:db8::1 ") == [
+    assert trust(" 10.20.0.0/16 ,::1, 10.20.0.0/16,2001:db8:0::1 ") == [
         TRUSTED_RANGE,
         "::1",
         "2001:db8::1",
@@ -230,6 +261,8 @@ def test_entries_are_normalized_and_deduplicated(trust: TrustSetter) -> None:
         ("10.0.0.0/33", "is not an IP address or CIDR range"),
         ("300.1.1.1", "is not an IP address or CIDR range"),
         ("*,10.0.0.0/8", "cannot be combined"),
+        # Uvicorn parses ranges strictly, so a range with host bits would never match.
+        ("10.20.3.4/16", "did you mean 10.20.0.0/16"),
     ],
 )
 def test_malformed_entries_fail_at_startup(
@@ -281,4 +314,20 @@ def test_up_foreground_server_receives_the_trust_list(
 
     args = popen.call_args.args[0]
     assert args[args.index("--forwarded-allow-ips") + 1] == "*"
-    assert any(entry["event"] == "forwarded_allow_ips_trusts_every_peer" for entry in logs)
+    # The server subprocess warns from its app factory, so the parent stays quiet.
+    assert not [
+        entry for entry in logs if entry["event"] == "forwarded_allow_ips_trusts_every_peer"
+    ]
+
+
+def test_dev_app_factory_warns_for_every_dev_launcher(
+    trust: TrustSetter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    trust("*")
+    sibyl_main = import_module("sibyl.main")
+    monkeypatch.setattr(sibyl_main, "create_combined_app", lambda: "combined-app")
+
+    with capture_logs() as logs:
+        assert sibyl_main.create_dev_app() == "combined-app"
+
+    assert [entry["event"] for entry in logs].count("forwarded_allow_ips_trusts_every_peer") == 1
