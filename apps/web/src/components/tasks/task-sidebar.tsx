@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/icons';
 import type { Entity } from '@/lib/api/graph';
 import { formatDateTime } from '@/lib/constants/formatting';
+import { withProjectsContext } from '@/lib/constants/navigation';
 import type { ProjectOption } from './task-detail-types';
 
 interface TaskSidebarProps {
@@ -202,7 +203,7 @@ export function TaskSidebar({
       {/* Project Link */}
       {projectId && (
         <Link
-          href={`/tasks?project=${projectId}`}
+          href={withProjectsContext('/tasks', projectId)}
           className="flex items-center gap-3 p-4 bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-xl hover:border-sc-cyan/30 hover:bg-sc-bg-highlight transition-colors duration-200 group
                      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
         >

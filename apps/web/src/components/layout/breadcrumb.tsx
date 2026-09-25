@@ -167,7 +167,7 @@ export function EntityBreadcrumb({ entityType, entityName, parentProject }: Enti
       if (parentProject) {
         result.push({
           label: parentProject.name,
-          href: `/tasks?project=${parentProject.id}`,
+          href: withProjectsContext(ROUTE_CONFIG.tasks.href, parentProject.id),
           icon: ROUTE_CONFIG.projects.icon,
         });
       }
@@ -180,7 +180,7 @@ export function EntityBreadcrumb({ entityType, entityName, parentProject }: Enti
       if (parentProject) {
         result.push({
           label: parentProject.name,
-          href: `/epics?project=${parentProject.id}`,
+          href: withProjectsContext(ROUTE_CONFIG.epics.href, parentProject.id),
           icon: ROUTE_CONFIG.projects.icon,
         });
       }
