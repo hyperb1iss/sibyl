@@ -64,11 +64,6 @@ openrouter.key
 # Docker
 falkordb_data/
 
-# Kubernetes / Tilt
-infra/local/secrets.yaml
-.tiltbuild/
-tilt_modules/
-
 # OS
 .DS_Store
 Thumbs.db

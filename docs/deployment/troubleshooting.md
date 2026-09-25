@@ -411,55 +411,6 @@ and the log line was missed.
    kubectl describe httproute sibyl-api -n sibyl
    ```
 
-## Tilt-Specific Issues
-
-### Tilt Stuck on Resource
-
-**Solutions:**
-
-1. **Check Tilt logs:**
-   - Click on stuck resource in Tilt UI
-   - Look for error messages
-
-2. **Trigger manual rebuild:**
-
-   ```bash
-   tilt trigger <resource-name>
-   ```
-
-3. **Full reset:**
-   ```bash
-   tilt down
-   # If using Minikube:
-   minikube delete
-   minikube start --cpus=4 --memory=8192
-   # If using OrbStack: restart via OrbStack app or `orb restart`)
-   tilt up
-   ```
-
-### Can't Access sibyl.local
-
-**Solutions:**
-
-1. **Check /etc/hosts:**
-
-   ```bash
-   grep sibyl.local /etc/hosts
-   # Should show: 127.0.0.1 sibyl.local
-   ```
-
-2. **Check Caddy is running:**
-   - Look for `caddy-proxy` in Tilt UI
-
-3. **Check Kong port-forward:**
-   - Look for `kong-port-forward` in Tilt UI
-
-4. **Trust Caddy CA (macOS):**
-   ```bash
-   sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain \
-     ~/.local/share/caddy/pki/authorities/local/root.crt
-   ```
-
 ## Getting Help
 
 If you're still stuck:

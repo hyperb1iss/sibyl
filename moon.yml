@@ -773,7 +773,6 @@ tasks:
       - README.md
       - AGENTS.md
       - CLAUDE.md
-      - Tiltfile
       - .env.example
       - .env.quickstart.example
       - .env.quickstart.test
