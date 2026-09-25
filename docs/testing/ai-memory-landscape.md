@@ -5,10 +5,11 @@ description: Honest competitive positioning for Sibyl in the June 2026 AI memory
 
 # AI Memory Landscape
 
-This page positions Sibyl against the June 2026 AI memory systems field. The headline result
-([500/500 hit@5, 96.96% strict R@5, 98.90% R@10 on LongMemEval-S](./longmemeval.md)) is one number
-in a noisy field. The point of this page is to make the comparison legible without overclaim and
-without burying real competitive strengths.
+This page positions Sibyl against the June 2026 AI memory systems field. Sibyl does not currently
+publish a citable LongMemEval-S number: the pre-1.0 headline run was withdrawn (see
+[LongMemEval-S](./longmemeval.md)), so this page compares methodology and architecture rather than
+scores. The point is to make the comparison legible without overclaim and without burying real
+competitive strengths.
 
 The single most important framing for the rest of this page comes first.
 
@@ -43,9 +44,9 @@ There is a second distinction inside the retrieval lane:
   gold session? Many LongMemEval-S questions have multiple correct sessions (250 of 500 have exactly
   2, 41 have 3, the rest more). `recall_any` is strictly easier than `recall_all`.
 
-Sibyl reports both: `hit@5 = 100%` (the easier metric, equivalent to `recall_any@5`) and
-`recall@5 = 96.96%` (the strict multi-answer metric). When MemPalace and agentmemory report "R@5",
-they generally mean `recall_any@5`.
+Sibyl's harness reports both: `hit@k` (the easier metric, equivalent to `recall_any@k`) and strict
+`recall@k` (the multi-answer metric). When MemPalace and agentmemory report "R@5", they generally
+mean `recall_any@5`.
 
 ## Where Sibyl Sits
 
@@ -91,7 +92,7 @@ it.
 
 | System           | Headline                        | Metric type  | Strict multi-answer | LLM in retrieval | Live API | Tenant isolation |
 | ---------------- | ------------------------------- | ------------ | :-----------------: | :--------------: | :------: | :--------------: |
-| **Sibyl**        | 96.96% R@5, 98.90% R@10         | strict R@K   |          ✓          |        ✗         |    ✓     |        ✓         |
+| **Sibyl**        | none citable (withdrawn)        | strict R@K   |          ✓          |        ✗         |    ✓     |        ✓         |
 | MemPalace raw    | 96.6% R@5                       | recall_any@K |          ✗          |        ✗         |    ✗     |        ✗         |
 | MemPalace hybrid | 100% R@5 (full), 98.4% held-out | recall_any@K |          ✗          |   yes (Haiku)    |    ✗     |        ✗         |
 | Memweave         | 98.0% R@5, 99.11% R@10          | recall_any@K |       unclear       |        ✗         |    ✗     |    filesystem    |
@@ -103,10 +104,10 @@ A few honest readings of this table:
 retrieval quality. Its 98.0% R@5 / 99.11% R@10 on a 450-question held-out split is real, well
 documented, cross-validated (±0.12% std dev), and methodologically transparent. The held-out split
 excludes 50 questions used for tuning, and the metric is `recall_any` rather than strict
-`recall_all`, so the comparison is not perfectly apples-to-apples. Still, Memweave is the system to
-point at when someone asks "is anyone close to Sibyl on this axis?". Its real edge is brutal
-simplicity: plain Markdown source files, SQLite + sqlite-vec + FTS5 index, zero infrastructure,
-graceful degradation. For a single developer on a laptop, Memweave is a defensible choice.
+`recall_all`, so the comparison is not perfectly apples-to-apples. Still, Memweave carries the
+strongest well-documented number on this axis. Its real edge is brutal simplicity: plain Markdown
+source files, SQLite + sqlite-vec + FTS5 index, zero infrastructure, graceful degradation. For a
+single developer on a laptop, Memweave is a defensible choice.
 
 [**MemPalace**](https://github.com/MemPalace/mempalace) had the loudest 2026 launch and the public
 methodology hasn't held up under independent review. The 96.6% raw number is
@@ -143,7 +144,7 @@ keeps the comparison from being misread.
 | RetainDB               |        79% | (in-context)   | GPT-4o         |       ✓        |      ✗       |
 | Zep (Cloud)            |      71.2% | GPT-4o         | GPT-4o         |       ✓        |      —       |
 
-Putting Sibyl's 96.96% R@5 next to Mem0's 94.4% QA-accuracy or Mastra's 94.87% as if they were the
+Putting any retrieval R@5 next to Mem0's 94.4% QA-accuracy or Mastra's 94.87% as if they were the
 same metric is the exact category error MemPalace was called out for. The two axes answer different
 questions:
 
@@ -221,14 +222,14 @@ agent uses, with policy learned via PPO or GRPO).
 
 ## Academic Frontier: Where Sibyl Trails
 
-Sibyl is at LongMemEval-S retrieval ceiling. The field has moved on. Honest assessment of where
-Sibyl trails academic SOTA:
+LongMemEval-S retrieval is crowded near the top of the scale, and the research frontier has moved
+on. Honest assessment of where Sibyl trails academic SOTA:
 
 - **Cross-encoder reranker.** [BGE-reranker-v2-m3](https://huggingface.co/BAAI/bge-reranker-v2-m3)
   and ColBERT add another +33–40% accuracy at 50–100 ms latency cost on most public benchmarks.
   Sibyl uses interpretable query-aware ranking instead. The trade-off is real observability and
-  cost-per-query; the cap is strict-recall ranking quality on diffuse-evidence questions
-  (single-session-preference at 79.26% NDCG@5 illustrates this).
+  cost-per-query; the cap is strict-recall ranking quality on diffuse-evidence questions such as
+  single-session preferences.
 - **Principled forgetting and consolidation.** [FadeMem](https://arxiv.org/pdf/2601.18642) reports
   45% storage reduction with biologically inspired exponential decay;
   [FiFA](https://arxiv.org/html/2512.12856v1) introduces six forgetting policies (FIFO, LRU,
@@ -268,21 +269,23 @@ Sibyl trails academic SOTA:
 
 Things we do not yet have, and want to be explicit about:
 
-1. **No published QA-accuracy number.** Adding a thin reader pass over Sibyl's retrieved sessions
+1. **No citable LongMemEval-S retrieval number.** The pre-1.0 headline run was withdrawn. A new
+   number needs a live full run on a current release that passes the benchmark gate.
+2. **No published QA-accuracy number.** Adding a thin reader pass over Sibyl's retrieved sessions
    plus the official LongMemEval GPT-4o judge would let us publish a number on the same axis as
    Mem0, Mastra, OMEGA, Hindsight, and Zep. This is on the roadmap, not the benchmark we lead with.
-2. **No public local-embedding variant.** The full run uses OpenAI embeddings. A
+3. **No public local-embedding variant.** The live eval uses OpenAI embeddings. A
    `text-embedding-3-small`-free variant with `all-MiniLM-L6-v2` or BGE-M3 would be directly
    comparable to MemPalace raw and agentmemory's measurements.
-3. **No published LongMemEval-V2 number.** The official full-suite harness path is wired and
+4. **No published LongMemEval-V2 number.** The official full-suite harness path is wired and
    internal runs exist (see [LongMemEval-V2](./longmemeval-v2.md)), but nothing is published or
    leaderboard-submitted yet, and nothing should be cited until a pinned receipt exists.
-4. **No LOCOMO, BEAM, FiFA numbers.** LongMemEval-S is one dataset. The field is broader.
-5. **No published latency-cost trade-off curve.** Search p95 is 1,115 ms in the full run; that's a
-   working number but not yet contextualized against competitors' published latency-cost envelopes.
-6. **No cross-encoder reranker.** We chose interpretable ranking; that choice has a cost on
+5. **No LOCOMO, BEAM, FiFA numbers.** LongMemEval-S is one dataset. The field is broader.
+6. **No published latency-cost trade-off curve.** Live runs record search latency, but nothing is
+   contextualized against competitors' published latency-cost envelopes yet.
+7. **No cross-encoder reranker.** We chose interpretable ranking; that choice has a cost on
    strict-recall ranking quality.
-7. **Forgetting is partial, not principled.** A `priority_decay` consolidation job archives
+8. **Forgetting is partial, not principled.** A `priority_decay` consolidation job archives
    low-importance, stale entities (reversibly), but it is not yet tuned, benchmarked, or applied as
    a uniform decay signal across the context/recall path, so old facts still compete with new ones
    in the main recall scoring.
@@ -290,24 +293,24 @@ Things we do not yet have, and want to be explicit about:
 ## How To Read This Page
 
 If you remember one thing: retrieval R@K and end-to-end QA accuracy are different axes, and most
-LongMemEval leaderboard tables mix them. Sibyl's 96.96% strict R@5 is in the retrieval lane. The
-numbers from Mem0, Mastra, OMEGA, Hindsight, Zep, ByteRover, RetainDB, Supermemory, and Emergence AI
-are QA-accuracy numbers, and they answer a different question. Sibyl's QA lane is wired, but it
-should not be cited until the pinned artifact exists.
+LongMemEval leaderboard tables mix them. Sibyl's harness measures the retrieval lane. The numbers
+from Mem0, Mastra, OMEGA, Hindsight, Zep, ByteRover, RetainDB, Supermemory, and Emergence AI are
+QA-accuracy numbers, and they answer a different question. Sibyl's QA lane is wired, but it should
+not be cited until the pinned artifact exists.
 
-The retrieval-lane comparison Sibyl can defend right now: Sibyl reaches LongMemEval-S retrieval
-ceiling on a stricter metric (full multi-answer recall, not lenient hit-rate), on the live
-production API path, with per-question physical tenant isolation, and with no LLM in the retrieval
-or extraction path. The retrieval-lane systems with credible published numbers in the same
-neighborhood are MemPalace's honest 98.4% held-out, Memweave's 98.0% held-out, and agentmemory's
-95.2%, all on `recall_any`, all single-tenant, all offline notebook measurements.
+What Sibyl can defend right now is methodology, not a score: its harness measures strict
+multi-answer recall rather than lenient hit rate, on the live production API path, with per-question
+physical tenant isolation, and with no LLM in the retrieval or extraction path. The retrieval-lane
+systems with credible published numbers are MemPalace's honest 98.4% held-out, Memweave's 98.0%
+held-out, and agentmemory's 95.2%, all on `recall_any`, all single-tenant, all offline notebook
+measurements.
 
 That is the position. We are happy to be wrong about anything in this page if a reader brings a
 primary source that contradicts it.
 
 ## Related
 
-- [LongMemEval Results](./longmemeval.md): the headline eval and methodology
+- [LongMemEval-S](./longmemeval.md): the eval harness, methodology, and claim boundary
 - [Benchmark Methodology](./benchmark-methodology.md): the broader eval ladder, gates, reporting
   rules
 - [Retrieval System Architecture](../architecture/retrieval-system.md): how the eval-passing path

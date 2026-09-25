@@ -242,7 +242,7 @@ export default defineConfig({
                 {
                     text: 'Evaluation',
                     items: [
-                        { text: 'LongMemEval Results', link: '/testing/longmemeval' },
+                        { text: 'LongMemEval-S', link: '/testing/longmemeval' },
                         { text: 'LongMemEval-V2', link: '/testing/longmemeval-v2' },
                         { text: 'AI Memory Landscape', link: '/testing/ai-memory-landscape' },
                         { text: 'Benchmark Methodology', link: '/testing/benchmark-methodology' },
@@ -272,7 +272,7 @@ export default defineConfig({
                     text: 'Benchmarks',
                     items: [
                         { text: 'Overview', link: '/testing/' },
-                        { text: 'LongMemEval Results', link: '/testing/longmemeval' },
+                        { text: 'LongMemEval-S', link: '/testing/longmemeval' },
                         { text: 'AI Memory Landscape', link: '/testing/ai-memory-landscape' },
                         { text: 'Benchmark Methodology', link: '/testing/benchmark-methodology' },
                     ],

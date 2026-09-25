@@ -299,19 +299,14 @@ See [Why SurrealDB](docs/guide/why-surreal.md) for the rationale and
 
 ## 🧪 Benchmarks
 
-Sibyl reaches the LongMemEval-S retrieval ceiling on the live `/api/search` path, measured in an
-ephemeral CI stack, with no LLM extraction and no LLM reranking.
-
-| Metric      | Value                            |
-| ----------- | -------------------------------- |
-| `hit@5`     | **100.00%** (500/500)            |
-| `recall@5`  | **96.96%** (strict multi-answer) |
-| `recall@10` | **98.90%**                       |
-| `ndcg@5`    | 94.63%                           |
+Sibyl benchmarks LongMemEval-S retrieval on the live `/api/search` path, in an ephemeral CI stack,
+with no LLM extraction and no LLM reranking. No retrieval number is published right now: the pre-1.0
+headline run was withdrawn, and a new number lands here only once a live run on a current release
+passes the benchmark gate.
 
 `hit@5` and strict `recall@5` measure different things, and many published "LongMemEval" numbers are
-end-to-end QA accuracy with an LLM judge, a different metric than retrieval recall. Full results and
-honest side-by-side positioning: [LongMemEval](docs/testing/longmemeval.md) ·
+end-to-end QA accuracy with an LLM judge, a different metric than retrieval recall. Methodology and
+claim boundary: [LongMemEval-S](docs/testing/longmemeval.md) ·
 [AI Memory Landscape](docs/testing/ai-memory-landscape.md).
 
 ## Deployment

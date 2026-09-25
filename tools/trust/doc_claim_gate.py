@@ -77,10 +77,9 @@ CLAIM_REQUIREMENTS: tuple[ClaimRequirement, ...] = (
         phrases=(
             "retrieval metric",
             "not an answer-quality metric",
-            "96.96% R@5",
-            "98.90% R@10",
+            "does not currently publish a LongMemEval-S retrieval number",
         ),
-        surfaces=("retrieval recall", "canonical LongMemEval-S receipt"),
+        surfaces=("retrieval recall", "withdrawn LongMemEval-S headline"),
     ),
     ClaimRequirement(
         name="qa-accuracy-boundary",
