@@ -33,7 +33,7 @@ classifiers = [
 
 dependencies = [
     # Sibyl Core Library with daemon/runtime extras
-    "sibyl-core[crawler,embeddings,graph,graphrag,llm]==1.4.1",
+    "sibyl-core[embeddings,graph,graphrag,llm]==1.4.1",
     # Core Framework
     "fastapi>=0.141.1",
     "mcp>=2.2.0,<3",
@@ -48,9 +48,13 @@ dependencies = [
     "rich>=13.0",
     "typer>=0.27.1",
     "tomli-w>=1.2.0",
+    # Async filesystem access for backup routes
+    "anyio>=4.14.2",
+    # Documentation crawling and markdown ingestion (server-only)
+    "crawl4ai>=0.9.2",
+    "mistune>=3.3.4",
     # Background Jobs (server-only)
     "arq>=0.26.3",
-    "greenlet>=3.5.4",
     "slowapi>=0.1.9",
     "google-genai>=2.23.0",
     "argon2-cffi>=25.1.0",
@@ -59,25 +63,6 @@ dependencies = [
     "itsdangerous>=2.2,<3",
     # Transactional email (SMTP uses the standard library)
     "resend>=2.47.0,<3",
-]
-
-[project.optional-dependencies]
-generator = [
-    "anthropic>=1.0.0,<2",
-]
-graphrag = [
-    "networkx>=3.0",
-    "python-louvain>=0.16",
-]
-graphrag-leiden = [
-    "igraph>=0.11",
-    "leidenalg>=0.10",
-    "networkx>=3.0",
-]
-docs = [
-    "mkdocs>=1.6",
-    "mkdocs-material>=9.7.7",
-    "mkdocstrings[python]>=1.0.6",
 ]
 
 [project.scripts]
@@ -302,7 +287,7 @@ omit = ["*/tests/*", "*/__pycache__/*"]
 parallel = true
 source = ["src"]
 sigterm = true  # Handle SIGTERM for subprocess coverage
-concurrency = ["thread", "greenlet"]  # Handle async code
+concurrency = ["thread"]
 
 [tool.coverage.report]
 exclude_lines = [

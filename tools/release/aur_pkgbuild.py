@@ -35,7 +35,6 @@ depends=(
     'docker'
     'docker-compose'
     'python>=3.13'
-    'python-anyio'
     'python-dotenv'
     'python-httpx'
     'python-passlib'
