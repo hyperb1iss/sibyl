@@ -2527,18 +2527,13 @@ def test_ai_memory_manifest_tracks_full_citable_artifacts() -> None:
         assert "artifact" not in entry
         assert "external_artifact_manifest" not in entry
 
-    history_regressions = [
-        entry for entry in manifest["no_regression"] if "baseline_history" in entry
-    ]
-    assert history_regressions == [
-        {
-            "candidate": "external/longmemeval_sibyl_live_full_26304777971.json",
-            "baseline_history": "latest-citable-hybrid",
-            "profile": "ai-memory",
-            "metrics": ["recall@5"],
-            "max_regression": {"recall@5": 0.005},
-        }
-    ]
+    # The pre-1.0 LongMemEval-S live run was withdrawn as a public claim. Its
+    # external manifest stays as history, but it must not return to the
+    # citable ledger or anchor a no-regression entry.
+    withdrawn = "external/longmemeval_sibyl_live_full_26304777971.json"
+    assert (manifest_path.parent / withdrawn).exists()
+    assert all(entry.get("external_artifact_manifest") != withdrawn for entry in citable)
+    assert all(entry["candidate"] != withdrawn for entry in manifest["no_regression"])
     assert eval_gate.validate_ai_memory_manifest(manifest_path) == []
 
 
