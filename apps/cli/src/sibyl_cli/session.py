@@ -22,10 +22,11 @@ from sibyl_cli.common import (
 )
 from sibyl_cli.config_store import (
     get_current_context,
-    get_effective_project,
     get_effective_server_url,
     resolve_effective_context,
+    resolve_project_from_cwd,
 )
+from sibyl_cli.project_scope import ALL_PROJECTS_SCOPE, resolve_recall_project
 from sibyl_core.session_bundle import (
     derive_query,
     memory_dedupe_keys,
@@ -98,7 +99,17 @@ async def _build_session_bundle(
 ) -> dict[str, Any]:
     active_context = resolve_effective_context()
     linked_project, matched_path = get_current_context()
-    effective_project = None if all_projects else get_effective_project()
+    # The same resolver the recall commands use, without the refusal: an
+    # unlinked session start gets an empty bundle and a nudge to link, never
+    # other projects' tasks and memories.
+    effective_project = resolve_recall_project(
+        None,
+        all_projects,
+        resolve_linked=resolve_project_from_cwd,
+        resolve_context=resolve_effective_context,
+        refuse=False,
+    )
+    unscoped = effective_project is None and not all_projects
     server_url = get_effective_server_url()
 
     context: dict[str, Any] = {
@@ -110,7 +121,7 @@ async def _build_session_bundle(
         "project_id": effective_project,
         "project_name": None,
         "project_description": None,
-        "scope": "all_projects" if all_projects else "project",
+        "scope": ALL_PROJECTS_SCOPE if all_projects else ("none" if unscoped else "project"),
         "source": "path_mapping"
         if linked_project
         else ("active_context" if active_context else "legacy"),
@@ -131,18 +142,22 @@ async def _build_session_bundle(
         elif effective_project:
             context["project_name"] = effective_project
 
-        tasks_response = await client.explore(
-            mode="list",
-            types=["task"],
-            status="doing,blocked",
-            project=effective_project,
-            limit=task_limit,
-        )
-        tasks = [summarize_task(task) for task in tasks_response.get("entities", [])][:task_limit]
+        tasks: list[dict[str, Any]] = []
+        if not unscoped:
+            tasks_response = await client.explore(
+                mode="list",
+                types=["task"],
+                status="doing,blocked",
+                project=effective_project,
+                limit=task_limit,
+            )
+            tasks = [summarize_task(task) for task in tasks_response.get("entities", [])][
+                :task_limit
+            ]
 
         effective_query = derive_query(query, tasks, context.get("project_name"))
         relevant_entities: list[dict[str, Any]] = []
-        if effective_query and memory_limit > 0:
+        if effective_query and memory_limit > 0 and not unscoped:
             await _append_raw_memories(
                 client=client,
                 memories=relevant_entities,
