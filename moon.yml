@@ -775,8 +775,6 @@ tasks:
       - CLAUDE.md
       - .env.example
       - .env.quickstart.example
-      - .env.quickstart.test
-      - .env.test.example
       - apps/**/*.example
       - apps/**/*.md
       - apps/**/*.mdx
