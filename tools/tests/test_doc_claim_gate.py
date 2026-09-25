@@ -209,6 +209,8 @@ WITHDRAWN_HEADLINE_VARIANTS = (
     "Strict recall rounds to 97% R@5.",
     "LongMemEval-S retrieval: ~97% strict recall.",
     "`recall@10` = **99%** on the live run.",
+    "| recall@5 | **97.0%** (strict multi-answer) |",
+    "Sibyl reaches ~97% on LongMemEval-S.",
 )
 
 
@@ -244,10 +246,16 @@ def test_withdrawn_headline_fails_on_public_surfaces_outside_the_claim_corpus(
         "The HNSW index keeps 99% recall at ef=40.",
         "97% of requests finish under the latency budget.",
         "Replay projected 97.35% strict R@5 before the run was withdrawn.",
+        "| MemPalace hybrid | 100% R@5 (full), 98.4% held-out | recall_any@K |",
+        "HNSW recall@10 stays at 99% with ef=64",
+        "99% recall@10 on SIFT1M",
+        "Competitor X claims 97% on LongMemEval",
+        "hit@5 is 97% on LongMemEval-S",
+        "| recall@5 |\n| 97% of cases |",
     ],
 )
 def test_withdrawn_headline_pattern_ignores_other_percentages(text: str) -> None:
-    assert doc_claim_gate.WITHDRAWN_HEADLINE_PATTERN.search(text) is None
+    assert doc_claim_gate.find_withdrawn_headline(text) == []
 
 
 def test_public_scan_covers_readmes_and_every_docs_page() -> None:

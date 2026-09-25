@@ -216,28 +216,52 @@ PUBLIC_SCAN_GLOBS: tuple[str, ...] = (
 )
 
 # The pre-1.0 LongMemEval-S headline (run 26304777971) was withdrawn as a public claim.
-# The exact values match anywhere. Rounded forms (96.9x or 97 for R@5, 98.9x or 99 for
-# R@10) match only within a short same-cell window of an explicit recall@k or
-# LongMemEval token, so unrelated percentages and competitor numbers stay clean.
-_WITHDRAWN_GAP = r"[^%|]{0,40}?"
+# Matching is per line and never spans a line break. The exact values match anywhere.
+# Rounded forms (96.9x or 97 for R@5, 98.9x or 99 for R@10) match within 40 characters of
+# an explicit recall@k or strict-recall token on the same line, crossing table-cell pipes
+# but never another percentage. Lines about vector-index recall (HNSW, SIFT, ef=) are
+# exempt from the recall@k forms, and a LongMemEval-only context counts only when the
+# same line names Sibyl, so other systems' numbers stay clean.
+_WITHDRAWN_GAP = r"[^%\n]{0,40}?"
 _WITHDRAWN_R5_VALUE = r"(?<![\d.])(?:96\.9\d?|97(?:\.0+)?)\s?%"
 _WITHDRAWN_R10_VALUE = r"(?<![\d.])(?:98\.9\d?|99(?:\.0+)?)\s?%"
-_WITHDRAWN_R5_CONTEXT = (
-    r"(?:\bR@\s?5\b|\brecall(?:_all)?@5\b|\bstrict\s+(?:multi-answer\s+)?recall\b|\bLongMemEval)"
+_WITHDRAWN_R5_RECALL = (
+    r"(?:\bR@\s?5\b|\brecall(?:_all)?@5\b|\bstrict\s+(?:multi-answer\s+)?recall\b)"
 )
-_WITHDRAWN_R10_CONTEXT = r"(?:\bR@\s?10\b|\brecall(?:_all)?@10\b|\bLongMemEval)"
-WITHDRAWN_HEADLINE_PATTERN = re.compile(
+_WITHDRAWN_R10_RECALL = r"(?:\bR@\s?10\b|\brecall(?:_all)?@10\b)"
+_WITHDRAWN_EXACT = re.compile(r"(?<![\d.])(?:96\.96|98\.90|0\.9696)(?!\d)%?")
+_WITHDRAWN_RECALL_FORMS = re.compile(
     "|".join(
         (
-            r"(?<![\d.])(?:96\.96|98\.90|0\.9696)(?!\d)%?",
-            rf"{_WITHDRAWN_R5_VALUE}(?={_WITHDRAWN_GAP}{_WITHDRAWN_R5_CONTEXT})",
-            rf"{_WITHDRAWN_R5_CONTEXT}{_WITHDRAWN_GAP}{_WITHDRAWN_R5_VALUE}",
-            rf"{_WITHDRAWN_R10_VALUE}(?={_WITHDRAWN_GAP}{_WITHDRAWN_R10_CONTEXT})",
-            rf"{_WITHDRAWN_R10_CONTEXT}{_WITHDRAWN_GAP}{_WITHDRAWN_R10_VALUE}",
+            rf"{_WITHDRAWN_R5_VALUE}(?={_WITHDRAWN_GAP}{_WITHDRAWN_R5_RECALL})",
+            rf"{_WITHDRAWN_R5_RECALL}{_WITHDRAWN_GAP}{_WITHDRAWN_R5_VALUE}",
+            rf"{_WITHDRAWN_R10_VALUE}(?={_WITHDRAWN_GAP}{_WITHDRAWN_R10_RECALL})",
+            rf"{_WITHDRAWN_R10_RECALL}{_WITHDRAWN_GAP}{_WITHDRAWN_R10_VALUE}",
         )
     ),
     re.IGNORECASE,
 )
+_WITHDRAWN_LONGMEMEVAL_FORMS = re.compile(
+    rf"{_WITHDRAWN_R5_VALUE}(?={_WITHDRAWN_GAP}LongMemEval)|LongMemEval{_WITHDRAWN_GAP}{_WITHDRAWN_R5_VALUE}",
+    re.IGNORECASE,
+)
+_VECTOR_INDEX_CONTEXT = re.compile(r"\b(?:HNSW|SIFT\w*|ANN|efc?\s*=)", re.IGNORECASE)
+_SIBYL_SELF_CONTEXT = re.compile(r"\bSibyl\b", re.IGNORECASE)
+
+
+def find_withdrawn_headline(text: str) -> list[str]:
+    """Return every phrase in ``text`` that restates the withdrawn LongMemEval-S headline."""
+    matches: list[str] = []
+    for line in text.splitlines():
+        found = [match.group(0) for match in _WITHDRAWN_EXACT.finditer(line)]
+        if not found and not _VECTOR_INDEX_CONTEXT.search(line):
+            found = [match.group(0) for match in _WITHDRAWN_RECALL_FORMS.finditer(line)]
+        if not found and _SIBYL_SELF_CONTEXT.search(line):
+            found = [match.group(0) for match in _WITHDRAWN_LONGMEMEVAL_FORMS.finditer(line)]
+        matches.extend(" ".join(phrase.split()) for phrase in found)
+    return matches
+
+
 WITHDRAWN_HEADLINE_REASON = (
     "matches the withdrawn pre-1.0 LongMemEval-S headline from run 26304777971, "
     "including rounded forms"
@@ -547,13 +571,9 @@ def _find_forbidden_claims(docs: Mapping[str, str]) -> list[dict[str, str]]:
 
 def _find_withdrawn_claims(docs: Mapping[str, str]) -> list[dict[str, str]]:
     return [
-        {
-            "path": path,
-            "phrase": " ".join(match.group(0).split()),
-            "reason": WITHDRAWN_HEADLINE_REASON,
-        }
+        {"path": path, "phrase": phrase, "reason": WITHDRAWN_HEADLINE_REASON}
         for path, text in sorted(docs.items())
-        for match in WITHDRAWN_HEADLINE_PATTERN.finditer(text)
+        for phrase in find_withdrawn_headline(text)
     ]
 
 
