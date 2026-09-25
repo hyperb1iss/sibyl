@@ -20,6 +20,7 @@ from sibyl_core.embeddings.gemini import (
     build_gemini_contents,
     format_gemini_embedding_text,
 )
+from sibyl_core.embeddings.provenance import document_chunk_embedding_metadata
 
 if TYPE_CHECKING:
     from sibyl.crawler.chunker import Chunk
@@ -37,6 +38,12 @@ class ResolvedEmbeddingConfig:
     provider: EmbeddingProvider
     model: str
     dimensions: int
+
+    def chunk_metadata(self) -> dict[str, str | int]:
+        """The provenance stamped beside a chunk vector this config produced."""
+        return document_chunk_embedding_metadata(
+            provider=self.provider, model=self.model, dimensions=self.dimensions
+        )
 
 
 class EmbeddingService:
@@ -173,9 +180,27 @@ class EmbeddingService:
         Returns:
             Embedding vector
         """
-        config = await self._resolve_config()
+        embedding, _metadata = await self.embed_query_with_metadata(text)
+        return embedding
 
-        return (await self._embed_texts_with_config([text], config, kind="query"))[0]
+    async def embed_query_with_metadata(self, text: str) -> tuple[Embedding, dict[str, str | int]]:
+        """Embed a search query and name the chunk vector space it can be scored against."""
+        config = await self._resolve_config()
+        embedding = (await self._embed_texts_with_config([text], config, kind="query"))[0]
+        return embedding, config.chunk_metadata()
+
+    async def chunk_embedding_metadata(self) -> dict[str, str | int] | None:
+        """The stamp chunk writes carry today, or None when no embedder can run.
+
+        A provider whose client cannot be built (a missing credential) has no
+        vectors to offer, so the chunk sweep treats it as unconfigured.
+        """
+        config = await self._resolve_config()
+        try:
+            await self._get_client(config)
+        except ValueError:
+            return None
+        return config.chunk_metadata()
 
     async def _embed_texts_with_config(
         self,
@@ -268,6 +293,17 @@ class EmbeddingService:
         Returns:
             List of embedding vectors
         """
+        embeddings, _metadata = await self.embed_chunks_with_metadata(chunks)
+        return embeddings
+
+    async def embed_chunks_with_metadata(
+        self, chunks: list[Chunk]
+    ) -> tuple[list[Embedding], dict[str, str | int]]:
+        """Embed chunks and return the provenance their vectors must be stored with.
+
+        The configuration is resolved once, so the stamp always names the
+        model that produced these vectors even if settings change mid-call.
+        """
         # Build text for each chunk, including context if available
         texts = []
         titles: list[str | None] = []
@@ -280,10 +316,10 @@ class EmbeddingService:
             texts.append(text)
             titles.append(" / ".join(chunk.heading_path) or None)
 
-        if not texts:
-            return []
-
         config = await self._resolve_config()
+        if not texts:
+            return [], config.chunk_metadata()
+
         embeddings: list[Embedding] = []
         batch_size = self._batch_size(config, len(texts))
         for i in range(0, len(texts), batch_size):
@@ -298,7 +334,7 @@ class EmbeddingService:
                 )
             )
 
-        return embeddings
+        return embeddings, config.chunk_metadata()
 
 
 # Module-level service instance (lazy initialization)
@@ -337,3 +373,8 @@ async def embed_text(text: str) -> Embedding:
     """
     service = get_embedding_service()
     return await service.embed_text(text)
+
+
+async def embed_query_with_metadata(text: str) -> tuple[Embedding, dict[str, str | int]]:
+    """Embed a chunk search query and name the vector space it belongs to."""
+    return await get_embedding_service().embed_query_with_metadata(text)

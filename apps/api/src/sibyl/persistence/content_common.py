@@ -87,6 +87,9 @@ class DocumentChunkRecord:
     end_char: int = 0
     heading_path: list[str] = field(default_factory=list)
     embedding: object | None = None
+    # The model that produced ``embedding``. Travels with the vector through
+    # every rewrite so a re-saved chunk never keeps a vector it cannot vouch for.
+    embedding_metadata: dict[str, object] | None = None
     language: str | None = None
     is_complete: bool = True
     has_entities: bool = False

@@ -51,9 +51,20 @@ def _raw_memory(
     )
 
 
+FAKE_CHUNK_EMBEDDING_METADATA = {
+    "provider": "fake",
+    "model": "fake-chunks",
+    "dimensions": 3,
+    "text_version": "document-chunk-v1",
+}
+
+
 class FakeEmbedder:
     async def embed_chunks(self, chunks):
         return [[float(index), 0.25, 0.5] for index, _chunk in enumerate(chunks)]
+
+    async def embed_chunks_with_metadata(self, chunks):
+        return await self.embed_chunks(chunks), dict(FAKE_CHUNK_EMBEDDING_METADATA)
 
 
 def _fake_embedder() -> FakeEmbedder:
@@ -190,6 +201,8 @@ async def test_promote_raw_captures_writes_chunks_and_graph_entity(
     assert all(chunk.organization_id == UUID(memory.organization_id) for chunk in saved_chunks)
     assert all(chunk.source_id == memory.source_id for chunk in saved_chunks)
     assert all(chunk.embedding is not None for chunk in saved_chunks)
+    # Each chunk vector is stored beside the model that produced it.
+    assert all(chunk.embedding_metadata == FAKE_CHUNK_EMBEDDING_METADATA for chunk in saved_chunks)
     assert created_entities[0][0].id == memory.id
     assert created_entities[0][0].entity_type.value == "document"
     assert created_entities[0][1] is False

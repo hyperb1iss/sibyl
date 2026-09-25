@@ -18,6 +18,9 @@ class FakeSettingsService:
     async def get_gemini_key(self) -> str | None:
         return self.values.get("gemini_api_key")
 
+    async def get_openai_key(self) -> str | None:
+        return self.values.get("openai_api_key")
+
 
 @pytest.mark.asyncio
 async def test_gemini_embed_text_formats_query_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -156,3 +159,57 @@ async def test_switching_back_to_bedrock_rebuilds_the_provider(
     assert isinstance(await embedder._get_client(bedrock), BedrockEmbeddingProvider)
     assert embedder._batch_size(bedrock, 250) == 250
     assert embedder._batch_size(openai, 250) == embedder.batch_size
+
+
+@pytest.mark.asyncio
+async def test_chunk_vectors_come_back_with_the_model_that_made_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = SimpleNamespace(
+        aio=SimpleNamespace(
+            models=SimpleNamespace(
+                embed_content=AsyncMock(
+                    return_value=SimpleNamespace(
+                        embeddings=[SimpleNamespace(values=[0.4, 0.5, 0.6])]
+                    )
+                )
+            )
+        )
+    )
+    service = FakeSettingsService(
+        {
+            "embedding_provider": "gemini",
+            "embedding_model": "gemini-embedding-2",
+            "embedding_dimensions": "1536",
+            "gemini_api_key": "gemini-key",
+        }
+    )
+    monkeypatch.setattr(embedder_module, "get_settings_service", lambda: service)
+    monkeypatch.setattr(embedder_module.genai, "Client", lambda api_key: fake_client)
+
+    embeddings, metadata = await EmbeddingService().embed_chunks_with_metadata(
+        [Chunk(content="Chunk body")]
+    )
+    _query, query_metadata = await EmbeddingService().embed_query_with_metadata("find it")
+
+    expected = {
+        "provider": "gemini",
+        "model": "gemini-embedding-2",
+        "dimensions": 1536,
+        "text_version": "document-chunk-v1",
+    }
+    assert embeddings == [[0.4, 0.5, 0.6]]
+    assert metadata == expected
+    # A query is scored only against chunks stamped with the space it was embedded in.
+    assert query_metadata == expected
+    assert await EmbeddingService().chunk_embedding_metadata() == expected
+
+
+@pytest.mark.asyncio
+async def test_chunk_embedding_metadata_is_none_without_a_usable_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = FakeSettingsService({"embedding_provider": "openai"})
+    monkeypatch.setattr(embedder_module, "get_settings_service", lambda: service)
+
+    assert await EmbeddingService().chunk_embedding_metadata() is None

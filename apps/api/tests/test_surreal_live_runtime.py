@@ -97,6 +97,14 @@ class _StaticChunkEmbedder:
     async def embed_chunks(self, chunks):
         return [list(self._embedding) for _chunk in chunks]
 
+    async def embed_chunks_with_metadata(self, chunks):
+        return await self.embed_chunks(chunks), {
+            "provider": "deterministic",
+            "model": "live-chunk-test",
+            "dimensions": len(self._embedding),
+            "text_version": "document-chunk-v1",
+        }
+
 
 async def _drop_surreal_namespace(namespace: str) -> None:
     from surrealdb import AsyncSurreal

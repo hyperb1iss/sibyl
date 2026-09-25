@@ -439,9 +439,13 @@ class IngestionPipeline:
 
             # Generate embeddings if enabled
             embeddings = None
+            embedding_metadata: dict[str, str | int] | None = None
             if self.generate_embeddings and self._embedder:
                 try:
-                    embeddings = await self._embedder.embed_chunks(chunks)
+                    (
+                        embeddings,
+                        embedding_metadata,
+                    ) = await self._embedder.embed_chunks_with_metadata(chunks)
                     stats.embeddings_generated += len(embeddings)
                 except Exception as e:
                     log.warning(
@@ -466,6 +470,11 @@ class IngestionPipeline:
                     heading_path=chunk.heading_path,
                     language=chunk.language,
                     embedding=embeddings[i] if embeddings and i < len(embeddings) else None,
+                    embedding_metadata=(
+                        dict(embedding_metadata)
+                        if embedding_metadata and embeddings and i < len(embeddings)
+                        else None
+                    ),
                     is_complete=True,
                     has_entities=False,
                     entity_ids=[],

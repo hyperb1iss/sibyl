@@ -339,6 +339,12 @@ def _coerce_float_list(value: object | None) -> list[float] | None:
     return out
 
 
+def _coerce_optional_dict(value: object | None) -> dict[str, object] | None:
+    if not isinstance(value, Mapping):
+        return None
+    return {str(key): item for key, item in value.items()}
+
+
 def _coerce_dict(value: object | None) -> dict[str, object]:
     if isinstance(value, dict):
         return {str(key): item for key, item in value.items()}
@@ -506,6 +512,7 @@ def _chunk_from_record(record: Mapping[str, object]) -> DocumentChunk:
         end_char=_coerce_int(record.get("end_char")),
         heading_path=_coerce_str_list(record.get("heading_path")),
         embedding=_coerce_float_list(record.get("embedding")),
+        embedding_metadata=_coerce_optional_dict(record.get("embedding_metadata")),
         language=_coerce_optional_str(record.get("language")),
         is_complete=_coerce_bool(record.get("is_complete"), default=True),
         has_entities=_coerce_bool(record.get("has_entities")),
@@ -531,6 +538,11 @@ def _chunk_record(chunk: DocumentChunk) -> SurrealRecord:
         "end_char": chunk.end_char,
         "heading_path": list(chunk.heading_path or []),
         "embedding": _serialize_value(chunk.embedding),
+        "embedding_metadata": (
+            dict(chunk.embedding_metadata)
+            if chunk.embedding is not None and chunk.embedding_metadata
+            else None
+        ),
         "language": chunk.language,
         "is_complete": chunk.is_complete,
         "has_entities": chunk.has_entities,
