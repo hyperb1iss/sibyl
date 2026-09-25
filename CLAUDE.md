@@ -201,7 +201,10 @@ from sibyl.cli.common import ELECTRIC_PURPLE
 ### SurrealDB (default)
 
 - **Port 8000** for ws/http; RPC path is `/rpc`
-- **Embedded mode** uses SurrealKV at `.moon/cache/surreal-dev` by default; single-writer
+- **Dev server:** `moon run dev` runs a RocksDB-backed SurrealDB server with data in
+  `.moon/cache/surreal-dev`
+- **Embedded mode** (`SIBYL_SURREAL_DATA_DIR`, SurrealKV) is single-writer and single-process; give
+  it its own directory
 - **Namespace-per-org** (`org_<uuid_hex>`): missing group_id routes queries to the wrong namespace
 - **Memory mode** (`memory://`) is test-only; forbidden in production via config validator
 

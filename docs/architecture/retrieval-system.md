@@ -217,10 +217,14 @@ The current frame families (all interpretable, all hand-crafted, none case-ID-sp
 These are retrieval intents, not benchmark case IDs. The right framing: Sibyl recognizes common
 memory-question shapes and ranks evidence accordingly, without paying an LLM on every query.
 
-::: warning Honest positioning Typed query frames were developed against LongMemEval failure
-patterns. That is acceptable because they generalize to the production memory-question taxonomy, but
-it is not "intelligence that emerged from nowhere." The handcrafted nature is a real claim boundary.
-Memory-R1, A-MEM, and similar systems learn these operations via RL; we have not gone there yet. :::
+::: warning Honest positioning
+
+Typed query frames were developed against LongMemEval failure patterns. That is acceptable because
+they generalize to the production memory-question taxonomy, but it is not "intelligence that emerged
+from nowhere." The handcrafted nature is a real claim boundary. Memory-R1, A-MEM, and similar
+systems learn these operations via RL; we have not gone there yet.
+
+:::
 
 ## Stabilization
 

@@ -271,8 +271,8 @@ kubectl apply -f sibyl-secrets-sealed.yaml
 
 ## Schema Bootstrap
 
-Sibyl bootstraps SurrealDB schema inline at startup. The Helm chart no longer runs an Alembic
-pre-upgrade hook for the active runtime.
+Sibyl bootstraps SurrealDB schema inline at startup. The Helm chart runs no pre-upgrade migration
+hook.
 
 ## Ingress Configuration
 
