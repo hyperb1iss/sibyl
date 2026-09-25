@@ -3618,7 +3618,7 @@ def test_node_record_candidates_keep_top_level_provenance_metadata() -> None:
             "valid_from": "2026-05-13T12:00:00+00:00",
             "valid_to": "2026-05-14T12:00:00+00:00",
             "invalid_at": None,
-            "created_by": "stef",
+            "created_by": "alice",
             "modified_by": "nova",
             "attributes": {},
         },
@@ -3634,7 +3634,7 @@ def test_node_record_candidates_keep_top_level_provenance_metadata() -> None:
     assert candidate.metadata["valid_at"] == "2026-05-13T12:00:00+00:00"
     assert candidate.metadata["valid_from"] == "2026-05-13T12:00:00+00:00"
     assert candidate.metadata["valid_to"] == "2026-05-14T12:00:00+00:00"
-    assert candidate.metadata["created_by"] == "stef"
+    assert candidate.metadata["created_by"] == "alice"
     assert candidate.metadata["modified_by"] == "nova"
 
 
@@ -3652,7 +3652,7 @@ def test_edge_record_candidates_keep_top_level_temporal_metadata() -> None:
             "valid_to": "2026-05-14T12:00:00+00:00",
             "invalid_at": "2026-05-15T12:00:00+00:00",
             "expired_at": "2026-05-16T12:00:00+00:00",
-            "created_by": "stef",
+            "created_by": "alice",
             "modified_by": "nova",
             "episodes": ["episode_1"],
             "source_node_uuid": "task-1",
@@ -3671,7 +3671,7 @@ def test_edge_record_candidates_keep_top_level_temporal_metadata() -> None:
     assert candidate.metadata["valid_to"] == "2026-05-14T12:00:00+00:00"
     assert candidate.metadata["invalid_at"] == "2026-05-15T12:00:00+00:00"
     assert candidate.metadata["expired_at"] == "2026-05-16T12:00:00+00:00"
-    assert candidate.metadata["created_by"] == "stef"
+    assert candidate.metadata["created_by"] == "alice"
     assert candidate.metadata["modified_by"] == "nova"
     assert candidate.metadata["episodes"] == ["episode_1"]
     assert candidate.metadata["source_node_uuid"] == "task-1"

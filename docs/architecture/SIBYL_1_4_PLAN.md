@@ -89,13 +89,13 @@ false. The mechanism did run end to end with receipts.
 Next, assemble a task set with measured no-memory headroom, whether harder or simply more, before
 spending on the sealed study. The product findings above are the other open thread.
 
-Evidence: [retention index](/Users/bliss/dev/eval-artifacts/sibyl/screen48-final-20260918/INDEX.md),
-[cell observation](/Users/bliss/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-cdaedf33db57/cells-20260918T100210Z/observation.json),
-[cell terminal](/Users/bliss/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-cdaedf33db57/cells-20260918T100210Z/run/terminal.json),
-[checkpoint zero](/Users/bliss/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-da65497ec2dc/checkpoint0-20260917T222713Z/checkpoint.json),
-[checkpoint one](/Users/bliss/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-cdaedf33db57/checkpoint1-20260918T094001Z/checkpoint.json),
-[consolidation cycle](/Users/bliss/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-da65497ec2dc/cycle-20260917T224236Z/cycle.json),
-[final drain](/Users/bliss/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-cdaedf33db57/cycle-drain-20260918T093950Z/cycle.json).
+Evidence: [retention index](~/dev/eval-artifacts/sibyl/screen48-final-20260918/INDEX.md),
+[cell observation](~/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-cdaedf33db57/cells-20260918T100210Z/observation.json),
+[cell terminal](~/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-cdaedf33db57/cells-20260918T100210Z/run/terminal.json),
+[checkpoint zero](~/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-da65497ec2dc/checkpoint0-20260917T222713Z/checkpoint.json),
+[checkpoint one](~/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-cdaedf33db57/checkpoint1-20260918T094001Z/checkpoint.json),
+[consolidation cycle](~/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-da65497ec2dc/cycle-20260917T224236Z/cycle.json),
+[final drain](~/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-cdaedf33db57/cycle-drain-20260918T093950Z/cycle.json).
 
 ### Historical checkpoint (September 15, 0:44 UTC, initial native counts accepted)
 
@@ -130,10 +130,10 @@ and dependency update. Superseded [PR 600](https://github.com/hyperb1iss/sibyl/p
 The user's local instance remains untouched. Visual acceptance remains false.
 
 Evidence:
-[accepted native counts](/Users/bliss/dev/eval-artifacts/sibyl/ordinary-count-outcome-root-20260915-r4bxev1s/acceptance.json),
-[independent outcome review](/Users/bliss/dev/eval-artifacts/sibyl/ordinary-count-outcome-independent-20260915-596bzsfg/review-v1.json),
-[root verification](/Users/bliss/dev/eval-artifacts/sibyl/ordinary-count-outcome-root-20260915-r4bxev1s/root-spots-complete.json),
-[accepted capture](/Users/bliss/dev/eval-artifacts/sibyl/ordinary-count-preparation-root-20260914-1830226429ff4140a781eeaa8ee678af/capture-acceptance.json).
+[accepted native counts](~/dev/eval-artifacts/sibyl/ordinary-count-outcome-root-20260915-r4bxev1s/acceptance.json),
+[independent outcome review](~/dev/eval-artifacts/sibyl/ordinary-count-outcome-independent-20260915-596bzsfg/review-v1.json),
+[root verification](~/dev/eval-artifacts/sibyl/ordinary-count-outcome-root-20260915-r4bxev1s/root-spots-complete.json),
+[accepted capture](~/dev/eval-artifacts/sibyl/ordinary-count-preparation-root-20260914-1830226429ff4140a781eeaa8ee678af/capture-acceptance.json).
 
 ### Historical checkpoint (September 14, 20:04 UTC, summary baseline complete)
 
@@ -171,16 +171,16 @@ for the experiment; it does not establish learning efficacy or release readiness
 19:05 checkpoint below remains a historical snapshot.
 
 Evidence:
-[native completion](/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-summary-continuation-root-run-20260914/completed-evidence/files/continuation/terminal.json),
-[complete summary library](/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-summary-continuation-root-run-20260914/completed-evidence/files/construction/summaries/terminal.json),
-[copied evidence receipt](/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-summary-continuation-root-run-20260914/completed-evidence/receipt.json),
-[capture preparation review](/Users/bliss/dev/eval-artifacts/sibyl/capture-preparation-independent-20260914-3f224b1ade8341de9ed84ac5a2e6f3da/review-v1.json),
-[sixth merge receipt](/Users/bliss/dev/eval-artifacts/sibyl/dependency-root-delivery-20260914/605-7ca6f844a27a4adca5316aa7d3129325/after.json),
-[published repair](/Users/bliss/dev/eval-artifacts/sibyl/dependency600-root-delivery-20260914/published.json).
+[native completion](~/dev/eval-artifacts/sibyl/full-cohort-summary-continuation-root-run-20260914/completed-evidence/files/continuation/terminal.json),
+[complete summary library](~/dev/eval-artifacts/sibyl/full-cohort-summary-continuation-root-run-20260914/completed-evidence/files/construction/summaries/terminal.json),
+[copied evidence receipt](~/dev/eval-artifacts/sibyl/full-cohort-summary-continuation-root-run-20260914/completed-evidence/receipt.json),
+[capture preparation review](~/dev/eval-artifacts/sibyl/capture-preparation-independent-20260914-3f224b1ade8341de9ed84ac5a2e6f3da/review-v1.json),
+[sixth merge receipt](~/dev/eval-artifacts/sibyl/dependency-root-delivery-20260914/605-7ca6f844a27a4adca5316aa7d3129325/after.json),
+[published repair](~/dev/eval-artifacts/sibyl/dependency600-root-delivery-20260914/published.json).
 
 Accepted outcome:
-[independent review](/Users/bliss/dev/eval-artifacts/sibyl/summary-completion-independent-f5fea8afd67041fe947d521b6bc50ea5/review-v1.json),
-[root acceptance](/Users/bliss/dev/eval-artifacts/sibyl/summary-completion-root-acceptance-20260914-d9c1927b9c6844be9c9b62d9479c2695/acceptance.json).
+[independent review](~/dev/eval-artifacts/sibyl/summary-completion-independent-f5fea8afd67041fe947d521b6bc50ea5/review-v1.json),
+[root acceptance](~/dev/eval-artifacts/sibyl/summary-completion-root-acceptance-20260914-d9c1927b9c6844be9c9b62d9479c2695/acceptance.json).
 
 ### Historical checkpoint (September 14, 19:05 UTC, summary continuation live)
 

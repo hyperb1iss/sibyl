@@ -34,13 +34,13 @@ compiles on the host.
 
 ### Variables
 
-| Variable                | Default                 | Purpose                            |
-| ----------------------- | ----------------------- | ---------------------------------- |
-| `sibyl_domain`          | `sibyl.hyperbliss.tech` | Hostname Caddy serves              |
-| `sibyl_version`         | `1.4.1`                 | ghcr.io image tag                  |
-| `sibyl_dir`             | `/opt/sibyl`            | Deployment directory               |
-| `sibyl_proxy_interface` | `tailscale0`            | Interface HTTP/HTTPS is exposed on |
-| `sibyl_mcp_auth_mode`   | `auto`                  | MCP bearer-token enforcement       |
+| Variable                | Default             | Purpose                            |
+| ----------------------- | ------------------- | ---------------------------------- |
+| `sibyl_domain`          | `sibyl.example.com` | Hostname Caddy serves              |
+| `sibyl_version`         | `1.4.1`             | ghcr.io image tag                  |
+| `sibyl_dir`             | `/opt/sibyl`        | Deployment directory               |
+| `sibyl_proxy_interface` | `tailscale0`        | Interface HTTP/HTTPS is exposed on |
+| `sibyl_mcp_auth_mode`   | `auto`              | MCP bearer-token enforcement       |
 
 Secrets have no defaults and must be supplied, ideally through ansible-vault: `sibyl_jwt_secret`,
 `sibyl_surreal_password`, `sibyl_openai_api_key`, `sibyl_anthropic_api_key`, `sibyl_cf_api_token`.

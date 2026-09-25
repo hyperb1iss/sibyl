@@ -12,7 +12,7 @@ sibyl_version: "1.4.1"
 sibyl_surreal_image: "surrealdb/surrealdb:v3.2.4"
 
 # Public hostname Caddy serves and requests a certificate for.
-sibyl_domain: sibyl.hyperbliss.tech
+sibyl_domain: sibyl.example.com
 
 # Local-first auth defaults. First setup can create the owner/admin user;
 # later account creation stays invite-based unless public signups are enabled.

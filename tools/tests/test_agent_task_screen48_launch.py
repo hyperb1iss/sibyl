@@ -22,9 +22,10 @@ from benchmarks.agent_tasks.transfer_report import IDENTITY_FIELDS
 REPO_SCHEDULE = (
     Path(__file__).resolve().parents[2] / "benchmarks/agent_tasks/screen48/schedule/schedule.json"
 )
-FROZEN_SCHEDULE = Path(
-    "/Users/bliss/dev/eval-artifacts/sibyl"
-    "/full-cohort-screen48-schedule-b21d33fdf886433cb188cb4414e435e1/schedule.json"
+FROZEN_SCHEDULE = (
+    Path.home()
+    / "dev/eval-artifacts/sibyl"
+    / "full-cohort-screen48-schedule-b21d33fdf886433cb188cb4414e435e1/schedule.json"
 )
 NAMESPACE = "b21d33fdf886433cb188cb4414e435e1"
 FROZEN_CELLS = 48

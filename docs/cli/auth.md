@@ -71,7 +71,7 @@ sibyl auth login https://prod.example.com -c prod
 sibyl auth login --no-browser
 
 # Local email/password login
-sibyl auth login -e stef@example.com -p "$SIBYL_PASSWORD"
+sibyl auth login -e alice@example.com -p "$SIBYL_PASSWORD"
 
 # Emergency local login during an approved break-glass window
 sibyl auth login \

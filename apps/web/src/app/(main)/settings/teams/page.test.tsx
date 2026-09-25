@@ -29,7 +29,7 @@ describe('TeamsPage', () => {
     hooks.useDeleteOrgInvitation.mockReturnValue({ isPending: false, mutateAsync: vi.fn() });
     hooks.useMe.mockReturnValue({
       data: {
-        user: { id: 'user-1', email: 'stef@hyperbliss.tech', name: 'Stefanie Jane' },
+        user: { id: 'user-1', email: 'alice@example.com', name: 'Alice Example' },
         organization: { id: 'org-1' },
       },
     });
@@ -44,8 +44,8 @@ describe('TeamsPage', () => {
             user: {
               id: 'user-1',
               github_id: null,
-              email: 'stef@hyperbliss.tech',
-              name: 'Stefanie Jane',
+              email: 'alice@example.com',
+              name: 'Alice Example',
               avatar_url: null,
             },
             role: 'owner',
@@ -60,8 +60,8 @@ describe('TeamsPage', () => {
         orgs: [
           {
             id: 'org-1',
-            slug: 'u-stefanie',
-            name: 'Stefanie Jane',
+            slug: 'u-alice',
+            name: 'Alice Example',
             is_personal: true,
             role: 'owner',
           },
@@ -78,7 +78,7 @@ describe('TeamsPage', () => {
   it('keeps the invite email field usable and enables invite after typing', async () => {
     const { user } = render(<TeamsPage />);
 
-    const emailInput = screen.getByRole('textbox', { name: 'Invite email for Stefanie Jane' });
+    const emailInput = screen.getByRole('textbox', { name: 'Invite email for Alice Example' });
     const roleSelect = screen.getByRole('combobox', { name: 'Invite role' });
     const inviteButton = screen.getByRole('button', { name: 'Invite' });
     const inviteForm = emailInput.closest('form');
@@ -101,7 +101,7 @@ describe('TeamsPage', () => {
     await user.click(inviteButton);
 
     expect(createInvitation.mutateAsync).toHaveBeenCalledWith({
-      slug: 'u-stefanie',
+      slug: 'u-alice',
       email: 'teammate@example.com',
       role: 'admin',
     });

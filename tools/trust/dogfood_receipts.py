@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 from collections.abc import Callable
@@ -31,7 +32,9 @@ DOGFOOD_DEPLOYMENT_BUDGETS: dict[str, float] = {
 }
 
 _SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
-DEFAULT_HEALTH_URL = "https://sibyl.hyperbliss.tech/api/health"
+DEFAULT_HEALTH_URL = os.environ.get(
+    "SIBYL_DOGFOOD_HEALTH_URL", "https://sibyl.example.com/api/health"
+)
 DEFAULT_API_CONTAINER = "sibyl-backend"
 DEFAULT_WEB_CONTAINER = "sibyl-frontend"
 

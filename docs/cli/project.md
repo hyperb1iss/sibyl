@@ -260,7 +260,7 @@ sibyl project link proj_abc123
 Output:
 
 ```
-Linked /Users/bliss/dev/backend-api
+Linked /home/user/dev/backend-api
   -> Backend API (proj_abc123def456...)
 Task commands in this directory will now auto-scope to this project
 ```
@@ -286,8 +286,8 @@ The link is stored in `~/.sibyl/config.toml`:
 
 ```toml
 [paths]
-"/Users/bliss/dev/backend-api" = "proj_abc123"
-"/Users/bliss/dev/mobile-app" = "proj_xyz789"
+"/home/user/dev/backend-api" = "proj_abc123"
+"/home/user/dev/mobile-app" = "proj_xyz789"
 ```
 
 ---
@@ -345,7 +345,7 @@ sibyl project unlink
 Output:
 
 ```
-Unlinked /Users/bliss/dev/backend-api
+Unlinked /home/user/dev/backend-api
 ```
 
 ### Unlink Specific Path
@@ -377,9 +377,9 @@ Output:
 ```
 Project Links:
 
-* /Users/bliss/dev/backend-api
+* /home/user/dev/backend-api
     -> proj_abc123def456789
-  /Users/bliss/dev/mobile-app
+  /home/user/dev/mobile-app
     -> proj_xyz789abc123456
 
 * = current context

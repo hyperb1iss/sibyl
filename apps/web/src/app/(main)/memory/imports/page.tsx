@@ -165,7 +165,7 @@ export default function MemoryImportsPage() {
                   {...field}
                   value={sourceUri}
                   onChange={event => setSourceUri(event.target.value)}
-                  placeholder="mbox:///Users/bliss/archive/messages.mbox"
+                  placeholder="mbox:///home/user/archive/messages.mbox"
                 />
               )}
             </FormField>

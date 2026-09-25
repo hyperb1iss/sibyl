@@ -981,5 +981,5 @@ Validated against current primary sources on 2026-04-26:
 Local planning source:
 
 - `/tmp/sibyl-surreal-research/00-synthesis.md`
-- `/Users/bliss/dev/mempalace`
-- `/Users/bliss/dev/haven`
+- `~/dev/mempalace`
+- `~/dev/haven`
