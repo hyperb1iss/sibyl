@@ -57,6 +57,7 @@ from sibyl_core.services.content_raw_persistence import (
 from sibyl_core.services.content_raw_recall import (
     list_raw_memories_for_scope,
     list_reflection_candidate_reviews,
+    list_reflection_dream_neighbours,
     list_reflection_dream_source_memories,
     recall_raw_memory,
     recall_raw_memory_with_sources,
@@ -88,6 +89,7 @@ __all__ = [
     "list_raw_memories_for_promotion",
     "list_raw_memories_for_scope",
     "list_reflection_candidate_reviews",
+    "list_reflection_dream_neighbours",
     "list_reflection_dream_source_memories",
     "list_source_ids_for_org",
     "list_unlinked_document_chunks",

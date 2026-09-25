@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from datetime import UTC, datetime
 from time import perf_counter
@@ -45,6 +46,7 @@ from sibyl_core.services.surreal_content import (
     MemoryScope,
     RawMemory,
     list_reflection_candidate_reviews,
+    list_reflection_dream_neighbours,
     list_reflection_dream_source_memories,
     save_raw_memory,
 )
@@ -205,11 +207,12 @@ async def _reflect_dream_sources(
         return []
     selected: dict[str, DreamSourceWork] = {}
     selection_errors: dict[str, Exception] = {}
+    checked: dict[str, bool] = {}
     after_source_id, cursor_revision = await load_dream_cursor(group_id)
     cursor_owned = not dry_run
     covered = await completed_cohort_sources(group_id)
 
-    async def pending(source: RawMemory) -> bool:
+    async def check(source: RawMemory) -> bool:
         try:
             work = await _load_dream_work(group_id, source)
             if work is None:
@@ -230,17 +233,32 @@ async def _reflect_dream_sources(
         selected[source.id] = work
         return True
 
-    sources = await list_reflection_dream_source_memories(
+    async def pending(source: RawMemory) -> bool:
+        # The walk and the neighbour read can meet the same source.
+        if source.id not in checked:
+            checked[source.id] = await check(source)
+        return checked[source.id]
+
+    walk = await list_reflection_dream_source_memories(
         organization_id=group_id,
         limit=limit,
         is_pending=pending,
         after_source_id=after_source_id,
     )
+    sources, walked = await _dream_page(group_id, walk, limit, pending)
+    log.info(
+        "reflection_dream_page_selected",
+        group_id=group_id,
+        run_id=run_id,
+        seed_id=sources[0].id if sources else None,
+        sources=len(sources),
+        walked=len(walked),
+    )
     from sibyl.jobs.ordinary_cohorts import reflect_cohorts
 
     results, consumed = await reflect_cohorts(group_id, sources, dry_run=dry_run)
     for source in sources:
-        if cursor_owned:
+        if cursor_owned and source.id in walked:
             cursor_owned = await advance_dream_cursor(group_id, source.id, cursor_revision)
             cursor_revision += int(cursor_owned)
         if source.id in consumed:
@@ -278,6 +296,47 @@ async def _reflect_dream_sources(
                 }
             )
     return results
+
+
+async def _dream_page(
+    group_id: str,
+    walk: list[RawMemory],
+    limit: int,
+    pending: Callable[[RawMemory], Awaitable[bool]],
+) -> tuple[list[RawMemory], set[str]]:
+    """Seed the page at the cursor, fill it with the seed's neighbours, then walk on.
+
+    The first pending source after the cursor seeds the page and its nearest
+    pending neighbours fill it, so a family spread across identifier order
+    meets in one partition instead of being cut at page boundaries. Walk
+    sources then fill what the neighbours leave.
+
+    The page always holds a prefix of the walk: the seed, then walk sources in
+    order until the page is full, with neighbours counted where they fall.
+    Only that prefix advances the cursor, and the page lists it first in walk
+    order, so the cursor never passes a pending source that did not get a
+    place, and a crash leaves it on the last walk source handled. A neighbour
+    taken from beyond the cursor is reflected early; once its cohort
+    completes, the walk finds it covered and moves past it. Every run moves
+    the cursor at least past its seed, so each sweep still reaches every
+    pending source. Returns the page and the identifiers of its walk prefix.
+    """
+    if not walk:
+        return [], set()
+    seed = walk[0]
+    neighbours = await list_reflection_dream_neighbours(
+        organization_id=group_id, seed=seed, limit=limit - 1, is_pending=pending
+    )
+    chosen = {seed.id, *(source.id for source in neighbours)}
+    prefix, room = [seed], limit - len(chosen)
+    for source in walk[1:]:
+        if source.id not in chosen:
+            if room == 0:
+                break
+            room -= 1
+        prefix.append(source)
+    walked = {source.id for source in prefix}
+    return [*prefix, *(source for source in neighbours if source.id not in walked)], walked
 
 
 async def _load_dream_work(group_id: str, source: RawMemory) -> DreamSourceWork | None:

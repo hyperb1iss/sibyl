@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import math
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -17,7 +19,7 @@ from sibyl_core.backends.surreal.fulltext import (
     build_fulltext_terms,
     build_match_disjunction,
 )
-from sibyl_core.backends.surreal.knn import knn_search_effort
+from sibyl_core.backends.surreal.knn import KNN_TYPE_OVERFETCH_CAP, knn_search_effort
 from sibyl_core.config import settings
 from sibyl_core.embeddings.providers import (
     EmbeddingProvider,
@@ -39,6 +41,12 @@ _REFLECTION_DREAM_EXCLUDED_CAPTURE_SURFACES = frozenset(
         "synthesis_artifact",
     }
 )
+
+#: How many times deeper than the requested neighbours the dream job's HNSW
+#: read walks. Pending checks reject covered, unauthorized and changed sources
+#: after the read, and the exact rerank only orders what the pool holds, so the
+#: pool runs deeper than the page to keep the nearest pending sources inside it.
+DREAM_NEIGHBOUR_POOL_FACTOR = 4
 
 _EMBEDDED_SURREAL_SCHEMES = ("memory://", "surrealkv://", "rocksdb://", "file://")
 
@@ -1055,11 +1063,8 @@ async def list_reflection_dream_source_memories(
             cursor = str(rows[-1]["uuid"])
             for row in rows:
                 memory = models.raw_memory_from_record(row)
-                if (
-                    models.raw_memory_currently_recallable(memory)
-                    and models.raw_memory_capture_surface(memory)
-                    not in _REFLECTION_DREAM_EXCLUDED_CAPTURE_SURFACES
-                    and (is_pending is None or await is_pending(memory))
+                if _dream_source_eligible(memory) and (
+                    is_pending is None or await is_pending(memory)
                 ):
                     result.append(memory)
                     if len(result) == limit:
@@ -1069,4 +1074,96 @@ async def list_reflection_dream_source_memories(
                     cursor, wrapped = "", True
                 else:
                     break
+    return result
+
+
+def _dream_source_eligible(memory: RawMemory) -> bool:
+    return (
+        models.raw_memory_currently_recallable(memory)
+        and models.raw_memory_capture_surface(memory)
+        not in _REFLECTION_DREAM_EXCLUDED_CAPTURE_SURFACES
+    )
+
+
+def _unit_vector(row: Mapping[str, object]) -> tuple[float, ...] | None:
+    vector = row.get("embedding")
+    if not isinstance(vector, list) or not vector:
+        return None
+    norm = math.sqrt(math.fsum(float(value) * float(value) for value in vector))
+    return tuple(float(value) / norm for value in vector) if norm else None
+
+
+def _embedding_space(row: Mapping[str, object]) -> str:
+    metadata = row.get("metadata")
+    space = metadata.get("embedding_metadata") if isinstance(metadata, Mapping) else None
+    return json.dumps(space, sort_keys=True, separators=(",", ":"), default=str)
+
+
+async def list_reflection_dream_neighbours(
+    *,
+    organization_id: str,
+    seed: RawMemory,
+    limit: int,
+    is_pending: Callable[[RawMemory], Awaitable[bool]] | None = None,
+) -> list[RawMemory]:
+    """The seed's nearest eligible sources that could share its cohort, nearest first.
+
+    Only sources with the seed's owner, scope, scope key, project and
+    embedding space can join a cohort with it, so only those are ranked. The
+    HNSW index proposes a pool DREAM_NEIGHBOUR_POOL_FACTOR times deeper than
+    the request, and every candidate is then ordered by exact cosine similarity
+    to the seed from its stored vector, ties broken on identifier. The order
+    therefore does not depend on how the index walked its graph; only a source
+    the approximate read misses entirely can be absent, and the deep pool keeps
+    the nearest sources well inside it. A seed without a vector has no
+    neighbours.
+    """
+    if limit <= 0 or not seed.principal_id:
+        return []
+    pool = min(max(limit * DREAM_NEIGHBOUR_POOL_FACTOR, limit), KNN_TYPE_OVERFETCH_CAP)
+    knn_effort = knn_search_effort(pool, content_client.CONTENT_KNN_EF_FLOOR)
+    async with content_client.surreal_content_client() as client:
+        anchors = await content_client.select_many(
+            client,
+            "SELECT embedding, metadata FROM raw_captures "
+            "WHERE organization_id = $organization_id AND uuid = $seed LIMIT 1;",
+            organization_id=organization_id,
+            seed=seed.id,
+        )
+        anchor = _unit_vector(anchors[0]) if anchors else None
+        if anchor is None:
+            return []
+        rows = await content_client.select_many(
+            client,
+            "SELECT * FROM raw_captures WITH INDEX idx_raw_captures_embedding "
+            "WHERE organization_id = $organization_id AND principal_id = $principal_id "
+            f"AND uuid != $seed AND embedding <|{pool}, {knn_effort}|> $vector;",
+            organization_id=organization_id,
+            principal_id=seed.principal_id,
+            seed=seed.id,
+            vector=list(anchor),
+        )
+    space = _embedding_space(anchors[0])
+    group = (seed.memory_scope, seed.scope_key, seed.project_id)
+    ranked: list[tuple[float, str, RawMemory]] = []
+    for row in rows:
+        vector = _unit_vector(row)
+        if vector is None or len(vector) != len(anchor) or _embedding_space(row) != space:
+            continue
+        memory = models.raw_memory_from_record(row)
+        if (
+            memory.principal_id != seed.principal_id
+            or (memory.memory_scope, memory.scope_key, memory.project_id) != group
+            or not _dream_source_eligible(memory)
+        ):
+            continue
+        similarity = math.fsum(a * b for a, b in zip(anchor, vector, strict=True))
+        ranked.append((-similarity, memory.id, memory))
+    ranked.sort(key=lambda item: (item[0], item[1]))
+    result: list[RawMemory] = []
+    for _, _, memory in ranked:
+        if is_pending is None or await is_pending(memory):
+            result.append(memory)
+            if len(result) == limit:
+                break
     return result

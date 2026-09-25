@@ -26,6 +26,9 @@ def dispatch_cursor(monkeypatch):
     monkeypatch.setattr(
         "sibyl.jobs.reflection.completed_cohort_sources", AsyncMock(return_value=frozenset())
     )
+    monkeypatch.setattr(
+        "sibyl.jobs.reflection.list_reflection_dream_neighbours", AsyncMock(return_value=[])
+    )
     # These orchestration tests stub the validator; the public cohort tests
     # exercise the durable binding and real publisher together.
     monkeypatch.setattr(
@@ -543,3 +546,70 @@ async def test_dream_drain_visits_every_pending_candidate_once() -> None:
 
     assert visited == [memory.id for memory in pending]
     assert len(results) == len(pending)
+
+
+def _walk(count: int) -> list[RawMemory]:
+    return [_raw_memory(id=f"walk-{index}") for index in range(count)]
+
+
+@pytest.mark.parametrize(
+    ("neighbour_ids", "page_ids", "walked_ids"),
+    [
+        # A neighbour beyond the walk prefix keeps its place but never moves
+        # the cursor; the walk stops at the first source without room.
+        (["walk-3", "outside"], ["walk-0", "walk-1", "walk-3", "outside"], ["walk-0", "walk-1"]),
+        # A neighbour inside the prefix takes no extra room, so the walk runs on.
+        (
+            ["walk-1", "outside"],
+            ["walk-0", "walk-1", "walk-2", "outside"],
+            ["walk-0", "walk-1", "walk-2"],
+        ),
+        # A seed without neighbours pages exactly as the plain walk did.
+        ([], ["walk-0", "walk-1", "walk-2", "walk-3"], ["walk-0", "walk-1", "walk-2", "walk-3"]),
+    ],
+)
+async def test_dream_page_holds_a_walk_prefix_and_the_seed_neighbours(
+    monkeypatch, neighbour_ids, page_ids, walked_ids
+) -> None:
+    from sibyl.jobs import reflection
+
+    walk = _walk(5)
+    known = {source.id: source for source in [*walk, _raw_memory(id="outside")]}
+    neighbours = AsyncMock(return_value=[known[identifier] for identifier in neighbour_ids])
+    monkeypatch.setattr(reflection, "list_reflection_dream_neighbours", neighbours)
+    pending = AsyncMock(return_value=True)
+
+    page, walked = await reflection._dream_page(ORG_ID, walk, 4, pending)
+
+    assert [source.id for source in page] == page_ids
+    assert walked == set(walked_ids)
+    neighbours.assert_awaited_once_with(
+        organization_id=ORG_ID, seed=walk[0], limit=3, is_pending=pending
+    )
+    assert await reflection._dream_page(ORG_ID, [], 4, pending) == ([], set())
+
+
+async def test_dream_cursor_advances_through_the_walk_prefix_in_walk_order(monkeypatch) -> None:
+    from sibyl.jobs import ordinary_cohorts, reflection
+
+    walk = _walk(5)
+    outside = _raw_memory(id="outside")
+    monkeypatch.setattr(
+        reflection, "list_reflection_dream_source_memories", AsyncMock(return_value=walk)
+    )
+    monkeypatch.setattr(
+        reflection,
+        "list_reflection_dream_neighbours",
+        AsyncMock(return_value=[walk[3], outside]),
+    )
+    page_ids = {"walk-0", "walk-1", "walk-3", "outside"}
+    reflect = AsyncMock(return_value=([], page_ids))
+    monkeypatch.setattr(ordinary_cohorts, "reflect_cohorts", reflect)
+
+    await reflection._reflect_dream_sources(group_id=ORG_ID, run_id="run", dry_run=False, limit=4)
+
+    assert {source.id for source in reflect.await_args.args[1]} == page_ids
+    assert reflection.advance_dream_cursor.await_args_list == [
+        ((ORG_ID, "walk-0", 0),),
+        ((ORG_ID, "walk-1", 1),),
+    ]
