@@ -264,10 +264,10 @@ keep the HNSW index lean while staying well above the SOTA-comparable floor.
 
 ::: tip "No LLM" caveat
 
-The full LongMemEval run records "no LLM extraction or LLM reranking." That does not mean "no
-external API calls." The embedding provider is OpenAI, and the embedding API is called on every
-write and every query. A future local-embedding variant will run end-to-end without external API
-dependencies for direct comparison against systems that publish local-embedding numbers.
+A full LongMemEval run records "no LLM extraction or LLM reranking." That does not mean "no external
+API calls." The embedding provider is OpenAI, and the embedding API is called on every write and
+every query. A future local-embedding variant will run end-to-end without external API dependencies
+for direct comparison against systems that publish local-embedding numbers.
 
 :::
 
