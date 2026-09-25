@@ -258,20 +258,26 @@ complete.
 
 ### Dream Run Spend
 
-The nightly dream cycle's proposal, critique, correction and individual reflection calls reserve
-against the monthly LLM token budgets of the source's owner and the organization, the same buckets
-the extraction jobs use, and each call settles to the tokens it used once it returns. Each call
-reserves one attempt up front; a retry reserves another attempt when it dispatches, so a call that
-succeeds first time never holds its full retry envelope. A cohort the monthly budget refuses fails
-closed in the run report and the run continues with the next one.
+The nightly dream cycle's proposal, critique and correction calls reserve against the monthly LLM
+token budgets of the source's owner and the organization, the same buckets the extraction jobs use,
+and each call settles to the tokens it used once it returns, in the month it was reserved. On the
+Anthropic and OpenAI transports a call reserves one attempt up front and each retry reserves another
+as it dispatches, so a call that succeeds first time never holds its full retry envelope. Other
+providers reserve every output attempt up front, since their retries are not observed one by one.
+
+A refusal that arrives before a request is sent releases that stage instead of failing it, so a
+proposal, critique or correction the budget refused runs again once there is room. The refusal is
+listed in the run report with its budget details, and the run continues with the next cohort.
 
 `SIBYL_CONSOLIDATION_RUN_MAX_TOKENS` caps what one run may reserve in total. When the next
-reservation would cross it, that call is refused, the run stops admitting cohorts, individual passes
-and candidates, and the receipt records `stopped_reason: run_token_ceiling` with the reserved,
-refunded and committed totals under `spend`. Whatever the run did not reach stays pending for the
-next run. At the Opus input budget a joined cohort's proposal and critique reserve about 0.9M
-tokens, so the default admits about ten such cohorts a night; at a 40,000-character budget a call
-reserves about 11K tokens and the default never binds.
+reservation would cross it, that call is refused, the run stops admitting cohorts and candidates,
+and the receipt records `stopped_reason: run_token_ceiling` with the reserved, refunded and
+committed totals under `spend`. Cohorts the run did not reach stay pending and are picked up when
+the dream walk next reaches them; pending candidates are drained on the next run. Individual
+reflection passes make no model call and are not stopped by the ceiling. At the Opus input budget a
+joined cohort's proposal and critique reserve about 0.9M tokens, so the default admits about ten
+such cohorts a night; at a 40,000-character budget a call reserves about 11K tokens and the default
+never binds.
 
 ## Embeddings
 

@@ -118,8 +118,7 @@ async def reflect_cohorts(org: str, sources: list[RawMemory], *, dry_run: bool):
                 source = next(member for member in members if member.id == identifiers[0])
                 if is_controller_episode(source.raw_content.encode()):
                     consumed.add(source.id)
-                    with llm_budget_context(user_id=principal, organization_id=org):
-                        results.append(await _reflect_packet_source(org, principal, source.id))
+                    results.append(await _reflect_packet_source(org, principal, source.id))
                     continue
                 results.append(
                     {
@@ -196,14 +195,15 @@ async def _reflect_packet_source(org: str, principal: str, source_id: str):
     for packet in packets:
         page = {"packet_index": packet.binding["index"], "packet_sha256": packet.sha256}
         try:
-            candidate, execution = await propose_stored_cohort(
-                org,
-                principal,
-                [source_id],
-                writable_source_authority,
-                authorize=authorize,
-                packet_binding=packet.binding,
-            )
+            with llm_budget_context(user_id=principal, organization_id=org):
+                candidate, execution = await propose_stored_cohort(
+                    org,
+                    principal,
+                    [source_id],
+                    writable_source_authority,
+                    authorize=authorize,
+                    packet_binding=packet.binding,
+                )
             page.update(
                 outcome="returned" if candidate else "abstained",
                 operation_id=execution,
@@ -213,12 +213,18 @@ async def _reflect_packet_source(org: str, principal: str, source_id: str):
                 result["candidate_ids"].append(candidate.id)
         except Exception as exc:
             state = getattr(exc, "execution_state", None)
+            # A dict, not keywords: the budget fields may name the reason too,
+            # and theirs wins.
             page.update(
-                outcome="pending" if state in {"running", "recorded", "returned"} else "failed",
-                reason=str(exc),
-                provider_error=provider_error_detail(exc),
-                execution_state=state,
-                **budget_failure_fields(exc),
+                {
+                    "outcome": "pending"
+                    if state in {"running", "recorded", "returned"}
+                    else "failed",
+                    "reason": str(exc),
+                    "provider_error": provider_error_detail(exc),
+                    "execution_state": state,
+                    **budget_failure_fields(exc),
+                }
             )
             if execution_id := getattr(exc, "execution_id", None):
                 page["operation_id"] = execution_id

@@ -57,6 +57,9 @@ class ValidationExecution:
         self._source_dispatch_guard = dispatch_guard
         self._dependency_guard = ""
         self._dependency_ids: list[str] = []
+        self._claim_id: str | None = None
+        #: Physical dispatches this process began for the claimed execution.
+        self.dispatched = 0
 
     @property
     def params(self) -> dict[str, str]:
@@ -115,7 +118,9 @@ class ValidationExecution:
             raise ValidationExecutionUnavailable("Execution request identity differs")
         self._request_json = rows[0]["request_json"]
         self._recovery_key = rows[0].get("recovery_key")
-        return rows[0].get("claim_id") == nonce
+        claimed = rows[0].get("claim_id") == nonce
+        self._claim_id = nonce if claimed else None
+        return claimed
 
     async def _check_progress_history(
         self, request: dict[str, Any]
@@ -181,7 +186,36 @@ class ValidationExecution:
         )
         if len(rows) != 1 or rows[0].get("begun") is not True:
             raise ValidationExecutionUnavailable("Dispatch begin was not committed")
+        self.dispatched += 1
         return attempt_id
+
+    async def release(self) -> bool:
+        """Give back a claim that never dispatched, so the stage can run again later.
+
+        Only this process's own running claim with no physical attempt on record
+        is removed; anything that reached a provider keeps its row. Returns
+        whether the claim was released.
+        """
+        if self._claim_id is None or self.dispatched:
+            return False
+        attempts = await _query(
+            "SELECT uuid FROM memory_validation_attempts WHERE execution_id = $uuid "
+            "AND organization_id = $org AND principal_id = $principal LIMIT 1;",
+            **self.params,
+        )
+        if attempts:
+            return False
+        rows = await _query(
+            """DELETE memory_validation_executions WHERE uuid = $uuid
+                AND organization_id = $org AND principal_id = $principal
+                AND state = 'running' AND claim_id = $claim RETURN BEFORE;""",
+            **self.params,
+            claim=self._claim_id,
+        )
+        released = len(rows) == 1
+        if released:
+            self._claim_id = None
+        return released
 
     async def after_dispatch(self, attempt_id: str, outcome: TransportAttempt) -> None:
         # HTTP status is not a token or cost receipt. All physical rows stay usage-unknown.

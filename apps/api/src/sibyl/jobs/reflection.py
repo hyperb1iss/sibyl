@@ -192,7 +192,7 @@ async def run_reflection_dream_cycle(
         "exceptioned": sum(1 for item in candidate_results if item["outcome"] == "exception"),
         "skipped": sum(1 for item in all_results if item["outcome"] == "skip"),
         "failed": sum(1 for item in all_results if item["outcome"] == "error"),
-        "budget_refused": sum(1 for item in all_results if item.get("budget") is not None),
+        "budget_refused": _budget_refusals(all_results),
         "spend": spend.snapshot(),
         "stopped_reason": spend.stopped_reason,
         "model_usage": {
@@ -211,6 +211,15 @@ async def run_reflection_dream_cycle(
     }
     log.info("reflection_dream_cycle_completed", **_summary_log_fields(receipt))
     return receipt
+
+
+def _budget_refusals(results: list[dict[str, Any]]) -> int:
+    """Count budget refusals, including those on individual packet pages."""
+    return sum(
+        int(item.get("budget") is not None)
+        + sum(1 for page in item.get("pages", []) if page.get("budget") is not None)
+        for item in results
+    )
 
 
 def _result_execution_ids(item: dict[str, Any]) -> list[str | None]:
@@ -263,9 +272,8 @@ async def _reflect_dream_sources(
             cursor_revision += int(cursor_owned)
         if source.id in consumed:
             continue
-        if run_ceiling_reached():
-            results.append({"source_id": source.id, "outcome": "skip", "reason": RUN_TOKEN_CEILING})
-            continue
+        # Individual passes use the heuristic writer and make no model call, so
+        # the run's token ceiling never stops them.
         try:
             if source.id in selection_errors:
                 raise selection_errors[source.id]

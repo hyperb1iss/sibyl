@@ -279,15 +279,8 @@ async def test_ordinary_two_repairs_reenter_original_and_child(
 ):
     import json
 
-    from pydantic_ai import Agent
-    from pydantic_ai.models.test import TestModel
-
     from sibyl_core.ai.llm.extractor import Extractor
-    from sibyl_core.services import procedure_validation
     from sibyl_core.services.automatic_reflection import automatically_review_reflection
-    from sibyl_core.tasks.memory_validation import CriticOutput
-    from sibyl_core.tasks.procedure_review import ReviewSubmission
-    from sibyl_core.tasks.reflection_correction import ReflectionCorrection
 
     await remember_raw_memory(
         organization_id="dream-org",
@@ -301,72 +294,7 @@ async def test_ordinary_two_repairs_reenter_original_and_child(
         "SELECT * FROM raw_captures WHERE capture_surface='reflection_candidate';"
     )
     parent_id = candidates[0]["uuid"]
-    resolver = AsyncMock(return_value=SourceReadAuthority("owner"))
-    original_extract = Extractor.extract_with_usage
-    partial = "Validate inputs before parsing, then always discard original bytes."
-    final = "Validate inputs before parsing and retain the original bytes."
-    calls = []
-
-    async def factory(output_type=CriticOutput):
-        return Extractor(output_type), '{"max_input_chars":40000,"model":"offline"}'
-
-    async def extract(reader, prompt):
-        payload = json.loads(prompt.splitlines()[-1])
-        calls.append(reader.output_type.__name__)
-        if reader.output_type in (CriticOutput, ProgressCriticOutput):
-            resolved = payload["assertions"]["/content"]["statement"] == final
-            output = {
-                "findings": []
-                if resolved
-                else [
-                    {
-                        "claim_path": "/content",
-                        "claim_sha256": payload["assertion_hashes"]["/content"],
-                        "evidence_refs": [{"evidence_id": "s0"}],
-                        "basis": "factual_contradiction",
-                        "disposition": "reconsider",
-                        "critique": "Preserve both validation ordering and original bytes.",
-                    }
-                ]
-            }
-            if reader.output_type is ProgressCriticOutput:
-                review = ReviewSubmission.model_validate(payload["prior_progress"]["review"])
-                output["prior_assessments"] = [
-                    {
-                        "finding_id": identity,
-                        "disposition": "resolved" if resolved else "partially_resolved",
-                        "supported_reduction": "The ordering now agrees with the decision."
-                        if not resolved
-                        else "Ordering and byte retention agree with the decision.",
-                        "remaining_concern": None
-                        if resolved
-                        else "Discarding the original bytes contradicts the decision.",
-                        "evidence_refs": [{"evidence_id": "s0"}],
-                    }
-                    for identity in review.finding_ids()
-                ]
-        else:
-            assert reader.output_type is ReflectionCorrection
-            content = payload["original"]["assertions"]["/content"]["statement"]
-            output = {
-                "content": final if content == partial else partial,
-                "abstention_reason": None,
-                "assessments": [
-                    {
-                        "finding_id": identity,
-                        "disposition": "accepted",
-                        "explanation": "Apply the observed source decision.",
-                        "evidence_refs": [{"evidence_id": "s0"}],
-                    }
-                    for identity in payload["finding_ids"]
-                ],
-            }
-        reader._agent = Agent(TestModel(custom_output_args=output), output_type=reader.output_type)
-        return await original_extract(reader, prompt)
-
-    monkeypatch.setattr(procedure_validation, "validation_extractor", factory)
-    monkeypatch.setattr(procedure_validation, "_validation_extractor", factory)
-    monkeypatch.setattr(Extractor, "extract_with_usage", extract)
+    resolver, calls, final = _install_repair_rig(monkeypatch)
     if interrupt:
         import asyncio
 
@@ -484,6 +412,88 @@ async def _assert_ordinary_published_frontier(result, parent_id, resolver, dream
     assert len(retired) == 5
     assert all(row["purged"] for row in retired)
     assert all(json.loads(row["usage_json"])["requests"] == 1 for row in retired)
+
+
+def _install_repair_rig(monkeypatch):
+    """Model a critic that asks for two corrections before accepting the candidate."""
+    import json
+
+    from pydantic_ai import Agent
+    from pydantic_ai.models.test import TestModel
+
+    from sibyl_core.ai.llm.extractor import Extractor
+    from sibyl_core.services import procedure_validation
+    from sibyl_core.tasks.memory_validation import CriticOutput
+    from sibyl_core.tasks.procedure_review import ReviewSubmission
+    from sibyl_core.tasks.reflection_correction import ReflectionCorrection
+
+    resolver = AsyncMock(return_value=SourceReadAuthority("owner"))
+    original_extract = Extractor.extract_with_usage
+    partial = "Validate inputs before parsing, then always discard original bytes."
+    final = "Validate inputs before parsing and retain the original bytes."
+    calls = []
+
+    async def factory(output_type=CriticOutput):
+        return Extractor(output_type), '{"max_input_chars":40000,"model":"offline"}'
+
+    async def extract(reader, prompt):
+        payload = json.loads(prompt.splitlines()[-1])
+        calls.append(reader.output_type.__name__)
+        if reader.output_type in (CriticOutput, ProgressCriticOutput):
+            resolved = payload["assertions"]["/content"]["statement"] == final
+            output = {
+                "findings": []
+                if resolved
+                else [
+                    {
+                        "claim_path": "/content",
+                        "claim_sha256": payload["assertion_hashes"]["/content"],
+                        "evidence_refs": [{"evidence_id": "s0"}],
+                        "basis": "factual_contradiction",
+                        "disposition": "reconsider",
+                        "critique": "Preserve both validation ordering and original bytes.",
+                    }
+                ]
+            }
+            if reader.output_type is ProgressCriticOutput:
+                review = ReviewSubmission.model_validate(payload["prior_progress"]["review"])
+                output["prior_assessments"] = [
+                    {
+                        "finding_id": identity,
+                        "disposition": "resolved" if resolved else "partially_resolved",
+                        "supported_reduction": "The ordering now agrees with the decision."
+                        if not resolved
+                        else "Ordering and byte retention agree with the decision.",
+                        "remaining_concern": None
+                        if resolved
+                        else "Discarding the original bytes contradicts the decision.",
+                        "evidence_refs": [{"evidence_id": "s0"}],
+                    }
+                    for identity in review.finding_ids()
+                ]
+        else:
+            assert reader.output_type is ReflectionCorrection
+            content = payload["original"]["assertions"]["/content"]["statement"]
+            output = {
+                "content": final if content == partial else partial,
+                "abstention_reason": None,
+                "assessments": [
+                    {
+                        "finding_id": identity,
+                        "disposition": "accepted",
+                        "explanation": "Apply the observed source decision.",
+                        "evidence_refs": [{"evidence_id": "s0"}],
+                    }
+                    for identity in payload["finding_ids"]
+                ],
+            }
+        reader._agent = Agent(TestModel(custom_output_args=output), output_type=reader.output_type)
+        return await original_extract(reader, prompt)
+
+    monkeypatch.setattr(procedure_validation, "validation_extractor", factory)
+    monkeypatch.setattr(procedure_validation, "_validation_extractor", factory)
+    monkeypatch.setattr(Extractor, "extract_with_usage", extract)
+    return resolver, calls, final
 
 
 @pytest.fixture
@@ -687,3 +697,61 @@ async def _assert_published_checkpoint_tamper_denied(store, candidate_id):
             AsyncMock(return_value=SourceReadAuthority("owner")),
             publication=True,
         )
+
+
+async def _seed_ordinary_candidate(dream_store):
+    await remember_raw_memory(
+        organization_id="dream-org",
+        principal_id="owner",
+        source_id="session",
+        raw_content="Decision: validate inputs before parsing and retain the original bytes.",
+        embedding_provider=None,
+    )
+    await reflection.run_reflection_dream_cycle({}, "dream-org", candidate_limit=0)
+    candidates = await dream_store.execute_query(
+        "SELECT * FROM raw_captures WHERE capture_surface='reflection_candidate';"
+    )
+    return candidates[0]["uuid"]
+
+
+@pytest.mark.parametrize("kind", ["ceiling", "monthly"])
+@pytest.mark.parametrize(
+    ("stage", "at", "kept"), [("critic", 1, []), ("correction", 2, ["returned"])]
+)
+async def test_a_budget_refusal_in_the_correction_loop_resumes_on_the_next_review(
+    dream_store, monkeypatch, ordinary_graph, stage, at, kept, kind
+):
+    """A refused critic or correction releases its claim, and the loop resumes there."""
+    from sibyl_core.ai.errors import LLMBudgetExceededError
+    from sibyl_core.ai.llm.budget import llm_run_spend_ledger
+    from sibyl_core.services.automatic_reflection import automatically_review_reflection
+    from tests.budget_refusal import refuse_reservation
+
+    parent_id = await _seed_ordinary_candidate(dream_store)
+    resolver, calls, final = _install_repair_rig(monkeypatch)
+    refuse_reservation(monkeypatch, at=at, kind=kind)
+
+    with llm_run_spend_ledger(10_000_000), pytest.raises(LLMBudgetExceededError):
+        await automatically_review_reflection("dream-org", "owner", parent_id, resolver)
+    rows = await dream_store.execute_query("SELECT state FROM memory_validation_executions;")
+    assert [row["state"] for row in rows] == kept
+
+    refused = len(calls)
+    result = await automatically_review_reflection("dream-org", "owner", parent_id, resolver)
+
+    assert result.status == "corrected"
+    assert result.candidate.raw_content == final
+    assert len(result.executions) == 5
+    # Nothing that completed before the refusal is sent again.
+    assert (
+        calls[refused:]
+        == [
+            "CriticOutput",
+            "ReflectionCorrection",
+            "ProgressCriticOutput",
+            "ReflectionCorrection",
+            "ProgressCriticOutput",
+        ][at - 1 :]
+    )
+    rows = await dream_store.execute_query("SELECT state FROM memory_validation_executions;")
+    assert [row["state"] for row in rows] == ["returned"] * 5
