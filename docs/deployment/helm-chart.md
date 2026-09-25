@@ -263,45 +263,64 @@ the backend believes. The chart renders it into `SIBYL_FORWARDED_ALLOW_IPS`.
 
 ```yaml
 backend:
-  # The range the ingress controller pods get their addresses from, usually the pod CIDR.
-  forwardedAllowIps: "10.244.0.0/16"
+  # A range only the ingress controller pods draw their addresses from, never the pod CIDR.
+  forwardedAllowIps: "10.250.0.0/28"
   # A list works too:
   # forwardedAllowIps:
-  #   - 10.244.0.0/16
-  #   - 10.0.0.0/20
+  #   - 10.250.0.0/28
+  #   - 10.250.1.0/28
 ```
 
 On the command line, pass a list so Helm does not split on the comma:
-`--set 'backend.forwardedAllowIps={10.244.0.0/16,10.0.0.0/20}'`.
+`--set 'backend.forwardedAllowIps={10.250.0.0/28,10.250.1.0/28}'`.
 
 Empty (the default) keeps the backend's loopback-only trust. When `backend.forwardedAllowIps` is
 empty, a `SIBYL_FORWARDED_ALLOW_IPS` entry under `backend.env` still works; when both are set, the
 dedicated value wins.
 
+**Every trusted address must be a proxy, never something that could be a client.** A trusted peer
+can name any client address it likes, and an ingress that appends to `X-Forwarded-For` instead of
+replacing it extends that power to everyone who calls through it from a trusted address. Envoy-based
+gateways, AWS ALB, and nginx's `$proxy_add_x_forwarded_for` all append. With the pod CIDR trusted, a
+pod at `10.244.9.9` that sends `X-Forwarded-For: 100.101.102.103` through such an ingress arrives as
+`100.101.102.103, 10.244.9.9`; the backend skips the pod's own address as trusted and resolves the
+forged one. A NetworkPolicy cannot stop this, because the request really does come from the
+controller. So never trust the cluster pod CIDR (it covers every pod, and with
+`networkPolicy.enabled` at its default of `false` any of them can also reach the backend directly),
+node ranges, or the VPC CIDR: each of them holds clients.
+
 What to set:
 
-- **Ingress controller or Gateway pods:** the range their addresses come from, usually the cluster
-  pod CIDR. Running `kubectl get pods -n <controller-namespace> -o wide` shows the addresses to
-  cover. On clusters where pods take VPC addresses, use the subnets the controller pods run in.
-- **An L7 load balancer in front that appends `X-Forwarded-For`** (a cloud application load
-  balancer, for example): add its subnets or the VPC CIDR as well, so the walk skips past it to the
-  address it recorded.
+- **Trust only the ingress controller pods.** Give them addresses nothing else draws from, such as a
+  CNI IP pool selected by the controller's namespace or a node pool reserved for the controller with
+  its own pod range, and list that range. Running
+  `kubectl get pods -n <controller-namespace> -o wide` shows the addresses it has to cover.
+- **Make the controller replace `X-Forwarded-For` from untrusted peers rather than append to it.**
+  ingress-nginx does by default, as long as `use-forwarded-headers` and `compute-full-forwarded-for`
+  stay off. With a controller that can only append, the trust list is all that keeps a forged entry
+  out, so it must hold nothing but the controller.
+- **A load balancer in front of the controller:** resolve the client at the controller rather than
+  widening the backend's list. Have the controller trust only the load balancer's dedicated subnets
+  (in ingress-nginx, `use-forwarded-headers: true` with `proxy-real-ip-cidr` set to them, because
+  its default is `0.0.0.0/0`), so it still hands the backend a single resolved address, and keep the
+  backend trusting the controller alone.
 - **An L4 load balancer or a node hop that SNATs:** do not trust node addresses. The controller then
   only ever sees node IPs, and trusting them hands the entry the client wrote the final say.
   Preserve the source address instead (`externalTrafficPolicy: Local` on the controller's Service,
   or PROXY protocol from the load balancer) and trust only the controller pods.
+- **Enable `networkPolicy`** with `networkPolicy.ingress.from` naming the controller, so nothing can
+  reach the backend directly and write the header itself.
 
 ::: warning Trusting a range lets anything inside it choose its client address
 
 Any peer inside `forwardedAllowIps` can claim to be any client, dodge the per-address rate limits,
-and satisfy `breakGlass.allowedIPs`. Keep the range as narrow as the topology allows, and enable
-`networkPolicy` with `networkPolicy.ingress.from` naming the controller so nothing else in that
-range can reach the backend. Keep `/api` and `/mcp` routed straight to the backend service (the
-default route table): the Next.js frontend passes a client-supplied `X-Forwarded-For` through
-unchanged, so it must never be the hop the backend trusts. A value of `"*"` (or a `/0` range) trusts
-every peer and makes the backend log `forwarded_allow_ips_trusts_every_peer` at startup; with it,
-the leftmost header entry wins, and a client writes that one unless every proxy in front overwrites
-the header.
+and satisfy `breakGlass.allowedIPs`, and so can any caller behind an appending ingress whose own
+address is trusted. List the controller and nothing else. Keep `/api` and `/mcp` routed straight to
+the backend service (the default route table): the Next.js frontend passes a client-supplied
+`X-Forwarded-For` through unchanged, so it must never be the hop the backend trusts. A value of
+`"*"` (or a `/0` range) trusts every peer and makes the backend log
+`forwarded_allow_ips_trusts_every_peer` at startup; with it, the leftmost header entry wins, and a
+client writes that one unless every proxy in front overwrites the header.
 
 :::
 
@@ -797,9 +816,10 @@ backend:
     repository: ghcr.io/hyperb1iss/sibyl-api
     tag: "1.4.1"
     pullPolicy: Always
-  existingSecret: sibyl-secrets # Ingress controller pod range, so each user gets their own login rate-limit bucket.
-  # Pair it with networkPolicy so only the controller can reach the backend (see Trusted Proxies).
-  forwardedAllowIps: "10.244.0.0/16"
+  existingSecret: sibyl-secrets
+  # Only the ingress controller pods' own range, so each user gets their own login
+  # rate-limit bucket. Never the pod CIDR (see Trusted Proxies).
+  forwardedAllowIps: "10.250.0.0/28"
   validationReceipts:
     existingClaim: sibyl-validation-receipts
   surreal:

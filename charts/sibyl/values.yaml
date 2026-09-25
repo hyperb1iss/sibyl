@@ -183,12 +183,16 @@ backend:
   # The per-address login rate limit, request and audit logs, session records, and the
   # break-glass allowlist all use the address this resolves. Empty keeps the backend
   # default of loopback only, so behind an ingress every user shares the ingress pod's login
-  # bucket. Set it to the range your ingress controller pods run in, usually the cluster pod
-  # CIDR. Add a VPC or subnet range only for an L7 load balancer in front that appends
-  # X-Forwarded-For itself; never add node ranges that merely SNAT traffic. Anything inside a
-  # trusted range can choose its client address, so keep it narrow and pair it with
-  # networkPolicy.enabled. "*" trusts every peer and the backend logs a warning.
-  # On the command line pass a list: --set 'backend.forwardedAllowIps={10.244.0.0/16}'
+  # bucket. Every address listed must be a proxy and never a possible client: a trusted peer
+  # can name any client address, and so can anything that calls through an ingress that
+  # appends to X-Forwarded-For (Envoy gateways, AWS ALB, nginx's $proxy_add_x_forwarded_for)
+  # from a trusted address. Never list the cluster pod CIDR, node ranges, or the VPC CIDR.
+  # List only the ingress controller pods' addresses or a range dedicated to them, have the
+  # controller replace X-Forwarded-For from untrusted peers rather than append (ingress-nginx
+  # does by default), and pair it with networkPolicy.enabled. For a load balancer in front,
+  # let the controller resolve the client and keep this list to the controller.
+  # "*" trusts every peer and the backend logs a warning.
+  # On the command line pass a list: --set 'backend.forwardedAllowIps={10.250.0.0/28}'
   forwardedAllowIps: ""
 
   # -- Reference to existing secret for sensitive env vars

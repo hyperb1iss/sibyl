@@ -218,9 +218,9 @@ range there would let those clients choose their address.
 peer is in the list, it reads `X-Forwarded-For` from right to left and takes the first entry that is
 not itself in the list; when every entry is trusted, it takes the leftmost. When the direct peer is
 not in the list, the header is ignored. For example, with
-`SIBYL_FORWARDED_ALLOW_IPS=10.244.0.0/16,10.0.0.0/20`, a request from ingress pod `10.244.3.7`
-carrying `X-Forwarded-For: 203.0.113.99, 198.51.100.10, 10.0.1.5` resolves to `198.51.100.10`: the
-load balancer at `10.0.1.5` is trusted and skipped, and the client-written `203.0.113.99` is never
+`SIBYL_FORWARDED_ALLOW_IPS=10.250.0.0/28,10.0.0.0/28`, a request from ingress pod `10.250.0.7`
+carrying `X-Forwarded-For: 203.0.113.99, 198.51.100.10, 10.0.0.5` resolves to `198.51.100.10`: the
+load balancer at `10.0.0.5` is trusted and skipped, and the client-written `203.0.113.99` is never
 reached. That one resolved address feeds the per-address rate limits, request logs, session and
 audit records, and the break-glass allowlist. Trusted peers also set the request scheme through
 `X-Forwarded-Proto`; Sibyl builds its links from `SIBYL_PUBLIC_URL`, so nothing visible changes.
@@ -246,9 +246,13 @@ audit records, and the break-glass allowlist. Trusted peers also set the request
 
 Trusting a range lets anything inside it choose its client address. A peer in the list can claim to
 be any client, sidestep the per-address rate limits, and satisfy `SIBYL_BREAK_GLASS_ALLOWED_IPS`.
-Keep the list to the proxies that actually front Sibyl, make sure nothing else in those ranges can
-reach the backend port (a NetworkPolicy, no published port), and only trust a hop that writes the
-address it saw into `X-Forwarded-For`, by appending or by replacing the header. A hop that only
+Every address in the list must be a proxy, never something that could be a client. Keep the list to
+the proxies that actually front Sibyl, make sure nothing else in those ranges can reach the backend
+port (a NetworkPolicy, no published port), and only trust a hop that writes the address it saw into
+`X-Forwarded-For`. A proxy that appends to the header rather than replacing it (Envoy-based
+gateways, AWS ALB, nginx's `$proxy_add_x_forwarded_for`) also lets any caller whose own address is
+trusted forge an entry through it, so a pod CIDR, node range, or VPC CIDR is never safe to list,
+NetworkPolicy or not. Prefer a proxy that replaces the header from untrusted peers. A hop that only
 forwards packets, such as nodes that SNAT or an L4 load balancer without source preservation, must
 not be trusted: trusting it gives the next entry, which the client wrote, the final say. The Next.js
 frontend keeps a client-supplied `X-Forwarded-For`, so route `/api` and `/mcp` straight to the
@@ -564,8 +568,9 @@ SIBYL_SETTINGS_KEY=<generate with: openssl rand -base64 32 | tr '+/' '-_'>
 # Public URL (Kong/ingress domain)
 SIBYL_PUBLIC_URL=https://sibyl.example.com
 
-# Reverse proxies allowed to report the client address (your ingress range)
-SIBYL_FORWARDED_ALLOW_IPS=10.244.0.0/16
+# Reverse proxies allowed to report the client address: the ingress
+# controller pods' own range, never the pod CIDR
+SIBYL_FORWARDED_ALLOW_IPS=10.250.0.0/28
 
 # Storage (fully Surreal)
 SIBYL_STORE=surreal
@@ -604,7 +609,7 @@ data:
   SIBYL_SERVER_HOST: "0.0.0.0"
   SIBYL_SERVER_PORT: "3334"
   SIBYL_PUBLIC_URL: "https://sibyl.example.com"
-  SIBYL_FORWARDED_ALLOW_IPS: "10.244.0.0/16"
+  SIBYL_FORWARDED_ALLOW_IPS: "10.250.0.0/28"
   SIBYL_LLM_PROVIDER: "anthropic"
   SIBYL_LLM_MODEL: "claude-haiku-4-5"
   SIBYL_EMBEDDING_MODEL: "text-embedding-3-small"
