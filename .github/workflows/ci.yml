@@ -351,7 +351,8 @@ jobs:
           fi
 
           if [[ "$HOOKS_CHANGED" == "true" ]]; then
-            moon run hooks:lint hooks:typecheck
+            # Hooks ship with the runtime, and hooks-only changes skip trust-gates.
+            moon run hooks:lint hooks:typecheck root:inventory-check
             ran_any=true
           fi
 
