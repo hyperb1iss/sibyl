@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 from weakref import WeakKeyDictionary
 
+import structlog
 from pydantic import BaseModel, Field, TypeAdapter
 from pydantic_ai import Agent, NativeOutput
 from pydantic_ai.messages import ModelResponse
@@ -21,7 +22,7 @@ from pydantic_ai.profiles.openai import OpenAIJsonSchemaTransformer
 
 from sibyl_core.ai.clients import get_agent
 from sibyl_core.ai.errors import LLMError, classify_llm_exception
-from sibyl_core.ai.llm.budget import reserve_llm_budget
+from sibyl_core.ai.llm.budget import estimate_llm_tokens, reserve_llm_budget, settle_llm_budget
 from sibyl_core.ai.llm.config import LLMConfig, LLMSurface
 from sibyl_core.ai.providers import rejects_forced_tool_choice
 from sibyl_core.ai.transport import (
@@ -31,6 +32,8 @@ from sibyl_core.ai.transport import (
     reserve_uncovered_transport_attempts,
 )
 from sibyl_core.observability import elapsed_ms, telemetry_registry
+
+log = structlog.get_logger()
 
 
 class ExtractionUsage(BaseModel):
@@ -134,31 +137,43 @@ class Extractor[T]:
                 or agent.model.client.base_url.port not in (None, 443)
             ):
                 raise ValueError("OpenRouter routing requires the OpenRouter API origin")
-            transport_retries = (
-                agent.model.client.max_retries
-                if isinstance(agent.model, OpenAIResponsesModel | AnthropicModel)
-                else 0
-            )
-            # An unspecified output retry policy estimates one model request;
-            # dynamic agent settings and provider work are not bounded here.
+            # Dynamic agent settings and provider work are not bounded here.
             budget_prompt = self._budget_prompt(prompt, agent, mode)
             output_limit = self._budget_output_limit(agent)
-            envelope = (transport_retries + 1) * ((self.output_retries or 0) + 1)
+            attempt_tokens = estimate_llm_tokens(budget_prompt, output_token_limit=output_limit)
+            reserved_tokens = 0
 
             async def reserve(envelope: int = 1) -> None:
+                nonlocal reserved_tokens
                 await reserve_llm_budget(
                     surface=self.surface.value,
                     prompt=budget_prompt,
                     output_token_limit=output_limit,
                     attempt_envelope=envelope,
                 )
+                reserved_tokens += attempt_tokens * envelope
 
-            await reserve(envelope)
-            with reserve_uncovered_transport_attempts(envelope, reserve):
-                result = await agent.run(
-                    prompt,
-                    model_settings=self._model_settings(),
-                )
+            # One attempt is reserved up front. Every further HTTP hop, an SDK
+            # retry or an output retry alike, reserves as it dispatches, and the
+            # call settles to its actual usage afterwards, so the monthly bucket
+            # never holds the full retry envelope (up to nine attempts) for a
+            # call that used one.
+            await reserve(1)
+            try:
+                with reserve_uncovered_transport_attempts(1, reserve):
+                    result = await agent.run(
+                        prompt,
+                        model_settings=self._model_settings(),
+                    )
+            except BaseException:
+                # Usage is unknown after a failure; each dispatched hop keeps one
+                # attempt's estimate, and hops that never left keep nothing.
+                await self._settle(reserved_tokens, attempt_tokens * len(attempts))
+                raise
+            usage = _extraction_usage(result, attempts)
+            await self._settle(
+                reserved_tokens, usage.total_tokens if usage.total_tokens > 0 else reserved_tokens
+            )
             telemetry_registry().record_llm_call(
                 surface=self.surface.value,
                 provider="runtime",
@@ -166,10 +181,7 @@ class Extractor[T]:
                 status="ok",
                 duration_ms=elapsed_ms(started_at),
             )
-            return ExtractionResult(
-                output=result.output,
-                usage=_extraction_usage(result, attempts),
-            )
+            return ExtractionResult(output=result.output, usage=usage)
         except asyncio.CancelledError as exc:
             exc.__dict__["extraction_usage"] = FailedExtractionUsage(
                 transport_attempts=attempts
@@ -188,6 +200,25 @@ class Extractor[T]:
                 transport_attempts=attempts
             ).model_dump(mode="json")
             raise error from exc
+
+    async def _settle(self, reserved_tokens: int, actual_tokens: int) -> None:
+        """Hand back the unused part of a reservation; a settle failure never fails the call."""
+        if reserved_tokens <= 0:
+            return
+        try:
+            await settle_llm_budget(
+                surface=self.surface.value,
+                reserved_tokens=reserved_tokens,
+                actual_tokens=actual_tokens,
+            )
+        except Exception:
+            log.warning(
+                "llm_budget_settle_failed",
+                surface=self.surface.value,
+                reserved_tokens=reserved_tokens,
+                actual_tokens=actual_tokens,
+                exc_info=True,
+            )
 
     def _budget_output_limit(self, agent: Agent[Any, Any]) -> int | None:
         """Use known static settings; dynamic settings and absent limits stay unknown."""

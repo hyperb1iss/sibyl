@@ -14,7 +14,12 @@ from pydantic_ai.models.test import TestModel
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import RequestUsage
 
-from sibyl_core.ai.errors import LLMProviderError, LLMRateLimitError, LLMValidationError
+from sibyl_core.ai.errors import (
+    LLMError,
+    LLMProviderError,
+    LLMRateLimitError,
+    LLMValidationError,
+)
 from sibyl_core.ai.llm import Extractor
 from sibyl_core.ai.llm.budget import LLMBudgetContext, llm_budget_context, set_budget_enforcer
 
@@ -27,6 +32,7 @@ class Payload(BaseModel):
 class RecordingBudgetEnforcer:
     def __init__(self) -> None:
         self.calls: list[tuple[LLMBudgetContext, str, int]] = []
+        self.settlements: list[tuple[str, int, int]] = []
 
     async def reserve(
         self,
@@ -36,6 +42,16 @@ class RecordingBudgetEnforcer:
         estimated_tokens: int,
     ) -> None:
         self.calls.append((context, surface, estimated_tokens))
+
+    async def settle(
+        self,
+        context: LLMBudgetContext,
+        *,
+        surface: str,
+        reserved_tokens: int,
+        actual_tokens: int,
+    ) -> None:
+        self.settlements.append((surface, reserved_tokens, actual_tokens))
 
 
 @pytest.fixture(autouse=True)
@@ -161,7 +177,30 @@ async def test_extractor_reserves_budget_before_provider_call() -> None:
     context, surface, tokens = enforcer.calls[0]
     assert context.user_id == "user-1"
     assert surface == "default"
-    assert tokens > 11  # Declared output schema and retry envelope are included.
+    assert tokens > 11  # The declared output schema is included.
+    # One attempt is reserved up front, then the call settles to what it used.
+    assert len(enforcer.settlements) == 1
+    settled_surface, reserved, actual = enforcer.settlements[0]
+    assert (settled_surface, reserved) == ("default", tokens)
+    assert 0 < actual != reserved
+
+
+@pytest.mark.asyncio
+async def test_extractor_refunds_a_call_that_fails_before_any_dispatch() -> None:
+    enforcer = RecordingBudgetEnforcer()
+    set_budget_enforcer(enforcer)
+
+    async def fail(_: list[ModelMessage], __: AgentInfo) -> ModelResponse:
+        raise RuntimeError("synthetic provider outage")
+
+    extractor = Extractor(Payload, agent=Agent(FunctionModel(fail), output_type=Payload))
+
+    with llm_budget_context(user_id="user-1", organization_id="org-1"), pytest.raises(LLMError):
+        await extractor.extract("abcd")
+
+    assert len(enforcer.calls) == 1
+    reserved = enforcer.calls[0][2]
+    assert enforcer.settlements == [("default", reserved, 0)]
 
 
 async def _invalid_json_response(_: list[ModelMessage], __: AgentInfo) -> ModelResponse:

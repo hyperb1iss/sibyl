@@ -53,6 +53,10 @@ class LLMBudgetExceededError(LLMError):
     """Raised when a local LLM budget would be exceeded."""
 
 
+class LLMRunBudgetExceededError(LLMBudgetExceededError):
+    """Raised when one job run would reserve past its own token ceiling."""
+
+
 class LLMProviderError(LLMError):
     """Raised when a provider rejects or fails a request."""
 

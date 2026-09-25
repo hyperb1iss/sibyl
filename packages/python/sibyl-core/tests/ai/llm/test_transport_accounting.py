@@ -117,7 +117,7 @@ async def test_transport_receipts_are_isolated_for_concurrent_extractions(monkey
             assert result.usage.transport_usage_complete is True
 
 
-async def test_transport_budget_includes_system_schema_and_retry_envelope(monkeypatch):
+async def test_transport_budget_includes_system_schema_for_one_attempt(monkeypatch):
     class Payload(BaseModel):
         name: str
 
@@ -151,10 +151,11 @@ async def test_transport_budget_includes_system_schema_and_retry_envelope(monkey
                 await extractor.extract("prompt")
         finally:
             set_budget_enforcer(None)
+        # One attempt up front; the SDK's two transport retries reserve as they dispatch.
         expected = (
             len("system\nprompt\n" + json.dumps(Payload.model_json_schema(), sort_keys=True)) // 4
             + 7
-        ) * 3
+        )
         assert reservations == [expected]
 
 

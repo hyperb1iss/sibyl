@@ -119,7 +119,8 @@ async def test_anthropic_native_factory_emits_profile_schema_and_settings(
         assert result.usage.cost_usd == pytest.approx(cost)
         assert result.usage.transport_usage_complete is True
         assert result.usage.transport_attempts[0].request_id == "req_native"
-        assert reserve.await_args.kwargs["attempt_envelope"] == 6
+        # One attempt up front; retries reserve as they dispatch (was the 6-attempt envelope).
+        assert reserve.await_args.kwargs["attempt_envelope"] == 1
         assert json.dumps(declared, sort_keys=True) in reserve.await_args.kwargs["prompt"]
         config = (await source.resolve(LLMSurface.MEMORY)).to_llm_config()
         assert transport_policy(config)["max_retries"] == 2
@@ -244,7 +245,7 @@ async def test_anthropic_concurrent_attempts_remain_request_local(monkeypatch):
         assert all(len(r.usage.transport_attempts) == 1 for r in results)
 
 
-async def test_anthropic_native_budget_uses_transformed_schema_and_sdk_envelope(monkeypatch):
+async def test_anthropic_native_budget_uses_transformed_schema_and_one_attempt(monkeypatch):
     from sibyl_core.ai.llm.budget import llm_budget_context, reserve_llm_budget, set_budget_enforcer
 
     reservations = []
@@ -270,7 +271,8 @@ async def test_anthropic_native_budget_uses_transformed_schema_and_sdk_envelope(
         finally:
             set_budget_enforcer(None)
         prompt = "Synthetic policy\nSynthetic evidence\n" + json.dumps(schema, sort_keys=True)
-        assert reservations == [(len(prompt) // 4 + 8192) * 12]
+        # One attempt up front, whatever the SDK and output retry settings allow.
+        assert reservations == [len(prompt) // 4 + 8192]
         assert caught.value.details["extraction_usage"]["transport_attempts"] == []
 
 
@@ -669,11 +671,12 @@ async def test_anthropic_sdk_wrapping_preserves_terminal_budget_denial(monkeypat
         with pytest.raises(LLMBudgetExceededError) as caught:
             await extractor.extract("Synthetic evidence")
         assert caught.value is denial
-        assert len(sent) == 2
-        assert [r["attempt_envelope"] for r in reservations] == [2, 1]
+        # The first hop is covered up front; the redirect's hop reserves and is denied.
+        assert len(sent) == 1
+        assert [r["attempt_envelope"] for r in reservations] == [1, 1]
         assert [
             a["status_code"] for a in denial.details["extraction_usage"]["transport_attempts"]
-        ] == [307, 307]
+        ] == [307]
         assert denial.details["extraction_usage"]["cost_complete"] is False
 
 
