@@ -14,8 +14,6 @@ positives.
 
 ## When to use this
 
-- `moon run dev` aborts with `⚠️  Local legacy data detected` (the `run-surreal-dev.sh` legacy guard
-  fires).
 - The user has data in podman volumes named `sibyl_falkordb*` / `sibyl_postgres*` but
   `.moon/cache/surreal-dev` is empty.
 - The Sibyl server is unreachable and the CLI is buffering writes to
@@ -442,13 +440,12 @@ migration is sound regardless of what `migrate verify`'s exit code says.
 
 ---
 
-## Phase 10: Unblock dev
+## Phase 10: Hand dev back
 
-`run-surreal-dev.sh`'s `surreal_runtime_data_detected()` checks for
-`.moon/cache/surreal-dev/sibyl.db/CURRENT` or `IDENTITY`. After a successful import both files
-exist, so the legacy guard passes on the next `moon run dev`.
+The import writes into `.moon/cache/surreal-dev`, the data directory `moon run dev` mounts, so the
+next `moon run dev` starts on the imported graph.
 
-**Tell the user `moon run dev` will now start cleanly. Do not run it yourself.**
+**Tell the user `moon run dev` is ready to start on the imported data. Do not run it yourself.**
 
 The CLI's buffered writes in `~/.config/sibyl/pending_writes/` flush on next CLI activity once the
 API is back up.
@@ -481,8 +478,6 @@ feels right.
 
 - Canonical user-facing playbook: `docs/guide/migrating-from-falkor.md`
 - Release notes: `docs/guide/surrealdb-migration-release-notes.md`
-- Legacy guard implementation: `tools/dev/run-surreal-dev.sh` (`warn_if_legacy_setup_detected`,
-  `surreal_runtime_data_detected`, `docker_legacy_setup_detected`)
 - Export command source: `apps/api/src/sibyl/cli/migrate.py` (at commit `290b824b`)
 - Import command source: `apps/api/src/sibyl/cli/migrate.py` (at tag `v0.10.0`, the last version
   with the `legacy-archive` on-ramp; removed in `903a738d`)
