@@ -34,14 +34,15 @@ VALUE = "<value>"
 MARKUP = re.compile(r"\[/?[\w #.<>-]*\]")
 
 # A suggestion runs from `sibyl` to the first character that cannot be part
-# of one shell command: quotes, backticks, chaining, and sentence punctuation.
-SUGGESTION = re.compile(r"(?<![\w/.~-])sibyl[ \t]+([^\n\0`'\"&|;,()]+)")
+# of one shell command: quotes, backticks, chaining, commas, parentheses, and
+# a period that ends a sentence rather than sitting inside a token.
+SUGGESTION = re.compile(r"(?<![\w/.~-])sibyl[ \t]+((?:[^\n\0`'\"&|;,().]|\.(?!\s|$))+)")
 
 # Strings that mention `sibyl` followed by prose rather than a command. Keyed
 # by file and suggestion so a new occurrence elsewhere is still checked.
 NOT_COMMANDS = {
     ("data/hooks/session-start.py", "command and return stdout"),
-    ("data/hooks/session-start.py", "commands this session."),
+    ("data/hooks/session-start.py", "commands this session"),
 }
 
 
@@ -71,11 +72,26 @@ def _fstring_parts(tree: ast.AST) -> set[int]:
     }
 
 
+def _argv(node: ast.List | ast.Tuple) -> str | None:
+    """`["sibyl", "docker", "upgrade", tag]` as the command line it runs."""
+    first = node.elts[0] if node.elts else None
+    if not (isinstance(first, ast.Constant) and first.value == "sibyl"):
+        return None
+    return " ".join(
+        elt.value if isinstance(elt, ast.Constant) and isinstance(elt.value, str) else VALUE
+        for elt in node.elts[1:]
+    )
+
+
 def _suggestions_in(source: Path, relative: str) -> list[Suggestion]:
     tree = ast.parse(source.read_text(), filename=str(source))
     fstring_parts = _fstring_parts(tree)
     found: list[Suggestion] = []
     for node in ast.walk(tree):
+        # Subprocess argv lists run the command directly, so they resolve too.
+        if isinstance(node, ast.List | ast.Tuple) and (argv := _argv(node)):
+            found.append(Suggestion(relative, node.lineno, argv))
+            continue
         if isinstance(node, ast.JoinedStr):
             text = _render(node)
         elif (
@@ -251,6 +267,8 @@ def test_scanner_reads_fstrings_and_markup(tmp_path: Path) -> None:
         'a = f"Run [bold {name}]sibyl context use {name}[/bold {name}] now"\n'
         "b = 'Next: sibyl auth login && sibyl doctor'\n"
         "c = (\n    'Run \\'sibyl init\\' '\n    'or \\'sibyl up --pull\\'.'\n)\n"
+        "d = ['sibyl', 'docker', 'upgrade', '--tag', tag]\n"
+        "e = 'Run sibyl context. It builds a pack from ~/.sibyl/local.'\n"
     )
     found = [(s.line, s.text) for s in iter_suggestions(tmp_path)]
     assert found == [
@@ -259,6 +277,8 @@ def test_scanner_reads_fstrings_and_markup(tmp_path: Path) -> None:
         (3, "doctor"),
         (5, "init"),
         (5, "up --pull"),
+        (8, "docker upgrade --tag <value>"),
+        (9, "context"),
     ]
 
 
