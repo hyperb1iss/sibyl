@@ -2122,6 +2122,98 @@ class _CommunityGraphExpansionClient:
         return []
 
 
+_EPISODE_MENTION_TOPICS: dict[str, dict[str, object]] = {
+    "native-topic": {
+        "uuid": "native-topic",
+        "name": "Connection Pooling",
+        "entity_type": "topic",
+        "content": "topic mentioned by a native episode",
+        "attributes": {},
+        "created_at": None,
+    },
+    "archived-topic": {
+        "uuid": "archived-topic",
+        "name": "Backoff Strategy",
+        "entity_type": "topic",
+        "content": "topic mentioned by an archived episode",
+        "attributes": {},
+        "created_at": None,
+    },
+}
+
+
+class _EpisodeMentionsGraphClient:
+    """A graph holding both shapes of episode, each with its mentions where it lives.
+
+    A native episode is an ``entity`` row whose topics hang off ``relates_to``
+    MENTIONS edges. An archived episode is an ``episode`` row whose topics live
+    in the ``mentions`` table, which only archive restore writes.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
+        self.calls.append((query, params))
+        if "FROM mentions" in query:
+            episode_uuids = params.get("episode_uuids") or []
+            return [{"uuid": "archived-topic"}] if "archived-episode" in episode_uuids else []
+        if 'out.entity_type = "community"' in query or "target_id IN $community_uuids" in query:
+            return []
+        if "FROM relates_to" in query:
+            source_uuids = params.get("source_uuids") or []
+            if "native-episode" in source_uuids:
+                return [{"uuid": "native-topic", "relationship": "MENTIONS"}]
+            return []
+        if "FROM entity" in query and "uuid IN $uuids" in query:
+            topics = _EPISODE_MENTION_TOPICS
+            return [dict(topics[uuid]) for uuid in params.get("uuids") or [] if uuid in topics]
+        return []
+
+
+def _native_episode_seed() -> RetrievalCandidate:
+    return candidate_module._candidate_from_node_record(
+        {
+            "uuid": "native-episode",
+            "name": "Pool exhaustion postmortem",
+            "entity_type": "episode",
+            "content": "The API ran out of pooled connections under load.",
+            "group_id": "org-123",
+            "attributes": {},
+        },
+        signal=RetrievalSignal.NODE_FULLTEXT,
+        score=1.0,
+    )
+
+
+def _archived_episode_seed() -> RetrievalCandidate:
+    return candidate_module._candidate_from_episode_record(
+        {
+            "uuid": "archived-episode",
+            "name": "Retry storm",
+            "content": "Clients retried without jitter and stampeded the API.",
+            "group_id": "org-123",
+        },
+        signal=RetrievalSignal.EPISODE_FULLTEXT,
+        score=1.0,
+    )
+
+
+def _organization_episode_plan() -> plan_module.RetrievalPlan:
+    # Organization-wide, because a project-scoped plan withholds every
+    # episode-typed candidate before it can seed the walk.
+    return build_context_retrieval_plan(
+        query="connection pool exhaustion",
+        organization_id="org-123",
+        facets=[ContextFacet.RECENT_MEMORY],
+        facet_types={ContextFacet.RECENT_MEMORY: ["episode", "topic"]},
+        principal_id="user-123",
+        project=None,
+        accessible_projects=None,
+        limit=12,
+    )
+
+
 @pytest.mark.asyncio
 async def test_context_search_pushes_facet_types_into_graph_queries(
     monkeypatch: pytest.MonkeyPatch,
@@ -2453,6 +2545,7 @@ async def test_graph_expansion_uses_mentions_for_episode_seeds_with_limit() -> N
                 source=None,
                 metadata={},
                 project_id="project_123",
+                kind=CandidateKind.EPISODE,
             )
         ],
         limit=2,
@@ -2467,6 +2560,106 @@ async def test_graph_expansion_uses_mentions_for_episode_seeds_with_limit() -> N
     assert mention_calls[0][1]["episode_uuids"] == ["episode-seed"]
     assert mention_calls[0][1]["limit"] == expansion_module._graph_expansion_fetch_limit(2)
     assert "LIMIT $limit" in mention_calls[0][0]
+
+
+@pytest.mark.asyncio
+async def test_graph_expansion_walks_relates_to_mentions_from_native_episode_seeds() -> None:
+    seed = _native_episode_seed()
+    # The shape the entity lanes actually mint: typed by its entity_type, but
+    # a node read from the entity table.
+    assert seed.type == "episode"
+    assert seed.kind is CandidateKind.NODE
+    client = _EpisodeMentionsGraphClient()
+
+    candidates = await expansion_module._graph_expansion_candidates(
+        client=client,
+        plan=_organization_episode_plan(),
+        search_filter=search_module.SearchFilter(),
+        seed_candidates=[seed],
+        limit=4,
+    )
+
+    assert [candidate.id for candidate in candidates] == ["native-topic"]
+    assert candidates[0].score == pytest.approx(0.58)
+    assert candidates[0].metadata["graph_expansion_relationship"] == "MENTIONS"
+    assert candidates[0].metadata["graph_expansion_depth"] == 1
+    relation_sources = [
+        params["source_uuids"]
+        for query, params in client.calls
+        if "FROM relates_to" in query and "source_uuids" in params
+    ]
+    assert ["native-episode"] in relation_sources
+    assert all(
+        "native-episode" not in (params.get("episode_uuids") or [])
+        for query, params in client.calls
+        if "FROM mentions" in query
+    )
+
+
+@pytest.mark.asyncio
+async def test_graph_expansion_routes_each_episode_shape_to_its_own_mentions() -> None:
+    client = _EpisodeMentionsGraphClient()
+
+    candidates = await expansion_module._graph_expansion_candidates(
+        client=client,
+        plan=_organization_episode_plan(),
+        search_filter=search_module.SearchFilter(),
+        seed_candidates=[_archived_episode_seed(), _native_episode_seed()],
+        limit=4,
+    )
+
+    assert sorted(candidate.id for candidate in candidates) == ["archived-topic", "native-topic"]
+    assert all(
+        candidate.metadata["graph_expansion_relationship"] == "MENTIONS" for candidate in candidates
+    )
+    mention_episodes = [
+        params["episode_uuids"] for query, params in client.calls if "FROM mentions" in query
+    ]
+    assert mention_episodes == [["archived-episode"]]
+    relation_sources = [
+        params["source_uuids"]
+        for query, params in client.calls
+        if "FROM relates_to" in query and "source_uuids" in params
+    ]
+    assert relation_sources
+    assert all(sources == ["native-episode"] for sources in relation_sources)
+
+
+@pytest.mark.asyncio
+async def test_context_search_surfaces_topics_mentioned_by_native_episodes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Runtime:
+        client = _EpisodeMentionsGraphClient()
+
+    async def fake_runtime(_organization_id: str, **_kwargs: object) -> Runtime:
+        return Runtime()
+
+    async def fake_node_fulltext(**_kwargs: object) -> list[RetrievalCandidate]:
+        return [_native_episode_seed()]
+
+    async def no_raw_memories(**_kwargs: object) -> list[RawMemory]:
+        return []
+
+    monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(source_module, "_node_fulltext_candidates", fake_node_fulltext)
+
+    response = await search_module.context_search(
+        plan=_organization_episode_plan(),
+        types=["episode", "topic"],
+        facet=ContextFacet.RECENT_MEMORY,
+        limit=5,
+        raw_memory_recall_fn=no_raw_memories,
+    )
+
+    assert response.filters["candidate_source_degraded"] is False
+
+    by_id = {result.id: result for result in response.results}
+    assert "native-episode" in by_id
+    assert "native-topic" in by_id
+    topic_metadata = by_id["native-topic"].metadata
+    assert topic_metadata["graph_expansion_relationship"] == "MENTIONS"
+    assert RetrievalSignal.GRAPH_EXPANSION.value in topic_metadata["retrieval_signals"]
 
 
 @pytest.mark.asyncio
@@ -2562,6 +2755,7 @@ async def test_graph_expansion_keeps_strongest_same_depth_path() -> None:
                 source=None,
                 metadata={},
                 project_id="project_123",
+                kind=CandidateKind.EPISODE,
             ),
             RetrievalCandidate(
                 id="task-seed",
