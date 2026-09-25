@@ -50,6 +50,7 @@ describe('MainShell', () => {
       selectProject: vi.fn(),
       clearProjects: vi.fn(),
       contextEnabled: false,
+      scopeReady: true,
     });
     hooks.useSwitchOrg.mockReturnValue({
       mutateAsync: vi.fn(),
