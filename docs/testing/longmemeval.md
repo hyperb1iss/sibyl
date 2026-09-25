@@ -150,7 +150,6 @@ Everything lives in `.github/workflows/eval.yml`. The full job uses `workflow_di
 are recorded in every artifact:
 
 ```yaml
-retrieval_mode: native
 longmemeval_concurrency: 1
 longmemeval_corpus_text_policy: user-and-assistant-turns-v1
 longmemeval_auto_extract_entities: false
@@ -159,7 +158,6 @@ longmemeval_wait_for_memory_projection: false
 longmemeval_graph_hnsw_efc: 150
 longmemeval_graph_hnsw_m: 12
 longmemeval_graph_knn_ef: 40
-longmemeval_native_fusion_backend: python_rrf
 run_longmemeval_full: true
 ```
 

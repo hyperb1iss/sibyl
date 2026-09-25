@@ -36,13 +36,6 @@ on:
       - "uv.lock"
   workflow_dispatch:
     inputs:
-      retrieval_mode:
-        description: "Retrieval mode to evaluate"
-        type: choice
-        options:
-          - native
-          - compare
-        default: native
       repeat:
         description: "Repeat count per case (higher = lower variance)"
         type: string
@@ -90,13 +83,6 @@ on:
         description: "Surreal graph KNN query effort"
         type: string
         default: "40"
-      longmemeval_native_fusion_backend:
-        description: "Native retrieval fusion backend"
-        type: choice
-        options:
-          - python_rrf
-          - surreal_rrf
-        default: python_rrf
       run_longmemeval_full:
         description: "Run the full 500-question LongMemEval live job"
         type: boolean
@@ -141,7 +127,6 @@ concurrency:
 
 env:
   COMPOSE_PROJECT_NAME: sibyl-eval
-  EVAL_RETRIEVAL_MODE: ${{ inputs.retrieval_mode || 'native' }}
   EVAL_REPEAT: ${{ inputs.repeat || '20' }}
   LONGMEMEVAL_SMOKE_LIMIT: ${{ inputs.longmemeval_smoke_limit || '25' }}
   LONGMEMEVAL_LOCAL_SMOKE_LIMIT:
@@ -159,7 +144,6 @@ env:
   LONGMEMEVAL_GRAPH_HNSW_EFC: ${{ inputs.longmemeval_graph_hnsw_efc || '150' }}
   LONGMEMEVAL_GRAPH_HNSW_M: ${{ inputs.longmemeval_graph_hnsw_m || '12' }}
   LONGMEMEVAL_GRAPH_KNN_EF: ${{ inputs.longmemeval_graph_knn_ef || '40' }}
-  LONGMEMEVAL_NATIVE_FUSION_BACKEND: ${{ inputs.longmemeval_native_fusion_backend || 'python_rrf' }}
   LONGMEMEVAL_QA_MODE:
     ${{ ( inputs.run_longmemeval_qa || (github.event_name == 'schedule' && github.event.schedule ==
     '0 8 * * 0') ) && 'model' || 'disabled' }}
@@ -187,7 +171,6 @@ jobs:
       SIBYL_SURREAL_URL: ws://localhost:8000/rpc
       SIBYL_SURREAL_USERNAME: sibyl_ci
       SIBYL_SURREAL_PASSWORD: sibyl_ci_password
-      SIBYL_RETRIEVAL_MODE: ${{ inputs.retrieval_mode || 'native' }}
       SIBYL_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       SIBYL_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     steps:
@@ -278,10 +261,9 @@ jobs:
           moon run core:bench-context -- \
             --cases benchmarks/context_pack_cases.json \
             --auth-manifest .moon/cache/baseline-runtime-manifest.json \
-            --label "retrieval-${EVAL_RETRIEVAL_MODE}" \
+            --label retrieval-native \
             --timeout 30 \
-            --repeat "${EVAL_REPEAT}" \
-            --metadata "retrieval_mode=${EVAL_RETRIEVAL_MODE}"
+            --repeat "${EVAL_REPEAT}"
           bench_status="$?"
           set -e
 
@@ -318,7 +300,6 @@ jobs:
           moon run bench-gate -- "${{ steps.eval.outputs.report }}" \
             --profile context-pack \
             --require-accounting \
-            --require-metadata "retrieval_mode=${EVAL_RETRIEVAL_MODE}" \
             --require-metadata "repeat_count=${EVAL_REPEAT}"
 
       - name: Upload eval report
@@ -362,7 +343,6 @@ jobs:
       SIBYL_GRAPH_HNSW_EFC: ${{ inputs.longmemeval_graph_hnsw_efc || '150' }}
       SIBYL_GRAPH_HNSW_M: ${{ inputs.longmemeval_graph_hnsw_m || '12' }}
       SIBYL_GRAPH_KNN_EF: ${{ inputs.longmemeval_graph_knn_ef || '40' }}
-      SIBYL_NATIVE_FUSION_BACKEND: ${{ inputs.longmemeval_native_fusion_backend || 'python_rrf' }}
       SIBYL_LLM_MEMORY_PROVIDER: openai
       SIBYL_LLM_MEMORY_MODEL: gpt-5.4-nano
       PYTHONUNBUFFERED: "1"
@@ -480,7 +460,6 @@ jobs:
             --metadata graph_hnsw_efc="${SIBYL_GRAPH_HNSW_EFC}" \
             --metadata graph_hnsw_m="${SIBYL_GRAPH_HNSW_M}" \
             --metadata graph_knn_ef="${SIBYL_GRAPH_KNN_EF}" \
-            --metadata native_fusion_backend="${SIBYL_NATIVE_FUSION_BACKEND}" \
             "${projection_args[@]}" \
             "${extraction_args[@]}"
 
@@ -561,7 +540,6 @@ jobs:
       SIBYL_GRAPH_HNSW_EFC: ${{ inputs.longmemeval_graph_hnsw_efc || '150' }}
       SIBYL_GRAPH_HNSW_M: ${{ inputs.longmemeval_graph_hnsw_m || '12' }}
       SIBYL_GRAPH_KNN_EF: ${{ inputs.longmemeval_graph_knn_ef || '40' }}
-      SIBYL_NATIVE_FUSION_BACKEND: ${{ inputs.longmemeval_native_fusion_backend || 'python_rrf' }}
       PYTHONUNBUFFERED: "1"
       LONGMEMEVAL_SHA256: d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442
       LONGMEMEVAL_URL: https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/longmemeval_s_cleaned.json?download=true
@@ -682,7 +660,6 @@ jobs:
             --metadata graph_hnsw_efc="${SIBYL_GRAPH_HNSW_EFC}" \
             --metadata graph_hnsw_m="${SIBYL_GRAPH_HNSW_M}" \
             --metadata graph_knn_ef="${SIBYL_GRAPH_KNN_EF}" \
-            --metadata native_fusion_backend="${SIBYL_NATIVE_FUSION_BACKEND}" \
             "${projection_args[@]}"
 
       - name: Gate LongMemEval local embedding smoke
@@ -850,7 +827,6 @@ jobs:
       SIBYL_GRAPH_HNSW_EFC: ${{ inputs.longmemeval_graph_hnsw_efc || '150' }}
       SIBYL_GRAPH_HNSW_M: ${{ inputs.longmemeval_graph_hnsw_m || '12' }}
       SIBYL_GRAPH_KNN_EF: ${{ inputs.longmemeval_graph_knn_ef || '40' }}
-      SIBYL_NATIVE_FUSION_BACKEND: ${{ inputs.longmemeval_native_fusion_backend || 'python_rrf' }}
       PYTHONUNBUFFERED: "1"
       LONGMEMEVAL_SHA256: d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442
       LONGMEMEVAL_URL: https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/longmemeval_s_cleaned.json?download=true
@@ -1029,7 +1005,6 @@ jobs:
             --metadata graph_hnsw_efc="${SIBYL_GRAPH_HNSW_EFC}" \
             --metadata graph_hnsw_m="${SIBYL_GRAPH_HNSW_M}" \
             --metadata graph_knn_ef="${SIBYL_GRAPH_KNN_EF}" \
-            --metadata native_fusion_backend="${SIBYL_NATIVE_FUSION_BACKEND}" \
             --metadata qa_mode="${LONGMEMEVAL_QA_MODE}" \
             --metadata qa_baseline_bootstrap="${LONGMEMEVAL_QA_BOOTSTRAP}" \
             "${projection_args[@]}" \

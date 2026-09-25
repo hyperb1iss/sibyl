@@ -1514,12 +1514,6 @@
   ],
   "planned": [
     {
-      "suite": "Live Graphiti vs native Surreal",
-      "status": "planned",
-      "required_artifact_pattern": "benchmarks/results/<engine-artifact>.json",
-      "required_summary": "Paired live runtime reports, same corpus and queries, gated and compared."
-    },
-    {
       "suite": "LOCOMO-style long-memory suite",
       "status": "planned",
       "required_artifact_pattern": "benchmarks/results/ai-memory/locomo_<engine>_<timestamp>.json",
