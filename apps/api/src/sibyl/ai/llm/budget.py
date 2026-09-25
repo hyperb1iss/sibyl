@@ -60,6 +60,48 @@ class DBLLMBudgetEnforcer:
                     estimated_tokens=estimated_tokens,
                 )
 
+    async def settle(
+        self,
+        context: LLMBudgetContext,
+        *,
+        surface: str,
+        reserved_tokens: int,
+        actual_tokens: int,
+    ) -> None:
+        """Move each bucket from the reserved estimate to the tokens the call used.
+
+        A call that used less than it reserved hands the difference back; one
+        that used more is charged the overage, since it is spend that happened.
+        Buckets never go below zero, and the month is read at settle time, so a
+        call that straddles midnight on the last day settles into the new month.
+        """
+        delta = actual_tokens - reserved_tokens
+        if delta == 0:
+            return
+        now = _utcnow()
+        month = now.strftime("%Y-%m")
+        limits = await self._limits(context, month=month)
+        if not limits:
+            return
+
+        async with AsyncExitStack() as locks:
+            for limit in sorted(limits, key=lambda item: item.key):
+                await locks.enter_async_context(entity_lock("auth", f"llm-budget:{limit.key}"))
+            async with surreal_auth_client_scope() as client:
+                for limit in limits:
+                    bucket = await _ensure_bucket(client, limit, month=month, now=now)
+                    await client.execute_query(
+                        """
+                            UPDATE llm_usage_buckets
+                            SET used_tokens = $used_tokens,
+                                updated_at = $updated_at
+                            WHERE bucket_key = $bucket_key;
+                        """,
+                        bucket_key=str(bucket["bucket_key"]),
+                        used_tokens=max(0, _int_value(bucket.get("used_tokens")) + delta),
+                        updated_at=now,
+                    )
+
     async def _reserve_with_locks(
         self,
         client,
