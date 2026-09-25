@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from sibyl_core.tools.responses import SearchResult
 
 type FusedCandidate = tuple[RetrievalCandidate, float, dict[str, Any]]
+type DistinctKey = Callable[[RetrievalCandidate], str | None]
 type CoverageRanker = Callable[..., tuple[list[tuple[RetrievalCandidate, float]], bool, bool]]
 
 DEFAULT_FUSION_BACKEND = FusionBackend.PYTHON_RRF
@@ -54,6 +55,7 @@ def _fuse_candidates(
     plan: RetrievalPlan,
     limit: int,
     temporal_target: datetime | None = None,
+    distinct_key: DistinctKey | None = None,
 ) -> list[tuple[RetrievalCandidate, float, dict[str, Any]]]:
     return _rank_fused_candidates(
         source_lists,
@@ -61,6 +63,7 @@ def _fuse_candidates(
         limit=limit,
         rrf_scores=_python_rrf_scores(source_lists, rrf_k=plan.weights.rrf_k),
         temporal_target=temporal_target,
+        distinct_key=distinct_key,
     )
 
 
@@ -73,6 +76,7 @@ async def _fuse_candidates_for_plan(
     temporal_target: datetime | None = None,
     fusion_backend: FusionBackend | None = None,
     fusion_failures: list[CandidateSourceFailure] | None = None,
+    distinct_key: DistinctKey | None = None,
 ) -> FusionExecutionResult:
     backend = fusion_backend or DEFAULT_FUSION_BACKEND
     if backend is FusionBackend.SURREAL_RRF:
@@ -101,6 +105,7 @@ async def _fuse_candidates_for_plan(
                     rrf_scores=scores,
                     backend=backend,
                     temporal_target=temporal_target,
+                    distinct_key=distinct_key,
                 ),
                 actual_backend=backend,
             )
@@ -111,6 +116,7 @@ async def _fuse_candidates_for_plan(
                     plan=plan,
                     limit=limit,
                     temporal_target=temporal_target,
+                    distinct_key=distinct_key,
                 ),
                 actual_backend=FusionBackend.PYTHON_RRF,
             )
@@ -121,6 +127,7 @@ async def _fuse_candidates_for_plan(
             plan=plan,
             limit=limit,
             temporal_target=temporal_target,
+            distinct_key=distinct_key,
         ),
         actual_backend=FusionBackend.PYTHON_RRF,
     )
@@ -189,6 +196,7 @@ def _rank_fused_candidates(
     rrf_scores: Mapping[str, float],
     backend: FusionBackend = FusionBackend.PYTHON_RRF,
     temporal_target: datetime | None = None,
+    distinct_key: DistinctKey | None = None,
 ) -> list[tuple[RetrievalCandidate, float, dict[str, Any]]]:
     score_by_id: dict[str, float] = defaultdict(float)
     candidates_by_id: dict[str, RetrievalCandidate] = {}
@@ -256,7 +264,39 @@ def _rank_fused_candidates(
             fusion_metadata["temporal_decay_multiplier"] = temporal_multiplier
         ranked.append((candidate, boosted, fusion_metadata))
     ranked.sort(key=lambda item: item[1], reverse=True)
-    return ranked[:limit]
+    return _cut_at_distinct_items(ranked, limit=limit, distinct_key=distinct_key)
+
+
+def _cut_at_distinct_items(
+    ranked: list[FusedCandidate],
+    *,
+    limit: int,
+    distinct_key: DistinctKey | None,
+) -> list[FusedCandidate]:
+    """Cut the ranked list after ``limit`` distinct items rather than ``limit`` rows.
+
+    A caller that folds several rows into one item afterwards, as the context
+    pack does for a capture and the entity projected from it, would otherwise
+    receive ``limit`` rows holding fewer than ``limit`` items and serve a short
+    answer with candidates left over. A row that shares its key with one
+    already kept rides along without spending the budget, so the caller still
+    sees every copy the cut reached and picks among them itself. Rows without
+    a key count as their own item, and no key function means rows are items.
+    """
+    if distinct_key is None:
+        return ranked[:limit]
+    kept: list[FusedCandidate] = []
+    seen: set[tuple[str, str]] = set()
+    for entry in ranked:
+        candidate = entry[0]
+        key = distinct_key(candidate)
+        identity = ("key", key) if key else ("id", candidate.id)
+        if identity not in seen:
+            if len(seen) >= limit:
+                break
+            seen.add(identity)
+        kept.append(entry)
+    return kept
 
 
 def _merge_graph_expansion_metadata(

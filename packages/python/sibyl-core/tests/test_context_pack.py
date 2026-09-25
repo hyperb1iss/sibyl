@@ -1754,6 +1754,99 @@ async def test_lineage_dedup_collapses_same_name_duplicates(
     assert matching[0].id == "raw_memory:one"
 
 
+@pytest.mark.asyncio
+async def test_pack_stays_full_when_captures_and_their_episodes_both_qualify(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A capture and the episode projected from it are one item, so they cost one slot.
+
+    Both shapes reach fusion under the same name, and the pack folds them into
+    one item. If the search cut counted rows rather than items, every such pair
+    would leave the pack an item short even with candidates left to serve.
+    """
+    import sibyl_core.retrieval._search_database as database_module
+    import sibyl_core.retrieval._search_sources as source_module
+    from sibyl_core.retrieval import _search_candidates as candidate_module
+    from sibyl_core.retrieval.search import RetrievalSignal
+    from sibyl_core.services.surreal_content import RawMemory
+
+    limit = 24
+    captured_at = datetime(2026, 9, 1, tzinfo=UTC)
+    capture_titles = [f"Pool exhaustion finding {index}" for index in range(6)]
+    decision_names = [f"Distinct pool decision {index}" for index in range(limit)]
+
+    class EmptyNativeClient:
+        async def execute_query(self, *_args: object, **_kwargs: object) -> list[object]:
+            return []
+
+    class EmptyNativeRuntime:
+        client = EmptyNativeClient()
+
+    async def fake_native_runtime(_organization_id: str, **_kwargs: object) -> EmptyNativeRuntime:
+        return EmptyNativeRuntime()
+
+    async def fake_raw_recall(**kwargs: Any) -> list[RawMemory]:
+        if kwargs["memory_scope"] != "private":
+            return []
+        return [
+            RawMemory(
+                id=f"capture-{index}",
+                organization_id="org-123",
+                source_id=f"capture:{index}",
+                principal_id="user-123",
+                title=title,
+                raw_content=f"{title}: the pool ran dry under load.",
+                captured_at=captured_at,
+                created_at=captured_at,
+                score=1.0 - index * 0.01,
+            )
+            for index, title in enumerate(capture_titles)
+        ]
+
+    def node_row(uuid: str, name: str, entity_type: str, rank: int) -> Any:
+        return candidate_module._candidate_from_node_record(
+            {
+                "uuid": uuid,
+                "name": name,
+                "entity_type": entity_type,
+                "content": f"{name}: the pool ran dry under load.",
+                "group_id": "org-123",
+                "attributes": {},
+            },
+            signal=RetrievalSignal.NODE_FULLTEXT,
+            score=1.0 - rank * 0.01,
+        )
+
+    async def fake_node_fulltext(**_kwargs: object) -> list[Any]:
+        episodes = [
+            node_row(f"episode-{index}", title, "episode", index)
+            for index, title in enumerate(capture_titles)
+        ]
+        decisions = [
+            node_row(f"decision-{index}", name, "decision", len(episodes) + index)
+            for index, name in enumerate(decision_names)
+        ]
+        return [*episodes, *decisions]
+
+    monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_native_runtime)
+    monkeypatch.setattr(source_module, "_node_fulltext_candidates", fake_node_fulltext)
+
+    pack = await compile_context(
+        "pool exhaustion",
+        intent="build",
+        principal_id="user-123",
+        organization_id="org-123",
+        limit=limit,
+        raw_memory_recall_fn=fake_raw_recall,
+        record_exposure=False,
+    )
+
+    names = [item.name for item in pack.items]
+    assert len(names) == limit
+    assert len(set(names)) == limit
+    assert set(capture_titles) <= set(names)
+
+
 def _budget_pack(item_count: int):
     from sibyl_core.models.context import ContextPack, ContextSection
 

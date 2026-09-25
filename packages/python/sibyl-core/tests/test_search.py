@@ -1610,6 +1610,52 @@ def test_graph_expansion_only_sessions_demote_below_direct_hits() -> None:
     assert ranked[1][2]["graph_expansion_only_multiplier"] == 0.45
 
 
+def test_fused_cut_counts_distinct_items_when_the_caller_names_them() -> None:
+    def fused(identifier: str, name: str, score: float) -> fusion_module.FusedCandidate:
+        candidate = RetrievalCandidate(
+            id=identifier,
+            type="episode",
+            name=name,
+            content="",
+            score=score,
+            source=None,
+            metadata={},
+        )
+        return (candidate, score, {})
+
+    ranked = [
+        fused("raw_memory:a", "A", 0.9),
+        fused("episode-a", "A", 0.8),
+        fused("b", "B", 0.7),
+        fused("unnamed", "", 0.6),
+        fused("c", "C", 0.5),
+        fused("episode-b", "B", 0.4),
+    ]
+
+    def cut(limit: int, *, by_name: bool) -> list[str]:
+        kept = fusion_module._cut_at_distinct_items(
+            ranked,
+            limit=limit,
+            distinct_key=(lambda candidate: candidate.name) if by_name else None,
+        )
+        return [entry[0].id for entry in kept]
+
+    assert cut(2, by_name=False) == ["raw_memory:a", "episode-a"]
+    # A copy of an item already kept rides along without spending the budget,
+    # and a copy ranked past the cut stays out.
+    assert cut(2, by_name=True) == ["raw_memory:a", "episode-a", "b"]
+    # A row with no key is its own item.
+    assert cut(3, by_name=True) == ["raw_memory:a", "episode-a", "b", "unnamed"]
+    assert cut(4, by_name=True) == [
+        "raw_memory:a",
+        "episode-a",
+        "b",
+        "unnamed",
+        "c",
+        "episode-b",
+    ]
+
+
 def test_graph_path_metadata_survives_fusion_with_direct_hit() -> None:
     plan = build_context_retrieval_plan(
         query="surreal live query decision",

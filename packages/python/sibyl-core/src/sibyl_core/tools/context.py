@@ -801,7 +801,11 @@ _PROCEDURE_NAME_PREFIX = "procedure: "
 
 
 def _lineage_key(item: ContextItem) -> str:
-    name = " ".join((item.name or "").strip().lower().split())
+    return _lineage_name_key(item.name)
+
+
+def _lineage_name_key(raw_name: str | None) -> str:
+    name = " ".join((raw_name or "").strip().lower().split())
     if name.startswith(_PROCEDURE_NAME_PREFIX):
         name = name[len(_PROCEDURE_NAME_PREFIX) :]
     return name
@@ -1411,6 +1415,11 @@ async def _compile_native_sections(
             raw_memory_recall_fn=(
                 raw_memory_recall_fn if include_raw_memory else _empty_raw_memory_recall
             ),
+            # The pack folds same-lineage rows into one item after the search,
+            # so the search has to count items the same way or each fold is a
+            # slot lost: a capture and the episode projected from it share a
+            # name and would otherwise take two of the fused rows.
+            distinct_key=lambda candidate: _lineage_name_key(candidate.name),
         )
     return _sections_from_response(response, facets=facets, audit=audit)
 
