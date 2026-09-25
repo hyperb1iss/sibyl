@@ -76,7 +76,8 @@ There is no rollback once the new services start. The new SurrealDB may already 
 data, and an older API must not run against a schema a newer one migrated. If the services fail to
 start or do not report healthy within two minutes, the command keeps the new pins, says so, and
 points at `sibyl local logs`; a slow migration may still finish, which `sibyl local status` shows.
-Re-running the same `sibyl local upgrade --tag <tag>` retries the start.
+Re-running the same `sibyl local upgrade --tag <tag>` retries the start. When nothing is left
+running, it says to start it with `sibyl up` instead, which keeps the SurrealDB image the pins name.
 
 A stopped instance is not started. The command stops with nothing changed when Docker Compose cannot
 report the state, when the current tag cannot be read, or when another `sibyl local upgrade` is

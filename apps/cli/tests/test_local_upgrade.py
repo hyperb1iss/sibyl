@@ -29,7 +29,11 @@ def local_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 class FakeCompose:
-    """Records compose calls; `fail` names the calls that return non-zero, in order."""
+    """Records compose calls; `fail` names the calls that return non-zero, in order.
+
+    `down_after_up` makes a failed `up -d` leave nothing running, as when
+    Compose stops the old containers and cannot start the new ones.
+    """
 
     def __init__(
         self,
@@ -38,8 +42,10 @@ class FakeCompose:
         fail: tuple[str, ...] = (),
         ps_fails: bool = False,
         ps_hangs: bool = False,
+        down_after_up: bool = False,
     ) -> None:
         self.running = running
+        self.down_after_up = down_after_up
         self.fail = list(fail)
         self.ps_fails = ps_fails
         self.ps_hangs = ps_hangs
@@ -67,6 +73,8 @@ class FakeCompose:
         failed = bool(self.fail) and self.fail[0] == name
         if failed:
             self.fail.pop(0)
+            if name == "up -d" and self.down_after_up:
+                self.running = False
         return subprocess.CompletedProcess(args, 1 if failed else 0, stdout="")
 
 
@@ -89,7 +97,7 @@ def test_a_failed_pull_changes_nothing(
     result = _invoke(monkeypatch, compose, healthy=[])
 
     assert result.exit_code == 1
-    assert "Nothing changed; still on 1.4.0" in result.output
+    assert "Nothing changed; the pin stays on 1.4.0" in result.output
     assert local_runtime.read_bytes() == before
     assert not list(local_runtime.parent.glob("docker-compose.*.next.yml"))
     # The running containers were never stopped or recreated.
@@ -142,6 +150,36 @@ def test_a_failed_start_keeps_the_new_pins_and_never_rolls_back(
     assert "SIBYL_IMAGE_TAG=1.4.0" not in result.output
     assert _pin(local_runtime) == "1.5.0"
     assert [name for name, _ in compose.calls].count("up -d") == 1
+
+
+def test_a_failed_start_that_left_nothing_running_says_to_start_it(
+    local_runtime: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Retrying `local upgrade` would find nothing running and only print advice."""
+    compose = FakeCompose(fail=("up -d",), down_after_up=True)
+
+    result = _invoke(monkeypatch, compose, healthy=[])
+
+    assert result.exit_code == 1
+    assert "Nothing is running now" in result.output
+    assert "SIBYL_IMAGE_TAG=1.5.0 sibyl up" in result.output
+    assert "Retry the start with" not in result.output
+
+
+def test_sibyl_up_keeps_a_newer_surrealdb(
+    local_runtime: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The start the retry advice leads to must not undo what `local upgrade` kept."""
+    newer = "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.9.0}"
+    config = yaml.safe_load(local_runtime.read_text())
+    config["services"]["surrealdb"]["image"] = newer
+    local.write_compose_file(config)
+
+    local.write_compose_file()
+
+    services = yaml.safe_load(local_runtime.read_text())["services"]
+    assert services["surrealdb"]["image"] == newer
+    assert services["api"]["image"].endswith(f":{local.DEFAULT_IMAGE_TAG}")
 
 
 def test_surrealdb_is_never_moved_backwards(

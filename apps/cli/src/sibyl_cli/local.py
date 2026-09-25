@@ -320,10 +320,22 @@ def is_running() -> bool:
 
 
 def write_compose_file(config: dict | None = None, path: Path | None = None) -> None:
-    """Write the compose config to disk."""
+    """Write the compose config to disk.
+
+    Without an explicit config this writes the CLI's defaults, but keeps a
+    newer or hand-written SurrealDB image from the file it replaces, so
+    `sibyl up` never takes SurrealDB backwards either.
+    """
     SIBYL_LOCAL_DIR.mkdir(parents=True, exist_ok=True)
-    with open(path or SIBYL_LOCAL_COMPOSE, "w") as f:
-        yaml.dump(config or COMPOSE_CONFIG, f, default_flow_style=False, sort_keys=False)
+    target = path or SIBYL_LOCAL_COMPOSE
+    if config is None:
+        try:
+            existing = yaml.safe_load(target.read_text()) if target.exists() else None
+        except (OSError, yaml.YAMLError):
+            existing = None
+        config = compose_config_for(DEFAULT_IMAGE_TAG, existing)
+    with open(target, "w") as f:
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
 
 def write_env_file(
@@ -618,7 +630,9 @@ def upgrade(
             raise typer.Exit(1)
         if not running:
             if container_owner() == "docker":
-                info("The running Sibyl belongs to the Docker runtime (`sibyl docker`), not this one.")
+                info(
+                    "The running Sibyl belongs to the Docker runtime (`sibyl docker`), not this one."
+                )
                 info("Upgrade it with: sibyl docker upgrade")
                 return
             info("The local instance is not running, so there is nothing to upgrade in place.")
@@ -636,10 +650,11 @@ def upgrade(
         staged = _staged_compose_file()
         try:
             write_compose_file(target, staged)
-            info(f"Pulling images for {tag} while {previous_tag} keeps serving...")
+            info(f"Pulling images for {tag} while the running containers keep serving...")
             if run_compose(["pull", "--quiet"], compose_file=staged).returncode != 0:
                 error(
-                    f"Could not pull the images for {tag}. Nothing changed; still on {previous_tag}."
+                    f"Could not pull the images for {tag}. Nothing changed; "
+                    f"the pin stays on {previous_tag}."
                 )
                 raise typer.Exit(1)
             os.replace(staged, SIBYL_LOCAL_COMPOSE)
@@ -664,7 +679,13 @@ def upgrade(
         "version, and an older API must not start against a newer schema."
     )
     info("Inspect the failure with: sibyl local logs")
-    info(f"Retry the start with: sibyl local upgrade --tag {tag}")
+    if _compose_project_running():
+        info(f"Retry the start with: sibyl local upgrade --tag {tag}")
+    else:
+        # Nothing is left for `local upgrade` to recreate, so the retry is a
+        # start, which keeps the SurrealDB image the pins name.
+        prefix = "" if tag == DEFAULT_IMAGE_TAG else f"SIBYL_IMAGE_TAG={tag} "
+        info(f"Nothing is running now. Start it again with: {prefix}sibyl up")
     raise typer.Exit(1)
 
 
