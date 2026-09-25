@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import secrets
 import subprocess
 from copy import deepcopy
@@ -11,10 +12,16 @@ from typing import Annotated, Any
 
 import typer
 import yaml
+from packaging.version import InvalidVersion, Version
 
 from sibyl_cli import config_store
-from sibyl_cli.common import NEON_CYAN, console, error, info, success
-from sibyl_cli.docker_storage import surreal_data_mount, surreal_volume_initializer
+from sibyl_cli.common import NEON_CYAN, console, error, info, success, warn
+from sibyl_cli.docker_storage import (
+    SURREAL_IMAGE,
+    SURREAL_IMAGE_REFERENCE,
+    surreal_data_mount,
+    surreal_volume_initializer,
+)
 from sibyl_cli.local import DEFAULT_IMAGE_TAG, check_docker, check_docker_compose
 
 app = typer.Typer(
@@ -31,6 +38,9 @@ MANAGED_IMAGE_REPOSITORIES = (
     "ghcr.io/hyperb1iss/sibyl-api-crawler",
     "ghcr.io/hyperb1iss/sibyl-web",
 )
+# The shape `init` writes for the SurrealDB image. Anything else in that slot
+# was edited by hand, and upgrade leaves it alone.
+MANAGED_SURREAL_IMAGE = re.compile(r"\$\{SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:(?P<tag>[^}]+)\}")
 
 
 def compose_config(
@@ -82,7 +92,7 @@ def compose_config(
         },
         "surreal-init": surreal_volume_initializer(),
         "surrealdb": {
-            "image": "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.4}",
+            "image": SURREAL_IMAGE_REFERENCE,
             "container_name": "sibyl-surrealdb",
             "depends_on": {"surreal-init": {"condition": "service_completed_successfully"}},
             "command": [
@@ -195,6 +205,58 @@ def update_configured_image_tag(image_tag: str) -> None:
         if isinstance(image, str):
             service["image"] = _retag_managed_image(image, image_tag)
     write_compose_file(config)
+
+
+def _surreal_version(tag: str) -> Version | None:
+    try:
+        return Version(tag.removeprefix("v"))
+    except InvalidVersion:
+        return None
+
+
+def _surreal_image_override() -> str | None:
+    """The SIBYL_SURREAL_IMAGE value Compose interpolates, if one is set.
+
+    The shell environment wins over the env file, as it does in Compose.
+    """
+    override = os.environ.get("SIBYL_SURREAL_IMAGE")
+    if override:
+        return override
+    for line in SIBYL_DOCKER_ENV.read_text().splitlines():
+        key, sep, value = line.removeprefix("export ").partition("=")
+        value = value.strip().strip("\"'")
+        if sep and key.strip() == "SIBYL_SURREAL_IMAGE" and value:
+            return value
+    return None
+
+
+def update_surreal_image() -> None:
+    """Move an older CLI-written SurrealDB default up to the server this CLI runs.
+
+    Only the default inside `${SIBYL_SURREAL_IMAGE:-...}` moves, and never
+    backwards, so SIBYL_SURREAL_IMAGE still wins and a hand-written image stays.
+    """
+    config = yaml.safe_load(SIBYL_DOCKER_COMPOSE.read_text()) or {}
+    service = config.get("services", {}).get("surrealdb")
+    image = service.get("image") if isinstance(service, dict) else None
+    if not isinstance(image, str):
+        return
+
+    if image != SURREAL_IMAGE_REFERENCE:
+        match = MANAGED_SURREAL_IMAGE.fullmatch(image)
+        shipped_tag = SURREAL_IMAGE.rpartition(":")[2]
+        current = _surreal_version(match["tag"]) if match else None
+        shipped = _surreal_version(shipped_tag)
+        if match is None or current is None or shipped is None or current > shipped:
+            warn(f"Leaving the SurrealDB image {image} as written; this CLI runs {SURREAL_IMAGE}.")
+            return
+        service["image"] = SURREAL_IMAGE_REFERENCE
+        write_compose_file(config)
+        info(f"Moved the SurrealDB image from {match['tag']} to {shipped_tag}")
+
+    override = _surreal_image_override()
+    if override and override != SURREAL_IMAGE:
+        warn(f"SIBYL_SURREAL_IMAGE keeps SurrealDB on {override}; this CLI runs {SURREAL_IMAGE}.")
 
 
 def compose_command(args: list[str]) -> list[str]:
@@ -339,6 +401,9 @@ def upgrade(
     require_docker()
     if image_tag:
         update_configured_image_tag(image_tag)
+    update_surreal_image()
+    # The api waits on `surrealdb: service_healthy`, so Compose recreates
+    # SurrealDB on its new image and waits for it before the new API starts.
     result = run_compose(["pull"])
     if result.returncode == 0:
         result = run_compose(["up", "-d"])

@@ -13,6 +13,7 @@ from sibyl_cli import config_store
 from sibyl_cli import dev as dev_module
 from sibyl_cli import docker as docker_module
 from sibyl_cli import local as local_module
+from sibyl_cli.docker_storage import SURREAL_IMAGE_REFERENCE
 from sibyl_cli.main import app
 
 
@@ -227,6 +228,120 @@ def test_docker_upgrade_tag_updates_pinned_compose_images(
     assert services["worker"]["image"] == "ghcr.io/hyperb1iss/sibyl-api-crawler:1.0.0-rc.8"
     assert services["web"]["image"] == "ghcr.io/hyperb1iss/sibyl-web:1.0.0-rc.8"
     assert services["surrealdb"]["image"] == "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.4}"
+
+
+def _docker_runtime_with_surreal_image(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    surreal_image: str,
+) -> tuple[Path, list[tuple[list[str], str]]]:
+    """An initialized runtime whose SurrealDB slot holds `surreal_image`.
+
+    The returned list records each compose call with the SurrealDB image the
+    compose file held when Compose would have read it.
+    """
+    docker_dir = tmp_path / "docker"
+    compose_path = docker_dir / "docker-compose.yml"
+    monkeypatch.setattr(docker_module, "SIBYL_DOCKER_DIR", docker_dir)
+    monkeypatch.setattr(docker_module, "SIBYL_DOCKER_ENV", docker_dir / ".env")
+    monkeypatch.setattr(docker_module, "SIBYL_DOCKER_COMPOSE", compose_path)
+    monkeypatch.setattr(docker_module, "require_docker", lambda: None)
+    monkeypatch.delenv("SIBYL_SURREAL_IMAGE", raising=False)
+    docker_module.write_env_file(image_tag="1.3.2", surreal_password="surreal", jwt_secret="jwt")
+    config = docker_module.compose_config(
+        image_tag="1.3.2",
+        api_port=3334,
+        web_port=3337,
+        surreal_port=8000,
+        with_worker=True,
+        with_crawler=False,
+    )
+    config["services"]["surrealdb"]["image"] = surreal_image
+    docker_module.write_compose_file(config)
+
+    calls: list[tuple[list[str], str]] = []
+
+    def fake_run_compose(args: list[str]) -> subprocess.CompletedProcess[str]:
+        compose = yaml.safe_load(compose_path.read_text())
+        calls.append((args, compose["services"]["surrealdb"]["image"]))
+        return subprocess.CompletedProcess(args, 0)
+
+    monkeypatch.setattr(docker_module, "run_compose", fake_run_compose)
+    return compose_path, calls
+
+
+@pytest.mark.parametrize("tag_args", [[], ["--tag", "1.4.0"]])
+def test_docker_upgrade_moves_older_surreal_default_to_shipped_pin(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tag_args: list[str],
+) -> None:
+    compose_path, calls = _docker_runtime_with_surreal_image(
+        tmp_path, monkeypatch, "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.3}"
+    )
+
+    result = CliRunner().invoke(app, ["docker", "upgrade", *tag_args])
+
+    assert result.exit_code == 0, result.output
+    services = yaml.safe_load(compose_path.read_text())["services"]
+    assert services["surrealdb"]["image"] == SURREAL_IMAGE_REFERENCE
+    assert "Moved the SurrealDB image from v3.2.3 to v3.2.4" in result.output
+    # Compose reads the new pin on both calls, and holds the API until the
+    # recreated SurrealDB reports healthy.
+    assert calls == [(["pull"], SURREAL_IMAGE_REFERENCE), (["up", "-d"], SURREAL_IMAGE_REFERENCE)]
+    assert services["api"]["depends_on"]["surrealdb"] == {"condition": "service_healthy"}
+
+
+@pytest.mark.parametrize("source", ["env-file", "shell"])
+def test_docker_upgrade_keeps_explicit_surreal_override(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+) -> None:
+    compose_path, calls = _docker_runtime_with_surreal_image(
+        tmp_path, monkeypatch, "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.3}"
+    )
+    pinned = "registry.example/surrealdb:v3.2.3-patched"
+    env_path = compose_path.parent / ".env"
+    if source == "shell":
+        monkeypatch.setenv("SIBYL_SURREAL_IMAGE", pinned)
+    else:
+        env_path.write_text(env_path.read_text() + f"SIBYL_SURREAL_IMAGE={pinned}\n")
+    env_before = env_path.read_text()
+
+    result = CliRunner().invoke(app, ["docker", "upgrade"])
+
+    assert result.exit_code == 0, result.output
+    # The override still feeds the interpolated slot, and nothing rewrote it.
+    image = yaml.safe_load(compose_path.read_text())["services"]["surrealdb"]["image"]
+    assert image.startswith("${SIBYL_SURREAL_IMAGE:-")
+    assert env_path.read_text() == env_before
+    assert f"keeps SurrealDB on {pinned}" in result.output
+    assert [args for args, _ in calls] == [["pull"], ["up", "-d"]]
+
+
+@pytest.mark.parametrize(
+    "image",
+    [
+        "surrealdb/surrealdb:v3.2.3",
+        "registry.example/surrealdb:custom",
+        "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:nightly}",
+        "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.3.0}",
+    ],
+)
+def test_docker_upgrade_leaves_hand_edited_surreal_image(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    image: str,
+) -> None:
+    compose_path, _ = _docker_runtime_with_surreal_image(tmp_path, monkeypatch, image)
+    compose_before = compose_path.read_text()
+
+    result = CliRunner().invoke(app, ["docker", "upgrade"])
+
+    assert result.exit_code == 0, result.output
+    assert compose_path.read_text() == compose_before
+    assert "Leaving the SurrealDB image" in result.output
 
 
 def test_up_starts_local_runtime_without_agent_setup(
