@@ -151,13 +151,31 @@ async def _release_shared_embedded_engine(engine: _SharedEmbeddedEngine) -> None
         engine.client = None
         try:
             if client is not None:
-                await client.close()
+                await _close_to_completion(client)
         finally:
             # Dropped only after the close finishes: a lease that arrives
             # meanwhile waits on this engine's lock and reopens it, rather than
             # opening a second engine on files that are still being closed.
             if engine.leases == 0 and _shared_embedded_engines.get(engine.key) is engine:
                 del _shared_embedded_engines[engine.key]
+
+
+async def _close_to_completion(client: SurrealClient) -> None:
+    """Finish closing an engine even when the releasing task is cancelled.
+
+    The caller holds the engine's lock until this returns, so no new lease can
+    open a second engine on the directory while the old one is still closing.
+    """
+    closing = asyncio.ensure_future(client.close())
+    cancelled = False
+    while not closing.done():
+        try:
+            await asyncio.shield(closing)
+        except asyncio.CancelledError:
+            cancelled = True
+    closing.result()
+    if cancelled:
+        raise asyncio.CancelledError
 
 
 def _without_scope_result(response: object) -> object:

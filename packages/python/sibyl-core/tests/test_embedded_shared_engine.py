@@ -168,6 +168,44 @@ async def test_concurrent_clients_open_one_engine_per_path(monkeypatch, tmp_path
     assert engines[0].closed
 
 
+async def test_a_cancelled_last_close_still_finishes_before_a_reopen(monkeypatch, tmp_path) -> None:
+    engines = _install_counting_surreal(monkeypatch)
+    import surrealdb
+
+    closing_started = asyncio.Event()
+    finish_close = asyncio.Event()
+
+    async def slow_close(self) -> None:
+        closing_started.set()
+        await finish_close.wait()
+        self.closed = True
+
+    monkeypatch.setattr(surrealdb.AsyncSurreal, "close", slow_close)
+    url = f"surrealkv://{tmp_path / 'store'}"
+    first = _client(url, "sibyl_auth")
+    await first.execute_query("RETURN 1")
+    releasing = asyncio.create_task(first.close())
+    await closing_started.wait()
+    releasing.cancel()
+    await asyncio.sleep(0)
+
+    second = _client(url, "sibyl_content")
+    reopening = asyncio.create_task(second.execute_query("RETURN 2"))
+    await asyncio.sleep(0.05)
+    # The old engine is still closing, so the new lease waits instead of
+    # opening a second engine beside it.
+    assert len(engines) == 1
+    assert not reopening.done()
+
+    finish_close.set()
+    with pytest.raises(asyncio.CancelledError):
+        await releasing
+    assert await reopening == ["RETURN 2"]
+    assert len(engines) == 2
+    assert engines[0].closed
+    await second.close()
+
+
 async def test_memory_urls_keep_one_store_per_connection(monkeypatch) -> None:
     engines = _install_counting_surreal(monkeypatch)
     first = _client("memory://", "one")
