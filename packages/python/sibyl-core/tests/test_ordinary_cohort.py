@@ -13,7 +13,7 @@ from pydantic_ai.models.test import TestModel
 
 from sibyl_core.ai.llm.extractor import Extractor
 from sibyl_core.backends.surreal import SurrealContentClient
-from sibyl_core.backends.surreal.content_schema import bootstrap_content_schema
+from sibyl_core.backends.surreal.content_schema import EMBEDDING_DIM, bootstrap_content_schema
 from sibyl_core.services import ordinary_cohort as service
 from sibyl_core.services import procedure_validation
 from sibyl_core.services.content_raw_persistence import remember_raw_memory, save_raw_memory
@@ -328,6 +328,29 @@ async def test_ordinary_cohort_completed_receipt_recovers_without_provider(
     assert json.loads(stages[0]["usage_json"])["requests"] == 1
 
 
+async def test_ordinary_cohort_reworded_instructions_do_not_replay_the_old_result(
+    cohort_sources, monkeypatch, content_store
+):
+    from sibyl_core.tasks import ordinary_proposals
+
+    install_proposal(monkeypatch, cohort_sources)
+    args = (
+        "org",
+        "owner",
+        [s.id for s in cohort_sources],
+        AsyncMock(return_value=SourceReadAuthority("owner")),
+    )
+    _, first = await service.propose_stored_cohort(*args, authorize=AsyncMock())
+    # Same sources and output schema; only the instructions change.
+    monkeypatch.setattr(
+        ordinary_proposals, "REQUEST", ordinary_proposals.REQUEST + " Prefer the shortest rule."
+    )
+    _, second = await service.propose_stored_cohort(*args, authorize=AsyncMock())
+    assert first != second
+    stages = await content_store.execute_query("SELECT * FROM memory_validation_executions;")
+    assert len(stages) == 2
+
+
 async def test_ordinary_cohort_budget_partition_keeps_all_source_bytes(
     cohort_sources, content_store, monkeypatch
 ):
@@ -370,6 +393,206 @@ async def test_ordinary_cohort_budget_partition_keeps_all_source_bytes(
         for source in sources:
             if source.id in bucket:
                 assert source.raw_content in prepared.prepared.prompt
+
+
+def _axis(axis, tilt=0.0):
+    return _vector({axis: 1.0, 2: tilt})
+
+
+def _vector(components):
+    vector = [0.0] * EMBEDDING_DIM
+    for axis, value in components.items():
+        vector[axis] = value
+    return vector
+
+
+async def _embed(content_store, source, vector, space="model-a"):
+    await content_store.execute_query(
+        "UPDATE raw_captures SET embedding=$vector, metadata.embedding_metadata=$space "
+        "WHERE uuid=$uuid;",
+        vector=vector,
+        space={"model": space},
+        uuid=source.id,
+    )
+
+
+async def _family_sources(count, content=lambda index: f"Episode {index}: repair evidence."):
+    sources = [
+        await remember_raw_memory(
+            organization_id="org",
+            principal_id="owner",
+            source_id=f"family-{index}",
+            raw_content=content(index),
+            embedding_provider=None,
+        )
+        for index in range(count)
+    ]
+    return sorted(sources, key=lambda source: source.id)
+
+
+def _capacity_in_episodes(monkeypatch, capacity, weights=None, seen=None):
+    """Measure a cohort as the sum of its episodes' weights, one each by default."""
+    from sibyl_core.config import settings
+    from sibyl_core.tasks.ordinary_proposals import PartialCohort
+
+    def size(prepared, *args, **kwargs):
+        ids = [
+            e.episode_id for e in PartialCohort.model_validate_json(prepared.input_json).episodes
+        ]
+        if seen is not None:
+            seen.append((sorted(ids), prepared.projection_json is not None))
+        return sum((weights or {}).get(identifier, 1) for identifier in ids)
+
+    monkeypatch.setattr(settings, "consolidation_max_input_chars", capacity)
+    monkeypatch.setattr(service, "_cohort_input_chars", size)
+
+
+async def test_partition_grows_cohorts_from_nearest_embedded_neighbours(
+    cohort_sources, content_store, monkeypatch
+):
+    sources = await _family_sources(6)
+    install_proposal(monkeypatch, sources)
+    _capacity_in_episodes(monkeypatch, 3)
+    resolver = AsyncMock(return_value=SourceReadAuthority("owner"))
+    ids = [source.id for source in sources]
+    assert await service.partition_stored_cohort("org", "owner", ids, resolver) == [
+        ids[:3],
+        ids[3:],
+    ]
+    # Interleave two families across identifier order, the way unrelated tasks
+    # share a page of random identifiers.
+    for index, source in enumerate(sources):
+        await _embed(content_store, source, _axis(index % 2, tilt=index / 100))
+    bins = await service.partition_stored_cohort("org", "owner", ids, resolver)
+    assert bins == [ids[0::2], ids[1::2]]
+    assert bins == await service.partition_stored_cohort(
+        "org", "owner", list(reversed(ids)), resolver
+    )
+
+
+async def test_partition_stops_a_cohort_at_the_family_boundary_despite_spare_budget(
+    cohort_sources, content_store, monkeypatch
+):
+    sources = await _family_sources(6)
+    install_proposal(monkeypatch, sources)
+    # Room for five: growth alone would top the first family up with the second.
+    _capacity_in_episodes(monkeypatch, 5)
+    for index, source in enumerate(sources):
+        await _embed(content_store, source, _axis(index % 2, tilt=index / 100))
+    ids = [source.id for source in sources]
+    bins = await service.partition_stored_cohort(
+        "org", "owner", ids, AsyncMock(return_value=SourceReadAuthority("owner"))
+    )
+    assert bins == [ids[0::2], ids[1::2]]
+
+
+@pytest.mark.parametrize("capacity", [5, 3])
+async def test_partition_places_an_unreciprocated_episode_in_its_nearest_cohort(
+    cohort_sources, content_store, monkeypatch, capacity
+):
+    sources = await _family_sources(4)
+    install_proposal(monkeypatch, sources)
+    _capacity_in_episodes(monkeypatch, capacity)
+    # The first identifier seeds first, but every other episode's nearest
+    # neighbours are each other, so nothing reciprocates it. It joins the most
+    # similar cohort with room, and stands alone only when the budget says so.
+    await _embed(content_store, sources[0], _axis(3, tilt=0.5))
+    for index in (1, 2, 3):
+        await _embed(content_store, sources[index], _axis(0, tilt=index / 100))
+    ids = [source.id for source in sources]
+    bins = await service.partition_stored_cohort(
+        "org", "owner", ids, AsyncMock(return_value=SourceReadAuthority("owner"))
+    )
+    assert bins == ([ids[1:] + ids[:1]] if capacity == 5 else [ids[1:], ids[:1]])
+
+
+async def test_partition_ranks_neighbours_among_unplaced_episodes(
+    cohort_sources, content_store, monkeypatch
+):
+    sources = await _family_sources(8)
+    install_proposal(monkeypatch, sources)
+    _capacity_in_episodes(monkeypatch, 3)
+    # Three identical hub episodes, then three spokes whose nearest neighbours
+    # are all hubs, then a second family of two. Once the hubs fill the first
+    # cohort, the spokes still recognise each other instead of drifting into
+    # the other family's cohort.
+    for index in (0, 1, 2):
+        await _embed(content_store, sources[index], _axis(0))
+    for index, spoke in ((3, 3), (4, 4), (5, 5)):
+        await _embed(content_store, sources[index], _vector({0: 1.0, spoke: 0.5}))
+    for index in (6, 7):
+        await _embed(content_store, sources[index], _axis(1, tilt=index / 100))
+    ids = [source.id for source in sources]
+    bins = await service.partition_stored_cohort(
+        "org", "owner", ids, AsyncMock(return_value=SourceReadAuthority("owner"))
+    )
+    assert bins == [ids[0:3], ids[3:6], ids[6:8]]
+
+
+async def test_partition_skips_an_oversized_neighbour_without_closing_the_cohort(
+    cohort_sources, content_store, monkeypatch
+):
+    sources = await _family_sources(4)
+    install_proposal(monkeypatch, sources)
+    ids = [source.id for source in sources]
+    # The second episode is every other member's nearest neighbour and alone
+    # takes the whole budget; the rest of the family still packs together.
+    _capacity_in_episodes(monkeypatch, 10, weights={ids[1]: 10})
+    await _embed(content_store, sources[1], _axis(0))
+    for index, spoke in ((0, 3), (2, 4), (3, 5)):
+        await _embed(content_store, sources[index], _vector({0: 1.0, spoke: 0.3}))
+    bins = await service.partition_stored_cohort(
+        "org", "owner", ids, AsyncMock(return_value=SourceReadAuthority("owner"))
+    )
+    assert bins == [[ids[0], ids[2], ids[3]], [ids[1]]]
+
+
+async def test_partition_sizes_a_controller_cohort_as_a_projection_in_a_mixed_group(
+    cohort_sources, content_store, monkeypatch
+):
+    from sibyl_core.tasks._evidence_json import canonical
+    from tests.test_episode_evidence import _episode
+
+    def content(index):
+        if index == 2:
+            return "A plain note about the deploy window."
+        episode = _episode()
+        episode["goal"] = f"preserve evidence {index}"
+        return canonical(episode)
+
+    sources = await _family_sources(3, content)
+    install_proposal(monkeypatch, sources)
+    seen = []
+    _capacity_in_episodes(monkeypatch, 5, seen=seen)
+    controllers = [s for s in sources if s.raw_content.startswith("{")]
+    for source in controllers:
+        await _embed(content_store, source, _axis(0))
+    await service.partition_stored_cohort(
+        "org",
+        "owner",
+        [s.id for s in sources],
+        AsyncMock(return_value=SourceReadAuthority("owner")),
+    )
+    # The proposal sends a cohort of controller episodes as a projection, so
+    # partitioning must size it that way even though the group is mixed.
+    assert (sorted(s.id for s in controllers), True) in seen
+
+
+async def test_partition_keeps_budget_packing_outside_the_shared_embedding_space(
+    cohort_sources, content_store, monkeypatch
+):
+    sources = await _family_sources(6)
+    install_proposal(monkeypatch, sources)
+    _capacity_in_episodes(monkeypatch, 3)
+    for index in (0, 2, 4):
+        await _embed(content_store, sources[index], _axis(0, tilt=index / 100))
+    # One vector from another model is not comparable with the shared space.
+    await _embed(content_store, sources[1], _axis(0), space="model-b")
+    ids = [source.id for source in sources]
+    bins = await service.partition_stored_cohort(
+        "org", "owner", ids, AsyncMock(return_value=SourceReadAuthority("owner"))
+    )
+    assert bins == [ids[0::2], ids[1::2]]
 
 
 async def test_cohort_partition_keeps_event_loop_responsive(cohort_sources, monkeypatch):
