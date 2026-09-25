@@ -2,6 +2,7 @@
 
 import asyncio
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 
@@ -11,7 +12,25 @@ from sibyl_core.backends.surreal.schema_ownership import (
     try_acquire_schema_ownership,
 )
 from sibyl_core.backends.surreal.schema_version import GRAPH_SCHEMA_CURRENT_VERSION
+from sibyl_core.services.graph import SurrealGraphClient
 from tests.test_reflection_identity import runtime as runtime
+
+# Relax endpoint enforcement long enough to plant one orphan edge per relation
+# table next to one valid edge, as a namespace that predates enforcement has.
+ORPHAN_EDGE_SEED = """
+CREATE entity:kept SET uuid = 'kept', name = 'Kept', entity_type = 'pattern',
+    labels = [], attributes = {}, group_id = $group_id;
+CREATE entity:other SET uuid = 'other', name = 'Other', entity_type = 'pattern',
+    labels = [], attributes = {}, group_id = $group_id;
+RELATE entity:kept->relates_to:valid->entity:other SET
+    uuid = 'valid', name = 'RELATED_TO', fact = 'valid edge', group_id = $group_id;
+DEFINE TABLE OVERWRITE relates_to SCHEMAFULL TYPE RELATION IN entity OUT entity;
+DEFINE TABLE OVERWRITE mentions SCHEMAFULL TYPE RELATION IN episode OUT entity;
+RELATE entity:kept->relates_to:orphan->entity:ghost SET
+    uuid = 'orphan', name = 'RELATED_TO', fact = 'orphan edge', group_id = $group_id;
+RELATE episode:ghost->mentions:orphan->entity:kept SET
+    uuid = 'orphan', group_id = $group_id;
+"""
 
 
 async def test_current_bootstrap_does_not_claim_or_mutate(runtime, monkeypatch):
@@ -175,18 +194,18 @@ async def test_embedded_bootstrap_continues_after_long_operation(runtime, monkey
     assert await runtime.client.execute_query("SELECT VALUE id FROM embedded_renewal:complete;")
 
 
-@pytest.mark.parametrize("slow_read", ["version", "count", "page"])
+@pytest.mark.parametrize("slow_read", ["version", "page", "rebuild_intent"])
 async def test_embedded_migration_renews_all_owned_reads(runtime, monkeypatch, slow_read):
     original = runtime.client.execute_query
     await original("UPDATE schema_version:graph SET version = 22;")
-    for table in schema.REMOVED_GRAPH_OBJECTS:
-        await original(f"DEFINE TABLE IF NOT EXISTS {table} SCHEMALESS;")
     claimed = False
     delayed = False
     prefix = {
         "version": "SELECT version FROM schema_version",
-        "count": "SELECT count() AS count FROM",
         "page": "SELECT id, uuid FROM entity WITH INDEX",
+        # The dimension reconcile reads the rebuild intent and then the recorded
+        # dimension, so a lease that lapsed during the first fails the second.
+        "rebuild_intent": "SELECT embedding_rebuild_dimension FROM schema_version",
     }[slow_read]
 
     async def slow_owned_read(statement, **params):
@@ -211,3 +230,28 @@ async def test_embedded_migration_renews_all_owned_reads(runtime, monkeypatch, s
     assert await original("SELECT VALUE version FROM schema_version:graph;") == [
         GRAPH_SCHEMA_CURRENT_VERSION
     ]
+
+
+@pytest.mark.parametrize("store", ["memory", "surrealkv"])
+async def test_bootstrap_cleans_orphan_edges_after_losing_schema_version(tmp_path, store):
+    url = "memory://" if store == "memory" else "surrealkv://" + str(tmp_path / "graph")
+    client = SurrealGraphClient(group_id=f"orphans-{uuid4().hex}", url=url)
+    try:
+        await schema.bootstrap_schema(client)
+        await client.execute_query(ORPHAN_EDGE_SEED, group_id=client.group_id)
+        assert sorted(await client.execute_query("SELECT VALUE uuid FROM relates_to;")) == [
+            "orphan",
+            "valid",
+        ]
+        assert await client.execute_query("SELECT VALUE uuid FROM mentions;") == ["orphan"]
+        await client.execute_query("DELETE schema_version:graph;")
+
+        await schema.bootstrap_schema(client)
+
+        assert await client.execute_query("SELECT VALUE uuid FROM relates_to;") == ["valid"]
+        assert await client.execute_query("SELECT VALUE uuid FROM mentions;") == []
+        assert await client.execute_query("SELECT VALUE version FROM schema_version:graph;") == [
+            GRAPH_SCHEMA_CURRENT_VERSION
+        ]
+    finally:
+        await client.close()

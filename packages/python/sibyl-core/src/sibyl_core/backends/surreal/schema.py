@@ -18,6 +18,7 @@ from sibyl_core.backends.surreal.schema_helpers import (
     split_statements,
 )
 from sibyl_core.backends.surreal.schema_index_recovery import ensure_owned_concurrent_index
+from sibyl_core.backends.surreal.schema_invariants import fetch_table_definitions
 from sibyl_core.backends.surreal.schema_lifecycle_repair import (
     LIFECYCLE_REPAIR_FIELDS,
     migrate_lifecycle_repair,
@@ -43,6 +44,7 @@ from sibyl_core.backends.surreal.schema_source_states import (
 from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WITNESS_DEFINITION
 from sibyl_core.backends.surreal.schema_version import (
     GRAPH_SCHEMA_CURRENT_VERSION,
+    GRAPH_SCHEMA_NAME,
     SCHEMA_VERSION_TABLE,
     ConcurrentIndexDefinition,
     SchemaMigration,
@@ -53,6 +55,7 @@ from sibyl_core.backends.surreal.schema_version import (
     get_schema_embedding_rebuild_dimension,
     get_schema_version,
     record_schema_version,
+    schema_version_record_id,
 )
 from sibyl_core.config import core_config
 from sibyl_core.memory_pipeline.observations import SourceKind
@@ -687,12 +690,6 @@ CURRENT_SCHEMA_MAINTENANCE_DEFINITIONS = ENTITY_DENORMALIZATION_MAINTENANCE_DEFI
 
 GRAPH_TABLES = ("entity", "episode")
 GRAPH_EDGES = ("relates_to", "mentions")
-REMOVED_GRAPH_TABLES = ("community", "saga")
-REMOVED_GRAPH_EDGES = ("has_episode", "next_episode", "has_member")
-REMOVED_GRAPH_OBJECTS = (*REMOVED_GRAPH_EDGES, *REMOVED_GRAPH_TABLES)
-DEAD_GRAPH_OBJECT_REMOVAL_DEFINITIONS = "\n".join(
-    f"REMOVE TABLE IF EXISTS {table};" for table in REMOVED_GRAPH_OBJECTS
-)
 GRAPH_SCHEMA_MIGRATIONS = (
     SchemaMigration(
         version=2,
@@ -710,7 +707,13 @@ GRAPH_SCHEMA_MIGRATIONS = (
     SchemaMigration(
         version=4,
         name="drop_dead_graph_objects",
-        statements=tuple(split_statements(DEAD_GRAPH_OBJECT_REMOVAL_DEFINITIONS)),
+        statements=(
+            "REMOVE TABLE IF EXISTS has_episode;",
+            "REMOVE TABLE IF EXISTS next_episode;",
+            "REMOVE TABLE IF EXISTS has_member;",
+            "REMOVE TABLE IF EXISTS community;",
+            "REMOVE TABLE IF EXISTS saga;",
+        ),
     ),
     SchemaMigration(
         version=5,
@@ -1062,79 +1065,17 @@ async def _reconcile_embedding_dimension(driver: SchemaDriver, ownership: Schema
     )
 
 
-def _is_relation_cleanup_statement(statement: str) -> bool:
+def _relation_cleanup_table(statement: str) -> str | None:
     normalized = statement.lstrip().lower()
-    return any(
-        normalized.startswith(f"delete from {table}") or normalized.startswith(f"update {table}")
-        for table in GRAPH_EDGES
-    )
+    for table in GRAPH_EDGES:
+        if normalized.startswith((f"delete from {table}", f"update {table}")):
+            return table
+    return None
 
 
 def _is_missing_table_error(error: Exception) -> bool:
     message = str(error).lower()
     return "the table" in message and "does not exist" in message
-
-
-def _coerce_count(value: object) -> int:
-    if isinstance(value, bool):
-        return int(value)
-    if isinstance(value, int | float):
-        return int(value)
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return 0
-    return 0
-
-
-def _first_count_value(value: object) -> object:
-    value_map = _object_mapping(value)
-    if value_map is not None:
-        if "result" in value_map:
-            return _first_count_value(value_map.get("result"))
-        count = value_map.get("count")
-        if count is not None:
-            return count
-        return value_map.get("cnt", 0)
-    if isinstance(value, list):
-        for item in value:
-            count = _first_count_value(item)
-            if count is not None:
-                return count
-    return None
-
-
-async def _dead_graph_object_count(
-    driver: SchemaDriver, table: str, *, ownership: SchemaOwnership | None = None
-) -> int:
-    _validate_identifier(table)
-    try:
-        execute = ownership.read if ownership is not None else driver.execute_query
-        result = await execute(f"SELECT count() AS count FROM {table} GROUP ALL;")
-    except Exception as exc:
-        if _is_missing_table_error(exc):
-            return 0
-        raise
-    return _coerce_count(_first_count_value(result))
-
-
-async def _ensure_removed_graph_objects_empty(
-    driver: SchemaDriver, *, ownership: SchemaOwnership | None = None
-) -> None:
-    occupied: dict[str, int] = {}
-    for table in REMOVED_GRAPH_OBJECTS:
-        count = await _dead_graph_object_count(driver, table, ownership=ownership)
-        if count:
-            occupied[table] = count
-
-    if occupied:
-        summary = ", ".join(f"{table}={count}" for table, count in occupied.items())
-        msg = (
-            "Dead graph objects still contain rows; export or clear them before "
-            f"graph schema v{GRAPH_SCHEMA_CURRENT_VERSION} migration: {summary}"
-        )
-        raise RuntimeError(msg)
 
 
 async def _assert_graph_migrations_safe(
@@ -1278,9 +1219,19 @@ async def _graph_schema_ownership(driver: SchemaDriver) -> AsyncIterator[SchemaO
             await ownership.release()
 
 
+async def _recorded_graph_schema_version(driver: SchemaDriver) -> int:
+    # A new namespace has no schema_version table. Selecting from a list of
+    # record ids returns no rows there, while a table scan fails with NotFound
+    # on 3.x servers and the client logs every failed query as a warning.
+    record_id = schema_version_record_id(GRAPH_SCHEMA_NAME)
+    result = await driver.execute_query(f"SELECT VALUE version FROM [{record_id}];")
+    version = result[0] if isinstance(result, list) and result else None
+    return int(version) if isinstance(version, int | float | str) else 0
+
+
 async def _graph_schema_is_current(driver: SchemaDriver) -> bool:
     try:
-        if await get_schema_version(driver.execute_query) < GRAPH_SCHEMA_CURRENT_VERSION:
+        if await _recorded_graph_schema_version(driver) < GRAPH_SCHEMA_CURRENT_VERSION:
             return False
         if await get_schema_embedding_dimension(driver.execute_query) != EMBEDDING_DIM:
             return False
@@ -1323,7 +1274,7 @@ async def _bootstrap_owned_schema(
     current_version = 0
     if reset:
         await retire_source_states(ownership.mutate, kind=SourceKind.GRAPH_ENTITY)
-        for table in (*GRAPH_EDGES, *GRAPH_TABLES, *REMOVED_GRAPH_EDGES, *REMOVED_GRAPH_TABLES):
+        for table in (*GRAPH_EDGES, *GRAPH_TABLES):
             await ownership.mutate(f"REMOVE TABLE IF EXISTS {table};")
         await ownership.mutate(f"REMOVE TABLE IF EXISTS {SCHEMA_VERSION_TABLE};")
     else:
@@ -1337,7 +1288,6 @@ async def _bootstrap_owned_schema(
             await _assert_graph_migrations_safe(
                 driver, current_version=current_version, ownership=ownership
             )
-            await _ensure_removed_graph_objects_empty(driver, ownership=ownership)
             await apply_schema_migrations(
                 ownership.read,
                 _graph_schema_migrations(url=driver._url, ownership=ownership),
@@ -1346,21 +1296,27 @@ async def _bootstrap_owned_schema(
             )
             await _reconcile_embedding_dimension(driver, ownership)
             return
-        await _ensure_removed_graph_objects_empty(driver, ownership=ownership)
 
-    compatible_blocks = (
+    for block in (
         ANALYZER_DEFINITIONS,
         render_surreal_compatible_sql(NODE_DEFINITIONS, url=driver._url),
-        RELATION_EDGE_CLEANUP_DEFINITIONS,
+    ):
+        await _execute_graph_schema_block(driver, block, ownership=ownership)
+    # Orphaned edges must be gone before EDGE_DEFINITIONS enforces relation
+    # endpoints. A 3.x server fails DELETE and UPDATE on a missing table with
+    # NotFound, so each relation table is cleaned only when INFO FOR DB lists
+    # it. A new namespace or a reset has neither table and skips the cleanup.
+    present_tables = await fetch_table_definitions(ownership.read)
+    for statement in split_statements(RELATION_EDGE_CLEANUP_DEFINITIONS):
+        if _relation_cleanup_table(statement) in present_tables:
+            await execute_schema_statement(
+                ownership.mutate, statement, scope="graph", group_id=driver.group_id
+            )
+    await _execute_graph_schema_block(
+        driver,
         render_surreal_compatible_sql(EDGE_DEFINITIONS, url=driver._url),
+        ownership=ownership,
     )
-    for block in compatible_blocks:
-        await _execute_graph_schema_block(
-            driver,
-            block,
-            ignore_missing_relation_tables=block == RELATION_EDGE_CLEANUP_DEFINITIONS,
-            ownership=ownership,
-        )
     if force and not reset and current_version >= 23:
         for statement in split_statements(LIFECYCLE_REPAIR_FIELDS):
             await execute_schema_statement(
@@ -1385,41 +1341,15 @@ async def _execute_graph_schema_block(
     driver: SchemaDriver,
     block: str,
     *,
-    ignore_missing_relation_tables: bool = False,
-    ownership: SchemaOwnership | None = None,
-) -> bool:
-    skipped_missing_relation_table = False
-    if ownership is not None and not ignore_missing_relation_tables:
-        await execute_schema_statements(
-            ownership.mutate,
-            split_statements(block),
-            scope="graph",
-            group_id=driver.group_id,
-            batch_execute=ownership.mutate,
-        )
-        return False
-    for statement in split_statements(block):
-        try:
-            await execute_schema_statement(
-                ownership.mutate if ownership is not None else driver.execute_query,
-                statement,
-                scope="graph",
-                group_id=driver.group_id,
-            )
-        except Exception as exc:
-            if not (
-                ignore_missing_relation_tables
-                and _is_relation_cleanup_statement(statement)
-                and _is_missing_table_error(exc)
-            ):
-                raise
-            skipped_missing_relation_table = True
-            logger.debug(
-                "surreal_schema_relation_cleanup_skipped",
-                group_id=driver.group_id,
-                error_type=type(exc).__name__,
-            )
-    return skipped_missing_relation_table
+    ownership: SchemaOwnership,
+) -> None:
+    await execute_schema_statements(
+        ownership.mutate,
+        split_statements(block),
+        scope="graph",
+        group_id=driver.group_id,
+        batch_execute=ownership.mutate,
+    )
 
 
 async def drop_all_indexes(
@@ -1445,7 +1375,6 @@ async def drop_all_indexes(
 
 __all__ = [
     "ANALYZER_DEFINITIONS",
-    "DEAD_GRAPH_OBJECT_REMOVAL_DEFINITIONS",
     "EDGE_DEFINITIONS",
     "EMBEDDING_DIM",
     "EMBEDDING_VECTOR_FIELDS",
@@ -1471,9 +1400,6 @@ __all__ = [
     "PARENT_TASK_CANONICALIZATION_DEFINITIONS",
     "RELATION_CREATED_AT_CURSOR_MIGRATION_DEFINITIONS",
     "RELATION_EDGE_CLEANUP_DEFINITIONS",
-    "REMOVED_GRAPH_EDGES",
-    "REMOVED_GRAPH_OBJECTS",
-    "REMOVED_GRAPH_TABLES",
     "EmbeddingVectorField",
     "_graph_schema_migrations",
     "bootstrap_schema",
