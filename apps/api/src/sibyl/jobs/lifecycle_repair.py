@@ -17,8 +17,10 @@ from sibyl.persistence.auth_runtime import (
 )
 from sibyl.persistence.organization_runtime import list_org_ids
 from sibyl_core.projection.repair import LifecycleRepairResult, repair_graph_lifecycle
+from sibyl_core.services import content_client
 from sibyl_core.services.content_raw_embedding_repair import repair_raw_capture_embeddings
 from sibyl_core.services.document_embedding_sweep import (
+    DOCUMENT_CHUNK_EMBEDDING_PLANE,
     ChunkEmbedder,
     decide_document_chunk_legacy_vectors,
     sweep_document_chunk_embeddings,
@@ -27,8 +29,10 @@ from sibyl_core.services.embedding_sweep import (
     SWEEP_CURRENT,
     SWEEP_SKIPPED_NO_PROVIDER,
     EmbeddingSweepResult,
+    read_embedding_sweep_state,
 )
 from sibyl_core.services.graph_embedding_sweep import (
+    GRAPH_EMBEDDING_PLANE,
     decide_graph_legacy_vectors,
     sweep_graph_embeddings,
 )
@@ -88,15 +92,21 @@ async def _repair_graph(
         # promoted-embedding repair can rewrite, so it is settled first.
         sweep_task: asyncio.Task[EmbeddingSweepResult] | None = None
         sweep: EmbeddingSweepResult | BaseException
+        restamp_allowed = True
         try:
             await decide_graph_legacy_vectors(runtime)
         except Exception as exc:
             sweep = exc
+            restamp_allowed = await _graph_verdict_recorded(runtime, organization_id)
         else:
             sweep_task = asyncio.create_task(sweep_graph_embeddings(runtime))
         try:
             lifecycle = await repair_graph_lifecycle(runtime)
-            embeddings = await repair_promoted_embeddings(runtime)
+            embeddings = (
+                await repair_promoted_embeddings(runtime)
+                if restamp_allowed
+                else LifecycleRepairResult()
+            )
         finally:
             if sweep_task is not None:
                 try:
@@ -109,10 +119,11 @@ async def _repair_graph(
         return combined, sweep
 
 
-async def _settle_chunk_verdict(
-    organization_id: str,
-) -> tuple[dict[str, Any], bool, ChunkEmbedder] | None:
-    """Record the chunk plane's verdict, or None when it could not be settled.
+type _ChunkPlane = tuple[dict[str, Any], bool, ChunkEmbedder]
+
+
+async def _settle_chunk_verdict(organization_id: str) -> _ChunkPlane | BaseException:
+    """Record the chunk plane's verdict, or return why it could not be settled.
 
     The verdict reads raw capture stamps, which the raw embedding repair
     rewrites after a provider switch, so it must be settled before that
@@ -129,8 +140,33 @@ async def _settle_chunk_verdict(
             group_id=organization_id,
             error_type=type(exc).__name__,
         )
-        return None
+        return exc
     return stamp, runnable, embed_chunks
+
+
+async def _graph_verdict_recorded(runtime: Any, organization_id: str) -> bool:
+    """Whether an earlier pass already persisted this organization's graph verdict."""
+    try:
+        state = await read_embedding_sweep_state(
+            GRAPH_EMBEDDING_PLANE, organization_id, runtime.client.execute_query
+        )
+    except Exception:
+        return False
+    return bool(state.get("legacy_decision"))
+
+
+async def _chunk_verdict_recorded(organization_id: str) -> bool:
+    """Whether an earlier pass already persisted this organization's chunk verdict."""
+    try:
+        async with content_client.surreal_content_client() as client:
+            state = await read_embedding_sweep_state(
+                DOCUMENT_CHUNK_EMBEDDING_PLANE,
+                organization_id,
+                lambda query, **params: content_client.select_many(client, query, **params),
+            )
+    except Exception:
+        return False
+    return bool(state.get("legacy_decision"))
 
 
 async def _repair_organization(organization_id: str) -> list[object]:
@@ -140,7 +176,14 @@ async def _repair_organization(organization_id: str) -> list[object]:
         _repair_graph(organization_id),
         repair_raw_source_lifecycle(organization_id, authority_resolver=resolve_source_authority),
     ]
-    if chunk_plane is not None:
+    outcomes: list[object] = []
+    if isinstance(chunk_plane, BaseException):
+        outcomes.append(chunk_plane)
+        # Until a verdict exists, restamping raw captures would erase the
+        # evidence it needs; once one is recorded the raw repair is free to run.
+        if await _chunk_verdict_recorded(organization_id):
+            repairs.append(repair_raw_capture_embeddings(organization_id))
+    else:
         stamp, runnable, embed_chunks = chunk_plane
         repairs.append(repair_raw_capture_embeddings(organization_id))
         repairs.append(
@@ -148,7 +191,8 @@ async def _repair_organization(organization_id: str) -> list[object]:
                 organization_id, stamp=stamp if runnable else None, embed_chunks=embed_chunks
             )
         )
-    return list(await asyncio.gather(*repairs, return_exceptions=True))
+    outcomes.extend(await asyncio.gather(*repairs, return_exceptions=True))
+    return outcomes
 
 
 def _record_embedding_sweep(

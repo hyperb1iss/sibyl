@@ -180,3 +180,17 @@ async def test_chunk_sweep_without_an_embedder_does_nothing(content_store) -> No
         str(uuid4()), stamp=None, embed_chunks=ChunkEmbedder(CURRENT)
     )
     assert result.status == SWEEP_SKIPPED_NO_PROVIDER
+
+
+async def test_fresh_chunk_stamps_are_not_evidence_about_older_chunks(content_store) -> None:
+    org = str(uuid4())
+    # Written by the new release with the new model before its first sweep.
+    await _chunk(org, "fresh", stamp=CURRENT)
+    await _chunk(org, "legacy")
+
+    result = await sweep_document_chunk_embeddings(
+        org, stamp=CURRENT, embed_chunks=ChunkEmbedder(CURRENT)
+    )
+
+    assert result.legacy_decision == LegacyVectorDecision.ADOPT.value
+    assert (await _state(org))["legacy_basis"] == LegacyVectorBasis.NO_PRIOR_EVIDENCE.value

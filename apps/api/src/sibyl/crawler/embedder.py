@@ -200,8 +200,8 @@ class EmbeddingService:
         """
         try:
             config = await self._resolve_config()
-            await self._get_client(config)
         except ValueError:
+            # A provider this service does not speak: stamp the configured values.
             service = get_settings_service()
             provider = str(await service.get("embedding_provider") or settings.embedding_provider)
             model = self.model or await service.get("embedding_model") or settings.embedding_model
@@ -214,6 +214,10 @@ class EmbeddingService:
                 ),
                 False,
             )
+        try:
+            await self._get_client(config)
+        except ValueError:
+            return config.chunk_metadata(), False
         return config.chunk_metadata(), True
 
     async def _embed_texts_with_config(

@@ -236,10 +236,20 @@ async def test_an_unsettled_chunk_verdict_holds_back_raw_restamping(monkeypatch)
     monkeypatch.setattr(lifecycle_repair, "repair_raw_capture_embeddings", raw_embeddings)
     monkeypatch.setattr(lifecycle_repair, "sweep_document_chunk_embeddings", chunk_sweep)
 
-    await lifecycle_repair.repair_lifecycle_all_orgs({})
+    monkeypatch.setattr(lifecycle_repair, "_chunk_verdict_recorded", AsyncMock(return_value=False))
+
+    result = await lifecycle_repair.repair_lifecycle_all_orgs({})
 
     raw_lifecycle.assert_awaited_once()
     raw_embeddings.assert_not_awaited()
+    chunk_sweep.assert_not_awaited()
+    # The unsettled verdict is a failure the summary counts.
+    assert result["failed_organizations"] == 1
+
+    # Once an earlier pass recorded the verdict, raw repair no longer waits on it.
+    monkeypatch.setattr(lifecycle_repair, "_chunk_verdict_recorded", AsyncMock(return_value=True))
+    await lifecycle_repair.repair_lifecycle_all_orgs({})
+    raw_embeddings.assert_awaited_once()
     chunk_sweep.assert_not_awaited()
 
 
@@ -277,3 +287,37 @@ async def test_a_failed_graph_sweep_keeps_the_graph_lifecycle_counts(monkeypatch
     result = await lifecycle_repair.repair_lifecycle_all_orgs({})
 
     assert (result["checked"], result["recovered"], result["failed_organizations"]) == (2, 2, 1)
+
+
+async def test_an_unsettled_graph_verdict_holds_back_promoted_restamping(monkeypatch):
+    @asynccontextmanager
+    async def background(_group_id):
+        yield object()
+
+    monkeypatch.setattr(lifecycle_repair, "list_org_ids", AsyncMock(return_value=["org"]))
+    monkeypatch.setattr(lifecycle_repair, "background_graph_runtime", background)
+    monkeypatch.setattr(
+        lifecycle_repair,
+        "decide_graph_legacy_vectors",
+        AsyncMock(side_effect=ConnectionError("graph store unavailable")),
+    )
+    monkeypatch.setattr(
+        lifecycle_repair, "repair_graph_lifecycle", AsyncMock(return_value=LifecycleRepairResult())
+    )
+    promoted = AsyncMock(return_value=LifecycleRepairResult())
+    graph_sweep = AsyncMock()
+    monkeypatch.setattr(lifecycle_repair, "repair_promoted_embeddings", promoted)
+    monkeypatch.setattr(lifecycle_repair, "sweep_graph_embeddings", graph_sweep)
+    for name in ("repair_raw_source_lifecycle", "repair_raw_capture_embeddings"):
+        monkeypatch.setattr(lifecycle_repair, name, AsyncMock(return_value=LifecycleRepairResult()))
+    monkeypatch.setattr(lifecycle_repair, "_graph_verdict_recorded", AsyncMock(return_value=False))
+
+    result = await lifecycle_repair.repair_lifecycle_all_orgs({})
+
+    promoted.assert_not_awaited()
+    graph_sweep.assert_not_awaited()
+    assert result["failed_organizations"] == 1
+
+    monkeypatch.setattr(lifecycle_repair, "_graph_verdict_recorded", AsyncMock(return_value=True))
+    await lifecycle_repair.repair_lifecycle_all_orgs({})
+    promoted.assert_awaited_once()

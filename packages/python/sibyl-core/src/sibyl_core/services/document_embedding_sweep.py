@@ -6,8 +6,8 @@ and resolves the content embedding configuration), so callers inject it as a
 function that returns vectors together with the stamp it wrote them under.
 
 Chunks gained a stamp in the same release as the sweep, so a plane's first
-verdict also reads the organization's raw captures: they are embedded by the
-same content configuration and have carried a stamp for longer.
+verdict reads the organization's raw captures instead: they are embedded by
+the same content configuration and have carried a stamp for longer.
 """
 
 from __future__ import annotations
@@ -87,19 +87,20 @@ def document_chunk_embedding_plane(
         return await embed_chunks(rows)
 
     async def evidence() -> LegacyEvidence:
-        common = {"scope": organization_id, "unverified": UNVERIFIED_EMBEDDING_PROVIDER}
-        model = {
+        # Chunk stamps are all written by this release or later, so they say
+        # nothing about the model behind unstamped chunks. Raw captures share
+        # the content embedding configuration and were stamped long before.
+        params = {
+            "scope": organization_id,
+            "unverified": UNVERIFIED_EMBEDDING_PROVIDER,
             "provider": stamp.get("provider"),
             "model": stamp.get("model"),
             "dimensions": stamp.get("dimensions"),
         }
-        differs = bool(
-            await execute(table.stamp_probe_query(matching=False), stamp=stamp, **common)
-        ) or bool(await execute(_RAW_MODEL_DIFFERS, **common, **model))
-        matches = bool(
-            await execute(table.stamp_probe_query(matching=True), stamp=stamp, **common)
-        ) or bool(await execute(_RAW_MODEL_MATCHES, **common, **model))
-        return LegacyEvidence(differs=differs, matches=matches)
+        return LegacyEvidence(
+            differs=bool(await execute(_RAW_MODEL_DIFFERS, **params)),
+            matches=bool(await execute(_RAW_MODEL_MATCHES, **params)),
+        )
 
     dimensions = stamp.get("dimensions")
     return SweepPlane(

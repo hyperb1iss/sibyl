@@ -198,3 +198,59 @@ async def test_restored_chunk_vectors_keep_their_model_or_arrive_unverified(
     # The restore sends the sweep back over a plane that had finished.
     assert state[0].get("complete_metadata") is None
     assert state[0]["generation"] == 1
+
+
+@pytest.mark.asyncio
+async def test_restore_settles_the_chunk_verdict_before_restamping_raw_captures(
+    surreal_content_client: SurrealContentClient, monkeypatch
+) -> None:
+    from sibyl_core.projection.repair import LifecycleRepairResult
+
+    org = str(uuid4())
+    order: list[str] = []
+
+    async def decide(organization_id, **kwargs):
+        assert kwargs["client"] is surreal_content_client
+        order.append(f"verdict:{organization_id}")
+
+    async def repair(organization_id, **kwargs):
+        order.append(f"raw:{organization_id}")
+        return LifecycleRepairResult()
+
+    monkeypatch.setattr(
+        "sibyl.jobs.embedding_sweep.document_chunk_sweep_inputs",
+        AsyncMock(return_value=({"provider": "p"}, True, AsyncMock())),
+    )
+    monkeypatch.setattr(
+        "sibyl_core.services.document_embedding_sweep.decide_document_chunk_legacy_vectors",
+        decide,
+    )
+    monkeypatch.setattr(
+        "sibyl_core.services.content_raw_embedding_repair.repair_raw_capture_embeddings", repair
+    )
+
+    result = await _restore(surreal_content_client, _payload(org))
+
+    assert result.success is True
+    assert order == [f"verdict:{org}", f"raw:{org}"]
+
+
+@pytest.mark.asyncio
+async def test_restore_holds_back_raw_restamping_when_the_verdict_fails(
+    surreal_content_client: SurrealContentClient, monkeypatch
+) -> None:
+    org = str(uuid4())
+    repair = AsyncMock()
+    monkeypatch.setattr(
+        "sibyl.jobs.embedding_sweep.document_chunk_sweep_inputs",
+        AsyncMock(side_effect=ConnectionError("settings unavailable")),
+    )
+    monkeypatch.setattr(
+        "sibyl_core.services.content_raw_embedding_repair.repair_raw_capture_embeddings", repair
+    )
+
+    result = await _restore(surreal_content_client, _payload(org))
+
+    assert result.success is True
+    assert result.embedding_repair == {org: {"error": "ConnectionError"}}
+    repair.assert_not_awaited()

@@ -228,3 +228,16 @@ async def test_chunk_stamp_survives_an_embedder_that_cannot_run(
         "dimensions": 1536,
         "text_version": "document-chunk-v1",
     }
+
+
+@pytest.mark.asyncio
+async def test_a_missing_gemini_key_still_stamps_the_model_gemini_would_use(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = FakeSettingsService({"embedding_provider": "gemini"})
+    monkeypatch.setattr(embedder_module, "get_settings_service", lambda: service)
+
+    stamp, runnable = await EmbeddingService().chunk_embedding_metadata()
+
+    assert runnable is False
+    assert stamp["model"] == "gemini-embedding-2"
