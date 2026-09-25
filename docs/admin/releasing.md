@@ -50,6 +50,10 @@ git rev-parse origin/main
 Run the release gates on that commit. The browser gate needs the production-shaped fixture and a
 running frontend. The Helm gate needs Helm installed.
 
+Pull request CI already runs the root trust gates on every change (the `trust-gates` task, with
+moon's task cache off), so this run confirms them on the release commit rather than running them for
+the first time.
+
 ```bash
 moon run :check
 moon run e2e:test-browser

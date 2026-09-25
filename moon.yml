@@ -212,15 +212,17 @@ tasks:
       - web:typecheck
       - hooks:typecheck
 
-  check:
+  # Every root gate that PR CI does not already run through another job.
+  # Static Checks covers inventory-lint and inventory-typecheck, Test Suite
+  # covers bench-gate-test, and Release Workflow Contract covers
+  # release-workflow-test and sync-versions-check. CI runs this task with
+  # --force so a gate whose input list misses a dependency cannot be served
+  # a cached pass; that is how a scope regression reached the 1.4.0 dry cut.
+  trust-gates:
     deps:
       - ~:inventory-check
-      - ~:sync-versions-check
-      - ~:inventory-lint
-      - ~:inventory-typecheck
       - ~:inventory-test
       - ~:dev-script-test
-      - ~:bench-gate-test
       - ~:vector-index-bench-test
       - ~:multi-user-perf-test
       - ~:chaos-test
@@ -247,6 +249,14 @@ tasks:
       - ~:doc-claim-gate-test
       - ~:backup-restore-gate-test
       - ~:enterprise-readiness-evidence-test
+
+  check:
+    deps:
+      - ~:trust-gates
+      - ~:sync-versions-check
+      - ~:inventory-lint
+      - ~:inventory-typecheck
+      - ~:bench-gate-test
       - ~:release-workflow-test
       - core:check
       - api:check

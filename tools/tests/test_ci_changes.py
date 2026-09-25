@@ -33,6 +33,7 @@ def test_release_surfaces_run_every_release_integrity_gate(path: str) -> None:
     assert outputs["run_static"] == "true"
     assert outputs["run_build"] == "true"
     assert outputs["run_tests"] == "true"
+    assert outputs["run_trust"] == "true"
     assert outputs["run_e2e"] == "true"
     assert outputs["run_image_scan"] == "true"
     assert outputs["image_scan_matrix"] == '["api","web"]'
@@ -46,6 +47,8 @@ def test_documentation_only_change_keeps_runtime_jobs_off() -> None:
     assert outputs["run_static"] == "true"
     assert outputs["run_build"] == "false"
     assert outputs["run_tests"] == "false"
+    # The doc-claim gate checks published claims against receipts.
+    assert outputs["run_trust"] == "true"
     assert outputs["run_e2e"] == "false"
     assert outputs["run_image_scan"] == "false"
     assert outputs["run_release"] == "false"
@@ -59,7 +62,15 @@ def test_toolchain_change_runs_runtime_jobs(path: str) -> None:
     assert outputs["run_static"] == "true"
     assert outputs["run_build"] == "true"
     assert outputs["run_tests"] == "true"
+    assert outputs["run_trust"] == "true"
     assert outputs["run_e2e"] == "true"
+
+
+def test_hooks_only_change_keeps_trust_gates_off() -> None:
+    outputs = classify_changed_paths(("hooks/pyproject.toml",)).outputs()
+
+    assert outputs["run_static"] == "true"
+    assert outputs["run_trust"] == "false"
 
 
 def test_classifier_fails_closed_with_the_unmatched_path() -> None:
@@ -121,6 +132,53 @@ def test_ci_runs_release_and_helm_contract_jobs() -> None:
     assert "moon run e2e:test-browser" in workflow
     assert "profile: defaults" in workflow
     assert "profile: production-redis" in workflow
+
+
+# Gates that PR CI already runs through another job, so trust-gates omits them.
+TRUST_GATES_COVERED_ELSEWHERE = {
+    "~:inventory-lint",
+    "~:inventory-typecheck",
+    "~:bench-gate-test",
+    "~:release-workflow-test",
+    "~:sync-versions-check",
+}
+
+
+def test_trust_gates_carry_every_root_gate_in_the_rc_bundle() -> None:
+    tasks = yaml.safe_load((REPO_ROOT / "moon.yml").read_text(encoding="utf-8"))["tasks"]
+    root_check_deps = {dep for dep in tasks["check"]["deps"] if dep.startswith("~:")}
+    trust_gates = set(tasks["trust-gates"]["deps"])
+
+    assert "~:trust-gates" in root_check_deps
+    assert trust_gates.isdisjoint(TRUST_GATES_COVERED_ELSEWHERE)
+    assert root_check_deps - {"~:trust-gates"} == TRUST_GATES_COVERED_ELSEWHERE
+    assert "command" not in tasks["trust-gates"]
+    for dep in trust_gates:
+        assert dep.removeprefix("~:") in tasks, dep
+
+
+def test_ci_runs_trust_gates_on_pull_requests_without_the_task_cache() -> None:
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    job = workflow["jobs"]["trust-gates"]
+
+    assert job["if"] == "needs.changes.outputs.run_trust == 'true'"
+    assert job["needs"] == "changes"
+    assert "run_trust" in workflow["jobs"]["changes"]["outputs"]
+    run_steps = [step["run"] for step in job["steps"] if "moon run" in step.get("run", "")]
+    assert run_steps
+    for script in run_steps:
+        for line in script.splitlines():
+            if "moon run" in line:
+                assert line.strip().endswith("--force"), line
+    assert "moon run trust-gates --force" in run_steps[0]
+    assert "moon run doc-claim-gate-test --force" in run_steps[0]
+    moon_cache_steps = [
+        step
+        for step in job["steps"]
+        if "actions/cache@" in step.get("uses", "")
+        and ".moon/cache" in str(step.get("with", {}).get("path", ""))
+    ]
+    assert not moon_cache_steps
 
 
 def test_ci_runs_darwin_authority_on_the_supported_host() -> None:
