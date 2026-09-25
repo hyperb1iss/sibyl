@@ -137,6 +137,8 @@ class _RecordingSchemaClient:
             return {"indexes": {}}
         if stripped.startswith("SELECT version FROM schema_version"):
             return [{"version": self.schema_version}]
+        if stripped.startswith("SELECT VALUE version FROM [schema_version:graph]"):
+            return [self.schema_version]
         if stripped.startswith("UPSERT schema_version:"):
             version = params.get("version")
             self.schema_version = int(version) if isinstance(version, int | str | float) else 0
@@ -1358,6 +1360,7 @@ async def test_graph_bootstrap_skips_maintenance_when_version_is_current() -> No
 
     await bootstrap_schema(client)  # type: ignore[arg-type]
 
+    assert not any("$sibyl_schema_claimed" in statement for statement in client.calls)
     assert not any("REMOVE INDEX" in statement for statement in client.calls)
     assert not any("DEFINE TABLE IF NOT EXISTS entity" in statement for statement in client.calls)
     assert not any("UPDATE entity SET" in statement for statement in client.calls)

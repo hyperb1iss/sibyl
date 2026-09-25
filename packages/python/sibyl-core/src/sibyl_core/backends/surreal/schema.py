@@ -43,6 +43,7 @@ from sibyl_core.backends.surreal.schema_source_states import (
 from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WITNESS_DEFINITION
 from sibyl_core.backends.surreal.schema_version import (
     GRAPH_SCHEMA_CURRENT_VERSION,
+    GRAPH_SCHEMA_NAME,
     SCHEMA_VERSION_TABLE,
     ConcurrentIndexDefinition,
     SchemaMigration,
@@ -53,6 +54,7 @@ from sibyl_core.backends.surreal.schema_version import (
     get_schema_embedding_rebuild_dimension,
     get_schema_version,
     record_schema_version,
+    schema_version_record_id,
 )
 from sibyl_core.config import core_config
 from sibyl_core.memory_pipeline.observations import SourceKind
@@ -1216,9 +1218,19 @@ async def _graph_schema_ownership(driver: SchemaDriver) -> AsyncIterator[SchemaO
             await ownership.release()
 
 
+async def _recorded_graph_schema_version(driver: SchemaDriver) -> int:
+    # A new namespace has no schema_version table. Selecting from a list of
+    # record ids returns no rows there, while a table scan fails with NotFound
+    # on 3.x servers and the client logs every failed query as a warning.
+    record_id = schema_version_record_id(GRAPH_SCHEMA_NAME)
+    result = await driver.execute_query(f"SELECT VALUE version FROM [{record_id}];")
+    version = result[0] if isinstance(result, list) and result else None
+    return int(version) if isinstance(version, int | float | str) else 0
+
+
 async def _graph_schema_is_current(driver: SchemaDriver) -> bool:
     try:
-        if await get_schema_version(driver.execute_query) < GRAPH_SCHEMA_CURRENT_VERSION:
+        if await _recorded_graph_schema_version(driver) < GRAPH_SCHEMA_CURRENT_VERSION:
             return False
         if await get_schema_embedding_dimension(driver.execute_query) != EMBEDDING_DIM:
             return False
