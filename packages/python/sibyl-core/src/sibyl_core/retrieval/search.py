@@ -75,8 +75,14 @@ async def context_search(
     include_content: bool = True,
     embedding_provider: EmbeddingProvider | None = None,
     raw_memory_recall_fn: source_stage.RawMemoryRecallFn = recall_raw_memory_with_sources,
+    distinct_key: fusion_stage.DistinctKey | None = None,
 ) -> SearchResponse:
-    """Search context-pack candidates through native SurrealDB paths."""
+    """Search context-pack candidates through native SurrealDB paths.
+
+    ``distinct_key`` names the rows the caller will fold into one item. The
+    fused cut then counts ``limit`` distinct items, so a response can carry
+    more than ``limit`` rows when several of them share a key.
+    """
 
     from sibyl_core.tools.responses import SearchResponse
 
@@ -305,6 +311,7 @@ async def context_search(
         temporal_target=temporal_target,
         fusion_backend=fusion_backend,
         fusion_failures=fusion_failures,
+        distinct_key=distinct_key,
     )
     fused = fusion.candidates
     stage_timings_ms["fusion"] = _elapsed_ms(stage_started_at)

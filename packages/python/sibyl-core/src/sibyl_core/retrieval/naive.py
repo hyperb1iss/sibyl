@@ -36,7 +36,11 @@ import structlog
 from sibyl_core.retrieval._search_candidates import _candidate_allowed
 from sibyl_core.retrieval._search_database import _get_read_only_graph_runtime
 from sibyl_core.retrieval._search_expansion import _predicate_hop_receipt
-from sibyl_core.retrieval._search_fusion import _search_result_from_candidate
+from sibyl_core.retrieval._search_fusion import (
+    DistinctKey,
+    _cut_at_distinct_items,
+    _search_result_from_candidate,
+)
 from sibyl_core.retrieval._search_lifecycle import _apply_supersession_gate
 from sibyl_core.retrieval._search_plan import (
     MAX_RETRIEVAL_LIMIT,
@@ -118,8 +122,14 @@ async def naive_search(
     embedding_provider: EmbeddingProvider | None = None,
     char_budget: int | None = None,
     content_max_chars: int | None = None,
+    distinct_key: DistinctKey | None = None,
 ) -> SearchResponse:
-    """Retrieve with BM25 + dense KNN + plain RRF + a tight pack, and nothing else."""
+    """Retrieve with BM25 + dense KNN + plain RRF + a tight pack, and nothing else.
+
+    ``distinct_key`` has the meaning it has for the machine's ``context_search``:
+    the fused cut counts ``limit`` distinct items, so a caller that folds rows
+    sharing a key gets as many item slots from this arm as from the machine.
+    """
 
     from sibyl_core.tools.responses import SearchResponse
     from sibyl_core.tools.search import MAX_SEARCH_CONTENT_MAX_CHARS
@@ -280,7 +290,7 @@ async def naive_search(
     stage_timings_ms["candidate_filtering"] = _elapsed_ms(stage_started_at)
 
     stage_started_at = time.perf_counter()
-    fused = fuse_naive_candidates(filtered_lists, limit=limit)
+    fused = fuse_naive_candidates(filtered_lists, limit=limit, distinct_key=distinct_key)
     stage_timings_ms["fusion"] = _elapsed_ms(stage_started_at)
 
     stage_started_at = time.perf_counter()
@@ -386,6 +396,7 @@ def fuse_naive_candidates(
     *,
     limit: int,
     k: float = NAIVE_RRF_K,
+    distinct_key: DistinctKey | None = None,
 ) -> list[tuple[RetrievalCandidate, float, dict[str, Any]]]:
     """Plain reciprocal-rank fusion: no weights, no boosts, no re-rank.
 
@@ -417,7 +428,12 @@ def fuse_naive_candidates(
     fused.sort(key=lambda item: (-item[1], item[0].id))
     for _candidate, _score, metadata in fused:
         metadata["fusion_backend"] = "python_rrf"
-    return fused[:limit] if limit else fused
+    if not limit:
+        return fused
+    # The same distinct-item cut the machine uses, so a pack that folds
+    # same-lineage rows gives both arms the same number of item slots. It
+    # decides how many rows survive, never how any of them score.
+    return _cut_at_distinct_items(fused, limit=limit, distinct_key=distinct_key)
 
 
 def pack_naive_results(

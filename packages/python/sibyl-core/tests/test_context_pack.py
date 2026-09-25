@@ -1754,6 +1754,187 @@ async def test_lineage_dedup_collapses_same_name_duplicates(
     assert matching[0].id == "raw_memory:one"
 
 
+@pytest.mark.asyncio
+async def test_pack_stays_full_when_captures_and_their_episodes_both_qualify(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A capture and the episode projected from it are one item, so they cost one slot.
+
+    Both shapes reach fusion under the same name, and the pack folds them into
+    one item. If the search cut counted rows rather than items, every such pair
+    would leave the pack an item short even with candidates left to serve.
+    """
+    import sibyl_core.retrieval._search_database as database_module
+    import sibyl_core.retrieval._search_sources as source_module
+    from sibyl_core.retrieval import _search_candidates as candidate_module
+    from sibyl_core.retrieval.search import RetrievalSignal
+    from sibyl_core.services.surreal_content import RawMemory
+
+    limit = 24
+    captured_at = datetime(2026, 9, 1, tzinfo=UTC)
+    capture_titles = [f"Pool exhaustion finding {index}" for index in range(6)]
+    decision_names = [f"Distinct pool decision {index}" for index in range(limit)]
+
+    class EmptyNativeClient:
+        async def execute_query(self, *_args: object, **_kwargs: object) -> list[object]:
+            return []
+
+    class EmptyNativeRuntime:
+        client = EmptyNativeClient()
+
+    async def fake_native_runtime(_organization_id: str, **_kwargs: object) -> EmptyNativeRuntime:
+        return EmptyNativeRuntime()
+
+    async def fake_raw_recall(**kwargs: Any) -> list[RawMemory]:
+        if kwargs["memory_scope"] != "private":
+            return []
+        return [
+            RawMemory(
+                id=f"capture-{index}",
+                organization_id="org-123",
+                source_id=f"capture:{index}",
+                principal_id="user-123",
+                title=title,
+                raw_content=f"{title}: the pool ran dry under load.",
+                captured_at=captured_at,
+                created_at=captured_at,
+                score=1.0 - index * 0.01,
+            )
+            for index, title in enumerate(capture_titles)
+        ]
+
+    def node_row(uuid: str, name: str, entity_type: str, rank: int) -> Any:
+        return candidate_module._candidate_from_node_record(
+            {
+                "uuid": uuid,
+                "name": name,
+                "entity_type": entity_type,
+                "content": f"{name}: the pool ran dry under load.",
+                "group_id": "org-123",
+                "attributes": {},
+            },
+            signal=RetrievalSignal.NODE_FULLTEXT,
+            score=1.0 - rank * 0.01,
+        )
+
+    async def fake_node_fulltext(**_kwargs: object) -> list[Any]:
+        episodes = [
+            node_row(f"episode-{index}", title, "episode", index)
+            for index, title in enumerate(capture_titles)
+        ]
+        decisions = [
+            node_row(f"decision-{index}", name, "decision", len(episodes) + index)
+            for index, name in enumerate(decision_names)
+        ]
+        return [*episodes, *decisions]
+
+    monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_native_runtime)
+    monkeypatch.setattr(source_module, "_node_fulltext_candidates", fake_node_fulltext)
+
+    pack = await compile_context(
+        "pool exhaustion",
+        intent="build",
+        principal_id="user-123",
+        organization_id="org-123",
+        limit=limit,
+        raw_memory_recall_fn=fake_raw_recall,
+        record_exposure=False,
+    )
+
+    names = [item.name for item in pack.items]
+    assert len(names) == limit
+    assert len(set(names)) == limit
+    assert set(capture_titles) <= set(names)
+
+
+@pytest.mark.asyncio
+async def test_naive_pack_stays_full_when_same_lineage_rows_both_qualify(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The naive arm gets the machine's pack-slot accounting, or the race is not fair.
+
+    Each task here has a procedure mirror that the pack folds into it. A naive
+    cut by rows would spend two slots on every pair and hand the arm a shorter
+    pack than the machine gets from the same candidates.
+    """
+    import sibyl_core.retrieval._search_database as database_module
+    from sibyl_core.retrieval import _search_candidates as candidate_module
+    from sibyl_core.retrieval import naive as naive_module
+    from sibyl_core.retrieval.candidates import VectorCandidateFetch
+    from sibyl_core.retrieval.search import RetrievalSignal
+
+    limit = 24
+    task_names = [f"Drain the pool before deploy {index}" for index in range(6)]
+    decision_names = [f"Distinct pool decision {index}" for index in range(limit)]
+
+    class EmptyNativeClient:
+        async def execute_query(self, *_args: object, **_kwargs: object) -> list[object]:
+            return []
+
+    class EmptyNativeRuntime:
+        client = EmptyNativeClient()
+
+    async def fake_native_runtime(_organization_id: str, **_kwargs: object) -> EmptyNativeRuntime:
+        return EmptyNativeRuntime()
+
+    def node_row(uuid: str, name: str, entity_type: str) -> Any:
+        return candidate_module._candidate_from_node_record(
+            {
+                "uuid": uuid,
+                "name": name,
+                "entity_type": entity_type,
+                "content": f"{name}: drain the pool before deploy.",
+                "group_id": "org-123",
+                "attributes": {},
+            },
+            signal=RetrievalSignal.NODE_FULLTEXT,
+            score=1.0,
+        )
+
+    async def fake_node_fulltext(**_kwargs: object) -> list[Any]:
+        pairs = [
+            row
+            for index, name in enumerate(task_names)
+            for row in (
+                node_row(f"task-{index}", name, "task"),
+                node_row(f"procedure-{index}", f"Procedure: {name}", "procedure"),
+            )
+        ]
+        decisions = [
+            node_row(f"decision-{index}", name, "decision")
+            for index, name in enumerate(decision_names)
+        ]
+        return [*pairs, *decisions]
+
+    async def no_archived_episodes(**_kwargs: object) -> list[Any]:
+        return []
+
+    async def empty_vector(**_kwargs: object) -> VectorCandidateFetch:
+        return VectorCandidateFetch(
+            node_candidates=[], edge_candidates=[], requested=True, attempted=True
+        )
+
+    monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_native_runtime)
+    monkeypatch.setattr(naive_module, "_node_fulltext_candidates", fake_node_fulltext)
+    monkeypatch.setattr(naive_module, "_episode_fulltext_candidates", no_archived_episodes)
+    monkeypatch.setattr(naive_module, "_vector_candidate_sources_detailed", empty_vector)
+
+    pack = await compile_context(
+        "drain the pool before deploy",
+        intent="build",
+        principal_id="user-123",
+        organization_id="org-123",
+        limit=limit,
+        naive_retrieval=True,
+        record_exposure=False,
+    )
+
+    names = [item.name for item in pack.items]
+    assert len(names) == limit
+    assert len(set(names)) == limit
+    assert set(task_names) <= set(names)
+
+
 def _budget_pack(item_count: int):
     from sibyl_core.models.context import ContextPack, ContextSection
 

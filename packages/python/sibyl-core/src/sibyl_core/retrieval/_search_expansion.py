@@ -19,7 +19,7 @@ from sibyl_core.retrieval._search_candidates import (
 from sibyl_core.retrieval._search_database import _execute_query_records
 from sibyl_core.retrieval._search_plan import RetrievalPlan, RetrievalSignal, SearchFilter
 from sibyl_core.retrieval._search_sources import _node_filter_clause, _where_clause
-from sibyl_core.retrieval.candidates import RetrievalCandidate
+from sibyl_core.retrieval.candidates import CandidateKind, RetrievalCandidate
 
 _GRAPH_EXPANSION_RELATIONSHIP_WEIGHTS = PREDICATE_EXPANSION_PATH_SCORES
 _SUPERSEDES_PREDICATE = "SUPERSEDES"
@@ -45,13 +45,19 @@ async def _graph_expansion_candidates(
     seed_candidates: Sequence[RetrievalCandidate],
     limit: int,
 ) -> list[RetrievalCandidate]:
+    # Where an episode's mentions live depends on the table it was read from,
+    # which its kind records and its type does not. A row from the archived
+    # `episode` table keeps them in the `mentions` table, which only archive
+    # restore writes. A native episode is an entity row whose mentions are
+    # ordinary `relates_to` MENTIONS edges, so it walks with the entity seeds.
     entity_seed_uuids = [
         candidate.id
         for candidate in seed_candidates
-        if candidate.type not in {"claim", "relationship", "raw_memory", "episode"}
+        if candidate.kind != CandidateKind.EPISODE
+        and candidate.type not in {"claim", "relationship", "raw_memory"}
     ][:limit]
     episode_seed_uuids = [
-        candidate.id for candidate in seed_candidates if candidate.type == "episode"
+        candidate.id for candidate in seed_candidates if candidate.kind == CandidateKind.EPISODE
     ][:limit]
     if not entity_seed_uuids and not episode_seed_uuids:
         return []

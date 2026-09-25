@@ -1031,7 +1031,10 @@ def test_no_caller_can_reweight_the_arm_per_request() -> None:
 
     ``fuse_naive_candidates`` keeps a ``k`` keyword for direct unit testing, but
     nothing reachable from the API or bench surface can set it: ``naive_search``
-    neither accepts a fusion parameter nor forwards one.
+    neither accepts a fusion parameter nor forwards one. ``distinct_key`` is the
+    one extra input, and it is not a weight: it tells the cut which rows the
+    pack will fold into one item, the same key the machine receives, so it
+    decides how many rows survive and never how any of them score.
     """
 
     parameters = set(inspect.signature(naive_module.naive_search).parameters)
@@ -1045,9 +1048,10 @@ def test_no_caller_can_reweight_the_arm_per_request() -> None:
         "embedding_provider",
         "char_budget",
         "content_max_chars",
+        "distinct_key",
     }
     source = inspect.getsource(naive_module.naive_search)
-    assert "fuse_naive_candidates(filtered_lists, limit=limit)" in source
+    assert "fuse_naive_candidates(filtered_lists, limit=limit, distinct_key=distinct_key)" in source
 
 
 # ---------------------------------------------------------------------------

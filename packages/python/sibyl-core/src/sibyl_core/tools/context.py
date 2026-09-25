@@ -38,6 +38,7 @@ from sibyl_core.models.context import (
 )
 from sibyl_core.models.reflection import memory_lifecycle_from_metadata
 from sibyl_core.retrieval._search_lifecycle import _superseded_candidate_uuids
+from sibyl_core.retrieval.candidates import RetrievalCandidate
 from sibyl_core.retrieval.search import build_context_retrieval_plan, context_search
 from sibyl_core.services.eval_publication_guards import (
     unavailable_publication_ids,
@@ -801,10 +802,18 @@ _PROCEDURE_NAME_PREFIX = "procedure: "
 
 
 def _lineage_key(item: ContextItem) -> str:
-    name = " ".join((item.name or "").strip().lower().split())
+    return _lineage_name_key(item.name)
+
+
+def _lineage_name_key(raw_name: str | None) -> str:
+    name = " ".join((raw_name or "").strip().lower().split())
     if name.startswith(_PROCEDURE_NAME_PREFIX):
         name = name[len(_PROCEDURE_NAME_PREFIX) :]
     return name
+
+
+def _candidate_lineage_key(candidate: RetrievalCandidate) -> str:
+    return _lineage_name_key(candidate.name)
 
 
 def _lineage_rank(item: ContextItem) -> tuple[int, float]:
@@ -1389,6 +1398,12 @@ async def _compile_native_sections(
 ) -> list[ContextSection]:
     search_limit = min(50, max(limit, per_facet_limit * len(facets)))
     facet = ContextFacet.RECENT_MEMORY if ContextFacet.RECENT_MEMORY in facets else None
+    # The pack folds same-lineage rows into one item after the search, so the
+    # search has to count items the same way or each fold is a slot lost: a
+    # capture and the episode projected from it share a name and would
+    # otherwise take two of the fused rows. Both arms get the same key, so a
+    # race between them compares retrieval rather than pack-slot accounting.
+    distinct_key = _candidate_lineage_key
     if naive_retrieval:
         from sibyl_core.retrieval.naive import naive_search
 
@@ -1399,6 +1414,7 @@ async def _compile_native_sections(
             limit=search_limit,
             include_content=True,
             embedding_provider=configured_embedding_provider(),
+            distinct_key=distinct_key,
         )
     else:
         response = await context_search(
@@ -1411,6 +1427,7 @@ async def _compile_native_sections(
             raw_memory_recall_fn=(
                 raw_memory_recall_fn if include_raw_memory else _empty_raw_memory_recall
             ),
+            distinct_key=distinct_key,
         )
     return _sections_from_response(response, facets=facets, audit=audit)
 

@@ -1183,6 +1183,384 @@ async def test_captured_scope_retrieval_matrix(
     assert reads("user-bob") is co_member_reads
 
 
+async def _captured_episode_attributes(
+    *,
+    memory_scope: str,
+    scope_key: str | None,
+    project_id: str = "project_p",
+    principal_id: str = "user-alice",
+) -> dict[str, object]:
+    """Run a real episode capture and hand back the attributes its entity row carries."""
+    captured: dict[str, object] = {}
+
+    async def remember_raw_memory(_request: MemoryCaptureRequest) -> Mapping[str, object]:
+        return {"id": "raw_episode_1"}
+
+    async def create_graph_entity(
+        _request: MemoryCaptureRequest,
+        metadata: Mapping[str, object],
+    ) -> Mapping[str, object]:
+        captured.update(metadata)
+        return {"id": "episode-in-p"}
+
+    await MemoryCaptureService(
+        remember_raw_memory=remember_raw_memory,
+        create_graph_entity=create_graph_entity,
+    ).capture(
+        MemoryCaptureRequest(
+            title="Pool exhaustion postmortem",
+            content="The API ran out of pooled connections under load.",
+            entity_type="episode",
+            metadata={"capture_mode": "remember", "project_id": project_id},
+            memory_scope=memory_scope,
+            scope_key=scope_key,
+            principal_id=principal_id,
+        )
+    )
+    return captured
+
+
+async def _captured_native_episode(
+    *,
+    memory_scope: str,
+    scope_key: str | None,
+    project_id: str = "project_p",
+    principal_id: str = "user-alice",
+) -> RetrievalCandidate:
+    """Capture an episode for real and read its entity row back as the lanes would."""
+    attributes = await _captured_episode_attributes(
+        memory_scope=memory_scope,
+        scope_key=scope_key,
+        project_id=project_id,
+        principal_id=principal_id,
+    )
+    candidate = candidate_module._candidate_from_node_record(
+        {
+            "uuid": "episode-in-p",
+            "name": "Pool exhaustion postmortem",
+            "entity_type": "episode",
+            "content": "The API ran out of pooled connections under load.",
+            "group_id": "org-123",
+            "project_id": project_id,
+            "attributes": attributes,
+        },
+        signal=RetrievalSignal.NODE_FULLTEXT,
+        score=1.0,
+    )
+    assert candidate.type == "episode"
+    assert candidate.kind is CandidateKind.NODE
+    return candidate
+
+
+def _episode_plan(
+    principal_id: str,
+    project_id: str | None,
+    accessible_projects: set[str] | None,
+) -> search_module.RetrievalPlan:
+    return build_context_retrieval_plan(
+        query="connection pool exhaustion",
+        organization_id="org-123",
+        facets=[ContextFacet.RECENT_MEMORY],
+        facet_types={ContextFacet.RECENT_MEMORY: ["episode"]},
+        principal_id=principal_id,
+        project=project_id,
+        accessible_projects=accessible_projects,
+    )
+
+
+def _episode_admitted(candidate: RetrievalCandidate, plan: search_module.RetrievalPlan) -> bool:
+    return candidate_module._candidate_allowed(
+        candidate,
+        plan=plan,
+        requested_types=set(),
+        facet=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_native_project_episode_serves_its_own_project_and_no_other() -> None:
+    episode = await _captured_native_episode(memory_scope="project", scope_key="project_p")
+
+    assert _episode_admitted(episode, _episode_plan("user-alice", "project_p", {"project_p"}))
+    assert _episode_admitted(episode, _episode_plan("user-bob", "project_p", {"project_p"}))
+    # Membership in P is not enough once the search names Q.
+    assert not _episode_admitted(
+        episode, _episode_plan("user-alice", "project_q", {"project_p", "project_q"})
+    )
+    assert not _episode_admitted(episode, _episode_plan("user-bob", "project_q", {"project_q"}))
+    assert not _episode_admitted(episode, _episode_plan("user-bob", None, {"project_q"}))
+
+
+@pytest.mark.asyncio
+async def test_native_private_episode_stays_with_its_owner_inside_a_project() -> None:
+    episode = await _captured_native_episode(memory_scope="private", scope_key=None)
+
+    assert _episode_admitted(episode, _episode_plan("user-alice", "project_p", {"project_p"}))
+    assert not _episode_admitted(episode, _episode_plan("user-bob", "project_p", {"project_p"}))
+    assert not _episode_admitted(episode, _episode_plan("user-bob", None, {"project_p"}))
+
+
+def test_archived_episode_stays_out_of_project_scoped_plans() -> None:
+    archived = _archived_episode_seed()
+
+    assert archived.kind is CandidateKind.EPISODE
+    assert _episode_admitted(archived, _episode_plan("user-alice", None, None))
+    assert not _episode_admitted(archived, _episode_plan("user-alice", "project_p", {"project_p"}))
+    assert not _episode_admitted(archived, _episode_plan("user-alice", None, {"project_p"}))
+    assert not _episode_admitted(archived, _episode_plan("user-alice", None, set()))
+
+
+@pytest.mark.asyncio
+async def test_project_search_serves_native_episodes_from_that_project_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    episode = await _captured_native_episode(memory_scope="project", scope_key="project_p")
+    client = _EpisodeMentionsGraphClient()
+
+    class Runtime:
+        pass
+
+    runtime = Runtime()
+    runtime.client = client
+
+    async def fake_runtime(_organization_id: str, **_kwargs: object) -> Runtime:
+        return runtime
+
+    async def fake_node_fulltext(**_kwargs: object) -> list[RetrievalCandidate]:
+        # Returned whatever the filter says, so the admission check is what
+        # decides; the database's own project clause is asserted below.
+        return [episode]
+
+    async def no_raw_memories(**_kwargs: object) -> list[RawMemory]:
+        return []
+
+    monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(source_module, "_node_fulltext_candidates", fake_node_fulltext)
+    provider = DeterministicEmbeddingProvider(
+        EmbeddingMetadata(
+            provider="deterministic",
+            model="unit-test",
+            dimensions=4,
+            cache_namespace="retrieval-test",
+            tokenizer_estimate_method="utf8-byte-length",
+        )
+    )
+
+    async def result_ids(plan: search_module.RetrievalPlan) -> list[str]:
+        response = await search_module.context_search(
+            plan=plan,
+            types=["episode"],
+            facet=ContextFacet.RECENT_MEMORY,
+            limit=5,
+            embedding_provider=provider,
+            raw_memory_recall_fn=no_raw_memories,
+        )
+        assert response.filters["candidate_source_degraded"] is False
+        return [result.id for result in response.results]
+
+    assert await result_ids(_episode_plan("user-bob", "project_p", {"project_p"})) == [
+        "episode-in-p"
+    ]
+    entity_reads = [
+        params for query, params in client.calls if "FROM entity" in query and "WHERE" in query
+    ]
+    assert entity_reads
+    assert all(params.get("project_ids") == ["project_p"] for params in entity_reads)
+
+    assert (
+        await result_ids(_episode_plan("user-alice", "project_q", {"project_p", "project_q"})) == []
+    )
+
+
+# Seeds a reader may or may not see, each with the neighbours only it leads to.
+_SCOPED_EXPANSION_EDGES = {
+    "seed-q": ["n-ok", "n-alice-private", "n-p-episode"],
+    "seed-p": ["n-via-p"],
+    "seed-alice-private-q": ["n-via-private"],
+}
+
+
+async def _scoped_expansion_rows() -> dict[str, dict[str, object]]:
+    async def row(
+        uuid: str,
+        entity_type: str,
+        project_id: str,
+        scope: tuple[str, str | None, str] | None,
+    ) -> dict[str, object]:
+        attributes: dict[str, object] = {}
+        if scope is not None:
+            memory_scope, scope_key, principal_id = scope
+            attributes = await _captured_episode_attributes(
+                memory_scope=memory_scope,
+                scope_key=scope_key,
+                project_id=project_id,
+                principal_id=principal_id,
+            )
+        return {
+            "uuid": uuid,
+            "name": uuid,
+            "entity_type": entity_type,
+            "content": f"connection pool exhaustion {uuid}",
+            "group_id": "org-123",
+            "project_id": project_id,
+            "attributes": attributes,
+            "created_at": None,
+        }
+
+    q_project = ("project", "project_q", "user-carol")
+    p_project = ("project", "project_p", "user-alice")
+    alice_private = ("private", None, "user-alice")
+    return {
+        "seed-q": await row("seed-q", "episode", "project_q", q_project),
+        "seed-p": await row("seed-p", "episode", "project_p", p_project),
+        "seed-alice-private-q": await row(
+            "seed-alice-private-q", "episode", "project_q", alice_private
+        ),
+        "n-ok": await row("n-ok", "episode", "project_q", q_project),
+        "n-alice-private": await row("n-alice-private", "episode", "project_q", alice_private),
+        "n-p-episode": await row("n-p-episode", "episode", "project_p", p_project),
+        "n-via-p": await row("n-via-p", "topic", "project_q", None),
+        "n-via-private": await row("n-via-private", "topic", "project_q", None),
+    }
+
+
+class _ScopedExpansionGraphClient:
+    """Walks a fixed edge map and hydrates rows without applying the project filter.
+
+    Hydration ignores the database's project clause on purpose, so admission is
+    the only thing standing between the reader and a neighbour.
+    """
+
+    def __init__(self, rows: Mapping[str, dict[str, object]]) -> None:
+        self.rows = rows
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
+        self.calls.append((query, params))
+        if "FROM mentions" in query:
+            return []
+        if 'out.entity_type = "community"' in query or "target_id IN $community_uuids" in query:
+            return []
+        if "FROM relates_to" in query and "source_uuids" in params:
+            return [
+                {"uuid": target, "relationship": "MENTIONS"}
+                for source in params.get("source_uuids") or []
+                for target in _SCOPED_EXPANSION_EDGES.get(str(source), [])
+            ]
+        if "FROM relates_to" in query:
+            return []
+        if "FROM entity" in query and "uuid IN $uuids" in query:
+            return [
+                dict(self.rows[uuid]) for uuid in params.get("uuids") or [] if uuid in self.rows
+            ]
+        return []
+
+
+async def _scoped_expansion_search(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    seeds: tuple[str, ...],
+    plan: search_module.RetrievalPlan,
+) -> tuple[set[str], list[str]]:
+    rows = await _scoped_expansion_rows()
+    client = _ScopedExpansionGraphClient(rows)
+
+    class Runtime:
+        pass
+
+    runtime = Runtime()
+    runtime.client = client
+
+    async def fake_runtime(_organization_id: str, **_kwargs: object) -> Runtime:
+        return runtime
+
+    async def fake_node_fulltext(**_kwargs: object) -> list[RetrievalCandidate]:
+        return [
+            candidate_module._candidate_from_node_record(
+                rows[uuid], signal=RetrievalSignal.NODE_FULLTEXT, score=1.0
+            )
+            for uuid in seeds
+        ]
+
+    async def no_raw_memories(**_kwargs: object) -> list[RawMemory]:
+        return []
+
+    monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(source_module, "_node_fulltext_candidates", fake_node_fulltext)
+    response = await search_module.context_search(
+        plan=plan,
+        types=["episode", "topic"],
+        facet=ContextFacet.RECENT_MEMORY,
+        limit=12,
+        raw_memory_recall_fn=no_raw_memories,
+    )
+    walked = [
+        str(source)
+        for query, params in client.calls
+        if "FROM relates_to" in query
+        for source in (params.get("source_uuids") or [])
+    ]
+    return {result.id for result in response.results}, walked
+
+
+def _scoped_expansion_plan(
+    principal_id: str,
+    project_id: str | None,
+    accessible_projects: set[str],
+) -> search_module.RetrievalPlan:
+    return build_context_retrieval_plan(
+        query="connection pool exhaustion",
+        organization_id="org-123",
+        facets=[ContextFacet.RECENT_MEMORY],
+        facet_types={ContextFacet.RECENT_MEMORY: ["episode", "topic"]},
+        principal_id=principal_id,
+        project=project_id,
+        accessible_projects=accessible_projects,
+        limit=12,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("project_id", [None, "project_q"])
+async def test_expansion_never_carries_a_non_member_to_a_native_episode(
+    monkeypatch: pytest.MonkeyPatch,
+    project_id: str | None,
+) -> None:
+    ids, walked = await _scoped_expansion_search(
+        monkeypatch,
+        seeds=("seed-q", "seed-p", "seed-alice-private-q"),
+        plan=_scoped_expansion_plan("user-bob", project_id, {"project_q"}),
+    )
+
+    assert {"seed-q", "n-ok"} <= ids
+    for forbidden in (
+        "seed-p",
+        "seed-alice-private-q",
+        "n-alice-private",
+        "n-p-episode",
+        "n-via-p",
+        "n-via-private",
+    ):
+        assert forbidden not in ids
+    assert "seed-q" in walked
+    assert "seed-p" not in walked
+    assert "seed-alice-private-q" not in walked
+
+
+@pytest.mark.asyncio
+async def test_expansion_follows_an_owner_through_their_private_native_episode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ids, walked = await _scoped_expansion_search(
+        monkeypatch,
+        seeds=("seed-alice-private-q",),
+        plan=_scoped_expansion_plan("user-alice", "project_q", {"project_q"}),
+    )
+
+    assert {"seed-alice-private-q", "n-via-private"} <= ids
+    assert set(walked) == {"seed-alice-private-q"}
+
+
 def test_build_context_retrieval_plan_requires_principal() -> None:
     plan = build_context_retrieval_plan(
         query="no principal",
@@ -1436,6 +1814,93 @@ def test_graph_expansion_only_sessions_demote_below_direct_hits() -> None:
     assert [candidate.id for candidate, _, _ in ranked] == ["direct", "graph-only"]
     assert ranked[1][2]["graph_expansion_only_demoted"] is True
     assert ranked[1][2]["graph_expansion_only_multiplier"] == 0.45
+
+
+def test_fused_cut_counts_distinct_items_when_the_caller_names_them() -> None:
+    def fused(identifier: str, name: str, score: float) -> fusion_module.FusedCandidate:
+        candidate = RetrievalCandidate(
+            id=identifier,
+            type="episode",
+            name=name,
+            content="",
+            score=score,
+            source=None,
+            metadata={},
+        )
+        return (candidate, score, {})
+
+    ranked = [
+        fused("raw_memory:a", "A", 0.9),
+        fused("episode-a", "A", 0.8),
+        fused("b", "B", 0.7),
+        fused("unnamed", "", 0.6),
+        fused("c", "C", 0.5),
+        fused("episode-b", "B", 0.4),
+    ]
+
+    def cut(limit: int, *, by_name: bool) -> list[str]:
+        kept = fusion_module._cut_at_distinct_items(
+            ranked,
+            limit=limit,
+            distinct_key=(lambda candidate: candidate.name) if by_name else None,
+        )
+        return [entry[0].id for entry in kept]
+
+    assert cut(2, by_name=False) == ["raw_memory:a", "episode-a"]
+    # A copy of an item already kept rides along without spending the budget,
+    # and a copy ranked past the cut stays out.
+    assert cut(2, by_name=True) == ["raw_memory:a", "episode-a", "b"]
+    # A row with no key is its own item.
+    assert cut(3, by_name=True) == ["raw_memory:a", "episode-a", "b", "unnamed"]
+    assert cut(4, by_name=True) == [
+        "raw_memory:a",
+        "episode-a",
+        "b",
+        "unnamed",
+        "c",
+        "episode-b",
+    ]
+
+
+def test_fused_cut_caps_rows_that_ride_along_on_a_kept_key() -> None:
+    def fused(identifier: str, name: str) -> fusion_module.FusedCandidate:
+        candidate = RetrievalCandidate(
+            id=identifier,
+            type="episode",
+            name=name,
+            content="",
+            score=1.0,
+            source=None,
+            metadata={},
+        )
+        return (candidate, 1.0, {})
+
+    # One name seen in a thousand projects, then the distinct items behind it.
+    ranked = [
+        *(fused(f"shared-{index}", "Shared name") for index in range(1000)),
+        *(fused(f"distinct-{index}", f"Distinct {index}") for index in range(10)),
+    ]
+
+    kept = fusion_module._cut_at_distinct_items(
+        ranked,
+        limit=4,
+        distinct_key=lambda candidate: candidate.name,
+    )
+
+    ids = [entry[0].id for entry in kept]
+    # The first row of the shared key plus at most `limit` riders, and the
+    # skipped riders do not stop the cut from reaching the distinct items.
+    assert ids == [
+        "shared-0",
+        "shared-1",
+        "shared-2",
+        "shared-3",
+        "shared-4",
+        "distinct-0",
+        "distinct-1",
+        "distinct-2",
+    ]
+    assert len(kept) <= 2 * 4
 
 
 def test_graph_path_metadata_survives_fusion_with_direct_hit() -> None:
@@ -2122,6 +2587,98 @@ class _CommunityGraphExpansionClient:
         return []
 
 
+_EPISODE_MENTION_TOPICS: dict[str, dict[str, object]] = {
+    "native-topic": {
+        "uuid": "native-topic",
+        "name": "Connection Pooling",
+        "entity_type": "topic",
+        "content": "topic mentioned by a native episode",
+        "attributes": {},
+        "created_at": None,
+    },
+    "archived-topic": {
+        "uuid": "archived-topic",
+        "name": "Backoff Strategy",
+        "entity_type": "topic",
+        "content": "topic mentioned by an archived episode",
+        "attributes": {},
+        "created_at": None,
+    },
+}
+
+
+class _EpisodeMentionsGraphClient:
+    """A graph holding both shapes of episode, each with its mentions where it lives.
+
+    A native episode is an ``entity`` row whose topics hang off ``relates_to``
+    MENTIONS edges. An archived episode is an ``episode`` row whose topics live
+    in the ``mentions`` table, which only archive restore writes.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
+        self.calls.append((query, params))
+        if "FROM mentions" in query:
+            episode_uuids = params.get("episode_uuids") or []
+            return [{"uuid": "archived-topic"}] if "archived-episode" in episode_uuids else []
+        if 'out.entity_type = "community"' in query or "target_id IN $community_uuids" in query:
+            return []
+        if "FROM relates_to" in query:
+            source_uuids = params.get("source_uuids") or []
+            if "native-episode" in source_uuids:
+                return [{"uuid": "native-topic", "relationship": "MENTIONS"}]
+            return []
+        if "FROM entity" in query and "uuid IN $uuids" in query:
+            topics = _EPISODE_MENTION_TOPICS
+            return [dict(topics[uuid]) for uuid in params.get("uuids") or [] if uuid in topics]
+        return []
+
+
+def _native_episode_seed() -> RetrievalCandidate:
+    return candidate_module._candidate_from_node_record(
+        {
+            "uuid": "native-episode",
+            "name": "Pool exhaustion postmortem",
+            "entity_type": "episode",
+            "content": "The API ran out of pooled connections under load.",
+            "group_id": "org-123",
+            "attributes": {},
+        },
+        signal=RetrievalSignal.NODE_FULLTEXT,
+        score=1.0,
+    )
+
+
+def _archived_episode_seed() -> RetrievalCandidate:
+    return candidate_module._candidate_from_episode_record(
+        {
+            "uuid": "archived-episode",
+            "name": "Retry storm",
+            "content": "Clients retried without jitter and stampeded the API.",
+            "group_id": "org-123",
+        },
+        signal=RetrievalSignal.EPISODE_FULLTEXT,
+        score=1.0,
+    )
+
+
+def _organization_episode_plan() -> plan_module.RetrievalPlan:
+    # Organization-wide, because a project-scoped plan withholds every
+    # episode-typed candidate before it can seed the walk.
+    return build_context_retrieval_plan(
+        query="connection pool exhaustion",
+        organization_id="org-123",
+        facets=[ContextFacet.RECENT_MEMORY],
+        facet_types={ContextFacet.RECENT_MEMORY: ["episode", "topic"]},
+        principal_id="user-123",
+        project=None,
+        accessible_projects=None,
+        limit=12,
+    )
+
+
 @pytest.mark.asyncio
 async def test_context_search_pushes_facet_types_into_graph_queries(
     monkeypatch: pytest.MonkeyPatch,
@@ -2453,6 +3010,7 @@ async def test_graph_expansion_uses_mentions_for_episode_seeds_with_limit() -> N
                 source=None,
                 metadata={},
                 project_id="project_123",
+                kind=CandidateKind.EPISODE,
             )
         ],
         limit=2,
@@ -2467,6 +3025,106 @@ async def test_graph_expansion_uses_mentions_for_episode_seeds_with_limit() -> N
     assert mention_calls[0][1]["episode_uuids"] == ["episode-seed"]
     assert mention_calls[0][1]["limit"] == expansion_module._graph_expansion_fetch_limit(2)
     assert "LIMIT $limit" in mention_calls[0][0]
+
+
+@pytest.mark.asyncio
+async def test_graph_expansion_walks_relates_to_mentions_from_native_episode_seeds() -> None:
+    seed = _native_episode_seed()
+    # The shape the entity lanes actually mint: typed by its entity_type, but
+    # a node read from the entity table.
+    assert seed.type == "episode"
+    assert seed.kind is CandidateKind.NODE
+    client = _EpisodeMentionsGraphClient()
+
+    candidates = await expansion_module._graph_expansion_candidates(
+        client=client,
+        plan=_organization_episode_plan(),
+        search_filter=search_module.SearchFilter(),
+        seed_candidates=[seed],
+        limit=4,
+    )
+
+    assert [candidate.id for candidate in candidates] == ["native-topic"]
+    assert candidates[0].score == pytest.approx(0.58)
+    assert candidates[0].metadata["graph_expansion_relationship"] == "MENTIONS"
+    assert candidates[0].metadata["graph_expansion_depth"] == 1
+    relation_sources = [
+        params["source_uuids"]
+        for query, params in client.calls
+        if "FROM relates_to" in query and "source_uuids" in params
+    ]
+    assert ["native-episode"] in relation_sources
+    assert all(
+        "native-episode" not in (params.get("episode_uuids") or [])
+        for query, params in client.calls
+        if "FROM mentions" in query
+    )
+
+
+@pytest.mark.asyncio
+async def test_graph_expansion_routes_each_episode_shape_to_its_own_mentions() -> None:
+    client = _EpisodeMentionsGraphClient()
+
+    candidates = await expansion_module._graph_expansion_candidates(
+        client=client,
+        plan=_organization_episode_plan(),
+        search_filter=search_module.SearchFilter(),
+        seed_candidates=[_archived_episode_seed(), _native_episode_seed()],
+        limit=4,
+    )
+
+    assert sorted(candidate.id for candidate in candidates) == ["archived-topic", "native-topic"]
+    assert all(
+        candidate.metadata["graph_expansion_relationship"] == "MENTIONS" for candidate in candidates
+    )
+    mention_episodes = [
+        params["episode_uuids"] for query, params in client.calls if "FROM mentions" in query
+    ]
+    assert mention_episodes == [["archived-episode"]]
+    relation_sources = [
+        params["source_uuids"]
+        for query, params in client.calls
+        if "FROM relates_to" in query and "source_uuids" in params
+    ]
+    assert relation_sources
+    assert all(sources == ["native-episode"] for sources in relation_sources)
+
+
+@pytest.mark.asyncio
+async def test_context_search_surfaces_topics_mentioned_by_native_episodes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Runtime:
+        client = _EpisodeMentionsGraphClient()
+
+    async def fake_runtime(_organization_id: str, **_kwargs: object) -> Runtime:
+        return Runtime()
+
+    async def fake_node_fulltext(**_kwargs: object) -> list[RetrievalCandidate]:
+        return [_native_episode_seed()]
+
+    async def no_raw_memories(**_kwargs: object) -> list[RawMemory]:
+        return []
+
+    monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(source_module, "_node_fulltext_candidates", fake_node_fulltext)
+
+    response = await search_module.context_search(
+        plan=_organization_episode_plan(),
+        types=["episode", "topic"],
+        facet=ContextFacet.RECENT_MEMORY,
+        limit=5,
+        raw_memory_recall_fn=no_raw_memories,
+    )
+
+    assert response.filters["candidate_source_degraded"] is False
+
+    by_id = {result.id: result for result in response.results}
+    assert "native-episode" in by_id
+    assert "native-topic" in by_id
+    topic_metadata = by_id["native-topic"].metadata
+    assert topic_metadata["graph_expansion_relationship"] == "MENTIONS"
+    assert RetrievalSignal.GRAPH_EXPANSION.value in topic_metadata["retrieval_signals"]
 
 
 @pytest.mark.asyncio
@@ -2562,6 +3220,7 @@ async def test_graph_expansion_keeps_strongest_same_depth_path() -> None:
                 source=None,
                 metadata={},
                 project_id="project_123",
+                kind=CandidateKind.EPISODE,
             ),
             RetrievalCandidate(
                 id="task-seed",
