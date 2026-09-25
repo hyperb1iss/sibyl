@@ -175,6 +175,29 @@ describe('OnboardingWizard', () => {
   });
 });
 
+describe('OnboardingWizard with late data', () => {
+  it('still offers the keys step when the status loads after Get Started', async () => {
+    signInAs(true);
+    hooks.useSetupStatus.mockReturnValue({ data: undefined });
+    hooks.useConnectInfo.mockReturnValue({
+      data: connectInfo('https://sibyl.example.com', true),
+      isLoading: false,
+      isError: false,
+    });
+    const user = userEvent.setup();
+    const { rerender } = render(<OnboardingWizard onComplete={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: /get started/i }));
+    expect(await screen.findByText('Connect your tools')).toBeInTheDocument();
+
+    hooks.useSetupStatus.mockReturnValue({ data: setupStatus(false) });
+    rerender(<OnboardingWizard onComplete={vi.fn()} />);
+
+    expect(screen.getByText('Step 3 of 5')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Back' }));
+    expect(await screen.findByText('Configure API Keys')).toBeInTheDocument();
+  });
+});
+
 describe('onboardingSteps', () => {
   it('adds the models step only for an admin on an unconfigured server', () => {
     expect(onboardingSteps(setupStatus(false), true)).toEqual([
