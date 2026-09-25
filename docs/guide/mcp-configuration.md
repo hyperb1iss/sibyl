@@ -21,7 +21,7 @@ flowchart LR
     BG["Background queue + session management"]
     APP -->|"/api/*"| API
     APP -->|"/mcp"| MCP
-    APP -->|"/ws"| WS
+    APP -->|"/api/ws"| WS
     APP -->|"Lifespan"| BG
 ```
 
