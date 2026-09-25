@@ -94,12 +94,21 @@ sibyl context <goal> [options]
 | `--domain`  | `-d`  | (none)   | Domain/category to bias retrieval                |
 | `--project` | `-p`  | (auto)   | Project ID to scope context                      |
 | `--agent`   |       | (none)   | Agent diary identity to include                  |
-| `--all`     | `-a`  | false    | Use all accessible projects                      |
+| `--all`     | `-a`  | false    | Read every accessible project, labelled as such  |
 | `--limit`   | `-l`  | 12       | Maximum context items (1-50)                     |
 | `--related` |       | on       | Include one-hop related graph context            |
 | `--audit`   |       | false    | Include full retrieval metadata                  |
 | `--budget`  |       | (none)   | Approximate Markdown token budget                |
 | `--json`    | `-j`  | false    | JSON output                                      |
+
+### Project scope
+
+A pack reads one project. The project comes from `--project`, then from the directory link
+(`sibyl project link`), then from the active context's default project, with a one-line notice that
+nothing in this directory chose it. With none of those the command stops and names the ways to
+proceed instead of reading across every project you can access. Pass `--all` to read every project
+on purpose; the pack then carries `scope: all_projects` in JSON and a
+`Scope: all accessible projects` line in Markdown, so a reader can tell where it came from.
 
 ### Raw-Memory Filters
 
@@ -164,7 +173,7 @@ sibyl config context pack <goal> [options]
 | `--domain`        | `-d`  | (none)   | Domain/category to bias retrieval                                            |
 | `--project`       | `-p`  | (auto)   | Project ID to scope context                                                  |
 | `--agent`         |       | (none)   | Agent diary identity to include                                              |
-| `--all`           | `-a`  | false    | Use all accessible projects                                                  |
+| `--all`           | `-a`  | false    | Read every accessible project, labelled as such                              |
 | `--limit`         | `-l`  | 24       | Maximum total context items (1-50)                                           |
 | `--related`       |       | on       | Include one-hop related graph context                                        |
 | `--related-limit` |       | 3        | Related items per context item (0-5)                                         |

@@ -342,5 +342,6 @@ Either:
 
 - Link the directory: `sibyl project link <project_id>`
 - For task/epic commands: pass `--project <project_id>` or `-p`
-- For context retrieval: pass `--all` or `-a`
+- For context retrieval: pass `--project <project_id>`, or `--all` to read every accessible project
+  on purpose
 - Use the global flag `--context` / `-C` to override

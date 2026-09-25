@@ -50,6 +50,7 @@ from sibyl_cli.project_refs import (
     list_accessible_projects,
     matching_project_refs,
 )
+from sibyl_cli.project_scope import ALL_PROJECTS_SCOPE, resolve_recall_project
 
 CONTEXT_PACK_PREVIEW_CHARS = 320
 
@@ -470,7 +471,12 @@ def pack_cmd(
     ] = None,
 ) -> None:
     """Compile a precise context pack for an agent."""
-    effective_project = project or (None if all_projects else resolve_project_from_cwd())
+    effective_project = resolve_recall_project(
+        project,
+        all_projects,
+        resolve_linked=resolve_project_from_cwd,
+        resolve_context=resolve_effective_context,
+    )
 
     @run_async
     async def _run() -> None:
@@ -509,6 +515,8 @@ def pack_cmd(
             console.print(f"  [{NEON_CYAN}]Domain:[/{NEON_CYAN}] {pack['domain']}")
         if pack.get("project"):
             console.print(f"  [{NEON_CYAN}]Project:[/{NEON_CYAN}] {pack['project']}")
+        elif pack.get("scope") == ALL_PROJECTS_SCOPE:
+            console.print(f"  [{CORAL}]Scope:[/{CORAL}] all accessible projects")
         console.print(f"  [dim]{pack.get('total_items', 0)} item(s)[/dim]")
         console.print()
 
