@@ -8,6 +8,7 @@ and verify. Each step checks first and skips work that is already done.
 
 from __future__ import annotations
 
+import ipaddress
 import shutil
 import sys
 from dataclasses import dataclass
@@ -65,6 +66,17 @@ def normalize_server_url(raw: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, path, "", ""))
 
 
+def is_loopback(server_url: str) -> bool:
+    """True for localhost, 127.0.0.0/8 and ::1, the only hosts plain http may reach."""
+    host = (urlsplit(server_url).hostname or "").lower()
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 def upgrade_command() -> str:
     """How to upgrade this CLI, matched to how it was installed."""
     prefix = Path(sys.prefix).as_posix().lower()
@@ -98,6 +110,15 @@ def _matching_contexts(server_url: str, name: str | None) -> list[config_store.C
     ]
 
 
+def _existing_context(server_url: str, name: str | None) -> config_store.Context | None:
+    """The context already pointing at `server_url`, preferring the selected one."""
+    matches = _matching_contexts(server_url, name)
+    if not matches:
+        return None
+    current = config_store.resolve_context_name()
+    return next((ctx for ctx in matches if ctx.name == current), matches[0])
+
+
 def _new_context_name(server_url: str, name: str | None) -> str:
     """Name a new context after the server, adding the port when the plain name is taken."""
     if name:
@@ -115,28 +136,17 @@ def _new_context_name(server_url: str, name: str | None) -> str:
     raise typer.Exit(1)
 
 
-def _context_for(
-    server_url: str, name: str | None, *, insecure: bool
-) -> tuple[config_store.Context, str]:
-    """Select the context for `server_url`, creating one when none points there."""
-    matches = _matching_contexts(server_url, name)
-    current = config_store.resolve_context_name()
-    if matches:
-        chosen = next((ctx for ctx in matches if ctx.name == current), matches[0])
-        if insecure and not chosen.insecure:
-            chosen = config_store.update_context(chosen.name, insecure=True)
-        if chosen.name == current:
-            return chosen, f"{chosen.name} (active)"
-        config_store.set_active_context(chosen.name)
+def _activate(ctx: config_store.Context, *, created: bool) -> str:
+    """Make `ctx` the active context once sign-in worked; returns the checklist detail."""
+    if created:
+        config_store.set_active_context(ctx.name)
         clear_client_cache()
-        return chosen, f"{chosen.name} (now active)"
-
-    context_name = _new_context_name(server_url, name)
-    ctx = config_store.create_context(
-        context_name, server_url=server_url, set_active=True, insecure=insecure
-    )
+        return f"{ctx.name} (created, active)"
+    if ctx.name == config_store.resolve_context_name():
+        return f"{ctx.name} (active)"
+    config_store.set_active_context(ctx.name)
     clear_client_cache()
-    return ctx, f"{context_name} (created, active)"
+    return f"{ctx.name} (now active)"
 
 
 def _warn_if_pinned_elsewhere(ctx: config_store.Context) -> None:
@@ -182,6 +192,21 @@ def login(ctx: config_store.Context) -> None:
     clear_client_cache()
 
 
+def sign_in(ctx: config_store.Context) -> str | None:
+    """The signed-in identity, running the browser login when there is none yet."""
+    identity = whoami(ctx)
+    if identity is not None:
+        return identity
+    console.print("\n  Opening your browser to sign in. Approve the code there.")
+    try:
+        login(ctx)
+    except typer.Exit:
+        # The login already printed why; setup reports the failed step.
+        return None
+    console.print()
+    return whoami(ctx)
+
+
 def ensure_skill() -> Step:
     if doctor._check_skill_stub().status == "pass":
         return Step("Skill", True, "already installed")
@@ -206,14 +231,18 @@ def ensure_hook() -> Step:
     """Register the Claude Code SessionStart hook; other agents have no hook."""
     if not claude_code_present():
         return Step("Hook", True, "skipped: Claude Code not found, other agents need none")
+    check = doctor._check_session_hook()
     script = setup.CLAUDE_HOOKS_DIR / "session-start.py"
-    if doctor._check_session_hook().status == "pass" and script.exists():
+    if check.status == "pass" and script.exists():
         return Step("Hook", True, "already registered")
+    unreadable = f"{setup.CLAUDE_SETTINGS_FILE} is not valid Claude settings; left unchanged"
+    if check.status == "fail":
+        return Step("Hook", False, unreadable)
     data_dir = setup.get_package_data_dir()
     if data_dir is None or not setup.install_hooks_copy(data_dir):
         return Step("Hook", False, "hook script missing from this CLI package")
     if not setup.configure_claude_hooks():
-        return Step("Hook", False, f"could not update {setup.CLAUDE_SETTINGS_FILE}")
+        return Step("Hook", False, unreadable)
     return Step("Hook", True, "Claude Code SessionStart")
 
 
@@ -233,7 +262,12 @@ def setup_cmd(
         bool, typer.Option("--no-hooks", help="Skip the Claude Code SessionStart hook")
     ] = False,
     insecure: Annotated[
-        bool, typer.Option("--insecure", "-k", help="Skip TLS verification (self-signed dev)")
+        bool,
+        typer.Option(
+            "--insecure",
+            "-k",
+            help="Skip TLS verification, and allow plain http to a host that is not this machine",
+        ),
     ] = False,
 ) -> None:
     """Connect this machine to a Sibyl server: sign in, install the skill and hooks."""
@@ -245,6 +279,14 @@ def setup_cmd(
     console.print(f"[{ELECTRIC_PURPLE}]◈[/{ELECTRIC_PURPLE}] [bold]Sibyl setup[/bold] {server_url}")
     console.print()
 
+    # Sign-in sends a password or a token over this connection.
+    if server_url.startswith("http://") and not insecure and not is_loopback(server_url):
+        _print_step(Step("Server", False, "plain http to another machine would expose sign-in"))
+        console.print(
+            "\n  Use the https URL, or pass --insecure to allow http on a network you trust."
+        )
+        raise typer.Exit(1)
+
     if not yes and interactive():
         hook = "" if no_hooks else f", and add {HOOK_PURPOSE}"
         console.print(
@@ -254,9 +296,12 @@ def setup_cmd(
             raise typer.Exit(1)
         console.print()
 
-    insecure = insecure or any(ctx.insecure for ctx in _matching_contexts(server_url, context))
+    # TLS trust comes from the flag or the chosen context's own setting, never
+    # from a sibling context that happens to point at the same server.
+    existing = _existing_context(server_url, context)
+    skip_verify = insecure or bool(existing and existing.insecure)
     try:
-        version, minimum = probe_server(server_url, insecure=insecure)
+        version, minimum = probe_server(server_url, insecure=skip_verify)
     except (httpx.HTTPError, ValueError) as exc:
         _print_step(Step("Server", False, f"unreachable: {exc}"))
         if not url:
@@ -269,17 +314,35 @@ def setup_cmd(
         raise typer.Exit(1)
     _print_step(Step("Server", True, f"sibyl {version or 'unknown version'}"))
 
-    ctx, context_detail = _context_for(server_url, context, insecure=insecure)
+    # A new context stays inactive until sign-in works, and is removed if it
+    # does not, so a failed setup never leaves the CLI pointed at a server it
+    # cannot talk to.
+    created = existing is None
+    if existing is None:
+        ctx = config_store.create_context(
+            _new_context_name(server_url, context), server_url=server_url, insecure=insecure
+        )
+    elif insecure and not existing.insecure:
+        ctx = config_store.update_context(existing.name, insecure=True)
+    else:
+        ctx = existing
+    clear_client_cache()
+
+    identity = sign_in(ctx)
+    _print_step(Step("Signed in", identity is not None, identity or "sign-in did not complete"))
+    if identity is None:
+        if created:
+            config_store.delete_context(ctx.name)
+            clear_client_cache()
+        console.print()
+        error("Setup is incomplete. Sign in, then re-run this command.")
+        raise typer.Exit(1)
+
+    context_detail = _activate(ctx, created=created)
+    if insecure and not (existing and existing.insecure):
+        context_detail += ", skips TLS verification"
     _print_step(Step("Context", True, context_detail))
     _warn_if_pinned_elsewhere(ctx)
-
-    identity = whoami(ctx)
-    if identity is None:
-        console.print("\n  Opening your browser to sign in. Approve the code there.")
-        login(ctx)
-        console.print()
-        identity = whoami(ctx)
-    _print_step(Step("Signed in", identity is not None, identity or "sign-in did not complete"))
 
     steps = [ensure_skill()]
     if not no_hooks:
@@ -288,7 +351,7 @@ def setup_cmd(
         _print_step(step)
 
     console.print()
-    if identity is None or not all(step.ok for step in steps):
+    if not all(step.ok for step in steps):
         error("Setup is incomplete. Fix the step above, then re-run this command.")
         raise typer.Exit(1)
     console.print(f"  Try it: [{NEON_CYAN}]{FIRST_TRY}[/{NEON_CYAN}]")

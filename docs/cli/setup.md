@@ -24,16 +24,21 @@ sibyl setup [url] [options]
 
 ## Options
 
-| Option       | Short | Default          | Description                                  |
-| ------------ | ----- | ---------------- | -------------------------------------------- |
-| `url`        |       | current server   | Server URL, such as `https://sibyl.acme.io`  |
-| `--yes`      | `-y`  | false            | Don't ask; for agents and scripts            |
-| `--context`  | `-c`  | server host name | Context name to use or create                |
-| `--no-hooks` |       | false            | Skip the Claude Code SessionStart hook       |
-| `--insecure` | `-k`  | false            | Skip TLS verification for a self-signed host |
+| Option       | Short | Default          | Description                                   |
+| ------------ | ----- | ---------------- | --------------------------------------------- |
+| `url`        |       | current server   | Server URL, such as `https://sibyl.acme.io`   |
+| `--yes`      | `-y`  | false            | Don't ask; for agents and scripts             |
+| `--context`  | `-c`  | server host name | Context name to use or create                 |
+| `--no-hooks` |       | false            | Skip the Claude Code SessionStart hook        |
+| `--insecure` | `-k`  | false            | Skip TLS verification; allow http off-machine |
 
 Without a URL, `setup` connects the server the CLI already talks to: the selected context, or
 `http://localhost:3334`. Without a terminal, it runs as if `--yes` were passed.
+
+Plain `http://` is accepted only for this machine (`localhost`, `127.0.0.0/8`, `::1`), because
+sign-in sends a password or token over the connection. Use the server's https URL, or pass
+`--insecure` on a network you trust. A context remembers `--insecure` only when you pass it; it is
+never copied from another context for the same server.
 
 ## What It Does
 
@@ -43,7 +48,8 @@ Without a URL, `setup` connects the server the CLI already talks to: the selecte
 2. Selects the context that already points at the server, or creates one named after its host
    (adding the port when that name is taken, such as `local-3334`).
 3. Signs in with the device flow unless a valid login exists. The browser page offers the server's
-   SSO provider or its email and password sign-in.
+   SSO provider or its email and password sign-in. A new context becomes active only after sign-in
+   succeeds; if it fails, the new context is removed and the previous one stays active.
 4. Installs the skill into `~/.claude/skills`, `~/.codex/skills`, and `~/.agents/skills`.
 5. Adds a SessionStart hook to `~/.claude/settings.json` that loads your active tasks and recent
    memory when a Claude Code session starts. Codex and other agents have no hook.

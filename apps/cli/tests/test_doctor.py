@@ -197,6 +197,50 @@ def test_check_session_hook_passes_when_registered(
     assert check.status == "pass"
 
 
+MISSHAPEN_SETTINGS = [
+    '{"hooks": []}',
+    '{"hooks": null}',
+    '{"hooks": {"SessionStart": {"matcher": "startup"}}}',
+    '{"hooks": {"UserPromptSubmit": [{"hooks": "python3 sibyl.py"}]}}',
+    "[1, 2, 3]",
+    "{ not json",
+]
+
+
+@pytest.mark.parametrize("content", MISSHAPEN_SETTINGS)
+def test_hook_checks_fail_cleanly_on_misshapen_settings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    content: str,
+) -> None:
+    settings_file = tmp_path / "settings.json"
+    settings_file.write_text(content, encoding="utf-8")
+    monkeypatch.setattr(doctor_module, "CLAUDE_SETTINGS_PATH", settings_file)
+    monkeypatch.setattr(doctor_module, "LEGACY_USER_PROMPT_HOOK", tmp_path / "missing.py")
+
+    for check in (doctor_module._check_session_hook(), doctor_module._check_no_legacy_hook()):
+        assert check.status == "fail"
+        assert str(settings_file) in (check.detail or "")
+    assert settings_file.read_text(encoding="utf-8") == content
+
+
+@pytest.mark.parametrize("content", MISSHAPEN_SETTINGS)
+def test_hook_registration_refuses_to_rewrite_misshapen_settings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    content: str,
+) -> None:
+    from sibyl_cli import setup as setup_module
+
+    settings_file = tmp_path / "settings.json"
+    settings_file.write_text(content, encoding="utf-8")
+    monkeypatch.setattr(setup_module, "CLAUDE_SETTINGS_FILE", settings_file)
+
+    assert setup_module.configure_claude_hooks() is False
+    assert settings_file.read_text(encoding="utf-8") == content
+    assert list(tmp_path.glob("settings.json.*.bak")) == []
+
+
 def test_check_session_hook_warns_when_missing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

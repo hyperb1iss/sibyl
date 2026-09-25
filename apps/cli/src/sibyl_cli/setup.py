@@ -75,6 +75,26 @@ def get_sibyl_hooks_config() -> dict:
     }
 
 
+def valid_hooks_shape(hooks: object) -> bool:
+    """True when `hooks` has the shape Claude Code reads: event -> list of entries.
+
+    Each entry is an object whose optional `hooks` is a list of objects. Anything
+    else is a file someone edited by hand, and rewriting it would lose their data.
+    """
+    if not isinstance(hooks, dict):
+        return False
+    for entries in hooks.values():
+        if not isinstance(entries, list):
+            return False
+        for entry in entries:
+            if not isinstance(entry, dict):
+                return False
+            inner = entry.get("hooks", [])
+            if not isinstance(inner, list) or not all(isinstance(h, dict) for h in inner):
+                return False
+    return True
+
+
 def is_sibyl_hook(hook_entry: dict) -> bool:
     """Check if a hook entry is a Sibyl hook."""
     for hook in hook_entry.get("hooks", []):
@@ -284,9 +304,11 @@ def configure_claude_hooks() -> bool:
             settings = json.loads(CLAUDE_SETTINGS_FILE.read_text())
         else:
             settings = {}
-    except json.JSONDecodeError:
+    except (OSError, json.JSONDecodeError):
         return False
     if not isinstance(settings, dict):
+        return False
+    if "hooks" in settings and not valid_hooks_shape(settings["hooks"]):
         return False
 
     # Backup if there are existing hooks
