@@ -595,6 +595,42 @@ async def test_partition_keeps_budget_packing_outside_the_shared_embedding_space
     assert bins == [ids[0::2], ids[1::2]]
 
 
+@pytest.mark.parametrize(
+    ("model", "whole"), [("claude-opus-5-5", True), ("claude-haiku-4-5", False)]
+)
+async def test_partition_uses_the_memory_models_budget_when_none_is_set(
+    cohort_sources, content_store, monkeypatch, model, whole
+):
+    from sibyl_core.ai.llm import config as llm_config
+    from sibyl_core.config import settings
+
+    sources = [
+        await remember_raw_memory(
+            organization_id="org",
+            principal_id="owner",
+            source_id=f"model-budget-{i}",
+            raw_content=f"capture-{i}:" + "a" * 3000,
+            embedding_provider=None,
+        )
+        for i in range(20)
+    ]
+    install_proposal(monkeypatch, sources)
+    monkeypatch.setattr(settings, "consolidation_max_input_chars", None)
+    monkeypatch.setattr(
+        llm_config,
+        "_config_source",
+        llm_config.EnvConfigSource(
+            {"SIBYL_LLM_MEMORY_PROVIDER": "anthropic", "SIBYL_LLM_MEMORY_MODEL": model}
+        ),
+    )
+    ids = [s.id for s in sources]
+    bins = await service.partition_stored_cohort(
+        "org", "owner", ids, AsyncMock(return_value=SourceReadAuthority("owner"))
+    )
+    assert sorted(i for bucket in bins for i in bucket) == sorted(ids)
+    assert (len(bins) == 1) is whole
+
+
 async def test_cohort_partition_keeps_event_loop_responsive(cohort_sources, monkeypatch):
     install_proposal(monkeypatch, cohort_sources)
     loop = asyncio.get_running_loop()

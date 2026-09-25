@@ -40,12 +40,12 @@ def track_projections(monkeypatch):
 def test_one_projection_serves_preparation_and_both_budgets(monkeypatch):
     group = cohort(controller("a"), controller("b"))
     expected = service._prepare_cohort_input(group)
-    expected_chars = service._cohort_input_chars(expected, 100, 200)
+    expected_chars = service._cohort_input_chars(expected, 100, 200, 40_000)
     calls = track_projections(monkeypatch)
     reuse = projection.ProjectionReuse()
 
     actual = service._prepare_cohort_input(group, projection_reuse=reuse)
-    actual_chars = service._cohort_input_chars(actual, 100, 200, projection_reuse=reuse)
+    actual_chars = service._cohort_input_chars(actual, 100, 200, 40_000, projection_reuse=reuse)
 
     assert actual == expected
     assert actual_chars == expected_chars

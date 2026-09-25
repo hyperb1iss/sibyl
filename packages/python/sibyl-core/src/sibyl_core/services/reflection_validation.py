@@ -361,7 +361,7 @@ async def _validate_prepared_reflection(
     progress_context=None,
     review_execution_id: str | None = None,
 ) -> dict[str, object]:
-    from sibyl_core.config import settings
+    from sibyl_core.ai.llm.config import resolve_consolidation_input_budget
     from sibyl_core.services.validation_execution import ValidationExecution
     from sibyl_core.services.validation_stages import run_validation_stage
     from sibyl_core.tasks._evidence_json import canonical
@@ -441,8 +441,9 @@ async def _validate_prepared_reflection(
             return await run_memory_validation(prepared, extractor)
 
     chars = len(prompt) + len(canonical(schema))
-    if chars > settings.consolidation_max_input_chars:
-        raise ConsolidationInputBudgetExceeded(chars, settings.consolidation_max_input_chars)
+    budget = await resolve_consolidation_input_budget()
+    if chars > budget:
+        raise ConsolidationInputBudgetExceeded(chars, budget)
     from sibyl_core.services.ordinary_publication import ordinary_semantic_digest
 
     request: dict[str, Any] = {

@@ -11,7 +11,12 @@ from typing import Any
 
 from pydantic_ai import Agent, NativeOutput
 
-from sibyl_core.ai.llm.config import LLMSurface, resolve_llm_config
+from sibyl_core.ai.llm.config import (
+    LLMSurface,
+    consolidation_input_budget,
+    resolve_consolidation_input_budget,
+    resolve_llm_config,
+)
 from sibyl_core.ai.llm.extractor import Extractor, effective_output_mode
 from sibyl_core.ai.providers import build_model
 from sibyl_core.ai.transport import transport_policy
@@ -254,7 +259,7 @@ async def _validation_extractor[T](output_type: type[T]) -> tuple[Extractor[T], 
                 "route": settings.consolidation_openrouter_provider,
                 "schema": schema,
                 "transport": transport_policy(config),
-                "max_input_chars": settings.consolidation_max_input_chars,
+                "max_input_chars": consolidation_input_budget(config),
             }
         )
         return extractor, policy
@@ -283,8 +288,9 @@ async def validate_stored_procedure(
         original = replace(original, prepared=prepared)
         extensions["base_input"] = base_input
     prompt_chars = len(original.prepared.prompt)
-    if prompt_chars > settings.consolidation_max_input_chars:
-        raise ConsolidationInputBudgetExceeded(prompt_chars, settings.consolidation_max_input_chars)
+    budget = await resolve_consolidation_input_budget()
+    if prompt_chars > budget:
+        raise ConsolidationInputBudgetExceeded(prompt_chars, budget)
     if progress_context is None:
         extractor, policy = await validation_extractor()
     else:
@@ -319,8 +325,9 @@ async def _validate_prepared_procedure(
     request_extensions: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     actual_chars = len(original.prepared.prompt) + len(canonical(await extractor.output_schema()))
-    if actual_chars > settings.consolidation_max_input_chars:
-        raise ConsolidationInputBudgetExceeded(actual_chars, settings.consolidation_max_input_chars)
+    budget = await resolve_consolidation_input_budget()
+    if actual_chars > budget:
+        raise ConsolidationInputBudgetExceeded(actual_chars, budget)
     request = {
         "org": organization_id,
         "principal": principal_id,

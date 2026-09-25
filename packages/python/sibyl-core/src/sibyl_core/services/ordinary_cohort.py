@@ -14,9 +14,9 @@ from pydantic import TypeAdapter
 from pydantic_ai import Agent, NativeOutput
 from pydantic_ai.models import Model
 
+from sibyl_core.ai.llm.config import resolve_consolidation_input_budget
 from sibyl_core.ai.llm.extractor import Extractor
 from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
-from sibyl_core.config import settings
 from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind
 from sibyl_core.services.content_models import RawMemory
 from sibyl_core.services.content_raw_persistence import (
@@ -243,6 +243,7 @@ def _cohort_input_chars(
     prepared: PreparedPartialProposal,
     proposal_schema_chars: int,
     critic_schema_chars: int,
+    max_input_chars: int,
     *,
     projection_reuse: ProjectionReuse | None = None,
 ) -> int:
@@ -260,9 +261,7 @@ def _cohort_input_chars(
         assert projection is not None
         actual = max(
             actual,
-            projection_critic_input_chars(
-                projection, candidate_reserve_chars=settings.consolidation_max_input_chars // 4
-            )
+            projection_critic_input_chars(projection, candidate_reserve_chars=max_input_chars // 4)
             + critic_schema_chars,
         )
     return actual
@@ -294,10 +293,9 @@ async def propose_stored_cohort(
         packet_binding=packet_binding,
         evidence_mode=evidence_mode,
     )
-    if len(original.prepared.prompt) > settings.consolidation_max_input_chars:
-        raise ConsolidationInputBudgetExceeded(
-            len(original.prepared.prompt), settings.consolidation_max_input_chars
-        )
+    budget = await resolve_consolidation_input_budget()
+    if len(original.prepared.prompt) > budget:
+        raise ConsolidationInputBudgetExceeded(len(original.prepared.prompt), budget)
     owned, policy = await validation_extractor()
     try:
         extractor = await _proposal_extractor(owned, original.prepared.system)
@@ -307,8 +305,8 @@ async def propose_stored_cohort(
                 "evidence_representation": COMPLETE_PROJECTION,
                 "packing_policy": {
                     "version": "ordinary_complete_dual_envelope_v1",
-                    "max_input_chars": settings.consolidation_max_input_chars,
-                    "candidate_reserve_chars": settings.consolidation_max_input_chars // 4,
+                    "max_input_chars": budget,
+                    "candidate_reserve_chars": budget // 4,
                 },
             }
             if original.prepared.projection_json
@@ -321,9 +319,10 @@ async def propose_stored_cohort(
             original.prepared,
             len(canonical(schema)),
             len(canonical(await owned.output_schema())) if original.prepared.projection_json else 0,
+            budget,
         )
-        if actual > settings.consolidation_max_input_chars:
-            raise ConsolidationInputBudgetExceeded(actual, settings.consolidation_max_input_chars)
+        if actual > budget:
+            raise ConsolidationInputBudgetExceeded(actual, budget)
         return await _run_cohort(org, principal, original, resolver, extractor, policy, authorize)
     finally:
         if isinstance(owned, _OwnedValidationExtractor):
@@ -507,6 +506,7 @@ async def partition_stored_cohort(org, principal, source_ids, resolver):
 
     original = await prepare_stored_cohort(org, principal, source_ids, resolver)
     affinity = await _cohort_affinity(org, original.ids)
+    budget = await resolve_consolidation_input_budget()
     owned, _policy = await validation_extractor()
     try:
         extractor = await _proposal_extractor(owned, original.prepared.system)
@@ -524,6 +524,7 @@ async def partition_stored_cohort(org, principal, source_ids, resolver):
             original.prepared,
             schema_chars,
             critic_schema_chars,
+            budget,
             cancelled,
             affinity,
         )
@@ -555,6 +556,7 @@ def _partition_prepared_cohort(
     original: PreparedPartialProposal,
     schema_chars: int,
     critic_schema_chars: int,
+    max_input_chars: int,
     cancelled: Event,
     affinity: Mapping[str, tuple[float, ...]] | None = None,
 ) -> list[list[str]]:
@@ -587,9 +589,13 @@ def _partition_prepared_cohort(
         )
         return (
             _cohort_input_chars(
-                prepared, schema_chars, critic_schema_chars, projection_reuse=projection_reuse
+                prepared,
+                schema_chars,
+                critic_schema_chars,
+                max_input_chars,
+                projection_reuse=projection_reuse,
             )
-            <= settings.consolidation_max_input_chars
+            <= max_input_chars
         )
 
     vectors = affinity or {}
@@ -712,6 +718,7 @@ async def prepare_stored_source_packets(org, principal, source_id, resolver):
 
     original = await prepare_stored_cohort(org, principal, [source_id], resolver, allow_single=True)
     group = PartialCohort.model_validate_json(original.prepared.input_json)
+    budget = await resolve_consolidation_input_budget()
     owned, _policy = await validation_extractor()
     try:
         proposer = await _proposal_extractor(owned, original.prepared.system)
@@ -723,7 +730,7 @@ async def prepare_stored_source_packets(org, principal, source_id, resolver):
 
     # Reserve a quarter of the total critic input for the rendered candidate,
     # including both occurrences. Unbounded output still needs the actual guard.
-    candidate_reserve = settings.consolidation_max_input_chars // 4
+    candidate_reserve = budget // 4
 
     def input_chars(packet: OrdinaryEvidencePacket) -> int:
         return max(
@@ -742,10 +749,10 @@ async def prepare_stored_source_packets(org, principal, source_id, resolver):
         source_id,
         group.episodes[0].artifact,
         input_chars=input_chars,
-        max_input_chars=settings.consolidation_max_input_chars,
+        max_input_chars=budget,
         packing_policy={
             "version": "actual_envelopes_with_candidate_headroom_v1",
-            "max_input_chars": settings.consolidation_max_input_chars,
+            "max_input_chars": budget,
             "critic_candidate_reserve_chars": candidate_reserve,
             "proposal_schema_sha256": hashlib.sha256(proposal_schema.encode()).hexdigest(),
             "critic_schema_sha256": hashlib.sha256(critic_schema.encode()).hexdigest(),

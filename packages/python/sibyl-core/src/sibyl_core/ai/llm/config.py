@@ -6,12 +6,13 @@ import os
 from collections.abc import Mapping
 from datetime import datetime
 from enum import StrEnum
-from typing import Literal, Protocol
+from typing import Literal, NamedTuple, Protocol
 
 from pydantic import BaseModel, Field, SecretStr
 
 from sibyl_core.ai.errors import LLMConfigError
 from sibyl_core.ai.registry import ProviderName
+from sibyl_core.config import settings
 
 LLMProviderName = Literal["anthropic", "gemini", "openai"]
 AnthropicEffort = Literal["low", "medium", "high", "xhigh", "max"]
@@ -37,14 +38,35 @@ def default_timeout_seconds(surface: LLMSurface) -> float:
     return MEMORY_TIMEOUT_SECONDS if surface is LLMSurface.MEMORY else DEFAULT_TIMEOUT_SECONDS
 
 
+#: Consolidation input budget, in system, user and output-schema characters, for
+#: a memory model without a default of its own.
+DEFAULT_CONSOLIDATION_MAX_INPUT_CHARS = 40_000
+
+
+class MemoryModelDefaults(NamedTuple):
+    max_tokens: int
+    effort: AnthropicEffort | None
+    max_input_chars: int
+
+
 #: Memory-surface defaults for Anthropic models whose adaptive thinking shares the
-#: output ceiling with the answer: (max_tokens, effort). Opus 5 already runs at
-#: high effort by default, so it sends none. Opus 5.5 defaults to medium, a level
-#: below the depth memory validation was qualified at, so it is pinned to high.
-MEMORY_MODEL_DEFAULTS: dict[str, tuple[int, AnthropicEffort | None]] = {
-    "claude-opus-5": (32_768, None),
-    "claude-opus-5-5": (32_768, "high"),
+#: output ceiling with the answer. Opus 5 already runs at high effort by default,
+#: so it sends none. Opus 5.5 defaults to medium, a level below the depth memory
+#: validation was qualified at, so it is pinned to high.
+#:
+#: Both Opus models take a 1M-token input window billed at standard rates, so a
+#: consolidation request can hold a whole task family. 1.6M characters was about
+#: 420K tokens on the screen48 corpus, and stays inside the window beside the
+#: 32K output at any density above about 1.7 characters per token. Twice that no
+#: longer fits once text runs denser than about 3.3 characters per token.
+MEMORY_MODEL_DEFAULTS: dict[str, MemoryModelDefaults] = {
+    "claude-opus-5": MemoryModelDefaults(32_768, None, 1_600_000),
+    "claude-opus-5-5": MemoryModelDefaults(32_768, "high", 1_600_000),
 }
+
+
+def memory_model_defaults(provider: str, model: str) -> MemoryModelDefaults | None:
+    return MEMORY_MODEL_DEFAULTS.get(model) if provider == "anthropic" else None
 
 
 class LLMConfig(BaseModel):
@@ -84,11 +106,11 @@ class ResolvedLLMConfig(BaseModel):
     def with_model_defaults(self) -> ResolvedLLMConfig:
         """Apply defaults after provider/model overrides, preserving explicit settings."""
         defaults = (
-            MEMORY_MODEL_DEFAULTS.get(self.model.value)
-            if self.surface is LLMSurface.MEMORY and self.provider.value == "anthropic"
+            memory_model_defaults(self.provider.value, self.model.value)
+            if self.surface is LLMSurface.MEMORY
             else None
         )
-        max_tokens, effort = defaults or (None, None)
+        max_tokens, effort = (defaults.max_tokens, defaults.effort) if defaults else (None, None)
         update: dict[str, object] = {}
         if self.max_tokens.source == "default":
             update["max_tokens"] = ConfigField[int | None](value=max_tokens, source="default")
@@ -273,6 +295,21 @@ async def resolve_llm_config(surface: LLMSurface = LLMSurface.DEFAULT) -> Resolv
 
 async def invalidate_llm_config(surface: LLMSurface | None = None) -> None:
     await _config_source.invalidate(surface)
+
+
+def consolidation_input_budget(memory: LLMConfig) -> int:
+    """Budget for the memory surface's ``memory`` config; an explicit setting wins."""
+    if settings.consolidation_max_input_chars is not None:
+        return settings.consolidation_max_input_chars
+    defaults = memory_model_defaults(memory.provider, memory.model)
+    return defaults.max_input_chars if defaults else DEFAULT_CONSOLIDATION_MAX_INPUT_CHARS
+
+
+async def resolve_consolidation_input_budget() -> int:
+    if settings.consolidation_max_input_chars is not None:
+        return settings.consolidation_max_input_chars
+    resolved = await resolve_llm_config(LLMSurface.MEMORY)
+    return consolidation_input_budget(resolved.to_llm_config())
 
 
 def _surface_env_names(surface: LLMSurface, field: str) -> tuple[str, ...]:

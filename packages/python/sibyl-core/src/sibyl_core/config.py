@@ -149,10 +149,13 @@ class CoreConfig(BaseSettings):
     consolidation_output_mode: Literal["tool", "native_strict"] = "tool"
     consolidation_openrouter_provider: str | None = None
 
-    consolidation_max_input_chars: int = Field(
-        default=40_000,
+    consolidation_max_input_chars: int | None = Field(
+        default=None,
         gt=0,
-        description="Complete consolidation system, user, and output-schema character budget",
+        description=(
+            "Complete consolidation system, user, and output-schema character budget; "
+            "unset uses the memory model's default"
+        ),
     )
 
     # Anthropic configuration
