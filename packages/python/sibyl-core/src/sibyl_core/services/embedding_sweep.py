@@ -37,10 +37,12 @@ from uuid import uuid4
 import structlog
 
 from sibyl_core.backends.surreal.records import normalize_records
+from sibyl_core.backends.surreal.schema_embedding_states import REOPEN_EMBEDDING_STATES
 from sibyl_core.config import settings
 from sibyl_core.embeddings.provenance import (
     UNVERIFIED_EMBEDDING_PROVIDER,
     UNVERIFIED_ORIGIN_LEGACY,
+    UNVERIFIED_ORIGIN_OPERATOR,
     is_rate_limit_error,
     unverified_embedding_metadata,
 )
@@ -177,6 +179,15 @@ class SweepTable:
             f"WHERE {self.scope_field} = $scope AND {self.vector_field} != NONE "
             f"AND {self.metadata_path} = NONE LIMIT $limit) "
             f"SET {self.metadata_path} = $legacy RETURN uuid;"
+        )
+
+    def unverify_query(self) -> str:
+        return (
+            f"UPDATE (SELECT VALUE id FROM {self.name} "
+            f"WHERE {self.scope_field} = $scope AND ({self.vector_field} != NONE "
+            f"OR {self.metadata_path} != NONE) AND ({self.metadata_path} = NONE "
+            f"OR {self.metadata_path}.provider != $unverified) LIMIT $limit) "
+            f"SET {self.metadata_path} = $marker RETURN uuid;"
         )
 
     def write_query(self) -> str:
@@ -807,6 +818,47 @@ async def _release(
         )
 
 
+async def mark_plane_for_reembed(
+    *,
+    plane: str,
+    organization_id: str,
+    execute: SweepExecute,
+    tables: Sequence[SweepTable],
+    page_size: int = 1000,
+) -> int:
+    """Stamp every vector in a plane as unverified so the sweep replaces it.
+
+    The operator escape hatch for vectors the plane's verdict trusted but the
+    operator knows came from another model. Metadata-only writes, paged, and
+    idempotent: already-unverified rows are skipped. Returns rows marked.
+    """
+    marker = unverified_embedding_metadata(UNVERIFIED_ORIGIN_OPERATOR)
+    marked = 0
+    for table in tables:
+        while True:
+            rows = normalize_records(
+                await execute(
+                    table.unverify_query(),
+                    scope=organization_id,
+                    unverified=UNVERIFIED_EMBEDDING_PROVIDER,
+                    marker=marker,
+                    limit=page_size,
+                )
+            )
+            marked += len(rows)
+            if len(rows) < page_size:
+                break
+    await execute(
+        REOPEN_EMBEDDING_STATES.replace(
+            "WHERE $organizations CONTAINS organization_id",
+            "WHERE $organizations CONTAINS organization_id AND plane = $plane",
+        ),
+        organizations=[organization_id],
+        plane=plane,
+    )
+    return marked
+
+
 async def read_embedding_sweep_state(
     plane: str, organization_id: str, execute: SweepExecute
 ) -> dict[str, Any]:
@@ -839,6 +891,7 @@ __all__ = [
     "decide_legacy_vectors",
     "embedding_state_key",
     "ensure_legacy_decision",
+    "mark_plane_for_reembed",
     "read_embedding_sweep_state",
     "run_embedding_sweep",
 ]

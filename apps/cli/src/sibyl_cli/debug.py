@@ -315,6 +315,38 @@ def schema(
     _run()
 
 
+def _embedding_sweep_lines(sweep: object) -> list[str]:
+    """One line per embedding plane: which model it tracks and what is left."""
+    if not isinstance(sweep, dict) or not sweep:
+        return []
+    lines: list[str] = []
+    for index, (plane, state) in enumerate(sorted(sweep.items())):
+        label = "  Embeddings:   " if index == 0 else "                "
+        if not isinstance(state, dict):
+            continue
+        summary = str(state.get("state") or "unknown")
+        model = state.get("active_metadata") or state.get("complete_metadata")
+        if isinstance(model, dict) and model.get("provider"):
+            summary += (
+                f" [{NEON_CYAN}]{model.get('provider')}/{model.get('model')}"
+                f"/{model.get('dimensions')}[/{NEON_CYAN}]"
+            )
+        last_run = state.get("last_run")
+        if isinstance(last_run, dict) and summary.startswith("sweeping"):
+            summary += (
+                f", [{CORAL}]{last_run.get('recovered', 0):,}[/{CORAL}] re-embedded last pass,"
+                f" [{CORAL}]{last_run.get('pending', 0):,}[/{CORAL}] pending"
+                f" ({last_run.get('status', 'unknown')})"
+            )
+        rejected = last_run.get("rejected") if isinstance(last_run, dict) else None
+        if isinstance(rejected, int) and rejected:
+            summary += f", [{CORAL}]{rejected:,}[/{CORAL}] refused by the provider"
+        if state.get("legacy_basis"):
+            summary += f", legacy {state.get('legacy_decision')} ({state.get('legacy_basis')})"
+        lines.append(f"{label}{plane} {summary}")
+    return lines
+
+
 @app.command("status")
 def status(
     json_output: Annotated[
@@ -406,6 +438,8 @@ def status(
                         f"  Surreal:      health {surreal_obs.get('health_http_status', 'unknown')}, "
                         f"{metrics_display}"
                     )
+                for line in _embedding_sweep_lines(data.get("embedding_sweep")):
+                    console.print(line)
                 coordination_error = data.get("coordination_error")
                 if coordination_error:
                     console.print(

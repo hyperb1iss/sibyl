@@ -778,11 +778,16 @@ async def test_dev_status_reports_coordination_backend() -> None:
             ),
         ),
         patch("sibyl_core.logging.LogBuffer.get", return_value=mock_buffer),
+        patch(
+            "sibyl.api.routes.admin.get_embedding_sweep_status",
+            AsyncMock(return_value={"graph": {"state": "complete"}}),
+        ),
     ):
         response = await dev_status(org=org)
 
     assert response.api_healthy is True
     assert response.graph_healthy is True
+    assert response.embedding_sweep == {"graph": {"state": "complete"}}
     assert response.coordination_backend == "local"
     assert response.coordination_status == "unavailable"
     assert response.coordination_durable is False
@@ -949,3 +954,59 @@ async def test_surreal_observability_shows_no_path_and_authenticates_health(
     assert status["base_url"] == "https://host:8443"
     assert status["health_http_status"] == 200
     assert status["metrics_http_status"] == 200
+
+
+@pytest.mark.asyncio
+async def test_embedding_sweep_status_reads_each_plane_and_survives_a_dead_store(
+    monkeypatch,
+) -> None:
+    from sibyl.api.routes.admin import get_embedding_sweep_status
+
+    states = {
+        "graph": {
+            "legacy_decision": "reembed",
+            "legacy_basis": "prior_stamps_differ",
+            "active_metadata": {"provider": "bedrock"},
+            "complete_metadata": None,
+            "last_run": {"status": "partial", "recovered": 384, "pending": 1200},
+        }
+    }
+
+    async def read_state(plane, _organization_id, _execute):
+        if plane == "document_chunks":
+            raise ConnectionError("content store down")
+        return states[plane]
+
+    monkeypatch.setattr(
+        "sibyl_core.services.graph_runtime.get_graph_client",
+        AsyncMock(return_value=SimpleNamespace(execute_query=AsyncMock())),
+    )
+    monkeypatch.setattr(
+        "sibyl_core.services.embedding_sweep.read_embedding_sweep_state", read_state
+    )
+
+    status = await get_embedding_sweep_status("org")
+
+    assert status["graph"]["state"] == "sweeping"
+    assert status["graph"]["last_run"]["pending"] == 1200
+    assert status["document_chunks"] == {"state": "unavailable", "error_type": "ConnectionError"}
+
+
+def test_embedding_plane_state_reports_only_the_current_model_as_complete() -> None:
+    from sibyl.api.routes.admin import _embedding_plane_state
+
+    first = {"provider": "openai", "model": "first"}
+    second = {"provider": "bedrock", "model": "second"}
+
+    assert _embedding_plane_state({"complete_metadata": first, "active_metadata": first}) == (
+        "complete"
+    )
+    assert _embedding_plane_state({"complete_metadata": first, "active_metadata": second}) == (
+        "sweeping"
+    )
+    assert (
+        _embedding_plane_state(
+            {"active_metadata": second, "last_run": {"status": "skipped_dimension_mismatch"}}
+        )
+        == "skipped_dimension_mismatch"
+    )

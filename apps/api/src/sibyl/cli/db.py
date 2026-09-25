@@ -1468,6 +1468,72 @@ def backfill_project_ids(
     _backfill()
 
 
+@app.command("reembed")
+def reembed_embeddings(
+    org_id: Annotated[
+        str,
+        typer.Option("--org-id", help="Organization UUID whose vectors to replace"),
+    ] = "",
+    plane: Annotated[
+        str,
+        typer.Option(
+            "--plane",
+            help="graph (entities and relationships), documents (chunks), or all",
+        ),
+    ] = "all",
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", "-y", help="Skip the confirmation prompt"),
+    ] = False,
+) -> None:
+    """Mark stored vectors as unverified so the embedding sweep replaces them.
+
+    The lifecycle sweep re-embeds on its own when a vector's recorded model
+    differs from the configured one. Use this when vectors are recorded as
+    the configured model but were produced by another one, for example when
+    SIBYL_EMBEDDING_LEGACY_VECTORS let a deployment adopt unstamped vectors
+    across a provider switch. Only metadata is written here; the sweep does
+    the embedding on its next passes and `sibyl debug status` shows progress.
+    """
+    if not org_id:
+        error("--org-id is required")
+        raise typer.Exit(code=1)
+    if plane not in {"graph", "documents", "all"}:
+        error("--plane must be graph, documents, or all")
+        raise typer.Exit(code=1)
+    if not yes and not typer.confirm(
+        f"Replace every {plane} vector for organization {org_id}? This spends embedding calls."
+    ):
+        raise typer.Exit(code=1)
+
+    @run_async
+    async def _reembed() -> None:
+        from sibyl_core.services.document_embedding_sweep import (
+            mark_document_chunk_embeddings_for_reembed,
+        )
+        from sibyl_core.services.graph_embedding_sweep import mark_graph_embeddings_for_reembed
+
+        try:
+            if plane in {"graph", "all"}:
+                client = await _get_graph_client(org_id)
+                marked = await mark_graph_embeddings_for_reembed(client)
+                success(f"Graph: {marked} vectors queued for re-embedding")
+            if plane in {"documents", "all"}:
+                from sibyl.persistence.surreal.content import surreal_content_client
+
+                async with surreal_content_client() as content:
+                    marked = await mark_document_chunk_embeddings_for_reembed(
+                        org_id, client=content
+                    )
+                success(f"Documents: {marked} chunk vectors queued for re-embedding")
+        except Exception as exc:
+            error(f"Re-embed marking failed: {exc}")
+            print_db_hint()
+            raise typer.Exit(code=1) from exc
+
+    _reembed()
+
+
 @app.command("backfill-denormalized-fields")
 def backfill_denormalized_fields_cmd(
     org_id: Annotated[

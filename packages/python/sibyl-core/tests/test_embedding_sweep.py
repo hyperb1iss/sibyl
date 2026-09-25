@@ -454,3 +454,26 @@ async def test_an_import_reopens_a_finished_plane(runtime) -> None:
     assert reopened.status == SWEEP_COMPLETED
     assert reopened.recovered == 1
     assert (await _rows(runtime, "entity"))["imported"]["stamp"] == provider.metadata.to_dict()
+
+
+async def test_operator_reembed_replaces_every_vector_including_current_ones(runtime) -> None:
+    from sibyl_core.services.graph_embedding_sweep import mark_graph_embeddings_for_reembed
+
+    provider = CountingProvider("current")
+    await _entity(runtime, "current", stamp=provider.metadata.to_dict())
+    await _entity(runtime, "legacy")
+    await _entity(runtime, "lexical", vector=False)
+    assert (await sweep_graph_embeddings(runtime, embedding_provider=provider)).status == (
+        SWEEP_COMPLETED
+    )
+
+    marked = await mark_graph_embeddings_for_reembed(runtime.client)
+    again = await mark_graph_embeddings_for_reembed(runtime.client)
+    result = await sweep_graph_embeddings(runtime, embedding_provider=provider)
+
+    assert (marked, again) == (2, 0)
+    assert result.status == SWEEP_COMPLETED
+    assert result.recovered == 2
+    entities = await _rows(runtime, "entity")
+    assert entities["lexical"]["stamp"] is None
+    assert entities["current"]["stamp"] == provider.metadata.to_dict()

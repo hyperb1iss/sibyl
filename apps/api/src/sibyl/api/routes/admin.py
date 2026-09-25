@@ -213,6 +213,80 @@ def _surreal_metrics_sample(metric_names: list[str]) -> dict[str, bool]:
     }
 
 
+_EMBEDDING_SWEEP_STATUS_FIELDS = (
+    "legacy_decision",
+    "legacy_basis",
+    "active_metadata",
+    "complete_metadata",
+    "complete_at",
+    "lease_until",
+    "last_run",
+)
+
+
+def _embedding_plane_state(state: dict[str, Any]) -> str:
+    """Complete only for the model the plane is swept toward now."""
+    last_run = state.get("last_run")
+    last_status = last_run.get("status") if isinstance(last_run, dict) else None
+    if last_status in {"skipped_dimension_mismatch", "provider_failing", "store_failing"}:
+        return str(last_status)
+    complete = state.get("complete_metadata")
+    if complete and complete == state.get("active_metadata"):
+        return "complete"
+    return "sweeping"
+
+
+async def get_embedding_sweep_status(organization_id: str) -> dict[str, object]:
+    """Each embedding plane's persisted sweep state, for the status dashboard.
+
+    A plane that has not been swept yet reports ``{"state": "not_started"}``;
+    a store that cannot be read reports the error type instead of failing
+    the dashboard.
+    """
+    from sibyl.persistence.surreal.content import surreal_content_client
+    from sibyl_core.services import content_client
+    from sibyl_core.services.document_embedding_sweep import DOCUMENT_CHUNK_EMBEDDING_PLANE
+    from sibyl_core.services.embedding_sweep import read_embedding_sweep_state
+    from sibyl_core.services.graph_embedding_sweep import GRAPH_EMBEDDING_PLANE
+    from sibyl_core.services.graph_runtime import get_graph_client
+
+    async def graph_state() -> dict[str, Any]:
+        client = await get_graph_client(organization_id)
+        return await read_embedding_sweep_state(
+            GRAPH_EMBEDDING_PLANE, organization_id, client.execute_query
+        )
+
+    async def chunk_state() -> dict[str, Any]:
+        async with surreal_content_client() as client:
+            return await read_embedding_sweep_state(
+                DOCUMENT_CHUNK_EMBEDDING_PLANE,
+                organization_id,
+                lambda query, **params: content_client.select_many(client, query, **params),
+            )
+
+    status: dict[str, object] = {}
+    for plane, read in (
+        (GRAPH_EMBEDDING_PLANE, graph_state),
+        (DOCUMENT_CHUNK_EMBEDDING_PLANE, chunk_state),
+    ):
+        try:
+            state = await read()
+        except Exception as exc:
+            status[plane] = {"state": "unavailable", "error_type": type(exc).__name__}
+            continue
+        if not state:
+            status[plane] = {"state": "not_started"}
+            continue
+        status[plane] = jsonable_encoder(
+            {
+                "state": _embedding_plane_state(state),
+                **{key: state.get(key) for key in _EMBEDDING_SWEEP_STATUS_FIELDS},
+            },
+            custom_encoder={SurrealDatetime: str},
+        )
+    return status
+
+
 async def get_surreal_observability_status() -> dict[str, object]:
     base_url = _surreal_http_base_url()
     # What the payload shows: scheme, host, and port only.
@@ -1141,6 +1215,7 @@ async def dev_status(
     error_entries = buffer.tail(n=10, level="error")
     recent_errors = [e.to_dict() for e in error_entries]
     surreal_observability = await get_surreal_observability_status()
+    embedding_sweep = await get_embedding_sweep_status(str(org.id))
 
     return DevStatusResponse(
         api_healthy=api_healthy,
@@ -1156,6 +1231,7 @@ async def dev_status(
         queue_depth=queue_depth,
         recent_errors=recent_errors,
         surreal_observability=surreal_observability,
+        embedding_sweep=embedding_sweep,
     )
 
 

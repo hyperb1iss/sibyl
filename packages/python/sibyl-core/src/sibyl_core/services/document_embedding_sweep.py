@@ -29,6 +29,7 @@ from sibyl_core.services.embedding_sweep import (
     SweepRow,
     SweepTable,
     ensure_legacy_decision,
+    mark_plane_for_reembed,
     run_embedding_sweep,
 )
 
@@ -166,11 +167,29 @@ async def sweep_document_chunk_embeddings(
         return await run_embedding_sweep(plane, **options)
 
 
+async def mark_document_chunk_embeddings_for_reembed(
+    organization_id: str, *, client: SurrealContentClient | None = None
+) -> int:
+    """Queue every chunk vector of one organization for the sweep to replace."""
+    async with _content_session(client) as session:
+
+        async def execute(query: str, **params: object) -> object:
+            return await content_client.select_many(session, query, **params)
+
+        return await mark_plane_for_reembed(
+            plane=DOCUMENT_CHUNK_EMBEDDING_PLANE,
+            organization_id=organization_id,
+            execute=execute,
+            tables=(document_chunk_sweep_table(),),
+        )
+
+
 __all__ = [
     "DOCUMENT_CHUNK_EMBEDDING_PLANE",
     "ChunkEmbedder",
     "decide_document_chunk_legacy_vectors",
     "document_chunk_embedding_plane",
     "document_chunk_sweep_table",
+    "mark_document_chunk_embeddings_for_reembed",
     "sweep_document_chunk_embeddings",
 ]

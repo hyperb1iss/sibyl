@@ -93,6 +93,60 @@ def test_debug_status_displays_surreal_observability(
     assert "metrics 404" in result.stdout
 
 
+@patch("sibyl_cli.debug.pending_write_status")
+@patch("sibyl_cli.debug.get_client")
+def test_debug_status_shows_embedding_sweep_progress(
+    mock_get_client: MagicMock,
+    mock_pending_write_status: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(
+        return_value={
+            "api_healthy": True,
+            "worker_healthy": True,
+            "graph_healthy": True,
+            "queue_healthy": True,
+            "coordination_backend": "local",
+            "coordination_status": "ok",
+            "coordination_durable": True,
+            "uptime_seconds": 60,
+            "entity_count": 10,
+            "queue_depth": 0,
+            "recent_errors": [],
+            "embedding_sweep": {
+                "graph": {
+                    "state": "sweeping",
+                    "active_metadata": {
+                        "provider": "bedrock",
+                        "model": "cohere.embed-v4:0",
+                        "dimensions": 1024,
+                    },
+                    "legacy_decision": "reembed",
+                    "legacy_basis": "prior_stamps_differ",
+                    "last_run": {"status": "partial", "recovered": 384, "pending": 12000},
+                },
+                "document_chunks": {
+                    "state": "complete",
+                    "complete_metadata": {"provider": "bedrock", "model": "m", "dimensions": 1536},
+                    "last_run": {"status": "completed", "rejected": 3},
+                },
+            },
+        }
+    )
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+    mock_pending_write_status.return_value = {"count": 0, "metrics": {}}
+
+    result = CliRunner().invoke(debug.app, ["status"])
+
+    assert result.exit_code == 0
+    assert "Embeddings:" in result.stdout
+    assert "graph sweeping bedrock/cohere.embed-v4:0/1024" in result.stdout
+    assert "12,000 pending (partial)" in result.stdout
+    assert "legacy reembed (prior_stamps_differ)" in result.stdout
+    assert "document_chunks complete" in result.stdout
+    assert "3 refused by the provider" in result.stdout
+
+
 @patch("sibyl_cli.debug.get_client")
 def test_debug_query_explain_prefixes_query_and_formats_plan(
     mock_get_client: MagicMock,

@@ -29,6 +29,7 @@ from sibyl_core.services.embedding_sweep import (
     SweepRow,
     SweepTable,
     ensure_legacy_decision,
+    mark_plane_for_reembed,
     run_embedding_sweep,
 )
 from sibyl_core.services.graph_embeddings import _embed_texts_with_timeout
@@ -210,12 +211,25 @@ async def sweep_graph_embeddings(
     return await run_embedding_sweep(plane, **options)
 
 
+async def mark_graph_embeddings_for_reembed(client: Any) -> int:
+    """Queue every entity and relationship vector for the sweep to replace."""
+    recorded = await get_schema_embedding_dimension(client.execute_query)
+    dimensions = recorded or EMBEDDING_DIM
+    return await mark_plane_for_reembed(
+        plane=GRAPH_EMBEDDING_PLANE,
+        organization_id=str(client.group_id),
+        execute=client.execute_query,
+        tables=(entity_sweep_table(dimensions), relationship_sweep_table(dimensions)),
+    )
+
+
 __all__ = [
     "GRAPH_EMBEDDING_PLANE",
     "decide_graph_legacy_vectors",
     "entity_row_embedding_text",
     "entity_sweep_table",
     "graph_embedding_plane",
+    "mark_graph_embeddings_for_reembed",
     "relationship_row_embedding_text",
     "relationship_sweep_table",
     "sweep_graph_embeddings",
