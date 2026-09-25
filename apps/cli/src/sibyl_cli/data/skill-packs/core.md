@@ -802,10 +802,9 @@ sibyl task complete task_a1b2c3d4e5f6 --hours 4.5 --learnings "Key insight: The 
 
 ## Migrating from FalkorDB + PostgreSQL
 
-If a local install still has legacy FalkorDB + PostgreSQL data (typical signs: `moon run dev`
-aborting with `⚠️  Local legacy data detected`, the Sibyl server unreachable, and writes piling up
-in `~/.config/sibyl/pending_writes/`), follow the agent playbook in the migration pack
-(`sibyl skill get migration`).
+If a local install still has legacy FalkorDB + PostgreSQL data (typical signs: the Sibyl server
+unreachable and writes piling up in `~/.config/sibyl/pending_writes/`), follow the agent playbook
+in the migration pack (`sibyl skill get migration`).
 
 The playbook covers:
 
