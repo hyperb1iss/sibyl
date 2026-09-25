@@ -255,6 +255,18 @@ def _outcome(receipt: dict[str, Any]) -> bool | None:
     return None
 
 
+def repetition_seed(template_seed: int, repetition: int) -> int:
+    """The controller seed for one repetition, shared by every arm of that repetition.
+
+    Every repetition of a cell used to send the template's one seed, so
+    repetitions were correlated by construction rather than sampled. Distinct
+    seeds per repetition make them draws; one seed per repetition across arms
+    keeps each arm-to-arm comparison paired. Repetition zero keeps the template
+    seed.
+    """
+    return template_seed + repetition
+
+
 def run_cell(
     task_id: str,
     repetition: int,
@@ -263,6 +275,7 @@ def run_cell(
     manifest_path: Path,
     output: Path,
     relative: str,
+    seed: int | None = None,
 ) -> dict[str, Any]:
     """Run one repetition of one arm of one task, recording whatever happened.
 
@@ -280,6 +293,7 @@ def run_cell(
         "task": task_id,
         "arm": arm,
         "repetition": repetition,
+        "seed": seed,
         "attempt_id": attempt_id,
         "status": "runner_error",
         "success": False,
@@ -299,6 +313,7 @@ def run_cell(
             arm_id=arm,
             output=cell_root,
             attempt_id=attempt_id,
+            seed=seed,
         )
     except Exception as exc:  # one broken cell must never end the sweep
         cell.update(error=f"{type(exc).__name__}: {exc}", error_type=type(exc).__name__)
@@ -432,6 +447,7 @@ def screen(
                 manifest_path=manifests[task_id],
                 output=output,
                 relative=f"cells/{task_id}/{repetition}",
+                seed=repetition_seed(int(template["seed"]), repetition),
             )
             for task_id in task_ids
             if task_id in manifests

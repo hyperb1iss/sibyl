@@ -165,6 +165,28 @@ def test_controller_final_state_is_independently_checked(experiment, monkeypatch
     assert checksum == identity(saved)
 
 
+def test_an_attempt_seed_replaces_the_manifest_seed_for_that_attempt(experiment):
+    manifest, freeze, output = experiment
+    attempt_seed = manifest["seed"] + 8
+    receipt = run_task(
+        freeze(), task_id="task-one", arm_id="memory", output=output, seed=attempt_seed
+    )
+    assert receipt["seed"] == attempt_seed
+    assert json.loads((output / "controller-request.json").read_text())["seed"] == attempt_seed
+    default = run_task(
+        freeze(), task_id="task-one", arm_id="memory", output=output.with_name("default")
+    )
+    assert default["seed"] == manifest["seed"]
+
+
+@pytest.mark.parametrize("seed", [-1, True, 1.5])
+def test_an_attempt_seed_must_be_a_non_negative_integer(experiment, seed):
+    _, freeze, output = experiment
+    with pytest.raises(ManifestError, match="seed must be a non-negative integer"):
+        run_task(freeze(), task_id="task-one", arm_id="memory", output=output, seed=seed)
+    assert not output.exists()
+
+
 @pytest.mark.parametrize("role", ["controller", "checker"])
 def test_child_imports_leave_dependency_runtime_unchanged(experiment, monkeypatch, role):
     manifest, freeze, output = experiment

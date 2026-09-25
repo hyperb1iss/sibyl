@@ -525,12 +525,29 @@ def _perform_attempt(
     _check_task(manifest, task, output, receipt)
 
 
-def run_task(
-    manifest_path: Path, *, task_id: str, arm_id: str, output: Path, attempt_id: str | None = None
-) -> dict[str, Any]:
-    """Validate first; create one exclusive attempt with durable partial receipts."""
+def _check_attempt_arguments(attempt_id: str | None, seed: int | None) -> None:
     if attempt_id is not None and re.fullmatch(r"[0-9a-f]{32}", attempt_id) is None:
         raise ManifestError("attempt_id must be 32 lowercase hexadecimal characters")
+    if seed is not None and (type(seed) is not int or seed < 0):
+        raise ManifestError("seed must be a non-negative integer")
+
+
+def run_task(
+    manifest_path: Path,
+    *,
+    task_id: str,
+    arm_id: str,
+    output: Path,
+    attempt_id: str | None = None,
+    seed: int | None = None,
+) -> dict[str, Any]:
+    """Validate first; create one exclusive attempt with durable partial receipts.
+
+    ``seed`` replaces the manifest's seed for this attempt only, so repeated
+    attempts over one frozen manifest can ask the controller for distinct seeds.
+    The receipt records the seed actually sent.
+    """
+    _check_attempt_arguments(attempt_id, seed)
     if os.name != "posix":
         raise ManifestError("the trusted development adapter requires POSIX process groups")
     manifest, inputs = load_manifest(manifest_path)
@@ -556,8 +573,13 @@ def run_task(
         raise ManifestError("attempt output must be outside the frozen input directory")
     output.mkdir(parents=False, exist_ok=False)
     receipt = _receipt(manifest, task, arm, inputs)
-    if attempt_id is not None:
-        receipt["attempt_id"] = attempt_id
+    receipt.update(
+        {
+            key: value
+            for key, value in (("attempt_id", attempt_id), ("seed", seed))
+            if value is not None
+        }
+    )
     _write_json(output / "receipt.json", receipt)
     try:
         _perform_attempt(manifest, task, arm, inputs, output, receipt, api_key)

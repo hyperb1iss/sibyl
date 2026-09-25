@@ -1432,6 +1432,7 @@ def test_phase_registry_carries_the_cycle_both_checkpoints_preflight_and_probe()
         "checkpoint0",
         "checkpoint1",
         "cycle",
+        "intervention",
         "preflight",
         "probe",
         "repair_raw_embeddings",

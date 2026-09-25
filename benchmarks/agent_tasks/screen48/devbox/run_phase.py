@@ -193,6 +193,18 @@ def _probe_phase(output: Path, extra: Sequence[str], record: dict[str, Any]) -> 
     return probe.main([*extra, "--output", str(output)])
 
 
+def _intervention_phase(output: Path, extra: Sequence[str], record: dict[str, Any]) -> int:
+    """Recompose a prepare-only probe's sealed packs and run the diagnostic arms.
+
+    Every pack it runs was sealed by an earlier probe phase, so nothing here
+    reads SurrealDB and the owned container stays as this lane found it.
+    """
+    from benchmarks.agent_tasks.screen48 import intervention
+
+    del record
+    return intervention.main([*extra, "--output", str(output)])
+
+
 def _repair_raw_embeddings_phase(output: Path, extra: Sequence[str], record: dict[str, Any]) -> int:
     """Embed the study organization's raw captures that carry no vector.
 
@@ -452,12 +464,13 @@ PHASES: dict[str, PhaseRunner] = {
     "checkpoint1": _checkpoint_phase(1),
     "preflight": _preflight_phase,
     "probe": _probe_phase,
+    "intervention": _intervention_phase,
     "repair_raw_embeddings": _repair_raw_embeddings_phase,
 }
 
 #: Phases that read nothing out of SurrealDB, so the owned container stays as
 #: this lane found it.
-NO_DATABASE_PHASES = frozenset({"preflight"})
+NO_DATABASE_PHASES = frozenset({"preflight", "intervention"})
 
 
 def _source_commit() -> str:
