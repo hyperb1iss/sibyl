@@ -7,15 +7,18 @@ import subprocess
 
 import pytest
 import yaml
+from tools.inventory import runtime_surface
 from tools.inventory.runtime_surface import (
     PYPROJECT_PATHS,
     REPO_ROOT,
+    RUNTIME_IMPORT_ROOTS,
     DependencyRecord,
     GraphitiImportRecord,
     RuntimeSurface,
     SqlUsageRecord,
     check_runtime_purity,
     classify_dependency,
+    collect_graphiti_imports,
     collect_runtime_surface,
     graphiti_imports_in,
     main,
@@ -282,6 +285,8 @@ def test_dependency_parser_strips_extras_and_markers() -> None:
     [
         f"{GRAPHITI_PACKAGE}>=0.28.2",
         f'{GRAPHITI_PACKAGE}[anthropic]>=0.28 ; python_version >= "3.13"',
+        f"{GRAPHITI_PACKAGE} @ git+https://example.test/graphiti.git@v0.28.2",
+        f"{GRAPHITI_PACKAGE} (>=0.28)",
         GRAPHITI_MODULE,
         "Graphiti.Core==0.28",
         "graphiti",
@@ -320,6 +325,39 @@ import graphitize
         f"{GRAPHITI_MODULE}.edges",
         f"{GRAPHITI_MODULE}.nodes",
         f"{GRAPHITI_MODULE}.search",
+    )
+
+
+def test_graphiti_import_scan_covers_every_shipped_python_root() -> None:
+    assert {root.relative_to(REPO_ROOT).as_posix() for root in RUNTIME_IMPORT_ROOTS} == {
+        "apps/api/src",
+        "apps/cli/src",
+        "hooks",
+        "packages/python/sibyl-core/src",
+    }
+
+
+def test_graphiti_import_scan_reads_nested_imports_and_skips_virtualenvs(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(runtime_surface, "REPO_ROOT", tmp_path)
+    hooks = tmp_path / "hooks"
+    (hooks / ".venv/lib").mkdir(parents=True)
+    (hooks / ".venv/lib/vendored.py").write_text(f"import {GRAPHITI_MODULE}\n", encoding="utf-8")
+    (hooks / "session-start.py").write_text(
+        "from typing import TYPE_CHECKING\n\n"
+        "if TYPE_CHECKING:\n"
+        f"    from {GRAPHITI_MODULE}.nodes import EntityNode\n\n"
+        "def load():\n"
+        "    import graphiti\n",
+        encoding="utf-8",
+    )
+
+    assert collect_graphiti_imports(roots=(hooks,)) == (
+        GraphitiImportRecord(
+            path="hooks/session-start.py",
+            imports=("graphiti", f"{GRAPHITI_MODULE}.nodes"),
+        ),
     )
 
 

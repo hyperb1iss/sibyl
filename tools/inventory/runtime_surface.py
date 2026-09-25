@@ -266,14 +266,13 @@ def annotation_names(node: ast.AST) -> set[str]:
     return {child.id for child in ast.walk(node) if isinstance(child, ast.Name)}
 
 
+# The PEP 508 name token, which ends before extras, versions, markers, and `@ url` specs.
+DEPENDENCY_NAME_PATTERN = re.compile(r"\s*([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)")
+
+
 def parse_dependency_name(requirement: str) -> str:
-    trimmed = requirement.split(";", maxsplit=1)[0].strip()
-    if "[" in trimmed:
-        trimmed = trimmed.split("[", maxsplit=1)[0]
-    for stop in ("<", ">", "=", "!", "~"):
-        if stop in trimmed:
-            trimmed = trimmed.split(stop, maxsplit=1)[0]
-    return trimmed.strip()
+    match = DEPENDENCY_NAME_PATTERN.match(requirement)
+    return match.group(1) if match else ""
 
 
 def normalize_dependency_name(name: str) -> str:
