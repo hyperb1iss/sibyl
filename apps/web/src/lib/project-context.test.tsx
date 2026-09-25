@@ -32,6 +32,18 @@ const PROJECTS = {
   ],
 };
 
+const ARCHIVED = {
+  id: 'project_archived',
+  name: 'Archived',
+  metadata: { status: 'archived', last_activity_at: '2026-09-24T00:00:00Z' },
+};
+const WITH_ARCHIVED = { entities: [...PROJECTS.entities, ARCHIVED] };
+
+/** Answer like the API: archived projects only when the caller asks for them. */
+function projectsByArchive(options?: { includeArchived?: boolean }) {
+  return { data: options?.includeArchived ? WITH_ARCHIVED : PROJECTS, isError: false };
+}
+
 function Probe() {
   const { isAll, selectedProjects, scopeReady, clearProjects } = useProjectContext();
   const filters = useProjectFilters();
@@ -239,6 +251,59 @@ describe('ProjectContextProvider default scope', () => {
     await waitFor(() =>
       expect(screen.getByTestId('selected').textContent).toBe('project_other_org')
     );
+  });
+
+  it('keeps an archived project that a link put in the URL', async () => {
+    navigation.params = new URLSearchParams('projects=project_archived');
+    hooks.useProjects.mockImplementation(projectsByArchive);
+
+    renderProbe();
+
+    await waitFor(() => expect(screen.getByTestId('ready').textContent).toBe('true'));
+    // Give validation a chance to run against the list, then check it held
+    await waitFor(() =>
+      expect(hooks.useProjects).toHaveBeenCalledWith(
+        expect.objectContaining({ includeArchived: true })
+      )
+    );
+    expect(screen.getByTestId('selected').textContent).toBe('project_archived');
+    expect(navigation.replace).not.toHaveBeenCalled();
+  });
+
+  it('opens a dropped selection on the most recent active project, never an archived one', async () => {
+    localStorage.setItem('sibyl-project-context', JSON.stringify({ projects: ['project_gone'] }));
+    hooks.useProjects.mockImplementation(projectsByArchive);
+
+    renderProbe();
+
+    await waitFor(() => expect(screen.getByTestId('selected').textContent).toBe('project_new'));
+  });
+
+  it('rewrites a corrected URL selection when the project list is already cached', async () => {
+    navigation.params = new URLSearchParams('projects=project_deleted');
+
+    renderProbe();
+
+    await waitFor(() => expect(screen.getByTestId('selected').textContent).toBe('project_new'));
+    await waitFor(() =>
+      expect(navigation.replace).toHaveBeenCalledWith('/tasks?projects=project_new', {
+        scroll: false,
+      })
+    );
+    expect(navigation.replace).not.toHaveBeenCalledWith('/tasks?projects=project_deleted', {
+      scroll: false,
+    });
+  });
+
+  it('keeps a stored project missing from a truncated project list', async () => {
+    localStorage.setItem('sibyl-project-context', JSON.stringify({ projects: ['project_far'] }));
+    hooks.useProjects.mockReturnValue({ data: { ...PROJECTS, has_more: true }, isError: false });
+
+    renderProbe();
+
+    await waitFor(() => expect(screen.getByTestId('ready').textContent).toBe('true'));
+    await waitFor(() => expect(hooks.useProjects).toHaveBeenCalled());
+    expect(screen.getByTestId('selected').textContent).toBe('project_far');
   });
 
   it('saves every project when the URL asks for it on purpose', async () => {

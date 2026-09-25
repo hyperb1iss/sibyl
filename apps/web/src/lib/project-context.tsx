@@ -74,12 +74,18 @@ function serializeSelection(selection: ProjectSelection): string | null {
   return JSON.stringify({ projects: selection.ids });
 }
 
-/** The project with the latest activity, the one a fresh visit opens on. */
+/** A selection's content, for telling whether the one on screen is the one queued for the URL. */
+function selectionKey(selection: ProjectSelection): string {
+  return selection.kind === 'projects' ? `projects:${selection.ids.join(',')}` : selection.kind;
+}
+
+/** The active project with the latest activity, the one a fresh visit opens on. */
 export function mostRecentProjectId(
   projects: Array<{ id: string; metadata?: Record<string, unknown> | null }>
 ): string | null {
   let best: { id: string; time: number } | null = null;
   for (const project of projects) {
+    if (project.metadata?.status === 'archived') continue;
     const activity = project.metadata?.last_activity_at || project.metadata?.updated_at;
     const time = typeof activity === 'string' ? new Date(activity).getTime() || 0 : 0;
     if (!best || time > best.time) best = { id: project.id, time };
@@ -140,8 +146,11 @@ export function ProjectContextProvider({ children }: { children: ReactNode }) {
   // Track whether we've completed initial hydration
   const isHydrated = useRef(false);
   const prevProjectsRef = useRef<string[] | null>(null);
-  // Set when a change should be written back to the URL
-  const userChangedSelection = useRef(false);
+  // The selection a change asked to write back to the URL. The URL effect
+  // writes only once that selection is the one on screen: a flag would be
+  // consumed by an effect run that still sees the previous selection when
+  // the change is made from inside another effect.
+  const pendingUrlWrite = useRef<string | null>(null);
 
   // Start unset; the real value lands in an effect after hydration. Hydration
   // is state, not only a ref, so the default and its fetch wait for the render
@@ -190,7 +199,10 @@ export function ProjectContextProvider({ children }: { children: ReactNode }) {
   // was deleted, lost its access, or belongs to another org drops out.
   const needsDefault = hydrated && contextEnabled && selection.kind === 'unset';
   const needsValidation = hydrated && contextEnabled && selection.kind === 'projects';
+  // Validation reads archived projects too, since links from the Projects
+  // page and task views can open one on purpose; the default never picks one.
   const { data: projectsData, isError: projectsFailed } = useProjects({
+    includeArchived: needsValidation,
     enabled: needsDefault || needsValidation,
   });
   useEffect(() => {
@@ -204,6 +216,8 @@ export function ProjectContextProvider({ children }: { children: ReactNode }) {
     const entities = projectsData.entities ?? [];
     let next: ProjectSelection | null = null;
     if (selection.kind === 'projects') {
+      // A truncated list cannot prove an id is gone, only that it did not fit
+      if (projectsData.has_more) return;
       const known = new Set(entities.map(project => project.id));
       const kept = selection.ids.filter(id => known.has(id));
       if (kept.length === selection.ids.length) return;
@@ -216,7 +230,7 @@ export function ProjectContextProvider({ children }: { children: ReactNode }) {
     }
     prevProjectsRef.current = next.kind === 'projects' ? next.ids : [];
     // A corrected choice that came from the URL rewrites the URL too
-    if (searchParams.get('projects') !== null) userChangedSelection.current = true;
+    if (searchParams.get('projects') !== null) pendingUrlWrite.current = selectionKey(next);
     setSelection(next);
   }, [needsDefault, needsValidation, projectsData, projectsFailed, selection, searchParams]);
 
@@ -235,16 +249,18 @@ export function ProjectContextProvider({ children }: { children: ReactNode }) {
   // Sync URL when USER changes selection (not from URL navigation)
   useEffect(() => {
     if (!isHydrated.current) return;
-    if (!userChangedSelection.current) return;
-    userChangedSelection.current = false;
+    if (pendingUrlWrite.current === null) return;
+    if (pendingUrlWrite.current !== selectionKey(selection)) return;
+    pendingUrlWrite.current = null;
 
     const params = new URLSearchParams(searchParams);
 
     if (selection.kind === 'projects') {
       params.set('projects', selection.ids.join(','));
-    } else if (selection.kind === 'all') {
+    } else if (selection.kind === 'all' && !selection.transient) {
       params.set('projects', ALL_PROJECTS_PARAM);
     } else {
+      // A fallback is not a choice, so it never lands in a shareable URL
       params.delete('projects');
     }
 
@@ -269,32 +285,36 @@ export function ProjectContextProvider({ children }: { children: ReactNode }) {
 
   // Wrapped setters that mark user-initiated changes
   const setProjects = useCallback((projectIds: string[]) => {
-    userChangedSelection.current = true;
+    const next = projectsSelection(projectIds);
+    pendingUrlWrite.current = selectionKey(next);
     prevProjectsRef.current = projectIds;
-    setSelection(projectsSelection(projectIds));
+    setSelection(next);
   }, []);
 
   const selectProject = useCallback((projectId: string) => {
-    userChangedSelection.current = true;
+    const next: ProjectSelection = { kind: 'projects', ids: [projectId] };
+    pendingUrlWrite.current = selectionKey(next);
     prevProjectsRef.current = [projectId];
-    setSelection({ kind: 'projects', ids: [projectId] });
+    setSelection(next);
   }, []);
 
   const toggleProject = useCallback((projectId: string) => {
-    userChangedSelection.current = true;
     setSelection(prev => {
       const current = prev.kind === 'projects' ? prev.ids : [];
-      const next = current.includes(projectId)
+      const ids = current.includes(projectId)
         ? current.filter(id => id !== projectId)
         : [...current, projectId];
-      prevProjectsRef.current = next;
-      return projectsSelection(next);
+      const next = projectsSelection(ids);
+      // Content, not identity, so a repeated updater call queues the same write
+      pendingUrlWrite.current = selectionKey(next);
+      prevProjectsRef.current = ids;
+      return next;
     });
   }, []);
 
   // "All projects" is a choice the viewer makes, and it is remembered as one.
   const clearProjects = useCallback(() => {
-    userChangedSelection.current = true;
+    pendingUrlWrite.current = selectionKey(ALL);
     prevProjectsRef.current = [];
     setSelection(ALL);
   }, []);
