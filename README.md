@@ -395,7 +395,7 @@ Past 1.0, the work is making memory more automatic and the sources deeper:
 
 Already shipped on the way here: a Surreal-only default runtime, plus source, document, and agent
 transcript ingestion via `sibyl ingest` and `sibyl docs`. See
-[`docs/architecture/SIBYL_1_0_ROADMAP.md`](docs/architecture/SIBYL_1_0_ROADMAP.md) for the full
+[`docs/architecture/SIBYL_NORTHSTAR.md`](docs/architecture/SIBYL_NORTHSTAR.md) for the full
 direction.
 
 ## 💜 Philosophy

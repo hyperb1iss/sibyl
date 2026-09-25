@@ -2,9 +2,9 @@
 
 - Status: living product and architecture spec
 - Last validated: 2026-07-01
-- Current release floor: v1.0.2 (v1.0 shipped; post-1.0 planning underway)
-- Active roadmap: [`SIBYL_POST_1_0_ROADMAP.md`](SIBYL_POST_1_0_ROADMAP.md) (post-1.0, v1.1 → v1.3);
-  the shipped 1.0 plan is [`SIBYL_1_0_ROADMAP.md`](SIBYL_1_0_ROADMAP.md)
+- Current release floor: v1.4.1
+- Active plan: [`SIBYL_1_5_PLAN.html`](SIBYL_1_5_PLAN.html); product strategy and claim boundaries
+  live in [`SIBYL_POST_1_0_ROADMAP.md`](SIBYL_POST_1_0_ROADMAP.md)
 
 This document defines Sibyl's northstar: the product shape, architecture principles, and deletion
 gates for the next form of the system.
@@ -23,10 +23,9 @@ substrate: the memory loop as legible verbs, the auth/multi-tenancy runtime, tas
 first-class memory citizen, self-hostability, and governed team memory with provenance that the
 frontier labs refuse to build. See [`SIBYL_POST_1_0_ROADMAP.md`](SIBYL_POST_1_0_ROADMAP.md) §1.
 
-Active executable plan:
-
-- post-1.0 releases (v1.1 → v1.3): [`SIBYL_POST_1_0_ROADMAP.md`](SIBYL_POST_1_0_ROADMAP.md)
-- v1.0 automatic memory operating system (shipped): [`SIBYL_1_0_ROADMAP.md`](SIBYL_1_0_ROADMAP.md)
+Active executable plan: [`SIBYL_1_5_PLAN.html`](SIBYL_1_5_PLAN.html). The 1.4 plan and its execution
+record are [`SIBYL_1_4_PLAN.md`](SIBYL_1_4_PLAN.md) and
+[`SIBYL_1_4_EXECUTION.md`](SIBYL_1_4_EXECUTION.md).
 
 ## Northstar
 
@@ -696,8 +695,8 @@ explainable, and polished enough to trust without routine human review.
 Keep this northstar current as decisions harden. When implementation branches land, update the
 "Current State Already Landed" section and remove stale gates.
 
-For 1.0, the Northstar stays product truth and [`SIBYL_1_0_ROADMAP.md`](SIBYL_1_0_ROADMAP.md) owns
-execution order, gates, and release cut lines.
+The Northstar stays product truth, and the active release plan owns execution order, gates, and
+release cut lines.
 
 ### W1. Native Memory Primitive
 

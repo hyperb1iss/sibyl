@@ -6,13 +6,9 @@
   coalescence added after a cross-system comparison against a production memory system surfaced the
   open-loop finding (see §2).
 - Current release floor: v1.0.2 (1.0 shipped)
-- Supersedes the post-1.0 "future work" framing in [`SIBYL_1_0_ROADMAP.md`](SIBYL_1_0_ROADMAP.md);
-  the product truth remains [`SIBYL_NORTHSTAR.md`](SIBYL_NORTHSTAR.md).
-- Concrete v1.1 execution plan:
-  [`SIBYL_1_1_IMPLEMENTATION_PLAN.md`](SIBYL_1_1_IMPLEMENTATION_PLAN.md).
-- Concrete v1.2 execution plan:
-  [`SIBYL_1_2_IMPLEMENTATION_PLAN.md`](SIBYL_1_2_IMPLEMENTATION_PLAN.md) (2026-07-24) — re-scopes
-  v1.2 to "Retrieve It"; coalescence W1–W3 and TeamMemBench slide to v1.3.
+- The product truth remains [`SIBYL_NORTHSTAR.md`](SIBYL_NORTHSTAR.md).
+- On 2026-07-24 v1.2 was re-scoped to "Retrieve It"; coalescence W1 to W3 and TeamMemBench slid to
+  v1.3.
 
 This roadmap covers the three releases after 1.0. It was assembled from a full-codebase +
 competitive-landscape research pass and a cross-model review, and it is grounded in verified code

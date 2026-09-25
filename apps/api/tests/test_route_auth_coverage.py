@@ -107,7 +107,8 @@ ROUTES_WITHOUT_CALLER_IDENTITY: dict[str, str] = {
     "POST /users/password/reset/confirm": "redeems a reset token",
     "GET /setup/status": "reports whether the instance is unconfigured",
     # Instance-wide settings, gated in the handler body by require_settings_owner
-    # rather than by a dependency (see AUDIT_2026-08-13 debt-api finding 6).
+    # rather than by a dependency, so the gate is invisible to the dependency
+    # graph and the OpenAPI schema and has to be allowlisted here by name.
     "GET /settings": "require_settings_owner called in the handler",
     "PATCH /settings": "require_settings_owner called in the handler",
     "DELETE /settings/{key}": "require_settings_owner called in the handler",
