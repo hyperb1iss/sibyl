@@ -112,8 +112,28 @@ def _root_task(task_id: str) -> dict[str, Any]:
     return cast(dict[str, Any], payload["tasks"]["root"][task_id])
 
 
+def _is_root_aggregate(task: dict[str, Any]) -> bool:
+    """A root task that only fans out to other tasks, like check or trust-gates."""
+    return task.get("command", "") in ("", "noop") and bool(task.get("deps"))
+
+
 def _dep_targets(task_id: str) -> set[str]:
-    return {dep["target"] for dep in _root_task(task_id)["deps"]}
+    """Every target a root task runs, following root aggregates it depends on."""
+    targets: set[str] = set()
+    pending = [task_id]
+    seen: set[str] = set()
+    while pending:
+        current = pending.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        for dep in _root_task(current)["deps"]:
+            target = dep["target"]
+            targets.add(target)
+            project, _, dep_id = target.partition(":")
+            if project == "root" and dep_id not in seen and _is_root_aggregate(_root_task(dep_id)):
+                pending.append(dep_id)
+    return targets
 
 
 def _assert_fragments_present(content: str, fragments: tuple[str, ...]) -> None:

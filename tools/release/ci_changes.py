@@ -71,6 +71,9 @@ class ChangePlan:
             )
         )
         run_runtime = self.runtime_changed or self.ci_changed or self.release_changed
+        # The trust gates read docs too: doc-claim compares published claims
+        # against receipts, so a docs-only change still needs that gate.
+        run_trust = run_runtime or self.docs_changed
         image_matrix = self.image_scan_matrix
         values: dict[str, bool | str] = {
             "docs_changed": self.docs_changed,
@@ -87,6 +90,7 @@ class ChangePlan:
             "run_static": run_static,
             "run_build": run_runtime,
             "run_tests": run_runtime,
+            "run_trust": run_trust,
             "run_e2e": run_runtime,
             "run_storybook": self.web_changed,
             "run_image_scan": bool(image_matrix),
@@ -284,6 +288,7 @@ def _write_summary(path: Path, plan: ChangePlan, outputs: dict[str, str]) -> Non
             "run_static",
             "run_build",
             "run_tests",
+            "run_trust",
             "run_e2e",
             "run_storybook",
             "run_image_scan",

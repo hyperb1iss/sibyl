@@ -39,6 +39,7 @@ jobs:
       run_static: ${{ steps.classify.outputs.run_static }}
       run_build: ${{ steps.classify.outputs.run_build }}
       run_tests: ${{ steps.classify.outputs.run_tests }}
+      run_trust: ${{ steps.classify.outputs.run_trust }}
       run_e2e: ${{ steps.classify.outputs.run_e2e }}
       run_storybook: ${{ steps.classify.outputs.run_storybook }}
       run_image_scan: ${{ steps.classify.outputs.run_image_scan }}
@@ -366,6 +367,62 @@ jobs:
 
           if [[ "$ran_any" == false ]]; then
             echo "No static tasks matched the change set."
+          fi
+
+  # The RC gate bundle used to run only at release time, so a delegated-scope
+  # recall regression shipped through eleven days of green pull requests and
+  # surfaced on the 1.4.0 dry cut. This job runs every root trust gate on
+  # every pull request. It passes --force so moon bypasses its task cache: a
+  # gate whose declared inputs miss a real dependency would otherwise reuse a
+  # pass recorded before the regression, which is exactly what happened.
+  trust-gates:
+    name: Trust Gates
+    needs: changes
+    if: needs.changes.outputs.run_trust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup moonrepo toolchain
+        uses: moonrepo/setup-toolchain@v0.6.4
+        with:
+          proto-version: "0.61.1"
+          auto-install: true
+          auto-setup: true
+          cache-version: surreal-ci-v1
+
+      - name: Verify toolchain
+        run: |
+          chmod +x "$HOME/.proto/shims"/* 2>/dev/null || true
+          chmod +x "$HOME/.proto/bin"/* 2>/dev/null || true
+          moon --version
+          proto --version
+          uv --version
+
+      - name: Cache uv
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-
+
+      - name: Run trust gates
+        env:
+          DOCS_CHANGED: ${{ needs.changes.outputs.docs_changed }}
+          RUNTIME_CHANGED: ${{ needs.changes.outputs.runtime_changed }}
+          CI_CHANGED: ${{ needs.changes.outputs.ci_changed }}
+          RELEASE_CHANGED: ${{ needs.changes.outputs.release_changed }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$RUNTIME_CHANGED" == "true" || "$CI_CHANGED" == "true" || "$RELEASE_CHANGED" == "true" ]]; then
+            moon run trust-gates --force
+          elif [[ "$DOCS_CHANGED" == "true" ]]; then
+            moon run doc-claim-gate-test sync-versions-check --force
           fi
 
   build:
