@@ -25,6 +25,7 @@ from sibyl_core.ai.bedrock import (
     anthropic_bedrock_client,
     apply_inference_scope,
     has_geo_prefix,
+    is_arn,
     resolve_bedrock_settings,
 )
 from sibyl_core.ai.errors import LLMConfigError
@@ -112,6 +113,18 @@ BEDROCK_JSON_SCHEMA_OUTPUT_MODELS = (
     "claude-opus-4-5",
     "claude-opus-4-6",
 )
+
+
+#: Bedrock foundation IDs for Claude models outside the curated registry whose
+#: IDs carry a date or version suffix, from ``aws bedrock
+#: list-inference-profiles``. Newer models follow ``anthropic.<alias>``.
+BEDROCK_CLAUDE_MODEL_IDS = {
+    "claude-opus-4-1": "anthropic.claude-opus-4-1-20250805-v1:0",
+    "claude-opus-4-5": "anthropic.claude-opus-4-5-20251101-v1:0",
+    "claude-opus-4-6": "anthropic.claude-opus-4-6-v1",
+    "claude-sonnet-4": "anthropic.claude-sonnet-4-20250514-v1:0",
+    "claude-sonnet-4-5": "anthropic.claude-sonnet-4-5-20250929-v1:0",
+}
 
 
 def rejects_forced_tool_choice(config: LLMConfig) -> bool:
@@ -227,6 +240,9 @@ def _bedrock_model_id(config: LLMConfig) -> str:
     takes the configured inference scope, or the in-Region Mantle ID.
     """
     model = config.model.strip()
+    if is_arn(model):
+        # Application inference profiles and provisioned throughput: sent as given.
+        return model
     alias = canonical_model_alias(model)
     entry = model_registry.get(alias, kind=ModelKind.LLM)
     if entry is not None and entry.provider not in ANTHROPIC_FAMILY:
@@ -249,7 +265,11 @@ def _bedrock_model_id(config: LLMConfig) -> str:
         return model
     if model.startswith("anthropic."):
         return apply_inference_scope(model, bedrock.inference_scope)
-    base = (entry.platform_model_ids.get("bedrock") if entry else None) or f"anthropic.{alias}"
+    base = (
+        (entry.platform_model_ids.get("bedrock") if entry else None)
+        or BEDROCK_CLAUDE_MODEL_IDS.get(alias)
+        or f"anthropic.{alias}"
+    )
     return apply_inference_scope(base, bedrock.inference_scope)
 
 

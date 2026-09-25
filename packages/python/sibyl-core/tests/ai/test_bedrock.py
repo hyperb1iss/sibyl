@@ -101,7 +101,7 @@ def test_defaults_are_invoke_and_us_scope_with_sigv4():
 
 @pytest.mark.parametrize(
     ("name", "value"),
-    [("SIBYL_BEDROCK_INFERENCE_SCOPE", "eu"), ("SIBYL_BEDROCK_API", "converse")],
+    [("SIBYL_BEDROCK_INFERENCE_SCOPE", "mars"), ("SIBYL_BEDROCK_API", "converse")],
 )
 def test_unknown_scope_or_api_fails_clearly(name, value):
     with pytest.raises(BedrockConfigError, match=name):
@@ -115,6 +115,12 @@ def test_api_key_falls_back_to_the_aws_bearer_variable_and_never_prints():
     assert settings.auth_mode == "bearer"
     assert "bedrock-key-secret" not in repr(settings)
     assert "bedrock-key-secret" not in settings.fingerprint
+
+
+def test_mantle_reads_the_extra_api_key_its_client_reads():
+    env = {"AWS_REGION": "us-east-1", "ANTHROPIC_AWS_API_KEY": "k"}
+    assert resolve_bedrock_settings(env).auth_mode == "sigv4"
+    assert resolve_bedrock_settings({**env, "SIBYL_BEDROCK_API": "mantle"}).auth_mode == "bearer"
 
 
 def test_api_key_and_profile_together_are_rejected():
@@ -157,6 +163,14 @@ async def test_missing_credentials_raise_a_fix_it_error(monkeypatch):
         ("us", "claude-sonnet-5", "us.anthropic.claude-sonnet-5"),
         ("global", "anthropic.claude-fable-5-1", "global.anthropic.claude-fable-5-1"),
         ("global", "us.anthropic.claude-opus-5", "us.anthropic.claude-opus-5"),
+        ("eu", "claude-opus-5-5", "eu.anthropic.claude-opus-5-5"),
+        ("us-gov", "claude-sonnet-4-5", "us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0"),
+        ("us", "claude-opus-4-6", "us.anthropic.claude-opus-4-6-v1"),
+        (
+            "us",
+            "arn:aws:bedrock:us-west-2:123456789012:application-inference-profile/abc",
+            "arn:aws:bedrock:us-west-2:123456789012:application-inference-profile/abc",
+        ),
     ],
 )
 def test_bedrock_model_ids_follow_the_inference_scope(monkeypatch, scope, model, expected):
@@ -444,6 +458,23 @@ async def test_probe_without_credentials_reports_missing_credentials(monkeypatch
     result = await validation.check_provider_key("bedrock", None)
     assert result.status == "missing_credentials"
     assert "No AWS credentials found" in (result.error or "")
+
+
+async def test_surface_test_reports_missing_credentials_before_any_call(monkeypatch):
+    monkeypatch.setenv("AWS_REGION", "us-west-2")
+    monkeypatch.setattr(validation, "build_model", pytest.fail)
+    source = EnvConfigSource({"SIBYL_LLM_PROVIDER": "bedrock"})
+    result = await validation.test_surface_config(LLMSurface.DEFAULT, source)
+    assert result.valid is False
+    assert result.status == "missing_credentials"
+
+
+def test_sdk_credential_failures_map_to_missing_credentials():
+    for message in (
+        "could not resolve credentials from session",
+        "Could not resolve AWS credentials from session",
+    ):
+        assert validation._status_for_exception(RuntimeError(message)) == "missing_credentials"
 
 
 async def test_probe_with_credentials_makes_one_minimal_call(monkeypatch, static_aws):

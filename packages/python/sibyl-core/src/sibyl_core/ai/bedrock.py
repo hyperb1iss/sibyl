@@ -21,16 +21,35 @@ if TYPE_CHECKING:
     from anthropic import AsyncAnthropicBedrock, AsyncAnthropicBedrockMantle
 
 BedrockApi = Literal["invoke", "mantle"]
-BedrockInferenceScope = Literal["us", "global", "regional"]
+#: A geographic cross-region profile prefix, ``global``, or ``regional`` for
+#: the bare foundation-model ID. ``us`` keeps data in the US and Canada.
+BedrockInferenceScope = Literal[
+    "us", "eu", "apac", "jp", "au", "ca", "us-gov", "global", "regional"
+]
 
 BEDROCK_APIS: tuple[BedrockApi, ...] = ("invoke", "mantle")
-BEDROCK_INFERENCE_SCOPES: tuple[BedrockInferenceScope, ...] = ("us", "global", "regional")
+BEDROCK_INFERENCE_SCOPES: tuple[BedrockInferenceScope, ...] = (
+    "us",
+    "eu",
+    "apac",
+    "jp",
+    "au",
+    "ca",
+    "us-gov",
+    "global",
+    "regional",
+)
 DEFAULT_BEDROCK_API: BedrockApi = "invoke"
 DEFAULT_BEDROCK_INFERENCE_SCOPE: BedrockInferenceScope = "us"
 DEFAULT_BEDROCK_EMBEDDING_MODEL = "cohere.embed-v4:0"
+#: The output sizes Cohere Embed v4 produces on Bedrock.
+COHERE_EMBED_V4_DIMENSIONS = (256, 512, 1024, 1536)
 
 REGION_ENV_VARS = ("SIBYL_BEDROCK_REGION", "AWS_REGION", "AWS_DEFAULT_REGION")
 API_KEY_ENV_VARS = ("SIBYL_BEDROCK_API_KEY", "AWS_BEARER_TOKEN_BEDROCK")
+#: The Anthropic SDK's Mantle client also reads this one, so Sibyl must too or
+#: it would report SigV4 while the client sends a bearer token.
+MANTLE_API_KEY_ENV_VARS = (*API_KEY_ENV_VARS, "ANTHROPIC_AWS_API_KEY")
 
 #: Geographic prefixes a cross-region inference profile ID can carry.
 BEDROCK_GEO_PREFIXES = ("us", "eu", "apac", "jp", "au", "ca", "global", "us-gov")
@@ -91,7 +110,7 @@ def resolve_bedrock_settings(environ: Mapping[str, str] | None = None) -> Bedroc
             f"{', '.join(BEDROCK_INFERENCE_SCOPES)}, not {scope!r}"
         )
     profile = _first(env, ("SIBYL_BEDROCK_PROFILE",))
-    api_key = _first(env, API_KEY_ENV_VARS)
+    api_key = _first(env, MANTLE_API_KEY_ENV_VARS if api == "mantle" else API_KEY_ENV_VARS)
     if api_key and profile:
         # The Anthropic SDK refuses a bearer token beside explicit AWS
         # credentials, and silently preferring one would hide the other.
@@ -130,6 +149,11 @@ def has_geo_prefix(model_id: str) -> bool:
     return remove_geo_prefix(model_id) != model_id
 
 
+def is_arn(model_id: str) -> bool:
+    """Application inference profiles and provisioned throughput go by ARN."""
+    return model_id.startswith("arn:")
+
+
 def split_bedrock_model_id(model_id: str) -> tuple[str | None, str]:
     """Split a Bedrock ID into its vendor segment and bare model name.
 
@@ -159,8 +183,8 @@ def apply_inference_scope(base_model_id: str, scope: BedrockInferenceScope) -> s
 
 
 def bedrock_embedding_model_id(model: str, settings: BedrockSettings) -> str:
-    """The wire ID for an embedding model; an explicit profile ID wins."""
-    if has_geo_prefix(model):
+    """The wire ID for an embedding model; an explicit profile ID or ARN wins."""
+    if has_geo_prefix(model) or is_arn(model):
         return model
     return apply_inference_scope(model, settings.inference_scope)
 
@@ -180,7 +204,8 @@ class BedrockCredentialStatus:
     profile: str | None = None
 
 
-def _require_botocore() -> Any:
+def require_botocore() -> Any:
+    """boto3, or a fix-it error naming the extra that ships it."""
     try:
         import boto3
     except ImportError as exc:
@@ -192,7 +217,7 @@ def _require_botocore() -> Any:
 
 @lru_cache(maxsize=16)
 def _boto_session(profile: str | None, region: str) -> Any:
-    boto3 = _require_botocore()
+    boto3 = require_botocore()
     try:
         return boto3.Session(profile_name=profile, region_name=region)
     except Exception as exc:
@@ -256,6 +281,7 @@ def sigv4_headers(
     service: str = "bedrock",
 ) -> dict[str, str]:
     """Sign one request the way the Anthropic SDK's Bedrock client does."""
+    require_botocore()
     from botocore.auth import SigV4Auth
     from botocore.awsrequest import AWSRequest
 
@@ -286,7 +312,7 @@ def anthropic_bedrock_client(
     """
     from anthropic import AsyncAnthropicBedrock, AsyncAnthropicBedrockMantle
 
-    _require_botocore()
+    require_botocore()
     credentials: dict[str, Any] = (
         {"api_key": settings.api_key} if settings.api_key else {"aws_profile": settings.profile}
     )
@@ -318,7 +344,9 @@ __all__ = [
     "BEDROCK_APIS",
     "BEDROCK_GEO_PREFIXES",
     "BEDROCK_INFERENCE_SCOPES",
+    "COHERE_EMBED_V4_DIMENSIONS",
     "DEFAULT_BEDROCK_EMBEDDING_MODEL",
+    "MANTLE_API_KEY_ENV_VARS",
     "REGION_ENV_VARS",
     "BedrockApi",
     "BedrockConfigError",
@@ -332,7 +360,9 @@ __all__ = [
     "bedrock_region_configured",
     "frozen_aws_credentials",
     "has_geo_prefix",
+    "is_arn",
     "remove_geo_prefix",
+    "require_botocore",
     "resolve_bedrock_credentials",
     "resolve_bedrock_settings",
     "sigv4_headers",

@@ -195,6 +195,7 @@ async def test_surface_config(
     config = resolved.to_llm_config()
     started_at = time.perf_counter()
     try:
+        await _require_provider_credentials(config)
         agent = Agent[object, _SurfaceProbe](
             build_model(config),
             output_type=(
@@ -314,7 +315,8 @@ def _is_missing_aws_credentials(exc: BaseException) -> bool:
             return True
         if type(current).__name__ in {"NoCredentialsError", "PartialCredentialsError"}:
             return True
-        if "Could not resolve AWS credentials" in str(current):
+        message = str(current).lower()
+        if "could not resolve" in message and "credentials" in message:
             return True
         current = current.__cause__ or current.__context__
     return False
