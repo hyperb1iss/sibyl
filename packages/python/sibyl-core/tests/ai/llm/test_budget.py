@@ -6,6 +6,8 @@ from sibyl_core.ai.errors import LLMBudgetExceededError, LLMRunBudgetExceededErr
 from sibyl_core.ai.llm.budget import (
     RUN_TOKEN_CEILING,
     LLMBudgetContext,
+    LLMReservation,
+    collect_llm_reservations,
     estimate_llm_tokens,
     get_llm_budget_context,
     get_llm_run_spend_ledger,
@@ -14,6 +16,7 @@ from sibyl_core.ai.llm.budget import (
     reserve_llm_budget,
     set_budget_enforcer,
     settle_llm_budget,
+    settle_llm_reservations,
 )
 
 
@@ -22,6 +25,8 @@ class RecordingEnforcer:
         self.fail = fail
         self.calls: list[tuple[LLMBudgetContext, str, int]] = []
         self.settlements: list[tuple[LLMBudgetContext, str, int, int]] = []
+        self.periods: list[str | None] = []
+        self.period: str | None = None
 
     async def reserve(
         self,
@@ -29,10 +34,11 @@ class RecordingEnforcer:
         *,
         surface: str,
         estimated_tokens: int,
-    ) -> None:
+    ) -> str | None:
         self.calls.append((context, surface, estimated_tokens))
         if self.fail:
             raise LLMBudgetExceededError("budget exceeded", surface=surface)
+        return self.period
 
     async def settle(
         self,
@@ -41,8 +47,10 @@ class RecordingEnforcer:
         surface: str,
         reserved_tokens: int,
         actual_tokens: int,
+        period: str | None = None,
     ) -> None:
         self.settlements.append((context, surface, reserved_tokens, actual_tokens))
+        self.periods.append(period)
 
 
 @pytest.fixture(autouse=True)
@@ -184,3 +192,75 @@ def test_run_ledger_rejects_a_non_positive_cap() -> None:
 async def test_settle_rejects_negative_counts() -> None:
     with pytest.raises(ValueError):
         await settle_llm_budget(surface="memory", reserved_tokens=-1, actual_tokens=0)
+
+
+@pytest.mark.asyncio
+async def test_reservations_record_the_period_their_enforcer_returns() -> None:
+    enforcer = RecordingEnforcer()
+    enforcer.period = "2026-09"
+    set_budget_enforcer(enforcer)
+
+    with collect_llm_reservations() as log, llm_budget_context(user_id="u", organization_id="o"):
+        await reserve_llm_budget(surface="memory", prompt="abcd" * 100)
+        enforcer.period = "2026-10"
+        await reserve_llm_budget(surface="memory", prompt="abcd" * 10, attempt_envelope=2)
+
+    assert log == [LLMReservation(100, "2026-09"), LLMReservation(20, "2026-10")]
+
+
+@pytest.mark.asyncio
+async def test_a_refused_reservation_is_not_recorded() -> None:
+    set_budget_enforcer(RecordingEnforcer(fail=True))
+
+    with (
+        collect_llm_reservations() as log,
+        llm_budget_context(user_id="u", organization_id="o"),
+        pytest.raises(LLMBudgetExceededError),
+    ):
+        await reserve_llm_budget(surface="memory", prompt="abcd")
+
+    assert log == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("actual", "expected"),
+    [
+        # Under the September reservation: September takes it all, October is freed.
+        (20, [(400, 20, "2026-09"), (100, 0, "2026-10")]),
+        # September keeps what it held and October takes the rest.
+        (450, [(100, 50, "2026-10")]),
+        # Overage lands in the last period, never refunded to an earlier one.
+        (700, [(100, 300, "2026-10")]),
+    ],
+)
+async def test_settle_llm_reservations_allots_usage_period_by_period(actual, expected) -> None:
+    enforcer = RecordingEnforcer()
+    set_budget_enforcer(enforcer)
+    reservations = [LLMReservation(400, "2026-09"), LLMReservation(100, "2026-10")]
+
+    with llm_budget_context(user_id="u", organization_id="o"):
+        await settle_llm_reservations(
+            surface="memory", reservations=reservations, actual_tokens=actual
+        )
+
+    settled = [
+        (reserved, used, period)
+        for (_context, _surface, reserved, used), period in zip(
+            enforcer.settlements, enforcer.periods, strict=True
+        )
+    ]
+    assert settled == expected
+
+
+@pytest.mark.asyncio
+async def test_settle_llm_budget_passes_the_period_through() -> None:
+    enforcer = RecordingEnforcer()
+    set_budget_enforcer(enforcer)
+
+    with llm_budget_context(user_id="u", organization_id="o"):
+        await settle_llm_budget(
+            surface="memory", reserved_tokens=9, actual_tokens=1, period="2026-09"
+        )
+
+    assert enforcer.periods == ["2026-09"]

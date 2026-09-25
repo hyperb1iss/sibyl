@@ -222,7 +222,7 @@ async def test_opus_memory_output_default_binds_wire_policy_and_reservation(
         async def reserve(self, context, *, surface, estimated_tokens):
             reservations.append(estimated_tokens)
 
-        async def settle(self, context, *, surface, reserved_tokens, actual_tokens):
+        async def settle(self, context, *, surface, reserved_tokens, actual_tokens, period=None):
             pass
 
     def respond(request):

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
@@ -26,7 +26,9 @@ class LLMBudgetEnforcer(Protocol):
         *,
         surface: str,
         estimated_tokens: int,
-    ) -> None: ...
+    ) -> str | None:
+        """Reserve tokens and return the budget period they landed in, if any."""
+        ...
 
     async def settle(
         self,
@@ -35,9 +37,22 @@ class LLMBudgetEnforcer(Protocol):
         surface: str,
         reserved_tokens: int,
         actual_tokens: int,
+        period: str | None = None,
     ) -> None:
-        """Replace a reservation with what the call consumed, never below zero."""
+        """Replace a reservation with what the call consumed, never below zero.
+
+        ``period`` is what ``reserve`` returned, so a call reserved in one
+        budget period settles in that period even if it finishes in the next.
+        """
         ...
+
+
+@dataclass(frozen=True, slots=True)
+class LLMReservation:
+    """Tokens one reservation took, and the budget period they belong to."""
+
+    tokens: int
+    period: str | None = None
 
 
 @dataclass(slots=True)
@@ -120,6 +135,10 @@ _run_ledger: ContextVar[LLMRunSpendLedger | None] = ContextVar(
     "sibyl_llm_run_spend_ledger",
     default=None,
 )
+_reservation_log: ContextVar[list[LLMReservation] | None] = ContextVar(
+    "sibyl_llm_reservation_log",
+    default=None,
+)
 _budget_enforcer: LLMBudgetEnforcer | None = None
 
 
@@ -199,6 +218,17 @@ def llm_run_spend_ledger(cap_tokens: int | None) -> Iterator[LLMRunSpendLedger]:
         _run_ledger.reset(token)
 
 
+@contextmanager
+def collect_llm_reservations() -> Iterator[list[LLMReservation]]:
+    """Record every reservation made inside, so one call can settle exactly what it took."""
+    reservations: list[LLMReservation] = []
+    token = _reservation_log.set(reservations)
+    try:
+        yield reservations
+    finally:
+        _reservation_log.reset(token)
+
+
 async def reserve_llm_budget(
     *,
     surface: str,
@@ -206,7 +236,7 @@ async def reserve_llm_budget(
     output_token_limit: int | None = None,
     attempt_envelope: int = 1,
 ) -> int:
-    """Reserve a character-based estimate, including the configured retry envelope."""
+    """Reserve a character-based estimate for ``attempt_envelope`` attempts."""
     if attempt_envelope < 1:
         raise ValueError("attempt envelope must be positive")
     estimated_tokens = (
@@ -217,14 +247,22 @@ async def reserve_llm_budget(
         ledger.admit(surface=surface, estimated_tokens=estimated_tokens)
     enforcer = _budget_enforcer
     context = _budget_context.get()
+    period = None
     if enforcer is not None and context is not None:
-        await enforcer.reserve(
+        period = await enforcer.reserve(
             context,
             surface=surface,
             estimated_tokens=estimated_tokens,
         )
+    # The ledger's admit check and this record sit on either side of the
+    # enforcer's await. That is safe while a run makes its calls one at a time;
+    # concurrent calls under one ledger could each pass admit before either
+    # records, and would need the two steps joined under a lock.
     if ledger is not None:
         ledger.record_reservation(estimated_tokens)
+    log = _reservation_log.get()
+    if log is not None:
+        log.append(LLMReservation(estimated_tokens, period if isinstance(period, str) else None))
     return estimated_tokens
 
 
@@ -233,6 +271,7 @@ async def settle_llm_budget(
     surface: str,
     reserved_tokens: int,
     actual_tokens: int,
+    period: str | None = None,
 ) -> None:
     """Replace what a call reserved with what it used, in the buckets and the run ledger."""
     if reserved_tokens < 0 or actual_tokens < 0:
@@ -245,10 +284,39 @@ async def settle_llm_budget(
             surface=surface,
             reserved_tokens=reserved_tokens,
             actual_tokens=actual_tokens,
+            period=period,
         )
     ledger = _run_ledger.get()
     if ledger is not None:
         ledger.settle(reserved_tokens=reserved_tokens, actual_tokens=actual_tokens)
+
+
+async def settle_llm_reservations(
+    *,
+    surface: str,
+    reservations: Sequence[LLMReservation],
+    actual_tokens: int,
+) -> None:
+    """Settle one call's reservations against its actual usage, period by period.
+
+    A call's hops can land in different budget periods when it runs across a
+    month boundary. Usage is allotted to periods in the order they were
+    reserved, each taking at most what it reserved, and the last period takes
+    any overage, so no period is refunded tokens it never held.
+    """
+    if actual_tokens < 0:
+        raise ValueError("token counts must not be negative")
+    periods: dict[str | None, int] = {}
+    for reservation in reservations:
+        periods[reservation.period] = periods.get(reservation.period, 0) + reservation.tokens
+    remaining = actual_tokens
+    items = list(periods.items())
+    for index, (period, reserved) in enumerate(items):
+        used = remaining if index == len(items) - 1 else min(reserved, remaining)
+        remaining -= used
+        await settle_llm_budget(
+            surface=surface, reserved_tokens=reserved, actual_tokens=used, period=period
+        )
 
 
 def estimate_llm_tokens(text: str, *, output_token_limit: int | None = None) -> int:

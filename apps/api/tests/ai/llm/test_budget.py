@@ -358,3 +358,65 @@ async def test_an_opus_sized_request_fits_a_default_user_budget_with_one_attempt
         await llm_budget.DBLLMBudgetEnforcer(FakeSettingsService()).reserve(
             context, surface="memory", estimated_tokens=one_attempt * 9
         )
+
+
+class _BucketStore:
+    """An in-memory stand-in for llm_usage_buckets that keeps every month apart."""
+
+    def __init__(self) -> None:
+        self.buckets: dict[str, dict[str, object]] = {}
+
+    async def execute_query(self, query: str, **kwargs: object) -> object:
+        if query.startswith("SELECT"):
+            bucket = self.buckets.get(str(kwargs["bucket_key"]))
+            return [dict(bucket)] if bucket else []
+        if query.startswith("CREATE"):
+            record = dict(kwargs["record"])  # type: ignore[arg-type]
+            self.buckets[str(record["bucket_key"])] = record
+            return [record]
+        if "UPDATE llm_usage_buckets" in query:
+            self.buckets[str(kwargs["bucket_key"])]["used_tokens"] = kwargs["used_tokens"]
+            return []
+        raise AssertionError(query)
+
+
+@pytest.mark.asyncio
+async def test_a_call_reserved_last_month_settles_into_last_month(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _BucketStore()
+
+    @asynccontextmanager
+    async def client_scope():
+        yield store
+
+    @asynccontextmanager
+    async def no_lock(scope: str, key: str):
+        yield "token"
+
+    now = {"at": llm_budget.datetime(2026, 9, 30, 23, 59)}
+    monkeypatch.setattr(llm_budget, "surreal_auth_client_scope", client_scope)
+    monkeypatch.setattr(llm_budget, "entity_lock", no_lock)
+    monkeypatch.setattr(llm_budget, "_utcnow", lambda: now["at"])
+    enforcer = llm_budget.DBLLMBudgetEnforcer(FakeSettingsService())
+    context = LLMBudgetContext(user_id="u", organization_id="o")
+
+    period = await enforcer.reserve(context, surface="memory", estimated_tokens=432_768)
+    assert period == "2026-09"
+    now["at"] = llm_budget.datetime(2026, 10, 1, 0, 0, 30)
+    # Another call spends in October before the September call settles.
+    other = await enforcer.reserve(context, surface="memory", estimated_tokens=300_000)
+    await enforcer.settle(
+        context, surface="memory", reserved_tokens=300_000, actual_tokens=300_000, period=other
+    )
+    await enforcer.settle(
+        context, surface="memory", reserved_tokens=432_768, actual_tokens=20_000, period=period
+    )
+
+    used = {key: bucket["used_tokens"] for key, bucket in store.buckets.items()}
+    assert used == {
+        "user:u:2026-09": 20_000,
+        "org:o:2026-09": 20_000,
+        "user:u:2026-10": 300_000,
+        "org:o:2026-10": 300_000,
+    }

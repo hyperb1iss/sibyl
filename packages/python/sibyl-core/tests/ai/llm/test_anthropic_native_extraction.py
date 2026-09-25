@@ -276,6 +276,62 @@ async def test_anthropic_native_budget_uses_transformed_schema_and_one_attempt(m
         assert caught.value.details["extraction_usage"]["transport_attempts"] == []
 
 
+async def test_an_opus_sized_prompt_reserves_one_attempt_under_a_default_user_budget(monkeypatch):
+    """A 1.6M-character Opus request fits a 1,000,000-token monthly budget.
+
+    With SDK retries and output retries configured, the old envelope reserved
+    nine attempts, 3.6M tokens here, and a default user budget refused the call
+    outright. The extractor now reserves exactly one attempt up front and
+    settles the bucket to what the provider reported.
+    """
+    from sibyl_core.ai.errors import LLMBudgetExceededError
+    from sibyl_core.ai.llm.budget import (
+        estimate_llm_tokens,
+        llm_budget_context,
+        reserve_llm_budget,
+        set_budget_enforcer,
+    )
+
+    class MonthlyBudget:
+        limit = 1_000_000
+
+        def __init__(self):
+            self.used = 0
+            self.reservations = []
+
+        async def reserve(self, context, *, surface, estimated_tokens):
+            if self.used + estimated_tokens > self.limit:
+                raise LLMBudgetExceededError("LLM user monthly budget exceeded", surface=surface)
+            self.used += estimated_tokens
+            self.reservations.append(estimated_tokens)
+            return "2026-09"
+
+        async def settle(self, context, *, surface, reserved_tokens, actual_tokens, period=None):
+            assert period == "2026-09"
+            self.used = max(0, self.used + actual_tokens - reserved_tokens)
+
+    def respond(request):
+        return httpx.Response(200, headers={"request-id": "req_opus"}, json=response())
+
+    evidence = "x" * 1_600_000
+    async with configured(monkeypatch, respond, retries=2, output_retries=2) as (extractor, _, _):
+        monkeypatch.setattr(extraction, "reserve_llm_budget", reserve_llm_budget)
+        schema = await extractor.output_schema()
+        budget = MonthlyBudget()
+        set_budget_enforcer(budget)
+        try:
+            with llm_budget_context(user_id="owner", organization_id="org"):
+                result = await extractor.extract_with_usage(evidence)
+        finally:
+            set_budget_enforcer(None)
+
+    prompt = "Synthetic policy\n" + evidence + "\n" + json.dumps(schema, sort_keys=True)
+    one_attempt = estimate_llm_tokens(prompt, output_token_limit=8192)
+    assert budget.reservations == [one_attempt]
+    assert one_attempt * 9 > MonthlyBudget.limit
+    assert budget.used == result.usage.total_tokens == 12
+
+
 async def test_anthropic_prepared_schema_keeps_same_model_after_config_change(monkeypatch):
     wires = []
 

@@ -22,11 +22,19 @@ from pydantic_ai.profiles.openai import OpenAIJsonSchemaTransformer
 
 from sibyl_core.ai.clients import get_agent
 from sibyl_core.ai.errors import LLMError, classify_llm_exception
-from sibyl_core.ai.llm.budget import estimate_llm_tokens, reserve_llm_budget, settle_llm_budget
+from sibyl_core.ai.llm.budget import (
+    LLMReservation,
+    collect_llm_reservations,
+    estimate_llm_tokens,
+    reserve_llm_budget,
+    settle_llm_reservations,
+)
 from sibyl_core.ai.llm.config import LLMConfig, LLMSurface
 from sibyl_core.ai.providers import rejects_forced_tool_choice
 from sibyl_core.ai.transport import (
     FailedExtractionUsage,
+    RecordingAnthropicClient,
+    RecordingOpenAIClient,
     TransportAttempt,
     collect_transport_attempts,
     reserve_uncovered_transport_attempts,
@@ -141,39 +149,42 @@ class Extractor[T]:
             budget_prompt = self._budget_prompt(prompt, agent, mode)
             output_limit = self._budget_output_limit(agent)
             attempt_tokens = estimate_llm_tokens(budget_prompt, output_token_limit=output_limit)
-            reserved_tokens = 0
+            # A recording transport reserves every HTTP hop as it dispatches, an
+            # SDK retry and an output retry alike, so one attempt up front
+            # suffices. Any other model's retries never pass through that hook,
+            # so its output retries are reserved up front as before.
+            recorded = _records_transport(agent.model)
+            up_front = 1 if recorded else (self.output_retries or 0) + 1
 
             async def reserve(envelope: int = 1) -> None:
-                nonlocal reserved_tokens
                 await reserve_llm_budget(
                     surface=self.surface.value,
                     prompt=budget_prompt,
                     output_token_limit=output_limit,
                     attempt_envelope=envelope,
                 )
-                reserved_tokens += attempt_tokens * envelope
 
-            # One attempt is reserved up front. Every further HTTP hop, an SDK
-            # retry or an output retry alike, reserves as it dispatches, and the
-            # call settles to its actual usage afterwards, so the monthly bucket
-            # never holds the full retry envelope (up to nine attempts) for a
-            # call that used one.
-            await reserve(1)
-            try:
-                with reserve_uncovered_transport_attempts(1, reserve):
-                    result = await agent.run(
-                        prompt,
-                        model_settings=self._model_settings(),
-                    )
-            except BaseException:
-                # Usage is unknown after a failure; each dispatched hop keeps one
-                # attempt's estimate, and hops that never left keep nothing.
-                await self._settle(reserved_tokens, attempt_tokens * len(attempts))
-                raise
-            usage = _extraction_usage(result, attempts)
-            await self._settle(
-                reserved_tokens, usage.total_tokens if usage.total_tokens > 0 else reserved_tokens
-            )
+            with collect_llm_reservations() as reservations:
+                await reserve(up_front)
+                try:
+                    with reserve_uncovered_transport_attempts(up_front, reserve):
+                        result = await agent.run(
+                            prompt,
+                            model_settings=self._model_settings(),
+                        )
+                except BaseException:
+                    # Usage is unknown after a failure. A recorded call keeps one
+                    # attempt's estimate per dispatched hop, and hops that never
+                    # left keep nothing; an unrecorded call keeps its reservation.
+                    if recorded:
+                        await self._settle(reservations, attempt_tokens * len(attempts))
+                    raise
+                usage = _extraction_usage(result, attempts)
+                reserved_total = sum(item.tokens for item in reservations)
+                await self._settle(
+                    reservations,
+                    usage.total_tokens if usage.total_tokens > 0 else reserved_total,
+                )
             telemetry_registry().record_llm_call(
                 surface=self.surface.value,
                 provider="runtime",
@@ -201,21 +212,21 @@ class Extractor[T]:
             ).model_dump(mode="json")
             raise error from exc
 
-    async def _settle(self, reserved_tokens: int, actual_tokens: int) -> None:
+    async def _settle(self, reservations: list[LLMReservation], actual_tokens: int) -> None:
         """Hand back the unused part of a reservation; a settle failure never fails the call."""
-        if reserved_tokens <= 0:
+        if not reservations:
             return
         try:
-            await settle_llm_budget(
+            await settle_llm_reservations(
                 surface=self.surface.value,
-                reserved_tokens=reserved_tokens,
+                reservations=reservations,
                 actual_tokens=actual_tokens,
             )
         except Exception:
             log.warning(
                 "llm_budget_settle_failed",
                 surface=self.surface.value,
-                reserved_tokens=reserved_tokens,
+                reserved_tokens=sum(item.tokens for item in reservations),
                 actual_tokens=actual_tokens,
                 exc_info=True,
             )
@@ -339,6 +350,14 @@ class Extractor[T]:
             model=self.model_override,
             surface=self.surface.value,
         )
+
+
+def _records_transport(model: object) -> bool:
+    """True when every HTTP hop of this model passes through Sibyl's recording client."""
+    if not isinstance(model, OpenAIResponsesModel | AnthropicModel):
+        return False
+    http = getattr(model.client, "_client", None)
+    return isinstance(http, RecordingOpenAIClient | RecordingAnthropicClient)
 
 
 def _model_settings(max_tokens: int | None) -> ModelSettings | None:

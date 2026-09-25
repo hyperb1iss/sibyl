@@ -40,12 +40,13 @@ class DBLLMBudgetEnforcer:
         *,
         surface: str,
         estimated_tokens: int,
-    ) -> None:
+    ) -> str | None:
+        """Reserve against this month's buckets and return the month, for settle."""
         now = _utcnow()
         month = now.strftime("%Y-%m")
         limits = await self._limits(context, month=month)
         if not limits:
-            return
+            return month
 
         async with AsyncExitStack() as locks:
             for limit in sorted(limits, key=lambda item: item.key):
@@ -59,6 +60,7 @@ class DBLLMBudgetEnforcer:
                     surface=surface,
                     estimated_tokens=estimated_tokens,
                 )
+        return month
 
     async def settle(
         self,
@@ -67,19 +69,21 @@ class DBLLMBudgetEnforcer:
         surface: str,
         reserved_tokens: int,
         actual_tokens: int,
+        period: str | None = None,
     ) -> None:
         """Move each bucket from the reserved estimate to the tokens the call used.
 
         A call that used less than it reserved hands the difference back; one
         that used more is charged the overage, since it is spend that happened.
-        Buckets never go below zero, and the month is read at settle time, so a
-        call that straddles midnight on the last day settles into the new month.
+        Buckets never go below zero. ``period`` is the month ``reserve``
+        returned, so a call reserved on the last day of a month settles into
+        that month's buckets even when it finishes in the next.
         """
         delta = actual_tokens - reserved_tokens
         if delta == 0:
             return
         now = _utcnow()
-        month = now.strftime("%Y-%m")
+        month = period or now.strftime("%Y-%m")
         limits = await self._limits(context, month=month)
         if not limits:
             return

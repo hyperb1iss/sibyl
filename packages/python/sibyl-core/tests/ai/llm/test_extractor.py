@@ -50,6 +50,7 @@ class RecordingBudgetEnforcer:
         surface: str,
         reserved_tokens: int,
         actual_tokens: int,
+        period: str | None = None,
     ) -> None:
         self.settlements.append((surface, reserved_tokens, actual_tokens))
 
@@ -186,21 +187,50 @@ async def test_extractor_reserves_budget_before_provider_call() -> None:
 
 
 @pytest.mark.asyncio
-async def test_extractor_refunds_a_call_that_fails_before_any_dispatch() -> None:
+async def test_an_unrecorded_model_reserves_its_output_retries_up_front() -> None:
+    """A model without Sibyl's recording transport cannot reserve its retries as they go.
+
+    Gemini and test models alike: their output retries never pass through the
+    per-hop hook, so the extractor reserves every output attempt before the
+    first call, and a failed call keeps that reservation since its real usage
+    is unknown.
+    """
     enforcer = RecordingBudgetEnforcer()
     set_budget_enforcer(enforcer)
+    calls: list[int] = []
 
-    async def fail(_: list[ModelMessage], __: AgentInfo) -> ModelResponse:
-        raise RuntimeError("synthetic provider outage")
+    async def invalid(_: list[ModelMessage], __: AgentInfo) -> ModelResponse:
+        calls.append(1)
+        return ModelResponse(parts=[TextPart('{"nope": 1}')])
 
-    extractor = Extractor(Payload, agent=Agent(FunctionModel(fail), output_type=Payload))
+    agent = Agent(FunctionModel(invalid), output_type=Payload, retries={"output": 2})
+    extractor = Extractor(Payload, agent=agent, output_retries=2, max_tokens=10)
 
     with llm_budget_context(user_id="user-1", organization_id="org-1"), pytest.raises(LLMError):
-        await extractor.extract("abcd")
+        await extractor.extract("abcd" * 100)
+
+    assert len(calls) == 3
+    assert len(enforcer.calls) == 1
+    one_attempt = enforcer.calls[0][2] // 3
+    assert enforcer.calls[0][2] == one_attempt * 3
+    assert enforcer.settlements == []
+
+
+@pytest.mark.asyncio
+async def test_an_unrecorded_model_settles_a_success_to_reported_usage() -> None:
+    enforcer = RecordingBudgetEnforcer()
+    set_budget_enforcer(enforcer)
+    agent = Agent(
+        TestModel(custom_output_args={"name": "Sibyl", "score": 0.9}), output_type=Payload
+    )
+    extractor = Extractor(Payload, agent=agent, output_retries=2, max_tokens=10)
+
+    with llm_budget_context(user_id="user-1", organization_id="org-1"):
+        result = await extractor.extract_with_usage("abcd")
 
     assert len(enforcer.calls) == 1
     reserved = enforcer.calls[0][2]
-    assert enforcer.settlements == [("default", reserved, 0)]
+    assert enforcer.settlements == [("default", reserved, result.usage.total_tokens)]
 
 
 async def _invalid_json_response(_: list[ModelMessage], __: AgentInfo) -> ModelResponse:
