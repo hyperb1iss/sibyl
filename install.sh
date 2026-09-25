@@ -54,6 +54,7 @@ Modes:
   --server   Install Sibyl, start the local API + web UI, and open the browser (default)
   --remote   Install only the sibyl CLI for an existing remote Sibyl server;
              with a URL, also run 'sibyl setup URL' to connect this machine
+             (a URL on its own implies --remote)
   --daemon   Install sibyl + sibyld for the embedded daemon without the web UI
 
 Options:
@@ -335,6 +336,7 @@ print_next_steps() {
 
 parse_args() {
     MODE="${SIBYL_INSTALL_MODE:-server}"
+    MODE_CHOSEN="${SIBYL_INSTALL_MODE:+1}"
     SERVER_URL="${SIBYL_INSTALL_SERVER_URL:-}"
     SIBYL_INSTALL_VERSION="${SIBYL_INSTALL_VERSION:-}"
     START_AFTER_INSTALL="${SIBYL_INSTALL_START:-1}"
@@ -345,16 +347,22 @@ parse_args() {
         case "$1" in
             --server|server|--local|local|--docker|docker)
                 MODE=server
+                MODE_CHOSEN=1
                 ;;
             --remote|remote|--cli|cli)
                 MODE=remote
+                MODE_CHOSEN=1
                 case "${2:-}" in
-                    ''|-*) ;;
+                    ''|-*|server|local|docker|remote|cli|daemon) ;;
                     *) SERVER_URL="$2"; shift ;;
                 esac
                 ;;
             --daemon|daemon)
                 MODE=daemon
+                MODE_CHOSEN=1
+                ;;
+            http://*|https://*)
+                SERVER_URL="$1"
                 ;;
             --no-start)
                 START_AFTER_INSTALL=0
@@ -382,6 +390,15 @@ parse_args() {
         esac
         shift
     done
+
+    # A server URL means connecting to that server, which is remote mode.
+    if [ -n "$SERVER_URL" ]; then
+        if [ -z "$MODE_CHOSEN" ]; then
+            MODE=remote
+        elif [ "$MODE" != remote ]; then
+            error "A server URL needs --remote, not --$MODE."
+        fi
+    fi
 }
 
 main() {

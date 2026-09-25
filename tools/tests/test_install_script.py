@@ -344,3 +344,37 @@ def test_failed_remote_setup_never_reports_completion(tmp_path: Path) -> None:
     assert calls[-1] == "sibyl setup https://sibyl.example.com --yes"
     assert "Re-run: sibyl setup https://sibyl.example.com" in result.stderr
     assert "Installation complete" not in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("args", "env"),
+    [
+        # The URL alone implies remote mode, so no local Docker stack starts.
+        ([], {"SIBYL_INSTALL_SERVER_URL": "https://sibyl.example.com"}),
+        (["https://sibyl.example.com"], {}),
+        (["--remote", "--version", "1.4.1", "https://sibyl.example.com"], {}),
+    ],
+)
+def test_a_server_url_selects_remote_mode_wherever_it_appears(
+    tmp_path: Path, args: list[str], env: dict[str, str]
+) -> None:
+    result, calls = _run_installer(tmp_path, *args, env=env)
+    assert result.returncode == 0, result.stderr
+    assert "docker info" not in calls
+    assert not any(call.startswith("sibyl up") for call in calls)
+    assert calls[-1] == "sibyl setup https://sibyl.example.com --yes"
+
+
+def test_a_mode_keyword_after_remote_is_not_taken_as_the_url(tmp_path: Path) -> None:
+    result, calls = _run_installer(tmp_path, "--remote", "cli")
+    assert result.returncode == 0, result.stderr
+    assert not any(call.startswith("sibyl setup") for call in calls)
+
+
+def test_a_server_url_with_a_local_mode_fails_before_installing(tmp_path: Path) -> None:
+    result, calls = _run_installer(
+        tmp_path, "--daemon", env={"SIBYL_INSTALL_SERVER_URL": "https://sibyl.example.com"}
+    )
+    assert result.returncode != 0
+    assert calls == []
+    assert "needs --remote" in result.stderr
