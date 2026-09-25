@@ -18,6 +18,7 @@ from sibyl_core.backends.surreal.schema_helpers import (
     split_statements,
 )
 from sibyl_core.backends.surreal.schema_index_recovery import ensure_owned_concurrent_index
+from sibyl_core.backends.surreal.schema_invariants import fetch_table_definitions
 from sibyl_core.backends.surreal.schema_lifecycle_repair import (
     LIFECYCLE_REPAIR_FIELDS,
     migrate_lifecycle_repair,
@@ -1064,12 +1065,12 @@ async def _reconcile_embedding_dimension(driver: SchemaDriver, ownership: Schema
     )
 
 
-def _is_relation_cleanup_statement(statement: str) -> bool:
+def _relation_cleanup_table(statement: str) -> str | None:
     normalized = statement.lstrip().lower()
-    return any(
-        normalized.startswith(f"delete from {table}") or normalized.startswith(f"update {table}")
-        for table in GRAPH_EDGES
-    )
+    for table in GRAPH_EDGES:
+        if normalized.startswith((f"delete from {table}", f"update {table}")):
+            return table
+    return None
 
 
 def _is_missing_table_error(error: Exception) -> bool:
@@ -1296,23 +1297,26 @@ async def _bootstrap_owned_schema(
             await _reconcile_embedding_dimension(driver, ownership)
             return
 
-    # Orphaned edges can only exist in a namespace that already recorded a
-    # schema. A new namespace or a reset has no relation tables yet, and a 3.x
-    # server fails DELETE and UPDATE on a missing table with NotFound.
-    relation_cleanup = (RELATION_EDGE_CLEANUP_DEFINITIONS,) if current_version > 0 else ()
-    compatible_blocks = (
+    for block in (
         ANALYZER_DEFINITIONS,
         render_surreal_compatible_sql(NODE_DEFINITIONS, url=driver._url),
-        *relation_cleanup,
+    ):
+        await _execute_graph_schema_block(driver, block, ownership=ownership)
+    # Orphaned edges must be gone before EDGE_DEFINITIONS enforces relation
+    # endpoints. A 3.x server fails DELETE and UPDATE on a missing table with
+    # NotFound, so each relation table is cleaned only when INFO FOR DB lists
+    # it. A new namespace or a reset has neither table and skips the cleanup.
+    present_tables = await fetch_table_definitions(ownership.read)
+    for statement in split_statements(RELATION_EDGE_CLEANUP_DEFINITIONS):
+        if _relation_cleanup_table(statement) in present_tables:
+            await execute_schema_statement(
+                ownership.mutate, statement, scope="graph", group_id=driver.group_id
+            )
+    await _execute_graph_schema_block(
+        driver,
         render_surreal_compatible_sql(EDGE_DEFINITIONS, url=driver._url),
+        ownership=ownership,
     )
-    for block in compatible_blocks:
-        await _execute_graph_schema_block(
-            driver,
-            block,
-            ignore_missing_relation_tables=block == RELATION_EDGE_CLEANUP_DEFINITIONS,
-            ownership=ownership,
-        )
     if force and not reset and current_version >= 23:
         for statement in split_statements(LIFECYCLE_REPAIR_FIELDS):
             await execute_schema_statement(
@@ -1337,41 +1341,15 @@ async def _execute_graph_schema_block(
     driver: SchemaDriver,
     block: str,
     *,
-    ignore_missing_relation_tables: bool = False,
-    ownership: SchemaOwnership | None = None,
-) -> bool:
-    skipped_missing_relation_table = False
-    if ownership is not None and not ignore_missing_relation_tables:
-        await execute_schema_statements(
-            ownership.mutate,
-            split_statements(block),
-            scope="graph",
-            group_id=driver.group_id,
-            batch_execute=ownership.mutate,
-        )
-        return False
-    for statement in split_statements(block):
-        try:
-            await execute_schema_statement(
-                ownership.mutate if ownership is not None else driver.execute_query,
-                statement,
-                scope="graph",
-                group_id=driver.group_id,
-            )
-        except Exception as exc:
-            if not (
-                ignore_missing_relation_tables
-                and _is_relation_cleanup_statement(statement)
-                and _is_missing_table_error(exc)
-            ):
-                raise
-            skipped_missing_relation_table = True
-            logger.debug(
-                "surreal_schema_relation_cleanup_skipped",
-                group_id=driver.group_id,
-                error_type=type(exc).__name__,
-            )
-    return skipped_missing_relation_table
+    ownership: SchemaOwnership,
+) -> None:
+    await execute_schema_statements(
+        ownership.mutate,
+        split_statements(block),
+        scope="graph",
+        group_id=driver.group_id,
+        batch_execute=ownership.mutate,
+    )
 
 
 async def drop_all_indexes(

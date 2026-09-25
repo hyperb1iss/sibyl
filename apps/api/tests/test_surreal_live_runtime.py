@@ -892,6 +892,68 @@ async def test_live_graph_bootstrap_logs_no_failed_queries(starting_point: str) 
 
 
 @pytest.mark.asyncio
+async def test_live_graph_bootstrap_cleans_orphan_edges_after_losing_schema_version() -> None:
+    # A namespace that lost its schema_version record still has relation
+    # tables, so bootstrap must clean their orphans before enforcing endpoints.
+    client = SurrealGraphClient(
+        group_id=str(uuid4()),
+        url=_live_surreal_url(),
+        username=_surreal_username(),
+        password=_surreal_password(),
+    )
+
+    test_failed = False
+    try:
+        await bootstrap_schema(client)
+        await client.execute_query(
+            """
+            CREATE entity:kept SET uuid = 'kept', name = 'Kept', entity_type = 'pattern',
+                labels = [], attributes = {}, group_id = $group_id;
+            CREATE entity:other SET uuid = 'other', name = 'Other', entity_type = 'pattern',
+                labels = [], attributes = {}, group_id = $group_id;
+            RELATE entity:kept->relates_to:valid->entity:other SET
+                uuid = 'valid', name = 'RELATED_TO', fact = 'valid edge', group_id = $group_id;
+            DEFINE TABLE OVERWRITE relates_to SCHEMAFULL TYPE RELATION IN entity OUT entity;
+            DEFINE TABLE OVERWRITE mentions SCHEMAFULL TYPE RELATION IN episode OUT entity;
+            RELATE entity:kept->relates_to:orphan->entity:ghost SET
+                uuid = 'orphan', name = 'RELATED_TO', fact = 'orphan edge', group_id = $group_id;
+            RELATE episode:ghost->mentions:orphan->entity:kept SET
+                uuid = 'orphan', group_id = $group_id;
+            DELETE schema_version:graph;
+            """,
+            group_id=client.group_id,
+        )
+        assert sorted(await client.execute_query("SELECT VALUE uuid FROM relates_to;")) == [
+            "orphan",
+            "valid",
+        ]
+        assert await client.execute_query("SELECT VALUE uuid FROM mentions;") == ["orphan"]
+
+        with capture_logs() as entries:
+            await bootstrap_schema(client)
+
+        failed_queries = [
+            (entry.get("statement"), entry.get("tables"), entry.get("query_origin"))
+            for entry in entries
+            if entry["event"] == "surreal_query_failed"
+        ]
+        assert failed_queries == []
+        assert await client.execute_query("SELECT VALUE uuid FROM relates_to;") == ["valid"]
+        assert await client.execute_query("SELECT VALUE uuid FROM mentions;") == []
+        assert await get_schema_version(client.execute_query) == GRAPH_SCHEMA_CURRENT_VERSION
+    except Exception:
+        test_failed = True
+        raise
+    finally:
+        await client.close()
+        if test_failed:
+            with suppress(Exception):
+                await _drop_surreal_namespace(client.namespace)
+        else:
+            await _drop_surreal_namespace(client.namespace)
+
+
+@pytest.mark.asyncio
 async def test_live_surreal_server_resumes_partial_content_migration() -> None:
     namespace = f"content_migration_live_{uuid4().hex}"
     client = SurrealContentClient(

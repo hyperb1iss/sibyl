@@ -135,6 +135,10 @@ class _RecordingSchemaClient:
             return [{"embedding_dimension": EMBEDDING_DIM}]
         if stripped.startswith("INFO FOR TABLE entity"):
             return {"indexes": {}}
+        if stripped.startswith("INFO FOR DB"):
+            graph_tables = ("entity", "episode", "relates_to", "mentions")
+            present = [table for table in graph_tables if table not in self.missing_tables]
+            return {"tables": {table: f"DEFINE TABLE {table}" for table in present}}
         if stripped.startswith("SELECT version FROM schema_version"):
             return [{"version": self.schema_version}]
         if stripped.startswith("SELECT VALUE version FROM [schema_version:graph]"):
@@ -1319,27 +1323,51 @@ def test_current_graph_maintenance_skips_orphan_cleanup() -> None:
 
 
 @pytest.mark.asyncio
-async def test_graph_bootstrap_cleans_relations_before_enforcement() -> None:
-    client = _RecordingSchemaClient(schema_version=GRAPH_SCHEMA_CURRENT_VERSION)
+@pytest.mark.parametrize(
+    ("schema_version", "force"),
+    [(0, False), (GRAPH_SCHEMA_CURRENT_VERSION, True)],
+    ids=["lost_schema_version", "forced_rebuild"],
+)
+async def test_graph_bootstrap_cleans_relations_before_enforcement(
+    schema_version: int, force: bool
+) -> None:
+    client = _RecordingSchemaClient(schema_version=schema_version)
 
-    await bootstrap_schema(client, force=True)  # type: ignore[arg-type]
+    await bootstrap_schema(client, force=force)  # type: ignore[arg-type]
 
-    relation_define_index = next(
-        index
-        for index, statement in enumerate(client.calls)
-        if "DEFINE TABLE OVERWRITE relates_to" in statement
-    )
-    cleanup_index = next(
-        index
-        for index, statement in enumerate(client.calls)
-        if "DELETE FROM relates_to" in statement
-    )
-    assert cleanup_index < relation_define_index
+    for relation in ("relates_to", "mentions"):
+        relation_define_index = next(
+            index
+            for index, statement in enumerate(client.calls)
+            if f"DEFINE TABLE OVERWRITE {relation}" in statement
+        )
+        cleanup_index = next(
+            index
+            for index, statement in enumerate(client.calls)
+            if f"DELETE FROM {relation}" in statement
+        )
+        assert cleanup_index < relation_define_index
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("present", "absent"), [("relates_to", "mentions"), ("mentions", "relates_to")]
+)
+async def test_graph_bootstrap_cleans_each_present_relation_table(
+    present: str, absent: str
+) -> None:
+    client = _RecordingSchemaClient(missing_tables={absent})
+
+    await bootstrap_schema(client)  # type: ignore[arg-type]
+
+    assert any(f"DELETE FROM {present}" in statement for statement in client.calls)
+    assert not any(f"DELETE FROM {absent}" in statement for statement in client.calls)
+    assert client.schema_version == GRAPH_SCHEMA_CURRENT_VERSION
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("reset", [False, True])
-async def test_graph_bootstrap_skips_relation_cleanup_without_recorded_schema(
+async def test_graph_bootstrap_skips_relation_cleanup_when_tables_are_absent(
     reset: bool,
 ) -> None:
     client = _RecordingSchemaClient(missing_tables={"relates_to", "mentions"})
