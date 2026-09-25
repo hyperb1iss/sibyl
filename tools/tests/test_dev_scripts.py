@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shlex
+import signal
 import subprocess
 import time
 from pathlib import Path
@@ -809,6 +810,7 @@ def _spawn_dev_stack_decoy(cwd: Path) -> subprocess.Popen[bytes]:
         cwd=cwd,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        start_new_session=True,
     )
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
@@ -842,6 +844,16 @@ def _wait_for_exit(proc: subprocess.Popen[bytes], seconds: float) -> int | None:
         return None
 
 
+def _reap_decoy(proc: subprocess.Popen[bytes]) -> None:
+    """Kill the decoy's whole process group, so its sleep child never outlives the test."""
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    if proc.poll() is None:
+        proc.wait(timeout=5)
+
+
 def test_stop_dev_disables_default_compose_env_file(tmp_path: Path) -> None:
     root, env, docker_args = _stop_dev_sandbox(tmp_path)
 
@@ -869,9 +881,7 @@ def test_stop_dev_stops_matching_processes_running_from_its_own_workspace(
         assert "No matching Sibyl dev processes found." not in result.stdout
         assert _wait_for_exit(decoy, seconds=15) is not None
     finally:
-        if decoy.poll() is None:
-            decoy.kill()
-            decoy.wait(timeout=5)
+        _reap_decoy(decoy)
 
 
 def test_stop_dev_leaves_another_workspaces_dev_stack_alone(tmp_path: Path) -> None:
@@ -894,9 +904,7 @@ def test_stop_dev_leaves_another_workspaces_dev_stack_alone(tmp_path: Path) -> N
             "stop-dev.sh killed a process outside its workspace"
         )
     finally:
-        if decoy.poll() is None:
-            decoy.kill()
-            decoy.wait(timeout=5)
+        _reap_decoy(decoy)
 
 
 def test_launch_command_uses_separate_process_group() -> None:

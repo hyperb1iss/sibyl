@@ -2,7 +2,9 @@
 
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# Physical path: process_in_workspace compares against the cwd the kernel
+# reports, which has symlinks resolved.
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 source "$repo_root/tools/dev/process-tree.sh"
 
 pid_file="$repo_root/.moon/cache/dev/processes.pid"
