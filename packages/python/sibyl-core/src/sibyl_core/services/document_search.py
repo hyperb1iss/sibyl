@@ -8,6 +8,7 @@ from uuid import UUID
 import structlog
 
 from sibyl_core.embeddings import content as content_embeddings
+from sibyl_core.embeddings.provenance import document_chunk_embedding_metadata
 from sibyl_core.embeddings.providers import (
     EmbeddingProvider,
     create_embedding_provider,
@@ -52,6 +53,14 @@ async def _embed_text(text: str) -> list[float]:
     if not embeddings:
         raise ValueError("embedding provider returned no vectors")
     return [float(value) for value in embeddings[0]]
+
+
+def _query_chunk_embedding_metadata() -> dict[str, str | int]:
+    """The chunk stamp a query embedded by this module can be scored against."""
+    config = content_embeddings.configured_content_embedding()
+    return document_chunk_embedding_metadata(
+        provider=config.provider, model=config.model, dimensions=config.dimensions
+    )
 
 
 def _get_document_embedding_provider() -> EmbeddingProvider:
@@ -436,6 +445,7 @@ async def search_documents(
             source_name=source_name,
             language=language,
             limit=limit,
+            embedding_metadata=_query_chunk_embedding_metadata() if query_embedding else None,
         )
     except RuntimeError as exc:
         log.warning(

@@ -379,6 +379,7 @@ class _EntitySearchManager:
             " FROM entity WHERE group_id = $group_id"
             f" AND name_embedding <|{pool}, {overfetch_knn_effort}|> $query_embedding"
             ") WHERE entity_type IN $entity_types"
+            " AND attributes.embedding_metadata = $embedding_metadata"
             " ORDER BY score DESC, created_at DESC, uuid DESC"
             " LIMIT $limit;"
         )
@@ -409,6 +410,9 @@ class _EntitySearchManager:
                 embeddings,
                 self._embedding_provider.metadata.dimensions,
             )
+            # Only vectors from the query's model are comparable with it; rows
+            # still awaiting the embedding sweep stay reachable lexically.
+            embedding_metadata = self._embedding_provider.metadata.to_dict()
             rows: list[dict[str, Any]] = []
             if type_values and knn_type_overfetch > 0:
                 rows = normalize_records(
@@ -421,6 +425,7 @@ class _EntitySearchManager:
                         query_embedding=query_embedding,
                         entity_types=type_values,
                         limit=candidate_limit,
+                        embedding_metadata=embedding_metadata,
                         _query_label="entity.search.vector.overfetch",
                     )
                 )
@@ -450,6 +455,7 @@ class _EntitySearchManager:
                     + f"""
                           AND name_embedding <|{candidate_limit}, {knn_effort}|> $query_embedding
                     )
+                    WHERE attributes.embedding_metadata = $embedding_metadata
                     ORDER BY score DESC, created_at DESC, uuid DESC
                     LIMIT $limit;
                     """,
@@ -457,6 +463,7 @@ class _EntitySearchManager:
                     query_embedding=query_embedding,
                     entity_types=type_values,
                     limit=candidate_limit,
+                    embedding_metadata=embedding_metadata,
                     _query_label="entity.search.vector",
                 )
             )

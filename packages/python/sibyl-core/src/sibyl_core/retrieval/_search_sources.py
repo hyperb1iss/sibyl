@@ -647,6 +647,7 @@ async def _node_vector_candidates(
                   AND name_embedding <|{pool}, {pool_knn_effort}|> $query_embedding
             )
             WHERE score >= $min_score AND entity_type IN $node_types
+              AND attributes.embedding_metadata = $embedding_metadata
             ORDER BY score DESC, created_at DESC, uuid DESC
             LIMIT $limit;
             """,
@@ -654,6 +655,7 @@ async def _node_vector_candidates(
             query_embedding=list(query_embedding),
             min_score=plan.vector_min_score,
             limit=candidate_limit,
+            embedding_metadata=embedding_metadata.to_dict(),
             **filter_params,
         )
         if len(rows) >= candidate_limit:
@@ -679,7 +681,7 @@ async def _node_vector_candidates(
         + f"""
               AND name_embedding <|{candidate_limit}, {knn_effort}|> $query_embedding
         )
-        WHERE score >= $min_score
+        WHERE score >= $min_score AND attributes.embedding_metadata = $embedding_metadata
         ORDER BY score DESC, created_at DESC, uuid DESC
         LIMIT $limit;
         """,
@@ -687,6 +689,7 @@ async def _node_vector_candidates(
         query_embedding=list(query_embedding),
         min_score=plan.vector_min_score,
         limit=candidate_limit,
+        embedding_metadata=embedding_metadata.to_dict(),
         **filter_params,
     )
     return [
@@ -731,6 +734,7 @@ async def _edge_vector_candidates(
               AND fact_embedding <|{pool}, {pool_knn_effort}|> $query_embedding
             )
             WHERE score >= $min_score AND name IN $edge_types
+              AND attributes.embedding_metadata = $embedding_metadata
             ORDER BY score DESC, created_at DESC, uuid DESC
             LIMIT $limit;
             """,
@@ -738,6 +742,7 @@ async def _edge_vector_candidates(
             query_embedding=list(query_embedding),
             min_score=plan.vector_min_score,
             limit=candidate_limit,
+            embedding_metadata=embedding_metadata.to_dict(),
             **filter_params,
         )
         if len(rows) >= candidate_limit:
@@ -759,7 +764,7 @@ async def _edge_vector_candidates(
         + f"""
           AND fact_embedding <|{candidate_limit}, {knn_effort}|> $query_embedding
         )
-        WHERE score >= $min_score
+        WHERE score >= $min_score AND attributes.embedding_metadata = $embedding_metadata
         ORDER BY score DESC, created_at DESC, uuid DESC
         LIMIT $limit;
         """,
@@ -767,6 +772,7 @@ async def _edge_vector_candidates(
         query_embedding=list(query_embedding),
         min_score=plan.vector_min_score,
         limit=candidate_limit,
+        embedding_metadata=embedding_metadata.to_dict(),
         **filter_params,
     )
     return [

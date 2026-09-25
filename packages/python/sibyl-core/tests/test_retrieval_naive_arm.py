@@ -411,6 +411,8 @@ async def _seed_corpus(client: SurrealGraphClient, provider: Any, *, group_id: s
                     blend * query_value + (1.0 - blend) * document_value
                     for query_value, document_value in zip(query_embedding, embedding, strict=True)
                 ],
+                # Vector lanes score only rows stamped with the query's model.
+                "attributes": {"embedding_metadata": provider.metadata.to_dict()},
                 "created_at": datetime.now(UTC),
             }
         )
@@ -452,7 +454,11 @@ async def _seed_private_row(
                 "entity_type": "session",
                 "name_embedding": list(embedding),
                 "created_at": datetime.now(UTC),
-                "attributes": {"memory_scope": "private", "principal_id": owner},
+                "attributes": {
+                    "memory_scope": "private",
+                    "principal_id": owner,
+                    "embedding_metadata": provider.metadata.to_dict(),
+                },
             }
         ],
     )

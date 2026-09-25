@@ -18,6 +18,10 @@ import structlog
 
 from sibyl_core.backends.surreal.knn import knn_search_effort
 from sibyl_core.config import settings
+from sibyl_core.embeddings.provenance import (
+    UNVERIFIED_EMBEDDING_PROVIDER,
+    is_unverified_embedding_metadata,
+)
 from sibyl_core.models.entities import Entity
 from sibyl_core.services.graph import normalize_records
 
@@ -129,6 +133,11 @@ def jaccard_similarity(s1: str, s2: str) -> float:
     union = len(words1 | words2)
 
     return intersection / union if union > 0 else 0.0
+
+
+# A seed whose vector predates stamping is compared only with other unstamped
+# vectors; an unknown origin never meets a vector of a known model.
+_UNSTAMPED = object()
 
 
 def _float_list(value: object) -> list[float]:
@@ -297,10 +306,13 @@ class EntityDeduplicator:
                 seed_rows = normalize_records(
                     await execute_query(
                         """
-                        SELECT uuid, name, entity_type, name_embedding
+                        SELECT uuid, name, entity_type, name_embedding,
+                               attributes.embedding_metadata AS embedding_space
                         FROM entity
                         WHERE group_id = $group_id
                           AND name_embedding != NONE
+                          AND (attributes.embedding_metadata = NONE
+                              OR attributes.embedding_metadata.provider != $unverified)
                     """
                         + type_clause
                         + """
@@ -311,6 +323,7 @@ class EntityDeduplicator:
                         entity_types=allowed_types,
                         offset=offset,
                         limit=page_size,
+                        unverified=UNVERIFIED_EMBEDDING_PROVIDER,
                         _query_label="dedup.seeds",
                     )
                 )
@@ -319,6 +332,10 @@ class EntityDeduplicator:
 
                 offset += len(seed_rows)
                 seeds = [seed for row in seed_rows if (seed := _dedup_seed_from_row(row))]
+                seed_spaces = {
+                    str(row.get("uuid")): row.get("embedding_space") or _UNSTAMPED
+                    for row in seed_rows
+                }
                 entity_count += len(seeds)
                 pairs.extend(
                     await self._find_hnsw_candidates_for_seeds(
@@ -329,6 +346,7 @@ class EntityDeduplicator:
                         seen_pairs=seen_pairs,
                         execute_query=execute_query,
                         execute_query_raw=execute_query_raw,
+                        seed_spaces=seed_spaces,
                     )
                 )
 
@@ -357,11 +375,17 @@ class EntityDeduplicator:
             execute_query_raw = None
 
         seeds: list[tuple[str, str, str, list[float]]] = []
+        seed_spaces: dict[str, object] = {}
         scope_constraints: dict[str, dict[str, object | None]] = {}
         for entity in entities:
             embedding = _float_list(entity.embedding)
+            space = (entity.metadata or {}).get("embedding_metadata")
+            if is_unverified_embedding_metadata(space):
+                # A vector of unknown origin has no space to compare in.
+                continue
             if entity.id and embedding:
                 seeds.append((entity.id, entity.name, entity.entity_type.value, embedding))
+                seed_spaces[entity.id] = space if space is not None else _UNSTAMPED
                 if self.config.scope_metadata_keys:
                     metadata = entity.metadata if isinstance(entity.metadata, dict) else {}
                     scope_constraints[entity.id] = {
@@ -380,6 +404,7 @@ class EntityDeduplicator:
                 execute_query=execute_query,
                 execute_query_raw=execute_query_raw,
                 scope_constraints=scope_constraints,
+                seed_spaces=seed_spaces,
             )
         except Exception as exc:
             log.warning(
@@ -404,6 +429,7 @@ class EntityDeduplicator:
         execute_query: Any,
         execute_query_raw: Any | None = None,
         scope_constraints: dict[str, dict[str, object | None]] | None = None,
+        seed_spaces: dict[str, object] | None = None,
     ) -> list[DuplicatePair]:
         if not seeds:
             return []
@@ -422,6 +448,7 @@ class EntityDeduplicator:
                         seen_pairs=seen_pairs,
                         execute_query=execute_query,
                         scope_constraints=(scope_constraints or {}).get(seed[0]),
+                        seed_space=(seed_spaces or {}).get(seed[0]),
                     )
                 )
             return pairs
@@ -459,12 +486,20 @@ class EntityDeduplicator:
             params[seed_type_param] = seed_type
             params[seed_embedding_param] = seed_embedding
             params[limit_param] = candidate_limit
+            space = (seed_spaces or {}).get(seed_id)
+            space_clause = ""
+            if space is _UNSTAMPED:
+                space_clause = " AND embedding_space = NONE"
+            elif space is not None:
+                params[f"seed_space_{index}"] = space
+                space_clause = f" AND embedding_space = $seed_space_{index}"
             statements.append(
                 f"""
                 SELECT seed_id, uuid, name, entity_type, score, created_at
                 FROM (
                     SELECT ${seed_id_param} AS seed_id,
                            uuid, name, entity_type, created_at,
+                           attributes.embedding_metadata AS embedding_space,
                            (1 - vector::distance::knn()) AS score
                     FROM entity
                     WHERE """
@@ -472,7 +507,7 @@ class EntityDeduplicator:
                 + f"""
                       AND name_embedding <|{candidate_limit}, {knn_effort}|> ${seed_embedding_param}
                 )
-                WHERE score >= $threshold
+                WHERE score >= $threshold{space_clause}
                 ORDER BY score DESC, created_at DESC, uuid DESC
                 LIMIT ${limit_param};
                 """
@@ -524,6 +559,7 @@ class EntityDeduplicator:
         seen_pairs: set[tuple[str, str]],
         execute_query: Any,
         scope_constraints: dict[str, object | None] | None = None,
+        seed_space: object | None = None,
     ) -> list[DuplicatePair]:
         seed_id, seed_name, seed_type, seed_embedding = seed
         clauses = [
@@ -551,6 +587,12 @@ class EntityDeduplicator:
             param_prefix="scope",
         )
 
+        space_clause = ""
+        if seed_space is _UNSTAMPED:
+            space_clause = " AND embedding_space = NONE"
+        elif seed_space is not None:
+            params["seed_space"] = seed_space
+            space_clause = " AND embedding_space = $seed_space"
         knn_effort = knn_search_effort(candidate_limit, settings.graph_knn_ef)
         rows = normalize_records(
             await execute_query(
@@ -558,6 +600,7 @@ class EntityDeduplicator:
                 SELECT uuid, name, entity_type, score, created_at
                 FROM (
                     SELECT uuid, name, entity_type, created_at,
+                           attributes.embedding_metadata AS embedding_space,
                            (1 - vector::distance::knn()) AS score
                     FROM entity
                     WHERE """
@@ -565,7 +608,7 @@ class EntityDeduplicator:
                 + f"""
                       AND name_embedding <|{candidate_limit}, {knn_effort}|> $seed_embedding
                 )
-                WHERE score >= $threshold
+                WHERE score >= $threshold{space_clause}
                 ORDER BY score DESC, created_at DESC, uuid DESC
                 LIMIT $limit;
                 """,

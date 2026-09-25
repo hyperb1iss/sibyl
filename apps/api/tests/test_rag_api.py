@@ -47,15 +47,23 @@ def mock_auth_context():
     )
 
 
+QUERY_CHUNK_SPACE = {
+    "provider": "openai",
+    "model": "text-embedding-3-small",
+    "dimensions": 1536,
+    "text_version": "document-chunk-v1",
+}
+
+
 @pytest.fixture
 def mock_embed_text():
-    """Mock the embed_text function to return fake embeddings."""
+    """Mock the query embedder to return a fake embedding and its chunk space."""
 
-    async def fake_embed(text: str) -> list[float]:
+    async def fake_embed(text: str) -> tuple[list[float], dict[str, object]]:
         # Return a fake 1536-dim embedding
-        return [0.1] * 1536
+        return [0.1] * 1536, dict(QUERY_CHUNK_SPACE)
 
-    with patch("sibyl.api.routes.rag.embed_text", fake_embed):
+    with patch("sibyl.api.routes.rag.embed_query_with_metadata", fake_embed):
         yield fake_embed
 
 
@@ -149,10 +157,11 @@ class TestRAGSearchEndpoint:
     ):
         """Test basic RAG search functionality."""
         rows = [(sample_chunk, sample_document, sample_source.name, sample_source.id, 0.85)]
+        search = AsyncMock(return_value=rows)
 
         with (
             patch("sibyl.api.routes.rag.get_content_read_session", mock_content_session),
-            patch("sibyl.api.routes.rag.search_rag_chunks", AsyncMock(return_value=rows)),
+            patch("sibyl.api.routes.rag.search_rag_chunks", search),
         ):
             from sibyl.api.routes.rag import rag_search
             from sibyl.api.schemas import RAGSearchRequest
@@ -163,6 +172,9 @@ class TestRAGSearchEndpoint:
             )
 
             response = await rag_search(request, auth=mock_auth_context)
+
+            # The vector lane is told which chunk space the query lives in.
+            assert search.await_args.kwargs["embedding_metadata"] == QUERY_CHUNK_SPACE
 
             assert response.query == "authentication patterns"
             assert response.return_mode == "chunks"
@@ -577,10 +589,10 @@ class TestErrorHandling:
     async def test_embedding_error(self, mock_session, mock_auth_context):
         """Test handling of embedding generation errors."""
 
-        async def failing_embed(text: str) -> list[float]:
+        async def failing_embed(text: str) -> tuple[list[float], dict[str, object]]:
             raise ValueError("Embedding service unavailable")
 
-        with patch("sibyl.api.routes.rag.embed_text", failing_embed):
+        with patch("sibyl.api.routes.rag.embed_query_with_metadata", failing_embed):
             from fastapi import HTTPException
 
             from sibyl.api.routes.rag import rag_search

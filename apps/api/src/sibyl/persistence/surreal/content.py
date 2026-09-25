@@ -699,6 +699,21 @@ def _search_candidate_limit(limit: int) -> int:
     return min(max(limit * 5, limit, 1), 100)
 
 
+def _chunk_space_clause(
+    embedding_metadata: Mapping[str, object] | None,
+) -> tuple[str, dict[str, object]]:
+    """Keep a query's vector lane to chunks embedded in the query's space.
+
+    Chunks awaiting the embedding sweep after a model change still carry the
+    old model's vector; they drop out of the vector lane, not the lexical one.
+    """
+    if embedding_metadata is None:
+        return "", {}
+    return "AND embedding_metadata = $embedding_metadata ", {
+        "embedding_metadata": dict(embedding_metadata)
+    }
+
+
 def _code_chunk_clause(language: str | None) -> tuple[str, dict[str, object]]:
     if not language:
         return " AND chunk_type = 'code' ", {}
@@ -2406,12 +2421,14 @@ async def search_rag_chunks(
     match_count: int,
     source_id: UUID | None = None,
     source_name: str | None = None,
+    embedding_metadata: Mapping[str, object] | None = None,
 ) -> list[RagSearchRow]:
     if match_count <= 0:
         return []
 
     candidate_limit = _search_candidate_limit(match_count)
     knn_effort = knn_search_effort(candidate_limit, _CONTENT_KNN_EF_FLOOR)
+    space_clause, space_params = _chunk_space_clause(embedding_metadata)
     async with surreal_content_client() as client:
         sources = await _load_sources_for_search_scope(
             client,
@@ -2429,17 +2446,18 @@ async def search_rag_chunks(
             "SELECT * FROM ("  # noqa: S608
             "SELECT uuid, organization_id, source_id, document_id, chunk_index, "
             "chunk_type, content, context, heading_path, language, has_entities, entity_ids, "
-            "(1 - vector::distance::knn()) AS score "
+            "embedding_metadata, (1 - vector::distance::knn()) AS score "
             "FROM document_chunks WHERE organization_id = $organization_id "
             "AND source_id INSIDE $source_ids "
             f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding"
-            ") WHERE score >= $similarity_threshold "
+            f") WHERE score >= $similarity_threshold {space_clause}"
             "ORDER BY score DESC LIMIT $candidate_limit;",
             organization_id=str(organization_id),
             source_ids=source_ids,
             query_embedding=query_embedding,
             similarity_threshold=similarity_threshold,
             candidate_limit=candidate_limit,
+            **space_params,
         )
         documents = await _load_search_documents_by_ids(
             client, _document_ids_from_search_rows(rows)
@@ -2461,12 +2479,14 @@ async def search_code_example_chunks(
     match_count: int,
     source_id: UUID | None = None,
     language: str | None = None,
+    embedding_metadata: Mapping[str, object] | None = None,
 ) -> list[CodeSearchRow]:
     if match_count <= 0:
         return []
 
     candidate_limit = _search_candidate_limit(match_count)
     knn_effort = knn_search_effort(candidate_limit, _CONTENT_KNN_EF_FLOOR)
+    space_clause, space_params = _chunk_space_clause(embedding_metadata)
     language_clause, language_params = _code_chunk_clause(language)
     async with surreal_content_client() as client:
         sources = await _load_sources_for_search_scope(
@@ -2485,18 +2505,20 @@ async def search_code_example_chunks(
             "SELECT * FROM ("  # noqa: S608
             "SELECT uuid, organization_id, source_id, document_id, chunk_index, "
             "chunk_type, content, context, heading_path, language, has_entities, entity_ids, "
-            "(1 - vector::distance::knn()) AS score "
+            "embedding_metadata, (1 - vector::distance::knn()) AS score "
             "FROM document_chunks WHERE organization_id = $organization_id "
             "AND source_id INSIDE $source_ids"
             f"{language_clause} "
             f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding "
             ") "
+            f"{space_clause.replace('AND ', 'WHERE ', 1)}"
             "ORDER BY score DESC LIMIT $candidate_limit;",
             organization_id=str(organization_id),
             source_ids=source_ids,
             query_embedding=query_embedding,
             candidate_limit=candidate_limit,
             **language_params,
+            **space_params,
         )
         documents = await _load_search_documents_by_ids(
             client, _document_ids_from_search_rows(rows)
@@ -2523,12 +2545,14 @@ async def hybrid_search_chunks(
     match_count: int,
     source_id: UUID | None = None,
     source_name: str | None = None,
+    embedding_metadata: Mapping[str, object] | None = None,
 ) -> list[HybridSearchRow]:
     if match_count <= 0:
         return []
 
     candidate_limit = _search_candidate_limit(match_count)
     knn_effort = knn_search_effort(candidate_limit, _CONTENT_KNN_EF_FLOOR)
+    space_clause, space_params = _chunk_space_clause(embedding_metadata)
     async with surreal_content_client() as client:
         sources = await _load_sources_for_search_scope(
             client,
@@ -2546,17 +2570,18 @@ async def hybrid_search_chunks(
             "SELECT * FROM ("  # noqa: S608
             "SELECT uuid, organization_id, source_id, document_id, chunk_index, "
             "chunk_type, content, context, heading_path, language, has_entities, entity_ids, "
-            "(1 - vector::distance::knn()) AS score "
+            "embedding_metadata, (1 - vector::distance::knn()) AS score "
             "FROM document_chunks WHERE organization_id = $organization_id "
             "AND source_id INSIDE $source_ids "
             f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding"
-            ") WHERE score >= $similarity_threshold "
+            f") WHERE score >= $similarity_threshold {space_clause}"
             "ORDER BY score DESC LIMIT $candidate_limit;",
             organization_id=str(organization_id),
             source_ids=source_ids,
             query_embedding=query_embedding,
             similarity_threshold=similarity_threshold,
             candidate_limit=candidate_limit,
+            **space_params,
         )
         lexical_rows = await _select_many_raw(
             client,

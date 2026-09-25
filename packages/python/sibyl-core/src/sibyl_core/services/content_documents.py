@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from uuid import uuid4
 
 from sibyl_core.backends.surreal import SurrealContentClient
@@ -337,7 +338,14 @@ async def search_document_chunks(
     language: str | None = None,
     limit: int = 10,
     similarity_threshold: float = 0.5,
+    embedding_metadata: Mapping[str, object] | None = None,
 ) -> tuple[list[ContentSearchRow], list[ContentSearchRow]]:
+    """Vector and lexical chunk rows for one query.
+
+    ``embedding_metadata`` names the model ``query_embedding`` came from; only
+    chunk vectors stamped with it are scored, so chunks still awaiting the
+    embedding sweep after a model change are served by the lexical lane alone.
+    """
     if limit <= 0:
         return [], []
 
@@ -371,6 +379,10 @@ async def search_document_chunks(
                 "candidate_limit": candidate_limit,
                 **language_params,
             }
+            space_clause = ""
+            if embedding_metadata is not None:
+                vector_params["embedding_metadata"] = dict(embedding_metadata)
+                space_clause = "AND embedding_metadata = $embedding_metadata "
             try:
                 vector_rows = await with_timeout(
                     content_client.select_many_raw(
@@ -378,13 +390,13 @@ async def search_document_chunks(
                         "SELECT * FROM ("
                         "SELECT uuid, organization_id, source_id, document_id, chunk_index, "
                         "chunk_type, content, context, heading_path, language, "
-                        "has_entities, entity_ids, "
+                        "has_entities, entity_ids, embedding_metadata, "
                         "(1 - vector::distance::knn()) AS score "
                         "FROM document_chunks WHERE organization_id = $organization_id "
                         "AND source_id INSIDE $source_ids"
                         f"{language_clause} "
                         f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding"
-                        ") WHERE score >= $similarity_threshold "
+                        f") WHERE score >= $similarity_threshold {space_clause}"
                         "ORDER BY score DESC LIMIT $candidate_limit;",
                         **vector_params,
                     ),
