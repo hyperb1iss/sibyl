@@ -2,21 +2,20 @@ from __future__ import annotations
 
 import argparse
 import ast
+import re
 import shutil
 import subprocess
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, TextIO
+from typing import Any, TextIO
 
 import tomllib
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SNAPSHOT_PATH = REPO_ROOT / "docs/research/rust-port/INVENTORY.md"
-GRAPHITI_EXIT_INVENTORY_PATH = REPO_ROOT / "docs/_archive/SURREALDB_GRAPHITI_EXIT_INVENTORY.md"
 APP_PATH = REPO_ROOT / "apps/api/src/sibyl/api/app.py"
-MODELS_PATH = REPO_ROOT / "apps/api/src/sibyl/db/models.py"
-PYPROJECT_EXCLUDED_PARTS = {
+SCAN_EXCLUDED_PARTS = {
     ".git",
     ".moon",
     ".mypy_cache",
@@ -32,6 +31,13 @@ SOURCE_ROOTS = [
     REPO_ROOT / "apps/api/src",
     REPO_ROOT / "packages/python/sibyl-core/src",
 ]
+# Every Python surface that ships: the server, the core library, the CLI, and the agent hooks.
+RUNTIME_IMPORT_ROOTS = (
+    REPO_ROOT / "apps/api/src",
+    REPO_ROOT / "apps/cli/src",
+    REPO_ROOT / "hooks",
+    REPO_ROOT / "packages/python/sibyl-core/src",
+)
 HTTP_METHOD_DECORATORS = {
     "delete",
     "get",
@@ -69,23 +75,24 @@ SQL_SESSION_CALLS = {
     "scalar",
     "scalars",
 }
+# Names compare PEP 503 normalized, so underscore, dotted, and mixed-case spellings match too.
 LEGACY_DEPENDENCY_NAMES = {
     "alembic",
     "asyncpg",
+    "graphiti",
+    "graphiti" + "-core",
     "pgvector",
     "sqlalchemy",
     "sqlmodel",
 }
-GRAPH_DEPENDENCY_NAMES = {"graphiti" + "-core"}
 TARGET_DEPENDENCY_NAMES = {"surrealdb"}
 # The frozen migration allowlist; shrinking it is progress, growing it needs a reason.
 ALLOWED_LEGACY_DEPENDENCIES: frozenset[tuple[str, str]] = frozenset()
-GraphitiSurfaceClass = Literal["admin", "archived_docs", "compatibility", "migration", "test"]
 
 
 def _is_repo_pyproject(path: Path) -> bool:
     relative_parts = path.relative_to(REPO_ROOT).parts
-    return not any(part in PYPROJECT_EXCLUDED_PARTS for part in relative_parts)
+    return not any(part in SCAN_EXCLUDED_PARTS for part in relative_parts)
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,14 +131,6 @@ class GraphitiImportRecord:
 
 
 @dataclass(frozen=True, slots=True)
-class GraphitiCompatibilityRecord:
-    path: str
-    classification: GraphitiSurfaceClass
-    owner: str
-    criteria: str
-
-
-@dataclass(frozen=True, slots=True)
 class DependencyRecord:
     project: str
     dependency: str
@@ -146,14 +145,10 @@ class RuntimeSurface:
     websocket_routes: tuple[WebSocketRouteRecord, ...]
     mcp_tools: tuple[McpDecoratorRecord, ...]
     mcp_resources: tuple[McpDecoratorRecord, ...]
-    sqlmodel_tables: tuple[str, ...]
     raw_sql_usage: tuple[SqlUsageRecord, ...]
     session_storage_usage: tuple[SqlUsageRecord, ...]
     graphiti_imports: tuple[GraphitiImportRecord, ...]
     dependencies: tuple[DependencyRecord, ...]
-
-
-GRAPHITI_COMPATIBILITY_ALLOWLIST: tuple[GraphitiCompatibilityRecord, ...] = ()
 
 
 def git_index_paths() -> frozenset[str]:
@@ -254,6 +249,15 @@ def iter_python_files(root: Path) -> list[Path]:
     return sorted(path for path in root.rglob("*.py") if path.is_file())
 
 
+def iter_runtime_python_files(roots: Sequence[Path]) -> list[Path]:
+    return sorted(
+        path
+        for root in roots
+        for path in iter_python_files(root)
+        if not SCAN_EXCLUDED_PARTS.intersection(path.relative_to(root).parts)
+    )
+
+
 def relpath(path: Path) -> str:
     return path.relative_to(REPO_ROOT).as_posix()
 
@@ -262,30 +266,30 @@ def annotation_names(node: ast.AST) -> set[str]:
     return {child.id for child in ast.walk(node) if isinstance(child, ast.Name)}
 
 
+# The PEP 508 name token, which ends before extras, versions, markers, and `@ url` specs.
+DEPENDENCY_NAME_PATTERN = re.compile(r"\s*([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)")
+
+
 def parse_dependency_name(requirement: str) -> str:
-    trimmed = requirement.split(";", maxsplit=1)[0].strip()
-    if "[" in trimmed:
-        trimmed = trimmed.split("[", maxsplit=1)[0]
-    for stop in ("<", ">", "=", "!", "~"):
-        if stop in trimmed:
-            trimmed = trimmed.split(stop, maxsplit=1)[0]
-    return trimmed.strip()
+    match = DEPENDENCY_NAME_PATTERN.match(requirement)
+    return match.group(1) if match else ""
 
 
-def render_dependency_table(title: str, records: tuple[DependencyRecord, ...]) -> list[str]:
-    lines = [f"### {title}"]
-    if not records:
-        lines.append("- none")
-        return lines
-    lines.extend(
-        [
-            "| Project | Scope | Dependency |",
-            "| ------- | ----- | ---------- |",
-        ]
-    )
-    for record in records:
-        lines.append(f"| `{record.project}` | `{record.scope}` | `{record.dependency}` |")
-    return lines
+def normalize_dependency_name(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def classify_dependency(requirement: str) -> str | None:
+    name = normalize_dependency_name(parse_dependency_name(requirement))
+    if name in LEGACY_DEPENDENCY_NAMES or "falkordb" in requirement.lower():
+        return "legacy"
+    if name in TARGET_DEPENDENCY_NAMES:
+        return "target"
+    return None
+
+
+def matches_module_prefix(module: str, prefixes: Sequence[str]) -> bool:
+    return any(module == prefix or module.startswith(f"{prefix}.") for prefix in prefixes)
 
 
 def emit(message: str, stream: TextIO | None = None) -> None:
@@ -396,24 +400,6 @@ def collect_mcp_surface() -> tuple[tuple[McpDecoratorRecord, ...], tuple[McpDeco
     )
 
 
-def collect_sqlmodel_tables() -> tuple[str, ...]:
-    if not MODELS_PATH.exists():
-        return ()
-    tree = read_ast(MODELS_PATH)
-    tables: list[str] = []
-    for node in tree.body:
-        if not isinstance(node, ast.ClassDef):
-            continue
-        if any(
-            keyword.arg == "table"
-            and isinstance(keyword.value, ast.Constant)
-            and keyword.value.value is True
-            for keyword in node.keywords
-        ):
-            tables.append(node.name)
-    return tuple(tables)
-
-
 def collect_storage_usage() -> tuple[tuple[SqlUsageRecord, ...], tuple[SqlUsageRecord, ...]]:
     raw_sql_records: list[SqlUsageRecord] = []
     session_only_records: list[SqlUsageRecord] = []
@@ -442,51 +428,50 @@ def collect_storage_usage() -> tuple[tuple[SqlUsageRecord, ...], tuple[SqlUsageR
     return tuple(raw_sql_records), tuple(session_only_records)
 
 
-def collect_graphiti_imports() -> tuple[GraphitiImportRecord, ...]:
+def imported_module_names(tree: ast.AST) -> set[str]:
+    """Absolute imports, plus `import_module` and `__import__` calls on a literal name."""
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.module and node.level == 0:
+                names.add(node.module)
+        elif isinstance(node, ast.Call) and node.args:
+            function_name: str | None = None
+            if isinstance(node.func, ast.Name):
+                function_name = node.func.id
+            elif isinstance(node.func, ast.Attribute):
+                function_name = node.func.attr
+            module_arg = node.args[0]
+            if (
+                function_name in {"__import__", "import_module"}
+                and isinstance(module_arg, ast.Constant)
+                and isinstance(module_arg.value, str)
+            ):
+                names.add(module_arg.value)
+    return names
+
+
+def graphiti_imports_in(tree: ast.AST) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            name
+            for name in imported_module_names(tree)
+            if matches_module_prefix(name, GRAPHITI_IMPORT_PREFIXES)
+        )
+    )
+
+
+def collect_graphiti_imports(
+    roots: Sequence[Path] = RUNTIME_IMPORT_ROOTS,
+) -> tuple[GraphitiImportRecord, ...]:
     records: list[GraphitiImportRecord] = []
-    for root in SOURCE_ROOTS:
-        for path in iter_python_files(root):
-            tree = read_ast(path)
-            imports: set[str] = set()
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Import):
-                    for alias in node.names:
-                        if alias.name.startswith(GRAPHITI_IMPORT_PREFIXES):
-                            imports.add(alias.name)
-                elif isinstance(node, ast.ImportFrom):
-                    module = node.module or ""
-                    if module.startswith(GRAPHITI_IMPORT_PREFIXES):
-                        imports.add(module)
-                elif isinstance(node, ast.Call):
-                    dynamic_import = graphiti_dynamic_import_name(node)
-                    if dynamic_import is not None:
-                        imports.add(dynamic_import)
-            if imports:
-                records.append(
-                    GraphitiImportRecord(path=relpath(path), imports=tuple(sorted(imports)))
-                )
+    for path in iter_runtime_python_files(roots):
+        imports = graphiti_imports_in(read_ast(path))
+        if imports:
+            records.append(GraphitiImportRecord(path=relpath(path), imports=imports))
     return tuple(records)
-
-
-def graphiti_dynamic_import_name(node: ast.Call) -> str | None:
-    if not node.args:
-        return None
-
-    function_name: str | None = None
-    if isinstance(node.func, ast.Name):
-        function_name = node.func.id
-    elif isinstance(node.func, ast.Attribute):
-        function_name = node.func.attr
-
-    if function_name not in {"__import__", "import_module"}:
-        return None
-
-    module_arg = node.args[0]
-    if not isinstance(module_arg, ast.Constant) or not isinstance(module_arg.value, str):
-        return None
-    if not module_arg.value.startswith(GRAPHITI_IMPORT_PREFIXES):
-        return None
-    return module_arg.value
 
 
 def extract_dependency_items(pyproject: dict[str, Any]) -> list[tuple[str, str]]:
@@ -512,14 +497,7 @@ def collect_dependencies() -> tuple[DependencyRecord, ...]:
         data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
         project_name = relpath(pyproject_path)
         for scope, requirement in extract_dependency_items(data):
-            dependency_name = parse_dependency_name(requirement)
-            classification: str | None = None
-            if dependency_name in LEGACY_DEPENDENCY_NAMES or "falkordb" in requirement:
-                classification = "legacy"
-            elif dependency_name in GRAPH_DEPENDENCY_NAMES:
-                classification = "graph"
-            elif dependency_name in TARGET_DEPENDENCY_NAMES:
-                classification = "target"
+            classification = classify_dependency(requirement)
             if classification is None:
                 continue
             key = (project_name, requirement, classification, scope)
@@ -557,7 +535,6 @@ def collect_runtime_surface() -> RuntimeSurface:
         websocket_routes=websocket_routes,
         mcp_tools=mcp_tools,
         mcp_resources=mcp_resources,
-        sqlmodel_tables=collect_sqlmodel_tables(),
         raw_sql_usage=raw_sql_usage,
         session_storage_usage=session_storage_usage,
         graphiti_imports=collect_graphiti_imports(),
@@ -565,244 +542,8 @@ def collect_runtime_surface() -> RuntimeSurface:
     )
 
 
-def _path_matches_allowlist(path: str, allowed: GraphitiCompatibilityRecord) -> bool:
-    if allowed.path == "*":
-        msg = "Bare wildcard allowlist entries are not allowed"
-        raise ValueError(msg)
-    if allowed.path.endswith("*"):
-        return path.startswith(allowed.path.removesuffix("*"))
-    return path == allowed.path
-
-
-def graphiti_allowlist_record(path: str) -> GraphitiCompatibilityRecord | None:
-    for allowed in GRAPHITI_COMPATIBILITY_ALLOWLIST:
-        if _path_matches_allowlist(path, allowed):
-            return allowed
-    return None
-
-
-def graphiti_surface_class(path: str) -> GraphitiSurfaceClass | Literal["default"]:
-    allowed = graphiti_allowlist_record(path)
-    return "default" if allowed is None else allowed.classification
-
-
-def _graphiti_path_is_documented(path: str, inventory_text: str) -> bool:
-    allowed = graphiti_allowlist_record(path)
-    documented_path = path if allowed is None else allowed.path
-    return f"`{documented_path}`" in inventory_text
-
-
-def unclassified_graphiti_imports(
-    surface: RuntimeSurface,
-    *,
-    inventory_path: Path = GRAPHITI_EXIT_INVENTORY_PATH,
-) -> tuple[GraphitiImportRecord, ...]:
-    if not inventory_path.exists():
-        return surface.graphiti_imports
-    inventory_text = inventory_path.read_text(encoding="utf-8")
-    return tuple(
-        record
-        for record in surface.graphiti_imports
-        if graphiti_allowlist_record(record.path) is None
-        or not _graphiti_path_is_documented(record.path, inventory_text)
-    )
-
-
-def default_runtime_graphiti_imports(
-    surface: RuntimeSurface,
-) -> tuple[GraphitiImportRecord, ...]:
-    return tuple(
-        record
-        for record in surface.graphiti_imports
-        if graphiti_allowlist_record(record.path) is None
-    )
-
-
-def render_markdown(surface: RuntimeSurface) -> str:
-    legacy_dependencies = tuple(
-        record for record in surface.dependencies if record.classification == "legacy"
-    )
-    graph_dependencies = tuple(
-        record for record in surface.dependencies if record.classification == "graph"
-    )
-    target_dependencies = tuple(
-        record for record in surface.dependencies if record.classification == "target"
-    )
-
-    lines = [
-        "# Runtime Inventory",
-        "",
-        "Generated from code by `tools/inventory/runtime_surface.py`. Do not hand-edit.",
-        "",
-        "## Summary",
-        f"- REST routers: {len(surface.rest_routers)}",
-        f"- Top-level HTTP routes: {len(surface.top_level_http_routes)}",
-        f"- WebSocket routes: {len(surface.websocket_routes)}",
-        f"- MCP tools: {len(surface.mcp_tools)}",
-        f"- MCP resources: {len(surface.mcp_resources)}",
-        f"- SQLModel tables: {len(surface.sqlmodel_tables)}",
-        f"- Raw SQL query usage files: {len(surface.raw_sql_usage)}",
-        f"- Session-backed storage access files: {len(surface.session_storage_usage)}",
-        f"- Graphiti import files: {len(surface.graphiti_imports)}",
-        f"- Dependency records: {len(surface.dependencies)}",
-        "",
-        "## API Surface",
-        "",
-        "### Mounted REST routers",
-    ]
-
-    lines.extend(f"- `{router}`" for router in surface.rest_routers)
-    lines.extend(
-        [
-            "",
-            "### Top-level HTTP routes",
-        ]
-    )
-    lines.extend(
-        f"- `{route.method} {route.path}` → `{route.handler}`"
-        for route in surface.top_level_http_routes
-    )
-    lines.extend(
-        [
-            "",
-            "### WebSocket routes",
-        ]
-    )
-    lines.extend(f"- `{route.path}` → `{route.handler}`" for route in surface.websocket_routes)
-
-    lines.extend(
-        [
-            "",
-            "## MCP Surface",
-            "",
-            "### Tools",
-        ]
-    )
-    lines.extend(f"- `{record.name}` in `{record.location}`" for record in surface.mcp_tools)
-    lines.extend(
-        [
-            "",
-            "### Resources",
-        ]
-    )
-    lines.extend(
-        (
-            f"- `{record.target}` via `{record.name}` in `{record.location}`"
-            if record.target
-            else f"- `{record.name}` in `{record.location}`"
-        )
-        for record in surface.mcp_resources
-    )
-
-    lines.extend(
-        [
-            "",
-            "## Storage Coupling",
-            "",
-            "### SQLModel tables",
-        ]
-    )
-    lines.extend(f"- `{table}`" for table in surface.sqlmodel_tables)
-    lines.extend(
-        [
-            "",
-            "### Raw SQL query usage files",
-        ]
-    )
-    lines.extend(
-        (
-            f"- `{record.path}`"
-            f" — session imports: {', '.join(f'`{name}`' for name in record.session_imports) or 'none'}"
-            f"; query imports: {', '.join(f'`{name}`' for name in record.query_imports) or 'none'}"
-            f"; session calls: {', '.join(f'`{name}`' for name in record.session_calls) or 'none'}"
-            f"; query calls: {', '.join(f'`{name}`' for name in record.query_calls) or 'none'}"
-        )
-        for record in surface.raw_sql_usage
-    )
-
-    lines.extend(
-        [
-            "",
-            "### Session-backed storage access files",
-        ]
-    )
-    lines.extend(
-        (
-            f"- `{record.path}`"
-            f" — session imports: {', '.join(f'`{name}`' for name in record.session_imports) or 'none'}"
-            f"; query imports: {', '.join(f'`{name}`' for name in record.query_imports) or 'none'}"
-            f"; session calls: {', '.join(f'`{name}`' for name in record.session_calls) or 'none'}"
-            f"; query calls: {', '.join(f'`{name}`' for name in record.query_calls) or 'none'}"
-        )
-        for record in surface.session_storage_usage
-    )
-
-    lines.extend(
-        [
-            "",
-            "### Graphiti import files",
-        ]
-    )
-    lines.extend(
-        (
-            f"- `{record.path}` — class: `{graphiti_surface_class(record.path)}`"
-            f"; imports: {', '.join(f'`{item}`' for item in record.imports)}"
-        )
-        for record in surface.graphiti_imports
-    )
-
-    lines.extend(["", "## Dependency Inventory", ""])
-    lines.extend(render_dependency_table("Legacy and transition dependencies", legacy_dependencies))
-    lines.extend([""])
-    lines.extend(render_dependency_table("Graph runtime dependencies", graph_dependencies))
-    lines.extend([""])
-    lines.extend(render_dependency_table("Target SurrealDB dependencies", target_dependencies))
-    lines.extend([""])
-
-    return "\n".join(lines)
-
-
-def check_graphiti_exit_inventory(surface: RuntimeSurface) -> int:
-    default_imports = default_runtime_graphiti_imports(surface)
-    missing = unclassified_graphiti_imports(surface)
-    if not default_imports and not missing:
-        emit(
-            "Graphiti exit inventory covers "
-            f"{len(surface.graphiti_imports)} import files with compatibility classes"
-        )
-        return 0
-
-    if default_imports:
-        emit(
-            f"Default runtime contains {len(default_imports)} Graphiti import files:",
-            stream=sys.stderr,
-        )
-        for record in default_imports:
-            emit(f"- {record.path}", stream=sys.stderr)
-
-    default_import_set = set(default_imports)
-    undocumented = tuple(record for record in missing if record not in default_import_set)
-    if undocumented:
-        emit(
-            f"Graphiti exit inventory is missing {len(undocumented)} classified import files:",
-            stream=sys.stderr,
-        )
-        for record in undocumented:
-            emit(f"- {record.path}", stream=sys.stderr)
-    return 1
-
-
 def check_runtime_purity(surface: RuntimeSurface) -> int:
     failed = False
-
-    if surface.sqlmodel_tables:
-        failed = True
-        emit(
-            f"Runtime declares {len(surface.sqlmodel_tables)} SQLModel tables:",
-            stream=sys.stderr,
-        )
-        for table in surface.sqlmodel_tables:
-            emit(f"- {table}", stream=sys.stderr)
 
     if surface.raw_sql_usage:
         failed = True
@@ -823,6 +564,15 @@ def check_runtime_purity(surface: RuntimeSurface) -> int:
         for record in surface.session_storage_usage:
             emit(f"- {record.path}", stream=sys.stderr)
 
+    if surface.graphiti_imports:
+        failed = True
+        emit(
+            f"Runtime imports Graphiti in {len(surface.graphiti_imports)} files:",
+            stream=sys.stderr,
+        )
+        for record in surface.graphiti_imports:
+            emit(f"- {record.path}: {', '.join(record.imports)}", stream=sys.stderr)
+
     unpinned = tuple(
         record
         for record in surface.dependencies
@@ -841,43 +591,25 @@ def check_runtime_purity(surface: RuntimeSurface) -> int:
     if failed:
         return 1
     emit(
-        "Runtime purity holds: no SQLModel tables, raw SQL, session storage, "
+        "Runtime purity holds: no raw SQL, session storage, Graphiti imports, "
         "or unpinned legacy dependencies"
     )
     return 0
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Guard the runtime against the legacy stack.")
-    parser.add_argument(
-        "--check",
-        action="store_true",
-        help="Run the migration guards (Graphiti exit + runtime purity) instead of writing.",
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Fail when runtime code carries the legacy stack: raw SQL, session storage, "
+            "Graphiti imports, or legacy dependencies."
+        )
     )
-    parser.add_argument(
-        "--output",
-        type=Path,
-        default=SNAPSHOT_PATH,
-        help="Output path for the on-demand markdown report.",
-    )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
-def main() -> int:
-    args = parse_args()
-    surface = collect_runtime_surface()
-
-    if args.check:
-        graphiti_status = check_graphiti_exit_inventory(surface)
-        purity_status = check_runtime_purity(surface)
-        return 1 if graphiti_status or purity_status else 0
-
-    output_path = args.output.resolve()
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(render_markdown(surface), encoding="utf-8")
-    display_path = relpath(output_path) if output_path.is_relative_to(REPO_ROOT) else output_path
-    emit(f"Wrote inventory report to {display_path}")
-    return 0
+def main(argv: Sequence[str] | None = None) -> int:
+    parse_args(argv)
+    return check_runtime_purity(collect_runtime_surface())
 
 
 if __name__ == "__main__":

@@ -130,11 +130,6 @@ tasks:
     inputs:
     - '@group(sources)'
     - tests/test_mailbox_adapter.py
-  no-graphiti-smoke:
-    command: uv run pytest tests/test_default_memory_loop.py -v
-    inputs:
-    - '@group(sources)'
-    - '@group(tests)'
   bench-retrieval:
     command: uv run pytest tests/test_retrieval_benchmarks.py -v
     inputs:

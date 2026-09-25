@@ -344,21 +344,13 @@ tasks:
     options:
       cache: false
 
-  inventory:
+  inventory-check:
     command: uv run python tools/inventory/runtime_surface.py
     inputs:
       - tools/**/*.py
-      - docs/_archive/SURREALDB_GRAPHITI_EXIT_INVENTORY.md
       - apps/api/src/**/*.py
-      - packages/python/sibyl-core/src/**/*.py
-      - "**/pyproject.toml"
-
-  inventory-check:
-    command: uv run python tools/inventory/runtime_surface.py --check
-    inputs:
-      - tools/**/*.py
-      - docs/_archive/SURREALDB_GRAPHITI_EXIT_INVENTORY.md
-      - apps/api/src/**/*.py
+      - apps/cli/src/**/*.py
+      - hooks/**/*.py
       - packages/python/sibyl-core/src/**/*.py
       - "**/pyproject.toml"
 
@@ -778,7 +770,6 @@ tasks:
       - apps/api/src/sibyl/api/app.py
       - docs/**/*.md
       - benchmarks/longmemeval_v2_reader_replay_replication.py
-      - docs/_archive/SURREALDB_GRAPHITI_EXIT_INVENTORY.md
       - README.md
       - AGENTS.md
       - CLAUDE.md
@@ -841,6 +832,8 @@ tasks:
       - apps/api/moon.yml
       - packages/python/sibyl-core/moon.yml
       - apps/api/src/**/*.py
+      - apps/cli/src/**/*.py
+      - hooks/**/*.py
       - packages/python/sibyl-core/src/**/*.py
       - "**/pyproject.toml"
 

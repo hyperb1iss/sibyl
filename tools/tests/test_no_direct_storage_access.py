@@ -10,27 +10,28 @@ from tools.lint.no_direct_storage_access import (
     render_report,
 )
 
+GRAPHITI_MODULE = "graphiti" + "_core"
+
 
 def test_collect_direct_storage_imports_flags_unallowlisted_modules(tmp_path: Path) -> None:
     route_dir = tmp_path / "apps/api/src/sibyl/api/routes"
     route_dir.mkdir(parents=True)
     path = route_dir / "bad.py"
     path.write_text(
-        "from sibyl_core.graph.client import get_graph_client\n"
-        "from sibyl.auth.rls import get_auth_session\n"
-        "from sibyl.auth.sessions import SessionManager\n"
-        "from sibyl.persistence.legacy.auth_runtime import get_user_by_id\n"
-        "from sqlmodel import select\n",
+        "import graphiti\n"
+        f"from {GRAPHITI_MODULE}.nodes import EntityNode\n"
+        "from sqlalchemy.ext.asyncio import AsyncSession\n"
+        "from sqlmodel import select\n"
+        "from sibyl_core.services.graph import EntityManager\n",
         encoding="utf-8",
     )
 
     violations = collect_direct_storage_imports(targets=(route_dir,))
 
     assert [(violation.module, violation.allowlisted) for violation in violations] == [
-        ("sibyl_core.graph.client", False),
-        ("sibyl.auth.rls", False),
-        ("sibyl.auth.sessions", False),
-        ("sibyl.persistence.legacy.auth_runtime", False),
+        ("graphiti", False),
+        (f"{GRAPHITI_MODULE}.nodes", False),
+        ("sqlalchemy.ext.asyncio", False),
         ("sqlmodel", False),
     ]
 
@@ -40,17 +41,17 @@ def test_collect_direct_storage_imports_honors_exact_allowlist_entries(tmp_path:
     route_dir.mkdir(parents=True)
     path = route_dir / "allowed.py"
     path.write_text(
-        "from sibyl_core.graph.client import get_graph_client\nfrom sqlmodel import select\n",
+        "from sqlalchemy.orm import Session\nfrom sqlmodel import select\n",
         encoding="utf-8",
     )
 
     violations = collect_direct_storage_imports(
         targets=(route_dir,),
-        allowlist={display_path(path): ("sibyl_core.graph",)},
+        allowlist={display_path(path): ("sqlalchemy",)},
     )
 
     assert [(violation.module, violation.allowlisted) for violation in violations] == [
-        ("sibyl_core.graph.client", True),
+        ("sqlalchemy.orm", True),
         ("sqlmodel", False),
     ]
 
@@ -63,7 +64,7 @@ def test_collect_direct_storage_imports_ignores_type_checking_imports(tmp_path: 
         "from typing import TYPE_CHECKING\n\n"
         "if TYPE_CHECKING:\n"
         "    from sqlalchemy.ext.asyncio import AsyncSession\n"
-        "    from sibyl.db.models import User\n",
+        f"    from {GRAPHITI_MODULE}.nodes import EntityNode\n",
         encoding="utf-8",
     )
 
@@ -76,8 +77,8 @@ def test_render_report_separates_unallowlisted_and_allowlisted_entries() -> None
             DirectStorageImport(
                 path="apps/api/src/sibyl/api/routes/graph.py",
                 lineno=10,
-                module="sibyl_core.graph.client",
-                reason="legacy graph runtime import",
+                module=f"{GRAPHITI_MODULE}.nodes",
+                reason="Graphiti runtime import",
                 allowlisted=True,
             ),
             DirectStorageImport(
@@ -99,7 +100,7 @@ def test_main_returns_nonzero_for_unallowlisted_imports(tmp_path: Path) -> None:
     route_dir = tmp_path / "apps/api/src/sibyl/api/routes"
     route_dir.mkdir(parents=True)
     (route_dir / "bad.py").write_text(
-        "from sibyl_core.graph.entities import EntityManager\n",
+        f"from {GRAPHITI_MODULE} import Graphiti\n",
         encoding="utf-8",
     )
 

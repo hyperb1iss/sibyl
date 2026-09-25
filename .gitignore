@@ -93,9 +93,6 @@ backups/
 
 # generated docs
 docs/research/*
-!docs/research/rust-port/
-docs/research/rust-port/*
-!docs/research/rust-port/INVENTORY.md
 
 # Memory consolidation exports (dogfood archive tarballs kept on disk, not committed)
 sibyl-consolidation/
