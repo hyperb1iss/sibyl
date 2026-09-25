@@ -229,6 +229,16 @@ _CONTEXT_REPAIR_COMMANDS = frozenset(
 )
 
 
+# Every explicit selection outranks the active context, so switching the active
+# context with `config context use` cannot repair one; each source has to be
+# corrected where it was set.
+_SELECTION_REMEDIES = {
+    "--context": "Pass a known name to --context.",
+    "SIBYL_CONTEXT": "Point SIBYL_CONTEXT at a known name, or unset it.",
+    "directory pin": "Re-pin this directory with: sibyl config context link <name>",
+}
+
+
 def _reject_unknown_context() -> None:
     """Stop before any command logic when the selected context does not exist."""
     try:
@@ -251,9 +261,10 @@ def _reject_unknown_context() -> None:
     error(f"Unknown context '{name}' selected by {source}.")
     if known:
         info(f"Known contexts: {', '.join(known)}")
-        info("Switch with: sibyl context use <name>")
     else:
         info("No contexts are configured. Create one with: sibyl init")
+    if remedy := _SELECTION_REMEDIES.get(source):
+        info(remedy)
     raise typer.Exit(1)
 
 

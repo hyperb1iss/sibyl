@@ -73,7 +73,7 @@ def require_local_context() -> HostContext:
         raise typer.Exit(1)
     if not is_local_server(ctx.server_url):
         error(f"Context '{ctx.name}' points to {ctx.server_url}.")
-        info("Switch to a local context with 'sibyl context use local'.")
+        info("Switch to a local context with 'sibyl config context use local'.")
         raise typer.Exit(1)
     return ctx
 
