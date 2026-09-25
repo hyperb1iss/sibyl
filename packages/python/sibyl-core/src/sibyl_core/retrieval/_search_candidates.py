@@ -354,7 +354,13 @@ def _candidate_allowed(
         return False
     if _explicit_project_denied(plan) and candidate.type != "raw_memory":
         return False
-    if candidate.type == "episode" and (plan.project or plan.accessible_projects is not None):
+    # Rows from the archived `episode` table carry no project or memory scope,
+    # so a plan with project context has nothing to authorize them against. A
+    # native episode is an entity row with the same scope fields as any other,
+    # so the scope and project checks around this one govern it.
+    if candidate.kind == CandidateKind.EPISODE and (
+        plan.project or plan.accessible_projects is not None
+    ):
         return False
     if plan.project and candidate.project_id and candidate.project_id != plan.project:
         return False

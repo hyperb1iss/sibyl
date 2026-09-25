@@ -1183,6 +1183,178 @@ async def test_captured_scope_retrieval_matrix(
     assert reads("user-bob") is co_member_reads
 
 
+async def _captured_native_episode(
+    *,
+    memory_scope: str,
+    scope_key: str | None,
+    project_id: str = "project_p",
+    principal_id: str = "user-alice",
+) -> RetrievalCandidate:
+    """Capture an episode for real and read its entity row back as the lanes would."""
+    captured: dict[str, object] = {}
+
+    async def remember_raw_memory(_request: MemoryCaptureRequest) -> Mapping[str, object]:
+        return {"id": "raw_episode_1"}
+
+    async def create_graph_entity(
+        _request: MemoryCaptureRequest,
+        metadata: Mapping[str, object],
+    ) -> Mapping[str, object]:
+        captured.update(metadata)
+        return {"id": "episode-in-p"}
+
+    await MemoryCaptureService(
+        remember_raw_memory=remember_raw_memory,
+        create_graph_entity=create_graph_entity,
+    ).capture(
+        MemoryCaptureRequest(
+            title="Pool exhaustion postmortem",
+            content="The API ran out of pooled connections under load.",
+            entity_type="episode",
+            metadata={"capture_mode": "remember", "project_id": project_id},
+            memory_scope=memory_scope,
+            scope_key=scope_key,
+            principal_id=principal_id,
+        )
+    )
+    candidate = candidate_module._candidate_from_node_record(
+        {
+            "uuid": "episode-in-p",
+            "name": "Pool exhaustion postmortem",
+            "entity_type": "episode",
+            "content": "The API ran out of pooled connections under load.",
+            "group_id": "org-123",
+            "project_id": project_id,
+            "attributes": captured,
+        },
+        signal=RetrievalSignal.NODE_FULLTEXT,
+        score=1.0,
+    )
+    assert candidate.type == "episode"
+    assert candidate.kind is CandidateKind.NODE
+    return candidate
+
+
+def _episode_plan(
+    principal_id: str,
+    project_id: str | None,
+    accessible_projects: set[str] | None,
+) -> search_module.RetrievalPlan:
+    return build_context_retrieval_plan(
+        query="connection pool exhaustion",
+        organization_id="org-123",
+        facets=[ContextFacet.RECENT_MEMORY],
+        facet_types={ContextFacet.RECENT_MEMORY: ["episode"]},
+        principal_id=principal_id,
+        project=project_id,
+        accessible_projects=accessible_projects,
+    )
+
+
+def _episode_admitted(candidate: RetrievalCandidate, plan: search_module.RetrievalPlan) -> bool:
+    return candidate_module._candidate_allowed(
+        candidate,
+        plan=plan,
+        requested_types=set(),
+        facet=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_native_project_episode_serves_its_own_project_and_no_other() -> None:
+    episode = await _captured_native_episode(memory_scope="project", scope_key="project_p")
+
+    assert _episode_admitted(episode, _episode_plan("user-alice", "project_p", {"project_p"}))
+    assert _episode_admitted(episode, _episode_plan("user-bob", "project_p", {"project_p"}))
+    # Membership in P is not enough once the search names Q.
+    assert not _episode_admitted(
+        episode, _episode_plan("user-alice", "project_q", {"project_p", "project_q"})
+    )
+    assert not _episode_admitted(episode, _episode_plan("user-bob", "project_q", {"project_q"}))
+    assert not _episode_admitted(episode, _episode_plan("user-bob", None, {"project_q"}))
+
+
+@pytest.mark.asyncio
+async def test_native_private_episode_stays_with_its_owner_inside_a_project() -> None:
+    episode = await _captured_native_episode(memory_scope="private", scope_key=None)
+
+    assert _episode_admitted(episode, _episode_plan("user-alice", "project_p", {"project_p"}))
+    assert not _episode_admitted(episode, _episode_plan("user-bob", "project_p", {"project_p"}))
+    assert not _episode_admitted(episode, _episode_plan("user-bob", None, {"project_p"}))
+
+
+def test_archived_episode_stays_out_of_project_scoped_plans() -> None:
+    archived = _archived_episode_seed()
+
+    assert archived.kind is CandidateKind.EPISODE
+    assert _episode_admitted(archived, _episode_plan("user-alice", None, None))
+    assert not _episode_admitted(archived, _episode_plan("user-alice", "project_p", {"project_p"}))
+    assert not _episode_admitted(archived, _episode_plan("user-alice", None, {"project_p"}))
+    assert not _episode_admitted(archived, _episode_plan("user-alice", None, set()))
+
+
+@pytest.mark.asyncio
+async def test_project_search_serves_native_episodes_from_that_project_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    episode = await _captured_native_episode(memory_scope="project", scope_key="project_p")
+    client = _EpisodeMentionsGraphClient()
+
+    class Runtime:
+        pass
+
+    runtime = Runtime()
+    runtime.client = client
+
+    async def fake_runtime(_organization_id: str, **_kwargs: object) -> Runtime:
+        return runtime
+
+    async def fake_node_fulltext(**_kwargs: object) -> list[RetrievalCandidate]:
+        # Returned whatever the filter says, so the admission check is what
+        # decides; the database's own project clause is asserted below.
+        return [episode]
+
+    async def no_raw_memories(**_kwargs: object) -> list[RawMemory]:
+        return []
+
+    monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(source_module, "_node_fulltext_candidates", fake_node_fulltext)
+    provider = DeterministicEmbeddingProvider(
+        EmbeddingMetadata(
+            provider="deterministic",
+            model="unit-test",
+            dimensions=4,
+            cache_namespace="retrieval-test",
+            tokenizer_estimate_method="utf8-byte-length",
+        )
+    )
+
+    async def result_ids(plan: search_module.RetrievalPlan) -> list[str]:
+        response = await search_module.context_search(
+            plan=plan,
+            types=["episode"],
+            facet=ContextFacet.RECENT_MEMORY,
+            limit=5,
+            embedding_provider=provider,
+            raw_memory_recall_fn=no_raw_memories,
+        )
+        assert response.filters["candidate_source_degraded"] is False
+        return [result.id for result in response.results]
+
+    assert await result_ids(_episode_plan("user-bob", "project_p", {"project_p"})) == [
+        "episode-in-p"
+    ]
+    entity_reads = [
+        params for query, params in client.calls if "FROM entity" in query and "WHERE" in query
+    ]
+    assert entity_reads
+    assert all(params.get("project_ids") == ["project_p"] for params in entity_reads)
+
+    assert (
+        await result_ids(_episode_plan("user-alice", "project_q", {"project_p", "project_q"})) == []
+    )
+
+
 def test_build_context_retrieval_plan_requires_principal() -> None:
     plan = build_context_retrieval_plan(
         query="no principal",
