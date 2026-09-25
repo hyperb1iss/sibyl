@@ -128,3 +128,44 @@ signal_process_tree() {
     done
   fi
 }
+
+process_cwd() {
+  local pid="${1:-}"
+
+  if [[ -z "$pid" ]]; then
+    return 1
+  fi
+
+  if [[ -r "/proc/$pid/cwd" ]]; then
+    readlink "/proc/$pid/cwd" 2>/dev/null
+    return
+  fi
+
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1
+    return
+  fi
+
+  return 1
+}
+
+# True when the process runs from inside the given workspace root. Pattern
+# matches on command lines are machine wide, and several checkouts of this
+# repo run the same commands, so a stop from one workspace must leave the
+# others alone.
+process_in_workspace() {
+  local pid="${1:-}"
+  local root="${2:-}"
+  local cwd=""
+
+  if [[ -z "$pid" || -z "$root" ]]; then
+    return 1
+  fi
+
+  cwd="$(process_cwd "$pid")"
+  if [[ -z "$cwd" ]]; then
+    return 1
+  fi
+
+  [[ "$cwd" == "$root" || "$cwd" == "$root"/* ]]
+}

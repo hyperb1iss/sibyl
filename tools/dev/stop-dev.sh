@@ -27,12 +27,18 @@ add_target() {
   fi
 }
 
+# Command-line patterns match every checkout of this repo on the machine, and
+# a worktree's test run must never stop the dev stack another checkout is
+# running, so a pattern match counts only when the process runs from inside
+# this workspace. The pid file above is already per workspace.
 add_pattern_targets() {
   local pattern="${1:-}"
   local pid=""
 
   while IFS= read -r pid; do
-    add_target "$pid"
+    if [[ -n "$pid" ]] && process_in_workspace "$pid" "$repo_root"; then
+      add_target "$pid"
+    fi
   done < <(pgrep -f "$pattern" || true)
 }
 
