@@ -280,7 +280,7 @@ def _cheapest_probe_model(provider: LLMProviderName) -> str:
 
 
 def _status_for_exception(exc: Exception) -> ValidationStatus:
-    if _is_missing_aws_credentials(exc):
+    if _is_missing_credentials(exc):
         return "missing_credentials"
     if isinstance(exc, ModelHTTPError):
         if exc.status_code == 400 and _is_bedrock_unknown_model(exc):
@@ -305,8 +305,12 @@ def _status_for_http_code(status_code: int) -> ValidationStatus:
     return "network"
 
 
-def _is_missing_aws_credentials(exc: BaseException) -> bool:
-    """Bedrock settings or botocore credentials missing, however the SDK wraps them."""
+def _is_missing_credentials(exc: BaseException) -> bool:
+    """Missing Bedrock settings, AWS credentials or an SDK's credentials, however wrapped.
+
+    The Anthropic SDK's own "Could not resolve authentication method" for a
+    missing first-party key lands here too.
+    """
     current: BaseException | None = exc
     while current is not None:
         if isinstance(current, LLMConfigError) and (

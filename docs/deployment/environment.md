@@ -232,9 +232,10 @@ static keys and instance roles.
 A region is required. Without one, every Bedrock LLM call fails with a message naming these
 variables, and Bedrock embeddings stay off the way a missing API key turns off the other providers.
 Any other invalid Bedrock setting raises wherever it is used. `SIBYL_BEDROCK_API_KEY` falls back to
-`AWS_BEARER_TOKEN_BEDROCK` (and to `ANTHROPIC_AWS_API_KEY` on `mantle`, which its SDK client also
-reads), and it cannot be combined with `SIBYL_BEDROCK_PROFILE`. The Anthropic SDK reads those
-variables on its own, so a stray value in the environment replaces SigV4 signing.
+`AWS_BEARER_TOKEN_BEDROCK`, and it cannot be combined with `SIBYL_BEDROCK_PROFILE`. On `mantle`, the
+Claude client also takes `ANTHROPIC_AWS_API_KEY` when no profile is set, because its SDK client
+reads it; Cohere requests never use that key. The Anthropic SDK reads these variables on its own, so
+a stray value in the environment replaces SigV4 signing.
 
 The scope defaults to `us` whatever the Region, so a deployment outside the US sets it explicitly:
 `eu` for an EU Region, for example.
@@ -242,10 +243,13 @@ The scope defaults to `us` whatever the Region, so a deployment outside the US s
 Configure models by their Claude alias, as on the `anthropic` provider. Sibyl maps the alias to the
 Bedrock ID through the inference scope, so `claude-opus-5-5` becomes `us.anthropic.claude-opus-5-5`
 under `us` and `global.anthropic.claude-opus-5-5` under `global`. An ID that already names an
-inference profile, or an application inference profile or provisioned throughput ARN, is sent as
-given. Most current Claude models and Cohere Embed v4 offer no in-Region on-demand throughput, so
-`regional` only works where the model card lists In-Region support. Effort, memory-surface defaults
-and the forced-tool rule all key by alias, so a raw Bedrock ID behaves exactly like its alias.
+inference profile, or any Bedrock ARN, is sent as given. Most current Claude models and Cohere Embed
+v4 offer no in-Region on-demand throughput, so `regional` only works where the model card lists
+In-Region support. Effort, memory-surface defaults and the forced-tool rule all key by alias, so a
+raw Bedrock ID, or an inference-profile or foundation-model ARN, behaves exactly like its alias. An
+application inference profile or provisioned throughput ARN hides the model behind it, so it gets
+none of those Claude-specific rules; route Opus 5 and Opus 5.5 through an inference profile ID
+instead.
 
 Bedrock rejects native structured output (`output_config.format`) for Claude Opus 4.8, Opus 5, Opus
 5.5 and Sonnet 5, and for every model on bedrock-mantle. On those models Sibyl uses tool output

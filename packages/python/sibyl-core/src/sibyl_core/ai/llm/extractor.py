@@ -21,6 +21,7 @@ from pydantic_ai.models.openai import OpenAIResponsesModel
 from pydantic_ai.profiles import ModelProfile
 from pydantic_ai.profiles.openai import OpenAIJsonSchemaTransformer
 
+from sibyl_core.ai.bedrock import arn_model_id
 from sibyl_core.ai.clients import get_agent
 from sibyl_core.ai.errors import LLMError, classify_llm_exception
 from sibyl_core.ai.llm.budget import (
@@ -380,7 +381,7 @@ def _bedrock_price_ref(model: object) -> str | None:
     from anthropic import AsyncAnthropicBedrock, AsyncAnthropicBedrockMantle
 
     if isinstance(model.client, AsyncAnthropicBedrock):
-        return model.model_name
+        return arn_model_id(model.model_name) or model.model_name
     if isinstance(model.client, AsyncAnthropicBedrockMantle):
         # Mantle's in-Region IDs drop the version suffix the price table keys on.
         entry = model_registry.get(canonical_model_alias(model.model_name))

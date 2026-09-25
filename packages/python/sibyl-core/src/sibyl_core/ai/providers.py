@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from contextlib import AsyncExitStack
 from dataclasses import replace
 from typing import Literal
@@ -24,6 +25,7 @@ from sibyl_core.ai.bedrock import (
     BedrockSettings,
     anthropic_bedrock_client,
     apply_inference_scope,
+    arn_model_id,
     has_geo_prefix,
     is_arn,
     resolve_bedrock_settings,
@@ -69,7 +71,7 @@ def build_model(config: LLMConfig, *, resources: AsyncExitStack | None = None) -
                     )
                 ),
                 settings=AnthropicModelSettings(**_anthropic_settings(config)),
-                profile=bedrock_profile_overrides(config, bedrock),
+                profile=_bedrock_profile(config, provider_model_id, bedrock),
             )
         case "gemini":
             return GoogleModel(
@@ -118,6 +120,7 @@ BEDROCK_JSON_SCHEMA_OUTPUT_MODELS = (
 #: Bedrock foundation IDs for Claude models outside the curated registry whose
 #: IDs carry a date or version suffix, from ``aws bedrock
 #: list-inference-profiles``. Newer models follow ``anthropic.<alias>``.
+_DATE_SUFFIX = re.compile(r"-\d{8}$")
 BEDROCK_CLAUDE_MODEL_IDS = {
     "claude-opus-4-1": "anthropic.claude-opus-4-1-20250805-v1:0",
     "claude-opus-4-5": "anthropic.claude-opus-4-5-20251101-v1:0",
@@ -167,12 +170,23 @@ def resolved_model_profile(config: LLMConfig) -> ModelProfile:
     """Resolve provider schema capabilities without creating a network client."""
     provider_model_id = resolve_provider_model_id(config)
     if config.provider == "bedrock":
-        profile = AnthropicProvider.model_profile(provider_model_id) or {}
-        return merge_profile(profile, bedrock_profile_overrides(config, bedrock_settings()))
+        return _bedrock_profile(config, provider_model_id, bedrock_settings())
     provider = {"anthropic": AnthropicProvider, "openai": OpenAIProvider, "gemini": GoogleProvider}[
         config.provider
     ]
     return provider.model_profile(provider_model_id) or {}
+
+
+def _bedrock_profile(
+    config: LLMConfig, provider_model_id: str, bedrock: BedrockSettings
+) -> ModelProfile:
+    """The full Anthropic profile for the model behind a Bedrock ID or ARN.
+
+    pydantic-ai cannot see through an ARN, so the profile resolves from the
+    model ID the ARN names and is handed to ``AnthropicModel`` whole.
+    """
+    profile = AnthropicProvider.model_profile(arn_model_id(provider_model_id) or provider_model_id)
+    return merge_profile(profile or {}, bedrock_profile_overrides(config, bedrock))
 
 
 def bedrock_profile_overrides(config: LLMConfig, bedrock: BedrockSettings) -> AnthropicModelProfile:
@@ -267,7 +281,7 @@ def _bedrock_model_id(config: LLMConfig) -> str:
         return apply_inference_scope(model, bedrock.inference_scope)
     base = (
         (entry.platform_model_ids.get("bedrock") if entry else None)
-        or BEDROCK_CLAUDE_MODEL_IDS.get(alias)
+        or BEDROCK_CLAUDE_MODEL_IDS.get(_DATE_SUFFIX.sub("", alias))
         or f"anthropic.{alias}"
     )
     return apply_inference_scope(base, bedrock.inference_scope)

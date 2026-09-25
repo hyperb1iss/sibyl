@@ -120,7 +120,38 @@ def test_api_key_falls_back_to_the_aws_bearer_variable_and_never_prints():
 def test_mantle_reads_the_extra_api_key_its_client_reads():
     env = {"AWS_REGION": "us-east-1", "ANTHROPIC_AWS_API_KEY": "k"}
     assert resolve_bedrock_settings(env).auth_mode == "sigv4"
-    assert resolve_bedrock_settings({**env, "SIBYL_BEDROCK_API": "mantle"}).auth_mode == "bearer"
+    mantle = resolve_bedrock_settings({**env, "SIBYL_BEDROCK_API": "mantle"})
+    assert mantle.auth_mode == "bearer"
+    # Only the Claude client reads it; Cohere on bedrock-runtime keeps SigV4.
+    assert mantle.api_key is None
+    with_profile = {**env, "SIBYL_BEDROCK_API": "mantle", "SIBYL_BEDROCK_PROFILE": "dev"}
+    assert resolve_bedrock_settings(with_profile).auth_mode == "sigv4"
+
+
+def test_inference_profile_arns_keep_the_rules_of_the_model_they_name(monkeypatch):
+    monkeypatch.setenv("AWS_REGION", "us-west-2")
+    arn = "arn:aws:bedrock:us-west-2:123456789012:inference-profile/us.anthropic.claude-opus-5-5"
+    config = bedrock_config(arn, effort="high")
+    assert providers.resolve_provider_model_id(config) == arn
+    assert canonical_model_alias(arn) == "claude-opus-5-5"
+    assert providers.rejects_forced_tool_choice(config)
+    assert providers.anthropic_effort(config) == "high"
+    profile = providers.resolved_model_profile(config)
+    assert profile["anthropic_disallows_sampling_settings"] is True
+    assert profile["anthropic_supports_forced_tool_choice"] is False
+    assert memory_model_defaults("bedrock", arn) == memory_model_defaults(
+        "bedrock", "claude-opus-5-5"
+    )
+    opaque = "arn:aws:bedrock:us-west-2:123456789012:application-inference-profile/abc123"
+    assert canonical_model_alias(opaque) == opaque
+
+
+def test_dated_names_for_versioned_models_map_to_real_ids(monkeypatch):
+    monkeypatch.setenv("AWS_REGION", "us-west-2")
+    config = bedrock_config("claude-opus-4-1-20250805")
+    assert providers.resolve_provider_model_id(config) == (
+        "us.anthropic.claude-opus-4-1-20250805-v1:0"
+    )
 
 
 def test_api_key_and_profile_together_are_rejected():

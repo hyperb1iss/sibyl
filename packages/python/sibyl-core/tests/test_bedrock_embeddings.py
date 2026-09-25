@@ -203,6 +203,24 @@ async def test_arn_models_pass_through_with_only_dimensions_checked():
         provider_with(FakeBedrock(), meta=metadata(arn, 768))
 
 
+def test_inference_profile_arns_record_the_model_they_name():
+    arn = "arn:aws:bedrock:us-west-2:123456789012:inference-profile/us.cohere.embed-v4:0"
+    provider = provider_with(FakeBedrock(), meta=metadata(arn, 1536))
+    assert provider.metadata.model == "cohere.embed-v4:0"
+    assert provider.wire_model_id == arn
+    titan = "arn:aws:bedrock:us-west-2::foundation-model/amazon.titan-embed-text-v2:0"
+    with pytest.raises(BedrockConfigError, match="Cohere Embed v4"):
+        provider_with(FakeBedrock(), meta=metadata(titan, 1024))
+
+
+async def test_the_mantle_only_key_never_signs_cohere_calls(monkeypatch):
+    monkeypatch.setenv("SIBYL_BEDROCK_API", "mantle")
+    monkeypatch.setenv("ANTHROPIC_AWS_API_KEY", "claude-platform-key")
+    fake = FakeBedrock()
+    await provider_with(fake).embed_texts(["hello"])
+    assert fake.requests[0].headers["authorization"].startswith("AWS4-HMAC-SHA256")
+
+
 def test_metadata_tags_bedrock_with_the_scope_free_model():
     provider = provider_with(FakeBedrock(), meta=metadata("us.cohere.embed-v4:0", 1024))
     assert provider.metadata.provider == "bedrock"

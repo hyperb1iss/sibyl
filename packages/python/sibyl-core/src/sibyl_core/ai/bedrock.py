@@ -67,6 +67,8 @@ class BedrockSettings:
     ``api_key`` is a Bedrock API key sent as a bearer token in place of SigV4.
     Without one, requests sign with the default AWS credential chain, which
     covers IRSA web identity, EKS Pod Identity, SSO profiles and instance roles.
+    ``mantle_api_key`` is the extra key only the SDK's Mantle client reads; it
+    never signs the Cohere calls on bedrock-runtime.
     """
 
     region: str
@@ -74,16 +76,25 @@ class BedrockSettings:
     inference_scope: BedrockInferenceScope = DEFAULT_BEDROCK_INFERENCE_SCOPE
     profile: str | None = None
     api_key: str | None = field(default=None, repr=False)
+    mantle_api_key: str | None = field(default=None, repr=False)
+
+    @property
+    def claude_api_key(self) -> str | None:
+        """The bearer token the Claude client sends, if any."""
+        return self.api_key or (self.mantle_api_key if self.api == "mantle" else None)
 
     @property
     def auth_mode(self) -> Literal["bearer", "sigv4"]:
-        return "bearer" if self.api_key else "sigv4"
+        return "bearer" if self.claude_api_key else "sigv4"
 
     @property
     def fingerprint(self) -> str:
-        secret = hashlib.sha256(self.api_key.encode()).hexdigest() if self.api_key else ""
+        secrets = [
+            hashlib.sha256(key.encode()).hexdigest() if key else ""
+            for key in (self.api_key, self.mantle_api_key)
+        ]
         payload = "|".join(
-            (self.region, self.api, self.inference_scope, self.profile or "", secret)
+            (self.region, self.api, self.inference_scope, self.profile or "", *secrets)
         )
         return hashlib.sha256(payload.encode()).hexdigest()
 
@@ -110,7 +121,11 @@ def resolve_bedrock_settings(environ: Mapping[str, str] | None = None) -> Bedroc
             f"{', '.join(BEDROCK_INFERENCE_SCOPES)}, not {scope!r}"
         )
     profile = _first(env, ("SIBYL_BEDROCK_PROFILE",))
-    api_key = _first(env, MANTLE_API_KEY_ENV_VARS if api == "mantle" else API_KEY_ENV_VARS)
+    api_key = _first(env, API_KEY_ENV_VARS)
+    # With a profile the Mantle client signs SigV4 and ignores this variable.
+    mantle_api_key = (
+        _first(env, ("ANTHROPIC_AWS_API_KEY",)) if api == "mantle" and not profile else None
+    )
     if api_key and profile:
         # The Anthropic SDK refuses a bearer token beside explicit AWS
         # credentials, and silently preferring one would hide the other.
@@ -124,6 +139,7 @@ def resolve_bedrock_settings(environ: Mapping[str, str] | None = None) -> Bedroc
         inference_scope=scope,
         profile=profile,
         api_key=api_key,
+        mantle_api_key=mantle_api_key,
     )
 
 
@@ -154,6 +170,25 @@ def is_arn(model_id: str) -> bool:
     return model_id.startswith("arn:")
 
 
+_MODEL_BEARING_ARN_RESOURCES = ("inference-profile/", "foundation-model/")
+
+
+def arn_model_id(model_id: str) -> str | None:
+    """The model ID an inference-profile or foundation-model ARN names.
+
+    ``arn:aws:bedrock:us-west-2:123456789012:inference-profile/us.anthropic.claude-opus-5-5``
+    names ``us.anthropic.claude-opus-5-5``. Application inference profile and
+    provisioned throughput ARNs are opaque, so they give ``None``.
+    """
+    if not is_arn(model_id):
+        return None
+    resource = model_id.split(":", 5)[-1]
+    for prefix in _MODEL_BEARING_ARN_RESOURCES:
+        if resource.startswith(prefix):
+            return resource.removeprefix(prefix) or None
+    return None
+
+
 def split_bedrock_model_id(model_id: str) -> tuple[str | None, str]:
     """Split a Bedrock ID into its vendor segment and bare model name.
 
@@ -162,6 +197,7 @@ def split_bedrock_model_id(model_id: str) -> tuple[str | None, str]:
     segment comes back unchanged with ``None``. Mirrors pydantic-ai's private
     helper so model rules match the profile pydantic-ai resolves.
     """
+    model_id = arn_model_id(model_id) or model_id
     vendor, _, name = remove_geo_prefix(model_id).partition(".")
     if not name:
         return None, model_id
@@ -254,8 +290,8 @@ def frozen_aws_credentials(settings: BedrockSettings) -> Any:
 
 
 async def resolve_bedrock_credentials(settings: BedrockSettings) -> BedrockCredentialStatus:
-    """Prove credentials resolve for this region without sending a model request."""
-    if settings.api_key:
+    """Prove the Claude client's credentials resolve without a model request."""
+    if settings.claude_api_key:
         return BedrockCredentialStatus(
             region=settings.region, auth_mode="bearer", method="bedrock-api-key"
         )
@@ -314,7 +350,9 @@ def anthropic_bedrock_client(
 
     require_botocore()
     credentials: dict[str, Any] = (
-        {"api_key": settings.api_key} if settings.api_key else {"aws_profile": settings.profile}
+        {"api_key": settings.claude_api_key}
+        if settings.claude_api_key
+        else {"aws_profile": settings.profile}
     )
     if settings.api == "mantle":
         return AsyncAnthropicBedrockMantle(
@@ -355,6 +393,7 @@ __all__ = [
     "BedrockSettings",
     "anthropic_bedrock_client",
     "apply_inference_scope",
+    "arn_model_id",
     "aws_credentials",
     "bedrock_embedding_model_id",
     "bedrock_region_configured",

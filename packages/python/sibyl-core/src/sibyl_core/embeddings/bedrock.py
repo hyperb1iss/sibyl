@@ -27,6 +27,7 @@ from sibyl_core.ai.bedrock import (
     COHERE_EMBED_V4_DIMENSIONS,
     BedrockConfigError,
     BedrockSettings,
+    arn_model_id,
     bedrock_embedding_model_id,
     is_arn,
     remove_geo_prefix,
@@ -75,10 +76,12 @@ class BedrockEmbeddingError(RuntimeError):
 def validate_cohere_embedding(model: str, dimensions: int) -> None:
     """Fail at configuration time on a model or size Cohere v4 cannot serve.
 
-    An ARN (application inference profile or provisioned throughput) hides the
-    model, so only its dimensions are checked.
+    An inference-profile ARN is checked by the model it names. An opaque ARN
+    (application inference profile or provisioned throughput) hides the model,
+    so only its dimensions are checked.
     """
-    if not is_arn(model) and not remove_geo_prefix(model).startswith(COHERE_EMBED_V4_PREFIX):
+    named = arn_model_id(model) or (None if is_arn(model) else model)
+    if named is not None and not remove_geo_prefix(named).startswith(COHERE_EMBED_V4_PREFIX):
         raise BedrockConfigError(
             f"Bedrock embeddings support Cohere Embed v4 (cohere.embed-v4:0), not {model!r}"
         )
@@ -132,7 +135,7 @@ class BedrockEmbeddingProvider:
         self._metadata = replace(
             metadata,
             provider="bedrock",
-            model=remove_geo_prefix(metadata.model),
+            model=remove_geo_prefix(arn_model_id(metadata.model) or metadata.model),
             input_kind_sensitive=True,
         )
         self._settings = settings or resolve_bedrock_settings()
