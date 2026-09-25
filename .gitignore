@@ -61,9 +61,6 @@ dmypy.json
 .env.local
 openrouter.key
 
-# Docker
-falkordb_data/
-
 # OS
 .DS_Store
 Thumbs.db

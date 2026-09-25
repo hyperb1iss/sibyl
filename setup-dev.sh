@@ -257,7 +257,7 @@ check_docker() {
         else
             echo -e "${DIM}Install Docker: https://docs.docker.com/engine/install/${RESET}"
         fi
-        echo -e "${DIM}Docker is required for SurrealDB (and the legacy FalkorDB + PostgreSQL stack)${RESET}"
+        echo -e "${DIM}Docker is required for SurrealDB${RESET}"
         return 1
     fi
 
@@ -339,8 +339,6 @@ print_summary() {
     echo -e "  ${DIM}API + MCP:${RESET}    ${CORAL}3334${RESET}"
     echo -e "  ${DIM}Frontend:${RESET}     ${CORAL}3337${RESET}"
     echo -e "  ${DIM}SurrealDB:${RESET}    ${CORAL}8000${RESET}    ${DIM}(default)${RESET}"
-    echo -e "  ${DIM}FalkorDB:${RESET}     ${CORAL}6380${RESET}    ${DIM}(legacy)${RESET}"
-    echo -e "  ${DIM}Postgres:${RESET}     ${CORAL}5433${RESET}    ${DIM}(legacy)${RESET}"
     echo ""
 
     if ! check_docker 2>/dev/null; then

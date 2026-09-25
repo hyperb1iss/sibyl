@@ -336,7 +336,7 @@ function Test-Docker {
     if (-not (Test-Command docker)) {
         Write-Warn "Docker not installed"
         Write-Host "${DIM}Install Docker Desktop: https://docs.docker.com/desktop/install/windows-install/${RESET}"
-        Write-Host "${DIM}Docker is required for SurrealDB (and the legacy FalkorDB + PostgreSQL stack)${RESET}"
+        Write-Host "${DIM}Docker is required for SurrealDB${RESET}"
         $script:DockerOk = $false
         return
     }
@@ -434,8 +434,6 @@ function Show-Summary {
     Write-Host "  ${DIM}API + MCP:${RESET}    ${CORAL}3334${RESET}"
     Write-Host "  ${DIM}Frontend:${RESET}     ${CORAL}3337${RESET}"
     Write-Host "  ${DIM}SurrealDB:${RESET}    ${CORAL}8000${RESET}    ${DIM}(default)${RESET}"
-    Write-Host "  ${DIM}FalkorDB:${RESET}     ${CORAL}6380${RESET}    ${DIM}(legacy)${RESET}"
-    Write-Host "  ${DIM}Postgres:${RESET}     ${CORAL}5433${RESET}    ${DIM}(legacy)${RESET}"
     Write-Host ""
 
     if (-not $script:DockerOk) {
