@@ -278,9 +278,6 @@ package.
 # With mock LLM (fast, deterministic)
 SIBYL_MOCK_LLM=true uv run pytest tests/
 
-# Live model tests (costs money)
-uv run pytest tests/live --live-models
-
 # Retrieval benchmark suite
 moon run core:bench-retrieval
 

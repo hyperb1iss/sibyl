@@ -81,7 +81,7 @@ Issues = "https://github.com/hyperb1iss/sibyl/issues"
 packages = ["src/sibyl"]
 
 [tool.hatch.build.targets.sdist]
-include = ["/src", "/tests", "/README.md", "/LICENSE"]
+include = ["/src", "/tests", "/README.md"]
 
 # =============================================================================
 # Development Dependencies (uv)
@@ -210,7 +210,6 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"examples/**/*.py" = ["BLE001", "PLR0915", "T201", "TRY002"]
 "src/sibyl/cli/**/*.py" = ["S110", "T201"]
 "src/sibyl/config.py" = ["S104"]
 "tests/**/*.py" = [
@@ -259,22 +258,13 @@ max-statements = 60
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-# Exclude live model tests from normal runs - they require API keys and --live-models flag
-addopts = ["-ra", "--strict-markers", "--strict-config", "-v", "--ignore=tests/live"]
+addopts = ["-ra", "--strict-markers", "--strict-config", "-v"]
 filterwarnings = [
     "error",
     "ignore::DeprecationWarning",
     "ignore::pytest.PytestUnraisableExceptionWarning",
     "ignore:Remove `format_exc_info`:UserWarning",
     "ignore:unclosed.*:ResourceWarning",
-]
-markers = [
-    "integration: marks tests as integration tests",
-    "slow: marks tests as slow",
-    "stress: marks tests as stress/load tests",
-    "live_model: tests requiring real LLM API calls (requires --live-models)",
-    "requires_worktree: tests requiring git worktree setup",
-    "requires_redis: tests requiring Redis connection",
 ]
 
 # =============================================================================

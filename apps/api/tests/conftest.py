@@ -16,31 +16,6 @@ def disable_raw_memory_auto_embedding(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 # =============================================================================
-# pytest hooks
-# =============================================================================
-
-
-def pytest_configure(config: pytest.Config) -> None:
-    """Register custom markers."""
-    config.addinivalue_line("markers", "live_model: tests requiring real LLM API calls")
-    config.addinivalue_line("markers", "slow: tests taking >30s")
-    config.addinivalue_line("markers", "requires_worktree: tests requiring git worktree setup")
-    config.addinivalue_line("markers", "requires_redis: tests requiring Redis connection")
-
-
-def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """Auto-skip tests based on environment."""
-    # Skip worktree tests if git not available
-    try:
-        subprocess.run(["git", "--version"], check=True, capture_output=True)  # noqa: S607
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        skip_git = pytest.mark.skip(reason="git not available")
-        for item in items:
-            if "requires_worktree" in item.keywords:
-                item.add_marker(skip_git)
-
-
-# =============================================================================
 # Git Repository Fixtures
 # =============================================================================
 

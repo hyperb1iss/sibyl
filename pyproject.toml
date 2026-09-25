@@ -56,7 +56,7 @@ sibyld = { workspace = true }
 
 [tool.ruff]
 line-length = 100
-src = ["apps/*/src", "packages/*/src", "hooks", "tools"]
+src = ["apps/*/src", "packages/python/*/src", "hooks", "tools"]
 
 [tool.ruff.lint]
 select = [
@@ -139,7 +139,7 @@ error-on-warning = true
 
 [tool.ty.src]
 include = ["apps/*/src/**/*.py", "packages/python/*/src/**/*.py", "hooks/*.py", "tools/**/*.py"]
-exclude = ["**/build/**", "**/.venv/**", "**/migrations/**"]
+exclude = ["**/build/**", "**/.venv/**"]
 
 # Hooks use sys.exit() for control flow which ty doesn't understand
 [[tool.ty.overrides]]
@@ -152,12 +152,6 @@ invalid-argument-type = "ignore"
 include = ["apps/cli/src/**/*.py"]
 [tool.ty.overrides.rules]
 unresolved-attribute = "ignore"
-
-# Compatibility graph code still uses dynamic runtime driver wiring.
-[[tool.ty.overrides]]
-include = ["**/graph/client.py"]
-[tool.ty.overrides.rules]
-invalid-assignment = "ignore"
 
 # crawl4ai has complex union types that confuse ty
 [[tool.ty.overrides]]
@@ -193,12 +187,6 @@ include = ["**/crawler/service.py"]
 [tool.ty.overrides.rules]
 invalid-argument-type = "ignore"
 possibly-missing-attribute = "ignore"
-
-# Graph entity manager - dynamic dict access
-[[tool.ty.overrides]]
-include = ["**/graph/entities.py"]
-[tool.ty.overrides.rules]
-invalid-argument-type = "ignore"
 
 # Benchmark report scripts - metrics read out of loosely shaped report dicts,
 # where the value union carries nested dicts alongside the numbers, so passing
