@@ -246,3 +246,66 @@ async def test_graph_edge_actual_context_search_rechecks_endpoint_ancestry(
     )
     after = await context_search(plan=request, types=["relationship"], embedding_provider=None)
     assert edge.id not in {row.id for row in after.results}
+
+
+@pytest.mark.parametrize(
+    ("reader", "admitted"),
+    [("user_a", True), ("user_b", False)],
+)
+async def test_graph_edge_to_private_native_episode_follows_its_owner(
+    runtime, content_store, reader, admitted
+):
+    """An edge touching a native episode is judged at the episode like any endpoint.
+
+    Endpoint candidates are rebuilt from the entity row without a kind, so the
+    admission check sees an entity-shaped episode. A plan with project context
+    used to deny every episode, which dropped each edge touching one; now the
+    episode's own scope decides, so a private episode admits its owner's edges
+    and still refuses a co-member's.
+    """
+    await runtime.entity_manager.create_direct(
+        Entity(
+            id="episode-private",
+            name="Pool exhaustion postmortem",
+            entity_type=EntityType.EPISODE,
+            metadata={
+                "memory_scope": "private",
+                "principal_id": "user_a",
+                "project_id": "project_a",
+            },
+        )
+    )
+    await runtime.entity_manager.create_direct(
+        Entity(
+            id="topic-pooling",
+            name="Connection pooling",
+            entity_type=EntityType.TOPIC,
+            metadata={"project_id": "project_a"},
+        )
+    )
+    edge = Relationship(
+        id="episode-mentions-pooling",
+        relationship_type=RelationshipType.MENTIONS,
+        metadata={"fact": "Pool exhaustion postmortem mentions Connection pooling"},
+        source_id="episode-private",
+        target_id="topic-pooling",
+    )
+    await runtime.relationship_manager.create(edge)
+    project_plan = build_context_retrieval_plan(
+        query="pool exhaustion",
+        organization_id=runtime.client.group_id,
+        facets=[],
+        facet_types={},
+        principal_id=reader,
+        project="project_a",
+        accessible_projects={"project_a"},
+    )
+
+    lists, _receipt = await _apply_supersession_gate(
+        client=runtime.client,
+        group_id=runtime.client.group_id,
+        source_lists=[(RetrievalSignal.EDGE_FULLTEXT, [candidate(edge)])],
+        plan=project_plan,
+    )
+
+    assert [row.id for row in lists[0][1]] == (["episode-mentions-pooling"] if admitted else [])

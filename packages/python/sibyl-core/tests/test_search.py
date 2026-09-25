@@ -1183,14 +1183,14 @@ async def test_captured_scope_retrieval_matrix(
     assert reads("user-bob") is co_member_reads
 
 
-async def _captured_native_episode(
+async def _captured_episode_attributes(
     *,
     memory_scope: str,
     scope_key: str | None,
     project_id: str = "project_p",
     principal_id: str = "user-alice",
-) -> RetrievalCandidate:
-    """Capture an episode for real and read its entity row back as the lanes would."""
+) -> dict[str, object]:
+    """Run a real episode capture and hand back the attributes its entity row carries."""
     captured: dict[str, object] = {}
 
     async def remember_raw_memory(_request: MemoryCaptureRequest) -> Mapping[str, object]:
@@ -1217,6 +1217,23 @@ async def _captured_native_episode(
             principal_id=principal_id,
         )
     )
+    return captured
+
+
+async def _captured_native_episode(
+    *,
+    memory_scope: str,
+    scope_key: str | None,
+    project_id: str = "project_p",
+    principal_id: str = "user-alice",
+) -> RetrievalCandidate:
+    """Capture an episode for real and read its entity row back as the lanes would."""
+    attributes = await _captured_episode_attributes(
+        memory_scope=memory_scope,
+        scope_key=scope_key,
+        project_id=project_id,
+        principal_id=principal_id,
+    )
     candidate = candidate_module._candidate_from_node_record(
         {
             "uuid": "episode-in-p",
@@ -1225,7 +1242,7 @@ async def _captured_native_episode(
             "content": "The API ran out of pooled connections under load.",
             "group_id": "org-123",
             "project_id": project_id,
-            "attributes": captured,
+            "attributes": attributes,
         },
         signal=RetrievalSignal.NODE_FULLTEXT,
         score=1.0,
@@ -1353,6 +1370,195 @@ async def test_project_search_serves_native_episodes_from_that_project_only(
     assert (
         await result_ids(_episode_plan("user-alice", "project_q", {"project_p", "project_q"})) == []
     )
+
+
+# Seeds a reader may or may not see, each with the neighbours only it leads to.
+_SCOPED_EXPANSION_EDGES = {
+    "seed-q": ["n-ok", "n-alice-private", "n-p-episode"],
+    "seed-p": ["n-via-p"],
+    "seed-alice-private-q": ["n-via-private"],
+}
+
+
+async def _scoped_expansion_rows() -> dict[str, dict[str, object]]:
+    async def row(
+        uuid: str,
+        entity_type: str,
+        project_id: str,
+        scope: tuple[str, str | None, str] | None,
+    ) -> dict[str, object]:
+        attributes: dict[str, object] = {}
+        if scope is not None:
+            memory_scope, scope_key, principal_id = scope
+            attributes = await _captured_episode_attributes(
+                memory_scope=memory_scope,
+                scope_key=scope_key,
+                project_id=project_id,
+                principal_id=principal_id,
+            )
+        return {
+            "uuid": uuid,
+            "name": uuid,
+            "entity_type": entity_type,
+            "content": f"connection pool exhaustion {uuid}",
+            "group_id": "org-123",
+            "project_id": project_id,
+            "attributes": attributes,
+            "created_at": None,
+        }
+
+    q_project = ("project", "project_q", "user-carol")
+    p_project = ("project", "project_p", "user-alice")
+    alice_private = ("private", None, "user-alice")
+    return {
+        "seed-q": await row("seed-q", "episode", "project_q", q_project),
+        "seed-p": await row("seed-p", "episode", "project_p", p_project),
+        "seed-alice-private-q": await row(
+            "seed-alice-private-q", "episode", "project_q", alice_private
+        ),
+        "n-ok": await row("n-ok", "episode", "project_q", q_project),
+        "n-alice-private": await row("n-alice-private", "episode", "project_q", alice_private),
+        "n-p-episode": await row("n-p-episode", "episode", "project_p", p_project),
+        "n-via-p": await row("n-via-p", "topic", "project_q", None),
+        "n-via-private": await row("n-via-private", "topic", "project_q", None),
+    }
+
+
+class _ScopedExpansionGraphClient:
+    """Walks a fixed edge map and hydrates rows without applying the project filter.
+
+    Hydration ignores the database's project clause on purpose, so admission is
+    the only thing standing between the reader and a neighbour.
+    """
+
+    def __init__(self, rows: Mapping[str, dict[str, object]]) -> None:
+        self.rows = rows
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
+        self.calls.append((query, params))
+        if "FROM mentions" in query:
+            return []
+        if 'out.entity_type = "community"' in query or "target_id IN $community_uuids" in query:
+            return []
+        if "FROM relates_to" in query and "source_uuids" in params:
+            return [
+                {"uuid": target, "relationship": "MENTIONS"}
+                for source in params.get("source_uuids") or []
+                for target in _SCOPED_EXPANSION_EDGES.get(str(source), [])
+            ]
+        if "FROM relates_to" in query:
+            return []
+        if "FROM entity" in query and "uuid IN $uuids" in query:
+            return [
+                dict(self.rows[uuid]) for uuid in params.get("uuids") or [] if uuid in self.rows
+            ]
+        return []
+
+
+async def _scoped_expansion_search(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    seeds: tuple[str, ...],
+    plan: search_module.RetrievalPlan,
+) -> tuple[set[str], list[str]]:
+    rows = await _scoped_expansion_rows()
+    client = _ScopedExpansionGraphClient(rows)
+
+    class Runtime:
+        pass
+
+    runtime = Runtime()
+    runtime.client = client
+
+    async def fake_runtime(_organization_id: str, **_kwargs: object) -> Runtime:
+        return runtime
+
+    async def fake_node_fulltext(**_kwargs: object) -> list[RetrievalCandidate]:
+        return [
+            candidate_module._candidate_from_node_record(
+                rows[uuid], signal=RetrievalSignal.NODE_FULLTEXT, score=1.0
+            )
+            for uuid in seeds
+        ]
+
+    async def no_raw_memories(**_kwargs: object) -> list[RawMemory]:
+        return []
+
+    monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(source_module, "_node_fulltext_candidates", fake_node_fulltext)
+    response = await search_module.context_search(
+        plan=plan,
+        types=["episode", "topic"],
+        facet=ContextFacet.RECENT_MEMORY,
+        limit=12,
+        raw_memory_recall_fn=no_raw_memories,
+    )
+    walked = [
+        str(source)
+        for query, params in client.calls
+        if "FROM relates_to" in query
+        for source in (params.get("source_uuids") or [])
+    ]
+    return {result.id for result in response.results}, walked
+
+
+def _scoped_expansion_plan(
+    principal_id: str,
+    project_id: str | None,
+    accessible_projects: set[str],
+) -> search_module.RetrievalPlan:
+    return build_context_retrieval_plan(
+        query="connection pool exhaustion",
+        organization_id="org-123",
+        facets=[ContextFacet.RECENT_MEMORY],
+        facet_types={ContextFacet.RECENT_MEMORY: ["episode", "topic"]},
+        principal_id=principal_id,
+        project=project_id,
+        accessible_projects=accessible_projects,
+        limit=12,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("project_id", [None, "project_q"])
+async def test_expansion_never_carries_a_non_member_to_a_native_episode(
+    monkeypatch: pytest.MonkeyPatch,
+    project_id: str | None,
+) -> None:
+    ids, walked = await _scoped_expansion_search(
+        monkeypatch,
+        seeds=("seed-q", "seed-p", "seed-alice-private-q"),
+        plan=_scoped_expansion_plan("user-bob", project_id, {"project_q"}),
+    )
+
+    assert {"seed-q", "n-ok"} <= ids
+    for forbidden in (
+        "seed-p",
+        "seed-alice-private-q",
+        "n-alice-private",
+        "n-p-episode",
+        "n-via-p",
+        "n-via-private",
+    ):
+        assert forbidden not in ids
+    assert "seed-q" in walked
+    assert "seed-p" not in walked
+    assert "seed-alice-private-q" not in walked
+
+
+@pytest.mark.asyncio
+async def test_expansion_follows_an_owner_through_their_private_native_episode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ids, walked = await _scoped_expansion_search(
+        monkeypatch,
+        seeds=("seed-alice-private-q",),
+        plan=_scoped_expansion_plan("user-alice", "project_q", {"project_q"}),
+    )
+
+    assert {"seed-alice-private-q", "n-via-private"} <= ids
+    assert set(walked) == {"seed-alice-private-q"}
 
 
 def test_build_context_retrieval_plan_requires_principal() -> None:
