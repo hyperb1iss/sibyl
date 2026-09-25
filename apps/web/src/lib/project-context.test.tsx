@@ -119,12 +119,108 @@ describe('ProjectContextProvider default scope', () => {
     expect(hooks.useProjects).not.toHaveBeenCalledWith({ enabled: true });
   });
 
-  it('falls back to every project when the org has none to open on', async () => {
+  it('falls back to every project for an empty org without saving it as a choice', async () => {
     hooks.useProjects.mockReturnValue({ data: { entities: [] }, isError: false });
+
+    const first = renderProbe();
+
+    await waitFor(() => expect(screen.getByTestId('all').textContent).toBe('true'));
+    expect(localStorage.getItem('sibyl-project-context')).toBeNull();
+    first.unmount();
+
+    // Next visit, projects exist now: it still opens on one
+    hooks.useProjects.mockReturnValue({ data: PROJECTS, isError: false });
+    renderProbe();
+    await waitFor(() => expect(screen.getByTestId('selected').textContent).toBe('project_new'));
+    expect(screen.getByTestId('all').textContent).toBe('false');
+  });
+
+  it('falls back to every project when projects fail to load, without saving it', async () => {
+    hooks.useProjects.mockReturnValue({ data: undefined, isError: true });
+
+    const first = renderProbe();
+
+    await waitFor(() => expect(screen.getByTestId('all').textContent).toBe('true'));
+    expect(screen.getByTestId('ready').textContent).toBe('true');
+    expect(localStorage.getItem('sibyl-project-context')).toBeNull();
+    first.unmount();
+
+    // A healthy backend on the next visit adopts a project
+    hooks.useProjects.mockReturnValue({ data: PROJECTS, isError: false });
+    renderProbe();
+    await waitFor(() => expect(screen.getByTestId('selected').textContent).toBe('project_new'));
+  });
+
+  it('drops a stored project that no longer exists and opens on the default', async () => {
+    localStorage.setItem('sibyl-project-context', JSON.stringify({ projects: ['project_gone'] }));
+
+    renderProbe();
+
+    await waitFor(() => expect(screen.getByTestId('selected').textContent).toBe('project_new'));
+    expect(JSON.parse(localStorage.getItem('sibyl-project-context') ?? 'null')).toEqual({
+      projects: ['project_new'],
+    });
+  });
+
+  it('keeps the stored projects that still exist and drops the rest', async () => {
+    localStorage.setItem(
+      'sibyl-project-context',
+      JSON.stringify({ projects: ['project_gone', 'project_old'] })
+    );
+
+    renderProbe();
+
+    await waitFor(() => expect(screen.getByTestId('selected').textContent).toBe('project_old'));
+  });
+
+  it('keeps a stored choice when the project list fails to load', () => {
+    localStorage.setItem('sibyl-project-context', JSON.stringify({ projects: ['project_old'] }));
+    hooks.useProjects.mockReturnValue({ data: undefined, isError: true });
+
+    renderProbe();
+
+    expect(screen.getByTestId('selected').textContent).toBe('project_old');
+    expect(screen.getByTestId('all').textContent).toBe('false');
+  });
+
+  it('re-scopes when the project list changes to another org', async () => {
+    localStorage.setItem('sibyl-project-context', JSON.stringify({ projects: ['project_old'] }));
+
+    const view = renderProbe();
+    await waitFor(() => expect(screen.getByTestId('selected').textContent).toBe('project_old'));
+
+    hooks.useProjects.mockReturnValue({
+      data: {
+        entities: [
+          {
+            id: 'project_other_org',
+            name: 'Other',
+            metadata: { updated_at: '2026-09-20T00:00:00Z' },
+          },
+        ],
+      },
+      isError: false,
+    });
+    view.rerender(
+      <ProjectContextProvider>
+        <Probe />
+      </ProjectContextProvider>
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId('selected').textContent).toBe('project_other_org')
+    );
+  });
+
+  it('saves every project when the URL asks for it on purpose', async () => {
+    navigation.params = new URLSearchParams('projects=all');
 
     renderProbe();
 
     await waitFor(() => expect(screen.getByTestId('all').textContent).toBe('true'));
+    expect(JSON.parse(localStorage.getItem('sibyl-project-context') ?? 'null')).toEqual({
+      mode: 'all',
+    });
   });
 
   it('keeps cross-project pages unscoped and ready', () => {

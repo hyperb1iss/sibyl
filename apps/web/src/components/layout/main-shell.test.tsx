@@ -70,6 +70,50 @@ describe('MainShell', () => {
     expect(screen.queryByRole('button', { name: /capture memory/i })).not.toBeInTheDocument();
   });
 
+  it('holds the page until a project scope exists, then renders it', () => {
+    hooks.useProjectContext.mockReturnValue({
+      selectedProjects: [],
+      isAll: false,
+      toggleProject: vi.fn(),
+      setProjects: vi.fn(),
+      selectProject: vi.fn(),
+      clearProjects: vi.fn(),
+      contextEnabled: true,
+      scopeReady: false,
+    });
+
+    const { rerender } = render(
+      <MobileNavProvider>
+        <MainShell>
+          <div>Shell content</div>
+        </MainShell>
+      </MobileNavProvider>
+    );
+
+    expect(screen.queryByText('Shell content')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Choosing a project')).toBeInTheDocument();
+
+    hooks.useProjectContext.mockReturnValue({
+      selectedProjects: ['project_123'],
+      isAll: false,
+      toggleProject: vi.fn(),
+      setProjects: vi.fn(),
+      selectProject: vi.fn(),
+      clearProjects: vi.fn(),
+      contextEnabled: true,
+      scopeReady: true,
+    });
+    rerender(
+      <MobileNavProvider>
+        <MainShell>
+          <div>Shell content</div>
+        </MainShell>
+      </MobileNavProvider>
+    );
+
+    expect(screen.getByText('Shell content')).toBeInTheDocument();
+  });
+
   it('opens the omnibox from the header search control', async () => {
     const { user } = render(
       <MobileNavProvider>

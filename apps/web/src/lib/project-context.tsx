@@ -23,10 +23,19 @@ export const ALL_PROJECTS_PARAM = 'all';
  * "all projects" and was also the state a first visit started in, so every
  * page opened across every project the viewer could read.
  */
-type ProjectSelection = { kind: 'unset' } | { kind: 'all' } | { kind: 'projects'; ids: string[] };
+type ProjectSelection =
+  | { kind: 'unset' }
+  | { kind: 'all'; transient?: boolean }
+  | { kind: 'projects'; ids: string[] };
 
 const UNSET: ProjectSelection = { kind: 'unset' };
 const ALL: ProjectSelection = { kind: 'all' };
+/**
+ * Every project because nothing better was available (the project list
+ * failed to load, or the org has no projects yet). It is never saved, so the
+ * next visit with a healthy backend still opens on a project.
+ */
+const FALLBACK_ALL: ProjectSelection = { kind: 'all', transient: true };
 
 function projectsSelection(ids: string[]): ProjectSelection {
   return ids.length > 0 ? { kind: 'projects', ids } : ALL;
@@ -59,7 +68,9 @@ export function parseStoredSelection(raw: string | null): ProjectSelection {
 
 function serializeSelection(selection: ProjectSelection): string | null {
   if (selection.kind === 'unset') return null;
-  if (selection.kind === 'all') return JSON.stringify({ mode: 'all' });
+  if (selection.kind === 'all') {
+    return selection.transient ? null : JSON.stringify({ mode: 'all' });
+  }
   return JSON.stringify({ projects: selection.ids });
 }
 
@@ -129,6 +140,8 @@ export function ProjectContextProvider({ children }: { children: ReactNode }) {
   // Track whether we've completed initial hydration
   const isHydrated = useRef(false);
   const prevProjectsRef = useRef<string[] | null>(null);
+  // Set when a change should be written back to the URL
+  const userChangedSelection = useRef(false);
 
   // Start unset; the real value lands in an effect after hydration. Hydration
   // is state, not only a ref, so the default and its fetch wait for the render
@@ -173,24 +186,39 @@ export function ProjectContextProvider({ children }: { children: ReactNode }) {
 
   // A first visit opens on the most recently active project. Every project at
   // once stays available, but as a choice the viewer makes, not a default.
+  // A chosen set of projects is checked against the same list, so an id that
+  // was deleted, lost its access, or belongs to another org drops out.
   const needsDefault = hydrated && contextEnabled && selection.kind === 'unset';
-  const { data: projectsData, isError: projectsFailed } = useProjects({ enabled: needsDefault });
+  const needsValidation = hydrated && contextEnabled && selection.kind === 'projects';
+  const { data: projectsData, isError: projectsFailed } = useProjects({
+    enabled: needsDefault || needsValidation,
+  });
   useEffect(() => {
-    if (!needsDefault) return;
+    if (!needsDefault && !needsValidation) return;
     if (projectsFailed) {
-      setSelection(ALL);
+      // Keep a chosen set as it is; only a missing choice falls back.
+      if (needsDefault) setSelection(FALLBACK_ALL);
       return;
     }
     if (!projectsData) return;
-    const recent = mostRecentProjectId(projectsData.entities ?? []);
-    if (recent) {
-      prevProjectsRef.current = [recent];
-      setSelection({ kind: 'projects', ids: [recent] });
-    } else {
-      // Nothing to scope to yet
-      setSelection(ALL);
+    const entities = projectsData.entities ?? [];
+    let next: ProjectSelection | null = null;
+    if (selection.kind === 'projects') {
+      const known = new Set(entities.map(project => project.id));
+      const kept = selection.ids.filter(id => known.has(id));
+      if (kept.length === selection.ids.length) return;
+      if (kept.length > 0) next = { kind: 'projects', ids: kept };
     }
-  }, [needsDefault, projectsData, projectsFailed]);
+    if (!next) {
+      const recent = mostRecentProjectId(entities);
+      // Nothing to scope to yet: every project, but not as a saved choice
+      next = recent ? { kind: 'projects', ids: [recent] } : FALLBACK_ALL;
+    }
+    prevProjectsRef.current = next.kind === 'projects' ? next.ids : [];
+    // A corrected choice that came from the URL rewrites the URL too
+    if (searchParams.get('projects') !== null) userChangedSelection.current = true;
+    setSelection(next);
+  }, [needsDefault, needsValidation, projectsData, projectsFailed, selection, searchParams]);
 
   // Sync to localStorage when selection changes (after hydration)
   useEffect(() => {
@@ -205,7 +233,6 @@ export function ProjectContextProvider({ children }: { children: ReactNode }) {
   }, [selection]);
 
   // Sync URL when USER changes selection (not from URL navigation)
-  const userChangedSelection = useRef(false);
   useEffect(() => {
     if (!isHydrated.current) return;
     if (!userChangedSelection.current) return;
