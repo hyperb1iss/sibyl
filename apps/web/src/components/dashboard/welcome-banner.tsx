@@ -20,16 +20,15 @@ interface WelcomeBannerProps {
 
 export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) {
   const [isDismissed, setIsDismissed] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const [showConnectModal, setShowConnectModal] = useState(false);
-  const { data: setupStatus } = useSetupStatus({
-    validateKeys: false,
-    enabled: totalEntities === 0,
-  });
+  const { data: setupStatus } = useSetupStatus({ validateKeys: false });
   const { checklist, markConnectedAgent, markAddedSource, markTriedSearch } =
     useOnboardingProgress();
 
   // Load dismissal state from localStorage on mount
   useEffect(() => {
+    setMounted(true);
     const dismissed = localStorage.getItem(BANNER_DISMISSED_KEY);
     if (dismissed === 'true') {
       setIsDismissed(true);
@@ -49,6 +48,8 @@ export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) 
 
   const isNewUser = totalEntities === 0;
   // Keys are one way to be ready; a server-side provider such as Bedrock needs none.
+  // Server rendering never has the status, so the pill waits for the client.
+  const modelsKnown = mounted && setupStatus !== undefined;
   const modelsReady = setupStatus?.providers_configured === true;
 
   return (
@@ -177,14 +178,16 @@ export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) 
 
         {/* Status indicators */}
         <div className="flex flex-wrap items-center gap-3 text-xs">
-          <div className="flex items-center gap-1.5">
-            <div
-              className={`w-2 h-2 rounded-full ${modelsReady ? 'bg-sc-green shadow-[0_0_6px_color-mix(in_oklch,var(--sc-green)_60%,transparent)]' : 'bg-sc-fg-subtle'}`}
-            />
-            <span className="text-sc-fg-muted">
-              {modelsReady ? 'Models ready' : 'Models need setup'}
-            </span>
-          </div>
+          {modelsKnown && (
+            <div className="flex items-center gap-1.5">
+              <div
+                className={`w-2 h-2 rounded-full ${modelsReady ? 'bg-sc-green shadow-[0_0_6px_color-mix(in_oklch,var(--sc-green)_60%,transparent)]' : 'bg-sc-fg-subtle'}`}
+              />
+              <span className="text-sc-fg-muted">
+                {modelsReady ? 'Models ready' : 'Models need setup'}
+              </span>
+            </div>
+          )}
           <Link
             href="/graph"
             className="flex items-center gap-1.5 rounded text-sc-purple hover:text-sc-purple/80 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"

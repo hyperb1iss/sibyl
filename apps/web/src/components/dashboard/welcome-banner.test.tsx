@@ -75,4 +75,13 @@ describe('WelcomeBanner', () => {
 
     expect(screen.getByText('Models need setup')).toBeInTheDocument();
   });
+
+  it('shows no model status until the server has answered', () => {
+    hooks.useSetupStatus.mockReturnValue({ data: undefined });
+
+    render(<WelcomeBanner totalEntities={0} />);
+
+    expect(screen.queryByText('Models need setup')).not.toBeInTheDocument();
+    expect(screen.queryByText('Models ready')).not.toBeInTheDocument();
+  });
 });
