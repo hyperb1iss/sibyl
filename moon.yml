@@ -999,7 +999,7 @@ tasks:
     inputs:
       - tools/bench/longmemeval_v2_rig.py
       - tools/bench/longmemeval_v2_pack_compare.py
-      - benchmarks/longmemeval_v2/**/*.json
+      - benchmarks/longmemeval_v2_official_source.py
       - pyproject.toml
     options:
       cache: false
@@ -1017,7 +1017,6 @@ tasks:
     command: uv run python tools/bench/longmemeval_v2_pack_compare.py
     inputs:
       - tools/bench/longmemeval_v2_pack_compare.py
-      - benchmarks/longmemeval_v2/**/*.json
       - pyproject.toml
     options:
       cache: false
