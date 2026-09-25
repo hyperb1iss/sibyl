@@ -17,7 +17,15 @@ from sibyl.persistence.auth_runtime import (
     resolve_accessible_project_graph_ids,
 )
 from sibyl_core.ai.errors import provider_error_detail
+from sibyl_core.ai.llm.budget import (
+    RUN_TOKEN_CEILING,
+    budget_failure_fields,
+    llm_budget_context,
+    llm_run_spend_ledger,
+    run_ceiling_reached,
+)
 from sibyl_core.auth import ProjectRole
+from sibyl_core.config import settings
 from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind
 from sibyl_core.models.reflection import ReflectionPack
 from sibyl_core.services.dream_checkpoints import (
@@ -131,19 +139,29 @@ async def run_reflection_dream_cycle(
         run_id=run_id,
     )
 
-    source_results = await _reflect_dream_sources(
-        group_id=group_id,
-        run_id=run_id,
-        dry_run=dry_run,
-        limit=source_budget,
-    )
-    candidate_results = await _drain_dream_candidates(
-        group_id=group_id,
-        run_id=run_id,
-        dry_run=dry_run,
-        limit=candidate_budget,
-        confidence_threshold=confidence_threshold,
-    )
+    # Every model call in the run reserves against this ledger before it
+    # touches the monthly buckets, so one nightly run has a ceiling of its own.
+    with llm_run_spend_ledger(settings.consolidation_run_max_tokens) as spend:
+        source_results = await _reflect_dream_sources(
+            group_id=group_id,
+            run_id=run_id,
+            dry_run=dry_run,
+            limit=source_budget,
+        )
+        candidate_results = await _drain_dream_candidates(
+            group_id=group_id,
+            run_id=run_id,
+            dry_run=dry_run,
+            limit=candidate_budget,
+            confidence_threshold=confidence_threshold,
+        )
+    if spend.stopped_reason is not None:
+        log.warning(
+            "reflection_dream_run_ceiling_reached",
+            group_id=group_id,
+            run_id=run_id,
+            **spend.snapshot(),
+        )
 
     finished = datetime.now(UTC)
     all_results = [*source_results, *candidate_results]
@@ -174,6 +192,9 @@ async def run_reflection_dream_cycle(
         "exceptioned": sum(1 for item in candidate_results if item["outcome"] == "exception"),
         "skipped": sum(1 for item in all_results if item["outcome"] == "skip"),
         "failed": sum(1 for item in all_results if item["outcome"] == "error"),
+        "budget_refused": sum(1 for item in all_results if item.get("budget") is not None),
+        "spend": spend.snapshot(),
+        "stopped_reason": spend.stopped_reason,
         "model_usage": {
             "accounting": "durable_validation_stages",
             "execution_ids": sorted(
@@ -242,6 +263,9 @@ async def _reflect_dream_sources(
             cursor_revision += int(cursor_owned)
         if source.id in consumed:
             continue
+        if run_ceiling_reached():
+            results.append({"source_id": source.id, "outcome": "skip", "reason": RUN_TOKEN_CEILING})
+            continue
         try:
             if source.id in selection_errors:
                 raise selection_errors[source.id]
@@ -272,6 +296,7 @@ async def _reflect_dream_sources(
                     "outcome": "error",
                     "reason": str(exc),
                     "provider_error": provider_error_detail(exc),
+                    **budget_failure_fields(exc),
                 }
             )
     return results
@@ -515,31 +540,32 @@ async def _reflect_dream_source(
     dream_kwargs = {}
     if work is not None and not dry_run:
         dream_kwargs = {"extractor": CheckpointReflectionExtractor(work), "dream_work": work}
-    pack = await reflect_memory(
-        source.raw_content,
-        **dream_kwargs,
-        source_title=source.title or source.source_id or source.id,
-        intent="maintenance",
-        domain=_metadata_str(source.metadata, "domain"),
-        project=source.project_id,
-        related_to=_metadata_str_list(source.metadata.get("related_to")),
-        organization_id=group_id,
-        principal_id=source.principal_id,
-        accessible_projects=accessible_projects,
-        writable_projects=await _resolve_accessible_projects(
-            group_id=group_id,
+    with llm_budget_context(user_id=source.principal_id, organization_id=group_id):
+        pack = await reflect_memory(
+            source.raw_content,
+            **dream_kwargs,
+            source_title=source.title or source.source_id or source.id,
+            intent="maintenance",
+            domain=_metadata_str(source.metadata, "domain"),
+            project=source.project_id,
+            related_to=_metadata_str_list(source.metadata.get("related_to")),
+            organization_id=group_id,
             principal_id=source.principal_id,
-            required_role=ProjectRole.CONTRIBUTOR,
-        ),
-        memory_scope=source.memory_scope,
-        scope_key=source.scope_key,
-        suggested_memory_scope=_metadata_str(source.metadata, "suggested_memory_scope"),
-        suggested_scope_key=_metadata_str(source.metadata, "suggested_scope_key"),
-        persist=not dry_run,
-        persist_source=False,
-        persist_review=not dry_run,
-        existing_source_id=source.id,
-    )
+            accessible_projects=accessible_projects,
+            writable_projects=await _resolve_accessible_projects(
+                group_id=group_id,
+                principal_id=source.principal_id,
+                required_role=ProjectRole.CONTRIBUTOR,
+            ),
+            memory_scope=source.memory_scope,
+            scope_key=source.scope_key,
+            suggested_memory_scope=_metadata_str(source.metadata, "suggested_memory_scope"),
+            suggested_scope_key=_metadata_str(source.metadata, "suggested_scope_key"),
+            persist=not dry_run,
+            persist_source=False,
+            persist_review=not dry_run,
+            existing_source_id=source.id,
+        )
     if work is None or dry_run:
         return await _mark_source_reflected(source, pack=pack, run_id=run_id, dry_run=dry_run)
     result = {
@@ -590,15 +616,25 @@ async def _drain_dream_candidates(
             cursor = (candidate.captured_at or candidate.created_at, candidate.id)
             if candidate.id in handled_frontiers:
                 continue
-            try:
-                result = await _drain_dream_candidate(
-                    candidate=candidate,
-                    group_id=group_id,
-                    run_id=run_id,
-                    dry_run=dry_run,
-                    confidence_threshold=confidence_threshold,
-                    handled_frontiers=handled_frontiers,
+            if run_ceiling_reached():
+                # The candidate stays pending for the next run; the walk ends
+                # here rather than writing a skip for every pending candidate.
+                results.append(
+                    {"candidate_id": candidate.id, "outcome": "skip", "reason": RUN_TOKEN_CEILING}
                 )
+                return results
+            try:
+                with llm_budget_context(
+                    user_id=candidate.principal_id or None, organization_id=group_id
+                ):
+                    result = await _drain_dream_candidate(
+                        candidate=candidate,
+                        group_id=group_id,
+                        run_id=run_id,
+                        dry_run=dry_run,
+                        confidence_threshold=confidence_threshold,
+                        handled_frontiers=handled_frontiers,
+                    )
                 results.append(result)
                 if result["outcome"] != "skip":
                     remaining -= 1
@@ -617,6 +653,7 @@ async def _drain_dream_candidates(
                         "reason": str(exc),
                         "provider_error": provider_error_detail(exc),
                         "dry_run": dry_run,
+                        **budget_failure_fields(exc),
                     }
                 )
     return results

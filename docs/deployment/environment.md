@@ -239,9 +239,10 @@ waits ten minutes per attempt rather than one.
 
 ### Consolidation Input Budget
 
-| Variable                              | Default           | Description                                                          |
-| ------------------------------------- | ----------------- | -------------------------------------------------------------------- |
-| `SIBYL_CONSOLIDATION_MAX_INPUT_CHARS` | unset (per model) | Character cap on one consolidation request: system, evidence, schema |
+| Variable                              | Default           | Description                                                                      |
+| ------------------------------------- | ----------------- | -------------------------------------------------------------------------------- |
+| `SIBYL_CONSOLIDATION_MAX_INPUT_CHARS` | unset (per model) | Character cap on one consolidation request: system, evidence, schema             |
+| `SIBYL_CONSOLIDATION_RUN_MAX_TOKENS`  | `10000000`        | Token ceiling one reflection dream run may reserve across all of its model calls |
 
 Unset, each request takes the memory model's own budget: 1,600,000 characters for `claude-opus-5`
 and `claude-opus-5-5` on the `anthropic` provider, and 40,000 for every other model. The lookup
@@ -249,12 +250,28 @@ matches the model id exactly, so a dated id, a `[1m]` suffix or an `anthropic/`-
 id gets 40,000. When the variable is set, its value replaces the model's budget, even a value equal
 to a default.
 
-This variable is the operator's knob for capping dream spend. At the Opus default one consolidation
-request can carry about 420K input tokens (screen48 evidence ran about 3.8 characters per token),
-and the nightly dream cycle's proposal, critique and correction requests are not counted against the
-monthly LLM token budgets. A lower value shrinks every such request and splits large task families
-into more, smaller cohorts. The budget is recorded in each validation policy, so changing it, or
-changing the memory model, re-sends consolidation work that was in flight or only partly complete.
+At the Opus default one consolidation request can carry about 420K input tokens (screen48 evidence
+ran about 3.8 characters per token). A lower value shrinks every such request and splits large task
+families into more, smaller cohorts. The budget is recorded in each validation policy, so changing
+it, or changing the memory model, re-sends consolidation work that was in flight or only partly
+complete.
+
+### Dream Run Spend
+
+The nightly dream cycle's proposal, critique, correction and individual reflection calls reserve
+against the monthly LLM token budgets of the source's owner and the organization, the same buckets
+the extraction jobs use, and each call settles to the tokens it used once it returns. Each call
+reserves one attempt up front; a retry reserves another attempt when it dispatches, so a call that
+succeeds first time never holds its full retry envelope. A cohort the monthly budget refuses fails
+closed in the run report and the run continues with the next one.
+
+`SIBYL_CONSOLIDATION_RUN_MAX_TOKENS` caps what one run may reserve in total. When the next
+reservation would cross it, that call is refused, the run stops admitting cohorts, individual passes
+and candidates, and the receipt records `stopped_reason: run_token_ceiling` with the reserved,
+refunded and committed totals under `spend`. Whatever the run did not reach stays pending for the
+next run. At the Opus input budget a joined cohort's proposal and critique reserve about 0.9M
+tokens, so the default admits about ten such cohorts a night; at a 40,000-character budget a call
+reserves about 11K tokens and the default never binds.
 
 ## Embeddings
 

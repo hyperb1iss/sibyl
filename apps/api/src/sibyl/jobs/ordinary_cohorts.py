@@ -8,6 +8,12 @@ from sibyl.persistence.auth_runtime import (
     resolve_auth_context,
 )
 from sibyl_core.ai.errors import provider_error_detail
+from sibyl_core.ai.llm.budget import (
+    RUN_TOKEN_CEILING,
+    budget_failure_fields,
+    llm_budget_context,
+    run_ceiling_reached,
+)
 from sibyl_core.auth import OrganizationRole, ProjectRole
 from sibyl_core.services.content_models import RawMemory
 from sibyl_core.services.ordinary_cohort import (
@@ -61,14 +67,28 @@ async def reflect_cohorts(org: str, sources: list[RawMemory], *, dry_run: bool):
             )
             consumed.update(identifiers)
             continue
-        try:
-            bins = (
-                await partition_stored_cohort(
-                    org, principal, identifiers, writable_source_authority
-                )
-                if len(identifiers) > 1
-                else [identifiers]
+        if run_ceiling_reached():
+            # The run's token ceiling stops admitting work; the sources stay
+            # pending for the next run and the report says why they waited.
+            consumed.update(identifiers)
+            results.append(
+                {
+                    "source_ids": identifiers,
+                    "outcome": "skip",
+                    "reason": RUN_TOKEN_CEILING,
+                    "stage_kind": "ordinary_cohort",
+                }
             )
+            continue
+        try:
+            with llm_budget_context(user_id=principal, organization_id=org):
+                bins = (
+                    await partition_stored_cohort(
+                        org, principal, identifiers, writable_source_authority
+                    )
+                    if len(identifiers) > 1
+                    else [identifiers]
+                )
         except Exception as exc:
             consumed.update(identifiers)
             results.append(
@@ -78,15 +98,28 @@ async def reflect_cohorts(org: str, sources: list[RawMemory], *, dry_run: bool):
                     "reason": str(exc),
                     "provider_error": provider_error_detail(exc),
                     "stage_kind": "ordinary_cohort_preparation",
+                    **budget_failure_fields(exc),
                 }
             )
             continue
         for identifiers in bins:
+            if run_ceiling_reached():
+                consumed.update(identifiers)
+                results.append(
+                    {
+                        "source_ids": identifiers,
+                        "outcome": "skip",
+                        "reason": RUN_TOKEN_CEILING,
+                        "stage_kind": "ordinary_cohort",
+                    }
+                )
+                continue
             if len(identifiers) < 2:
                 source = next(member for member in members if member.id == identifiers[0])
                 if is_controller_episode(source.raw_content.encode()):
                     consumed.add(source.id)
-                    results.append(await _reflect_packet_source(org, principal, source.id))
+                    with llm_budget_context(user_id=principal, organization_id=org):
+                        results.append(await _reflect_packet_source(org, principal, source.id))
                     continue
                 results.append(
                     {
@@ -102,9 +135,10 @@ async def reflect_cohorts(org: str, sources: list[RawMemory], *, dry_run: bool):
                 await writable_source_authority(org, principal)
 
             try:
-                candidate, execution = await propose_stored_cohort(
-                    org, principal, identifiers, writable_source_authority, authorize=authorize
-                )
+                with llm_budget_context(user_id=principal, organization_id=org):
+                    candidate, execution = await propose_stored_cohort(
+                        org, principal, identifiers, writable_source_authority, authorize=authorize
+                    )
                 results.append(
                     {
                         "source_ids": identifiers,
@@ -123,6 +157,7 @@ async def reflect_cohorts(org: str, sources: list[RawMemory], *, dry_run: bool):
                     "provider_error": provider_error_detail(exc),
                     "stage_kind": "ordinary_cohort",
                     "execution_state": getattr(exc, "execution_state", None),
+                    **budget_failure_fields(exc),
                 }
                 if execution_id := getattr(exc, "execution_id", None):
                     failure["operation_id"] = execution_id
@@ -183,6 +218,7 @@ async def _reflect_packet_source(org: str, principal: str, source_id: str):
                 reason=str(exc),
                 provider_error=provider_error_detail(exc),
                 execution_state=state,
+                **budget_failure_fields(exc),
             )
             if execution_id := getattr(exc, "execution_id", None):
                 page["operation_id"] = execution_id
