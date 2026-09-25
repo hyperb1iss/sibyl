@@ -21,11 +21,12 @@ import sibyl_core.retrieval.search as search_module
 import sibyl_core.tools.context as context_module
 from sibyl_core.memory_pipeline.lifecycle import graph_metadata_recallable
 from sibyl_core.models.context import ContextFacet
+from sibyl_core.retrieval import _search_candidates as candidate_module
 from sibyl_core.retrieval import _search_database as database_module
 from sibyl_core.retrieval import _search_expansion as expansion_module
 from sibyl_core.retrieval import _search_lifecycle as lifecycle_module
 from sibyl_core.retrieval import _search_sources as source_module
-from sibyl_core.retrieval.candidates import RetrievalCandidate
+from sibyl_core.retrieval.candidates import CandidateKind, RetrievalCandidate
 from sibyl_core.retrieval.search import (
     RetrievalSignal,
     build_context_retrieval_plan,
@@ -762,7 +763,7 @@ async def test_correction_resolves_only_its_own_capture_not_its_source_group(
 
 @pytest.mark.asyncio
 async def test_the_edge_lookup_is_not_fed_ids_that_cannot_be_edge_endpoints() -> None:
-    """Raw memories and episodes are not entity uuids, so they stay out of the IN list."""
+    """Raw memories and archived episodes are not entity uuids, so they stay out of the IN list."""
 
     seen_uuids: list[list[str]] = []
 
@@ -778,7 +779,9 @@ async def test_the_edge_lookup_is_not_fed_ids_that_cannot_be_edge_endpoints() ->
                 assert params["ids"] == ["rel-1"]
             return []
 
-    def candidate(identifier: str, entity_type: str) -> RetrievalCandidate:
+    def candidate(
+        identifier: str, entity_type: str, kind: CandidateKind | None = None
+    ) -> RetrievalCandidate:
         return RetrievalCandidate(
             id=identifier,
             type=entity_type,
@@ -788,6 +791,7 @@ async def test_the_edge_lookup_is_not_fed_ids_that_cannot_be_edge_endpoints() ->
             source=None,
             metadata={},
             project_id="project_123",
+            kind=kind,
         )
 
     await lifecycle_module._apply_supersession_gate(
@@ -799,7 +803,7 @@ async def test_the_edge_lookup_is_not_fed_ids_that_cannot_be_edge_endpoints() ->
                 [
                     candidate("entity-real", "decision"),
                     candidate("raw_memory:abc", "raw_memory"),
-                    candidate("episode-1", "episode"),
+                    candidate("episode-1", "episode", CandidateKind.EPISODE),
                     candidate("rel-1", "relationship"),
                 ],
             )
@@ -807,6 +811,38 @@ async def test_the_edge_lookup_is_not_fed_ids_that_cannot_be_edge_endpoints() ->
     )
 
     assert seen_uuids == [["entity-real"]]
+
+
+@pytest.mark.asyncio
+async def test_a_superseded_native_episode_is_retired_like_any_entity() -> None:
+    """A native episode is an entity row, so an inbound SUPERSEDES edge retires it."""
+
+    native = candidate_module._candidate_from_node_record(
+        {
+            "uuid": SUPERSEDED_ID,
+            "name": "Deploy to Fly",
+            "entity_type": "episode",
+            "content": "we deploy to fly.io",
+            "group_id": "org-123",
+            "project_id": "project_123",
+            "attributes": {},
+        },
+        signal=RetrievalSignal.NODE_FULLTEXT,
+        score=1.0,
+    )
+    assert native.type == "episode"
+    assert native.kind is CandidateKind.NODE
+    client = _SupersessionGraphClient()
+
+    surviving, metadata = await lifecycle_module._apply_supersession_gate(
+        client=client,
+        group_id="org-123",
+        source_lists=[(RetrievalSignal.NODE_FULLTEXT, [native])],
+    )
+
+    assert surviving == [(RetrievalSignal.NODE_FULLTEXT, [])]
+    assert metadata["supersession_gate"]["superseded_uuids"] == [SUPERSEDED_ID]
+    assert metadata["supersession_gate"]["superseded_dropped"] == 1
 
 
 @pytest.mark.asyncio

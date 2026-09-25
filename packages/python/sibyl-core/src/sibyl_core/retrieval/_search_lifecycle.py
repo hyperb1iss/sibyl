@@ -30,7 +30,7 @@ from sibyl_core.services.graph_runtime import GraphRuntime
 _SUPERSEDES_PREDICATE = "SUPERSEDES"
 _SUPERSESSION_LOOKUP_BATCH_SIZE = 512
 _SUPERSESSION_EDGE_PAGE_SIZE = 512
-_NON_ENTITY_CANDIDATE_TYPES = frozenset({"claim", "relationship", "raw_memory", "episode"})
+_NON_ENTITY_CANDIDATE_TYPES = frozenset({"claim", "relationship", "raw_memory"})
 log = structlog.get_logger()
 
 
@@ -377,12 +377,15 @@ async def _apply_supersession_gate(
                 lifecycle_dropped += 1
         surviving.append((signal, kept))
 
+    # An archived `episode` row is not an entity, so no SUPERSEDES edge can
+    # name it. A native episode is one and is checked like every other.
     node_uuids = list(
         dict.fromkeys(
             candidate.id
             for _signal, candidates in surviving
             for candidate in candidates
-            if candidate.type not in _NON_ENTITY_CANDIDATE_TYPES
+            if candidate.kind != CandidateKind.EPISODE
+            and candidate.type not in _NON_ENTITY_CANDIDATE_TYPES
         )
     )
     node_uuids = list(
