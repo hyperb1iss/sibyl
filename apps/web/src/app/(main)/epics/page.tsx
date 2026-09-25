@@ -66,10 +66,11 @@ function EpicsPageContent() {
 
     const stored = readStorage<{ status?: string; sort?: string }>('epics:filters');
     if (stored) {
-      const params = new URLSearchParams();
+      // Build on the current URL so the project scope a link arrived with survives
+      const params = new URLSearchParams(searchParams);
       if (stored.status) params.set('status', stored.status);
       if (stored.sort && stored.sort !== 'updated_desc') params.set('sort', stored.sort);
-      if (params.toString()) {
+      if (params.has('status') || params.has('sort')) {
         router.replace(`/epics?${params.toString()}`);
       }
     }
