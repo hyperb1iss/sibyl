@@ -106,6 +106,13 @@ sibyl docker down [options]
 
 Pull current images and recreate containers, optionally writing a new image tag first.
 
+Upgrade also moves the SurrealDB image up to the server this CLI release runs (`v3.2.4`), so upgrade
+the CLI before you upgrade the deployment. It pulls every new image before it touches the compose
+file, so a failed pull exits non-zero and leaves the deployment and its pins as they were. Compose
+then recreates SurrealDB and waits for it to report healthy before it starts the new API. A
+`SIBYL_SURREAL_IMAGE` set in `~/.sibyl/docker/.env` or the shell still wins, and a SurrealDB image
+you wrote by hand, or one newer than the CLI's, stays as it is. Upgrade warns in both cases.
+
 ```bash
 sibyl docker upgrade [options]
 ```

@@ -6,8 +6,10 @@ from types import SimpleNamespace
 
 import pytest
 import typer
+import yaml
 
 from sibyl_cli import local
+from sibyl_cli.docker_storage import SURREAL_IMAGE_REFERENCE
 
 
 def test_local_compose_defaults_to_fully_surreal_runtime() -> None:
@@ -140,6 +142,31 @@ def test_local_start_opens_browser_after_successful_health_check(
     assert commands == [["write-config"], ["pull", "--quiet"], ["up", "-d"]]
     assert browsers == ["http://localhost:3337"]
     assert "Sibyl is ready" in capsys.readouterr().out
+
+
+def test_local_start_rewrites_an_older_surreal_pin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`sibyl down && sibyl up --pull` is the local upgrade, so start owns the pin."""
+    compose_path = tmp_path / "docker-compose.yml"
+    compose_path.write_text(
+        "services:\n  surrealdb:\n    image: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.3}\n"
+    )
+    (tmp_path / ".env").touch()
+    monkeypatch.setattr(local, "SIBYL_LOCAL_DIR", tmp_path)
+    monkeypatch.setattr(local, "SIBYL_LOCAL_ENV", tmp_path / ".env")
+    monkeypatch.setattr(local, "SIBYL_LOCAL_COMPOSE", compose_path)
+    monkeypatch.setattr(local, "check_docker", lambda: True)
+    monkeypatch.setattr(local, "check_docker_compose", lambda: True)
+    monkeypatch.setattr(local, "is_running", lambda: False)
+    monkeypatch.setattr(local, "wait_for_healthy", lambda: True)
+    monkeypatch.setattr(local, "run_compose", lambda _args: SimpleNamespace(returncode=0))
+
+    local.start(no_browser=True, pull=True)
+
+    services = yaml.safe_load(compose_path.read_text())["services"]
+    assert services["surrealdb"]["image"] == SURREAL_IMAGE_REFERENCE
+    assert services["api"]["depends_on"]["surrealdb"] == {"condition": "service_healthy"}
 
 
 def test_local_api_healthcheck_requires_success_status() -> None:

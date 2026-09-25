@@ -34,7 +34,11 @@ from sibyl_cli.common import (
     success,
     warn,
 )
-from sibyl_cli.docker_storage import surreal_data_mount, surreal_volume_initializer
+from sibyl_cli.docker_storage import (
+    SURREAL_IMAGE_REFERENCE,
+    surreal_data_mount,
+    surreal_volume_initializer,
+)
 
 app = typer.Typer(
     name="local",
@@ -137,7 +141,7 @@ COMPOSE_CONFIG = {
         },
         "surreal-init": surreal_volume_initializer(),
         "surrealdb": {
-            "image": "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.4}",
+            "image": SURREAL_IMAGE_REFERENCE,
             "container_name": "sibyl-surrealdb",
             "depends_on": {"surreal-init": {"condition": "service_completed_successfully"}},
             "command": [
