@@ -38,6 +38,7 @@ from sibyl_core.tasks.ordinary_projection import INSTRUCTIONS as PROJECTION_INST
 from sibyl_core.tasks.ordinary_projection import VERSION as ORDINARY_PROJECTION_VERSION
 from sibyl_core.tasks.ordinary_projection import (
     OrdinaryEvidenceProjection,
+    ProjectionReuse,
     reconstruct_ordinary_projection,
 )
 from sibyl_core.tasks.procedure_review import (
@@ -124,6 +125,7 @@ def _prepare(
     kind: str,
     packet: OrdinaryEvidencePacket | None = None,
     projection: OrdinaryEvidenceProjection | None = None,
+    projection_reuse: ProjectionReuse | None = None,
 ) -> PreparedMemoryValidation:
     _digest(parent_operation_id)
     _digest(parent_candidate_sha256)
@@ -135,7 +137,9 @@ def _prepare(
         ):
             raise ValueError("ordinary projection validation requires reported original sources")
         reconstructed = reconstruct_ordinary_projection(
-            [(source.source_id, source.content) for source in evidence], projection.binding
+            [(source.source_id, source.content) for source in evidence],
+            projection.binding,
+            reuse=projection_reuse,
         )
         if reconstructed != projection or projection.citations != citations:
             raise ValueError("ordinary projection citations differ from original evidence")
@@ -300,6 +304,7 @@ def prepare_reflection_validation(
     citations: dict[str, EvidenceCitation],
     packet: OrdinaryEvidencePacket | None = None,
     projection: OrdinaryEvidenceProjection | None = None,
+    projection_reuse: ProjectionReuse | None = None,
 ) -> PreparedMemoryValidation:
     """Index ordinary content and claims without inventing signed task outcomes."""
     snapshot = candidate.to_dict()
@@ -314,6 +319,7 @@ def prepare_reflection_validation(
         kind="reflection",
         packet=packet,
         projection=projection,
+        projection_reuse=projection_reuse,
     )
 
 

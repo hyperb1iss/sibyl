@@ -146,12 +146,16 @@ class PreparedPartialProposal:
     packet_json: str | None = None
     projection_json: str | None = None
 
-    def render(self, proposal: PartialProposal) -> ReflectionCandidate | None:
+    def render(
+        self, proposal: PartialProposal, *, projection_reuse: ProjectionReuse | None = None
+    ) -> ReflectionCandidate | None:
         """Render all semantic claims into critic-visible text, never authority metadata."""
         cohort = PartialCohort.model_validate_json(self.input_json)
         packet = _packet_for_cohort(cohort, self.packet_json)
-        projection = _projection_for_cohort(cohort, self.projection_json)
-        if self != prepare_partial_proposal(cohort, packet=packet, projection=projection):
+        projection = _projection_for_cohort(cohort, self.projection_json, reuse=projection_reuse)
+        if self != prepare_partial_proposal(
+            cohort, packet=packet, projection=projection, projection_reuse=projection_reuse
+        ):
             raise ValueError("partial preparation identity differs")
         checked = PartialProposal.model_validate(proposal.model_dump())
         if checked.procedure is None:

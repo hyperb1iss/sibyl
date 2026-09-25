@@ -101,6 +101,7 @@ async def prepare_stored_cohort(
     allow_single: bool = False,
     evidence_mode: str = "auto",
     projection_binding: dict | None = None,
+    projection_reuse: ProjectionReuse | None = None,
 ) -> PreparedCohort:
     """Resolve actual retained sources; project grouping never proves environment facts."""
     ids = sorted(source_ids)
@@ -192,6 +193,7 @@ async def prepare_stored_cohort(
             packet=packet,
             evidence_mode=evidence_mode,
             projection_binding=projection_binding,
+            projection_reuse=projection_reuse,
         ),
         tuple(sources),
         rows[0]["token"],
