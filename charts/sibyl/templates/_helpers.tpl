@@ -212,3 +212,27 @@ existing release to chart defaults, silently discarding every other override.
 {{- fail "backend.env.SIBYL_MCP_AUTH_MODE=off is forbidden in production. It serves every MCP tool unauthenticated regardless of the JWT secret. Use \"auto\" (enforce once a secret is set) or \"on\" (always enforce), or set backend.env.SIBYL_ENVIRONMENT=development for a local unauthenticated endpoint." -}}
 {{- end -}}
 {{- end }}
+
+{{/*
+Update strategy for a Deployment that mounts the validation receipts claim.
+An explicit strategy wins. A single fixed replica rolls with maxSurge 0 so no
+surge pod ever competes for a ReadWriteOnce claim. The default stays type
+RollingUpdate rather than Recreate: the API server defaults rollingUpdate on
+every existing Deployment, no applier owns that field, and server-side apply
+can never remove it, so switching type to Recreate is rejected on upgrade.
+*/}}
+{{- define "sibyl.receiptsStrategy" -}}
+{{- if .strategy -}}
+{{- if and (eq (toString .strategy.type) "Recreate") .strategy.rollingUpdate -}}
+{{- fail "strategy.rollingUpdate may not be set when strategy.type is Recreate" -}}
+{{- end -}}
+strategy:
+  {{- toYaml .strategy | nindent 2 }}
+{{- else if and (not .autoscaling.enabled) (le (int .replicaCount) 1) -}}
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 0
+    maxUnavailable: 1
+{{- end -}}
+{{- end }}

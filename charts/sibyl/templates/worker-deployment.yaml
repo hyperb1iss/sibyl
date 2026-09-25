@@ -9,6 +9,9 @@ spec:
   {{- if not .Values.worker.autoscaling.enabled }}
   replicas: {{ .Values.worker.replicaCount }}
   {{- end }}
+  {{- with include "sibyl.receiptsStrategy" .Values.worker }}
+  {{- . | nindent 2 }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "sibyl.worker.selectorLabels" . | nindent 6 }}

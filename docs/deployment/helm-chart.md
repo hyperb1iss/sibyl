@@ -113,6 +113,9 @@ backend:
   # Number of replicas (ignored if autoscaling is enabled)
   replicaCount: 1
 
+  # Empty selects Recreate for a single fixed replica, RollingUpdate otherwise
+  strategy: {}
+
   image:
     repository: ghcr.io/hyperb1iss/sibyl-api
     pullPolicy: IfNotPresent
@@ -354,6 +357,7 @@ backend:
     runAsUser: 10001
     runAsGroup: 10001
     fsGroup: 10001
+    fsGroupChangePolicy: OnRootMismatch
 
   securityContext:
     allowPrivilegeEscalation: false
@@ -512,6 +516,7 @@ worker:
     runAsUser: 10001
     runAsGroup: 10001
     fsGroup: 10001
+    fsGroupChangePolicy: OnRootMismatch
 
   securityContext:
     allowPrivilegeEscalation: false
@@ -821,6 +826,32 @@ upgrading. The chart rejects an absent claim at render time. API and worker moun
 Multi-node replicas require a ReadWriteMany volume; provision it with the storage class supported by
 your cluster. The service user (UID/GID 10001) must be able to create a private child directory. No
 temporary volume or single-replica fallback is used.
+
+Two chart defaults keep a ReadWriteOnce block volume (EBS, Persistent Disk, Azure Disk) working
+across restarts and rollouts:
+
+- `fsGroupChangePolicy: OnRootMismatch` on the backend and worker pod security contexts. Block CSI
+  drivers re-apply `fsGroup` on every mount by default, adding group permission bits to every file
+  and directory, and Sibyl refuses a receipts directory or file with any group or other bits. Keep
+  this key if you override `podSecurityContext`.
+- An empty `backend.strategy` or `worker.strategy` rolls a single fixed replica with `maxSurge: 0`
+  and `maxUnavailable: 1`, because a surge pod scheduled onto another node cannot attach a
+  ReadWriteOnce claim. The old pod stops before its replacement starts; if the replacement lands on
+  another node, it waits for the volume to detach and then starts on its own. With more replicas or
+  autoscaling the Kubernetes `RollingUpdate` default applies, which assumes ReadWriteMany storage.
+  An explicit strategy passes through unchanged.
+
+The single-replica default stays `type: RollingUpdate` rather than `Recreate` on purpose. The API
+server fills in `rollingUpdate` on every existing Deployment, no applier owns that field, and
+server-side apply (the Helm 4 default, Argo CD with `ServerSideApply=true`, Flux) can never remove
+it, so an upgrade that switches `type` to `Recreate` is rejected with
+`spec.strategy.rollingUpdate: Forbidden`. To opt into `Recreate` on an existing release, remove the
+field once first:
+
+```bash
+kubectl -n sibyl patch deploy sibyl-backend --type=json \
+  -p '[{"op":"remove","path":"/spec/strategy/rollingUpdate"},{"op":"replace","path":"/spec/strategy/type","value":"Recreate"}]'
+```
 
 Content schema 40 retains a per-execution receipt key and erases it when a source is purged. Older
 servers cannot recover these pending receipts. Schema repair must not replace the key-erasing purge

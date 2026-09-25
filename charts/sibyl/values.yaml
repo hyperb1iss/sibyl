@@ -60,6 +60,12 @@ backend:
   # -- Number of replicas (ignored if autoscaling is enabled)
   replicaCount: 1
 
+  # -- Deployment update strategy. Empty rolls a single fixed replica with
+  # maxSurge 0 and maxUnavailable 1, because a surge pod on another node
+  # cannot attach an RWO receipts claim, and uses the Kubernetes
+  # RollingUpdate default otherwise.
+  strategy: {}
+
   image:
     # -- Backend image repository
     repository: ghcr.io/hyperb1iss/sibyl-api
@@ -230,6 +236,9 @@ backend:
     runAsUser: 10001
     runAsGroup: 10001
     fsGroup: 10001
+    # Without this, kubelet re-applies fsGroup on every mount and adds group
+    # permission bits, which the private receipts directory refuses.
+    fsGroupChangePolicy: OnRootMismatch
 
   # -- Container security context
   securityContext:
@@ -380,6 +389,9 @@ worker:
   # -- Number of replicas (ignored if autoscaling is enabled)
   replicaCount: 1
 
+  # -- Deployment update strategy; empty follows the same rule as the backend.
+  strategy: {}
+
   # -- Autoscaling configuration
   autoscaling:
     # -- Enable horizontal pod autoscaler
@@ -436,6 +448,9 @@ worker:
     runAsUser: 10001
     runAsGroup: 10001
     fsGroup: 10001
+    # Without this, kubelet re-applies fsGroup on every mount and adds group
+    # permission bits, which the private receipts directory refuses.
+    fsGroupChangePolicy: OnRootMismatch
 
   # -- Container security context
   securityContext:
