@@ -66,14 +66,23 @@ COHORT_AFFINITY = (
 COHORT_COVERAGE = (
     "SELECT uuid, principal_id, request_json, result_json FROM memory_validation_executions "
     "WHERE organization_id=$org AND state='returned' AND purged=false "
-    "AND string::contains(request_json, $kind);"
+    # CONTAINS rather than string::contains: the embedded engine abandons the
+    # organization index for a WHERE clause holding a function call.
+    "AND request_json CONTAINS $kind;"
 )
+# Exact identity lookups over {org, id} keys, one per key.
+# A closure does not see the query's own parameters on the embedded engine,
+# and a key field read inside WHERE defeats the Surreal 3.x index, so each
+# lookup binds its key's fields to scalars first. An IN list would scan the
+# organization's whole source_states identity prefix on 3.x.
 COHORT_CANDIDATES_STORED = (
-    "SELECT uuid FROM raw_captures WHERE organization_id=$org AND uuid IN $ids;"
+    "RETURN array::flatten(array::map($keys, |$key| { LET $org = $key.org; LET $id = $key.id; "
+    "RETURN (SELECT uuid FROM raw_captures WHERE uuid = $id AND organization_id = $org); }));"
 )
 COHORT_CANDIDATES_RETIRED = (
-    "SELECT source_id FROM source_states WHERE organization_id=$org "
-    "AND source_kind='raw_capture' AND source_id IN $ids;"
+    "RETURN array::flatten(array::map($keys, |$key| { LET $org = $key.org; LET $id = $key.id; "
+    "RETURN (SELECT source_id FROM source_states WHERE organization_id = $org "
+    "AND source_kind = 'raw_capture' AND source_id = $id); }));"
 )
 COHORT_GUARD = (
     COHORT_SNAPSHOT
@@ -520,8 +529,9 @@ async def completed_cohort_sources(org: str) -> frozenset[CoveredSource]:
     candidates = sorted({candidate for candidate, _ in covered if candidate})
     kept = set()
     if candidates:
-        stored = await _query(COHORT_CANDIDATES_STORED, org=org, ids=candidates)
-        retired = await _query(COHORT_CANDIDATES_RETIRED, org=org, ids=candidates)
+        keys = [{"org": org, "id": candidate} for candidate in candidates]
+        stored = await _query(COHORT_CANDIDATES_STORED, keys=keys)
+        retired = await _query(COHORT_CANDIDATES_RETIRED, keys=keys)
         kept.update(row["uuid"] for row in stored)
         kept.update(row["source_id"] for row in retired)
     return frozenset(

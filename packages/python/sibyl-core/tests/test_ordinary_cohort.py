@@ -1035,9 +1035,10 @@ async def test_completed_cohorts_cover_only_sources_whose_proposal_finished(monk
         if statement == service.COHORT_COVERAGE:
             assert params == {"org": "org", "kind": service.VERSION}
             return rows
-        assert params["ids"] == sorted(
-            candidate(uuid) for uuid in ("stored", "retired", "unwritten")
-        )
+        assert params["keys"] == [
+            {"org": "org", "id": identifier}
+            for identifier in sorted(candidate(uuid) for uuid in ("stored", "retired", "unwritten"))
+        ]
         return stored if statement == service.COHORT_CANDIDATES_STORED else retired
 
     monkeypatch.setattr(service, "_query", query)
@@ -1045,3 +1046,18 @@ async def test_completed_cohorts_cover_only_sources_whose_proposal_finished(monk
     assert covered == {
         ("owner", source, f"inc-{source}", 1) for source in ("a1", "a2", "s1", "s2", "r1", "r2")
     }
+
+
+async def test_the_dream_reads_use_their_indexes(content_store):
+    from tests.test_validation_dependencies import assert_index
+
+    execution = await content_store.execute_query(
+        service.COHORT_COVERAGE.replace(";", " EXPLAIN;"), org="org", kind=service.VERSION
+    )
+    assert_index(execution, "memory_validation_execution_org_state")
+    checkpoint = await content_store.execute_query(
+        "SELECT source_id, request_json FROM dream_source_checkpoints "
+        "WHERE organization_id = $org AND completion_json != NONE EXPLAIN;",
+        org="org",
+    )
+    assert_index(checkpoint, "dream_checkpoint_source")
