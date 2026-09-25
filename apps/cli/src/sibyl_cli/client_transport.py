@@ -959,26 +959,3 @@ class ClientTransportMixin:
     ) -> dict[str, Any]:
         """Generic DELETE request."""
         return await self._request("DELETE", path, json=json, params=params)
-
-    async def _request_any(
-        self,
-        method: str,
-        paths: list[str],
-        *,
-        json: dict[str, Any] | None = None,
-        params: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """Try multiple paths, falling back when an endpoint is not found."""
-        last_error: SibylClientError | None = None
-        for path in paths:
-            try:
-                return await self._request(method, path, json=json, params=params)
-            except SibylClientError as e:
-                if e.status_code == 404:
-                    last_error = e
-                    continue
-                raise
-
-        if last_error:
-            raise last_error
-        raise SibylClientError("No API path candidates provided")

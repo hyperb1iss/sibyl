@@ -31,29 +31,6 @@ def show_welcome() -> None:
     console.print()
 
 
-def show_first_run_message() -> None:
-    """Display message for first-time users (non-interactive)."""
-    console.print()
-    console.print(
-        f"  [{ELECTRIC_PURPLE}]◈[/{ELECTRIC_PURPLE}] Welcome to [bold {ELECTRIC_PURPLE}]Sibyl[/bold {ELECTRIC_PURPLE}]"
-    )
-    console.print("    [dim]Cross-agent memory for every coding tool you use[/dim]")
-    console.print()
-    console.print("  [dim]Get started:[/dim]")
-    console.print()
-    console.print(
-        f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl up[/bold {NEON_CYAN}]             [dim]Start Sibyl[/dim]"
-    )
-    console.print(
-        f'    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl search[/bold {NEON_CYAN}] [white]"query"[/white]  [dim]Search knowledge[/dim]'
-    )
-    console.print()
-    console.print(
-        f"    [dim]Run[/dim] [bold {NEON_CYAN}]sibyl --help[/bold {NEON_CYAN}] [dim]for all commands[/dim]"
-    )
-    console.print()
-
-
 def prompt_server_url() -> str:
     """Prompt user for server URL."""
     console.print()
@@ -179,17 +156,3 @@ def run_onboarding() -> bool:
     except KeyboardInterrupt:
         console.print("\n\n[dim]Setup cancelled.[/dim]")
         return False
-
-
-def needs_onboarding() -> bool:
-    """Check if user needs to go through onboarding.
-
-    Returns True if:
-    - Config file doesn't exist
-    - Config file exists but has no server URL
-    """
-    if not config_store.config_exists():
-        return True
-
-    url = config_store.get_effective_server_url()
-    return not url or url == config_store.DEFAULT_CONFIG["server"]["url"]

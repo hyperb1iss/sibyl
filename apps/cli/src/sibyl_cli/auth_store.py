@@ -435,19 +435,3 @@ def clear_all_tokens(path: Path | None = None) -> None:
     with auth_file_lock(path):
         if p.exists():
             p.unlink()
-
-
-def migrate_legacy_tokens(path: Path | None = None) -> None:
-    """Remove legacy root-level tokens (one-time cleanup)."""
-    data = read_auth_data(path)
-
-    # Check if there are legacy root-level tokens to remove
-    if not data.get("access_token"):
-        return  # Nothing to migrate
-
-    # Remove legacy fields
-    data.pop("access_token", None)
-    data.pop("refresh_token", None)
-    data.pop("access_token_expires_at", None)
-
-    write_auth_data(data, path)
