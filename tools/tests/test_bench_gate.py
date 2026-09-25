@@ -518,6 +518,29 @@ def test_evaluate_report_context_pack_profile_rejects_missing_release_metadata()
     assert "label 'context-pack' must include retrieval mode 'native'" in failures
 
 
+@pytest.mark.parametrize("mode", ["compare", "pre-graphiti", "post-graphiti"])
+def test_evaluate_report_context_pack_profile_rejects_retired_retrieval_modes(mode: str) -> None:
+    report = {
+        "label": f"retrieval-{mode}",
+        "metrics": {
+            "pass_rate": 1.0,
+            "latency_p95_ms": 500.0,
+            "source_metadata_coverage": 1.0,
+            "facet_order_match_rate": 1.0,
+            "leak_count": 0.0,
+            "forbidden_term_matches": 0.0,
+        },
+        "metadata": {**RELEASE_METADATA, "retrieval_mode": mode},
+    }
+
+    failures = eval_gate.evaluate_report(report, profile="context-pack")
+
+    assert (
+        f"metadata['retrieval_mode'] has unsupported retrieval mode {mode!r}; "
+        "expected one of native"
+    ) in failures
+
+
 def test_evaluate_report_context_pack_profile_rejects_embedding_dimension_mismatch() -> None:
     metadata = dict(RELEASE_METADATA)
     metadata.update(

@@ -163,7 +163,7 @@ The `context-pack` profile gates dogfood context reports:
 
 It also requires citable release metadata:
 
-- `metadata.retrieval_mode` is one of `pre-graphiti`, `post-graphiti`, `native`, or `compare`
+- `metadata.retrieval_mode` is `native`
 - `metadata.embedding_provider`, `metadata.embedding_model`, and `metadata.embedding_dimensions`
 - `metadata.tokenizer_estimate_method`
 - `metadata.dataset_name` and `metadata.corpus_hash`
