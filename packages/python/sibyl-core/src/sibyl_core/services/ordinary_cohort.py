@@ -22,6 +22,7 @@ from sibyl_core.services.content_raw_persistence import (
     get_raw_memory,
     remember_reflection_candidate_review,
 )
+from sibyl_core.services.dream_checkpoints import SourceObservationKey
 from sibyl_core.services.memory_source_validation import (
     SourceAuthorityResolver,
     SourceReadAuthority,
@@ -70,11 +71,7 @@ COHORT_COVERAGE = (
     # organization index for a WHERE clause holding a function call.
     "AND request_json CONTAINS $kind;"
 )
-# Exact identity lookups over {org, id} keys, one per key.
-# A closure does not see the query's own parameters on the embedded engine,
-# and a key field read inside WHERE defeats the Surreal 3.x index, so each
-# lookup binds its key's fields to scalars first. An IN list would scan the
-# organization's whole source_states identity prefix on 3.x.
+# Exact identity lookups over {org, id} keys, shaped like SOURCE_OBSERVATIONS.
 COHORT_CANDIDATES_STORED = (
     "RETURN array::flatten(array::map($keys, |$key| { LET $org = $key.org; LET $id = $key.id; "
     "RETURN (SELECT uuid FROM raw_captures WHERE uuid = $id AND organization_id = $org); }));"
@@ -490,43 +487,46 @@ async def _run_cohort(org, principal, original, resolver, extractor, policy, aut
         raise
 
 
-#: One source observation a completed cohort reflected:
-#: (principal, source, incarnation, generation).
-CoveredSource = tuple[str, str, str, int]
+@dataclass(frozen=True)
+class ReflectedSources:
+    """Source observations the dream cycle already reflected, by how.
 
-
-async def completed_cohort_sources(org: str) -> frozenset[CoveredSource]:
-    """Source observations that a completed ordinary cohort already reflected.
-
-    A cohort of two or more sources is complete once its proposal returned and
-    either abstained or left its candidate behind, still stored or retired
-    with a source state. A proposal that returned but whose candidate was
-    never written stays uncovered, so the dream job selects its sources again
-    and replays the stored result instead of losing it. Failed and unresolved
-    proposals stay uncovered too. Each entry names the observation it covers,
-    so a source whose content or incarnation changed is reflected again, and
-    a single source's packet pages never count, since one page covers only
-    part of that source.
+    Each entry is (principal, source, incarnation, generation), so a source
+    whose content or incarnation changed is reflected again.
     """
-    covered: list[tuple[str, list[CoveredSource]]] = []
+
+    #: Bound into a completed cohort of two or more sources.
+    cohort: frozenset[SourceObservationKey]
+    #: Reflected alone: every page of its packet manifest completed.
+    alone: frozenset[SourceObservationKey]
+
+
+async def reflected_sources(org: str) -> ReflectedSources:
+    """What completed ordinary proposals have already reflected.
+
+    A proposal completes once it returned and either abstained or left its
+    candidate behind, still stored or retired with a source state. One that
+    returned but whose candidate was never written stays incomplete, so the
+    dream job selects its sources again and replays the stored result instead
+    of losing it. Failed, fenced and unresolved proposals never complete. A
+    cohort of two or more sources covers each source it bound; a single
+    source's packet pages cover it only once every page of the same manifest
+    completed, since one page reflects only part of it.
+    """
+    rows = []
     for row in await _query(COHORT_COVERAGE, org=org, kind=VERSION):
         request = json.loads(row["request_json"])
-        bindings = request.get("source_bindings") or []
-        if request.get("kind") != VERSION or "evidence_packet" in request or len(bindings) < 2:
-            continue
         result = json.loads(row.get("result_json") or "null")
-        if not isinstance(result, dict) or result.get("validation_error") is not None:
+        if request.get("kind") != VERSION or not isinstance(result, dict):
             continue
-        sources = [
-            (row["principal_id"], b["source_id"], b["incarnation"], b["generation"])
-            for b in bindings
-        ]
+        if result.get("validation_error") is not None:
+            continue
         abstained = (result.get("proposal") or {}).get("procedure") is None
         # The candidate identity derives from the execution alone, so it is
         # known without replaying the proposal.
         candidate = "" if abstained else ValidationCandidateWrite(row["uuid"], "", "", {}).id
-        covered.append((candidate, sources))
-    candidates = sorted({candidate for candidate, _ in covered if candidate})
+        rows.append((row["principal_id"], request, candidate))
+    candidates = sorted({candidate for _, _, candidate in rows if candidate})
     kept = set()
     if candidates:
         keys = [{"org": org, "id": candidate} for candidate in candidates]
@@ -534,12 +534,33 @@ async def completed_cohort_sources(org: str) -> frozenset[CoveredSource]:
         retired = await _query(COHORT_CANDIDATES_RETIRED, keys=keys)
         kept.update(row["uuid"] for row in stored)
         kept.update(row["source_id"] for row in retired)
-    return frozenset(
+    cohort: set[SourceObservationKey] = set()
+    pages: dict[tuple[SourceObservationKey, str], set[int]] = {}
+    page_counts: dict[tuple[SourceObservationKey, str], int] = {}
+    for principal, request, candidate in rows:
+        if candidate and candidate not in kept:
+            continue
+        observed = [
+            (principal, b["source_id"], b["incarnation"], b["generation"])
+            for b in request.get("source_bindings") or []
+        ]
+        packet = request.get("evidence_packet")
+        if packet is None:
+            if len(observed) >= 2:
+                cohort.update(observed)
+            continue
+        if len(observed) != 1:
+            continue
+        manifest = packet["manifest"]
+        key = (observed[0], canonical(manifest))
+        pages.setdefault(key, set()).add(packet["index"])
+        page_counts[key] = len(manifest["pages"])
+    alone = {
         source
-        for candidate, sources in covered
-        if not candidate or candidate in kept
-        for source in sources
-    )
+        for (source, manifest), done in pages.items()
+        if done == set(range(page_counts[(source, manifest)]))
+    }
+    return ReflectedSources(frozenset(cohort), frozenset(alone))
 
 
 async def _proposal_extractor(owned, system: str):

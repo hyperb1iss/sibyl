@@ -1027,11 +1027,14 @@ async def list_reflection_dream_source_memories(
     limit: int = 50,
     is_pending: Callable[[RawMemory], Awaitable[bool]] | None = None,
     after_source_id: str = "",
+    prefetch: Callable[[list[RawMemory]], Awaitable[None]] | None = None,
 ) -> list[RawMemory]:
     """Page past excluded rows before applying the eligible-source budget.
 
     The legacy processed timestamp is diagnostic, not a source-version fence.
-    The dream owner supplies its current observation/authority checkpoint test.
+    The dream owner supplies its current observation/authority checkpoint test,
+    and ``prefetch`` sees each page of eligible rows before their checks run,
+    so the owner can batch what the per-row test needs.
     UUID keyset pagination keeps concurrent inserts from shifting page offsets.
     """
     if limit <= 0:
@@ -1061,11 +1064,15 @@ async def list_reflection_dream_source_memories(
                     continue
                 break
             cursor = str(rows[-1]["uuid"])
-            for row in rows:
-                memory = models.raw_memory_from_record(row)
-                if _dream_source_eligible(memory) and (
-                    is_pending is None or await is_pending(memory)
-                ):
+            eligible = [
+                memory
+                for memory in (models.raw_memory_from_record(row) for row in rows)
+                if _dream_source_eligible(memory)
+            ]
+            if prefetch is not None:
+                await prefetch(eligible)
+            for memory in eligible:
+                if is_pending is None or await is_pending(memory):
                     result.append(memory)
                     if len(result) == limit:
                         break
@@ -1105,6 +1112,7 @@ async def list_reflection_dream_neighbours(
     seed: RawMemory,
     limit: int,
     is_pending: Callable[[RawMemory], Awaitable[bool]] | None = None,
+    prefetch: Callable[[list[RawMemory]], Awaitable[None]] | None = None,
 ) -> list[RawMemory]:
     """The seed's nearest eligible sources that could share its cohort, nearest first.
 
@@ -1160,6 +1168,8 @@ async def list_reflection_dream_neighbours(
         similarity = math.fsum(a * b for a, b in zip(anchor, vector, strict=True))
         ranked.append((-similarity, memory.id, memory))
     ranked.sort(key=lambda item: (item[0], item[1]))
+    if prefetch is not None:
+        await prefetch([memory for _, _, memory in ranked])
     result: list[RawMemory] = []
     for _, _, memory in ranked:
         if is_pending is None or await is_pending(memory):

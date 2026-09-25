@@ -221,6 +221,58 @@ async def test_an_abstaining_cohort_covers_its_sources_until_one_changes(
     assert [item.get("source_id") for item in third["sources"]] == [memory.id], third
 
 
+async def test_a_covered_source_is_ruled_out_before_authorization(cohort_runtime, monkeypatch):
+    from sibyl_core.services.dream_checkpoints import current_source_observations
+    from sibyl_core.services.ordinary_cohort import ReflectedSources
+
+    org, context, client, _runtime = cohort_runtime
+    for index in range(40):
+        await memory_raw.remember_raw(
+            RawMemoryRememberRequest(raw_content=f"Observation {index}: the config reloaded."),
+            http_request=SimpleNamespace(headers={}, client=None),
+            org=org,
+            ctx=context,
+        )
+    ids = sorted(
+        row["uuid"] for row in await client.execute_query("SELECT uuid FROM raw_captures;")
+    )
+    observed = await current_source_observations(str(org.id), ids)
+    assert set(observed) == set(ids)
+    fresh = set(ids[::10])
+    covered = frozenset(
+        (context.user_id, identifier, *observed[identifier])
+        for identifier in ids
+        if identifier not in fresh
+    )
+    monkeypatch.setattr(
+        reflection,
+        "reflected_sources",
+        AsyncMock(return_value=ReflectedSources(covered, frozenset())),
+    )
+    authorized = []
+    load = reflection._load_dream_work
+
+    async def counted(group_id, source):
+        authorized.append(source.id)
+        return await load(group_id, source)
+
+    monkeypatch.setattr(reflection, "_load_dream_work", counted)
+    pages = []
+
+    async def partition_free(org_id, sources, *, dry_run):
+        pages.append(sorted(source.id for source in sources))
+        return [], {source.id for source in sources}
+
+    monkeypatch.setattr(ordinary_cohorts, "reflect_cohorts", partition_free)
+    # The walk wraps the whole corpus to find four fresh sources, and only
+    # those four are ever authorized.
+    await reflection._reflect_dream_sources(
+        group_id=str(org.id), run_id="covered", dry_run=True, limit=20
+    )
+    assert pages == [sorted(fresh)]
+    assert sorted(authorized) == sorted(fresh)
+
+
 async def test_ordinary_cohort_candidate_write_failure_retains_execution_and_replays(
     cohort_runtime, monkeypatch
 ):

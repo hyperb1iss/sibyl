@@ -1012,7 +1012,11 @@ def _coverage_row(uuid, sources, *, procedure=True, error=None, **request):
     }
 
 
-async def test_completed_cohorts_cover_only_sources_whose_proposal_finished(monkeypatch):
+def _page(index, pages=2, manifest="m1"):
+    return {"manifest": {"id": manifest, "pages": [{}] * pages}, "index": index}
+
+
+async def test_reflected_sources_count_only_proposals_that_finished(monkeypatch):
     from sibyl_core.services.validation_candidate import ValidationCandidateWrite
 
     def candidate(uuid):
@@ -1025,27 +1029,38 @@ async def test_completed_cohorts_cover_only_sources_whose_proposal_finished(monk
         # Returned, but the candidate was never written: replay must stay possible.
         _coverage_row("unwritten", ["u1", "u2"]),
         _coverage_row("invalid", ["i1", "i2"], procedure=False, error="bad support"),
-        _coverage_row("packet", ["p1", "p2"], procedure=False, evidence_packet={}),
         _coverage_row("single", ["o1"], procedure=False),
         _coverage_row("other-kind", ["k1", "k2"], procedure=False, kind="other"),
+        # Every page of one manifest reflects the source alone; a missing page,
+        # or pages from different manifests, do not.
+        _coverage_row("whole-0", ["w1"], procedure=False, evidence_packet=_page(0)),
+        _coverage_row("whole-1", ["w1"], evidence_packet=_page(1)),
+        _coverage_row("half-0", ["h1"], procedure=False, evidence_packet=_page(0)),
+        _coverage_row("mixed-0", ["x1"], procedure=False, evidence_packet=_page(0)),
+        _coverage_row("mixed-1", ["x1"], procedure=False, evidence_packet=_page(1, manifest="m2")),
+        _coverage_row("lost-0", ["l1"], procedure=False, evidence_packet=_page(0)),
+        _coverage_row("lost-1", ["l1"], evidence_packet=_page(1)),
     ]
-    stored, retired = [{"uuid": candidate("stored")}], [{"source_id": candidate("retired")}]
+    stored = [{"uuid": candidate(uuid)} for uuid in ("stored", "whole-1")]
+    retired = [{"source_id": candidate("retired")}]
 
     async def query(statement, **params):
         if statement == service.COHORT_COVERAGE:
             assert params == {"org": "org", "kind": service.VERSION}
             return rows
+        expected = ("stored", "retired", "unwritten", "whole-1", "lost-1")
         assert params["keys"] == [
             {"org": "org", "id": identifier}
-            for identifier in sorted(candidate(uuid) for uuid in ("stored", "retired", "unwritten"))
+            for identifier in sorted(candidate(uuid) for uuid in expected)
         ]
         return stored if statement == service.COHORT_CANDIDATES_STORED else retired
 
     monkeypatch.setattr(service, "_query", query)
-    covered = await service.completed_cohort_sources("org")
-    assert covered == {
+    reflected = await service.reflected_sources("org")
+    assert reflected.cohort == {
         ("owner", source, f"inc-{source}", 1) for source in ("a1", "a2", "s1", "s2", "r1", "r2")
     }
+    assert reflected.alone == {("owner", "w1", "inc-w1", 1)}
 
 
 async def test_the_dream_reads_use_their_indexes(content_store):

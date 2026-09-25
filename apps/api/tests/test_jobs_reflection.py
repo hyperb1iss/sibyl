@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from dataclasses import replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -23,8 +24,17 @@ def dispatch_cursor(monkeypatch):
 
     monkeypatch.setattr("sibyl.jobs.reflection.load_dream_cursor", AsyncMock(return_value=("", 0)))
     monkeypatch.setattr("sibyl.jobs.reflection.advance_dream_cursor", AsyncMock(return_value=True))
+    from sibyl_core.services.ordinary_cohort import ReflectedSources
+
     monkeypatch.setattr(
-        "sibyl.jobs.reflection.completed_cohort_sources", AsyncMock(return_value=frozenset())
+        "sibyl.jobs.reflection.reflected_sources",
+        AsyncMock(return_value=ReflectedSources(frozenset(), frozenset())),
+    )
+    monkeypatch.setattr(
+        "sibyl.jobs.reflection.completed_dream_sources", AsyncMock(return_value=frozenset())
+    )
+    monkeypatch.setattr(
+        "sibyl.jobs.reflection.current_source_observations", AsyncMock(return_value={})
     )
     monkeypatch.setattr(
         "sibyl.jobs.reflection.list_reflection_dream_neighbours", AsyncMock(return_value=[])
@@ -584,7 +594,7 @@ async def test_dream_page_holds_a_walk_prefix_and_the_seed_neighbours(
     assert [source.id for source in page] == page_ids
     assert walked == set(walked_ids)
     neighbours.assert_awaited_once_with(
-        organization_id=ORG_ID, seed=walk[0], limit=3, is_pending=pending
+        organization_id=ORG_ID, seed=walk[0], limit=3, is_pending=pending, prefetch=None
     )
     assert await reflection._dream_page(ORG_ID, [], 4, pending) == ([], set())
 
@@ -613,3 +623,134 @@ async def test_dream_cursor_advances_through_the_walk_prefix_in_walk_order(monke
         ((ORG_ID, "walk-0", 0),),
         ((ORG_ID, "walk-1", 1),),
     ]
+
+
+class _DreamCorpus:
+    """An in-memory stand-in for the dream job's store, cursor and passes."""
+
+    def __init__(self, stale: int, fresh: int) -> None:
+        rng = random.Random(20)  # noqa: S311 - reproducible identifiers, not secrets
+        ids = sorted(f"{rng.getrandbits(64):016x}" for _ in range(stale + fresh))
+        picked = set(rng.sample(ids, stale))
+        self.sources = {identifier: _raw_memory(id=identifier) for identifier in ids}
+        self.order = ids
+        # Reflected alone at their current observation, and nearest to every seed.
+        self.stale = [identifier for identifier in ids if identifier in picked]
+        self.fresh = [identifier for identifier in ids if identifier not in picked]
+        self.covered: set[str] = set()
+        self.cursor, self.revision = "", 0
+        self.rechecked: list[str] = []
+        self.pages: list[list[str]] = []
+        self.advances: list[int] = []
+
+    def key(self, identifier: str) -> tuple[str, str, str, int]:
+        return (USER_ID, identifier, "inc", 1)
+
+    async def walk(self, *, organization_id, limit, is_pending, after_source_id, prefetch):
+        after = [i for i in self.order if i > after_source_id]
+        before = [i for i in self.order if i <= after_source_id]
+        memories = [self.sources[identifier] for identifier in after + before]
+        result = []
+        for start in range(0, len(memories), 50):
+            batch = memories[start : start + 50]
+            await prefetch(batch)
+            for memory in batch:
+                if await is_pending(memory):
+                    result.append(memory)
+                    if len(result) == limit:
+                        return result
+        return result
+
+    async def neighbours(self, *, organization_id, seed, limit, is_pending, prefetch):
+        ranked = [self.sources[i] for i in [*self.stale, *self.fresh] if i != seed.id]
+        await prefetch(ranked)
+        result = []
+        for memory in ranked:
+            if await is_pending(memory):
+                result.append(memory)
+                if len(result) == limit:
+                    break
+        return result
+
+    async def observations(self, organization_id, source_ids):
+        return dict.fromkeys(source_ids, ("inc", 1))
+
+    async def reflected(self, organization_id):
+        from sibyl_core.services.ordinary_cohort import ReflectedSources
+
+        return ReflectedSources(frozenset(map(self.key, self.covered)), frozenset())
+
+    async def completed(self, organization_id):
+        return frozenset(map(self.key, self.stale))
+
+    async def load_work(self, group_id, source):
+        if source.id in self.covered:
+            self.rechecked.append(source.id)
+        observation = SimpleNamespace(effective_incarnation="inc", generation=1)
+        return SimpleNamespace(snapshot=SimpleNamespace(observation=observation))
+
+    async def reflect(self, org, sources, *, dry_run):
+        page = [source.id for source in sources]
+        self.pages.append(page)
+        # Every fresh source on a page completes a cohort; stale ones never do.
+        self.covered.update(identifier for identifier in page if identifier not in self.stale)
+        return [], set(page)
+
+    async def load_cursor(self, organization_id):
+        return self.cursor, self.revision
+
+    async def advance(self, organization_id, source_id, revision):
+        self.cursor, self.revision = source_id, revision + 1
+        self.advances[-1] += 1
+        return True
+
+    def install(self, monkeypatch) -> None:
+        from sibyl.jobs import ordinary_cohorts, reflection
+
+        for name, fake in (
+            ("list_reflection_dream_source_memories", self.walk),
+            ("list_reflection_dream_neighbours", self.neighbours),
+            ("current_source_observations", self.observations),
+            ("reflected_sources", self.reflected),
+            ("completed_dream_sources", self.completed),
+            ("_load_dream_work", self.load_work),
+            ("load_dream_cursor", self.load_cursor),
+            ("advance_dream_cursor", self.advance),
+            ("load_dream_stage", AsyncMock(return_value={"completion_json": "{}"})),
+        ):
+            monkeypatch.setattr(reflection, name, fake)
+        monkeypatch.setattr(ordinary_cohorts, "reflect_cohorts", self.reflect)
+
+
+async def test_sources_reflected_alone_cannot_stall_the_cursor(monkeypatch) -> None:
+    """A crowd of sources reflected alone near every seed leaves the walk moving.
+
+    Fresh sources rank in walk order here, isolating the crowding. A fresh
+    neighbour from beyond the cursor is progress without moving the cursor,
+    which the fresh-paged floor covers.
+    """
+    from sibyl.jobs import reflection
+
+    limit = 20
+    corpus = _DreamCorpus(stale=2 * limit, fresh=6 * limit)
+    corpus.install(monkeypatch)
+    while set(corpus.fresh) - corpus.covered:
+        assert len(corpus.pages) < 20, "the fresh backlog stopped draining"
+        remaining = len(set(corpus.fresh) - corpus.covered)
+        corpus.advances.append(0)
+        await reflection._reflect_dream_sources(
+            group_id=ORG_ID, run_id="run", dry_run=False, limit=limit
+        )
+        page = corpus.pages[-1]
+        # A source already reflected alone never seeds a page or fills it from
+        # the walk; it returns only beside a fresh seed, and at most half a
+        # page of them.
+        assert page[0] in corpus.fresh
+        assert sum(identifier in corpus.stale for identifier in page) <= limit // 2
+        if remaining >= limit:
+            assert corpus.advances[-1] >= limit // 2, corpus.advances
+            paged = remaining - len(set(corpus.fresh) - corpus.covered)
+            assert paged >= limit // 2, (paged, page)
+    assert len(corpus.pages) <= 2 * len(corpus.fresh) // limit
+    # A covered source is ruled out by its observation, never authorized again.
+    assert corpus.rechecked == []

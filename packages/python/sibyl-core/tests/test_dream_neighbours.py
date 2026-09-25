@@ -1,5 +1,6 @@
 """The dream job fills a page with the seed's nearest sources that could share its cohort."""
 
+import json
 from contextlib import asynccontextmanager
 
 import pytest
@@ -114,3 +115,51 @@ async def test_a_seed_without_a_vector_has_no_neighbours(store):
     seed = await _source(store, "seed")
     await _source(store, "near", {0: 1.0})
     assert await _ids(seed, 5) == []
+
+
+async def test_current_observations_read_each_live_source_of_the_organization(store):
+    from sibyl_core.services.dream_checkpoints import current_source_observations
+
+    first = await _source(store, "first")
+    second = await _source(store, "second")
+    elsewhere = await remember_raw_memory(
+        organization_id="other-org",
+        principal_id="owner",
+        source_id="elsewhere",
+        raw_content="elsewhere: repair evidence.",
+        embedding_provider=None,
+    )
+    states = {
+        row["source_id"]: (row["incarnation"], row["generation"])
+        for row in await store.execute_query(
+            "SELECT source_id, incarnation, generation FROM source_states "
+            "WHERE organization_id = 'org';"
+        )
+    }
+    observed = await current_source_observations(
+        "org", [second.id, first.id, elsewhere.id, "missing"]
+    )
+    # An empty read would silently send every source to full authorization.
+    assert observed == {first.id: states[first.id], second.id: states[second.id]}
+    assert await current_source_observations("org", []) == {}
+
+
+async def test_completed_dream_sources_name_each_finished_individual_pass(store):
+    from sibyl_core.services.dream_checkpoints import completed_dream_sources
+
+    for uuid, source, completion in (("done", "s1", "{}"), ("open", "s2", None)):
+        await store.execute_query(
+            "CREATE dream_source_checkpoints CONTENT $row;",
+            row={
+                "uuid": uuid,
+                "organization_id": "org",
+                "source_id": source,
+                "request_json": json.dumps(
+                    {"principal_id": "owner", "incarnation": f"inc-{source}", "generation": 2}
+                ),
+                "extraction_json": "[]",
+                "completion_json": completion,
+            },
+        )
+    assert await completed_dream_sources("org") == {("owner", "s1", "inc-s1", 2)}
+    assert await completed_dream_sources("other-org") == frozenset()

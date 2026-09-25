@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from time import perf_counter
 from typing import Any
@@ -22,8 +22,11 @@ from sibyl_core.models.reflection import ReflectionPack
 from sibyl_core.services.dream_checkpoints import (
     CheckpointReflectionExtractor,
     DreamSourceWork,
+    SourceObservationKey,
     advance_dream_cursor,
     complete_dream_stage,
+    completed_dream_sources,
+    current_source_observations,
     load_dream_cursor,
     load_dream_stage,
 )
@@ -39,7 +42,7 @@ from sibyl_core.services.memory_autonomy import (
 )
 from sibyl_core.services.memory_source_validation import SourceReadAuthority
 from sibyl_core.services.observed_sources import load_authorized_source_snapshot
-from sibyl_core.services.ordinary_cohort import completed_cohort_sources
+from sibyl_core.services.ordinary_cohort import ReflectedSources, reflected_sources
 from sibyl_core.services.source_observations import SourceUnavailableError
 from sibyl_core.services.source_state_store import RawSourceSnapshot
 from sibyl_core.services.surreal_content import (
@@ -205,47 +208,20 @@ async def _reflect_dream_sources(
 ) -> list[dict[str, Any]]:
     if limit <= 0:
         return []
-    selected: dict[str, DreamSourceWork] = {}
-    selection_errors: dict[str, Exception] = {}
-    checked: dict[str, bool] = {}
     after_source_id, cursor_revision = await load_dream_cursor(group_id)
     cursor_owned = not dry_run
-    covered = await completed_cohort_sources(group_id)
-
-    async def check(source: RawMemory) -> bool:
-        try:
-            work = await _load_dream_work(group_id, source)
-            if work is None:
-                return False
-        except SourceUnavailableError:
-            return False
-        except Exception as exc:
-            selection_errors[source.id] = exc
-            return True
-        observation = work.snapshot.observation
-        if (
-            source.principal_id,
-            source.id,
-            observation.effective_incarnation,
-            observation.generation,
-        ) in covered:
-            return False
-        selected[source.id] = work
-        return True
-
-    async def pending(source: RawMemory) -> bool:
-        # The walk and the neighbour read can meet the same source.
-        if source.id not in checked:
-            checked[source.id] = await check(source)
-        return checked[source.id]
-
+    selection = await _DreamSelection.load(group_id, limit)
+    selected, selection_errors = selection.selected, selection.errors
     walk = await list_reflection_dream_source_memories(
         organization_id=group_id,
         limit=limit,
-        is_pending=pending,
+        is_pending=selection.fresh,
         after_source_id=after_source_id,
+        prefetch=selection.prefetch,
     )
-    sources, walked = await _dream_page(group_id, walk, limit, pending)
+    sources, walked = await _dream_page(
+        group_id, walk, limit, selection.neighbour, selection.prefetch
+    )
     log.info(
         "reflection_dream_page_selected",
         group_id=group_id,
@@ -298,34 +274,127 @@ async def _reflect_dream_sources(
     return results
 
 
+@dataclass
+class _DreamSelection:
+    """One run's view of what a pass already reflected, and the work it selected.
+
+    A covered source bound into a completed cohort never returns. A source
+    reflected alone, by an individual pass or every page of a packet
+    manifest, never seeds a page or fills it from the walk, but may come back
+    as a neighbour of a fresh seed, where a family member that arrived later
+    can meet it. Current observations are read in batches before anything is
+    authorized, so a reflected source is ruled out without authorizing it.
+    """
+
+    group_id: str
+    reflected: ReflectedSources
+    paged: frozenset[SourceObservationKey]
+    #: Sources reflected alone that one page may still admit, at most half
+    #: of it, so a crowd of them near every seed cannot keep fresh sources off.
+    returning: int
+    selected: dict[str, DreamSourceWork] = field(default_factory=dict)
+    errors: dict[str, Exception] = field(default_factory=dict)
+    authorized: dict[str, str] = field(default_factory=dict)
+    observed: dict[str, tuple[str, int]] = field(default_factory=dict)
+
+    @classmethod
+    async def load(cls, group_id: str, limit: int) -> _DreamSelection:
+        reflected = await reflected_sources(group_id)
+        paged = reflected.alone | await completed_dream_sources(group_id)
+        return cls(group_id, reflected, paged, returning=limit // 2)
+
+    def prior_pass(self, source: RawMemory, observation: tuple[str, int] | None) -> str | None:
+        if observation is None:
+            return None
+        key = (source.principal_id or "", source.id, *observation)
+        if key in self.reflected.cohort:
+            return "covered"
+        return "paged" if key in self.paged else None
+
+    async def prefetch(self, memories: list[RawMemory]) -> None:
+        missing = [memory.id for memory in memories if memory.id not in self.observed]
+        self.observed.update(await current_source_observations(self.group_id, missing))
+
+    async def authorize(self, source: RawMemory) -> str:
+        """Load the authorized snapshot; name the source's pass at its observation."""
+        if source.id in self.authorized:
+            return self.authorized[source.id]
+        try:
+            work = await _load_dream_work(self.group_id, source)
+        except SourceUnavailableError:
+            work = None
+        except Exception as exc:
+            # Selected so the failure reaches the receipt, as before.
+            self.errors[source.id] = exc
+            self.authorized[source.id] = "fresh"
+            return "fresh"
+        if work is None:
+            outcome = "unavailable"
+        else:
+            observation = work.snapshot.observation
+            prior = self.prior_pass(
+                source, (observation.effective_incarnation, observation.generation)
+            )
+            outcome = prior or "fresh"
+            if outcome != "covered":
+                self.selected[source.id] = work
+        self.authorized[source.id] = outcome
+        return outcome
+
+    async def fresh(self, source: RawMemory) -> bool:
+        if self.prior_pass(source, self.observed.get(source.id)) is not None:
+            return False
+        return await self.authorize(source) == "fresh"
+
+    async def neighbour(self, source: RawMemory) -> bool:
+        prior = self.prior_pass(source, self.observed.get(source.id))
+        if prior == "covered" or (prior == "paged" and self.returning == 0):
+            return False
+        outcome = await self.authorize(source)
+        if outcome == "paged" and self.returning > 0:
+            self.returning -= 1
+            return True
+        return outcome == "fresh"
+
+
 async def _dream_page(
     group_id: str,
     walk: list[RawMemory],
     limit: int,
-    pending: Callable[[RawMemory], Awaitable[bool]],
+    is_neighbour: Callable[[RawMemory], Awaitable[bool]],
+    prefetch: Callable[[list[RawMemory]], Awaitable[None]] | None = None,
 ) -> tuple[list[RawMemory], set[str]]:
     """Seed the page at the cursor, fill it with the seed's neighbours, then walk on.
 
-    The first pending source after the cursor seeds the page and its nearest
-    pending neighbours fill it, so a family spread across identifier order
-    meets in one partition instead of being cut at page boundaries. Walk
-    sources then fill what the neighbours leave.
+    The walk holds only sources no pass has reflected at their current
+    observation. Its first source seeds the page and the seed's nearest
+    neighbours join it, so a family spread across identifier order meets in
+    one partition instead of being cut at page boundaries. A source already
+    reflected on its own may come back only here, beside a fresh seed, where
+    a family member that arrived later can finally meet it.
 
-    The page always holds a prefix of the walk: the seed, then walk sources in
-    order until the page is full, with neighbours counted where they fall.
-    Only that prefix advances the cursor, and the page lists it first in walk
-    order, so the cursor never passes a pending source that did not get a
-    place, and a crash leaves it on the last walk source handled. A neighbour
-    taken from beyond the cursor is reflected early; once its cohort
-    completes, the walk finds it covered and moves past it. Every run moves
-    the cursor at least past its seed, so each sweep still reaches every
-    pending source. Returns the page and the identifiers of its walk prefix.
+    Walk sources fill what the neighbours leave. The page always holds a
+    prefix of the walk: the seed, then walk sources in order until the page
+    is full, with neighbours counted where they fall. Only that prefix
+    advances the cursor, and the page lists it first in walk order, so the
+    cursor never passes a source that did not get a place, and a crash leaves
+    it on the last walk source handled. The owner's neighbour test admits at
+    most half a page of sources reflected alone, so every page holds at least
+    half a page of fresh sources whenever that many remain, however many
+    reflected sources crowd the seed. A fresh neighbour taken from beyond the
+    cursor is reflected early; once its cohort completes, the walk rules it
+    out and moves past it. Returns the page and the identifiers of its walk
+    prefix.
     """
     if not walk:
         return [], set()
     seed = walk[0]
     neighbours = await list_reflection_dream_neighbours(
-        organization_id=group_id, seed=seed, limit=limit - 1, is_pending=pending
+        organization_id=group_id,
+        seed=seed,
+        limit=limit - 1,
+        is_pending=is_neighbour,
+        prefetch=prefetch,
     )
     chosen = {seed.id, *(source.id for source in neighbours)}
     prefix, room = [seed], limit - len(chosen)
