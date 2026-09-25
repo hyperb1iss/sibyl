@@ -88,6 +88,10 @@ backend:
   validationReceipts:
     existingClaim: sibyl-validation-receipts
 
+  # Pod range of the ingress controller, so logins key on each user's address
+  # instead of the controller's. See "Client Addresses Behind the Ingress".
+  forwardedAllowIps: "10.244.0.0/16"
+
   # SurrealDB connection
   surreal:
     url: "ws://your-surrealdb.example.com:8000/rpc"
@@ -283,6 +287,41 @@ The chart renders from the shared `ingress.hosts` route table. Set `ingress.clas
 for a classic `networking.k8s.io/v1` Ingress, or `ingress.gatewayApi.enabled=true` (with
 `parentRefs`) for a Gateway API HTTPRoute. The standalone manifests below are equivalent
 hand-written forms if you prefer to manage routing outside the chart.
+
+### Client Addresses Behind the Ingress
+
+Every request the backend receives comes from an ingress controller or Gateway pod, so on its own
+the backend sees one address for all users. The five-per-minute login limit is keyed on that
+address, which means the sixth sign-in in a minute from anyone locks everyone out. Tell the backend
+which proxies to believe and it reads the real client from `X-Forwarded-For` instead:
+
+```yaml
+backend:
+  forwardedAllowIps: "10.244.0.0/16"
+```
+
+**Recommended value:** the range the controller pods take their addresses from, usually the cluster
+pod CIDR (`kubectl get pods -n <controller-namespace> -o wide` shows which addresses it has to
+cover). Pair it with `networkPolicy.enabled: true` and a `networkPolicy.ingress.from` that selects
+the controller's namespace, so nothing else in that range can reach the backend.
+
+The backend walks `X-Forwarded-For` from the right and stops at the first address it does not trust,
+so each hop you add must write the address it saw:
+
+- A cloud L7 load balancer in front of the controller that appends `X-Forwarded-For`: add its
+  subnets (or the VPC CIDR) next to the pod range.
+- An L4 load balancer or `externalTrafficPolicy: Cluster`, where traffic reaches the controller from
+  node addresses: do not add the node range, because the entry to its left is one the client wrote.
+  Set `externalTrafficPolicy: Local` on the controller's Service, or enable PROXY protocol, so the
+  controller sees real client addresses.
+
+Trusting a range lets anything inside it choose its client address, which also decides the
+break-glass allowlist, so keep it narrow and keep `/api` and `/mcp` routed straight to the backend
+service (the Next.js frontend passes a client's own `X-Forwarded-For` through untouched). After an
+upgrade, sign in and check that the backend's `request` log lines
+(`kubectl logs -n sibyl deploy/sibyl-backend`) carry your own address in `client`, not a controller
+pod's. The [Helm reference](./helm-chart.md#trusted-proxies) covers the value's forms and the `"*"`
+escape hatch.
 
 ### Kong Gateway (standalone HTTPRoute)
 

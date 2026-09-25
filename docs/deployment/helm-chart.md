@@ -249,6 +249,64 @@ backend:
     NUMEXPR_NUM_THREADS: "1"
 ```
 
+### Trusted Proxies
+
+Behind an ingress controller or Gateway, every request reaches the backend from the proxy pod's
+address. The login route allows five attempts per minute per client address, so until the backend
+trusts the proxy, all users share one bucket and the sixth login in a minute from anyone locks
+everyone out. The `backend.forwardedAllowIps` value names the proxies whose `X-Forwarded-For` header
+the backend believes. The chart renders it into `SIBYL_FORWARDED_ALLOW_IPS`.
+
+| Value                       | Default | Description                                            |
+| --------------------------- | ------- | ------------------------------------------------------ |
+| `backend.forwardedAllowIps` | `""`    | IPs and CIDR ranges of trusted proxies, string or list |
+
+```yaml
+backend:
+  # The range the ingress controller pods get their addresses from, usually the pod CIDR.
+  forwardedAllowIps: "10.244.0.0/16"
+  # A list works too:
+  # forwardedAllowIps:
+  #   - 10.244.0.0/16
+  #   - 10.0.0.0/20
+```
+
+On the command line, pass a list so Helm does not split on the comma:
+`--set 'backend.forwardedAllowIps={10.244.0.0/16,10.0.0.0/20}'`.
+
+Empty (the default) keeps the backend's loopback-only trust. When `backend.forwardedAllowIps` is
+empty, a `SIBYL_FORWARDED_ALLOW_IPS` entry under `backend.env` still works; when both are set, the
+dedicated value wins.
+
+What to set:
+
+- **Ingress controller or Gateway pods:** the range their addresses come from, usually the cluster
+  pod CIDR. Running `kubectl get pods -n <controller-namespace> -o wide` shows the addresses to
+  cover. On clusters where pods take VPC addresses, use the subnets the controller pods run in.
+- **An L7 load balancer in front that appends `X-Forwarded-For`** (a cloud application load
+  balancer, for example): add its subnets or the VPC CIDR as well, so the walk skips past it to the
+  address it recorded.
+- **An L4 load balancer or a node hop that SNATs:** do not trust node addresses. The controller then
+  only ever sees node IPs, and trusting them hands the entry the client wrote the final say.
+  Preserve the source address instead (`externalTrafficPolicy: Local` on the controller's Service,
+  or PROXY protocol from the load balancer) and trust only the controller pods.
+
+::: warning Trusting a range lets anything inside it choose its client address
+
+Any peer inside `forwardedAllowIps` can claim to be any client, dodge the per-address rate limits,
+and satisfy `breakGlass.allowedIPs`. Keep the range as narrow as the topology allows, and enable
+`networkPolicy` with `networkPolicy.ingress.from` naming the controller so nothing else in that
+range can reach the backend. Keep `/api` and `/mcp` routed straight to the backend service (the
+default route table): the Next.js frontend passes a client-supplied `X-Forwarded-For` through
+unchanged, so it must never be the hop the backend trusts. A value of `"*"` trusts every peer and
+makes the backend log `forwarded_allow_ips_trusts_every_peer` at startup; with it, the leftmost
+header entry wins, and a client writes that one unless every proxy in front overwrites the header.
+
+:::
+
+To confirm the setting took, sign in through the ingress and check that the backend's `request` log
+lines carry your own address in `client`, not the controller pod's.
+
 ### Secrets
 
 ```yaml
@@ -647,7 +705,10 @@ bootstrap:
 ## Break-Glass
 
 Bounded emergency local-owner login for SSO outages. Keep disabled in normal operation; when
-enabled, both `expiresAt` (no more than four hours out) and `allowedIPs` are required.
+enabled, both `expiresAt` (no more than four hours out) and `allowedIPs` are required. The allowlist
+is matched against the resolved client address, so behind an ingress set `backend.forwardedAllowIps`
+(see [Trusted Proxies](#trusted-proxies)); without it the backend only ever sees the controller
+pod's address.
 
 ```yaml
 breakGlass:
@@ -736,6 +797,8 @@ backend:
     tag: "1.4.1"
     pullPolicy: Always
   existingSecret: sibyl-secrets
+  # Ingress controller pod range, so each user gets their own login rate-limit bucket.
+  forwardedAllowIps: "10.244.0.0/16"
   validationReceipts:
     existingClaim: sibyl-validation-receipts
   surreal:

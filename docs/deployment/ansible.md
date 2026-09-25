@@ -34,17 +34,46 @@ compiles on the host.
 
 ### Variables
 
-| Variable                | Default             | Purpose                            |
-| ----------------------- | ------------------- | ---------------------------------- |
-| `sibyl_domain`          | `sibyl.example.com` | Hostname Caddy serves              |
-| `sibyl_version`         | `1.4.1`             | ghcr.io image tag                  |
-| `sibyl_dir`             | `/opt/sibyl`        | Deployment directory               |
-| `sibyl_proxy_interface` | `tailscale0`        | Interface HTTP/HTTPS is exposed on |
-| `sibyl_mcp_auth_mode`   | `auto`              | MCP bearer-token enforcement       |
+| Variable                    | Default                        | Purpose                            |
+| --------------------------- | ------------------------------ | ---------------------------------- |
+| `sibyl_domain`              | `sibyl.example.com`            | Hostname Caddy serves              |
+| `sibyl_version`             | `1.4.1`                        | ghcr.io image tag                  |
+| `sibyl_dir`                 | `/opt/sibyl`                   | Deployment directory               |
+| `sibyl_proxy_interface`     | `tailscale0`                   | Interface HTTP/HTTPS is exposed on |
+| `sibyl_mcp_auth_mode`       | `auto`                         | MCP bearer-token enforcement       |
+| `sibyl_forwarded_allow_ips` | `172.16.0.0/12,192.168.0.0/16` | Proxies trusted to name the client |
 
 Secrets have no defaults and must be supplied, ideally through ansible-vault: `sibyl_jwt_secret`,
 `sibyl_surreal_password`, `sibyl_openai_api_key`, `sibyl_anthropic_api_key`, `sibyl_cf_api_token`.
 The role asserts each one is set before doing any work.
+
+### Client addresses behind Caddy
+
+Every request reaches the backend from Caddy, so the backend has to trust Caddy to learn who is
+actually signing in. Without that trust, all users share one login rate-limit budget (five attempts
+per minute) and audit logs record Caddy's address for everyone.
+
+The `sibyl_forwarded_allow_ips` variable renders into `SIBYL_FORWARDED_ALLOW_IPS`. Its default
+trusts Docker's default bridge address pools, where Docker assigns the `sibyl-network` subnet that
+Caddy's address comes from. Trusting that much is safe in this stack, where Caddy is the only
+ingress:
+
+- Caddy replaces any `X-Forwarded-For` a client sends with the address it saw, so a client cannot
+  spoof its way past it.
+- The backend publishes no host port, so the only peers that can reach it are containers on
+  `sibyl-network` and the host itself, all of them inside the trusted pools.
+
+Trusting a range lets anything inside it choose its client address, including for the break-glass
+allowlist. To trust only this stack's network, look up its subnet on the host and set the variable
+to that:
+
+```bash
+docker network inspect sibyl-network --format '{{(index .IPAM.Config 0).Subnet}}'
+```
+
+Change it too if the Docker daemon configures custom `default-address-pools`, or if you add
+`trusted_proxies` to Caddy for a proxy in front of it (then list that proxy as well). The
+[environment reference](./environment.md#trusted-proxies) explains how the address resolves.
 
 ## Deploying
 

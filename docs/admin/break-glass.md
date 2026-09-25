@@ -36,7 +36,10 @@ Every break-glass sign-in must include an incident reason. The web login form, d
 and `sibyl auth login --break-glass-reason` all send that reason into the audit event.
 
 The CIDR allowlist is an app-level backstop. Keep the same restriction at ingress or firewall level
-when possible, especially if the app only sees proxy addresses.
+when possible. Behind an ingress the app sees only the proxy's address until
+`backend.forwardedAllowIps` (or `SIBYL_FORWARDED_ALLOW_IPS`) names the proxies, so set it before
+relying on the allowlist, and list the operators' real addresses in `allowedIPs` rather than the
+proxy range.
 
 ## Storage
 
