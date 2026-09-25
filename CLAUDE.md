@@ -182,19 +182,6 @@ cached per `group_id` in an LRU (`surreal_graph_client_cache_size`, default 64);
 is closed and its schema marked dirty. Embedded/`memory://` URLs are clamped to a single connection
 (a pool would fragment single-writer state).
 
-### Legacy Graph Archives
-
-Older Graphiti archives contain two node shapes:
-
-- `Episodic` - Created by `add_episode()`
-- `Entity` - Extracted entities
-
-Migration and compatibility queries must handle both:
-
-```surql
-SELECT * FROM entity WHERE entity_type = $type;  -- handles both Episodic- and Entity-shaped archives
-```
-
 ### Package Imports
 
 ```python
@@ -217,8 +204,6 @@ from sibyl.cli.common import ELECTRIC_PURPLE
 - **Embedded mode** uses SurrealKV at `.moon/cache/surreal-dev` by default; single-writer
 - **Namespace-per-org** (`org_<uuid_hex>`): missing group_id routes queries to the wrong namespace
 - **Memory mode** (`memory://`) is test-only; forbidden in production via config validator
-- **Legacy graph compatibility code** is not part of the default memory loop. Graphiti-shaped
-  records are handled by Sibyl-owned projection and archive code without installing Graphiti.
 
 ### Next.js 16
 
