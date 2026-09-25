@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 import json
+import sys
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import pytest
+import resend
 from pydantic import SecretStr
+from resend.http_client import HTTPClient
+from structlog.testing import capture_logs
 
 from sibyl import config as config_module
 from sibyl.email import client as email_client_module
@@ -186,3 +193,142 @@ async def test_email_client_returns_outbox_when_smtp_fails_after_capture(
 
     assert delivery_id == "outbox"
     assert outbox_path.exists()
+
+
+RESEND_TEST_KEY = "re_test_key"
+
+
+@dataclass(frozen=True)
+class _ResendCall:
+    method: str
+    url: str
+    headers: dict[str, str]
+    json: dict[str, object] | list[object] | None
+
+
+class _RecordingResendHTTP(HTTPClient):
+    """Stands in for the network under the Resend SDK and records each API call."""
+
+    def __init__(self, *, status: int = 200, body: dict[str, object] | None = None) -> None:
+        self.calls: list[_ResendCall] = []
+        self._status = status
+        self._content = json.dumps(body if body is not None else {"id": "resend-email-123"})
+
+    def request(
+        self,
+        method: str,
+        url: str,
+        headers: Mapping[str, str],
+        json: dict[str, object] | list[object] | None = None,
+        files: dict[str, Any] | None = None,
+        data: dict[str, str] | None = None,
+    ) -> tuple[bytes, int, Mapping[str, str]]:
+        self.calls.append(_ResendCall(method=method, url=url, headers=dict(headers), json=json))
+        return self._content.encode(), self._status, {"Content-Type": "application/json"}
+
+
+def _configure_resend(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    http: _RecordingResendHTTP,
+) -> Path:
+    outbox_path = tmp_path / "email-outbox.jsonl"
+    monkeypatch.setattr(config_module.settings, "email_outbox_path", str(outbox_path))
+    monkeypatch.setattr(config_module.settings, "resend_api_key", SecretStr(RESEND_TEST_KEY))
+    monkeypatch.setattr(config_module.settings, "smtp_host", "")
+    monkeypatch.setattr(config_module.settings, "email_from", "Sibyl <noreply@sibyl.dev>")
+    # EmailClient writes the key onto the SDK module; restore it after the test.
+    monkeypatch.setattr(resend, "api_key", resend.api_key)
+    monkeypatch.setattr(resend, "default_http_client", http)
+    return outbox_path
+
+
+@pytest.mark.asyncio
+async def test_email_client_sends_via_resend_when_key_configured(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    http = _RecordingResendHTTP()
+    _configure_resend(monkeypatch, tmp_path, http)
+
+    client = EmailClient()
+    assert client.configured is True
+
+    delivery_id = await client.send(
+        to="auth-flow@example.com",
+        subject="Reset your Sibyl password",
+        html="<a href='http://localhost/reset-password?token=reset-token'>Reset</a>",
+        text="http://localhost/reset-password?token=reset-token",
+        reply_to="support@example.com",
+    )
+
+    assert delivery_id == "resend-email-123"
+    assert len(http.calls) == 1
+    call = http.calls[0]
+    assert call.method == "post"
+    assert call.url.endswith("/emails")
+    assert call.headers["Authorization"] == f"Bearer {RESEND_TEST_KEY}"
+    assert call.json == {
+        "from": "Sibyl <noreply@sibyl.dev>",
+        "to": ["auth-flow@example.com"],
+        "subject": "Reset your Sibyl password",
+        "html": "<a href='http://localhost/reset-password?token=reset-token'>Reset</a>",
+        "text": "http://localhost/reset-password?token=reset-token",
+        "reply_to": "support@example.com",
+    }
+
+
+@pytest.mark.asyncio
+async def test_email_client_warns_when_resend_key_is_set_but_package_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    http = _RecordingResendHTTP()
+    _configure_resend(monkeypatch, tmp_path, http)
+    monkeypatch.setitem(sys.modules, "resend", None)
+
+    with capture_logs() as entries:
+        client = EmailClient()
+        delivery_id = await client.send(
+            to="auth-flow@example.com",
+            subject="Reset your Sibyl password",
+            html="<p>Reset</p>",
+        )
+
+    assert client.configured is False
+    assert delivery_id == "outbox"
+    assert http.calls == []
+    warnings = [
+        (entry["event"], entry.get("reason"))
+        for entry in entries
+        if entry["log_level"] == "warning"
+    ]
+    assert warnings == [
+        ("email_provider_unavailable", "resend package is not installed"),
+        ("email_skipped", "provider_unavailable"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_email_client_logs_error_when_resend_rejects_the_send(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    http = _RecordingResendHTTP(
+        status=422,
+        body={"statusCode": 422, "name": "validation_error", "message": "Invalid `to` field."},
+    )
+    _configure_resend(monkeypatch, tmp_path, http)
+
+    client = EmailClient()
+    with capture_logs() as entries:
+        delivery_id = await client.send(
+            to="auth-flow@example.com",
+            subject="Reset your Sibyl password",
+            html="<p>Reset</p>",
+        )
+
+    assert delivery_id == "outbox"
+    assert len(http.calls) == 1
+    failures = [entry for entry in entries if entry["event"] == "email_failed"]
+    assert [(entry["log_level"], entry["provider"]) for entry in failures] == [("error", "resend")]

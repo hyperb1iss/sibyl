@@ -42,11 +42,15 @@ class EmailClient:
         if self._api_key:
             try:
                 import resend
-
+            except ImportError:
+                log.warning(
+                    "email_provider_unavailable",
+                    provider="resend",
+                    reason="resend package is not installed",
+                )
+            else:
                 resend.api_key = self._api_key
                 self._resend = resend
-            except ImportError:
-                log.warning("resend package not installed, emails will be logged only")
 
     @property
     def configured(self) -> bool:
@@ -88,19 +92,30 @@ class EmailClient:
             )
 
         if not self._resend:
-            log.info(
-                "email_skipped",
-                reason="not_configured",
-                to=recipients,
-                subject=subject,
-            )
+            if self._api_key:
+                # A key means the operator asked for Resend, so dropping to the
+                # outbox is a delivery failure, not an unconfigured install.
+                log.warning(
+                    "email_skipped",
+                    reason="provider_unavailable",
+                    provider="resend",
+                    to=recipients,
+                    subject=subject,
+                )
+            else:
+                log.info(
+                    "email_skipped",
+                    reason="not_configured",
+                    to=recipients,
+                    subject=subject,
+                )
             return "outbox" if outbox_written else None
 
         try:
             import resend
 
-            params: dict[str, object] = {
-                "from_": self._from_address,
+            params: resend.Emails.SendParams = {
+                "from": self._from_address,
                 "to": recipients,
                 "subject": subject,
                 "html": html,
@@ -110,14 +125,17 @@ class EmailClient:
             if reply_to:
                 params["reply_to"] = reply_to
 
-            result = resend.Emails.send(params)
+            # The SDK sends over blocking requests; keep it off the event loop.
+            result = await to_thread(resend.Emails.send, params)
             email_id = result.get("id") if isinstance(result, dict) else None
 
-            log.info("email_sent", email_id=email_id, to=recipients, subject=subject)
+            log.info(
+                "email_sent", provider="resend", email_id=email_id, to=recipients, subject=subject
+            )
             return email_id or "resend"
 
         except Exception:
-            log.exception("email_failed", to=recipients, subject=subject)
+            log.exception("email_failed", provider="resend", to=recipients, subject=subject)
             return "outbox" if outbox_written else None
 
     async def _send_smtp(
