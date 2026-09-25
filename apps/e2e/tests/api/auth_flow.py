@@ -1,4 +1,11 @@
-"""Replay the auth surface used as the SurrealDB cutover acceptance gate."""
+"""Replay the local-auth lifecycle against a live Sibyl API.
+
+The replay walks invite-gated signup, login, refresh, API keys, invitations,
+org switching, device auth, password change and reset, session listing, and
+logout in one pass, checking the JWT claim shape of every token the API issues
+on the way. Signups after first-run setup need an invitation, so the caller
+passes an access token for an existing org owner who invites both replay users.
+"""
 
 from __future__ import annotations
 
@@ -6,16 +13,17 @@ import asyncio
 import base64
 import binascii
 import json
+import random
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit, urlunsplit
 
 import httpx
 
 
 class AuthFlowError(RuntimeError):
-    """Raised when an auth flow step does not satisfy the acceptance contract."""
+    """Raised when an auth flow step does not satisfy the auth contract."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,18 +68,46 @@ class _PrimarySession:
 @dataclass(frozen=True, slots=True)
 class _SecondarySession:
     access_token: str
-    organization_slug: str
+    # An invite-gated signup lands in the inviting org, not a personal one.
+    signup_org_slug: str
+
+
+def _replay_client_address() -> str:
+    """Pick an address in the RFC 2544 benchmarking range for this replay.
+
+    The login route allows five attempts per minute per client address, and
+    every e2e request leaves the same loopback host, so the rest of the suite
+    already spends that budget. Presenting the replay as its own client through
+    the trusted loopback proxy header models two real users signing in from
+    their own machines instead of one host hammering the endpoint.
+    """
+    return f"198.18.{random.randrange(256)}.{random.randrange(1, 255)}"
+
+
+def _ipv4_loopback_url(base_url: str) -> str:
+    """Reach a localhost API over 127.0.0.1.
+
+    Uvicorn trusts X-Forwarded-For only from 127.0.0.1 by default, while
+    ``localhost`` resolves to ::1 first on most hosts, and a header sent over
+    IPv6 is ignored. Pinning the IPv4 loopback keeps the replay on its own
+    login budget wherever the API listens on both.
+    """
+    parts = urlsplit(base_url.rstrip("/"))
+    if parts.scheme != "http" or parts.hostname != "localhost":
+        return base_url.rstrip("/")
+    netloc = "127.0.0.1" if parts.port is None else f"127.0.0.1:{parts.port}"
+    return urlunsplit(parts._replace(netloc=netloc))
 
 
 async def replay_auth_flow(
     *,
     base_url: str,
+    inviter_access_token: str,
     email: str,
     password: str,
     name: str = "Sibyl Auth Flow",
     request_timeout: float = 15.0,
     email_outbox_path: Path | None = None,
-    transport: httpx.AsyncBaseTransport | None = None,
 ) -> AuthFlowResult:
     steps: list[str] = []
     token_claims: list[AuthFlowTokenClaims] = []
@@ -79,13 +115,24 @@ async def replay_auth_flow(
     secondary_email = _secondary_email(email)
 
     async with httpx.AsyncClient(
-        base_url=base_url.rstrip("/"),
+        base_url=_ipv4_loopback_url(base_url),
         follow_redirects=False,
         timeout=request_timeout,
-        transport=transport,
+        headers={"X-Forwarded-For": _replay_client_address()},
     ) as client:
+        inviter_me = await _get_json(
+            client,
+            "/auth/me",
+            headers=_bearer_headers(inviter_access_token),
+            expected_status=200,
+            step="resolve inviter org",
+        )
+        inviter_org = _required_object(inviter_me, "organization", "resolve inviter org")
+        inviter_org_slug = _required_string(inviter_org, "slug", "resolve inviter org")
         primary = await _signup_login_refresh_primary(
             client=client,
+            inviter_access_token=inviter_access_token,
+            inviter_org_slug=inviter_org_slug,
             email=email,
             password=password,
             name=name,
@@ -100,6 +147,8 @@ async def replay_auth_flow(
         )
         secondary = await _signup_secondary_user(
             client=client,
+            inviter_access_token=inviter_access_token,
+            inviter_org_slug=inviter_org_slug,
             email=secondary_email,
             password=password,
             name=f"{name} Member",
@@ -147,72 +196,110 @@ async def replay_auth_flow(
     )
 
 
-def compare_auth_flow_results(
+async def _invite(
+    client: httpx.AsyncClient,
     *,
-    left_label: str,
-    left: AuthFlowResult,
-    right_label: str,
-    right: AuthFlowResult,
-) -> None:
-    mismatches: list[str] = []
-    if left.steps != right.steps:
-        mismatches.append(
-            f"step sequence differed: {left_label}={left.steps!r} {right_label}={right.steps!r}"
-        )
+    org_slug: str,
+    inviter_access_token: str,
+    email: str,
+    step: str,
+) -> str:
+    invitation = await _post_json(
+        client,
+        f"/orgs/{org_slug}/invitations",
+        {"email": email, "role": "member", "expires_days": 1},
+        headers=_bearer_headers(inviter_access_token),
+        expected_status=200,
+        step=step,
+    )
+    invite_payload = _required_object(invitation, "invitation", step)
+    return _invitation_token(_required_string(invite_payload, "accept_url", step))
 
-    left_claims = tuple(_claim_fingerprint(claims) for claims in left.token_claims)
-    right_claims = tuple(_claim_fingerprint(claims) for claims in right.token_claims)
-    if left_claims != right_claims:
-        mismatches.append(
-            f"JWT claim shape differed: {left_label}={left_claims!r} {right_label}={right_claims!r}"
-        )
 
-    left_observations = tuple(_observation_fingerprint(item) for item in left.observations)
-    right_observations = tuple(_observation_fingerprint(item) for item in right.observations)
-    if left_observations != right_observations:
-        mismatches.append(
-            "auth observation semantics differed: "
-            f"{left_label}={left_observations!r} {right_label}={right_observations!r}"
-        )
-
-    if mismatches:
-        raise AuthFlowError("; ".join(mismatches))
+async def _owned_personal_org_slug(
+    client: httpx.AsyncClient, *, access_token: str, step: str
+) -> str:
+    # The inviter's personal org shows up here too, so ownership picks ours.
+    orgs = await _get_json(
+        client,
+        "/orgs",
+        headers=_bearer_headers(access_token),
+        expected_status=200,
+        step=step,
+    )
+    memberships = orgs.get("orgs")
+    if isinstance(memberships, list):
+        for org in memberships:
+            if (
+                isinstance(org, dict)
+                and org.get("is_personal") is True
+                and org.get("role") == "owner"
+            ):
+                slug = org.get("slug")
+                if isinstance(slug, str) and slug:
+                    return slug
+    raise AuthFlowError(f"{step} did not list a personal org the user owns")
 
 
 async def _signup_login_refresh_primary(
     *,
     client: httpx.AsyncClient,
+    inviter_access_token: str,
+    inviter_org_slug: str,
     email: str,
     password: str,
     name: str,
     steps: list[str],
     token_claims: list[AuthFlowTokenClaims],
 ) -> _PrimarySession:
+    invite_token = await _invite(
+        client,
+        org_slug=inviter_org_slug,
+        inviter_access_token=inviter_access_token,
+        email=email,
+        step="invite primary user",
+    )
     signup = await _post_json(
         client,
-        "/api/auth/local/signup",
-        {"email": email, "password": password, "name": name},
+        "/auth/local/signup",
+        {"email": email, "password": password, "name": name, "invite_token": invite_token},
         expected_status=201,
         step="signup primary user",
     )
     steps.append("signup_primary_user")
-    _, refresh_token = _record_response_tokens(token_claims, signup, step="signup primary user")
-    primary_org = _required_object(signup, "organization", "signup primary user")
-    primary_slug = _required_string(primary_org, "slug", "signup primary user")
+    _record_response_tokens(token_claims, signup, step="signup primary user")
 
     login = await _post_json(
         client,
-        "/api/auth/local/login",
+        "/auth/local/login",
         {"email": email, "password": password},
         expected_status=200,
         step="login primary user",
     )
     steps.append("login_primary_user")
-    _, refresh_token = _record_response_tokens(token_claims, login, step="login primary user")
+    login_access, _ = _record_response_tokens(token_claims, login, step="login primary user")
+
+    # The invitation made the primary a member of the inviter's org; the rest
+    # of the replay runs from the personal org the primary owns.
+    primary_slug = await _owned_personal_org_slug(
+        client, access_token=login_access, step="list primary user orgs"
+    )
+    switched = await _post_json(
+        client,
+        f"/orgs/{primary_slug}/switch",
+        {},
+        headers=_bearer_headers(login_access),
+        expected_status=200,
+        step="switch primary to personal org",
+    )
+    steps.append("switch_to_owned_org")
+    _, refresh_token = _record_response_tokens(
+        token_claims, switched, step="switch primary to personal org"
+    )
 
     refresh = await _post_json(
         client,
-        "/api/auth/refresh",
+        "/auth/refresh",
         {"refresh_token": refresh_token},
         expected_status=200,
         step="refresh tokens",
@@ -238,9 +325,9 @@ async def _exercise_api_key(
     primary_headers = _bearer_headers(primary.access_token)
     api_key = await _post_json(
         client,
-        "/api/auth/api-keys",
+        "/auth/api-keys",
         {
-            "name": "SurrealDB cutover auth flow",
+            "name": "Sibyl e2e auth flow",
             "live": False,
             "scopes": ["mcp", "api:read", "api:write"],
             "expires_days": 1,
@@ -255,7 +342,7 @@ async def _exercise_api_key(
 
     me_payload = await _get_json(
         client,
-        "/api/auth/me",
+        "/auth/me",
         headers=_bearer_headers(raw_api_key),
         expected_status=200,
         step="authenticate api key",
@@ -265,13 +352,13 @@ async def _exercise_api_key(
 
     await _post_json(
         client,
-        f"/api/auth/api-keys/{api_key_id}/revoke",
+        f"/auth/api-keys/{api_key_id}/revoke",
         {},
         headers=primary_headers,
         expected_status=200,
         step="revoke api key",
     )
-    revoked = await client.get("/api/auth/me", headers=_bearer_headers(raw_api_key))
+    revoked = await client.get("/auth/me", headers=_bearer_headers(raw_api_key))
     _expect_status_in(revoked, {401, 403}, "verify revoked api key")
     _record_observation(
         observations,
@@ -285,16 +372,25 @@ async def _exercise_api_key(
 async def _signup_secondary_user(
     *,
     client: httpx.AsyncClient,
+    inviter_access_token: str,
+    inviter_org_slug: str,
     email: str,
     password: str,
     name: str,
     steps: list[str],
     token_claims: list[AuthFlowTokenClaims],
 ) -> _SecondarySession:
+    invite_token = await _invite(
+        client,
+        org_slug=inviter_org_slug,
+        inviter_access_token=inviter_access_token,
+        email=email,
+        step="invite secondary user",
+    )
     signup = await _post_json(
         client,
-        "/api/auth/local/signup",
-        {"email": email, "password": password, "name": name},
+        "/auth/local/signup",
+        {"email": email, "password": password, "name": name, "invite_token": invite_token},
         expected_status=201,
         step="signup invited user",
     )
@@ -303,7 +399,7 @@ async def _signup_secondary_user(
     access_token, _ = _record_response_tokens(token_claims, signup, step="signup invited user")
     return _SecondarySession(
         access_token=access_token,
-        organization_slug=_required_string(secondary_org, "slug", "signup invited user"),
+        signup_org_slug=_required_string(secondary_org, "slug", "signup invited user"),
     )
 
 
@@ -316,20 +412,16 @@ async def _invite_accept_and_switch_org(
     steps: list[str],
     token_claims: list[AuthFlowTokenClaims],
 ) -> None:
-    invitation = await _post_json(
+    invite_token = await _invite(
         client,
-        f"/api/orgs/{primary.organization_slug}/invitations",
-        {"email": secondary_email, "role": "member", "expires_days": 1},
-        headers=_bearer_headers(primary.access_token),
-        expected_status=200,
+        org_slug=primary.organization_slug,
+        inviter_access_token=primary.access_token,
+        email=secondary_email,
         step="invite user to org",
     )
-    invite_payload = _required_object(invitation, "invitation", "invite user to org")
-    accept_url = _required_string(invite_payload, "accept_url", "invite user to org")
-    invite_token = _invitation_token(accept_url)
     accepted = await _post_json(
         client,
-        f"/api/invitations/{invite_token}/accept",
+        f"/invitations/{invite_token}/accept",
         {},
         headers=_bearer_headers(secondary.access_token),
         expected_status=200,
@@ -342,7 +434,7 @@ async def _invite_accept_and_switch_org(
 
     switched = await _post_json(
         client,
-        f"/api/orgs/{secondary.organization_slug}/switch",
+        f"/orgs/{secondary.signup_org_slug}/switch",
         {},
         headers=_bearer_headers(secondary_access),
         expected_status=200,
@@ -353,7 +445,7 @@ async def _invite_accept_and_switch_org(
     )
     switched_back = await _post_json(
         client,
-        f"/api/orgs/{primary.organization_slug}/switch",
+        f"/orgs/{primary.organization_slug}/switch",
         {},
         headers=_bearer_headers(secondary_access),
         expected_status=200,
@@ -373,9 +465,9 @@ async def _exercise_device_auth(
 ) -> None:
     device_start = await _post_json(
         client,
-        "/api/auth/device",
+        "/auth/device",
         {
-            "client_name": "SurrealDB cutover auth flow",
+            "client_name": "Sibyl e2e auth flow",
             "scope": "mcp",
             "interval": 1,
             "expires_in": 600,
@@ -385,7 +477,7 @@ async def _exercise_device_auth(
     )
     device_code = _required_string(device_start, "device_code", "start device auth")
     user_code = _required_string(device_start, "user_code", "start device auth")
-    pending = await client.post("/api/auth/device/token", json={"device_code": device_code})
+    pending = await client.post("/auth/device/token", json={"device_code": device_code})
     _expect_status(pending, 400, "poll pending device auth")
     pending_payload = _json_object(pending, "poll pending device auth")
     if pending_payload.get("error") != "authorization_pending":
@@ -398,14 +490,14 @@ async def _exercise_device_auth(
     )
 
     approved = await client.post(
-        "/api/auth/device/verify",
+        "/auth/device/verify",
         data={"action": "approve", "user_code": user_code},
         headers=_bearer_headers(primary.access_token),
     )
     _expect_status(approved, 200, "approve device auth")
     device_token = await _post_json(
         client,
-        "/api/auth/device/token",
+        "/auth/device/token",
         {"device_code": device_code},
         expected_status=200,
         step="exchange device auth",
@@ -428,14 +520,14 @@ async def _exercise_password_paths(
     reset_password = f"{password}-reset"
     await _post_no_content(
         client,
-        "/api/users/me/password",
+        "/users/me/password",
         {"current_password": password, "new_password": new_password},
         headers=_bearer_headers(primary.access_token),
         step="change password",
     )
     changed_login = await _post_json(
         client,
-        "/api/auth/local/login",
+        "/auth/local/login",
         {"email": email, "password": new_password},
         expected_status=200,
         step="login after password change",
@@ -446,7 +538,7 @@ async def _exercise_password_paths(
     outbox_offset = _outbox_offset(email_outbox_path)
     await _post_json(
         client,
-        "/api/users/password/reset",
+        "/users/password/reset",
         {"email": email},
         expected_status=202,
         step="request password reset",
@@ -458,13 +550,13 @@ async def _exercise_password_paths(
     )
     await _post_no_content(
         client,
-        "/api/users/password/reset/confirm",
+        "/users/password/reset/confirm",
         {"token": reset_token, "new_password": reset_password},
         step="confirm password reset",
     )
     reset_login = await _post_json(
         client,
-        "/api/auth/local/login",
+        "/auth/local/login",
         {"email": email, "password": reset_password},
         expected_status=200,
         step="login after password reset",
@@ -488,14 +580,14 @@ async def _list_sessions_and_logout(
     observations: list[AuthFlowObservation],
 ) -> None:
     primary_headers = _bearer_headers(primary.access_token)
-    sessions = await client.get("/api/users/me/sessions", headers=primary_headers)
+    sessions = await client.get("/users/me/sessions", headers=primary_headers)
     _expect_status(sessions, 200, "list sessions")
     _record_session_observations(observations, sessions, step="list sessions")
     steps.append("list_user_sessions")
 
-    logout = await client.post("/api/auth/logout", headers=primary_headers)
+    logout = await client.post("/auth/logout", headers=primary_headers)
     _expect_status(logout, 204, "logout")
-    rejected = await client.get("/api/auth/me", headers=primary_headers)
+    rejected = await client.get("/auth/me", headers=primary_headers)
     _expect_status_in(rejected, {401, 403}, "verify logged out token")
     _record_observation(
         observations,
@@ -616,22 +708,6 @@ def _record_response_tokens(
     return access_token, refresh_token
 
 
-def _claim_fingerprint(claims: AuthFlowTokenClaims) -> tuple[str, str, str, bool, bool, bool, bool]:
-    return (
-        claims.step,
-        claims.field_name,
-        claims.typ,
-        claims.has_sub,
-        claims.has_org,
-        claims.has_sid,
-        claims.has_jti,
-    )
-
-
-def _observation_fingerprint(observation: AuthFlowObservation) -> tuple[str, str, str]:
-    return (observation.step, observation.key, observation.value)
-
-
 def _record_observation(
     observations: list[AuthFlowObservation],
     *,
@@ -660,10 +736,12 @@ def _record_session_observations(
     *,
     step: str,
 ) -> None:
-    payload = _json_object(response, step)
-    sessions = payload.get("sessions")
+    try:
+        sessions: object = response.json()
+    except ValueError as exc:
+        raise AuthFlowError(f"{step} returned invalid JSON") from exc
     if not isinstance(sessions, list):
-        raise AuthFlowError(f"{step} did not return sessions")
+        raise AuthFlowError(f"{step} returned {type(sessions).__name__}, expected a session list")
     current_count = sum(
         1 for session in sessions if isinstance(session, dict) and session.get("is_current") is True
     )
@@ -711,8 +789,14 @@ def _has_claim(claims: JsonObject, key: str) -> bool:
 
 def _expect_status(response: httpx.Response, expected: int, step: str) -> None:
     if response.status_code != expected:
+        hint = ""
+        if response.status_code == 429:
+            hint = (
+                " (the API did not honor X-Forwarded-For from this connection, so the "
+                "replay shared the loopback login budget)"
+            )
         raise AuthFlowError(
-            f"{step} failed with HTTP {response.status_code}: {_response_excerpt(response)}"
+            f"{step} failed with HTTP {response.status_code}: {_response_excerpt(response)}{hint}"
         )
 
 
@@ -769,7 +853,7 @@ def _invitation_token(accept_url: str) -> str:
 
 def _outbox_offset(email_outbox_path: Path | None) -> int:
     if email_outbox_path is None:
-        raise AuthFlowError("password reset consume requires --email-outbox-path")
+        raise AuthFlowError("password reset consume requires an email outbox path")
     path = _expand_path(email_outbox_path)
     if not path.exists():
         return 0
@@ -783,14 +867,17 @@ async def _read_reset_token(
     offset: int,
 ) -> str:
     if email_outbox_path is None:
-        raise AuthFlowError("password reset consume requires --email-outbox-path")
+        raise AuthFlowError("password reset consume requires an email outbox path")
     path = _expand_path(email_outbox_path)
     for _ in range(50):
         token = _find_reset_token(email=email, path=path, offset=offset)
         if token is not None:
             return token
         await asyncio.sleep(0.1)
-    raise AuthFlowError(f"password reset token was not written to {path}")
+    raise AuthFlowError(
+        f"password reset token was not written to {path}; "
+        "point the API's SIBYL_EMAIL_OUTBOX_PATH at the same file"
+    )
 
 
 def _expand_path(path: Path) -> Path:
