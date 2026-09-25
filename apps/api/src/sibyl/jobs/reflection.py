@@ -38,6 +38,7 @@ from sibyl_core.services.memory_autonomy import (
 )
 from sibyl_core.services.memory_source_validation import SourceReadAuthority
 from sibyl_core.services.observed_sources import load_authorized_source_snapshot
+from sibyl_core.services.ordinary_cohort import completed_cohort_sources
 from sibyl_core.services.source_observations import SourceUnavailableError
 from sibyl_core.services.source_state_store import RawSourceSnapshot
 from sibyl_core.services.surreal_content import (
@@ -206,6 +207,7 @@ async def _reflect_dream_sources(
     selection_errors: dict[str, Exception] = {}
     after_source_id, cursor_revision = await load_dream_cursor(group_id)
     cursor_owned = not dry_run
+    covered = await completed_cohort_sources(group_id)
 
     async def pending(source: RawMemory) -> bool:
         try:
@@ -217,6 +219,14 @@ async def _reflect_dream_sources(
         except Exception as exc:
             selection_errors[source.id] = exc
             return True
+        observation = work.snapshot.observation
+        if (
+            source.principal_id,
+            source.id,
+            observation.effective_incarnation,
+            observation.generation,
+        ) in covered:
+            return False
         selected[source.id] = work
         return True
 

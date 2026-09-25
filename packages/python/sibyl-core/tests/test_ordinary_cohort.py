@@ -993,3 +993,55 @@ async def test_partition_worker_preserves_preparation_failure(cohort_sources, mo
             [source.id for source in cohort_sources],
             AsyncMock(return_value=SourceReadAuthority("owner")),
         )
+
+
+def _coverage_row(uuid, sources, *, procedure=True, error=None, **request):
+    bindings = [{"source_id": s, "incarnation": f"inc-{s}", "generation": 1} for s in sources]
+    return {
+        "uuid": uuid,
+        "principal_id": "owner",
+        "request_json": json.dumps(
+            {"kind": service.VERSION, "source_bindings": bindings, **request}
+        ),
+        "result_json": json.dumps(
+            {
+                "proposal": {"procedure": {"kind": "pattern"} if procedure else None},
+                "validation_error": error,
+            }
+        ),
+    }
+
+
+async def test_completed_cohorts_cover_only_sources_whose_proposal_finished(monkeypatch):
+    from sibyl_core.services.validation_candidate import ValidationCandidateWrite
+
+    def candidate(uuid):
+        return ValidationCandidateWrite(uuid, "", "", {}).id
+
+    rows = [
+        _coverage_row("abstained", ["a1", "a2"], procedure=False),
+        _coverage_row("stored", ["s1", "s2"]),
+        _coverage_row("retired", ["r1", "r2"]),
+        # Returned, but the candidate was never written: replay must stay possible.
+        _coverage_row("unwritten", ["u1", "u2"]),
+        _coverage_row("invalid", ["i1", "i2"], procedure=False, error="bad support"),
+        _coverage_row("packet", ["p1", "p2"], procedure=False, evidence_packet={}),
+        _coverage_row("single", ["o1"], procedure=False),
+        _coverage_row("other-kind", ["k1", "k2"], procedure=False, kind="other"),
+    ]
+    stored, retired = [{"uuid": candidate("stored")}], [{"source_id": candidate("retired")}]
+
+    async def query(statement, **params):
+        if statement == service.COHORT_COVERAGE:
+            assert params == {"org": "org", "kind": service.VERSION}
+            return rows
+        assert params["ids"] == sorted(
+            candidate(uuid) for uuid in ("stored", "retired", "unwritten")
+        )
+        return stored if statement == service.COHORT_CANDIDATES_STORED else retired
+
+    monkeypatch.setattr(service, "_query", query)
+    covered = await service.completed_cohort_sources("org")
+    assert covered == {
+        ("owner", source, f"inc-{source}", 1) for source in ("a1", "a2", "s1", "s2", "r1", "r2")
+    }

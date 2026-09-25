@@ -165,18 +165,60 @@ async def test_ordinary_cohort_public_capture_scheduled_publish_recall(cohort_ru
     from sibyl_core.services.validation_promotion import validated_graph_current
 
     assert await validated_graph_current(str(org.id), candidate.metadata["promoted_entity_id"])
-    # Identical cohort work may be selected again, but its durable proposal is reused.
+    # A completed cohort's sources are not selected again, so nothing redispatches.
     before = await client.execute_query(
         "SELECT uuid, result_json FROM memory_validation_executions ORDER BY uuid;"
     )
     monkeypatch.setattr(
         Extractor, "extract_with_usage", AsyncMock(side_effect=AssertionError("redispatch"))
     )
-    await reflection.run_reflection_dream_cycle({}, str(org.id))
+    again = await reflection.run_reflection_dream_cycle({}, str(org.id))
+    assert again["sources_scanned"] == 0, again
     after = await client.execute_query(
         "SELECT uuid, result_json FROM memory_validation_executions ORDER BY uuid;"
     )
     assert before == after
+
+
+async def test_an_abstaining_cohort_covers_its_sources_until_one_changes(
+    cohort_runtime, monkeypatch
+):
+    from dataclasses import replace
+
+    from sibyl_core.services.content_raw_persistence import get_raw_memory, save_raw_memory
+
+    org, _context, client, _runtime = cohort_runtime
+    sources = await capture(cohort_runtime)
+    abstention = {"procedure": None, "abstention_reason": "One configuration change is no habit."}
+
+    async def factory():
+        return Extractor(
+            CriticOutput,
+            agent=Agent(TestModel(custom_output_args=abstention), output_type=CriticOutput),
+        ), '{"model":"offline"}'
+
+    monkeypatch.setattr(procedure_validation, "validation_extractor", factory)
+    first = await reflection.run_reflection_dream_cycle({}, str(org.id), candidate_limit=0)
+    assert first["failed"] == 0, first
+    assert first["sources"][0]["source_ids"] == sorted(s["uuid"] for s in sources)
+    assert first["sources"][0]["candidate_count"] == 0
+    stages = await client.execute_query("SELECT * FROM memory_validation_executions;")
+    assert [stage["state"] for stage in stages] == ["returned"]
+
+    second = await reflection.run_reflection_dream_cycle({}, str(org.id), candidate_limit=0)
+    assert second["sources_scanned"] == 0, second
+
+    # A new observation of one source is new evidence; its unchanged sibling
+    # stays covered, so the changed source is reflected on its own.
+    memory = await get_raw_memory(organization_id=str(org.id), memory_id=sources[0]["uuid"])
+    assert memory is not None
+    await save_raw_memory(
+        replace(memory, raw_content=memory.raw_content + " The loaded value was stale."),
+        expected_revision=memory.revision,
+        embedding_provider=None,
+    )
+    third = await reflection.run_reflection_dream_cycle({}, str(org.id), candidate_limit=0)
+    assert [item.get("source_id") for item in third["sources"]] == [memory.id], third
 
 
 async def test_ordinary_cohort_candidate_write_failure_retains_execution_and_replays(

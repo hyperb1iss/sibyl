@@ -23,6 +23,9 @@ def dispatch_cursor(monkeypatch):
 
     monkeypatch.setattr("sibyl.jobs.reflection.load_dream_cursor", AsyncMock(return_value=("", 0)))
     monkeypatch.setattr("sibyl.jobs.reflection.advance_dream_cursor", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        "sibyl.jobs.reflection.completed_cohort_sources", AsyncMock(return_value=frozenset())
+    )
     # These orchestration tests stub the validator; the public cohort tests
     # exercise the durable binding and real publisher together.
     monkeypatch.setattr(

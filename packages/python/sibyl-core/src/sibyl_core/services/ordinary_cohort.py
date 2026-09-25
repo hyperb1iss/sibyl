@@ -63,6 +63,18 @@ COHORT_AFFINITY = (
     "SELECT uuid, embedding, metadata.embedding_metadata AS space FROM raw_captures "
     "WHERE organization_id=$org AND uuid IN $source_ids AND embedding != NONE ORDER BY uuid;"
 )
+COHORT_COVERAGE = (
+    "SELECT uuid, principal_id, request_json, result_json FROM memory_validation_executions "
+    "WHERE organization_id=$org AND state='returned' AND purged=false "
+    "AND string::contains(request_json, $kind);"
+)
+COHORT_CANDIDATES_STORED = (
+    "SELECT uuid FROM raw_captures WHERE organization_id=$org AND uuid IN $ids;"
+)
+COHORT_CANDIDATES_RETIRED = (
+    "SELECT source_id FROM source_states WHERE organization_id=$org "
+    "AND source_kind='raw_capture' AND source_id IN $ids;"
+)
 COHORT_GUARD = (
     COHORT_SNAPSHOT
     + "IF $snapshot_digest!=$expected { THROW 'Ordinary cohort sources changed'; };"
@@ -467,6 +479,57 @@ async def _run_cohort(org, principal, original, resolver, extractor, policy, aut
         error.__dict__["execution_id"] = identity
         error.__dict__["execution_state"] = "returned"
         raise
+
+
+#: One source observation a completed cohort reflected:
+#: (principal, source, incarnation, generation).
+CoveredSource = tuple[str, str, str, int]
+
+
+async def completed_cohort_sources(org: str) -> frozenset[CoveredSource]:
+    """Source observations that a completed ordinary cohort already reflected.
+
+    A cohort of two or more sources is complete once its proposal returned and
+    either abstained or left its candidate behind, still stored or retired
+    with a source state. A proposal that returned but whose candidate was
+    never written stays uncovered, so the dream job selects its sources again
+    and replays the stored result instead of losing it. Failed and unresolved
+    proposals stay uncovered too. Each entry names the observation it covers,
+    so a source whose content or incarnation changed is reflected again, and
+    a single source's packet pages never count, since one page covers only
+    part of that source.
+    """
+    covered: list[tuple[str, list[CoveredSource]]] = []
+    for row in await _query(COHORT_COVERAGE, org=org, kind=VERSION):
+        request = json.loads(row["request_json"])
+        bindings = request.get("source_bindings") or []
+        if request.get("kind") != VERSION or "evidence_packet" in request or len(bindings) < 2:
+            continue
+        result = json.loads(row.get("result_json") or "null")
+        if not isinstance(result, dict) or result.get("validation_error") is not None:
+            continue
+        sources = [
+            (row["principal_id"], b["source_id"], b["incarnation"], b["generation"])
+            for b in bindings
+        ]
+        abstained = (result.get("proposal") or {}).get("procedure") is None
+        # The candidate identity derives from the execution alone, so it is
+        # known without replaying the proposal.
+        candidate = "" if abstained else ValidationCandidateWrite(row["uuid"], "", "", {}).id
+        covered.append((candidate, sources))
+    candidates = sorted({candidate for candidate, _ in covered if candidate})
+    kept = set()
+    if candidates:
+        stored = await _query(COHORT_CANDIDATES_STORED, org=org, ids=candidates)
+        retired = await _query(COHORT_CANDIDATES_RETIRED, org=org, ids=candidates)
+        kept.update(row["uuid"] for row in stored)
+        kept.update(row["source_id"] for row in retired)
+    return frozenset(
+        source
+        for candidate, sources in covered
+        if not candidate or candidate in kept
+        for source in sources
+    )
 
 
 async def _proposal_extractor(owned, system: str):
