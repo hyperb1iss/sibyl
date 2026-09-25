@@ -396,6 +396,26 @@ def _item_render_spans(
     return spans
 
 
+_ALL_PROJECTS_SCOPE_LINE = "Scope: all accessible projects"
+
+
+def _header_lines(pack: ContextPack) -> list[str]:
+    """The pack's header: what was asked, how deep, and which project bounded the read."""
+    lines = [
+        f"# Sibyl Context Pack: {pack.goal}",
+        f"Intent: {pack.intent.value}",
+        f"Layer: {pack.layer.value}",
+        f"Query: {pack.query}",
+    ]
+    if pack.domain:
+        lines.append(f"Domain: {pack.domain}")
+    if pack.project:
+        lines.append(f"Project: {pack.project}")
+    else:
+        lines.append(_ALL_PROJECTS_SCOPE_LINE)
+    return lines
+
+
 def render_context_pack(
     pack: ContextPack,
     *,
@@ -431,6 +451,7 @@ def render_context_pack(
     max_items = max(1, min(max_items, _MARKDOWN_ITEM_CEILING))
     items_per_section = max(1, min(items_per_section, _MARKDOWN_SECTION_ITEM_CEILING))
     max_content_chars = max(80, min(max_content_chars, _MARKDOWN_CONTENT_CEILING))
+    header = _header_lines(pack)
     char_budget = (
         max(400, token_budget * _MARKDOWN_CHARS_PER_TOKEN) if token_budget is not None else None
     )
@@ -452,16 +473,7 @@ def render_context_pack(
             _MARKDOWN_CONTENT_CEILING, max(max_content_chars, content_allowance)
         )
 
-    lines = [
-        f"# Sibyl Context Pack: {pack.goal}",
-        f"Intent: {pack.intent.value}",
-        f"Layer: {pack.layer.value}",
-        f"Query: {pack.query}",
-    ]
-    if pack.domain:
-        lines.append(f"Domain: {pack.domain}")
-    if pack.project:
-        lines.append(f"Project: {pack.project}")
+    lines = list(header)
 
     spans: list[ContextRenderSpan] = []
     section_offsets: dict[int, list[int]] = {}
@@ -478,6 +490,21 @@ def render_context_pack(
     remaining = max_items
     emitted_items = 0
     trimmed = False
+    # One trailer line follows the items, and it is appended outside the
+    # guard, so a pack whose last block lands within a trailer's width of the
+    # budget overruns it. A cross-project pack carries one header line more
+    # than a scoped one, which is enough to hit that edge, so its items fit
+    # inside the budget less the widest trailer this render could end with.
+    # Scoped packs keep their exact prior rendering; their trailer edge is a
+    # pre-existing gap and is left for its own change.
+    item_budget: int | None = char_budget
+    if char_budget is not None and pack.project is None:
+        trailer_reserve = max(
+            len(f"_Trimmed to ~{token_budget} tokens; raise --budget for more._"),
+            len("_Procedures omitted by content limit; set --budget for complete bodies._"),
+            len(f"_Hint: {pack.usage_hint}_") if pack.usage_hint else 0,
+        )
+        item_budget = char_budget - (trailer_reserve + 2)
     omitted_procedure = False
     omitted_content = False
     for section in _sections_for_markdown(pack.sections, intent=pack.intent):
@@ -518,14 +545,15 @@ def render_context_pack(
             if (
                 char_budget is not None
                 and rendered_item.content_prefix is not None
-                and used + block_chars > char_budget
+                and item_budget is not None
+                and used + block_chars > item_budget
             ):
                 dispositions[index] = ContextRenderDisposition(
                     index, item.id, "omitted", "budget", "not_emitted"
                 )
                 omitted_procedure = True
                 continue
-            if char_budget is not None and emitted_items > 0 and used + block_chars > char_budget:
+            if item_budget is not None and emitted_items > 0 and used + block_chars > item_budget:
                 trimmed = True
                 break
             index = section_offset + position
