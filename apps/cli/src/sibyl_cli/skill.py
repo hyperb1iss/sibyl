@@ -60,7 +60,7 @@ SKILL_PACKS = {
     "migration": SkillPack(
         name="migration",
         filename="migration.md",
-        description="Legacy Graphiti/FalkorDB migration guidance",
+        description="Consolidating instances and replaying project memory into a team server",
     ),
 }
 
