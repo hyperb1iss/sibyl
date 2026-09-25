@@ -384,7 +384,7 @@ def test_github_identity_accepts_alias() -> None:
         {
             "id": 42,
             "login": "hyperb1iss",
-            "email": "stef@hyperbliss.tech",
+            "email": "alice@example.com",
         }
     )
 

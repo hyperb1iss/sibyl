@@ -769,7 +769,7 @@ def test_entity_from_surreal_row_preserves_native_policy_metadata() -> None:
             "description": "Top-level description",
             "content": "Top-level content",
             "group_id": "org-native",
-            "created_by": "stef",
+            "created_by": "alice",
             "modified_by": "nova",
             "project_id": "project_native",
             "source_id": "raw_1",
@@ -806,7 +806,7 @@ def test_entity_from_surreal_row_preserves_native_policy_metadata() -> None:
     assert entity.category == ""
     assert entity.required_tools == ["moon"]
     assert entity.steps[0].title == "Verify"
-    assert entity.created_by == "stef"
+    assert entity.created_by == "alice"
     assert entity.modified_by == "nova"
     assert entity.source_file == "docs/native.md"
     assert entity.embedding == [0.5] * EMBEDDING_DIM
@@ -889,7 +889,7 @@ async def test_native_entity_manager_generates_embeddings_with_native_provider()
             name="Native Embedding Pattern",
             description="Generated without Graphiti.",
             organization_id=client.group_id,
-            created_by="stef",
+            created_by="alice",
             modified_by="nova",
         ),
         generate_embedding=True,
@@ -906,7 +906,7 @@ async def test_native_entity_manager_generates_embeddings_with_native_provider()
     attributes = cast(dict[str, object], rows[0]["attributes"])
     assert isinstance(attributes["updated_at"], datetime)
     assert attributes["embedding_metadata"] == provider.metadata.to_dict()
-    assert rows[0]["created_by"] == "stef"
+    assert rows[0]["created_by"] == "alice"
     assert rows[0]["modified_by"] == "nova"
 
 
@@ -2764,7 +2764,7 @@ def test_relationship_from_surreal_row_preserves_temporal_provenance() -> None:
             "valid_at": "2026-05-13T12:00:00+00:00",
             "invalid_at": "2026-05-14T12:00:00+00:00",
             "expired_at": "2026-05-15T12:00:00+00:00",
-            "created_by": "stef",
+            "created_by": "alice",
             "modified_by": "nova",
             "direction": "outgoing",
             "episodes": ["episode_1"],
@@ -2788,7 +2788,7 @@ def test_relationship_from_surreal_row_preserves_temporal_provenance() -> None:
     assert relationship.metadata["valid_at"] == "2026-05-13T12:00:00+00:00"
     assert relationship.metadata["invalid_at"] == "2026-05-14T12:00:00+00:00"
     assert relationship.metadata["expired_at"] == "2026-05-15T12:00:00+00:00"
-    assert relationship.metadata["created_by"] == "stef"
+    assert relationship.metadata["created_by"] == "alice"
     assert relationship.metadata["modified_by"] == "nova"
     assert relationship.metadata["direction"] == "outgoing"
     assert relationship.metadata["episodes"] == ["episode_1"]

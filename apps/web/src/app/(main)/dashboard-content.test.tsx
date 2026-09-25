@@ -88,11 +88,11 @@ describe('DashboardContent', () => {
         user: {
           id: 'user_1',
           github_id: null,
-          email: 'stef@hyperbliss.tech',
-          name: 'Stefanie Jane',
+          email: 'alice@example.com',
+          name: 'Alice Example',
           avatar_url: null,
         },
-        organization: { id: 'org_1', slug: 'hyper', name: 'Hyperbliss' },
+        organization: { id: 'org_1', slug: 'acme', name: 'Acme' },
         org_role: 'owner',
       },
     });
@@ -171,7 +171,7 @@ describe('DashboardContent', () => {
       data: {
         context: {
           generated_at: '2026-04-15T12:00:00Z',
-          org_slug: 'hyper',
+          org_slug: 'acme',
           project_ids: [],
           scope: 'all_projects',
         },
@@ -221,7 +221,7 @@ describe('DashboardContent', () => {
   it('greets the user by name with a live memory pulse hero', () => {
     render(<DashboardContent initialStats={initialStats} />);
 
-    expect(screen.getByRole('heading', { level: 1, name: /stefanie/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: /alice/i })).toBeInTheDocument();
     expect(screen.getByText('memories')).toBeInTheDocument();
     expect(screen.getByText('in motion')).toBeInTheDocument();
     expect(screen.getByText('shipped this week')).toBeInTheDocument();

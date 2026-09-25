@@ -92,7 +92,7 @@ PRODUCT_CANDIDATE_LIMIT_CEILING = 200
 #: and the contract binds only 5/25, so the cycle prices Opus 5 without that
 #: tier. Receipts from earlier cycles doubled token-priced rows above 200K.
 PRICING_SOURCE: str | None = (
-    "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-pricing-20260914/sources.json"
+    "~/dev/eval-artifacts/sibyl/full-cohort-pricing-20260914/sources.json"
     " (sha256 22623e55aff2bd2ed5c7062148c774f05430b1b6e9a81503f459c839c9597327)"
 )
 DEFAULT_PRICE_INPUT_PER_MILLION: Decimal | None = Decimal("5")

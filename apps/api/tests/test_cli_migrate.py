@@ -318,11 +318,11 @@ def test_migrate_consolidate_plan_prints_safe_flow() -> None:
             "--canonical-org-id",
             "org-canonical",
             "--canonical-org-name",
-            "Stefanie Jane",
+            "Alice Example",
             "--canonical-org-slug",
-            "stefanie-jane",
+            "alice-example",
             "--target-host",
-            "eternia",
+            "server-1",
             "--target-sudo",
             "--server-url",
             "https://sibyl.example.test",
@@ -343,7 +343,7 @@ def test_migrate_consolidate_plan_prints_safe_flow() -> None:
     assert "ssh laptop sibyld migrate export" in output
     assert "sibyld migrate merge" in output
     assert "--canonical-org-id org-canonical" in output
-    assert f"scp {output_path} eternia:/tmp/sibyl-consolidated.tar.gz" in output
+    assert f"scp {output_path} server-1:/tmp/sibyl-consolidated.tar.gz" in output
     assert "sudo -n docker cp /tmp/sibyl-consolidated.tar.gz" in output
     assert "sudo -n docker compose --project-directory /opt/sibyl" in output
     assert "sibyld migrate import /tmp/sibyl-consolidated.tar.gz" in output

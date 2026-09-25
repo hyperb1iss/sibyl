@@ -220,7 +220,7 @@ async def test_native_reflection_returns_partial_relationship_receipt(
 @pytest.mark.asyncio
 async def test_reflect_memory_extracts_domain_general_candidates() -> None:
     pack = await reflect_memory(
-        "We decided to keep one Hyperbliss Technologies org. "
+        "We decided to keep one Acme Corp org. "
         "Next we will build reflect so agents remember planning sessions. "
         "Maybe context packs should score decisions above loose notes. "
         "Validated docs/architecture/SURREALDB_NATIVE_GOAL_STATE.md as the source.",

@@ -2,7 +2,7 @@
 
 This is the actual run that produced the skill: a 30-day audit of how Codex and Claude Code agents
 used Sibyl in real coding sessions, executed 2026-05-14. The full output is preserved at
-`/home/bliss/dev/sibyl/contexts/sibyl-analysis-2026-05-14/`.
+`/home/user/dev/sibyl/contexts/sibyl-analysis-2026-05-14/`.
 
 Reading this file should let you reproduce the audit pattern for any other tool/skill/system.
 
@@ -59,7 +59,7 @@ wc -l triage/*.txt
 ### 2. Triage scan in parallel
 
 ```bash
-SKILL_DIR="/home/bliss/dev/sibyl/skills/agent-activity-audit"
+SKILL_DIR="/home/user/dev/sibyl/skills/agent-activity-audit"
 
 time cat triage/all_files.txt | xargs -P 12 -n 5 python3 \
   "$SKILL_DIR/scripts/scan.py" --target sibyl > triage/scan_results.jsonl

@@ -177,11 +177,11 @@ describe('LoginPage', () => {
     await user.click(screen.getByRole('button', { name: 'Forgot password?' }));
 
     const resetForm = screen.getByRole('form', { name: 'Reset password' });
-    await user.type(within(resetForm).getByLabelText('Email'), 'stef@hyperbliss.tech');
+    await user.type(within(resetForm).getByLabelText('Email'), 'alice@example.com');
     await user.click(within(resetForm).getByRole('button', { name: 'Send Link' }));
 
     expect(apiMocks.requestPasswordReset).toHaveBeenCalledWith({
-      email: 'stef@hyperbliss.tech',
+      email: 'alice@example.com',
     });
     expect(
       await screen.findByText('If an account exists, a reset email has been sent.')

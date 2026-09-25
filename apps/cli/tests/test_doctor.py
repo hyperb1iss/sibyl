@@ -188,7 +188,7 @@ def test_check_session_hook_passes_when_registered(
     settings_file = tmp_path / "settings.json"
     settings_file.write_text(
         '{"hooks": {"SessionStart": [{"hooks": [{"command": "python3 '
-        '/Users/bliss/.claude/hooks/sibyl/session-start.py"}]}]}}',
+        '/home/user/.claude/hooks/sibyl/session-start.py"}]}]}}',
         encoding="utf-8",
     )
     monkeypatch.setattr(doctor_module, "CLAUDE_SETTINGS_PATH", settings_file)
@@ -246,7 +246,7 @@ def test_check_no_legacy_hook_fails_when_settings_still_have_it(
     settings_file = tmp_path / "settings.json"
     settings_file.write_text(
         '{"hooks": {"UserPromptSubmit": [{"hooks": [{"command": '
-        '"python3 /Users/bliss/.claude/hooks/sibyl/user-prompt-submit.py"}]}]}}',
+        '"python3 /home/user/.claude/hooks/sibyl/user-prompt-submit.py"}]}]}}',
         encoding="utf-8",
     )
     monkeypatch.setattr(doctor_module, "CLAUDE_SETTINGS_PATH", settings_file)

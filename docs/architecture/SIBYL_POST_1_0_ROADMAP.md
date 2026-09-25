@@ -340,7 +340,7 @@ Replace the 57-record rehearsal with adoption-grade corpora, and resolve the fil
 
 Build the internal benchmark for cross-user entity resolution, concurrent multi-writer consistency,
 and "helped AND stayed scoped" (utility + access control + forgetting, GateMem-style). Dogfood seed:
-the eternia/macbook merge. Internal-only this release — publication waits for v1.3 once a defensible
+the server/laptop merge. Internal-only this release — publication waits for v1.3 once a defensible
 dataset and an external comparator exist (synthetic-only risks "benchmark theater").
 
 **The utility axis is outcome-grounded — the field first no one else can do.** Tasks and memories

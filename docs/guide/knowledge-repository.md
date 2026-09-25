@@ -189,7 +189,7 @@ Ask explicitly: "Am I investigating or fixing?"
 Sibyl can crawl local directories:
 
 ```bash
-sibyl crawl add "file:///Users/bliss/dev/knowledge" --name "Guidance"
+sibyl crawl add "file:///home/user/dev/knowledge" --name "Guidance"
 sibyl crawl ingest <source_id>
 ```
 
@@ -216,7 +216,7 @@ Set up a hook to re-crawl when guidance changes:
 # In knowledge repository
 # .git/hooks/post-commit
 #!/bin/bash
-sibyl crawl add "file:///Users/bliss/dev/knowledge" --name "Guidance"
+sibyl crawl add "file:///home/user/dev/knowledge" --name "Guidance"
 sibyl crawl ingest <source_id>
 ```
 

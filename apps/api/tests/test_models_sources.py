@@ -119,7 +119,7 @@ class TestSource:
         """Test local source type."""
         source = Source(
             id="src-local",
-            url="/Users/bliss/dev/docs",
+            url="/home/user/dev/docs",
             source_type=SourceType.LOCAL,
         )
         assert source.source_type == SourceType.LOCAL

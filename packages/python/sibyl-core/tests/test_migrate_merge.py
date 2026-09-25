@@ -328,8 +328,8 @@ def test_merge_archives_does_not_coalesce_users_by_email() -> None:
                         "users": [
                             {
                                 "uuid": "user-a",
-                                "email": "STEF@HYPERBLISS.TECH",
-                                "name": "Stef A",
+                                "email": "ALICE@EXAMPLE.COM",
+                                "name": "Alice A",
                                 "is_admin": False,
                             }
                         ],
@@ -386,8 +386,8 @@ def test_merge_archives_does_not_coalesce_users_by_email() -> None:
                         "users": [
                             {
                                 "uuid": "user-b",
-                                "email": "stef@hyperbliss.tech",
-                                "name": "Stef B",
+                                "email": "alice@example.com",
+                                "name": "Alice B",
                                 "is_admin": True,
                             }
                         ],
@@ -439,8 +439,8 @@ def test_merge_archives_does_not_coalesce_users_by_email() -> None:
 
     auth = json.loads(result.archive.files[AUTH_FILENAME].decode("utf-8"))
     assert auth["tables"]["users"] == [
-        {"uuid": "user-a", "email": "stef@hyperbliss.tech", "name": "Stef A", "is_admin": False},
-        {"uuid": "user-b", "email": "stef@hyperbliss.tech", "name": "Stef B", "is_admin": True},
+        {"uuid": "user-a", "email": "alice@example.com", "name": "Alice A", "is_admin": False},
+        {"uuid": "user-b", "email": "alice@example.com", "name": "Alice B", "is_admin": True},
     ]
     assert auth["tables"]["organization_members"] == [
         {
@@ -494,8 +494,8 @@ def test_merge_archives_can_coalesce_users_by_email() -> None:
                         "users": [
                             {
                                 "uuid": "user-a",
-                                "email": "STEF@HYPERBLISS.TECH",
-                                "name": "Stef A",
+                                "email": "ALICE@EXAMPLE.COM",
+                                "name": "Alice A",
                                 "is_admin": False,
                             }
                         ],
@@ -549,8 +549,8 @@ def test_merge_archives_can_coalesce_users_by_email() -> None:
                         "users": [
                             {
                                 "uuid": "user-b",
-                                "email": "stef@hyperbliss.tech",
-                                "name": "Stef B",
+                                "email": "alice@example.com",
+                                "name": "Alice B",
                                 "is_admin": True,
                             }
                         ],
@@ -605,7 +605,7 @@ def test_merge_archives_can_coalesce_users_by_email() -> None:
 
     auth = json.loads(result.archive.files[AUTH_FILENAME].decode("utf-8"))
     assert auth["tables"]["users"] == [
-        {"uuid": "user-a", "email": "stef@hyperbliss.tech", "name": "Stef A", "is_admin": True}
+        {"uuid": "user-a", "email": "alice@example.com", "name": "Alice A", "is_admin": True}
     ]
     assert auth["tables"]["organization_members"] == [
         {

@@ -71,10 +71,9 @@ learning claim withheld; the remaining proof work is reflection retention (proce
 decision rules and the input that broke), a fresh consolidation cycle under the new renderer, and a
 sealed study at ten or more repetitions on the headroom tasks.
 
-Receipts:
-[headroom screen](/Users/bliss/dev/eval-artifacts/sibyl/screen48-headroom-20260920/headroom.json),
-[re-probe report](/Users/bliss/dev/eval-artifacts/sibyl/screen48-probe-20260920/probe-20260920T022805Z/probe.json),
-[repair phase](/Users/bliss/dev/eval-artifacts/sibyl/screen48-probe-20260920/repair-20260920T022805Z/repair.json);
+Receipts: [headroom screen](~/dev/eval-artifacts/sibyl/screen48-headroom-20260920/headroom.json),
+[re-probe report](~/dev/eval-artifacts/sibyl/screen48-probe-20260920/probe-20260920T022805Z/probe.json),
+[repair phase](~/dev/eval-artifacts/sibyl/screen48-probe-20260920/repair-20260920T022805Z/repair.json);
 on the devbox under /home/dev/dev/eval-runs/sibyl14-screen48-runtime-8dff413188ab/.
 
 ## Earlier checkpoint: September 19, 2026, floor probe executed
@@ -133,10 +132,10 @@ in a shape the solver reads as its own history; raw captures need embeddings for
 return anything; and the headroom screen needs more repetitions before it names a floor. The probe
 re-runs after those land, on the same two tasks, before any further spend on the sealed study.
 
-Receipts: [retention index](/Users/bliss/dev/eval-artifacts/sibyl/screen48-probe-20260919/INDEX.md),
-[probe report](/Users/bliss/dev/eval-artifacts/sibyl/screen48-probe-20260919/probe-20260919T055119Z/probe.json),
-[pack preparation](/Users/bliss/dev/eval-artifacts/sibyl/screen48-probe-20260919/probe-20260919T055119Z/preparation.json),
-[headroom screen](/Users/bliss/dev/eval-artifacts/sibyl/screen48-headroom-20260918/headroom.json).
+Receipts: [retention index](~/dev/eval-artifacts/sibyl/screen48-probe-20260919/INDEX.md),
+[probe report](~/dev/eval-artifacts/sibyl/screen48-probe-20260919/probe-20260919T055119Z/probe.json),
+[pack preparation](~/dev/eval-artifacts/sibyl/screen48-probe-20260919/probe-20260919T055119Z/preparation.json),
+[headroom screen](~/dev/eval-artifacts/sibyl/screen48-headroom-20260918/headroom.json).
 
 ## Earlier checkpoint: September 18, 2026, screen48 executed
 
@@ -206,15 +205,15 @@ mechanism ran end to end with receipts.
 Next, build a task set with measured no-memory headroom, harder or simply larger, before spending on
 the sealed study. The product findings above remain open alongside it.
 
-Receipts: [retention index](/Users/bliss/dev/eval-artifacts/sibyl/screen48-final-20260918/INDEX.md),
-[cell observation](/Users/bliss/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-cdaedf33db57/cells-20260918T100210Z/observation.json),
-[cell terminal](/Users/bliss/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-cdaedf33db57/cells-20260918T100210Z/run/terminal.json),
-[execution claim](/Users/bliss/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-cdaedf33db57/cells-20260918T100210Z/run/claim.json),
-[checkpoint zero](/Users/bliss/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-da65497ec2dc/checkpoint0-20260917T222713Z/checkpoint.json),
-[checkpoint one](/Users/bliss/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-cdaedf33db57/checkpoint1-20260918T094001Z/checkpoint.json),
-[consolidation cycle](/Users/bliss/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-da65497ec2dc/cycle-20260917T224236Z/cycle.json),
-[cycle resume](/Users/bliss/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-da65497ec2dc/cycle-20260918T030232Z-resume2/cycle.json),
-[final drain](/Users/bliss/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-cdaedf33db57/cycle-drain-20260918T093950Z/cycle.json).
+Receipts: [retention index](~/dev/eval-artifacts/sibyl/screen48-final-20260918/INDEX.md),
+[cell observation](~/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-cdaedf33db57/cells-20260918T100210Z/observation.json),
+[cell terminal](~/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-cdaedf33db57/cells-20260918T100210Z/run/terminal.json),
+[execution claim](~/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-cdaedf33db57/cells-20260918T100210Z/run/claim.json),
+[checkpoint zero](~/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-da65497ec2dc/checkpoint0-20260917T222713Z/checkpoint.json),
+[checkpoint one](~/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-cdaedf33db57/checkpoint1-20260918T094001Z/checkpoint.json),
+[consolidation cycle](~/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-da65497ec2dc/cycle-20260917T224236Z/cycle.json),
+[cycle resume](~/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-da65497ec2dc/cycle-20260918T030232Z-resume2/cycle.json),
+[final drain](~/dev/eval-artifacts/sibyl/screen48-final-20260918/sibyl14-screen48-runtime-cdaedf33db57/cycle-drain-20260918T093950Z/cycle.json).
 
 ## Earlier checkpoint: September 15, 0:44 UTC, initial native counts accepted
 
@@ -249,10 +248,10 @@ and dependency update. Superseded [PR 600](https://github.com/hyperb1iss/sibyl/p
 The user's local instance remains untouched. Visual acceptance remains false.
 
 Evidence:
-[accepted native counts](/Users/bliss/dev/eval-artifacts/sibyl/ordinary-count-outcome-root-20260915-r4bxev1s/acceptance.json),
-[independent outcome review](/Users/bliss/dev/eval-artifacts/sibyl/ordinary-count-outcome-independent-20260915-596bzsfg/review-v1.json),
-[root verification](/Users/bliss/dev/eval-artifacts/sibyl/ordinary-count-outcome-root-20260915-r4bxev1s/root-spots-complete.json),
-[accepted capture](/Users/bliss/dev/eval-artifacts/sibyl/ordinary-count-preparation-root-20260914-1830226429ff4140a781eeaa8ee678af/capture-acceptance.json).
+[accepted native counts](~/dev/eval-artifacts/sibyl/ordinary-count-outcome-root-20260915-r4bxev1s/acceptance.json),
+[independent outcome review](~/dev/eval-artifacts/sibyl/ordinary-count-outcome-independent-20260915-596bzsfg/review-v1.json),
+[root verification](~/dev/eval-artifacts/sibyl/ordinary-count-outcome-root-20260915-r4bxev1s/root-spots-complete.json),
+[accepted capture](~/dev/eval-artifacts/sibyl/ordinary-count-preparation-root-20260914-1830226429ff4140a781eeaa8ee678af/capture-acceptance.json).
 
 The native count terminal finished at September 15, 00:20:05 UTC. Independent review checked 4,992
 frozen bindings; root repeated evidence, cost and preservation checks. All 905 copied files match
@@ -302,17 +301,17 @@ acceptance is established. The prior browser automatic approval rejection remain
 update verifies document content and structure only.
 
 Receipts:
-[native terminal](/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-summary-continuation-root-run-20260914/completed-evidence/files/continuation/terminal.json),
-[library terminal](/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-summary-continuation-root-run-20260914/completed-evidence/files/construction/summaries/terminal.json),
-[preserved snapshot](/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-summary-continuation-20260914/retained-snapshot.json),
-[entry acceptance](/Users/bliss/dev/eval-artifacts/sibyl/ordinary-entry-root-acceptance-20260914/acceptance.json),
-[preparation review](/Users/bliss/dev/eval-artifacts/sibyl/capture-preparation-independent-20260914-3f224b1ade8341de9ed84ac5a2e6f3da/review-v1.json),
-[repair source acceptance](/Users/bliss/dev/eval-artifacts/sibyl/dependency600-root-acceptance-20260914/acceptance.json),
-[restack parity](/Users/bliss/dev/eval-artifacts/sibyl/dependency600-repair-20260914/restack-parity.json).
+[native terminal](~/dev/eval-artifacts/sibyl/full-cohort-summary-continuation-root-run-20260914/completed-evidence/files/continuation/terminal.json),
+[library terminal](~/dev/eval-artifacts/sibyl/full-cohort-summary-continuation-root-run-20260914/completed-evidence/files/construction/summaries/terminal.json),
+[preserved snapshot](~/dev/eval-artifacts/sibyl/full-cohort-summary-continuation-20260914/retained-snapshot.json),
+[entry acceptance](~/dev/eval-artifacts/sibyl/ordinary-entry-root-acceptance-20260914/acceptance.json),
+[preparation review](~/dev/eval-artifacts/sibyl/capture-preparation-independent-20260914-3f224b1ade8341de9ed84ac5a2e6f3da/review-v1.json),
+[repair source acceptance](~/dev/eval-artifacts/sibyl/dependency600-root-acceptance-20260914/acceptance.json),
+[restack parity](~/dev/eval-artifacts/sibyl/dependency600-repair-20260914/restack-parity.json).
 
 Accepted outcome:
-[independent review](/Users/bliss/dev/eval-artifacts/sibyl/summary-completion-independent-f5fea8afd67041fe947d521b6bc50ea5/review-v1.json),
-[root acceptance](/Users/bliss/dev/eval-artifacts/sibyl/summary-completion-root-acceptance-20260914-d9c1927b9c6844be9c9b62d9479c2695/acceptance.json).
+[independent review](~/dev/eval-artifacts/sibyl/summary-completion-independent-f5fea8afd67041fe947d521b6bc50ea5/review-v1.json),
+[root acceptance](~/dev/eval-artifacts/sibyl/summary-completion-root-acceptance-20260914-d9c1927b9c6844be9c9b62d9479c2695/acceptance.json).
 
 ## Earlier checkpoint: September 14, 19:05 UTC, reviewed summary continuation live
 
@@ -698,10 +697,10 @@ proposal/critique owners. A packet is not another independent source, and a pack
 result cannot establish full-source consistency. No further paid screen is armed by this design.
 
 Key retained evidence:
-[summary completion](/Users/bliss/dev/eval-artifacts/sibyl/sibyl14-recovered-comparison-4023db51b6ff4cb699a945a43c93313e/completed-parser-recovery-v2/summaries-parser-recovery-v2/terminal.json),
-[exact launch review](/Users/bliss/dev/eval-artifacts/sibyl/summary-text-amendment-independent/solver-launch-review.json),
-[source census](/Users/bliss/dev/eval-artifacts/sibyl/learning-source-census-20260914/root-verification.json),
-[ordinary-dream diagnosis](/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-next-screen-20260914/design.md)
+[summary completion](~/dev/eval-artifacts/sibyl/sibyl14-recovered-comparison-4023db51b6ff4cb699a945a43c93313e/completed-parser-recovery-v2/summaries-parser-recovery-v2/terminal.json),
+[exact launch review](~/dev/eval-artifacts/sibyl/summary-text-amendment-independent/solver-launch-review.json),
+[source census](~/dev/eval-artifacts/sibyl/learning-source-census-20260914/root-verification.json),
+[ordinary-dream diagnosis](~/dev/eval-artifacts/sibyl/full-cohort-next-screen-20260914/design.md)
 and [main CI](https://github.com/hyperb1iss/sibyl/actions/runs/34797394863). The appended machine
 checkpoint binds all source files by SHA-256.
 
@@ -987,7 +986,7 @@ passed a shell execution and all five reference-oracle cases in six isolated con
 containers were removed, and all 74 preexisting container states remained unchanged. No provider or
 solver call ran. Actual lesson authority, full-request token accounting and the paired manifest
 still require qualification. Receipts are in
-`/Users/bliss/dev/eval-artifacts/sibyl/learning-transfer-solver-routing-runtime`.
+`~/dev/eval-artifacts/sibyl/learning-transfer-solver-routing-runtime`.
 
 The promotion-repair scan completed a bounded, provider-free measurement on the remote host. Median
 latency was 47.678 ms with zero pending records and 46.827 ms with 10 pending records at 10,000
@@ -998,7 +997,7 @@ needed. A separate candidate-selective index follow-up is being implemented. The
 records have no vectors, and the probe excludes ancestry, provider and queue work; the full release
 scale gate remains open. The owned database was removed and all 74 preexisting container states
 remained unchanged. Receipts are in
-`/Users/bliss/dev/eval-artifacts/sibyl/promotion-embedding-scan-scale/remote`.
+`~/dev/eval-artifacts/sibyl/promotion-embedding-scan-scale/remote`.
 
 The diagnostic decoder correction is published in PR #588 at commit
 `07e35c2722904d91bc4a26de6aff924120c1b47e`. Two regressions reproduced impossible duplicate-evidence
@@ -1686,9 +1685,9 @@ reclassified.
 All 410 tool cleanup receipts and 163 oracle case cleanups were checked. The owned API stopped; its
 isolated database remains available for consolidation. The evidence archive digest is
 `f0768ce9b559065ae8591a1bc5e968329f88bf4548194c6c3d99d1bb31a50a21`. Verified content-addressed
-copies live under `/Users/bliss/dev/eval-artifacts/sibyl/sha256/`. The pilot excludes development
-tasks and remains separate from the required 20-family, 200-episode release cohort. No memory gain
-is established.
+copies live under `~/dev/eval-artifacts/sibyl/sha256/`. The pilot excludes development tasks and
+remains separate from the required 20-family, 200-episode release cohort. No memory gain is
+established.
 
 Real HTTP admission authorization also passed 11 requests against the production eval router with
 unchanged authentication dependencies and stored API keys. Owner registration, admission, and exact
@@ -2402,8 +2401,7 @@ reconfigured, or used for test writes. The remote UI is available through the ex
 `http://sibyl-eval.localhost:4337/login`. The separate hostname also avoids sharing local browser
 cookies.
 
-Implementation work used worktrees under `/Users/bliss/dev/worktrees/sibyl/nova/`, named for their
-branches:
+Implementation work used worktrees under `~/dev/worktrees/sibyl/nova/`, named for their branches:
 
 - `sibyl-1-4-learning`
 - `reflection-native-only`

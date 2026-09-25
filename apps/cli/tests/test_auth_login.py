@@ -156,9 +156,9 @@ def test_login_context_uses_existing_org_scope(
 
     monkeypatch.setattr(config_store.Path, "home", lambda: tmp_path)
     config_store.create_context(
-        "eternia",
+        "server-1",
         "https://old.example",
-        org_slug="stefanie-jane",
+        org_slug="alice-example",
         set_active=True,
     )
     monkeypatch.setattr(auth, "_login_auto", lambda **kwargs: calls.append(kwargs))
@@ -168,18 +168,18 @@ def test_login_context_uses_existing_org_scope(
         [
             "auth",
             "login",
-            "https://sibyl.hyperbliss.tech",
+            "https://sibyl.example.com",
             "--context",
-            "eternia",
+            "server-1",
         ],
     )
 
     assert result.exit_code == 0
-    assert calls[0]["credential_scope_name"] == "context:eternia:org:stefanie-jane"
-    ctx = config_store.get_context("eternia")
+    assert calls[0]["credential_scope_name"] == "context:server-1:org:alice-example"
+    ctx = config_store.get_context("server-1")
     assert ctx is not None
-    assert ctx.server_url == "https://sibyl.hyperbliss.tech"
-    assert ctx.org_slug == "stefanie-jane"
+    assert ctx.server_url == "https://sibyl.example.com"
+    assert ctx.org_slug == "alice-example"
 
 
 def test_login_auto_warns_when_env_token_overrides_saved_credentials(
@@ -382,7 +382,7 @@ def test_login_auto_requires_complete_local_credentials(
             api_url="http://testserver/api",
             no_browser=False,
             timeout_seconds=180,
-            email="stef@example.com",
+            email="alice@example.com",
             password=None,
         )
 
@@ -409,7 +409,7 @@ def test_login_auto_exits_non_zero_when_local_login_is_rejected(
             api_url="http://testserver/api",
             no_browser=False,
             timeout_seconds=180,
-            email="stef@example.com",
+            email="alice@example.com",
             password="wrong",
         )
 

@@ -326,7 +326,7 @@ describe('fetchApi auth state machine', () => {
 
     const { api } = await import('./api');
     await expect(
-      api.security.requestPasswordReset({ email: 'stef@hyperbliss.tech' })
+      api.security.requestPasswordReset({ email: 'alice@example.com' })
     ).resolves.toEqual({
       message: 'If an account exists, a reset email has been sent.',
     });
@@ -338,7 +338,7 @@ describe('fetchApi auth state machine', () => {
     ).resolves.toEqual({ success: true });
 
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
-      email: 'stef@hyperbliss.tech',
+      email: 'alice@example.com',
     });
     expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
       token: 'reset-token',

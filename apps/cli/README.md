@@ -165,7 +165,7 @@ server) cleanly isolated: memories only ever go to the server of the context in 
 
 ```bash
 # Define two servers as contexts (auth login creates + activates one in one step)
-sibyl auth login https://sibyl.hyperbliss.tech -c personal
+sibyl auth login https://sibyl.example.com -c personal
 sibyl auth login http://localhost:3334 -c work
 
 # Switch the global default

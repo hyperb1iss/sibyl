@@ -103,7 +103,7 @@ async def test_claude_code_adapter_preserves_turn_metadata(tmp_path: Path) -> No
                 "parentUuid": None,
                 "sessionId": "session-1",
                 "timestamp": "2026-05-29T04:52:48.980Z",
-                "cwd": "/Users/bliss/dev/sibyl",
+                "cwd": "/home/user/dev/sibyl",
                 "gitBranch": "main",
                 "message": {"role": "user", "content": "build the transcript adapter"},
             },
@@ -113,7 +113,7 @@ async def test_claude_code_adapter_preserves_turn_metadata(tmp_path: Path) -> No
                 "parentUuid": "turn-user-1",
                 "sessionId": "session-1",
                 "timestamp": "2026-05-29T04:53:00.000Z",
-                "cwd": "/Users/bliss/dev/sibyl",
+                "cwd": "/home/user/dev/sibyl",
                 "agentId": "agent-1",
                 "forkedFrom": "turn-root",
                 "promptId": "prompt-1",
@@ -192,7 +192,7 @@ async def test_codex_adapter_pairs_tool_calls_and_resumes(tmp_path: Path) -> Non
                 "payload": {
                     "id": "session-1",
                     "timestamp": "2026-05-30T00:00:00Z",
-                    "cwd": "/Users/bliss/dev/sibyl",
+                    "cwd": "/home/user/dev/sibyl",
                     "source": {"subagent": "review"},
                     "thread_source": {
                         "parent_uuid": "session-parent",
@@ -352,7 +352,7 @@ async def test_codex_adapter_emits_completed_custom_tool_call_in_place(
             {
                 "type": "session_meta",
                 "timestamp": "2026-05-30T00:00:00Z",
-                "payload": {"id": "session-1", "cwd": "/Users/bliss/dev/sibyl"},
+                "payload": {"id": "session-1", "cwd": "/home/user/dev/sibyl"},
             },
             {
                 "type": "response_item",

@@ -23,7 +23,7 @@ class _FakeClientContext:
 @patch("sibyl_cli.session.get_effective_server_url", return_value="http://localhost:3334")
 @patch("sibyl_cli.session.resolve_project_from_cwd", return_value="project_123")
 @patch(
-    "sibyl_cli.session.get_current_context", return_value=("project_123", "/Users/bliss/dev/sibyl")
+    "sibyl_cli.session.get_current_context", return_value=("project_123", "/home/user/dev/sibyl")
 )
 @patch("sibyl_cli.session.resolve_effective_context")
 @patch("sibyl_cli.session.get_client")
@@ -142,7 +142,7 @@ def test_session_bundle_json_packages_context_tasks_and_memories(
 @patch("sibyl_cli.session.get_effective_server_url", return_value="http://localhost:3334")
 @patch("sibyl_cli.session.resolve_project_from_cwd", return_value="project_123")
 @patch(
-    "sibyl_cli.session.get_current_context", return_value=("project_123", "/Users/bliss/dev/sibyl")
+    "sibyl_cli.session.get_current_context", return_value=("project_123", "/home/user/dev/sibyl")
 )
 @patch("sibyl_cli.session.resolve_effective_context")
 @patch("sibyl_cli.session.get_client")
@@ -222,7 +222,7 @@ def test_session_bundle_json_blends_raw_memory(
 @patch("sibyl_cli.session.get_effective_server_url", return_value="http://localhost:3334")
 @patch("sibyl_cli.session.resolve_project_from_cwd", return_value="project_123")
 @patch(
-    "sibyl_cli.session.get_current_context", return_value=("project_123", "/Users/bliss/dev/sibyl")
+    "sibyl_cli.session.get_current_context", return_value=("project_123", "/home/user/dev/sibyl")
 )
 @patch("sibyl_cli.session.resolve_effective_context")
 @patch("sibyl_cli.session.get_client")
@@ -348,7 +348,7 @@ def test_session_bundle_without_project_guides_user_to_link_one(
 @patch("sibyl_cli.session.get_effective_server_url", return_value="http://localhost:3334")
 @patch("sibyl_cli.session.resolve_project_from_cwd", return_value="project_123")
 @patch(
-    "sibyl_cli.session.get_current_context", return_value=("project_123", "/Users/bliss/dev/sibyl")
+    "sibyl_cli.session.get_current_context", return_value=("project_123", "/home/user/dev/sibyl")
 )
 @patch("sibyl_cli.session.resolve_effective_context")
 @patch("sibyl_cli.session.get_client")

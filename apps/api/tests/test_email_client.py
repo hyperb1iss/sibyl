@@ -79,7 +79,7 @@ async def test_email_client_sends_via_smtp_when_configured(
     monkeypatch.setattr(config_module.settings, "resend_api_key", SecretStr(""))
     monkeypatch.setattr(config_module.settings, "smtp_host", "smtp.gmail.com")
     monkeypatch.setattr(config_module.settings, "smtp_port", 587)
-    monkeypatch.setattr(config_module.settings, "smtp_username", "sibyl@hyperbliss.tech")
+    monkeypatch.setattr(config_module.settings, "smtp_username", "sibyl@example.com")
     monkeypatch.setattr(config_module.settings, "smtp_password", SecretStr("app-password"))
     monkeypatch.setattr(config_module.settings, "smtp_starttls", True)
     monkeypatch.setattr(config_module.settings, "smtp_ssl", False)
@@ -99,7 +99,7 @@ async def test_email_client_sends_via_smtp_when_configured(
 
     assert delivery_id == "smtp"
     assert ("starttls", context) in events
-    assert ("login", ("sibyl@hyperbliss.tech", "app-password")) in events
+    assert ("login", ("sibyl@example.com", "app-password")) in events
     assert any(event == "send" and "Reset your Sibyl password" in value for event, value in events)
 
 
@@ -131,7 +131,7 @@ async def test_email_client_smtp_ssl_uses_verified_context(
             return None
 
         def login(self, username: str, password: str) -> None:
-            assert username == "sibyl@hyperbliss.tech"
+            assert username == "sibyl@example.com"
             assert password == "app-password"
 
         def send_message(self, message: object) -> None:
@@ -141,7 +141,7 @@ async def test_email_client_smtp_ssl_uses_verified_context(
     monkeypatch.setattr(config_module.settings, "resend_api_key", SecretStr(""))
     monkeypatch.setattr(config_module.settings, "smtp_host", "smtp.gmail.com")
     monkeypatch.setattr(config_module.settings, "smtp_port", 465)
-    monkeypatch.setattr(config_module.settings, "smtp_username", "sibyl@hyperbliss.tech")
+    monkeypatch.setattr(config_module.settings, "smtp_username", "sibyl@example.com")
     monkeypatch.setattr(config_module.settings, "smtp_password", SecretStr("app-password"))
     monkeypatch.setattr(config_module.settings, "smtp_starttls", False)
     monkeypatch.setattr(config_module.settings, "smtp_ssl", True)
@@ -172,7 +172,7 @@ async def test_email_client_returns_outbox_when_smtp_fails_after_capture(
     monkeypatch.setattr(config_module.settings, "resend_api_key", SecretStr(""))
     monkeypatch.setattr(config_module.settings, "smtp_host", "smtp.gmail.com")
     monkeypatch.setattr(config_module.settings, "smtp_port", 587)
-    monkeypatch.setattr(config_module.settings, "smtp_username", "sibyl@hyperbliss.tech")
+    monkeypatch.setattr(config_module.settings, "smtp_username", "sibyl@example.com")
     monkeypatch.setattr(config_module.settings, "smtp_password", SecretStr("app-password"))
     monkeypatch.setattr(config_module.settings, "smtp_starttls", True)
     monkeypatch.setattr(config_module.settings, "smtp_ssl", False)
