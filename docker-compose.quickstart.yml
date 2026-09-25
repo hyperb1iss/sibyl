@@ -14,9 +14,7 @@
 #   - JWT secret auto-generated if not set
 #   - Default passwords suitable for local development only
 #
-# Default mode: fully Surreal (graph + content + auth in one SurrealDB instance).
-# Legacy imports are explicit archive migration flows. See
-# docs/guide/migrating-from-falkor.md for the cutover playbook.
+# SurrealDB is the only data store: graph, content, and auth in one instance.
 #
 # Optional environment variables for advanced setup:
 #   SIBYL_OPENAI_API_KEY      — Pre-configure via env (or enter in UI)

@@ -132,7 +132,7 @@ occur.
 {
   "name": "reflect",
   "arguments": {
-    "content": "Session notes: settled on Surreal-native storage, dropped the Postgres sidecar. Plan is to keep Postgres only for migration rehearsal.",
+    "content": "Session notes: settled on Surreal-native storage, dropped the Postgres sidecar.",
     "source_title": "Storage architecture session",
     "intent": "decide",
     "project": "proj_abc123",

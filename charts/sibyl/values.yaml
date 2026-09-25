@@ -14,8 +14,7 @@ global:
 publicUrl: ""
 
 # -- Storage mode configuration.
-# Sibyl's active Helm runtime is fully SurrealDB-backed.
-# Archive and legacy migration sidecars are operated outside this release chart.
+# Sibyl's Helm runtime is fully SurrealDB-backed.
 # -- Coordination backend: "auto", "local", or "redis"
 
 coordinationBackend: "auto"

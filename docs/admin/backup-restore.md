@@ -146,8 +146,8 @@ history and quarantined records instead of claiming every archived row was writt
 
 Auth, content and graph restore in separate stages. A failure does not imply a cross-namespace
 rollback. Preserve the failed archive and destination, inspect the reported stage, and retry only
-after correcting the cause. Database dumps and legacy PostgreSQL bundles are not accepted by this
-logical backup adapter.
+after correcting the cause. The loader accepts only Sibyl archives and API backups; it does not read
+raw database dumps or archives from other memory systems.
 
 ### Completed validation receipts
 

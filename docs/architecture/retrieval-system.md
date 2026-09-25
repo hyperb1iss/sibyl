@@ -125,7 +125,7 @@ set:
 | Raw lexical recall | Raw memory text store             | Exact-string matches in preserved sources |
 | Node full-text     | SurrealDB full-text index         | Lexical handles on entity name/content    |
 | Edge full-text     | SurrealDB full-text index         | Lexical handles on relationship facts     |
-| Episode full-text  | SurrealDB full-text index         | Lexical handles on episodic records       |
+| Episode full-text  | SurrealDB full-text index         | Lexical handles on `episode` records      |
 | Node vector        | SurrealDB KNN on `name_embedding` | Semantic similarity to entities           |
 | Edge vector        | SurrealDB KNN on `fact_embedding` | Semantic similarity to relationships      |
 | Graph expansion    | SurrealDB graph traversal         | k-hop neighbors of high-scoring seeds     |

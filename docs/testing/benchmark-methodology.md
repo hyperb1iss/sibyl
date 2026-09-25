@@ -5,7 +5,7 @@ local smoke checks, runtime artifacts, and offline baselines from drifting into 
 
 ## Recommended Order
 
-1. `moon run bench-live -- --label legacy --metadata store=legacy`
+1. `moon run bench-live -- --label native --metadata store=surreal`
 2. `moon run bench-live-smoke`
 3. `moon run core:bench-context -- --cases path/to/context_cases.json --label retrieval-native`
 4. `moon run bench-retrieval`
@@ -107,10 +107,10 @@ Use this for V2 full-suite work. A citable V2 result requires both `web` and `en
 the same tier, using the official reader and evaluator settings. See
 [LongMemEval-V2](./longmemeval-v2.md) for the command sequence and requirements.
 
-The committed `benchmarks/results/ai-memory/longmemeval_sibyl_raw_20260513.json` and
-`benchmarks/results/ai-memory/longmemeval_sibyl_hybrid_20260513.json` artifacts are full
-`longmemeval-offline-v2` outputs as of the v0.7 Surreal release work. Re-run the benchmark before
-using those numbers for a later release candidate.
+The committed `longmemeval_sibyl_{raw,hybrid}_20260513.json` and
+`longmemeval_sibyl_{raw,hybrid}_rc1_20260610.json` artifacts under `benchmarks/results/ai-memory/`
+are full `longmemeval-offline-v2` outputs kept as offline component baselines. Re-run the benchmark
+before using those numbers for a release candidate.
 
 `benchmarks/results/ai-memory/manifest.json` records which AI memory benchmark artifacts are citable
 for the release and which suites are planned coverage only. The manifest is checked against full
@@ -221,8 +221,8 @@ cost, and accounting schema for every row.
 
 ## Product Gates
 
-Post-v0.8 release claims use small product gates alongside benchmark gates. These do not replace the
-broad package suites; they make the claim boundary repeatable from a clean checkout.
+Release claims use small product gates alongside benchmark gates. These do not replace the broad
+package suites; they make the claim boundary repeatable from a clean checkout.
 
 `moon run synthesis-gate` is the source-grounded synthesis gate. It delegates to focused
 `sibyl-core` slices that require section-level source IDs, hidden-scope absence, unresolved-gap
@@ -311,30 +311,19 @@ a benchmark suite is missing from that ledger, add it there before citing the re
 - Smoke evidence: `moon run bench-live-smoke`
 - Offline evidence, if relevant: `moon run bench-retrieval` or `longmemeval_bench.py`
 
-## Store Comparison Flow
+## Deployment Comparison Flow
 
-> **Note (2026-07):** the legacy-vs-Surreal comparison below is historical. FalkorDB and PostgreSQL
-> are fully removed, and the current `sibyld migrate` CLI accepts only
-> `--source-type surreal-archive --target-mode surreal`; the `legacy-archive`, `postgres-rehearsal`,
-> and `--restore-database-dump` flags no longer exist.
-
-To compare two Surreal deployments (or validate a restore) on the same graph data today:
+To compare two SurrealDB deployments (or validate a restore) on the same graph data:
 
 1. Export a manifest archive from the source with
    `sibyld migrate export --org-id <org> --output /tmp/migration.tar.gz`
 2. Rehearse the import on the target with
    `moon run migrate-rehearse -- /tmp/migration.tar.gz --source-type surreal-archive --target-mode surreal --yes`
-3. Run `moon run bench-live -- --label <store> --metadata store=<store>` against each stack
+3. Run `moon run bench-live -- --label <deployment> --metadata deployment=<deployment>` against each
+   stack
 4. Compare the saved artifacts with
    `uv run python benchmarks/compare_eval_reports.py <baseline.json> <candidate.json>`
 
-Historically, the same flow compared FalkorDB/PostgreSQL against Surreal via
-`--source-type legacy-archive --target-mode postgres-rehearsal --restore-database-dump`, and
-maintenance-window swaps ran `moon run migrate-cutover -- ... --write-freeze-confirmed` with
-reopening writes as a separate explicit `--reopen-writes --acknowledge-no-instant-rollback` step.
-Those enums were removed in the v0.6–v1.0 line; the citable comparison artifacts from that era live
-in the benchmark ledger.
-
 Run `moon run chaos-archive -- /tmp/migration.tar.gz` when you want a quick corruption drill for the
-archive format itself. The current probe mutates checksums, graph counts, and organization IDs to
-make sure the validator rejects obviously bad cutover inputs before a restore window starts.
+archive format itself. The probe mutates checksums, graph counts, and organization IDs to make sure
+the validator rejects obviously bad archives before a restore window starts.

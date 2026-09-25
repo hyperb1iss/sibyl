@@ -1,80 +1,70 @@
 ---
 title: Storage Modes
-description: The supported storage configurations and when to pick each
+description: How Sibyl connects to SurrealDB and when to pick each connection mode
 ---
 
 # Storage Modes
 
-Sibyl's active runtime is SurrealDB. Current binaries only accept `SIBYL_STORE=surreal`; any other
-value, including `legacy`, is rejected at startup. `legacy` is historical context for the v0.6
-compatibility archives, not a runtime you can select today.
+SurrealDB is Sibyl's only store. Graph memory, content, auth, tasks, raw captures, and derived
+indexes all live in one SurrealDB data plane, with per-org isolation through namespaces
+(`org_<uuid_hex>`). `SIBYL_STORE` and `SIBYL_AUTH_STORE` accept only `surreal`, and any other value
+fails config validation at startup.
 
-| Mode                          | `SIBYL_STORE` | Auth store | Coordination | External services               |
-| ----------------------------- | ------------- | ---------- | ------------ | ------------------------------- |
-| **Fully Surreal** _(default)_ | `surreal`     | SurrealDB  | `local`      | SurrealDB                       |
-| **Archive rehearsal**         | `surreal`     | SurrealDB  | `local`      | SurrealDB + external PostgreSQL |
+What varies is how a process reaches SurrealDB:
 
-Active auth, content, crawler, raw-capture, graph, and RAG runtime paths resolve through SurrealDB.
-PostgreSQL remains only for explicit historical archive import/restore rehearsal against an
-operator-managed database. Fully Surreal is the only recommended target for new deployments.
-`SIBYL_AUTH_STORE` now only accepts `surreal`; a leftover `SIBYL_AUTH_STORE=postgres` fails config
-validation.
+| Mode                   | Setting                                 | Resolved URL                 | Use it for                |
+| ---------------------- | --------------------------------------- | ---------------------------- | ------------------------- |
+| **Server** _(prod)_    | `SIBYL_SURREAL_URL=ws://host:8000/rpc`  | `ws://...` or `http://...`   | Production, multi-process |
+| **Embedded SurrealKV** | `SIBYL_SURREAL_DATA_DIR=./path/to/data` | `surrealkv://./path/to/data` | Single-process local dev  |
+| **In-memory**          | neither set                             | `memory://`                  | Tests only                |
 
-Existing installs should read the
-[SurrealDB migration release notes](./surrealdb-migration-release-notes.md) before upgrading.
+`SIBYL_SURREAL_URL` wins when both are set. With neither set, Sibyl falls back to `memory://`, which
+the production config validator rejects.
 
-Set `SIBYL_COORDINATION_BACKEND=auto` (the default) and sibyld picks the right coordination backend
-for each mode. Override it only when you need Redis-backed coordination for multi-process Surreal
-dev.
+## Server
 
-## Archive And Rollback Policy
-
-Archive rehearsal is evidence work, not an alternate runtime. Historical PostgreSQL dump payloads
-may be restored only against an operator-managed rehearsal database, then verified through explicit
-`sibyld migrate` commands.
-
-Rollback has a narrow operational boundary:
-
-- before SurrealDB accepts new production writes, point traffic back to the preserved source
-  deployment and unfreeze source writes if needed;
-- after SurrealDB accepts new writes, do not treat the historical PostgreSQL/FalkorDB stack as a
-  lossless rollback target. Restore from Surreal backups or replay source archives deliberately.
-
-## Fully Surreal (default)
-
-**Pick this for:** new installs, self-hosted local dev, simpler ops.
-
-Graph, content, and auth all live in one SurrealDB instance, with per-org isolation via namespaces
-(`org_<uuid_hex>`). No PostgreSQL, no Redis, no FalkorDB.
+**Pick this for:** production, shared dev stacks, and anything that runs the API and a worker as
+separate processes.
 
 ```bash
-SIBYL_STORE=surreal
-# SIBYL_SURREAL_URL=ws://surrealdb:8000/rpc  (or)
-# SIBYL_SURREAL_DATA_DIR=./.moon/cache/surreal-dev
+SIBYL_SURREAL_URL=ws://surrealdb:8000/rpc
+SIBYL_SURREAL_USERNAME=root
+SIBYL_SURREAL_PASSWORD=<secure-password>
 ```
 
-- **Dev:** `moon run dev` starts local SurrealDB backed by SurrealKV automatically.
-- **Prod:** run SurrealDB as a service (`ws://` or `http://` URL). In-memory mode (`memory://`) is
-  rejected by the production config validator.
-- **Server version:** use SurrealDB 3.x, and pin the exact server image/tag in production.
+- Run SurrealDB 3.x as a service and pin the exact server image or tag in production.
+- Each org gets its own connection-pooled client scoped to its namespace, so queries within an org
+  run concurrently.
 
-## Archive Rehearsal
+## Embedded SurrealKV
 
-**Pick this for:** validating retained migration archives or database dump restore behavior.
+**Pick this for:** a fresh checkout with zero external services.
 
 ```bash
-SIBYL_STORE=surreal
-SIBYL_COORDINATION_BACKEND=local
+SIBYL_SURREAL_DATA_DIR=./.moon/cache/surreal-dev
 ```
 
-- SurrealDB backs graph, auth/RBAC, content, and RAG runtime paths
-- PostgreSQL dump payloads remain available only for migration and rollback evidence
-- Redis/Valkey is optional for distributed coordination and must be enabled explicitly
+- `moon run dev` starts local SurrealDB backed by SurrealKV automatically.
+- Embedded mode is single-writer. Sibyl clamps embedded clients to one connection, so keep it to a
+  single process. For real concurrency, run SurrealDB as a server.
+- In production, embedded mode also needs `SIBYL_ALLOW_EMBEDDED_SINGLE_WRITER=1`. Set it only when
+  one daemon owns the database.
 
-## Switching modes
+## In-Memory
 
-- **New install:** leave defaults alone. Fully Surreal is the default.
-- **Legacy → Surreal:** see [migrating-from-falkor.md](./migrating-from-falkor.md). The migration is
-  CLI-driven (`sibyld migrate export|import|verify`) and supports rehearsal runs.
-- **PostgreSQL auth removal:** if an old `.env` still sets `SIBYL_AUTH_STORE=postgres`, remove it.
-  The server rejects that value, and `moon run dev` normalizes local startup back to Surreal auth.
+`memory://` exists for test suites. It holds nothing across restarts and is forbidden when
+`SIBYL_ENVIRONMENT=production`.
+
+## Coordination
+
+Coordination (jobs, locks, pub/sub, pending state) is separate from storage. Leave
+`SIBYL_COORDINATION_BACKEND=auto`, the default, and sibyld resolves it to in-process `local`
+coordination unless Redis settings are present. Set `redis` explicitly for multi-process or
+multi-replica deployments.
+
+## Backups and Restore
+
+Back up SurrealDB with logical exports or storage snapshots, and restore Sibyl archives with
+`sibyld migrate import <archive> --source-type surreal-archive --target-mode surreal`. Restore
+accepts only archives and backups produced by Sibyl's own SurrealDB export. See
+[Backup and Restore](../admin/backup-restore.md) for the full procedure.

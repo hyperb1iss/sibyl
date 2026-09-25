@@ -35,8 +35,8 @@ versions as fallbacks.
 | `SIBYL_AUTH_STORE`           | `surreal` | Auth persistence. Only `surreal` is supported     |
 | `SIBYL_COORDINATION_BACKEND` | `auto`    | Jobs, locks, pub/sub: `auto`, `local`, or `redis` |
 
-`auto` resolves to local in-process coordination for the default Surreal runtime. Use `redis` for
-multi-pod deployments. See [storage-modes.md](../guide/storage-modes.md) for the full mode matrix.
+`auto` resolves to local in-process coordination unless Redis settings are present. Use `redis` for
+multi-pod deployments. See [Storage Modes](../guide/storage-modes.md) for the connection options.
 
 ## SurrealDB
 
@@ -188,29 +188,6 @@ Fallbacks:
 | `SIBYL_RATE_LIMIT_ENABLED` | `true`       | Enable rate limiting                    |
 | `SIBYL_RATE_LIMIT_DEFAULT` | `100/minute` | Default rate limit                      |
 | `SIBYL_RATE_LIMIT_STORAGE` | `memory://`  | Storage backend (memory:// or redis://) |
-
-## PostgreSQL (migration/rehearsal only)
-
-PostgreSQL is not part of the Sibyl runtime and is not read by the `Settings` model. It is consumed
-only by the standalone `migrate` CLI when explicitly restoring a retained `postgres.sql` payload
-against an operator-managed PostgreSQL database. Structured auth and content archive export reads
-SurrealDB. Remove any stale `SIBYL_AUTH_STORE=postgres` value before starting the API.
-
-The variables below are **not** `SIBYL_` Settings fields. They are read directly by the migration
-tooling for a rehearsal database connection and are ignored by the running API and worker.
-
-| Variable                      | Default     | Description                                 |
-| ----------------------------- | ----------- | ------------------------------------------- |
-| `SIBYL_POSTGRES_HOST`         | `localhost` | External rehearsal database host            |
-| `SIBYL_POSTGRES_PORT`         | `5433`      | External rehearsal database port            |
-| `SIBYL_POSTGRES_USER`         | `sibyl`     | External rehearsal database username        |
-| `SIBYL_POSTGRES_PASSWORD`     | `sibyl_dev` | External rehearsal database password        |
-| `SIBYL_POSTGRES_DB`           | `sibyl`     | External rehearsal database name            |
-| `SIBYL_POSTGRES_POOL_SIZE`    | `10`        | External rehearsal database connection pool |
-| `SIBYL_POSTGRES_MAX_OVERFLOW` | `20`        | External rehearsal database overflow limit  |
-
-Configure them only when running a migration that explicitly restores a retained `postgres.sql`
-payload. They have no effect on the default Surreal runtime.
 
 ## Redis/Valkey Coordination
 
@@ -447,35 +424,6 @@ SIBYL_SMTP_STARTTLS=true
 SIBYL_EMAIL_FROM=Sibyl <sibyl@example.com>
 ```
 
-### Migration Archive Rehearsal
-
-Use PostgreSQL settings only when explicitly restoring or validating a retained `postgres.sql`
-payload. New production deployments should use the fully Surreal example above.
-
-```bash
-SIBYL_ENVIRONMENT=production
-SIBYL_JWT_SECRET=<generate with: openssl rand -hex 32>
-SIBYL_SETTINGS_KEY=<generate with: openssl rand -base64 32 | tr '+/' '-_'>
-SIBYL_PUBLIC_URL=https://sibyl.example.com
-
-# Surreal target
-SIBYL_SURREAL_URL=ws://prod-surrealdb.internal:8000/rpc
-SIBYL_SURREAL_USERNAME=root
-SIBYL_SURREAL_PASSWORD=<secure-password>
-
-# Optional historical archive rehearsal database
-SIBYL_POSTGRES_HOST=prod-postgres.internal
-SIBYL_POSTGRES_PORT=5433
-SIBYL_POSTGRES_PASSWORD=<secure-password>
-
-# LLM
-SIBYL_OPENAI_API_KEY=sk-...
-SIBYL_ANTHROPIC_API_KEY=sk-ant-...
-
-# Rate limiting with Redis
-SIBYL_RATE_LIMIT_STORAGE=redis://prod-redis.internal:6379
-```
-
 ### Kubernetes ConfigMap
 
 Non-secret environment variables in ConfigMap:
@@ -513,9 +461,7 @@ stringData:
   SIBYL_SETTINGS_KEY: "<fernet-key>" # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
   SIBYL_OPENAI_API_KEY: "sk-..." # Optional if using DB-stored keys
   SIBYL_ANTHROPIC_API_KEY: "sk-ant-..." # Optional if using DB-stored keys
-  SIBYL_SURREAL_PASSWORD: "<surreal-password>" # For surreal mode
-  # Migration/archive only:
-  # SIBYL_POSTGRES_PASSWORD: "<db-password>"
+  SIBYL_SURREAL_PASSWORD: "<surreal-password>"
 ```
 
 ## Running Multiple Instances
@@ -588,8 +534,5 @@ settings.fully_surreal         # always True; graph, content, and auth are Surre
 settings.resolved_coordination_backend  # resolves "auto" to "local" or "redis"
 ```
 
-Sibyl is fully SurrealDB-backed, so `fully_surreal` always returns `True`. There are no PostgreSQL
-connection helpers or relational-shape flags on `Settings` (`postgres_url`, `postgres_url_sync`,
-`uses_relational_auth`, and `requires_relational_support` do not exist). PostgreSQL connection
-details live with the migration tooling described under
-[PostgreSQL (migration/rehearsal only)](#postgresql-migrationrehearsal-only).
+Sibyl is fully SurrealDB-backed, so `fully_surreal` always returns `True`. `Settings` has no
+relational connection helpers.

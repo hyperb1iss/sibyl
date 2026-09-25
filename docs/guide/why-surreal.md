@@ -5,13 +5,12 @@ description: Why Sibyl uses SurrealDB as the default store
 
 # Why SurrealDB
 
-Sibyl used to run on three separate databases: FalkorDB for the knowledge graph, PostgreSQL for
-relational auth and crawled docs, and Redis for the job queue. It worked, but three backends means
-three upgrade paths, three backup strategies, three health checks, and three sets of connection
-strings in every compose file and chart. For a tool that's supposed to give you memory, the
-operational surface was heavier than the product itself.
+A memory system needs a graph, a vector index, full-text search, relational auth records, and a
+place for documents. Split across separate databases, that means separate upgrade paths, backup
+strategies, health checks, and connection strings in every compose file and chart. For a tool that's
+supposed to give you memory, that operational surface would be heavier than the product itself.
 
-**SurrealDB replaces the whole stack with one engine.**
+**SurrealDB covers all of it with one engine.**
 
 ## What you get
 
@@ -24,28 +23,18 @@ operational surface was heavier than the product itself.
   retrieval doesn't have to fan out across stores.
 - **Fewer connection boundaries.** One driver, one auth model, one set of queries. The API and
   worker talk to the same WebSocket endpoint.
-- **Archive compatibility.** Legacy Graphiti/Falkor exports restore through Sibyl-owned Surreal
-  projection and archive code, so old data remains recoverable without keeping Graphiti in the
-  supported runtime.
+- **One archive format.** `sibyld migrate export` and the API backups write Sibyl's own SurrealDB
+  archive, and `sibyld migrate import` restores it. There is no second format to keep compatible.
 
 ## Honest tradeoffs
 
-- **Less battle-tested than Postgres** for deep relational workloads. If you have a mature Postgres
-  story (PITR, managed service, replicas), PostgreSQL archives can still support migration rehearsal
-  and rollback evidence, but they are not a long-term runtime destination.
+- **Less battle-tested than Postgres** for deep relational workloads. Mature Postgres operations
+  (point-in-time recovery, managed services, read replicas) have no one-to-one SurrealDB equivalent
+  yet, so plan backups around logical exports and storage snapshots.
 - **Embedded mode is single-writer.** Multi-process local dev on embedded Surreal serializes through
   one writer; for real concurrency, run SurrealDB as a service (`ws://...`).
 - **Younger tooling.** Third-party tooling around SurrealDB (observability dashboards, migration
-  frameworks) is thinner than Postgres'. The remaining relational path exists to stage legacy
-  content migration, not to keep two product stacks forever.
+  frameworks) is thinner than Postgres'.
 
-## Migrating existing legacy installs
-
-Do not start new runtime work on FalkorDB or PostgreSQL auth. If an existing install still has
-FalkorDB data, export an archive from that source install, rehearse the import, and cut over to
-SurrealDB deliberately. PostgreSQL is now a restore-only archive compatibility surface, not an
-active content runtime. See [storage-modes.md](./storage-modes.md) for the mode matrix and
-[migrating-from-falkor.md](./migrating-from-falkor.md) for the cutover playbook.
-
-The direction is clear: new installs default to fully Surreal, existing installs migrate
-deliberately, then FalkorDB and PostgreSQL leave the product surface.
+See [Storage Modes](./storage-modes.md) for the connection options and
+[Backup And Restore](../admin/backup-restore.md) for the recovery story.

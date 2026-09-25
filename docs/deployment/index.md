@@ -12,27 +12,18 @@ Sibyl consists of four components plus one unified storage backend:
 | **Backend**   | FastAPI + MCP server (sibyld serve) | 3334   |
 | **Worker**    | arq job queue processor             | -      |
 | **Frontend**  | Next.js 16 web UI                   | 3337   |
-| **SurrealDB** | Graph + content + auth (default)    | 8000\* |
+| **SurrealDB** | Graph + content + auth              | 8000\* |
 
 \*Default internal ports. External mappings vary by deployment mode.
 
-> **Migration-only:** PostgreSQL is **not** a deployed Sibyl component. It is consumed only by the
-> standalone `migrate` CLI when restoring a retained `postgres.sql` archive against an
-> operator-managed database (default port `5433`). It never runs as an ambient sidecar in any
-> supported deployment.
-
 ## Runtime Boundary
 
-- SurrealDB is the only required data service for new local, single-host, and supported production
-  deployments.
+- SurrealDB is the only data service Sibyl needs, for local, single-host, and production deployments
+  alike.
 - Redis/Valkey coordination is explicit opt-in. Use it for multi-process or multi-replica
   deployments by setting `SIBYL_COORDINATION_BACKEND=redis` or Helm `coordinationBackend: redis`.
-- PostgreSQL and preserved FalkorDB installs are migration sources or archive-rehearsal inputs, not
-  ambient sidecars for current deployments.
-- Rollback is bounded by the write-freeze window. Before SurrealDB accepts new production writes,
-  traffic can return to the preserved source deployment. After writes reopen on SurrealDB, recovery
-  uses Surreal backups, archive receipts, and deliberate replay, not an instant switch back to
-  legacy services.
+- Recovery uses SurrealDB backups and Sibyl archive restores. See
+  [Backup And Restore](../admin/backup-restore.md).
 
 ```
                                    +------------------+
@@ -68,9 +59,7 @@ Sibyl consists of four components plus one unified storage backend:
                                    +------------------+
 ```
 
-PostgreSQL is retained only as an external archive-rehearsal target. See
-[storage-modes.md](../guide/storage-modes.md) and
-[migrating-from-falkor.md](../guide/migrating-from-falkor.md).
+See [Storage Modes](../guide/storage-modes.md) for how each process connects to SurrealDB.
 
 ## Deployment Modes
 
