@@ -202,14 +202,29 @@ async def test_chunk_vectors_come_back_with_the_model_that_made_them(
     assert metadata == expected
     # A query is scored only against chunks stamped with the space it was embedded in.
     assert query_metadata == expected
-    assert await EmbeddingService().chunk_embedding_metadata() == expected
+    assert await EmbeddingService().chunk_embedding_metadata() == (expected, True)
 
 
 @pytest.mark.asyncio
-async def test_chunk_embedding_metadata_is_none_without_a_usable_key(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("provider", ["openai", "provider-this-service-lacks"])
+async def test_chunk_stamp_survives_an_embedder_that_cannot_run(
+    monkeypatch: pytest.MonkeyPatch, provider: str
 ) -> None:
-    service = FakeSettingsService({"embedding_provider": "openai"})
+    service = FakeSettingsService(
+        {
+            "embedding_provider": provider,
+            "embedding_model": "configured-model",
+            "embedding_dimensions": "1536",
+        }
+    )
     monkeypatch.setattr(embedder_module, "get_settings_service", lambda: service)
 
-    assert await EmbeddingService().chunk_embedding_metadata() is None
+    stamp, runnable = await EmbeddingService().chunk_embedding_metadata()
+
+    assert runnable is False
+    assert stamp == {
+        "provider": provider,
+        "model": "configured-model",
+        "dimensions": 1536,
+        "text_version": "document-chunk-v1",
+    }

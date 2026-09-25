@@ -189,18 +189,32 @@ class EmbeddingService:
         embedding = (await self._embed_texts_with_config([text], config, kind="query"))[0]
         return embedding, config.chunk_metadata()
 
-    async def chunk_embedding_metadata(self) -> dict[str, str | int] | None:
-        """The stamp chunk writes carry today, or None when no embedder can run.
+    async def chunk_embedding_metadata(self) -> tuple[dict[str, str | int], bool]:
+        """The stamp chunk writes carry today, and whether this service can embed.
 
-        A provider whose client cannot be built (a missing credential) has no
-        vectors to offer, so the chunk sweep treats it as unconfigured.
+        The stamp comes from the configured values even when no client can be
+        built for them (a missing credential, or a provider this service does
+        not speak), because the embedding sweep's one-time verdict on legacy
+        chunk vectors must compare against the configured model before any
+        repair restamps the evidence it reads.
         """
-        config = await self._resolve_config()
         try:
+            config = await self._resolve_config()
             await self._get_client(config)
         except ValueError:
-            return None
-        return config.chunk_metadata()
+            service = get_settings_service()
+            provider = str(await service.get("embedding_provider") or settings.embedding_provider)
+            model = self.model or await service.get("embedding_model") or settings.embedding_model
+            dimensions = self.dimensions or await service.get("embedding_dimensions")
+            return (
+                document_chunk_embedding_metadata(
+                    provider=provider.strip(),
+                    model=str(model),
+                    dimensions=int(dimensions or settings.embedding_dimensions),
+                ),
+                False,
+            )
+        return config.chunk_metadata(), True
 
     async def _embed_texts_with_config(
         self,

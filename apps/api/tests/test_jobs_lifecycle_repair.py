@@ -3,9 +3,44 @@
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
 
+import pytest
+
 from sibyl.jobs import lifecycle_repair
 from sibyl.jobs.worker import WorkerSettings, get_schedule_specs
 from sibyl_core.projection.repair import LifecycleRepairResult
+from sibyl_core.services.embedding_sweep import SWEEP_CURRENT, EmbeddingSweepResult
+
+_NO_EMBEDDING_WORK = {
+    "embedding_checked": 0,
+    "embedding_reembedded": 0,
+    "embedding_adopted": 0,
+    "embedding_pending": 0,
+    "embedding_skipped": 0,
+    "embedding_rejected": 0,
+    "embedding_failed": 0,
+}
+
+
+@pytest.fixture(autouse=True)
+def quiet_embedding_sweeps(monkeypatch):
+    """Keep the sweeps out of tests about the other repairs."""
+    monkeypatch.setattr(
+        lifecycle_repair,
+        "document_chunk_sweep_inputs",
+        AsyncMock(return_value=({"provider": "fake"}, True, AsyncMock())),
+    )
+    monkeypatch.setattr(lifecycle_repair, "decide_document_chunk_legacy_vectors", AsyncMock())
+    monkeypatch.setattr(lifecycle_repair, "decide_graph_legacy_vectors", AsyncMock())
+    monkeypatch.setattr(
+        lifecycle_repair,
+        "sweep_document_chunk_embeddings",
+        AsyncMock(return_value=EmbeddingSweepResult(plane="document_chunks", status=SWEEP_CURRENT)),
+    )
+    monkeypatch.setattr(
+        lifecycle_repair,
+        "sweep_graph_embeddings",
+        AsyncMock(return_value=EmbeddingSweepResult(plane="graph", status=SWEEP_CURRENT)),
+    )
 
 
 async def test_scheduled_repair_continues_after_org_failure(monkeypatch):
@@ -46,6 +81,7 @@ async def test_scheduled_repair_continues_after_org_failure(monkeypatch):
         "recovered": 6,
         "pending": 1,
         "failed": 2,
+        **_NO_EMBEDDING_WORK,
     }
     repair.assert_awaited_once_with(runtime)
     assert entered == ["a", "b"]
@@ -103,3 +139,141 @@ async def test_repair_rejects_deleted_user(monkeypatch):
         lifecycle_repair, "resolve_auth_context", AsyncMock(side_effect=UserNotFoundError("gone"))
     )
     assert await lifecycle_repair.resolve_source_authority("org", "owner") is None
+
+
+async def test_embedding_verdicts_settle_before_the_repairs_that_restamp_evidence(monkeypatch):
+    order: list[str] = []
+
+    def record(name, result=None):
+        async def run(*_args, **_kwargs):
+            order.append(name)
+            return result
+
+        return run
+
+    @asynccontextmanager
+    async def background(_group_id):
+        yield object()
+
+    monkeypatch.setattr(lifecycle_repair, "list_org_ids", AsyncMock(return_value=["org"]))
+    monkeypatch.setattr(lifecycle_repair, "background_graph_runtime", background)
+    monkeypatch.setattr(
+        lifecycle_repair, "decide_document_chunk_legacy_vectors", record("chunk_verdict")
+    )
+    monkeypatch.setattr(lifecycle_repair, "decide_graph_legacy_vectors", record("graph_verdict"))
+    monkeypatch.setattr(
+        lifecycle_repair,
+        "repair_graph_lifecycle",
+        record("graph_lifecycle", LifecycleRepairResult()),
+    )
+    monkeypatch.setattr(
+        lifecycle_repair,
+        "repair_promoted_embeddings",
+        record("promoted", LifecycleRepairResult()),
+    )
+    monkeypatch.setattr(
+        lifecycle_repair,
+        "repair_raw_source_lifecycle",
+        record("raw_lifecycle", LifecycleRepairResult()),
+    )
+    monkeypatch.setattr(
+        lifecycle_repair,
+        "repair_raw_capture_embeddings",
+        record("raw_embeddings", LifecycleRepairResult()),
+    )
+    monkeypatch.setattr(
+        lifecycle_repair,
+        "sweep_graph_embeddings",
+        record(
+            "graph_sweep",
+            EmbeddingSweepResult(
+                plane="graph", status="partial", checked=5, recovered=3, pending=2, skipped=1
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        lifecycle_repair,
+        "sweep_document_chunk_embeddings",
+        record(
+            "chunk_sweep",
+            EmbeddingSweepResult(plane="document_chunks", status="completed", adopted=4),
+        ),
+    )
+
+    result = await lifecycle_repair.repair_lifecycle_all_orgs({})
+
+    assert order.index("chunk_verdict") < order.index("raw_embeddings")
+    assert order.index("graph_verdict") < order.index("promoted")
+    assert {key: value for key, value in result.items() if key.startswith("embedding_")} == {
+        "embedding_checked": 5,
+        "embedding_reembedded": 3,
+        "embedding_adopted": 4,
+        "embedding_pending": 2,
+        "embedding_skipped": 1,
+        "embedding_rejected": 0,
+        "embedding_failed": 0,
+    }
+
+
+async def test_an_unsettled_chunk_verdict_holds_back_raw_restamping(monkeypatch):
+    @asynccontextmanager
+    async def background(_group_id):
+        yield object()
+
+    monkeypatch.setattr(lifecycle_repair, "list_org_ids", AsyncMock(return_value=["org"]))
+    monkeypatch.setattr(lifecycle_repair, "background_graph_runtime", background)
+    monkeypatch.setattr(
+        lifecycle_repair,
+        "decide_document_chunk_legacy_vectors",
+        AsyncMock(side_effect=ConnectionError("content store unavailable")),
+    )
+    for name in ("repair_graph_lifecycle", "repair_promoted_embeddings"):
+        monkeypatch.setattr(lifecycle_repair, name, AsyncMock(return_value=LifecycleRepairResult()))
+    raw_lifecycle = AsyncMock(return_value=LifecycleRepairResult())
+    raw_embeddings = AsyncMock(return_value=LifecycleRepairResult())
+    chunk_sweep = AsyncMock()
+    monkeypatch.setattr(lifecycle_repair, "repair_raw_source_lifecycle", raw_lifecycle)
+    monkeypatch.setattr(lifecycle_repair, "repair_raw_capture_embeddings", raw_embeddings)
+    monkeypatch.setattr(lifecycle_repair, "sweep_document_chunk_embeddings", chunk_sweep)
+
+    await lifecycle_repair.repair_lifecycle_all_orgs({})
+
+    raw_lifecycle.assert_awaited_once()
+    raw_embeddings.assert_not_awaited()
+    chunk_sweep.assert_not_awaited()
+
+
+async def test_a_failed_graph_sweep_keeps_the_graph_lifecycle_counts(monkeypatch):
+    @asynccontextmanager
+    async def background(_group_id):
+        yield object()
+
+    monkeypatch.setattr(lifecycle_repair, "list_org_ids", AsyncMock(return_value=["org"]))
+    monkeypatch.setattr(lifecycle_repair, "background_graph_runtime", background)
+    monkeypatch.setattr(
+        lifecycle_repair,
+        "repair_graph_lifecycle",
+        AsyncMock(return_value=LifecycleRepairResult(checked=2, recovered=2)),
+    )
+    monkeypatch.setattr(
+        lifecycle_repair,
+        "repair_promoted_embeddings",
+        AsyncMock(return_value=LifecycleRepairResult()),
+    )
+    monkeypatch.setattr(
+        lifecycle_repair,
+        "repair_raw_source_lifecycle",
+        AsyncMock(return_value=LifecycleRepairResult()),
+    )
+    monkeypatch.setattr(
+        lifecycle_repair,
+        "repair_raw_capture_embeddings",
+        AsyncMock(return_value=LifecycleRepairResult()),
+    )
+    monkeypatch.setattr(
+        lifecycle_repair, "sweep_graph_embeddings", AsyncMock(side_effect=TimeoutError())
+    )
+
+    result = await lifecycle_repair.repair_lifecycle_all_orgs({})
+
+    assert (result["checked"], result["recovered"], result["failed_organizations"]) == (2, 2, 1)

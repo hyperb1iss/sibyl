@@ -1,11 +1,13 @@
 """Scheduled recovery of captures and graph rows awaiting source checks."""
 
 import asyncio
+from collections.abc import Awaitable
 from dataclasses import asdict
 from typing import Any
 
 import structlog
 
+from sibyl.jobs.embedding_sweep import document_chunk_sweep_inputs
 from sibyl.persistence.auth_common import InvalidAuthClaimsError, UserNotFoundError
 from sibyl.persistence.auth_runtime import (
     list_accessible_delegated_scope_keys,
@@ -14,8 +16,22 @@ from sibyl.persistence.auth_runtime import (
     resolve_auth_context,
 )
 from sibyl.persistence.organization_runtime import list_org_ids
-from sibyl_core.projection.repair import repair_graph_lifecycle
+from sibyl_core.projection.repair import LifecycleRepairResult, repair_graph_lifecycle
 from sibyl_core.services.content_raw_embedding_repair import repair_raw_capture_embeddings
+from sibyl_core.services.document_embedding_sweep import (
+    ChunkEmbedder,
+    decide_document_chunk_legacy_vectors,
+    sweep_document_chunk_embeddings,
+)
+from sibyl_core.services.embedding_sweep import (
+    SWEEP_CURRENT,
+    SWEEP_SKIPPED_NO_PROVIDER,
+    EmbeddingSweepResult,
+)
+from sibyl_core.services.graph_embedding_sweep import (
+    decide_graph_legacy_vectors,
+    sweep_graph_embeddings,
+)
 from sibyl_core.services.graph_runtime import background_graph_runtime
 from sibyl_core.services.memory_embedding import repair_promoted_embeddings
 from sibyl_core.services.memory_source_validation import (
@@ -53,13 +69,113 @@ async def resolve_source_authority(
     )
 
 
-async def _repair_graph(organization_id: str):
+_EMBEDDING_SUMMARY_KEYS = (
+    "embedding_checked",
+    "embedding_reembedded",
+    "embedding_adopted",
+    "embedding_pending",
+    "embedding_skipped",
+    "embedding_rejected",
+    "embedding_failed",
+)
+
+
+async def _repair_graph(
+    organization_id: str,
+) -> tuple[LifecycleRepairResult, EmbeddingSweepResult | BaseException]:
     async with background_graph_runtime(organization_id) as runtime:
-        lifecycle = await repair_graph_lifecycle(runtime)
-        embeddings = await repair_promoted_embeddings(runtime)
-        return type(lifecycle)(
+        # The sweep's verdict on unstamped vectors reads stamps that the
+        # promoted-embedding repair can rewrite, so it is settled first.
+        sweep_task: asyncio.Task[EmbeddingSweepResult] | None = None
+        sweep: EmbeddingSweepResult | BaseException
+        try:
+            await decide_graph_legacy_vectors(runtime)
+        except Exception as exc:
+            sweep = exc
+        else:
+            sweep_task = asyncio.create_task(sweep_graph_embeddings(runtime))
+        try:
+            lifecycle = await repair_graph_lifecycle(runtime)
+            embeddings = await repair_promoted_embeddings(runtime)
+        finally:
+            if sweep_task is not None:
+                try:
+                    sweep = await sweep_task
+                except Exception as exc:
+                    sweep = exc
+        combined = type(lifecycle)(
             **{key: value + asdict(embeddings)[key] for key, value in asdict(lifecycle).items()}
         )
+        return combined, sweep
+
+
+async def _settle_chunk_verdict(
+    organization_id: str,
+) -> tuple[dict[str, Any], bool, ChunkEmbedder] | None:
+    """Record the chunk plane's verdict, or None when it could not be settled.
+
+    The verdict reads raw capture stamps, which the raw embedding repair
+    rewrites after a provider switch, so it must be settled before that
+    repair runs in the same pass.
+    """
+    try:
+        stamp, runnable, embed_chunks = await document_chunk_sweep_inputs()
+        await decide_document_chunk_legacy_vectors(
+            organization_id, stamp=stamp, embed_chunks=embed_chunks
+        )
+    except Exception as exc:
+        log.warning(
+            "embedding_sweep_chunk_verdict_failed",
+            group_id=organization_id,
+            error_type=type(exc).__name__,
+        )
+        return None
+    return stamp, runnable, embed_chunks
+
+
+async def _repair_organization(organization_id: str) -> list[object]:
+    """Run every repair for one organization, isolating each one's failure."""
+    chunk_plane = await _settle_chunk_verdict(organization_id)
+    repairs: list[Awaitable[object]] = [
+        _repair_graph(organization_id),
+        repair_raw_source_lifecycle(organization_id, authority_resolver=resolve_source_authority),
+    ]
+    if chunk_plane is not None:
+        stamp, runnable, embed_chunks = chunk_plane
+        repairs.append(repair_raw_capture_embeddings(organization_id))
+        repairs.append(
+            sweep_document_chunk_embeddings(
+                organization_id, stamp=stamp if runnable else None, embed_chunks=embed_chunks
+            )
+        )
+    return list(await asyncio.gather(*repairs, return_exceptions=True))
+
+
+def _record_embedding_sweep(
+    summary: dict[str, int], organization_id: str, sweep: EmbeddingSweepResult
+) -> None:
+    summary["embedding_checked"] += sweep.checked
+    summary["embedding_reembedded"] += sweep.recovered
+    summary["embedding_adopted"] += sweep.adopted
+    summary["embedding_pending"] += sweep.pending
+    summary["embedding_skipped"] += sweep.skipped
+    summary["embedding_rejected"] += sweep.rejected
+    summary["embedding_failed"] += sweep.failed
+    if sweep.status in {SWEEP_CURRENT, SWEEP_SKIPPED_NO_PROVIDER}:
+        return
+    log.info(
+        "lifecycle_embedding_sweep",
+        group_id=organization_id,
+        plane=sweep.plane,
+        status=sweep.status,
+        checked=sweep.checked,
+        reembedded=sweep.recovered,
+        adopted=sweep.adopted,
+        pending=sweep.pending,
+        skipped=sweep.skipped,
+        rejected=sweep.rejected,
+        failed=sweep.failed,
+    )
 
 
 async def repair_lifecycle_all_orgs(ctx: dict[str, Any]) -> dict[str, int]:  # noqa: ARG001
@@ -70,28 +186,29 @@ async def repair_lifecycle_all_orgs(ctx: dict[str, Any]) -> dict[str, int]:  # n
         "recovered": 0,
         "pending": 0,
         "failed": 0,
+        **dict.fromkeys(_EMBEDDING_SUMMARY_KEYS, 0),
     }
     for organization_id in await list_org_ids():
         summary["organizations"] += 1
-        results = await asyncio.gather(
-            _repair_graph(organization_id),
-            repair_raw_source_lifecycle(
-                organization_id, authority_resolver=resolve_source_authority
-            ),
-            repair_raw_capture_embeddings(organization_id),
-            return_exceptions=True,
-        )
-        if any(isinstance(result, BaseException) for result in results):
+        outcomes: list[object] = []
+        for result in await _repair_organization(organization_id):
+            if isinstance(result, tuple):
+                outcomes.extend(result)
+            else:
+                outcomes.append(result)
+        if any(isinstance(outcome, BaseException) for outcome in outcomes):
             summary["failed_organizations"] += 1
-        for result in results:
-            if isinstance(result, BaseException):
+        for outcome in outcomes:
+            if isinstance(outcome, BaseException):
                 log.warning(
                     "lifecycle_repair_org_failed",
                     group_id=organization_id,
-                    error_type=type(result).__name__,
+                    error_type=type(outcome).__name__,
                 )
+            elif isinstance(outcome, EmbeddingSweepResult):
+                _record_embedding_sweep(summary, organization_id, outcome)
             else:
-                for key, value in asdict(result).items():
+                for key, value in asdict(outcome).items():
                     if key in summary and isinstance(value, int):
                         summary[key] += value
     log.info("lifecycle_repair_completed", **summary)
