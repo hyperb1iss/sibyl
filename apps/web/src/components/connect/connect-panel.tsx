@@ -22,9 +22,9 @@ export function detectOs(userAgent: string): ConnectOs {
   return 'linux';
 }
 
-/** The sentence a person hands their agent; `/agent` serves the steps as markdown. */
-export function agentSentence(origin: string): string {
-  return `Set up Sibyl on this machine by following ${origin}/agent`;
+/** The sentence a person hands their agent, pointing at the server's setup document. */
+export function agentSentence(agentUrl: string): string {
+  return `Set up Sibyl on this machine by following ${agentUrl}`;
 }
 
 /**
@@ -41,7 +41,6 @@ export function ConnectPanel() {
   const [os, setOs] = useState<ConnectOs>(() =>
     typeof navigator === 'undefined' ? 'macos' : detectOs(navigator.userAgent)
   );
-  const origin = typeof window === 'undefined' ? '' : window.location.origin;
 
   if (isLoading) {
     return (
@@ -93,7 +92,7 @@ export function ConnectPanel() {
         </TabsContent>
 
         <TabsContent value="agent">
-          <CopyBlock value={agentSentence(origin)} label="Copy sentence" />
+          <CopyBlock value={agentSentence(data.agent_url)} label="Copy sentence" />
           <p className="mt-2 text-xs text-sc-fg-muted">
             Paste it into Claude Code, Codex, or any coding agent. It runs the same setup and hands
             you the sign-in.

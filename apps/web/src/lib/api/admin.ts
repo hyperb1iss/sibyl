@@ -159,6 +159,8 @@ export interface ConnectInfo {
   sso_enabled: boolean;
   local_auth_enabled: boolean;
   setup_command: string;
+  /** Public URL of the agent setup document, built from the server URL. */
+  agent_url: string;
   /** One copyable install-and-setup line per OS. */
   install: Record<ConnectOs, string>;
 }

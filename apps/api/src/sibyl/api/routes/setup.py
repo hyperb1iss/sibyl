@@ -408,6 +408,7 @@ class ConnectInfo(BaseModel):
     sso_enabled: bool = Field(description="True when sign-in goes through OIDC SSO")
     local_auth_enabled: bool = Field(description="True when email and password sign-in works")
     setup_command: str = Field(description="The command that connects a machine")
+    agent_url: str = Field(description="Public URL of the agent setup document")
     install: dict[str, str] = Field(
         description="One copyable install-and-setup line per OS: macos, linux, windows"
     )
@@ -415,6 +416,18 @@ class ConnectInfo(BaseModel):
 
 def _server_url() -> str:
     return settings.server_url.rstrip("/")
+
+
+def _agent_url(server_url: str) -> str:
+    """The short `/agent` page when the web app shares the API's origin, else the API route.
+
+    `/agent` is served by the web app, so it only resolves on the server URL when
+    one ingress fronts both; a split deployment points at the API document.
+    """
+    frontend = settings.frontend_url.rstrip("/")
+    if frontend == server_url:
+        return f"{server_url}/agent"
+    return f"{server_url}/api/setup/agent.md"
 
 
 def _minimum_client_version() -> str | None:
@@ -439,6 +452,7 @@ async def get_connect_info() -> ConnectInfo:
         sso_enabled=bool(settings.oidc.providers),
         local_auth_enabled=settings.local_auth_enabled,
         setup_command=setup_command(server_url),
+        agent_url=_agent_url(server_url),
         install=install_commands(server_url),
     )
 

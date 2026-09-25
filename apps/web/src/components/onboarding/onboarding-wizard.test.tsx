@@ -52,6 +52,7 @@ function connectInfo(serverUrl: string, sso: boolean) {
     sso_enabled: sso,
     local_auth_enabled: !sso,
     setup_command: setup,
+    agent_url: `${serverUrl}/agent`,
     install: {
       macos: `brew install hyperb1iss/tap/sibyl && ${setup}`,
       linux: `uv tool install --upgrade sibyl-dev && ${setup}`,

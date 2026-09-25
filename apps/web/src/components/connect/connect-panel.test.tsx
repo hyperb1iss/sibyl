@@ -14,6 +14,7 @@ const CONNECT_INFO = {
   sso_enabled: true,
   local_auth_enabled: false,
   setup_command: `sibyl setup ${SERVER}`,
+  agent_url: `${SERVER}/agent`,
   install: {
     macos: `brew install hyperb1iss/tap/sibyl && sibyl setup ${SERVER}`,
     linux: `uv tool install --upgrade sibyl-dev && sibyl setup ${SERVER}`,
@@ -52,7 +53,7 @@ describe('ConnectPanel', () => {
     expect(screen.queryByText(CONNECT_INFO.install.macos)).not.toBeInTheDocument();
   });
 
-  it('hands the agent one sentence pointing at /agent on this origin', async () => {
+  it('hands the agent one sentence built from the server URL, not the page origin', async () => {
     const user = userEvent.setup();
 
     render(<ConnectPanel />);
@@ -60,9 +61,10 @@ describe('ConnectPanel', () => {
 
     expect(
       await screen.findByText(
-        `Set up Sibyl on this machine by following ${window.location.origin}/agent`
+        'Set up Sibyl on this machine by following https://sibyl.example.com/agent'
       )
     ).toBeInTheDocument();
+    expect(screen.queryByText(new RegExp(window.location.origin))).not.toBeInTheDocument();
   });
 
   it('copies the command to the clipboard', async () => {
@@ -107,9 +109,9 @@ describe('detectOs', () => {
 });
 
 describe('agentSentence', () => {
-  it('points at /agent on the given origin', () => {
-    expect(agentSentence(SERVER)).toBe(
-      'Set up Sibyl on this machine by following https://sibyl.example.com/agent'
+  it('points at the given setup document', () => {
+    expect(agentSentence(`${SERVER}/api/setup/agent.md`)).toBe(
+      'Set up Sibyl on this machine by following https://sibyl.example.com/api/setup/agent.md'
     );
   });
 });

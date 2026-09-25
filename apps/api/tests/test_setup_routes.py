@@ -351,9 +351,11 @@ def _configure_server(
     minimum: str | None,
     oidc: bool,
     local_auth: bool,
+    frontend_url: str | None = None,
 ) -> None:
     providers = [SimpleNamespace(name="entra")] if oidc else []
     monkeypatch.setattr(setup_routes.settings, "server_url", server_url)
+    monkeypatch.setattr(setup_routes.settings, "frontend_url", frontend_url or server_url)
     monkeypatch.setattr(setup_routes.settings, "minimum_client_version", minimum)
     monkeypatch.setattr(setup_routes.settings, "local_auth_enabled", local_auth)
     monkeypatch.setattr(setup_routes.settings, "oidc", SimpleNamespace(providers=providers))
@@ -381,6 +383,7 @@ async def test_connect_info_for_a_default_local_install(monkeypatch: pytest.Monk
     assert info.sso_enabled is False
     assert info.local_auth_enabled is True
     assert info.setup_command == "sibyl setup http://localhost:3334"
+    assert info.agent_url == "http://localhost:3334/agent"
     assert info.install["macos"] == (
         "brew install hyperb1iss/tap/sibyl && sibyl setup http://localhost:3334"
     )
@@ -450,6 +453,43 @@ async def test_agent_setup_for_a_local_auth_server(monkeypatch: pytest.MonkeyPat
     assert "`sibyl setup http://localhost:3334 --yes`" in body
     assert "email and password" in body
     assert "or newer" not in body
+
+
+@pytest.mark.asyncio
+async def test_agent_url_points_at_the_api_when_the_web_app_lives_elsewhere(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Local dev default: API on :3334, web app on :3337, so /agent is not on the API.
+    _configure_server(
+        monkeypatch,
+        server_url="http://localhost:3334",
+        minimum=None,
+        oidc=False,
+        local_auth=True,
+        frontend_url="http://localhost:3337/",
+    )
+
+    info = await setup_routes.get_connect_info()
+
+    assert info.agent_url == "http://localhost:3334/api/setup/agent.md"
+
+
+@pytest.mark.asyncio
+async def test_agent_url_uses_the_short_page_behind_one_ingress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_server(
+        monkeypatch,
+        server_url="https://sibyl.example.com",
+        minimum=None,
+        oidc=True,
+        local_auth=False,
+        frontend_url="https://sibyl.example.com/",
+    )
+
+    info = await setup_routes.get_connect_info()
+
+    assert info.agent_url == "https://sibyl.example.com/agent"
 
 
 def test_connect_routes_are_public() -> None:
