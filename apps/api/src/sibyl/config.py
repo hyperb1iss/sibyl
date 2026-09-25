@@ -885,7 +885,16 @@ settings = Settings()
 
 
 def reload_settings_from_env() -> Settings:
-    """Reload the global settings instance from current environment variables."""
+    """Reload the global settings instances from current environment variables.
+
+    The core library keeps its own config instance, and the graph client reads
+    its SurrealDB URL from there, so both are refreshed. Otherwise the embedded
+    daemon's graph stays on the import-time default (memory://) and is lost on
+    every restart while auth and content persist.
+    """
+    from sibyl_core.config import reload_core_config_from_env
+
     refreshed = Settings()
     settings.__dict__.update(refreshed.__dict__)
+    reload_core_config_from_env()
     return settings
