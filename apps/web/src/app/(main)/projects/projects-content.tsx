@@ -48,6 +48,7 @@ import type {
   TaskStatus,
   TaskSummary,
 } from '@/lib/api';
+import { withProjectsContext } from '@/lib/constants/navigation';
 import { TASK_STATUS_CONFIG } from '@/lib/constants/tasks';
 import {
   useDeleteEntity,
@@ -806,7 +807,7 @@ function ProjectDetail({ project, stats, tasks, onDeleted }: ProjectDetailProps)
             </a>
           )}
           <Link
-            href={`/tasks?project=${project.id}`}
+            href={withProjectsContext('/tasks', project.id)}
             className="px-3 py-2 bg-sc-bg-elevated hover:bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-muted hover:text-sc-cyan transition-colors duration-200 flex items-center gap-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
           >
             <FolderKanban width={14} height={14} />
@@ -965,7 +966,7 @@ function ProjectDetail({ project, stats, tasks, onDeleted }: ProjectDetailProps)
             ))}
             {activeTasks.length > 5 && (
               <Link
-                href={`/tasks?project=${project.id}`}
+                href={withProjectsContext('/tasks', project.id)}
                 className="block text-center text-sm text-sc-purple hover:text-sc-purple/80 py-2"
               >
                 View all {activeTasks.length} active tasks →
@@ -1049,7 +1050,7 @@ function ProjectDetail({ project, stats, tasks, onDeleted }: ProjectDetailProps)
           <h3 className="text-lg font-semibold text-sc-fg-primary mb-2">No tasks yet</h3>
           <p className="text-sc-fg-muted mb-4">Create your first task to get started</p>
           <Link
-            href={`/tasks?project=${project.id}`}
+            href={withProjectsContext('/tasks', project.id)}
             className="inline-flex items-center gap-2 px-4 py-2 bg-sc-purple hover:bg-sc-purple/80 text-sc-on-accent rounded-lg font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
           >
             <Plus width={16} height={16} />

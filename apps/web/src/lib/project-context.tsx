@@ -17,6 +17,15 @@ const STORAGE_KEY = 'sibyl-project-context';
 // Pages that should always show all projects (no filtering)
 const CROSS_PROJECT_PATHS = ['/projects', '/sources', '/settings'];
 
+/**
+ * Read the project selection from a URL's `projects` parameter, a
+ * comma-separated list of project IDs. Links that scope a page to projects
+ * build this parameter with `withProjectsContext`.
+ */
+export function parseProjectsParam(params: URLSearchParams): string[] {
+  return (params.get('projects') ?? '').split(',').filter(Boolean);
+}
+
 interface ProjectContextValue {
   /** Selected project IDs. Empty array means "all projects" */
   selectedProjects: string[];
@@ -60,11 +69,10 @@ export function ProjectContextProvider({ children }: { children: ReactNode }) {
     isHydrated.current = true;
 
     // URL is source of truth
-    const urlProjects = searchParams.get('projects');
-    if (urlProjects) {
-      const projects = urlProjects.split(',').filter(Boolean);
-      prevProjectsRef.current = projects;
-      setSelectedProjectsState(projects);
+    const urlProjects = parseProjectsParam(searchParams);
+    if (urlProjects.length > 0) {
+      prevProjectsRef.current = urlProjects;
+      setSelectedProjectsState(urlProjects);
       return;
     }
 
@@ -101,7 +109,6 @@ export function ProjectContextProvider({ children }: { children: ReactNode }) {
     userChangedSelection.current = false;
 
     const params = new URLSearchParams(searchParams);
-    params.delete('project'); // Remove legacy single 'project' param
 
     if (selectedProjects.length > 0) {
       params.set('projects', selectedProjects.join(','));
@@ -117,8 +124,7 @@ export function ProjectContextProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!isHydrated.current) return;
 
-    const urlProjects = searchParams.get('projects');
-    const projects = urlProjects ? urlProjects.split(',').filter(Boolean) : [];
+    const projects = parseProjectsParam(searchParams);
 
     // Only sync if URL differs from what we have
     if (JSON.stringify(projects) !== JSON.stringify(prevProjectsRef.current)) {

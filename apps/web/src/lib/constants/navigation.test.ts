@@ -36,6 +36,13 @@ describe('navigation constants', () => {
     );
     expect(withProjectsContext('/graph', null)).toBe('/graph');
   });
+
+  it('keeps a link that already targets projects over the ambient selection', () => {
+    expect(withProjectsContext('/tasks?projects=proj-a', 'proj-b')).toBe('/tasks?projects=proj-a');
+    expect(withProjectsContext('/epics?status=planning&projects=proj-a', 'proj-b')).toBe(
+      '/epics?status=planning&projects=proj-a'
+    );
+  });
 });
 
 describe('navigation sections', () => {

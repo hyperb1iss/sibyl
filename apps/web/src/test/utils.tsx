@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { type RenderOptions, render } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactElement, ReactNode } from 'react';
+import { parseProjectsParam } from '@/lib/project-context';
 import { ThemeProvider } from '@/lib/theme';
 
 /**
@@ -58,6 +59,15 @@ export function renderWithProviders(
       ...renderOptions,
     }),
   };
+}
+
+/**
+ * Resolve a link the way the global project filter reads it: the page it
+ * lands on and the project IDs that page would be scoped to.
+ */
+export function projectFilterTarget(href: string | null) {
+  const url = new URL(href ?? '', 'http://localhost');
+  return { pathname: url.pathname, projects: parseProjectsParam(url.searchParams) };
 }
 
 // Re-export everything from testing-library

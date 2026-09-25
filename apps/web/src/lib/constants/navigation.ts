@@ -138,8 +138,14 @@ export const NAVIGATION_SECTIONS: NavigationSection[] = SECTION_ORDER.map(sectio
   ),
 })).filter(section => section.items.length > 0);
 
+/**
+ * Scope a link to projects through the `projects` parameter the global project
+ * filter reads (comma-separated IDs). A link that already names its projects
+ * keeps them, so an explicit project target wins over the ambient selection.
+ */
 export function withProjectsContext(href: string, projects: string | null): string {
-  if (!projects) {
+  const [, query = ''] = href.split('?');
+  if (!projects || new URLSearchParams(query).has('projects')) {
     return href;
   }
 
