@@ -44,12 +44,12 @@ tasks:
     - '@group(tests)'
   memory-trust-policy-test:
     command:
-      uv run pytest tests/test_memory_policy.py tests/test_native_memory.py
+      uv run pytest tests/test_memory_policy.py tests/test_memory.py
       tests/test_memory_autonomy.py -v
     inputs:
     - '@group(sources)'
     - tests/test_memory_policy.py
-    - tests/test_native_memory.py
+    - tests/test_memory.py
     - tests/test_memory_autonomy.py
   autonomy-test:
     command: uv run pytest tests/test_memory_autonomy.py -v
