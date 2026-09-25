@@ -79,10 +79,11 @@ services:
       SIBYL_PUBLIC_SIGNUPS_ENABLED: ${SIBYL_PUBLIC_SIGNUPS_ENABLED:-false}
       SIBYL_BREAK_GLASS_ENABLED: ${SIBYL_BREAK_GLASS_ENABLED:-false}
       SIBYL_MCP_AUTH_MODE: ${SIBYL_MCP_AUTH_MODE:-auto}
-      # Caddy reaches the backend over this compose bridge; trust Docker's
-      # default pools so logins key on the real client, not Caddy. Only an
-      # unset variable falls back; an empty one means loopback only.
-      SIBYL_FORWARDED_ALLOW_IPS: ${SIBYL_FORWARDED_ALLOW_IPS-172.16.0.0/12,192.168.0.0/16}
+      # Trust Caddy's pinned address alone, so logins key on the real client
+      # rather than Caddy. The bridge gateway, which every host process
+      # connects from, stays untrusted. Only an unset variable falls back;
+      # an empty one means loopback only.
+      SIBYL_FORWARDED_ALLOW_IPS: ${SIBYL_FORWARDED_ALLOW_IPS-10.47.213.10/32}
       SIBYL_COOKIE_DOMAIN: ${SIBYL_DOMAIN}
       SIBYL_COOKIE_SECURE: "true"
       SIBYL_SERVER_HOST: 0.0.0.0
@@ -139,6 +140,11 @@ services:
     ports:
       - "${SIBYL_BIND_IP:?set SIBYL_BIND_IP in the role env file}:80:80"
       - "${SIBYL_BIND_IP}:443:443"
+    # A fixed address outside the dynamic range, so the backend can trust
+    # exactly this container through SIBYL_FORWARDED_ALLOW_IPS.
+    networks:
+      default:
+        ipv4_address: ${SIBYL_CADDY_IPV4:-10.47.213.10}
     environment:
       SIBYL_DOMAIN: ${SIBYL_DOMAIN:?set SIBYL_DOMAIN in the role env file}
       CF_API_TOKEN: ${CF_API_TOKEN:?set CF_API_TOKEN in the role env file}
@@ -156,3 +162,12 @@ volumes:
 networks:
   default:
     name: sibyl-network
+    # Pinned rather than drawn from Docker's default pools, so Caddy's
+    # address is known ahead of time. Other containers draw from ip_range,
+    # which leaves Caddy's address free. The gateway is set explicitly
+    # because Docker would otherwise take it from that range.
+    ipam:
+      config:
+        - subnet: ${SIBYL_NETWORK_SUBNET:-10.47.213.0/24}
+          gateway: ${SIBYL_NETWORK_GATEWAY:-10.47.213.1}
+          ip_range: ${SIBYL_NETWORK_DYNAMIC_RANGE:-10.47.213.128/25}
