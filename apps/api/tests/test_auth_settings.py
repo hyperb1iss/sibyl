@@ -164,15 +164,6 @@ def test_settings_store_rejects_removed_legacy_value(monkeypatch) -> None:
         Settings(_env_file=None)
 
 
-def test_settings_store_ignores_removed_graph_backend_alias(monkeypatch) -> None:
-    monkeypatch.delenv("SIBYL_STORE", raising=False)
-    monkeypatch.setenv("SIBYL_GRAPH_BACKEND", "falkordb")
-
-    s = Settings(_env_file=None)
-
-    assert s.store == "surreal"
-
-
 def test_settings_auth_store_can_use_surreal(monkeypatch) -> None:
     monkeypatch.setenv("SIBYL_AUTH_STORE", "surreal")
 

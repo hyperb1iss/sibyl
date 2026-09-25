@@ -1,7 +1,7 @@
 """MCP Test Harness for Sibyl tools.
 
 Provides mock implementations and helpers for testing MCP tools
-without requiring a real FalkorDB connection.
+without requiring a live SurrealDB connection.
 
 Example usage:
 

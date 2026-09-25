@@ -297,10 +297,10 @@ class TestMiniLongMemEval:
             ("Redis connection pooling", "episode", 7, "Use pool_size >= concurrent_requests"),
             ("OAuth token refresh", "pattern", 14, "Refresh tokens 5 min before expiry"),
             (
-                "FalkorDB port config",
+                "SurrealDB port config",
                 "episode",
                 30,
-                "Port 6380, not 6379, to avoid Redis conflicts",
+                "Port 8000 serves ws and http, with RPC on /rpc",
             ),
             ("JWT validation middleware", "pattern", 45, "Validate audience and issuer claims"),
             ("PostgreSQL vacuum strategy", "episode", 60, "Autovacuum with scale_factor=0.05"),

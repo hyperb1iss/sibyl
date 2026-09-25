@@ -157,7 +157,7 @@ class TestProject:
             status=ProjectStatus.ACTIVE,
             repository_url="https://github.com/org/sibyl",
             features=["Entity Model", "Unified Tools", "Crawling"],
-            tech_stack=["Python", "FalkorDB", "MCPServer"],
+            tech_stack=["Python", "SurrealDB", "MCPServer"],
             knowledge_domains=["graph-rag", "nlp", "knowledge-graphs"],
             team_members=["alice@example.com"],
             tags=["priority", "q4"],

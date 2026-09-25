@@ -733,7 +733,7 @@ def test_migrate_import_dry_run_reports_unsupported_payloads(tmp_path: Path) -> 
     }
     files = {
         GRAPH_FILENAME: json.dumps(graph_payload).encode("utf-8"),
-        "old-falkor-export.json": b"{}",
+        "unrecognized-export.json": b"{}",
     }
     manifest = build_manifest(
         organization_id="org-123",
@@ -741,7 +741,7 @@ def test_migrate_import_dry_run_reports_unsupported_payloads(tmp_path: Path) -> 
         files=files,
         file_metadata={
             GRAPH_FILENAME: {"kind": "graph", "entity_count": 1, "relationship_count": 0},
-            "old-falkor-export.json": {"kind": "graph"},
+            "unrecognized-export.json": {"kind": "graph"},
         },
     )
     write_archive(archive_path, manifest=manifest, files=files)
@@ -753,7 +753,7 @@ def test_migrate_import_dry_run_reports_unsupported_payloads(tmp_path: Path) -> 
 
     assert result.exit_code == 0
     assert "Unsupported archive payloads will be ignored" in result.output
-    assert "old-falkor-export.json" in result.output
+    assert "unrecognized-export.json" in result.output
 
 
 def test_migrate_import_warns_when_auth_payload_restore_is_disabled(tmp_path: Path) -> None:
