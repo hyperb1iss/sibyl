@@ -178,6 +178,19 @@ backend:
     MKL_NUM_THREADS: "1"
     NUMEXPR_NUM_THREADS: "1"
 
+  # -- Reverse proxies trusted to report the client address through X-Forwarded-For, as a
+  # comma-separated string or a list of IPs and CIDR ranges (SIBYL_FORWARDED_ALLOW_IPS).
+  # The per-address login rate limit, request and audit logs, session records, and the
+  # break-glass allowlist all use the address this resolves. Empty keeps the backend
+  # default of loopback only, so behind an ingress every user shares the ingress pod's login
+  # bucket. Set it to the range your ingress controller pods run in, usually the cluster pod
+  # CIDR. Add a VPC or subnet range only for an L7 load balancer in front that appends
+  # X-Forwarded-For itself; never add node ranges that merely SNAT traffic. Anything inside a
+  # trusted range can choose its client address, so keep it narrow and pair it with
+  # networkPolicy.enabled. "*" trusts every peer and the backend logs a warning.
+  # On the command line pass a list: --set 'backend.forwardedAllowIps={10.244.0.0/16}'
+  forwardedAllowIps: ""
+
   # -- Reference to existing secret for sensitive env vars
   # Must contain: SIBYL_JWT_SECRET and SIBYL_SETTINGS_KEY.
   # Add provider and LLM API keys as needed. Amazon Bedrock (SIBYL_LLM_PROVIDER=bedrock) needs

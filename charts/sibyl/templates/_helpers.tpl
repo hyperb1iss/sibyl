@@ -236,3 +236,21 @@ strategy:
     maxUnavailable: 1
 {{- end -}}
 {{- end }}
+
+{{/*
+Trusted reverse proxies for SIBYL_FORWARDED_ALLOW_IPS. backend.forwardedAllowIps
+takes a comma-separated string or a list; a SIBYL_FORWARDED_ALLOW_IPS entry in
+backend.env still works when the dedicated value is empty. Renders nothing when
+neither is set, which keeps the backend's loopback-only default.
+*/}}
+{{- define "sibyl.forwardedAllowIps" -}}
+{{- $value := .Values.backend.forwardedAllowIps -}}
+{{- if kindIs "slice" $value -}}
+{{- $value = join "," $value -}}
+{{- end -}}
+{{- $value = trim (toString (default "" $value)) -}}
+{{- if and (not $value) (hasKey .Values.backend.env "SIBYL_FORWARDED_ALLOW_IPS") -}}
+{{- $value = trim (toString (index .Values.backend.env "SIBYL_FORWARDED_ALLOW_IPS")) -}}
+{{- end -}}
+{{- $value -}}
+{{- end }}

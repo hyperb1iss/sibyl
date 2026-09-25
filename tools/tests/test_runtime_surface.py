@@ -211,6 +211,58 @@ def test_helm_explicit_frontend_public_api_url_wins_over_public_url() -> None:
     assert 'value: "https://sibyl.example.test/api"' not in result.stdout
 
 
+def _rendered_config_data(manifests: str) -> dict[str, str]:
+    for document in yaml.safe_load_all(manifests):
+        if (
+            isinstance(document, dict)
+            and document.get("kind") == "ConfigMap"
+            and document["metadata"]["name"] == "sibyl-config"
+        ):
+            return document["data"]
+    raise AssertionError("sibyl-config ConfigMap was not rendered")
+
+
+@requires_helm
+def test_helm_forwarded_allow_ips_is_unset_by_default() -> None:
+    result = _helm_template("--set", "backend.existingSecret=sibyl-secrets")
+
+    assert result.returncode == 0, result.stderr
+    assert "SIBYL_FORWARDED_ALLOW_IPS" not in _rendered_config_data(result.stdout)
+
+
+@pytest.mark.parametrize(
+    ("override", "expected"),
+    [
+        ("backend.forwardedAllowIps=10.244.0.0/16", "10.244.0.0/16"),
+        ("backend.forwardedAllowIps={10.244.0.0/16,172.31.0.0/16}", "10.244.0.0/16,172.31.0.0/16"),
+        ("backend.env.SIBYL_FORWARDED_ALLOW_IPS=10.9.0.0/16", "10.9.0.0/16"),
+        ("backend.forwardedAllowIps=*", "*"),
+    ],
+)
+@requires_helm
+def test_helm_forwarded_allow_ips_reaches_the_backend_env(override: str, expected: str) -> None:
+    result = _helm_template("--set", "backend.existingSecret=sibyl-secrets", "--set", override)
+
+    assert result.returncode == 0, result.stderr
+    assert _rendered_config_data(result.stdout)["SIBYL_FORWARDED_ALLOW_IPS"] == expected
+
+
+@requires_helm
+def test_helm_forwarded_allow_ips_value_wins_over_backend_env() -> None:
+    result = _helm_template(
+        "--set",
+        "backend.existingSecret=sibyl-secrets",
+        "--set",
+        "backend.env.SIBYL_FORWARDED_ALLOW_IPS=10.9.0.0/16",
+        "--set",
+        "backend.forwardedAllowIps=10.244.0.0/16",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.count("SIBYL_FORWARDED_ALLOW_IPS:") == 1
+    assert _rendered_config_data(result.stdout)["SIBYL_FORWARDED_ALLOW_IPS"] == "10.244.0.0/16"
+
+
 @requires_helm
 def test_helm_non_production_render_keeps_development_jwt_autogeneration() -> None:
     result = _helm_template("--set", "backend.env.SIBYL_ENVIRONMENT=development")
