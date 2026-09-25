@@ -10,14 +10,15 @@ The top-level [`sibyl up`](#local-start) and [`sibyl down`](#local-stop) command
 
 ## Commands
 
-| Command                               | Description                                   |
-| ------------------------------------- | --------------------------------------------- |
-| [`sibyl local start`](#local-start)   | Start the local instance (alias: `sibyl up`)  |
-| [`sibyl local stop`](#local-stop)     | Stop the local instance (alias: `sibyl down`) |
-| [`sibyl local status`](#local-status) | Show status of local services                 |
-| [`sibyl local logs`](#local-logs)     | Show logs from local services                 |
-| [`sibyl local reset`](#local-reset)   | Reset the instance (removes all data)         |
-| [`sibyl local setup`](#local-setup)   | Set up Claude/Codex integration               |
+| Command                                 | Description                                   |
+| --------------------------------------- | --------------------------------------------- |
+| [`sibyl local start`](#local-start)     | Start the local instance (alias: `sibyl up`)  |
+| [`sibyl local stop`](#local-stop)       | Stop the local instance (alias: `sibyl down`) |
+| [`sibyl local upgrade`](#local-upgrade) | Move a running instance to new server images  |
+| [`sibyl local status`](#local-status)   | Show status of local services                 |
+| [`sibyl local logs`](#local-logs)       | Show logs from local services                 |
+| [`sibyl local reset`](#local-reset)     | Reset the instance (removes all data)         |
+| [`sibyl local setup`](#local-setup)     | Set up Claude/Codex integration               |
 
 ---
 
@@ -60,6 +61,37 @@ sibyl down [options]
 | Option      | Default | Description                            |
 | ----------- | ------- | -------------------------------------- |
 | `--destroy` | false   | Also remove volumes (deletes all data) |
+
+---
+
+## local upgrade
+
+Move a running local instance to new server images without leaving it down. The images for the
+target tag are pulled while the current containers keep serving, so a failed pull changes nothing.
+Only then are the pins moved and the services recreated. SurrealDB follows the same rule as
+[`sibyl docker upgrade`](./docker.md#docker-upgrade): a CLI-written default moves up to this
+release's server, and a newer or hand-written image stays.
+
+There is no rollback once the new services start. The new SurrealDB may already have opened the
+data, and an older API must not run against a schema a newer one migrated. If the services fail to
+start or do not report healthy within two minutes, the command keeps the new pins, says so, and
+points at `sibyl local logs`; a slow migration may still finish, which `sibyl local status` shows.
+Re-running the same `sibyl local upgrade --tag <tag>` retries the start.
+
+A stopped instance is not started. The command stops with nothing changed when Docker Compose cannot
+report the state, when the current tag cannot be read, or when another `sibyl local upgrade` is
+already running. When the running Sibyl belongs to the [`sibyl docker`](./docker.md) runtime, it
+says so and names `sibyl docker upgrade` instead.
+
+```bash
+sibyl local upgrade [options]
+```
+
+| Option  | Default          | Description                 |
+| ------- | ---------------- | --------------------------- |
+| `--tag` | this CLI's image | Server image tag to move to |
+
+[`sibyl update`](./update.md) runs this for a running local instance after it upgrades the CLI.
 
 ---
 

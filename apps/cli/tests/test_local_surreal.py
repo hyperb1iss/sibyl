@@ -84,6 +84,7 @@ def _stub_local_start(
     monkeypatch.setattr(local, "check_docker", lambda: True)
     monkeypatch.setattr(local, "check_docker_compose", lambda: True)
     monkeypatch.setattr(local, "is_running", lambda: running)
+    monkeypatch.setattr(local, "container_owner", lambda name="sibyl-api": "local")
     monkeypatch.setattr(local, "wait_for_healthy", lambda: healthy)
     commands: list[list[str]] = []
     browsers: list[str] = []
@@ -107,7 +108,7 @@ def test_local_start_preserves_running_instances(
     assert browsers == []
     output = capsys.readouterr().out
     assert "leaving server images unchanged" in output
-    assert "sibyl down && sibyl up --pull" in output
+    assert "sibyl local upgrade" in output
     assert "Sibyl is ready" not in output
 
 
@@ -147,7 +148,7 @@ def test_local_start_opens_browser_after_successful_health_check(
 def test_local_start_rewrites_an_older_surreal_pin(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`sibyl down && sibyl up --pull` is the local upgrade, so start owns the pin."""
+    """`sibyl up` rewrites the compose file on every start, so start owns the pin too."""
     compose_path = tmp_path / "docker-compose.yml"
     compose_path.write_text(
         "services:\n  surrealdb:\n    image: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.3}\n"
