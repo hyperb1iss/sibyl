@@ -233,7 +233,7 @@ async def _validation_extractor[T](output_type: type[T]) -> tuple[Extractor[T], 
     """Freeze one resolved model and whitelist its effective policy, never repr/key."""
     resolved = await resolve_llm_config(LLMSurface.MEMORY)
     config = resolved.to_llm_config()
-    if config.provider not in {"openai", "anthropic"}:
+    if config.provider not in {"openai", "anthropic", "bedrock"}:
         raise ValueError("Durable validation requires an observed SDK transport")
     resources = AsyncExitStack()
     try:

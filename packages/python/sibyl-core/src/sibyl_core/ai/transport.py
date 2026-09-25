@@ -113,7 +113,11 @@ def collect_transport_attempts() -> Iterator[list[TransportAttempt]]:
 
 
 async def _record_send(
-    send: Callable[..., Awaitable[Any]], request: Any, *, request_id_header: str, **kwargs: Any
+    send: Callable[..., Awaitable[Any]],
+    request: Any,
+    *,
+    request_id_headers: tuple[str, ...],
+    **kwargs: Any,
 ) -> Any:
     attempts = _attempts.get()
     observer = _observer.get()
@@ -139,7 +143,9 @@ async def _record_send(
                     raise exc from None
                 raise
         raise
-    request_id = response.headers.get(request_id_header)
+    request_id = next(
+        (value for name in request_id_headers if (value := response.headers.get(name))), None
+    )
     if request_id is not None and re.fullmatch(r"[a-zA-Z0-9_.:-]{1,200}", request_id) is None:
         request_id = None
     outcome = TransportAttempt(status_code=response.status_code, request_id=request_id)
@@ -153,14 +159,18 @@ async def _record_send(
 class RecordingOpenAIClient(DefaultAsyncHttpxClient):
     async def _send_single_request(self, request: Any) -> Any:
         return await _record_send(
-            super()._send_single_request, request, request_id_header="x-request-id"
+            super()._send_single_request, request, request_id_headers=("x-request-id",)
         )
 
 
 class RecordingAnthropicClient(AnthropicHttpClient):
+    """Records Anthropic hops, including Bedrock's, which carry the AWS request ID."""
+
     async def _send_single_request(self, request: Any) -> Any:
         return await _record_send(
-            super()._send_single_request, request, request_id_header="request-id"
+            super()._send_single_request,
+            request,
+            request_id_headers=("request-id", "x-amzn-requestid"),
         )
 
     async def send(self, request: Any, **kwargs: Any) -> Any:
@@ -192,15 +202,26 @@ def _validate_anthropic_usage(payload: Any) -> None:
 
 def transport_policy(config: LLMConfig) -> dict[str, str | int | None]:
     """Bind supported SDK retries and physical HTTP attempt recording."""
-    recorded = config.provider in {"openai", "anthropic"}
-    return {
+    recorded = config.provider in {"openai", "anthropic", "bedrock"}
+    policy: dict[str, str | int | None] = {
         "provider": config.provider,
         "sdk_version": version(
-            {"openai": "openai", "anthropic": "anthropic", "gemini": "google-genai"}[
-                config.provider
-            ]
+            {
+                "openai": "openai",
+                "anthropic": "anthropic",
+                "bedrock": "anthropic",
+                "gemini": "google-genai",
+            }[config.provider]
         ),
         "pydantic_ai_version": version("pydantic-ai-slim"),
         "max_retries": config.transport_max_retries if recorded else None,
         "receipt_version": "sibyl-sdk-attempt-v2" if recorded else None,
     }
+    if config.provider == "bedrock":
+        from sibyl_core.ai.bedrock import BedrockConfigError, resolve_bedrock_settings
+
+        try:
+            policy["bedrock_api"] = resolve_bedrock_settings().api
+        except BedrockConfigError:
+            policy["bedrock_api"] = None
+    return policy

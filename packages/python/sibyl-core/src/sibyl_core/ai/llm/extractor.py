@@ -11,6 +11,7 @@ from typing import Any, Literal
 from weakref import WeakKeyDictionary
 
 import structlog
+from genai_prices import calc_price
 from pydantic import BaseModel, Field, TypeAdapter
 from pydantic_ai import Agent, NativeOutput
 from pydantic_ai.messages import ModelResponse
@@ -30,7 +31,8 @@ from sibyl_core.ai.llm.budget import (
     settle_llm_reservations,
 )
 from sibyl_core.ai.llm.config import LLMConfig, LLMSurface
-from sibyl_core.ai.providers import rejects_forced_tool_choice
+from sibyl_core.ai.providers import prefers_native_output
+from sibyl_core.ai.registry import canonical_model_alias, model_registry
 from sibyl_core.ai.transport import (
     FailedExtractionUsage,
     RecordingAnthropicClient,
@@ -68,7 +70,7 @@ OutputMode = Literal["tool", "native_strict"]
 
 def effective_output_mode(output_mode: OutputMode, config: LLMConfig) -> OutputMode:
     """The structured-output mode a request can actually use on this model."""
-    if output_mode == "tool" and rejects_forced_tool_choice(config):
+    if output_mode == "tool" and prefers_native_output(config):
         return "native_strict"
     return output_mode
 
@@ -179,7 +181,7 @@ class Extractor[T]:
                     if recorded:
                         await self._settle(reservations, attempt_tokens * len(attempts))
                     raise
-                usage = _extraction_usage(result, attempts)
+                usage = _extraction_usage(result, attempts, llm=agent.model)
                 reserved_total = sum(item.tokens for item in reservations)
                 await self._settle(
                     reservations,
@@ -366,8 +368,44 @@ def _model_settings(max_tokens: int | None) -> ModelSettings | None:
     return ModelSettings(max_tokens=max_tokens)
 
 
-def _extraction_usage(result: Any, attempts: list[TransportAttempt]) -> ExtractionUsage:
+def _bedrock_price_ref(model: object) -> str | None:
+    """The wire model ID to price a Bedrock response by, or ``None`` elsewhere.
+
+    pydantic-ai prices by API URL and response model name, and Bedrock echoes
+    the bare Claude name, so every bedrock-runtime call would price at the
+    in-Region rate. The routed ID tells ``global.`` from ``us.`` profiles.
+    """
+    if not isinstance(model, AnthropicModel):
+        return None
+    from anthropic import AsyncAnthropicBedrock, AsyncAnthropicBedrockMantle
+
+    if isinstance(model.client, AsyncAnthropicBedrock):
+        return model.model_name
+    if isinstance(model.client, AsyncAnthropicBedrockMantle):
+        # Mantle's in-Region IDs drop the version suffix the price table keys on.
+        entry = model_registry.get(canonical_model_alias(model.model_name))
+        return (entry.platform_model_ids.get("bedrock") if entry else None) or model.model_name
+    return None
+
+
+def _response_cost(response: ModelResponse, bedrock_ref: str | None) -> float:
+    if bedrock_ref is None:
+        return float(response.cost().total_price)
+    return float(
+        calc_price(
+            response.usage,
+            bedrock_ref,
+            provider_id="aws",
+            genai_request_timestamp=response.timestamp,
+        ).total_price
+    )
+
+
+def _extraction_usage(
+    result: Any, attempts: list[TransportAttempt], *, llm: object = None
+) -> ExtractionUsage:
     run_usage = result.usage
+    bedrock_ref = _bedrock_price_ref(llm)
     responses = [message for message in result.new_messages() if isinstance(message, ModelResponse)]
     provider = next(
         (response.provider_name for response in reversed(responses) if response.provider_name),
@@ -381,7 +419,7 @@ def _extraction_usage(result: Any, attempts: list[TransportAttempt]) -> Extracti
     priced_responses = 0
     for response in responses:
         try:
-            total_cost += float(response.cost().total_price)
+            total_cost += _response_cost(response, bedrock_ref)
         except (AssertionError, LookupError):
             continue
         priced_responses += 1

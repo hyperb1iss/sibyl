@@ -6,15 +6,20 @@ import os
 from collections.abc import Mapping
 from datetime import datetime
 from enum import StrEnum
-from typing import Literal, NamedTuple, Protocol
+from typing import Literal, NamedTuple, Protocol, cast
 
 from pydantic import BaseModel, Field, SecretStr
 
+from sibyl_core.ai.bedrock import API_KEY_ENV_VARS as BEDROCK_API_KEY_ENV_VARS
 from sibyl_core.ai.errors import LLMConfigError
-from sibyl_core.ai.registry import ProviderName
+from sibyl_core.ai.registry import ProviderName, canonical_model_alias
 from sibyl_core.config import settings
 
-LLMProviderName = Literal["anthropic", "gemini", "openai"]
+LLMProviderName = Literal["anthropic", "bedrock", "gemini", "openai"]
+LLM_PROVIDERS: frozenset[str] = frozenset({"anthropic", "bedrock", "gemini", "openai"})
+#: Providers that serve Claude through the Anthropic Messages API, so model
+#: rules keyed by Claude alias apply to every one of them.
+ANTHROPIC_FAMILY: frozenset[str] = frozenset({"anthropic", "bedrock"})
 AnthropicEffort = Literal["low", "medium", "high", "xhigh", "max"]
 
 
@@ -59,6 +64,8 @@ class MemoryModelDefaults(NamedTuple):
 #: 420K tokens on the screen48 corpus, and stays inside the window beside the
 #: 32K output at any density above about 1.7 characters per token. Twice that no
 #: longer fits once text runs denser than about 3.3 characters per token.
+#: Amazon Bedrock serves the same 1M window with no beta header, so the
+#: defaults key by alias and hold on either provider.
 MEMORY_MODEL_DEFAULTS: dict[str, MemoryModelDefaults] = {
     "claude-opus-5": MemoryModelDefaults(32_768, None, 1_600_000),
     "claude-opus-5-5": MemoryModelDefaults(32_768, "high", 1_600_000),
@@ -66,7 +73,9 @@ MEMORY_MODEL_DEFAULTS: dict[str, MemoryModelDefaults] = {
 
 
 def memory_model_defaults(provider: str, model: str) -> MemoryModelDefaults | None:
-    return MEMORY_MODEL_DEFAULTS.get(model) if provider == "anthropic" else None
+    if provider not in ANTHROPIC_FAMILY:
+        return None
+    return MEMORY_MODEL_DEFAULTS.get(canonical_model_alias(model))
 
 
 class LLMConfig(BaseModel):
@@ -186,14 +195,14 @@ class EnvConfigSource:
 
     def _resolve_provider(self, surface: LLMSurface) -> ConfigField[LLMProviderName]:
         field = self._resolve_string(surface, "PROVIDER", default="anthropic")
-        if field.value not in {"anthropic", "gemini", "openai"}:
+        if field.value not in LLM_PROVIDERS:
             raise LLMConfigError(
                 f"Unsupported LLM provider: {field.value}",
                 provider=field.value,
                 surface=surface.value,
             )
         return ConfigField[LLMProviderName](
-            value=field.value,
+            value=cast("LLMProviderName", field.value),
             source=field.source,
             locked_by_env=field.locked_by_env,
             env_var=field.env_var,
@@ -321,4 +330,6 @@ def _api_key_env_names(provider: ProviderName) -> tuple[str, ...]:
         "anthropic": ("SIBYL_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"),
         "gemini": ("SIBYL_GEMINI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"),
         "openai": ("SIBYL_OPENAI_API_KEY", "OPENAI_API_KEY"),
+        # Optional: Bedrock signs with the AWS credential chain when unset.
+        "bedrock": BEDROCK_API_KEY_ENV_VARS,
     }.get(provider, ())

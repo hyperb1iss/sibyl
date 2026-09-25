@@ -137,9 +137,12 @@ class CoreConfig(BaseSettings):
     )
 
     # LLM Provider configuration
-    llm_provider: Literal["openai", "anthropic"] = Field(
+    # Mirrors SIBYL_LLM_PROVIDER, which the LLM config source reads per surface.
+    # It must accept every provider that source does, or the process fails to
+    # start on a valid setting.
+    llm_provider: Literal["anthropic", "bedrock", "gemini", "openai"] = Field(
         default="anthropic",
-        description="LLM provider for entity extraction",
+        description="Default LLM provider for every surface",
     )
     llm_model: str = Field(
         default="claude-haiku-4-5",

@@ -33,7 +33,7 @@ async def test_transport_observer_precedes_send_without_exposing_payloads():
         return SimpleNamespace(status_code=200, headers={"x-request-id": "safe-request"})
 
     with observe_transport_attempts(journal), collect_transport_attempts() as attempts:
-        await _record_send(send, {"secret": "private-body"}, request_id_header="x-request-id")
+        await _record_send(send, {"secret": "private-body"}, request_id_headers=("x-request-id",))
     assert journal.rows[0]["outcome"] == attempts[0].model_dump()
     assert "private-body" not in str(journal.rows)
     assert not journal.rows[0]["outcome"]["usage_known"]
@@ -51,7 +51,7 @@ async def test_failed_durable_dispatch_prevents_send():
         pytest.fail("request dispatched without durable accounting")
 
     with observe_transport_attempts(journal), pytest.raises(OSError):
-        await _record_send(send, None, request_id_header="x-request-id")
+        await _record_send(send, None, request_id_headers=("x-request-id",))
 
 
 async def test_denied_budget_does_not_create_dispatch():
@@ -68,7 +68,7 @@ async def test_denied_budget_does_not_create_dispatch():
         reserve_uncovered_transport_attempts(0, denied),
         pytest.raises(ValueError, match="budget denied"),
     ):
-        await _record_send(send, None, request_id_header="x-request-id")
+        await _record_send(send, None, request_id_headers=("x-request-id",))
     assert journal.rows == []
 
 
@@ -80,7 +80,7 @@ async def test_failed_requests_record_only_safe_unknown_outcome(failure):
         raise failure
 
     with observe_transport_attempts(journal), pytest.raises(type(failure)):
-        await _record_send(send, None, request_id_header="x-request-id")
+        await _record_send(send, None, request_id_headers=("x-request-id",))
     assert journal.rows[0]["outcome"]["exception_type"] == type(failure).__name__
     assert not journal.rows[0]["outcome"]["usage_known"]
     assert "private details" not in str(journal.rows)
@@ -98,7 +98,7 @@ async def test_outcome_storage_failure_leaves_dispatch_unknown():
         return SimpleNamespace(status_code=200, headers={})
 
     with observe_transport_attempts(journal), pytest.raises(OSError):
-        await _record_send(send, None, request_id_header="x-request-id")
+        await _record_send(send, None, request_id_headers=("x-request-id",))
     assert journal.rows == [{"state": "potentially_dispatched", "outcome": None}]
 
 
@@ -111,12 +111,12 @@ async def test_concurrent_and_nested_observers_keep_separate_attempts():
 
     async def request(journal):
         with observe_transport_attempts(journal):
-            await _record_send(send, None, request_id_header="x-request-id")
+            await _record_send(send, None, request_id_headers=("x-request-id",))
 
     with observe_transport_attempts(first):
         await asyncio.gather(request(second), request(inner))
-        await _record_send(send, None, request_id_header="x-request-id")
-    await _record_send(send, None, request_id_header="x-request-id")
+        await _record_send(send, None, request_id_headers=("x-request-id",))
+    await _record_send(send, None, request_id_headers=("x-request-id",))
     for journal in (first, second, inner):
         assert len(journal.rows) == 1
         assert journal.rows[0]["outcome"]["request_id"] is None
@@ -134,5 +134,5 @@ async def test_cancelled_send_stays_cancelled_when_outcome_storage_fails():
         raise asyncio.CancelledError()
 
     with observe_transport_attempts(journal), pytest.raises(asyncio.CancelledError):
-        await _record_send(send, None, request_id_header="x-request-id")
+        await _record_send(send, None, request_id_headers=("x-request-id",))
     assert journal.rows == [{"state": "potentially_dispatched", "outcome": None}]
