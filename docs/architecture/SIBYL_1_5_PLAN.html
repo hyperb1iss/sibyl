@@ -1,0 +1,828 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="Sibyl 1.5: memory you can trust as it grows. Thesis, workstreams, evaluation contract, release boundary, sequence, spend, and risks.">
+<title>Sibyl 1.5 · Trust It</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #faf8ff;
+    --surface: #f4f0ff;
+    --raised: #ffffff;
+    --rule: #ded3f8;
+    --rule-soft: #ebe4fb;
+    --ink: #2b2540;
+    --ink-strong: #1a1318;
+    --muted: #6a5a8e;
+    --accent: #7e2bd5;
+    --link: #006e72;
+    --coral: #b42a74;
+    --ok: #1d6e46;
+    --warn: #796100;
+    --err: #c1272d;
+    --chip-bg: #ece4ff;
+    --focus: 0 0 0 3px #006e7240;
+    --display: "Chakra Petch", "Avenir Next Condensed", "Arial Narrow", system-ui, sans-serif;
+    --body: "IBM Plex Sans", "Helvetica Neue", Arial, system-ui, sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #12101a;
+      --surface: #1a162a;
+      --raised: #1e1a2e;
+      --rule: #2e2744;
+      --rule-soft: #251f38;
+      --ink: #e9e6f2;
+      --ink-strong: #f8f8f2;
+      --muted: #a79bc4;
+      --accent: #e135ff;
+      --link: #80ffea;
+      --coral: #ff6ac1;
+      --ok: #50fa7b;
+      --warn: #f1fa8c;
+      --err: #ff6363;
+      --chip-bg: #2a2140;
+      --focus: 0 0 0 3px #80ffea55;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #12101a;
+    --surface: #1a162a;
+    --raised: #1e1a2e;
+    --rule: #2e2744;
+    --rule-soft: #251f38;
+    --ink: #e9e6f2;
+    --ink-strong: #f8f8f2;
+    --muted: #a79bc4;
+    --accent: #e135ff;
+    --link: #80ffea;
+    --coral: #ff6ac1;
+    --ok: #50fa7b;
+    --warn: #f1fa8c;
+    --err: #ff6363;
+    --chip-bg: #2a2140;
+    --focus: 0 0 0 3px #80ffea55;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 24px; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 400 16px/1.64 var(--body);
+    padding-inline: 20px;
+    padding-block: 0 80px;
+  }
+  .shell {
+    max-width: 1180px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 48px;
+  }
+  @media (min-width: 1100px) {
+    .shell { grid-template-columns: 220px minmax(0, 1fr); }
+  }
+  main { min-width: 0; max-width: 860px; }
+  .measure { max-width: 70ch; }
+
+  nav.toc { display: none; }
+  @media (min-width: 1100px) {
+    nav.toc {
+      display: block;
+      position: sticky;
+      top: calc(24px + env(safe-area-inset-top, 0px));
+      align-self: start;
+      padding-top: 64px;
+      font-size: 13.5px;
+    }
+  }
+  nav.toc .toc-title {
+    font: 600 11px/1 var(--mono);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 12px;
+  }
+  nav.toc ol { list-style: none; padding: 0; margin: 0; display: grid; gap: 2px; }
+  nav.toc a {
+    display: block;
+    color: var(--ink);
+    text-decoration: none;
+    padding: 5px 10px;
+    border-left: 2px solid var(--rule);
+  }
+  nav.toc a:hover { color: var(--accent); border-left-color: var(--accent); }
+
+  .toc-inline { margin: 20px 0 0; font-size: 14px; }
+  .toc-inline ol { columns: 2 220px; column-gap: 24px; padding-left: 20px; margin: 8px 0 0; }
+  .toc-inline li { margin-bottom: 3px; break-inside: avoid; }
+  @media (min-width: 1100px) { .toc-inline { display: none; } }
+
+  header.top { padding-block: 64px 32px; border-bottom: 1px solid var(--rule); }
+  .eyebrow {
+    font: 500 12px/1.4 var(--mono);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    display: flex;
+    gap: 6px 16px;
+    flex-wrap: wrap;
+  }
+  .eyebrow b { color: var(--accent); font-weight: 600; }
+  h1 {
+    font: 700 clamp(44px, 8vw, 76px)/0.98 var(--display);
+    color: var(--ink-strong);
+    margin: 20px 0 18px;
+    letter-spacing: -0.015em;
+  }
+  h1 small {
+    display: block;
+    font: 600 clamp(15px, 2vw, 18px)/1.3 var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 10px;
+  }
+  .thesis { font-size: 20px; line-height: 1.5; color: var(--ink-strong); margin: 0; text-wrap: pretty; }
+  .thesis em { font-style: normal; color: var(--accent); }
+  .stance { margin: 16px 0 0; color: var(--muted); }
+
+  section { padding-block: 44px 8px; }
+  section + section { border-top: 1px solid var(--rule); }
+  .sec-num {
+    font: 600 12px/1 var(--mono);
+    color: var(--accent);
+    letter-spacing: 0.1em;
+    display: block;
+    margin-bottom: 8px;
+  }
+  h2 {
+    font: 600 28px/1.18 var(--display);
+    color: var(--ink-strong);
+    margin: 0 0 14px;
+    text-wrap: balance;
+  }
+  h3 {
+    font: 600 19px/1.3 var(--display);
+    color: var(--ink-strong);
+    margin: 28px 0 8px;
+    text-wrap: balance;
+  }
+  h4 {
+    font: 600 12px/1.3 var(--mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 22px 0 8px;
+  }
+  p { margin: 0 0 12px; }
+  a { color: var(--link); text-underline-offset: 3px; }
+  a:focus-visible { outline: none; box-shadow: var(--focus); border-radius: 3px; }
+  strong { color: var(--ink-strong); font-weight: 600; }
+  code, .id {
+    font: 500 0.84em/1 var(--mono);
+    background: var(--chip-bg);
+    color: var(--ink-strong);
+    padding: 2px 6px;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+  ul, ol { padding-left: 22px; margin: 0 0 12px; }
+  li { margin-bottom: 6px; }
+  li::marker { color: var(--muted); }
+
+  .glance {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 12px;
+    margin: 18px 0 8px;
+  }
+  .glance .cell {
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    background: var(--surface);
+    padding: 14px 16px;
+    display: grid;
+    gap: 6px;
+    align-content: start;
+  }
+  .glance .k { font: 600 11px/1.2 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+  .glance .v { font: 600 17px/1.3 var(--display); color: var(--ink-strong); }
+  .glance .n { font: 600 15px/1 var(--mono); color: var(--coral); font-variant-numeric: tabular-nums; }
+
+  .table-wrap {
+    overflow-x: auto;
+    margin: 12px 0 18px;
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    background: var(--raised);
+  }
+  table { border-collapse: collapse; width: 100%; font-size: 14.5px; line-height: 1.5; }
+  th, td { text-align: left; padding: 10px 14px; vertical-align: top; border-bottom: 1px solid var(--rule-soft); }
+  tr:last-child td { border-bottom: 0; }
+  th {
+    font: 600 11px/1.3 var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: var(--surface);
+    white-space: nowrap;
+  }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.nowrap { white-space: nowrap; }
+  .size {
+    font: 600 11px/1 var(--mono);
+    padding: 3px 7px;
+    border-radius: 999px;
+    border: 1px solid currentColor;
+    white-space: nowrap;
+  }
+  .size.s { color: var(--ok); }
+  .size.m { color: var(--link); }
+  .size.l { color: var(--coral); }
+  .tag {
+    font: 600 10.5px/1 var(--mono);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 3px 6px;
+    border-radius: 4px;
+    background: var(--chip-bg);
+    color: var(--accent);
+    white-space: nowrap;
+  }
+  .tag.block { color: var(--err); }
+
+  .ws-head { display: flex; gap: 12px 16px; align-items: baseline; flex-wrap: wrap; margin-bottom: 10px; }
+  .ws-head h2 { margin: 0; }
+  .rank {
+    font: 700 15px/1 var(--mono);
+    color: var(--accent);
+    border: 1.5px solid var(--accent);
+    border-radius: 6px;
+    padding: 6px 9px;
+  }
+  .budget { margin-left: auto; font: 600 14px/1 var(--mono); color: var(--coral); white-space: nowrap; }
+
+  .funnel {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 10px;
+    margin: 14px 0 18px;
+  }
+  .stage {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 12px 14px;
+    display: grid;
+    gap: 5px;
+    align-content: start;
+  }
+  .stage .cost { font: 600 22px/1.1 var(--mono); color: var(--coral); font-variant-numeric: tabular-nums; }
+  .stage .what { font-weight: 600; color: var(--ink-strong); font-size: 15px; }
+  .stage .gate { font-size: 13.5px; color: var(--muted); line-height: 1.45; }
+
+  .callout {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 16px 18px;
+    margin: 16px 0;
+  }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout.risk { border-color: var(--coral); }
+  .label {
+    font: 600 11px/1 var(--mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+    display: block;
+    margin-bottom: 8px;
+  }
+  .callout.risk .label { color: var(--coral); }
+
+  .phases { list-style: none; padding: 0; margin: 14px 0; display: grid; gap: 0; border-left: 2px solid var(--rule); }
+  .phases > li { position: relative; padding: 4px 0 22px 26px; margin: 0; }
+  .phases > li::before {
+    content: "";
+    position: absolute;
+    left: -7px;
+    top: 10px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--bg);
+    border: 2px solid var(--accent);
+  }
+  .phase-name { font: 600 13px/1 var(--mono); color: var(--accent); letter-spacing: 0.08em; }
+  .phase-title { font: 600 18px/1.3 var(--display); color: var(--ink-strong); margin: 4px 0 6px; }
+  .exit { display: block; margin-top: 6px; font-size: 14px; color: var(--muted); }
+  .exit b { color: var(--ok); font-weight: 600; }
+
+  .decisions { display: grid; gap: 12px; margin-top: 12px; }
+  .decision { border-left: 3px solid var(--accent); padding: 4px 0 4px 16px; }
+  .decision .q { font-weight: 600; color: var(--ink-strong); display: block; }
+  .decision .rec { color: var(--muted); font-size: 14.5px; display: block; margin-top: 2px; }
+
+  .two { columns: 2 280px; column-gap: 32px; padding-left: 20px; }
+  .two li { break-inside: avoid; }
+
+  footer { margin-top: 48px; padding-top: 18px; border-top: 1px solid var(--rule); color: var(--muted); font-size: 13.5px; }
+
+  @media (max-width: 560px) {
+    body { font-size: 15.5px; }
+    .budget { margin-left: 0; }
+    h2 { font-size: 24px; }
+  }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+</style>
+</head>
+<body>
+<div class="shell">
+  <nav class="toc" aria-label="Contents">
+    <p class="toc-title">Contents</p>
+    <ol>
+      <li><a href="#glance">At a glance</a></li>
+      <li><a href="#decision">Decision</a></li>
+      <li><a href="#baseline">Where 1.4 left us</a></li>
+      <li><a href="#rules">Release rules</a></li>
+      <li><a href="#ws1">1 · Boundaries</a></li>
+      <li><a href="#ws2">2 · Learning</a></li>
+      <li><a href="#contract">Evaluation contract</a></li>
+      <li><a href="#ws3">3 · Scale</a></li>
+      <li><a href="#ws4">4 · Team move</a></li>
+      <li><a href="#side">Side lanes</a></li>
+      <li><a href="#users">What users get</a></li>
+      <li><a href="#boundary">Release boundary</a></li>
+      <li><a href="#sequence">Sequence</a></li>
+      <li><a href="#spend">Spend and scope</a></li>
+      <li><a href="#risks">Risk register</a></li>
+      <li><a href="#decisions">Open decisions</a></li>
+      <li><a href="#first">First slice</a></li>
+      <li><a href="#evidence">Evidence</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <header class="top">
+      <div class="eyebrow"><b>Sibyl 1.5</b><span>Implementation plan</span><span>Draft 2026-09-25</span><span>Base: main at f866c67c6</span></div>
+      <h1><small>Sibyl 1.5</small>Trust It</h1>
+      <p class="thesis measure">1.5 makes accumulated agent experience <em>dependable in daily use</em>. Project boundaries hold, corrections and deletions stick, recall stays fast on a large graph, and the dream cycle learns from the right evidence.</p>
+      <p class="stance measure">The learning claim rides along only if a sealed study earns it. A study that comes back inconclusive changes the release note, not the release date.</p>
+      <div class="toc-inline">
+        <strong>Contents</strong>
+        <ol>
+          <li><a href="#glance">At a glance</a></li>
+          <li><a href="#decision">Decision</a></li>
+          <li><a href="#baseline">Where 1.4 left us</a></li>
+          <li><a href="#rules">Release rules</a></li>
+          <li><a href="#ws1">Workstream 1: boundaries</a></li>
+          <li><a href="#ws2">Workstream 2: learning</a></li>
+          <li><a href="#contract">Evaluation contract</a></li>
+          <li><a href="#ws3">Workstream 3: scale</a></li>
+          <li><a href="#ws4">Workstream 4: team move</a></li>
+          <li><a href="#side">Side lanes</a></li>
+          <li><a href="#users">What users get</a></li>
+          <li><a href="#boundary">Release boundary</a></li>
+          <li><a href="#sequence">Sequence</a></li>
+          <li><a href="#spend">Spend and scope</a></li>
+          <li><a href="#risks">Risk register</a></li>
+          <li><a href="#decisions">Open decisions</a></li>
+          <li><a href="#first">First execution slice</a></li>
+          <li><a href="#evidence">Evidence</a></li>
+        </ol>
+      </div>
+    </header>
+
+    <section id="glance">
+      <span class="sec-num">00</span>
+      <h2>At a glance</h2>
+      <div class="glance">
+        <div class="cell"><span class="k">Workstream 1</span><span class="v">Boundaries and lifecycle that hold</span><span class="n">~$10</span></div>
+        <div class="cell"><span class="k">Workstream 2</span><span class="v">A learning loop worth measuring, then one credible study</span><span class="n">≤ $425</span></div>
+        <div class="cell"><span class="k">Workstream 3</span><span class="v">Fast on a big graph, under load</span><span class="n">$0 incremental</span></div>
+        <div class="cell"><span class="k">Workstream 4</span><span class="v">One real team move</span><span class="n">$0 incremental</span></div>
+      </div>
+      <p class="measure">Four workstreams in priority order, with a hard ceiling of $435 in inference spend and a likely spend nearer $300. Sibyl is an open-source project, so the plan buys evidence as cheaply as the statistics allow. The scale and migration work runs on the devbox and free public-repo CI, and engineering time is not counted. The release ships when the trust, scale, spend-guard and migration-rehearsal gates pass. The study runs alongside and decides only what the release note may claim. Every gate figure in this document is a proposed acceptance criterion, not a measurement, and every spend figure is a ceiling awaiting approval.</p>
+    </section>
+
+    <section id="decision">
+      <span class="sec-num">01</span>
+      <h2>Decision</h2>
+      <p class="measure"><strong>1.5 is a trust release.</strong> 1.4 proved that the dream cycle runs end to end with receipts, and the September 25 cleanup fixed the reasons it learned the wrong things. What a user meets first, though, is not consolidation. They meet recall that crosses projects, a delete that returns 500, a correction they can't undo from the CLI, and a graph page that takes a minute and then fails. 1.5 fixes those, makes the system hold up at the size real graphs reach, and delivers one real team migration.</p>
+      <p class="measure"><strong>The learning proof stays a first-class workstream, but it doesn't gate the release.</strong> The study is staged behind cheap gates, so money is spent only once the pipeline can plausibly show an effect, and the whole plan's inference spend is capped at $435. If the sealed study passes the 1.4 claim gate, 1.5 carries a bounded claim. If it doesn't, the release note reports the measured result and 1.5 still ships.</p>
+      <p class="measure"><strong>1.5 does not:</strong> activate Jev in production, claim general or autonomous learning, chase leaderboard numbers, polish graph visuals beyond the capacity fix, expand the archive or memoryfield surfaces, or build team workflow features beyond migration. Proposals in those areas go on the 1.6 list.</p>
+    </section>
+
+    <section id="baseline">
+      <span class="sec-num">02</span>
+      <h2>Where 1.4 left us</h2>
+
+      <h3>The learning mechanism now keeps what matters</h3>
+      <p class="measure">The September 20 re-probe showed memory of any kind lifting the three headroom tasks, but native memory did not beat raw retrieval (native 12/15, raw 13/15). The cause was consolidation: 33 of the 34 procedures it promoted were generic repair choreography. Four PRs merged on September 25 address that.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>PR</th><th>What it changed</th><th>Measured effect</th></tr></thead>
+        <tbody>
+          <tr><td class="nowrap"><a href="https://github.com/hyperb1iss/sibyl/pull/656">#656</a></td><td>Dream cohorts grow from nearest embedded neighbours, and proposals ask for the problem's decision rules.</td><td>Majority-family share 0.92 (was 0.24). A promoted procedure now carries the percent-escape mechanism.</td></tr>
+          <tr><td class="nowrap"><a href="https://github.com/hyperb1iss/sibyl/pull/657">#657</a></td><td>Per-repetition seeds shared across arms, and the diagnostic intervention harness.</td><td>Paired arms see the same seed and repetitions differ.</td></tr>
+          <tr><td class="nowrap"><a href="https://github.com/hyperb1iss/sibyl/pull/659">#659</a></td><td>Joins a family's two cohorts when the union stands clearly apart.</td><td>Recall on 100-source pages 35.2% → 40.4%. One proposal instead of two near-duplicates.</td></tr>
+          <tr><td class="nowrap"><a href="https://github.com/hyperb1iss/sibyl/pull/660">#660</a></td><td>Per-model consolidation input budget: 1.6M characters for Opus 5 and 5.5.</td><td>A whole family fits one proposal (about 412K tokens on screen48).</td></tr>
+          <tr><td class="nowrap"><a href="https://github.com/hyperb1iss/sibyl/pull/661">#661</a></td><td>Dream pages seeded by a source and filled with its nearest pending neighbours, with coverage and send-gate checks. Verified, merging.</td><td>Recall on the real job path 76.7% with 9 cross-family pairs (was 40.4% and 39).</td></tr>
+        </tbody>
+      </table></div>
+      <p class="measure">The intervention probe (task <span class="id">b7bc8bf4</span>) gives the only native-over-raw signal so far: 14/18 against 9/20 on cdn-batch-map, a paired +6 of 18 at p = 0.11. That clears the pre-stated +4 threshold but isn't significant. Removing the derived items takes back only 2 of the 6, a family summary adds nothing over raw, and a task with opaque keys shows no negative transfer (10/10 in both arms). One more finding from the probe: the promoted pattern itself was excluded from native recall as out of scope, and the mechanism reached the solver only through two raw candidate rows (task <span class="id">3ed9000e</span>).</p>
+
+      <h3>What a user meets first</h3>
+      <p class="measure">The September 22 demo prep and the proof work surfaced trust defects, and every one of them is still present on main. Each is small and reproduced. The gap that matters most is in process: PR CI never runs the <code>:check</code> bundle, so a delegated-scope regression from PR 525 shipped through 11 days of green PRs and surfaced only at the 1.4.0 dry cut.</p>
+
+      <h3>The system slows as it grows</h3>
+      <p class="measure">On the real 10.5K-entity graph, <code>/graph</code> spins for about 70 seconds and then fails with a 500, starving other pages in the same tab. A long-lived Surreal process reached 33 GB resident, with plain selects taking 14.8 seconds. Sustained ingest degrades from about 10 seconds to 100 to 700 seconds per capture once the entity table deepens. These also contaminate every latency number the public benchmarks would report.</p>
+
+      <h3>Public benchmarks have no current anchor</h3>
+      <p class="measure">LongMemEval-S sits at 26.2% because the adapter truncates every session at 3,985 characters and never calls <code>compile_context</code>. V2 Web Small's 23.3% ran with notes off and isn't comparable to the notes-on 30.38% anchor. The 80% and 60% targets in the 1.4 plan were never measured.</p>
+
+      <h3>Spend so far</h3>
+      <p class="measure">The 1.4 campaign spent about $463: roughly $385 on memory calls and $8.50 on solver attempts through September 19, then $69.47 across the headroom screen, re-probe, three scoped cycles and the intervention.</p>
+    </section>
+
+    <section id="rules">
+      <span class="sec-num">03</span>
+      <h2>Release rules</h2>
+      <ol class="measure">
+        <li><strong>Trust gates run on every PR.</strong> Nothing that affects scope, authorization or lifecycle merges without the gate bundle having run on its head.</li>
+        <li><strong>Scale fixes grow capacity.</strong> Truncating results, lowering concurrency or skipping work doesn't count as a fix. A temporary mitigation needs a name, a tracking task and a stated path back.</li>
+        <li><strong>Every paid run sits behind a gate and a guard.</strong> Each spend stage unlocks only when the previous gate passes. No product default ships with unbounded model spend.</li>
+        <li><strong>Claims need sealed evidence.</strong> Design, analysis and exclusions are frozen before unsealing. Failures stay in the denominators, and nothing is rerun selectively.</li>
+        <li><strong>Verification is independent.</strong> Every non-trivial PR gets an adversarial verifier that did not write it, plus root <code>moon run :lint</code> and <code>:typecheck</code> before push.</li>
+      </ol>
+    </section>
+
+    <section id="ws1">
+      <span class="sec-num">04</span>
+      <div class="ws-head"><span class="rank">1</span><h2>Boundaries and lifecycle that hold</h2><span class="budget">~$10</span></div>
+      <p class="measure"><strong>Goal:</strong> what a user stores stays in the scope they stored it in, and what they correct, delete or restore behaves the way the CLI and API say it will. <strong>Approach:</strong> fix the CI gap first, so every later fix lands under the gates. Then generate one authorization matrix that covers every role and scope across MCP, CLI and REST, and fix defects until it's green. The matrix extends the existing team-scope gate, which today seeds only private, team, project and delegated fixtures and says nothing about SHARED or ORGANIZATION.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Task</th><th>Problem</th><th>Fix direction</th><th>Size</th></tr></thead>
+        <tbody>
+          <tr><td><span class="id">c5ecc5b4</span> <span class="tag block">first</span></td><td>PR CI runs lint, typecheck and tests but never <code>moon run :check</code>. Trust gates run only at the release RC, uncached.</td><td>A PR job runs the trust gate tasks (team-scope, doc-claim, and whatever else <code>:check</code> adds) with correct moon inputs.</td><td><span class="size s">S</span></td></tr>
+          <tr><td><span class="id">672d5084</span></td><td>Default <code>sibyl context</code> recall returns memories from other projects.</td><td>Scope default recall to the linked project plus explicitly shared scopes. <code>--all</code> stays as a labelled opt-in.</td><td><span class="size m">M</span></td></tr>
+          <tr><td><span class="id">952d4340</span></td><td>Every web page defaults to All Projects and shows other projects' cards.</td><td>Default to the selected or most recent project and persist the choice. All Projects becomes an explicit selection.</td><td><span class="size s">S</span></td></tr>
+          <tr><td><span class="id">78b4010c</span> <span class="id">d9e4b5bd</span></td><td><code>authorize_memory_read</code> has no SHARED branch, so raw recall drops SHARED rows while listing returns them. Legacy shared captures are denied to every reader.</td><td>Decide what SHARED means (team, org, or retired), then add the read branch or backfill and tombstone. Needs your call.</td><td><span class="size m">M</span></td></tr>
+          <tr><td><span class="id">3ed9000e</span></td><td>A promoted pattern from a scoped cycle is excluded from native recall as out of scope, while its superseded draft stays recallable.</td><td>Fix the inventory's scope resolution for promoted private patterns, and make superseded drafts unrecallable. Shared with workstream two.</td><td><span class="size m">M</span></td></tr>
+          <tr><td><span class="id">a3e39787</span></td><td>After a raw source is revised, three old relationship generations stay readable.</td><td>Bind relationship reads to the source's current observation across search, explore, REST and cache. In progress since September 11.</td><td><span class="size l">L</span></td></tr>
+          <tr><td><span class="id">21495240</span></td><td>Deleting a <code>raw_memory:</code> id returns 500, and the CLI buffers the write forever.</td><td>Route raw ids to the correction lifecycle or return a 4xx with remediation. Never buffer a write the server can't accept.</td><td><span class="size s">S</span></td></tr>
+          <tr><td><span class="id">468693b1</span></td><td>The CLI maps five correction actions; restore, hide, redact and mark-sensitive exist only in the API.</td><td>Add the missing actions (restore aliased as <code>undo</code>), each with a preview line.</td><td><span class="size s">S</span></td></tr>
+          <tr><td><span class="id">6ec73846</span></td><td>An entity PATCH between backfill enqueue and drain leaves an embedding that's never refreshed.</td><td>Give the update path ownership of re-embedding and enqueue on write.</td><td><span class="size m">M</span></td></tr>
+          <tr><td><span class="id">47640192</span></td><td>The two projection paths disagree on whether private prose may be extracted. Not a leak today; rows inherit private stamps.</td><td>Pick one policy and unify both paths on it. Needs your call.</td><td><span class="size s">S</span></td></tr>
+          <tr><td><span class="id">e23ccd49</span></td><td>The Next.js dev server exposed a credential in its process title.</td><td>Rotate, trace how the value reaches argv, remove the path, and verify value-free inspection after restart.</td><td><span class="size s">S</span></td></tr>
+          <tr><td><span class="id">1a156f2b</span> <span class="id">5a978550</span></td><td>Pending writes that reference mutated task ids never drain. <code>sibyl health</code> reports healthy while auth storage is down.</td><td>Recheck the first against PR 615 and close or fix it. Have health round-trip a trivial auth-storage read.</td><td><span class="size s">S</span></td></tr>
+        </tbody>
+      </table></div>
+      <h4>Acceptance</h4>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Gate</th><th>Passes when</th></tr></thead>
+        <tbody>
+          <tr><td>Authorization matrix</td><td>At least 200 generated assertions across every role and scope, over MCP, CLI and REST. Zero unauthorized reads, zero foreign-project results under the default selection, and complete authorized SHARED results.</td></tr>
+          <tr><td>Lifecycle sequences</td><td>20 end-to-end runs of capture, correction, deletion, restore and recall, including a restart with pending-write replay. Provenance and receipts survive every step. A revised source leaves no stale relationship readable.</td></tr>
+          <tr><td>The gate guards itself</td><td>A deliberately broken trust assertion fails a PR check.</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section id="ws2">
+      <span class="sec-num">05</span>
+      <div class="ws-head"><span class="rank">2</span><h2>A learning loop worth measuring, then one credible study</h2><span class="budget">≤ $425</span></div>
+      <p class="measure"><strong>Goal:</strong> the dream cycle turns related experience into procedures that reach the next agent, at a bounded cost, and one sealed study measures whether that beats simpler memory. <strong>Approach:</strong> finish the product fixes first, then build task families with real headroom, then spend in stages.</p>
+
+      <h3>Product fixes, before any study spend</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Task</th><th>Problem</th><th>Fix direction</th><th>Size</th></tr></thead>
+        <tbody>
+          <tr><td><span class="id">bb650b6e</span> <span class="tag block">release blocker</span></td><td>Dream-path proposal, critic and correction calls run outside any token budget context. With #660, one Opus call can carry about 420K tokens.</td><td>Open a budget context per dream run and settle it to actual usage. Add a per-run spend ceiling that fails closed with a clear receipt.</td><td><span class="size m">M</span></td></tr>
+          <tr><td><span class="id">a5b6cc73</span></td><td>The classic consolidation path reserves the 9-attempt worst case per call and never refunds it, so the third 40K Opus call in a month is refused.</td><td>Reserve one attempt plus a margin, then settle to actual usage after each call.</td><td><span class="size s">S</span></td></tr>
+          <tr><td><span class="id">b1bf1287</span></td><td>No consolidation call uses prompt caching, yet every critique and correction resends the cohort&#39;s whole evidence.</td><td>Put the cohort evidence first as a shared, cached prefix, with role instructions after it. A cohort accepted on first critique then pays about a third less input, and each correction round much less. Verify the pydantic-ai caching surface first, and treat the prompt change as a new execution identity.</td><td><span class="size m">M</span></td></tr>
+          <tr><td><span class="id">3ed9000e</span></td><td>Promoted patterns don't reach native recall (see workstream one).</td><td>As above. This is the prerequisite for the canary.</td><td><span class="size m">M</span></td></tr>
+          <tr><td><span class="id">f1093a5a</span></td><td>Reflection candidates share <code>raw_captures</code> with originals and shift BM25 statistics, so consolidation changes the raw control's ranking.</td><td>Keep candidates out of the raw lane's index and statistics, or give them their own table.</td><td><span class="size m">M</span></td></tr>
+          <tr><td><span class="id">fe47bb18</span></td><td>An abstained reflection chain orphans its pending correction children, which fail forever. It ate one of two good candidates.</td><td>Abstain or archive the children along with the parent, and repair orphans already stored.</td><td><span class="size s">S</span></td></tr>
+          <tr><td><span class="id">258af557</span></td><td>The critic passes a candidate that says nothing useful.</td><td>Add a coverage finding for a supported distinction the candidate omits, with evidence spans and a correction or abstain outcome.</td><td><span class="size m">M</span></td></tr>
+          <tr><td><span class="id">6f97769b</span> <span class="id">#641</span></td><td>The candidate drain re-projects each cohort's evidence per candidate (32 minutes at 85% CPU with no model calls).</td><td>Merge #641 (reuse within one preparation, 1.56 s → 0.67 s), then cache projected evidence per cohort digest.</td><td><span class="size m">M</span></td></tr>
+          <tr><td>follow-up</td><td>Sources that 1.4.0 reflected alone never seed a dream page again after upgrade (a #661 upgrade effect).</td><td>An operator-triggered re-sweep of pre-1.5 singletons, costed per cohort, run after the spend guard lands.</td><td><span class="size s">S</span></td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Task families with headroom</h3>
+      <p class="measure">Only cdn-batch-map has real native-versus-raw room today; stock-adjustment-log and department-unit-budget saturate near raw. The study needs harder families before it needs a bigger n. Keep cdn-batch-map and add two families with different mechanisms, for example retry with idempotency keys, and revision-sensitive authorization. Each family needs:</p>
+      <ul class="measure">
+        <li>At least 25 instances: 5 for development screening and 20 sealed.</li>
+        <li>Cases where applying the remembered procedure would be wrong, so negative transfer is measurable.</li>
+        <li>Task validity verified independently of any memory arm, with public checks the solver can run and hidden checks it can't.</li>
+        <li>A learning corpus of episodes that captures the family's mechanism, generated the way screen48's was.</li>
+      </ul>
+      <p class="measure">The saturated screen48 tasks become regression controls.</p>
+
+      <h3>Staged spend</h3>
+      <div class="funnel">
+        <div class="stage"><span class="cost">$30</span><span class="what">Headroom screen</span><span class="gate">5 development instances per family, 3 reps, 3 arms (135 attempts). Unlocks when raw succeeds 30 to 70% and the best simple control stays under 80%.</span></div>
+        <div class="stage"><span class="cost">$20</span><span class="what">Canary</span><span class="gate">Scoped cycle plus 10 paired reps on cdn-batch-map. Unlocks when promoted mechanisms reach recall, superseded drafts don't, and exceptions survive.</span></div>
+        <div class="stage"><span class="cost">$75</span><span class="what">Fresh cycle</span><span class="gate">One ordinary dream cycle over the study families' learning episodes, with the existing screen48 memory as distractors that are already paid for. Unlocks when the canary passes.</span></div>
+        <div class="stage"><span class="cost">$300</span><span class="what">Sealed study</span><span class="gate">20 unseen instances per family × 5 arms, with repetitions set by the power preflight (default 4), about 1,200 attempts plus 100 on contrast families. One interim look at the halfway point stops it for futility.</span></div>
+      </div>
+      <p class="measure">The study is sized to what the statistics need. Uncertainty is clustered by instance, so once each instance has a few repetitions, more repetitions add little power; new instances add a lot. The plan keeps 20 sealed instances per family and lets the screen's variance set the repetitions. At the intervention's measured $0.19 per attempt ($29.98 for 160 cells), 1,300 attempts cost about $250, and the $300 cap leaves room for harder tasks running longer. The interim look means about half the time the study stops at half the cost.</p>
+    </section>
+
+    <section id="contract">
+      <span class="sec-num">06</span>
+      <h2>Evaluation contract</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Element</th><th>Contract</th></tr></thead>
+        <tbody>
+          <tr><td>Arms</td><td><strong>native</strong> (product recall after the fresh cycle), <strong>raw</strong> (raw retrieval over the same corpus), <strong>strong summary</strong> (the best simple control), <strong>no memory</strong>, and <strong>native minus derived</strong> (native with the promoted items removed and no refill).</td></tr>
+          <tr><td>Unit</td><td>One attempt at a fixed task budget. The primary endpoint is success on hidden checks.</td></tr>
+          <tr><td>Pairing</td><td>Each instance and repetition shares one seed across all arms (the per-repetition seeds from #657).</td></tr>
+          <tr><td>Freeze before unsealing</td><td>Solver model and budget, memory model, corpus and checkpoint, seeds, exclusion rules, and the analysis script with its hash.</td></tr>
+          <tr><td>Analysis</td><td>Paired differences with uncertainty clustered by instance (cluster bootstrap), reported per family and pooled. A negative family is reported, never averaged away.</td></tr>
+          <tr><td>Claim gate (from 1.4)</td><td>At least +10 points over no memory and at least +5 over the best simple control, with positive paired lower 95% bounds.</td></tr>
+          <tr><td>Also required</td><td>A positive native-minus-derived ablation, negative-transfer bounds on the exception cases, repeated-mistake rates, and cost per success with consolidation cost amortized in.</td></tr>
+          <tr><td>Power preflight</td><td>From the screen's variance, pick the repetitions per instance (2 to 6), favouring instances over repetitions. The sealed design must have at least 80% power to detect +5 over the best simple control within the $300 cap. If it doesn't, no claim-bearing run happens and the gate stays where it is.</td></tr>
+          <tr><td>Interim look</td><td>One pre-registered analysis at half the attempts, with alpha spending (O'Brien-Fleming boundaries). It can stop for futility, or for success only if the boundary is crossed. The final analysis uses the adjusted threshold.</td></tr>
+          <tr><td>Integrity</td><td>Voided cells (provider errors, harness faults) are rerun under the same seeds and listed, and failures stay in the denominators. Nothing is rerun for any other reason.</td></tr>
+        </tbody>
+      </table></div>
+      <h4>What the release note says, by outcome</h4>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Outcome</th><th>Release note</th></tr></thead>
+        <tbody>
+          <tr><td>Gate passes in every family</td><td>A bounded claim: native memory improved task success by the measured margin on these families at this budget, with the ablation and cost.</td></tr>
+          <tr><td>Gate passes in some families</td><td>The claim is scoped to the passing families, and the others are reported with their numbers.</td></tr>
+          <tr><td>Native beats no memory but not the simple control</td><td>Memory helps, but consolidation's added value is unproven. The numbers are reported.</td></tr>
+          <tr><td>Canary stop, or no power within the cap</td><td>No study ran. The note says why and what the canary showed.</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section id="ws3">
+      <span class="sec-num">07</span>
+      <div class="ws-head"><span class="rank">3</span><h2>Fast on a big graph, under load</h2><span class="budget">$0 incremental</span></div>
+      <p class="measure"><strong>Goal:</strong> the graph page, recall and ingest stay responsive at ten times today's real graph, with concurrent clients. <strong>Approach:</strong> treat the four symptoms as one capacity investigation on the devbox against native Surreal (local OrbStack has wedged four times under this kind of load). Name the contended resource for each symptom before changing code. The work runs on the devbox and free public-repo CI, so it adds no inference spend.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Task</th><th>Symptom and known mechanism</th><th>First move</th><th>Size</th></tr></thead>
+        <tbody>
+          <tr><td><span class="id">8ea64f07</span></td><td><code>/graph</code> takes 70 to 105 seconds or returns 500, and other pages starve. Batched snapshot queries take about 1.5 seconds each, and the hierarchical view is capped at 1,000 nodes and 5,000 edges, so a large graph gets a cut rather than an overview.</td><td>Capture the server-side 500 and profile the snapshot path. Then build the overview on the server, keeping the remaining nodes reachable on demand.</td><td><span class="size l">L</span></td></tr>
+          <tr><td><span class="id">defd7d5b</span> <span class="id">8a56f5c7</span></td><td>Surreal resident memory reached 33 GB after 24 hours of mixed load, and peaked at 11.7 GiB on a 15 GiB runner, killing the enterprise V2 run.</td><td>Replay the frozen snapshot and pack queries on v3.2.x, sample RSS, and bisect block cache vs FTS and HNSW residency vs query-time allocation.</td><td><span class="size l">L</span></td></tr>
+          <tr><td><span class="id">e2ffa177</span></td><td>Ingest degrades from about 10 seconds to 100 to 700 seconds per capture at depth. Each capture bulk-upserts about 700 fat rows through four FTS indexes plus HNSW, holding pool sockets so every other query queues.</td><td>Profile the bulk upsert at depth, then fix the write shape (slimmer rows, batched index maintenance, or a separate pool for bulk writes) rather than throttling ingest.</td><td><span class="size l">L</span></td></tr>
+        </tbody>
+      </table></div>
+      <h4>Acceptance</h4>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Workload</th><th>Passes when</th></tr></thead>
+        <tbody>
+          <tr><td>The real 10.5K graph, a 10× expansion, and the residency and ingest reproducers. Three repetitions each at 1, 8 and 32 concurrent clients, plus a two-hour mixed soak.</td><td>Zero 500s. Recall p95 at most 2 s. Graph first useful render at most 5 s with every node still reachable. Other pages slow by at most 20% during graph use. Deep ingest runs at 80% or more of shallow throughput. Resident memory on the reproducer drops at least 50% and grows no more than 5% after warm-up.</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section id="ws4">
+      <span class="sec-num">08</span>
+      <div class="ws-head"><span class="rank">4</span><h2>One real team move</h2><span class="budget">$0 incremental</span></div>
+      <p class="measure"><strong>Goal:</strong> any team member can move their personal Sibyl into a shared org server with one command, and one real team does it end to end. Both tasks have waited at high priority since September 2. An archive import makes no model calls, so the move adds no inference spend.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Task</th><th>Scope</th><th>Size</th></tr></thead>
+        <tbody>
+          <tr><td><span class="id">a7dcbe91</span></td><td>A new <code>sibyl migrate to-team &lt;url&gt;</code> command. It exports the local org archive (graph and content, auth skipped), authenticates through the existing flow, and streams to a new server-side import endpoint. The server runs check, dry run and import into the caller's org, remapping scope ownership to the authenticated user, which resolves the private-scope owner mismatch by construction. It returns per-kind counts and conflicts. The conflict policy for overlapping project knowledge is additive with dedup.</td><td><span class="size l">L</span></td></tr>
+          <tr><td><span class="id">aa3ea579</span></td><td>Move a personal graph into a shared team server as the acceptance deployment, once both ends run 1.5. The existing consolidate path assumes an SSH and compose target, and a Kubernetes-hosted server needs manual kubectl steps, so <code>to-team</code> replaces them.</td><td><span class="size m">M</span></td></tr>
+        </tbody>
+      </table></div>
+      <h4>Acceptance</h4>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Gate</th><th>Passes when</th></tr></thead>
+        <tbody>
+          <tr><td>Rehearsal (release gate)</td><td>Two full rehearsals on a representative snapshot, including interrupt and resume, an idempotent rerun, and rollback. Every source record reconciles by stable identity and content checksum, with an explicit exception ledger.</td></tr>
+          <tr><td>Pilot (post-cut acceptance)</td><td>One separately authorized migration into a real team server, then five days with two users across two projects and 20 scripted cross-agent handoffs. Zero scope leaks, missing captures or duplicates. The pilot runs on the release candidate and can finish in 1.5.1.</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section id="side">
+      <span class="sec-num">09</span>
+      <h2>Side lanes with a set position</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Lane</th><th>Position for 1.5</th></tr></thead>
+        <tbody>
+          <tr><td>Jev stack (14 PRs)</td><td>Merge perf PR <a href="https://github.com/hyperb1iss/sibyl/pull/641">#641</a> once its current head reproduces the preparation speedup with identical outputs. Hold <a href="https://github.com/hyperb1iss/sibyl/pull/626">#626</a> until the real-data semantic gate G1 runs; a disabled experiment doesn't justify a per-capture backfill. Its migration renumbers, since #661 took version 46. Archive experiments 628 to 646 as one indexed evidence branch, and extract standalone critic fixes (<span class="id">28b8e89d</span>, <span class="id">2563d7ef</span>) as small PRs.</td></tr>
+          <tr><td>Public benchmarks</td><td>Scope is measurement integrity only. Fix the LongMemEval adapter so it stops truncating sessions and uses <code>compile_context</code>, add the missing QA regression baseline, and prove 20 long-session fixtures keep their evidence. Retire 26.2% and 23.3% as product anchors. Paid reruns wait until the adapter and scale gates pass.</td></tr>
+          <tr><td>Dependencies</td><td>Clear the Dependabot queue. First fix the single ty diagnostic on #648, rerun the Opus 5.5 live smoke before #649 (pydantic-ai 2.45), and check the web runner config before #655 (vitest 5).</td></tr>
+          <tr><td>Developer experience</td><td>Opportunistic only: the 49 GB moon cache and 62 worktrees that make repo greps take minutes (<span class="id">9828a377</span>), and <code>apps/e2e/uv.lock</code> drifting behind sibyl-core's pins.</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section id="users">
+      <span class="sec-num">10</span>
+      <h2>What users get</h2>
+      <ul class="two measure">
+        <li>Recall and web pages scoped to the current project by default, with cross-project access as a visible choice.</li>
+        <li>Delete, restore, hide and redact from the CLI, with previews, and no forever-buffered writes.</li>
+        <li>SHARED memories that behave as documented.</li>
+        <li>A graph page that renders in seconds on a real graph without starving the rest of the app.</li>
+        <li>Ingest and recall that stay fast as memory grows.</li>
+        <li>A dream cycle that groups related experience across pages and keeps the mechanism in what it promotes.</li>
+        <li>Opus memory models sized to their window, with spend bounded per run.</li>
+        <li><code>sibyl migrate to-team</code> for moving personal memory into a team server.</li>
+        <li>A health check that tells the truth about storage.</li>
+      </ul>
+    </section>
+
+    <section id="boundary">
+      <span class="sec-num">11</span>
+      <h2>Release boundary</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Must pass for 1.5.0</th><th>Decides the note, not the date</th><th>May finish in 1.5.1</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>
+              <ul>
+                <li>Workstream one gates</li>
+                <li>Workstream three gates</li>
+                <li>Dream-path spend guard (<span class="id">bb650b6e</span>)</li>
+                <li>Migration rehearsals</li>
+                <li><code>:check</code> green at the RC</li>
+                <li>Dependabot queue clear</li>
+              </ul>
+            </td>
+            <td>
+              <ul>
+                <li>The sealed study and its claim</li>
+                <li>The canary result</li>
+              </ul>
+            </td>
+            <td>
+              <ul>
+                <li>The five-day team pilot</li>
+                <li>The operator re-sweep of pre-1.5 singletons</li>
+                <li>Cached evidence projection</li>
+              </ul>
+            </td>
+          </tr>
+        </tbody>
+      </table></div>
+      <p class="measure">The cut follows the 1.4 mechanics: bump VERSION, run <code>moon run sync-versions</code> for the 11 static pins, do a release dry run (it caught the delegated-scope regression in 1.4.0), then cut. The tag, publish and release steps each need your go-ahead.</p>
+    </section>
+
+    <section id="sequence">
+      <span class="sec-num">12</span>
+      <h2>Sequence</h2>
+      <p class="measure">Each phase ends on a gate rather than a date. From P1 on, workstreams two and three run side by side, with the study on the devbox and the capacity work on a separate native Surreal stack.</p>
+      <ol class="phases">
+        <li>
+          <span class="phase-name">P0</span>
+          <div class="phase-title">Land the cleanup and close the CI gap</div>
+          <p class="measure">Merge #661. Wire <code>:check</code> into PR CI (<span class="id">c5ecc5b4</span>). Land the dream spend guard and refund (<span class="id">bb650b6e</span>, <span class="id">a5b6cc73</span>).</p>
+          <span class="exit"><b>Exit:</b> main carries the whole partition stack, trust gates run on every PR, and no dream run can spend without a budget.</span>
+        </li>
+        <li>
+          <span class="phase-name">P1</span>
+          <div class="phase-title">Trust fixes, recall defects, task families</div>
+          <p class="measure">Default project scoping, the SHARED decision, CLI lifecycle, and the authorization matrix. Fix <span class="id">3ed9000e</span>, <span class="id">f1093a5a</span>, <span class="id">fe47bb18</span> and <span class="id">258af557</span>. Build the two new task families and run the $30 headroom screen. Start the residency bisect on the devbox.</p>
+          <span class="exit"><b>Exit:</b> the authorization matrix is green, at least two families show headroom, and the capacity bottlenecks are named.</span>
+        </li>
+        <li>
+          <span class="phase-name">P2</span>
+          <div class="phase-title">Canary, cycle, study, capacity fixes</div>
+          <p class="measure">$20 canary, then the $75 fresh cycle, the power preflight and the sealed study with its interim look. Capacity fixes land against the load harness.</p>
+          <span class="exit"><b>Exit:</b> the study verdict is recorded either way, and the scale gates pass.</span>
+        </li>
+        <li>
+          <span class="phase-name">P3</span>
+          <div class="phase-title">Migration and release</div>
+          <p class="measure"><code>sibyl migrate to-team</code>, two rehearsals, then the release dry run and the 1.5.0 cut. The team pilot starts on the RC.</p>
+          <span class="exit"><b>Exit:</b> <code>:check</code> green at the RC, rehearsals reconciled, and your go-ahead for the tag and publish.</span>
+        </li>
+      </ol>
+      <h4>Dependencies that set the order</h4>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Before</th><th>Unlocks</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td><span class="id">c5ecc5b4</span></td><td>All trust fixes</td><td>Fixes should land under the gates they exist to satisfy.</td></tr>
+          <tr><td><span class="id">bb650b6e</span></td><td>Fresh cycle, re-sweep, 1.5.0</td><td>No paid dream run and no shipped Opus default without a spend bound.</td></tr>
+          <tr><td><span class="id">3ed9000e</span> <span class="id">f1093a5a</span></td><td>Canary</td><td>The canary measures whether promoted items reach the solver and whether the raw control stays clean.</td></tr>
+          <tr><td>Headroom screen</td><td>Sealed study design</td><td>The power preflight needs the screen's variance.</td></tr>
+          <tr><td>Workstream one and three gates</td><td>Team pilot</td><td>A team deployment should inherit fixed boundaries and capacity.</td></tr>
+          <tr><td>Adapter fix</td><td>Any paid LongMemEval run</td><td>A truncating adapter makes the number meaningless.</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section id="spend">
+      <span class="sec-num">13</span>
+      <h2>Spend and scope controls</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Stage</th><th class="num">Cap</th><th>Unlock condition</th><th class="num">Running total</th></tr></thead>
+        <tbody>
+          <tr><td>Workstream one live smokes</td><td class="num">$10</td><td>None; the checks are deterministic.</td><td class="num">$10</td></tr>
+          <tr><td>Headroom screen</td><td class="num">$30</td><td>Task families built and validated.</td><td class="num">$40</td></tr>
+          <tr><td>Canary</td><td class="num">$20</td><td>Screen shows headroom; <span class="id">3ed9000e</span> and <span class="id">f1093a5a</span> landed.</td><td class="num">$60</td></tr>
+          <tr><td>Fresh cycle</td><td class="num">$75</td><td>Canary passes; spend guard landed.</td><td class="num">$135</td></tr>
+          <tr><td>Sealed study</td><td class="num">$300</td><td>Inventory audit and power preflight pass.</td><td class="num">$435</td></tr>
+          <tr><td>Capacity investigation</td><td class="num">$0</td><td>None; devbox and free public-repo CI.</td><td class="num">$435</td></tr>
+          <tr><td>Migration rehearsals and pilot</td><td class="num">$0</td><td>No model calls. The pilot needs its own authorization.</td><td class="num">$435</td></tr>
+        </tbody>
+      </table></div>
+      <ul class="measure">
+        <li>The harness cost guard stays armed on every paid run and counts billed-but-unmeasured attempts.</li>
+        <li>A stage that would overrun its cap stops and reports. It never borrows from the next stage.</li>
+        <li>If the canary stops the study, total spend is about $60. If the interim look stops it for futility, total spend is about $285.</li>
+        <li>New scope goes on the 1.6 list unless it fixes a defect that blocks a 1.5 gate.</li>
+      </ul>
+    </section>
+
+    <section id="risks">
+      <span class="sec-num">14</span>
+      <h2>Risk register</h2>
+      <div class="callout risk measure">
+        <span class="label">Biggest risk to the thesis</span>
+        <p><strong>Consolidation may add little beyond better raw retrieval.</strong> The intervention already hints at it: removing the promoted items took back only 2 of native's 6 extra wins. The earliest cheap signal is the $20 canary after <span class="id">3ed9000e</span> and <span class="id">f1093a5a</span>. If the promoted mechanism now reaches the solver but removing it still changes nothing, pause the study and investigate consumption. That result stops the spend; it doesn't prove zero benefit.</p>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Risk</th><th>Earliest signal</th><th>Response</th></tr></thead>
+        <tbody>
+          <tr><td>New task families lack headroom or validity.</td><td>The $30 screen.</td><td>Iterate on instances before spending further, or scope the study to the families that qualify.</td></tr>
+          <tr><td>A capacity bottleneck sits inside the Surreal engine rather than our code.</td><td>The residency bisect in P1.</td><td>Report upstream with a reproducer, and change our query or write shape around it. Pin a fixed version if one exists.</td></tr>
+          <tr><td>Migration identity remapping collides with records that already exist.</td><td>The first rehearsal's reconciliation ledger.</td><td>An additive-with-dedup policy and an explicit exception ledger. The rollback path is rehearsed before the pilot.</td></tr>
+          <tr><td>The SHARED and private-extraction decisions stall workstream one.</td><td>No decision by the end of P0.</td><td>Ship the fail-closed default (SHARED stays denied, extraction unified on the stricter policy) and revisit in 1.6.</td></tr>
+          <tr><td>Spend overruns.</td><td>A stage near its cap.</td><td>Stage caps, the harness cost guard, and the product spend guard. Stop and report rather than borrow.</td></tr>
+          <tr><td>Local infrastructure wedges during long runs.</td><td>OrbStack stops answering (four incidents so far).</td><td>Run long jobs on the devbox or native Surreal, with liveness probes that use real timeouts.</td></tr>
+          <tr><td>Merge bandwidth becomes the bottleneck.</td><td>Verified PRs waiting more than a day.</td><td>Batch merges at phase boundaries, and use stacked PRs with one verification each.</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section id="decisions">
+      <span class="sec-num">15</span>
+      <h2>Open decisions</h2>
+      <div class="decisions measure">
+        <div class="decision"><span class="q">Spend: approve the staged ceiling of $435.</span><span class="rec">Each stage unlocks only when the previous gate passes. The first spend is $40 (live smokes and the headroom screen).</span></div>
+        <div class="decision"><span class="q">SHARED scope: map it to team, map it to org, or retire it?</span><span class="rec">Recommendation: retire it for new writes and map legacy rows to team. No production writer exists today (<span class="id">78b4010c</span>, <span class="id">d9e4b5bd</span>).</span></div>
+        <div class="decision"><span class="q">Private prose extraction: extract and stamp private, or refuse?</span><span class="rec">Recommendation: refuse on both paths, matching <code>project_memory_entities</code>. It's simpler to audit and loses nothing a private recall needs (<span class="id">47640192</span>).</span></div>
+        <div class="decision"><span class="q">Jev: merge #641, hold #626, archive the experiments?</span><span class="rec">Recommendation: yes. The Jev lane is yours to overrule.</span></div>
+        <div class="decision"><span class="q">Viewer reflection: keep the #661 behaviour?</span><span class="rec">Recommendation: keep it. Org viewers' lone private sources no longer get an individual pass, which matches what a cohort already required.</span></div>
+        <div class="decision"><span class="q">Team pilot: authorize the live migration, and confirm the pilot doesn't block 1.5.0.</span><span class="rec">Recommendation: the pilot runs on the RC and can finish in 1.5.1.</span></div>
+      </div>
+    </section>
+
+    <section id="first">
+      <span class="sec-num">16</span>
+      <h2>First execution slice</h2>
+      <p class="measure">The first PRs, in order. Each one goes through independent verification and root gates before merge.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>#</th><th>PR</th><th>Tasks</th><th>Why now</th></tr></thead>
+        <tbody>
+          <tr><td class="num">1</td><td>Neighbour-page selection (#661, verified)</td><td><span class="id">2a1a7fee</span></td><td>Completes the partition stack on main.</td></tr>
+          <tr><td class="num">2</td><td>Run the trust gate bundle in PR CI</td><td><span class="id">c5ecc5b4</span></td><td>Every later fix lands under the gates.</td></tr>
+          <tr><td class="num">3</td><td>Budget the dream path and settle reservations to usage</td><td><span class="id">bb650b6e</span> <span class="id">a5b6cc73</span></td><td>Bounds spend now that Opus runs at 1.6M.</td></tr>
+          <tr><td class="num">4</td><td>Scope default recall and web pages to the current project</td><td><span class="id">672d5084</span> <span class="id">952d4340</span></td><td>The most visible trust defect.</td></tr>
+          <tr><td class="num">5</td><td>Let promoted patterns reach native recall</td><td><span class="id">3ed9000e</span></td><td>Prerequisite for the canary.</td></tr>
+          <tr><td class="num">6</td><td>Delete and restore work from the CLI</td><td><span class="id">21495240</span> <span class="id">468693b1</span></td><td>Small and user-facing.</td></tr>
+          <tr><td class="num">7</td><td>Task family design and the first family</td><td>new</td><td>Starts the study's longest lead-time item.</td></tr>
+        </tbody>
+      </table></div>
+      <p class="measure">In parallel from day one: the residency bisect on the devbox (<span class="id">8a56f5c7</span>), since it gates the scale fixes and needs no merges.</p>
+    </section>
+
+    <section id="evidence">
+      <span class="sec-num">17</span>
+      <h2>Evidence this plan leans on</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Measurement</th><th class="num">Value</th><th>Source</th></tr></thead>
+        <tbody>
+          <tr><td>Re-probe, n = 5, three headroom tasks: native vs raw vs no memory</td><td class="num">12/15 · 13/15 · 6/11</td><td>SIBYL_1_4_EXECUTION.md, September 20</td></tr>
+          <tr><td>Promoted procedures that were generic before #656</td><td class="num">33 of 34</td><td>task <span class="id">f7f38f5a</span></td></tr>
+          <tr><td>Same-family pair recall, 100-source pages: before join, with #659</td><td class="num">35.2% → 40.4%</td><td><span class="id">claim_95639fbb1c13</span></td></tr>
+          <tr><td>Same, whole corpus partitioned at once with join, 1.6M / 3.2M</td><td class="num">82.3% / 85.1%</td><td>partition matrix, September 24</td></tr>
+          <tr><td>Neighbour-page selection on the real job path (#661)</td><td class="num">76.7%, 9 cross-family</td><td>devbox validation, two identical passes</td></tr>
+          <tr><td>Scoped Opus 5.5 cycle, joined family</td><td class="num">1 procedure, $8.15</td><td>#659</td></tr>
+          <tr><td>cdn-batch-map: native vs raw, paired</td><td class="num">14/18 vs 9/20, +6</td><td><span class="id">b7bc8bf4</span></td></tr>
+          <tr><td>Native minus derived items</td><td class="num">11/18</td><td><span class="id">b7bc8bf4</span></td></tr>
+          <tr><td>Negative transfer on opaque keys</td><td class="num">10/10 both arms</td><td><span class="id">b7bc8bf4</span></td></tr>
+          <tr><td><code>/graph</code> on the 10.5K graph</td><td class="num">70 to 105 s or 500</td><td><span class="id">8ea64f07</span></td></tr>
+          <tr><td>Surreal resident memory under mixed load</td><td class="num">33 GB</td><td><span class="id">defd7d5b</span></td></tr>
+          <tr><td>Ingest time per capture at depth</td><td class="num">100 to 700 s</td><td><span class="id">e2ffa177</span></td></tr>
+          <tr><td>LongMemEval-S with the truncating adapter</td><td class="num">26.2%</td><td>run 33300782053</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <footer>Drafted by Nova on 2026-09-25 from the 1.5 planning dossier (Sibyl tasks, open PRs, memory ledgers), a GPT-6 Astra design consult (adjudicated), and the September 25 cleanup receipts. Sibyl record: <span class="id">plan_6faae5c63dd6</span>. Numbers in the gates are proposals until measured.</footer>
+  </main>
+</div>
+</body>
+</html>
