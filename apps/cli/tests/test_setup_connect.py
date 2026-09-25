@@ -24,8 +24,13 @@ class FakeServer:
         self.minimum = minimum
         self.signed_in: str | None = None
         self.logins: list[str] = []
+        self.probes: list[tuple[str, bool]] = []
+        self.reachable = True
 
     def probe(self, server_url: str, *, insecure: bool) -> tuple[str | None, str | None]:
+        self.probes.append((server_url, insecure))
+        if not self.reachable:
+            raise httpx.ConnectError("Connection refused")
         return self.version, self.minimum
 
     def whoami(self, ctx: config_store.Context) -> str | None:
@@ -246,11 +251,60 @@ def test_setup_without_a_url_uses_the_active_context(home: Path, server: FakeSer
     assert "team (active)" in result.output
 
 
-def test_setup_without_a_url_or_context_asks_for_the_server(home: Path, server: FakeServer) -> None:
+def test_setup_without_a_url_or_context_sets_up_the_local_server(
+    home: Path, server: FakeServer
+) -> None:
+    result = _run("--yes")
+
+    assert result.exit_code == 0, result.output
+    assert server.probes == [("http://localhost:3334", False)]
+    assert "local (created, active)" in result.output
+
+
+def test_unreachable_default_server_says_to_pass_a_url(home: Path, server: FakeServer) -> None:
+    server.reachable = False
+
     result = _run("--yes")
 
     assert result.exit_code == 1
-    assert "sibyl setup https://" in result.output
+    assert "unreachable" in result.output
+    assert "sibyl setup https://your-sibyl-host" in result.output
+    assert config_store.list_contexts() == []
+
+
+def test_a_second_local_server_gets_a_port_named_context(home: Path, server: FakeServer) -> None:
+    config_store.create_context("local", server_url="http://localhost:3337", set_active=True)
+
+    result = _run("http://localhost:3334", "--yes")
+
+    assert result.exit_code == 0, result.output
+    assert "local-3334 (created, active)" in result.output
+    local = config_store.get_context("local")
+    assert local is not None
+    assert local.server_url == "http://localhost:3337"
+
+
+def test_insecure_flag_reaches_the_probe_and_the_context(home: Path, server: FakeServer) -> None:
+    result = _run("https://sibyl.local", "--yes", "--insecure")
+
+    assert result.exit_code == 0, result.output
+    assert server.probes == [("https://sibyl.local", True)]
+    ctx = config_store.get_context("sibyl.local")
+    assert ctx is not None
+    assert ctx.insecure is True
+
+
+def test_setup_warns_when_a_pinned_context_still_wins(
+    home: Path, server: FakeServer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_store.create_context("prod", server_url="https://prod.example.com", set_active=True)
+    monkeypatch.setattr(config_store, "resolve_context_from_cwd", lambda: "prod")
+
+    result = _run(SERVER, "--yes")
+
+    assert result.exit_code == 0, result.output
+    assert "sibyl.example.com (created, active)" in result.output
+    assert "selects context 'prod'" in result.output
 
 
 def test_failed_sign_in_reports_incomplete_setup(

@@ -187,7 +187,7 @@ sibyl service install
 Nothing about the solo path locks you in. If you later want Sibyl on a small cloud VM you can reach
 from anywhere, the [single-host Ansible guide](../deployment/ansible.md) provisions one box with
 TLS, pairs cleanly with Tailscale for a private zero-public-port setup, and keeps the same
-local-first auth. Point any CLI at it with `sibyl init --remote https://your-host`.
+local-first auth. Connect any machine to it with `sibyl setup https://your-host`.
 
 ## Where to Go Next
 

@@ -22,7 +22,7 @@ from sibyl_cli import config_store, doctor, setup
 from sibyl_cli.auth import _login_auto
 from sibyl_cli.auth_store import credential_scope, normalize_api_url
 from sibyl_cli.client import SibylClient, SibylClientError, clear_client_cache
-from sibyl_cli.common import ELECTRIC_PURPLE, NEON_CYAN, console, error, run_async
+from sibyl_cli.common import ELECTRIC_PURPLE, NEON_CYAN, console, error, run_async, warn
 from sibyl_cli.skill import install_canonical_skill
 from sibyl_cli.version_drift import client_version
 from sibyl_core.integration import (
@@ -98,27 +98,55 @@ def _matching_contexts(server_url: str, name: str | None) -> list[config_store.C
     ]
 
 
-def _context_for(server_url: str, name: str | None) -> tuple[config_store.Context, str]:
+def _new_context_name(server_url: str, name: str | None) -> str:
+    """Name a new context after the server, adding the port when the plain name is taken."""
+    if name:
+        candidates = [name]
+    else:
+        parts = urlsplit(server_url)
+        host = parts.hostname or "remote"
+        base = "local" if host in LOCAL_HOSTS else host
+        candidates = [base, f"{base}-{parts.port}"] if parts.port else [base]
+    for candidate in candidates:
+        if config_store.get_context(candidate) is None:
+            return candidate
+    error(f"Context '{candidates[-1]}' already points at another server.")
+    console.print(f"  Name a new one: sibyl setup {server_url} --context <name>")
+    raise typer.Exit(1)
+
+
+def _context_for(
+    server_url: str, name: str | None, *, insecure: bool
+) -> tuple[config_store.Context, str]:
     """Select the context for `server_url`, creating one when none points there."""
     matches = _matching_contexts(server_url, name)
     current = config_store.resolve_context_name()
     if matches:
         chosen = next((ctx for ctx in matches if ctx.name == current), matches[0])
+        if insecure and not chosen.insecure:
+            chosen = config_store.update_context(chosen.name, insecure=True)
         if chosen.name == current:
             return chosen, f"{chosen.name} (active)"
         config_store.set_active_context(chosen.name)
         clear_client_cache()
         return chosen, f"{chosen.name} (now active)"
 
-    host = urlsplit(server_url).hostname or "remote"
-    context_name = name or ("local" if host in LOCAL_HOSTS else host)
-    if config_store.get_context(context_name) is not None:
-        error(f"Context '{context_name}' already points at another server.")
-        console.print(f"  Name a new one: sibyl setup {server_url} --context <name>")
-        raise typer.Exit(1)
-    ctx = config_store.create_context(context_name, server_url=server_url, set_active=True)
+    context_name = _new_context_name(server_url, name)
+    ctx = config_store.create_context(
+        context_name, server_url=server_url, set_active=True, insecure=insecure
+    )
     clear_client_cache()
     return ctx, f"{context_name} (created, active)"
+
+
+def _warn_if_pinned_elsewhere(ctx: config_store.Context) -> None:
+    """A -C flag, SIBYL_CONTEXT, or directory pin outranks the active context."""
+    selected = config_store.resolve_context_name()
+    if selected and selected != ctx.name:
+        warn(
+            f"This shell selects context '{selected}' (via -C, SIBYL_CONTEXT, or a directory "
+            f"pin), so other commands here still use it. Switch with: sibyl -C {ctx.name} ..."
+        )
 
 
 def whoami(ctx: config_store.Context) -> str | None:
@@ -192,7 +220,7 @@ def ensure_hook() -> Step:
 def setup_cmd(
     url: Annotated[
         str | None,
-        typer.Argument(help="Server URL, e.g. https://sibyl.example.com (default: active context)"),
+        typer.Argument(help="Server URL, e.g. https://sibyl.example.com (default: current server)"),
     ] = None,
     yes: Annotated[
         bool, typer.Option("--yes", "-y", help="Don't ask; for agents and scripts")
@@ -204,16 +232,14 @@ def setup_cmd(
     no_hooks: Annotated[
         bool, typer.Option("--no-hooks", help="Skip the Claude Code SessionStart hook")
     ] = False,
+    insecure: Annotated[
+        bool, typer.Option("--insecure", "-k", help="Skip TLS verification (self-signed dev)")
+    ] = False,
 ) -> None:
     """Connect this machine to a Sibyl server: sign in, install the skill and hooks."""
-    if url:
-        server_url = normalize_server_url(url)
-    else:
-        current = config_store.resolve_effective_context()
-        if current is None:
-            error("Which server? Run: sibyl setup https://your-sibyl-server")
-            raise typer.Exit(1)
-        server_url = normalize_server_url(current.server_url)
+    # Without a URL, set up whatever server the CLI already talks to: the
+    # selected context, or the local default.
+    server_url = normalize_server_url(url or config_store.get_effective_server_url())
 
     console.print()
     console.print(f"[{ELECTRIC_PURPLE}]◈[/{ELECTRIC_PURPLE}] [bold]Sibyl setup[/bold] {server_url}")
@@ -228,11 +254,13 @@ def setup_cmd(
             raise typer.Exit(1)
         console.print()
 
-    insecure = any(ctx.insecure for ctx in _matching_contexts(server_url, context))
+    insecure = insecure or any(ctx.insecure for ctx in _matching_contexts(server_url, context))
     try:
         version, minimum = probe_server(server_url, insecure=insecure)
     except (httpx.HTTPError, ValueError) as exc:
         _print_step(Step("Server", False, f"unreachable: {exc}"))
+        if not url:
+            console.print("\n  Pass the server to connect to: sibyl setup https://your-sibyl-host")
         raise typer.Exit(1) from exc
     current = client_version()
     if client_is_below_floor(client=current, minimum=minimum):
@@ -241,8 +269,9 @@ def setup_cmd(
         raise typer.Exit(1)
     _print_step(Step("Server", True, f"sibyl {version or 'unknown version'}"))
 
-    ctx, context_detail = _context_for(server_url, context)
+    ctx, context_detail = _context_for(server_url, context, insecure=insecure)
     _print_step(Step("Context", True, context_detail))
+    _warn_if_pinned_elsewhere(ctx)
 
     identity = whoami(ctx)
     if identity is None:

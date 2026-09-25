@@ -24,21 +24,24 @@ sibyl setup [url] [options]
 
 ## Options
 
-| Option       | Short | Default          | Description                                 |
-| ------------ | ----- | ---------------- | ------------------------------------------- |
-| `url`        |       | active context   | Server URL, such as `https://sibyl.acme.io` |
-| `--yes`      | `-y`  | false            | Don't ask; for agents and scripts           |
-| `--context`  | `-c`  | server host name | Context name to use or create               |
-| `--no-hooks` |       | false            | Skip the Claude Code SessionStart hook      |
+| Option       | Short | Default          | Description                                  |
+| ------------ | ----- | ---------------- | -------------------------------------------- |
+| `url`        |       | current server   | Server URL, such as `https://sibyl.acme.io`  |
+| `--yes`      | `-y`  | false            | Don't ask; for agents and scripts            |
+| `--context`  | `-c`  | server host name | Context name to use or create                |
+| `--no-hooks` |       | false            | Skip the Claude Code SessionStart hook       |
+| `--insecure` | `-k`  | false            | Skip TLS verification for a self-signed host |
 
-Without a terminal, `setup` runs as if `--yes` were passed.
+Without a URL, `setup` connects the server the CLI already talks to: the selected context, or
+`http://localhost:3334`. Without a terminal, it runs as if `--yes` were passed.
 
 ## What It Does
 
 1. Checks the server is reachable and that this CLI meets the server's minimum version. When it does
    not, it prints the upgrade command for how the CLI was installed (`brew upgrade` or
    `uv tool install --upgrade`).
-2. Selects the context that already points at the server, or creates one named after its host.
+2. Selects the context that already points at the server, or creates one named after its host
+   (adding the port when that name is taken, such as `local-3334`).
 3. Signs in with the device flow unless a valid login exists. The browser page offers the server's
    SSO provider or its email and password sign-in.
 4. Installs the skill into `~/.claude/skills`, `~/.codex/skills`, and `~/.agents/skills`.
