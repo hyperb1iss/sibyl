@@ -1,13 +1,28 @@
 """Tests for the self-updater module."""
 
+import os
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+from typer.testing import CliRunner
+
+from sibyl_cli import docker as docker_module
+from sibyl_cli import local as local_module
+from sibyl_cli import update as update_module
 from sibyl_cli.update import (
+    ContainerPlan,
+    ContainerRuntime,
+    ContainerTarget,
     cli_update_available,
+    container_target,
     get_current_cli_version,
     get_latest_cli_version,
+    installed_container_runtimes,
     is_dev_mode,
+    plan_container_upgrades,
+    upgrade_container_runtime,
 )
 
 
@@ -149,49 +164,336 @@ class TestVersionChecking:
             assert available is True
 
 
-class TestContainerUpdates:
-    """Tests for container update checking."""
+def _runtime(tmp_path: Path, name: str = "docker", tag: str | None = "1.4.0") -> ContainerRuntime:
+    compose = tmp_path / name / "docker-compose.yml"
+    compose.parent.mkdir(parents=True, exist_ok=True)
+    _pin(compose, tag)
+    return ContainerRuntime(name, compose, compose.parent / ".env")
 
-    def test_managed_container_images_match_surreal_runtime(self) -> None:
-        """The updater tracks the default local runtime image."""
-        from sibyl_cli.update import SIBYL_IMAGES
 
-        assert "surrealdb/surrealdb" in SIBYL_IMAGES
-        assert "falkordb/falkordb" not in SIBYL_IMAGES
+def _pin(compose: Path, tag: str | None) -> None:
+    image = "ghcr.io/hyperb1iss/sibyl-api" + (f":{tag}" if tag else "")
+    compose.write_text(f"services:\n  api:\n    image: {image}\n")
 
-    def test_check_container_updates_no_compose_file(self, tmp_path: Path) -> None:
-        """Returns zeros when no compose file exists."""
-        from sibyl_cli.update import check_container_updates
 
-        with patch("sibyl_cli.update.SIBYL_LOCAL_COMPOSE", tmp_path / "nonexistent.yml"):
-            total, updates, images = check_container_updates()
-            assert total == 0
-            assert updates == 0
-            assert images == []
+def _plan(
+    tmp_path: Path,
+    current: str | None,
+    target: str | None,
+    *,
+    running: bool | None = True,
+    name: str = "docker",
+    source: str = "CLI",
+) -> ContainerPlan:
+    return ContainerPlan(
+        _runtime(tmp_path, name, current), current, ContainerTarget(target, source), running
+    )
 
-    def test_get_local_image_digest_returns_digest(self) -> None:
-        """get_local_image_digest extracts digest from docker inspect."""
-        from sibyl_cli.update import get_local_image_digest
 
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = "surrealdb/surrealdb@sha256:abc123\n"
+def _docker_probe(cmd: list[str], running_tag: str | None) -> subprocess.CompletedProcess[str]:
+    """Answer the read-only Docker probes `update` makes about one runtime."""
+    if cmd[:2] == ["docker", "inspect"]:
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout=f"ghcr.io/hyperb1iss/sibyl-api:{running_tag}\n"
+        )
+    if "ps" in cmd:
+        return subprocess.CompletedProcess(cmd, 0, stdout="abc123\n" if running_tag else "")
+    return subprocess.CompletedProcess(cmd, 0, stdout="")
 
-        with patch("sibyl_cli.update.subprocess.run", return_value=mock_result):
-            digest = get_local_image_digest("surrealdb/surrealdb")
-            assert digest == "sha256:abc123"
 
-    def test_get_local_image_digest_handles_missing_image(self) -> None:
-        """get_local_image_digest returns None for missing images."""
-        from sibyl_cli.update import get_local_image_digest
+def _upgrader(
+    calls: list[list[str]],
+    envs: list[dict[str, str]] | None = None,
+    *,
+    returncode: int = 0,
+    move_pin: bool = True,
+    running: str | None = None,
+    starts: bool = True,
+):
+    """A stand-in for the PATH `sibyl` and Docker.
 
-        mock_result = MagicMock()
-        mock_result.returncode = 1
-        mock_result.stdout = ""
+    `sibyl <runtime> upgrade` calls are recorded and move the pin like the real
+    ones; a successful one that `starts` also moves the running API container.
+    Docker probes answer from that running tag, None meaning no API runs.
+    """
+    state = {"running": running}
 
-        with patch("sibyl_cli.update.subprocess.run", return_value=mock_result):
-            digest = get_local_image_digest("nonexistent/image")
-            assert digest is None
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[0] != "sibyl":
+            return _docker_probe(cmd, state["running"])
+        calls.append(cmd)
+        if envs is not None:
+            envs.append(kwargs.get("env") or {})  # type: ignore[arg-type]
+        if move_pin and cmd[2:4] == ["upgrade", "--tag"]:
+            for compose in _PINS:
+                if compose.parent.name == cmd[1]:
+                    _pin(compose, cmd[4])
+            if returncode == 0 and starts and state["running"]:
+                state["running"] = cmd[4]
+        return subprocess.CompletedProcess(cmd, returncode)
+
+    return fake_run
+
+
+# Compose files the fake upgrader may move, registered by `_runtime` users.
+_PINS: list[Path] = []
+
+
+@pytest.fixture(autouse=True)
+def _reset_pins() -> None:
+    _PINS.clear()
+
+
+class TestContainerRuntimes:
+    """`update` finds runtimes where `sibyl up` and `sibyl docker init` put them."""
+
+    def test_finds_the_files_the_runtime_commands_write(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        docker_dir = tmp_path / ".sibyl" / "docker"
+        local_dir = tmp_path / ".sibyl" / "local"
+        monkeypatch.setattr(docker_module, "SIBYL_DOCKER_DIR", docker_dir)
+        monkeypatch.setattr(docker_module, "SIBYL_DOCKER_ENV", docker_dir / ".env")
+        monkeypatch.setattr(
+            docker_module, "SIBYL_DOCKER_COMPOSE", docker_dir / "docker-compose.yml"
+        )
+        monkeypatch.setattr(local_module, "SIBYL_LOCAL_DIR", local_dir)
+        monkeypatch.setattr(local_module, "SIBYL_LOCAL_ENV", local_dir / ".env")
+        monkeypatch.setattr(local_module, "SIBYL_LOCAL_COMPOSE", local_dir / "docker-compose.yml")
+
+        assert installed_container_runtimes() == []
+
+        docker_module.write_env_file(image_tag="1.3.0", surreal_password="p", jwt_secret="s")
+        docker_module.write_compose_file(
+            docker_module.compose_config(
+                image_tag="1.3.0",
+                api_port=3334,
+                web_port=3337,
+                surreal_port=8000,
+                with_worker=False,
+                with_crawler=True,
+            )
+        )
+        local_module.write_compose_file()
+
+        runtimes = installed_container_runtimes()
+        assert [runtime.name for runtime in runtimes] == ["docker", "local"]
+        assert [runtime.image_tag() for runtime in runtimes] == [
+            "1.3.0",
+            local_module.DEFAULT_IMAGE_TAG,
+        ]
+
+    def test_image_tag_is_none_when_the_compose_file_does_not_pin_one(self, tmp_path: Path) -> None:
+        runtime = _runtime(tmp_path)
+        for content in (
+            "services:\n  api:\n    image: localhost:5000/sibyl-api\n",
+            "services:\n  web: {}\n",
+            "services: [\n",
+        ):
+            runtime.compose_file.write_text(content)
+            assert runtime.image_tag() is None
+
+    def test_is_running_never_lets_compose_read_a_cwd_env_file(self, tmp_path: Path) -> None:
+        runtime = _runtime(tmp_path)
+        calls: list[list[str]] = []
+
+        def fake_run(cmd: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+            calls.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, stdout="abc123\n")
+
+        with patch("sibyl_cli.update.subprocess.run", side_effect=fake_run):
+            assert runtime.is_running() is True
+            runtime.env_file.write_text("SIBYL_IMAGE_TAG=1.4.0\n")
+            assert runtime.is_running() is True
+
+        compose = str(runtime.compose_file)
+        assert calls == [
+            ["docker", "compose", "-f", compose, "--env-file", os.devnull, "ps", "-q"],
+            ["docker", "compose", "-f", compose, "--env-file", str(runtime.env_file), "ps", "-q"],
+        ]
+
+    def test_is_running_is_false_without_docker(self, tmp_path: Path) -> None:
+        with patch("sibyl_cli.update.subprocess.run", side_effect=FileNotFoundError("docker")):
+            assert _runtime(tmp_path).is_running() is False
+
+    def test_running_api_tag_reads_the_api_container_image(self, tmp_path: Path) -> None:
+        runtime = _runtime(tmp_path, tag="1.5.0")
+        seen: list[list[str]] = []
+
+        def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            seen.append(cmd)
+            assert kwargs["timeout"] == update_module.DOCKER_PROBE_TIMEOUT_SECONDS
+            return _docker_probe(cmd, "1.4.0")
+
+        with patch("sibyl_cli.update.subprocess.run", side_effect=fake_run):
+            assert runtime.running_api_tag() == "1.4.0"
+        assert seen[0][-3:] == ["ps", "-q", "api"]
+        assert seen[1] == ["docker", "inspect", "--format", "{{.Config.Image}}", "abc123"]
+
+        with patch(
+            "sibyl_cli.update.subprocess.run", side_effect=lambda cmd, **_: _docker_probe(cmd, None)
+        ):
+            assert runtime.running_api_tag() is None
+        with patch(
+            "sibyl_cli.update.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(["docker"], 10),
+        ):
+            assert runtime.running_api_tag() is None
+
+    def test_is_running_is_unknown_when_docker_is_wedged(self, tmp_path: Path) -> None:
+        wedged = subprocess.TimeoutExpired(["docker"], update_module.DOCKER_PROBE_TIMEOUT_SECONDS)
+        with patch("sibyl_cli.update.subprocess.run", side_effect=wedged) as run:
+            assert _runtime(tmp_path).is_running() is None
+        assert run.call_args.kwargs["timeout"] == update_module.DOCKER_PROBE_TIMEOUT_SECONDS
+
+
+class TestContainerTargets:
+    """Only versions with a published image become targets."""
+
+    @pytest.mark.parametrize(
+        ("version", "tag"),
+        [
+            ("1.4.0", "1.4.0"),
+            ("1.5.0rc2", "1.5.0-rc.2"),
+            ("1.4.0+g1a2b3c", None),
+            ("1.5.0.dev3+gabc123", None),
+            ("1.4.0.dev0", None),
+            ("1.4.0.post1", None),
+            ("1.5.0a1", None),
+            ("1.5.0b2", None),
+            ("1.4", None),
+            ("1!1.4.0", None),
+            ("1.4.0rc01", "1.4.0-rc.1"),
+            (None, None),
+        ],
+    )
+    def test_only_releases_and_rcs_have_a_target(
+        self, monkeypatch: pytest.MonkeyPatch, version: str | None, tag: str | None
+    ) -> None:
+        monkeypatch.delenv("SIBYL_IMAGE_TAG", raising=False)
+        target = container_target(version)
+        assert target.tag == tag
+        if tag is None:
+            assert target.reason
+
+    def test_a_dev_build_says_why_it_leaves_containers_alone(self, tmp_path: Path) -> None:
+        plan = ContainerPlan(
+            _runtime(tmp_path), "1.4.0", container_target("1.5.0.dev3+gabc123"), True
+        )
+        assert plan.applies is False
+        assert "1.5.0.dev3+gabc123 is not a release" in plan.status()
+
+    def test_the_override_wins_and_names_itself(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("SIBYL_IMAGE_TAG", "1.6.0")
+        assert container_target("1.5.0.dev3") == ContainerTarget("1.6.0", source="SIBYL_IMAGE_TAG")
+
+
+class TestContainerPlans:
+    """Runtimes follow the CLI version and are only upgraded while running."""
+
+    def test_target_is_the_image_tag_of_the_cli_version(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("SIBYL_IMAGE_TAG", raising=False)
+        runtime = _runtime(tmp_path, tag="1.4.0")
+        monkeypatch.setattr(update_module, "installed_container_runtimes", lambda: [runtime])
+        monkeypatch.setattr(ContainerRuntime, "is_running", lambda _self: True)
+        monkeypatch.setattr(ContainerRuntime, "running_api_tag", lambda _self: None)
+
+        [plan] = plan_container_upgrades("1.5.0rc2")
+
+        assert (plan.current_tag, plan.target_tag) == ("1.4.0", "1.5.0-rc.2")
+        assert plan.applies is True
+        assert plan_container_upgrades(None)[0].target_tag is None
+
+        # The override `sibyl up` honours wins here too, and a custom tag is
+        # never compared against a release.
+        monkeypatch.setenv("SIBYL_IMAGE_TAG", "edge")
+        [plan] = plan_container_upgrades("1.5.0")
+        assert (plan.target_tag, plan.applies) == ("edge", False)
+
+    @pytest.mark.parametrize(
+        ("current", "target", "running", "behind", "applies"),
+        [
+            ("1.4.0", "1.5.0", True, True, True),
+            ("1.0.0-rc.8", "1.0.0", True, True, True),
+            ("1.4.0", "1.5.0", False, True, False),
+            ("1.4.0", "1.5.0", None, True, False),
+            ("1.5.0", "1.5.0", True, False, False),
+            ("1.6.0", "1.5.0", True, False, False),
+            ("main", "1.5.0", True, False, False),
+            (None, "1.5.0", True, False, False),
+            ("1.4.0", None, True, False, False),
+        ],
+    )
+    def test_only_a_running_runtime_behind_the_cli_is_upgraded(
+        self,
+        tmp_path: Path,
+        current: str | None,
+        target: str | None,
+        *,
+        running: bool | None,
+        behind: bool,
+        applies: bool,
+    ) -> None:
+        plan = _plan(tmp_path, current, target, running=running)
+        assert (plan.behind, plan.applies) == (behind, applies)
+
+    def test_an_interrupted_upgrade_still_counts_as_behind(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The pin says 1.5.0 but the old API still runs, so the next update finishes the job."""
+        monkeypatch.delenv("SIBYL_IMAGE_TAG", raising=False)
+        runtime = _runtime(tmp_path, tag="1.5.0")
+        monkeypatch.setattr(update_module, "installed_container_runtimes", lambda: [runtime])
+        monkeypatch.setattr(ContainerRuntime, "is_running", lambda _self: True)
+        monkeypatch.setattr(ContainerRuntime, "running_api_tag", lambda _self: "1.4.0")
+
+        [plan] = plan_container_upgrades("1.5.0")
+
+        assert (plan.current_tag, plan.pinned_tag, plan.applies) == ("1.4.0", "1.5.0", True)
+        assert "pin says 1.5.0" in plan.status()
+
+    def test_the_pin_speaks_only_when_no_api_runs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        runtime = _runtime(tmp_path, tag="1.4.0")
+        monkeypatch.setattr(update_module, "installed_container_runtimes", lambda: [runtime])
+        monkeypatch.setattr(ContainerRuntime, "is_running", lambda _self: False)
+        probed: list[str] = []
+        monkeypatch.setattr(
+            ContainerRuntime, "running_api_tag", lambda _self: probed.append("x") or "9.9.9"
+        )
+
+        [plan] = plan_container_upgrades("1.5.0")
+
+        assert plan.current_tag == "1.4.0"
+        assert probed == []
+
+    def test_stopped_and_unknown_runtimes_say_what_happens_next(self, tmp_path: Path) -> None:
+        local = _plan(tmp_path, "1.4.0", "1.5.0", running=False, name="local")
+        docker = _plan(tmp_path, "1.4.0", "1.5.0", running=False, name="docker")
+        wedged = _plan(tmp_path, "1.4.0", "1.5.0", running=None, name="docker")
+
+        assert "the next `sibyl up` runs 1.5.0" in local.status()
+        assert "`sibyl docker upgrade --tag 1.5.0`" in docker.status()
+        assert "state unknown" in wedged.status()
+        assert "stopped" not in wedged.status()
+
+    @pytest.mark.parametrize(
+        ("current", "target", "source", "label"),
+        [
+            ("1.5.0", "1.5.0", "CLI", "matches CLI"),
+            ("1.6.0", "1.5.0", "CLI", "newer than CLI 1.5.0"),
+            ("1.6.0", "1.5.0", "SIBYL_IMAGE_TAG", "newer than SIBYL_IMAGE_TAG 1.5.0"),
+            ("main", "1.5.0", "CLI", "custom tag"),
+            ("1.4.0", "edge", "SIBYL_IMAGE_TAG", "SIBYL_IMAGE_TAG edge is not a release"),
+        ],
+    )
+    def test_runtimes_left_alone_say_why(
+        self, tmp_path: Path, current: str, target: str, source: str, label: str
+    ) -> None:
+        assert label in _plan(tmp_path, current, target, source=source).status()
 
 
 class TestUpdateFunctions:
@@ -225,47 +527,97 @@ class TestUpdateFunctions:
         with patch("sibyl_cli.update.subprocess.run", return_value=mock_result):
             assert update_cli() is False
 
-    def test_update_containers_no_compose(self, tmp_path: Path) -> None:
-        """update_containers returns False when no compose file."""
-        from sibyl_cli.update import update_containers
-
-        with patch("sibyl_cli.update.SIBYL_LOCAL_COMPOSE", tmp_path / "nonexistent.yml"):
-            assert update_containers() is False
-
-    def test_update_containers_disables_default_env_file(self, tmp_path: Path) -> None:
-        """update_containers does not let Compose load a repo .env."""
-        from sibyl_cli.update import update_containers
-
-        compose = tmp_path / "docker-compose.yml"
-        compose.write_text("services: {}\n")
+    @pytest.mark.parametrize("name", ["docker", "local"])
+    def test_each_runtime_upgrades_through_its_own_command(self, tmp_path: Path, name: str) -> None:
         calls: list[list[str]] = []
+        envs: list[dict[str, str]] = []
+        plan = _plan(tmp_path, "1.4.0", "1.5.0", name=name)
+        _PINS.append(plan.runtime.compose_file)
 
-        def fake_run(cmd: list[str], **_: object) -> MagicMock:
-            calls.append(cmd)
-            result = MagicMock()
-            result.returncode = 0
-            result.stdout = "api\n" if cmd[-2:] == ["ps", "-q"] else ""
-            return result
+        with patch("sibyl_cli.update.subprocess.run", side_effect=_upgrader(calls, envs)):
+            assert upgrade_container_runtime(plan) is True
 
-        with (
-            patch("sibyl_cli.update.SIBYL_LOCAL_COMPOSE", compose),
-            patch("sibyl_cli.update.subprocess.run", side_effect=fake_run),
+        assert calls == [["sibyl", name, "upgrade", "--tag", "1.5.0"]]
+        # The PATH `sibyl` may be another build, so the tag is passed, not derived.
+        assert envs[0]["SIBYL_IMAGE_TAG"] == "1.5.0"
+
+    def test_success_is_only_claimed_once_the_pin_moved(self, tmp_path: Path) -> None:
+        """A PATH `sibyl` that exits 0 on its own version must not read as success."""
+        calls: list[list[str]] = []
+        plan = _plan(tmp_path, "1.4.0", "1.5.0", name="local")
+        _PINS.append(plan.runtime.compose_file)
+
+        with patch("sibyl_cli.update.subprocess.run", side_effect=_upgrader(calls, move_pin=False)):
+            assert upgrade_container_runtime(plan) is False
+
+        assert plan.runtime.image_tag() == "1.4.0"
+
+    @pytest.mark.parametrize(
+        ("move_pin", "expected"),
+        [
+            # `docker upgrade` pulls first, so an unchanged pin means the pull failed.
+            (False, ["Nothing changed; the docker runtime still pins 1.4.0"]),
+            # A moved pin means the images arrived and the start failed.
+            (True, ["pulled and pinned", "sibyl docker up", "sibyl docker logs"]),
+        ],
+    )
+    def test_a_docker_failure_reads_the_pin_it_left(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        *,
+        move_pin: bool,
+        expected: list[str],
+    ) -> None:
+        calls: list[list[str]] = []
+        plan = _plan(tmp_path, "1.4.0", "1.5.0", name="docker")
+        _PINS.append(plan.runtime.compose_file)
+
+        with patch(
+            "sibyl_cli.update.subprocess.run",
+            side_effect=_upgrader(calls, returncode=1, move_pin=move_pin, running="1.4.0"),
         ):
-            assert update_containers() is True
+            assert upgrade_container_runtime(plan) is False
 
-        compose_prefix = [
-            "docker",
-            "compose",
-            "-f",
-            str(compose),
-            "--env-file",
-            "/dev/null",
-        ]
-        assert calls == [
-            [*compose_prefix, "ps", "-q"],
-            [*compose_prefix, "pull"],
-            [*compose_prefix, "up", "-d"],
-        ]
+        output = capsys.readouterr().out
+        for fragment in expected:
+            assert fragment in output
+        # No downgrade advice: after a start failure the data may be on the new version.
+        assert "upgrade --tag 1.4.0" not in output
+
+    def test_a_local_failure_leaves_the_explanation_to_local_upgrade(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        calls: list[list[str]] = []
+        plan = _plan(tmp_path, "1.4.0", "1.5.0", name="local")
+
+        with patch(
+            "sibyl_cli.update.subprocess.run",
+            side_effect=_upgrader(calls, returncode=1, move_pin=False),
+        ):
+            assert upgrade_container_runtime(plan) is False
+
+        output = capsys.readouterr().out
+        assert "sibyl local upgrade --tag 1.5.0 failed" in output
+        assert "Nothing changed" not in output
+
+    def test_success_needs_the_running_api_on_the_target(self, tmp_path: Path) -> None:
+        """A moved pin with the old API still running is not an upgrade."""
+        calls: list[list[str]] = []
+        plan = _plan(tmp_path, "1.4.0", "1.5.0", name="docker")
+        _PINS.append(plan.runtime.compose_file)
+
+        with patch(
+            "sibyl_cli.update.subprocess.run",
+            side_effect=_upgrader(calls, running="1.4.0", starts=False),
+        ):
+            assert upgrade_container_runtime(plan) is False
+
+        with patch(
+            "sibyl_cli.update.subprocess.run",
+            side_effect=_upgrader(calls, running="1.4.0"),
+        ):
+            assert upgrade_container_runtime(plan) is True
 
     def test_update_skills_delegates_to_setup(self) -> None:
         """update_skills calls setup_agent_integration."""
@@ -274,3 +626,120 @@ class TestUpdateFunctions:
         with patch("sibyl_cli.setup.setup_agent_integration", return_value=True) as mock:
             assert update_skills() is True
             mock.assert_called_once_with(verbose=False)
+
+
+class TestUpdateCommand:
+    """`sibyl update` wires the plans to the runtime commands."""
+
+    @pytest.fixture
+    def runtime_calls(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> tuple[list[list[str]], ContainerRuntime]:
+        monkeypatch.delenv("SIBYL_IMAGE_TAG", raising=False)
+        runtime = _runtime(tmp_path, "docker", "1.4.0")
+        _PINS.append(runtime.compose_file)
+        calls: list[list[str]] = []
+
+        monkeypatch.setattr(update_module, "is_dev_mode", lambda: False)
+        monkeypatch.setattr(update_module, "installed_container_runtimes", lambda: [runtime])
+        monkeypatch.setattr(update_module.subprocess, "run", _upgrader(calls))
+        return calls, runtime
+
+    def test_containers_follow_the_installed_cli(
+        self,
+        runtime_calls: tuple[list[list[str]], ContainerRuntime],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        calls, runtime = runtime_calls
+        monkeypatch.setattr(ContainerRuntime, "is_running", lambda _self: True)
+        monkeypatch.setattr(update_module, "get_current_cli_version", lambda: "1.5.0")
+
+        result = CliRunner().invoke(update_module.app, ["--containers", "--yes"])
+
+        assert result.exit_code == 0, result.output
+        assert calls == [["sibyl", "docker", "upgrade", "--tag", "1.5.0"]]
+        assert runtime.image_tag() == "1.5.0"
+
+    def test_a_stopped_runtime_is_left_alone(
+        self,
+        runtime_calls: tuple[list[list[str]], ContainerRuntime],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        calls, _ = runtime_calls
+        monkeypatch.setattr(ContainerRuntime, "is_running", lambda _self: False)
+        monkeypatch.setattr(update_module, "get_current_cli_version", lambda: "1.5.0")
+
+        result = CliRunner().invoke(update_module.app, ["--containers", "--yes"])
+
+        assert result.exit_code == 0, result.output
+        assert calls == []
+        assert "Everything is up to date" not in result.output
+
+    def test_an_unreadable_tag_is_not_up_to_date(
+        self,
+        runtime_calls: tuple[list[list[str]], ContainerRuntime],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        calls, runtime = runtime_calls
+        runtime.compose_file.write_text("services: {}\n")
+        monkeypatch.setattr(ContainerRuntime, "is_running", lambda _self: True)
+        monkeypatch.setattr(update_module, "get_current_cli_version", lambda: "1.5.0")
+
+        result = CliRunner().invoke(update_module.app, ["--containers", "--check"])
+
+        assert result.exit_code == 0, result.output
+        assert "Unknown image tag" in result.output
+        assert "Everything is up to date" not in result.output
+        assert calls == []
+
+    @pytest.mark.parametrize(
+        ("landed", "expected", "note"),
+        [
+            ("1.5.0", [["sibyl", "docker", "upgrade", "--tag", "1.5.0"]], None),
+            # A pinned tool install exits 0 without moving; the server must
+            # not be moved ahead of it.
+            ("1.4.0", [], "containers follow 1.4.0"),
+            (None, [], "Could not read the CLI version"),
+        ],
+    )
+    def test_containers_follow_the_cli_version_that_landed(
+        self,
+        runtime_calls: tuple[list[list[str]], ContainerRuntime],
+        monkeypatch: pytest.MonkeyPatch,
+        landed: str | None,
+        expected: list[list[str]],
+        note: str | None,
+    ) -> None:
+        calls, _ = runtime_calls
+        monkeypatch.setattr(ContainerRuntime, "is_running", lambda _self: True)
+        monkeypatch.setattr(update_module, "cli_update_available", lambda: ("1.3.0", "1.5.0", True))
+        monkeypatch.setattr(update_module, "get_server_version", lambda: None)
+        monkeypatch.setattr(update_module, "update_cli", lambda: True)
+        monkeypatch.setattr(update_module, "get_current_cli_version", lambda: landed)
+        monkeypatch.setattr(update_module, "update_skills", lambda: True)
+
+        result = CliRunner().invoke(update_module.app, ["--yes"])
+
+        assert result.exit_code == 0, result.output
+        assert calls == expected
+        if note:
+            assert note in result.output
+        assert "follow None" not in result.output
+
+    def test_containers_wait_for_a_cli_upgrade_that_failed(
+        self,
+        runtime_calls: tuple[list[list[str]], ContainerRuntime],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        calls, _ = runtime_calls
+        monkeypatch.setattr(ContainerRuntime, "is_running", lambda _self: True)
+        monkeypatch.setattr(update_module, "cli_update_available", lambda: ("1.4.0", "1.5.0", True))
+        monkeypatch.setattr(update_module, "get_server_version", lambda: None)
+        monkeypatch.setattr(update_module, "update_cli", lambda: False)
+        monkeypatch.setattr(update_module, "update_skills", lambda: True)
+
+        result = CliRunner().invoke(update_module.app, ["--yes"])
+
+        assert result.exit_code == 1
+        assert calls == []
+        assert "Skipped the container upgrade" in result.output

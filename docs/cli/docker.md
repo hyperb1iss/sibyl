@@ -104,22 +104,25 @@ sibyl docker down [options]
 
 ## docker upgrade
 
-Pull current images and recreate containers, optionally writing a new image tag first.
+Move the deployment to new images: pull them, then write the new pins and recreate the containers.
+With `--tag` it moves the Sibyl images to that tag; without it, it re-pulls the current pins.
 
 Upgrade also moves the SurrealDB image up to the server this CLI release runs (`v3.2.4`), so upgrade
 the CLI before you upgrade the deployment. It pulls every new image before it touches the compose
 file, so a failed pull exits non-zero and leaves the deployment and its pins as they were. Compose
-then recreates SurrealDB and waits for it to report healthy before it starts the new API. A
-`SIBYL_SURREAL_IMAGE` set in `~/.sibyl/docker/.env` or the shell still wins, and a SurrealDB image
-you wrote by hand, or one newer than the CLI's, stays as it is. Upgrade warns in both cases.
+then recreates SurrealDB and waits for it to report healthy before it starts the new API. If that
+start fails, upgrade exits non-zero with the new pins kept, because SurrealDB may already have
+opened the data on the new version; start it again with `sibyl docker up`. A `SIBYL_SURREAL_IMAGE`
+set in `~/.sibyl/docker/.env` or the shell still wins, and a SurrealDB image you wrote by hand, or
+one newer than the CLI's, stays as it is. Upgrade warns in both cases.
 
 ```bash
 sibyl docker upgrade [options]
 ```
 
-| Option  | Default | Description           |
-| ------- | ------- | --------------------- |
-| `--tag` | (none)  | Write a new image tag |
+| Option  | Default | Description                |
+| ------- | ------- | -------------------------- |
+| `--tag` | (none)  | Sibyl image tag to move to |
 
 ### Example
 
@@ -139,4 +142,4 @@ sibyl docker upgrade --tag 1.4.0
 
 - [`sibyl local`](./local.md) - Simpler local Docker instance with `sibyl up`/`down`
 - [`sibyl service`](./service.md) - Run a native host daemon instead of Docker
-- [`sibyl update`](./update.md) - Pull newer container images
+- [`sibyl update`](./update.md) - Upgrade a running deployment in step with the CLI
