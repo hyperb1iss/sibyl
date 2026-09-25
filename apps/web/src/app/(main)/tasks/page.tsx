@@ -14,7 +14,7 @@ import { LoadingState } from '@/components/ui/spinner';
 import { TagChip } from '@/components/ui/toggle';
 import type { TaskStatus } from '@/lib/api';
 import { useCreateEntity, useEpics, useProjects, useTasks, useTaskUpdateStatus } from '@/lib/hooks';
-import { useProjectFilters } from '@/lib/project-context';
+import { useProjectFilters, useRevealProject } from '@/lib/project-context';
 
 function TasksPageContent() {
   const router = useRouter();
@@ -22,6 +22,7 @@ function TasksPageContent() {
 
   // Project filtering is handled by global context (header selector)
   const projectFilters = useProjectFilters();
+  const revealProject = useRevealProject();
   const tagFilter = searchParams.get('tag') || undefined;
 
   // State for modals and search
@@ -169,12 +170,23 @@ function TasksPageContent() {
           },
         });
         setIsQuickTaskOpen(false);
-        toast.success('Task created');
+        // A task created in a project outside the current filter would drop
+        // out of this list the moment it lands, so that project joins the
+        // selection and the toast says why the filter changed.
+        if (revealProject(task.projectId)) {
+          const projectName =
+            projects.find(project => project.id === task.projectId)?.name ?? 'Its project';
+          toast.success('Task created', {
+            description: `${projectName} was added to the project filter so the new task stays in view.`,
+          });
+        } else {
+          toast.success('Task created');
+        }
       } catch (_err) {
         toast.error('Failed to create task');
       }
     },
-    [createEntity]
+    [createEntity, projects, revealProject]
   );
 
   return (

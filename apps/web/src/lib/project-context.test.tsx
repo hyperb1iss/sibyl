@@ -1,4 +1,5 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
+import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const navigation = vi.hoisted(() => ({
@@ -21,6 +22,7 @@ import {
   parseStoredSelection,
   useProjectContext,
   useProjectFilters,
+  useRevealProject,
 } from './project-context';
 
 const PROJECTS = {
@@ -43,6 +45,33 @@ function Probe() {
         every project
       </button>
     </div>
+  );
+}
+
+function RevealProbe() {
+  const reveal = useRevealProject();
+  const { selectedProjects, isAll } = useProjectContext();
+  const [changed, setChanged] = useState<string>('none');
+  return (
+    <div>
+      <span data-testid="reveal-selected">{selectedProjects.join(',')}</span>
+      <span data-testid="reveal-all">{String(isAll)}</span>
+      <span data-testid="reveal-changed">{changed}</span>
+      <button type="button" onClick={() => setChanged(String(reveal('project_old')))}>
+        reveal old
+      </button>
+      <button type="button" onClick={() => setChanged(String(reveal('project_new')))}>
+        reveal new
+      </button>
+    </div>
+  );
+}
+
+function renderRevealProbe() {
+  return render(
+    <ProjectContextProvider>
+      <RevealProbe />
+    </ProjectContextProvider>
   );
 }
 
@@ -230,6 +259,72 @@ describe('ProjectContextProvider default scope', () => {
 
     expect(screen.getByTestId('ready').textContent).toBe('true');
     expect(screen.getByTestId('filters').textContent).toBe('none');
+  });
+});
+
+describe('useRevealProject', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    navigation.replace.mockReset();
+    navigation.pathname = '/tasks';
+    navigation.params = new URLSearchParams();
+    hooks.useProjects.mockReset();
+    hooks.useProjects.mockReturnValue({ data: PROJECTS, isError: false });
+  });
+
+  it('adds a project outside the selection so a new item stays in view', async () => {
+    renderRevealProbe();
+    await waitFor(() =>
+      expect(screen.getByTestId('reveal-selected').textContent).toBe('project_new')
+    );
+
+    act(() => {
+      screen.getByRole('button', { name: 'reveal old' }).click();
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('reveal-selected').textContent).toBe('project_new,project_old')
+    );
+    expect(screen.getByTestId('reveal-changed').textContent).toBe('true');
+  });
+
+  it('leaves the selection alone when the project is already in it', async () => {
+    renderRevealProbe();
+    await waitFor(() =>
+      expect(screen.getByTestId('reveal-selected').textContent).toBe('project_new')
+    );
+
+    act(() => {
+      screen.getByRole('button', { name: 'reveal new' }).click();
+    });
+
+    expect(screen.getByTestId('reveal-changed').textContent).toBe('false');
+    expect(screen.getByTestId('reveal-selected').textContent).toBe('project_new');
+  });
+
+  it('keeps an explicit every-project choice intact', () => {
+    localStorage.setItem('sibyl-project-context', JSON.stringify({ mode: 'all' }));
+    renderRevealProbe();
+
+    act(() => {
+      screen.getByRole('button', { name: 'reveal old' }).click();
+    });
+
+    expect(screen.getByTestId('reveal-changed').textContent).toBe('false');
+    expect(screen.getByTestId('reveal-all').textContent).toBe('true');
+  });
+
+  it('keeps a fallback every-project view intact', async () => {
+    hooks.useProjects.mockReturnValue({ data: undefined, isError: true });
+    renderRevealProbe();
+    await waitFor(() => expect(screen.getByTestId('reveal-all').textContent).toBe('true'));
+
+    act(() => {
+      screen.getByRole('button', { name: 'reveal old' }).click();
+    });
+
+    expect(screen.getByTestId('reveal-changed').textContent).toBe('false');
+    expect(screen.getByTestId('reveal-all').textContent).toBe('true');
   });
 });
 

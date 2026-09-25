@@ -334,6 +334,26 @@ export function useProjectContext(): ProjectContextValue {
 }
 
 /**
+ * Keep something the viewer just created in view. When they have chosen
+ * specific projects and create an item in a project outside that choice,
+ * the project joins the selection, so the item does not vanish from the list
+ * it was created on. An every-project view (chosen or fallback) is left as it
+ * is. Returns true when the selection changed, so the caller can say so.
+ */
+export function useRevealProject(): (projectId: string | undefined) => boolean {
+  const { selectedProjects, isAll, contextEnabled, toggleProject } = useProjectContext();
+  return useCallback(
+    (projectId: string | undefined) => {
+      if (!projectId || !contextEnabled || isAll) return false;
+      if (selectedProjects.length === 0 || selectedProjects.includes(projectId)) return false;
+      toggleProject(projectId);
+      return true;
+    },
+    [contextEnabled, isAll, selectedProjects, toggleProject]
+  );
+}
+
+/**
  * Hook that returns project filter params for API calls.
  * Returns undefined when "all projects", when multiple projects are selected,
  * or on cross-project pages.
