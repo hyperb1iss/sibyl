@@ -196,7 +196,7 @@ start_local_server() {
 
     if [ "$(docker inspect --format '{{.State.Running}}' sibyl-api 2>/dev/null || true)" = true ]; then
         warn "Existing server found; running server images will remain unchanged."
-        info "To upgrade server images, run 'sibyl down && sibyl up --pull' when ready to restart."
+        info "To move it to new server images without leaving it down, run 'sibyl local upgrade'."
     fi
     info "Starting Sibyl local server..."
     set -- up

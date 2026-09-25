@@ -245,7 +245,7 @@ def test_server_rerun_explains_explicit_image_upgrade(tmp_path: Path) -> None:
     result, _ = _run_installer(tmp_path, env={"INSTALLER_EXISTING_SERVER": "true"})
     assert result.returncode == 0
     assert "running server images will remain unchanged" in result.stdout
-    assert "sibyl down && sibyl up --pull" in result.stdout
+    assert "sibyl local upgrade" in result.stdout
 
 
 def test_healthy_daemon_rerun_preserves_process_and_context(tmp_path: Path) -> None:
