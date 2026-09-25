@@ -1683,6 +1683,10 @@ tasks:
 
   doc-claim-gate:
     command: uv run python -m tools.trust.doc_claim_gate
+    # The gate runs docs:build itself. Depending on it orders the two, so a
+    # combined `moon run docs:build doc-claim-gate` cannot race on the dist.
+    deps:
+      - docs:build
     inputs:
       - tools/trust/doc_claim_gate.py
       - docs/**/*.md
