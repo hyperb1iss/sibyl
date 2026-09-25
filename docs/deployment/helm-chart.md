@@ -834,18 +834,19 @@ across restarts and rollouts:
   drivers re-apply `fsGroup` on every mount by default, adding group permission bits to every file
   and directory, and Sibyl refuses a receipts directory or file with any group or other bits. Keep
   this key if you override `podSecurityContext`.
-- An empty `backend.strategy` or `worker.strategy` rolls a single fixed replica with
-  `maxSurge: 0` and `maxUnavailable: 1`, because a surge pod scheduled onto another node cannot
-  attach a ReadWriteOnce claim. The old pod stops before its replacement starts; if the replacement
-  lands on another node, it waits for the volume to detach and then starts on its own. With more
-  replicas or autoscaling the Kubernetes `RollingUpdate` default applies, which assumes
-  ReadWriteMany storage. An explicit strategy passes through unchanged.
+- An empty `backend.strategy` or `worker.strategy` rolls a single fixed replica with `maxSurge: 0`
+  and `maxUnavailable: 1`, because a surge pod scheduled onto another node cannot attach a
+  ReadWriteOnce claim. The old pod stops before its replacement starts; if the replacement lands on
+  another node, it waits for the volume to detach and then starts on its own. With more replicas or
+  autoscaling the Kubernetes `RollingUpdate` default applies, which assumes ReadWriteMany storage.
+  An explicit strategy passes through unchanged.
 
 The single-replica default stays `type: RollingUpdate` rather than `Recreate` on purpose. The API
 server fills in `rollingUpdate` on every existing Deployment, no applier owns that field, and
 server-side apply (the Helm 4 default, Argo CD with `ServerSideApply=true`, Flux) can never remove
-it, so an upgrade that switches `type` to `Recreate` is rejected with `spec.strategy.rollingUpdate:
-Forbidden`. To opt into `Recreate` on an existing release, remove the field once first:
+it, so an upgrade that switches `type` to `Recreate` is rejected with
+`spec.strategy.rollingUpdate: Forbidden`. To opt into `Recreate` on an existing release, remove the
+field once first:
 
 ```bash
 kubectl -n sibyl patch deploy sibyl-backend --type=json \
