@@ -934,6 +934,11 @@ def _graph_schema_migrations(
     )
 
 
+_REBUILD_UNVERIFIED_STAMP = (
+    "{provider: 'unverified', model: 'unverified', dimensions: 0, origin: 'dimension_rebuild'}"
+)
+
+
 @dataclass(frozen=True, slots=True)
 class EmbeddingVectorField:
     """A vector field whose dimension is baked into both its type and its HNSW index."""
@@ -949,7 +954,14 @@ class EmbeddingVectorField:
         )
 
     def clear_statement(self) -> str:
-        return f"UPDATE {self.table} SET {self.field} = NONE WHERE {self.field} != NONE;"
+        # A cleared vector keeps a stamp, so the embedding sweep regenerates it.
+        # Rows from before vectors were stamped would otherwise end with neither
+        # vector nor stamp, which the sweep reads as intentionally lexical.
+        return (
+            f"UPDATE {self.table} SET {self.field} = NONE, "
+            "attributes.embedding_metadata = attributes.embedding_metadata ?? "
+            f"{_REBUILD_UNVERIFIED_STAMP} WHERE {self.field} != NONE;"
+        )
 
     def index_definition(self, dimension: int) -> ConcurrentIndexDefinition:
         return ConcurrentIndexDefinition(

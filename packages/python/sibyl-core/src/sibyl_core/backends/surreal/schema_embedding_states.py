@@ -2,8 +2,8 @@
 
 One row per organization and plane records how vectors written before Sibyl
 stamped their model were classified, which model the plane was last swept
-for, where the resumable walk stopped, who holds the sweep lease, and the last
-pass's receipt. The graph namespace and the shared content namespace both
+for, where the resumable walk stopped, which rows the provider refused, who
+holds the sweep lease, and the last pass's receipt. The graph namespace and the shared content namespace both
 carry the table, keyed the same way.
 """
 
@@ -24,6 +24,7 @@ DEFINE FIELD IF NOT EXISTS complete_metadata ON embedding_states TYPE option<obj
 DEFINE FIELD IF NOT EXISTS complete_at ON embedding_states TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS generation ON embedding_states TYPE int DEFAULT 0;
 DEFINE FIELD IF NOT EXISTS cursors ON embedding_states TYPE object FLEXIBLE DEFAULT {};
+DEFINE FIELD IF NOT EXISTS rejections ON embedding_states TYPE object FLEXIBLE DEFAULT {};
 DEFINE FIELD IF NOT EXISTS lease_owner ON embedding_states TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS lease_until ON embedding_states TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS last_run ON embedding_states TYPE option<object> FLEXIBLE;
@@ -35,12 +36,14 @@ DEFINE INDEX IF NOT EXISTS idx_embedding_states_scope ON embedding_states
 # Imports and dimension rebuilds can hand a plane rows that need vectors while
 # its state still says a full pass found nothing, so they reopen the plane.
 # A pass that started before the reopen sees the generation move and does
-# not record itself complete. The predicate is spelled CONTAINS because the
+# not record itself complete. Remembered provider refusals are forgotten, so
+# rows the reopen hands over are tried at least once. The predicate is spelled
+# CONTAINS because the
 # embedded 2.x test engine drops IN matches that the compound scope index
 # answers.
 REOPEN_EMBEDDING_STATES = (
     "UPDATE embedding_states SET complete_metadata = NONE, complete_at = NONE, "
-    "generation = (generation ?? 0) + 1, updated_at = time::now() "
+    "rejections = {}, generation = (generation ?? 0) + 1, updated_at = time::now() "
     "WHERE $organizations CONTAINS organization_id RETURN NONE;"
 )
 

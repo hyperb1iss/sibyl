@@ -17,11 +17,15 @@ UNVERIFIED_EMBEDDING_PROVIDER = "unverified"
 UNVERIFIED_ORIGIN_ARCHIVE = "archive_import"
 UNVERIFIED_ORIGIN_LEGACY = "legacy_unrecorded"
 UNVERIFIED_ORIGIN_OPERATOR = "operator_reembed"
+UNVERIFIED_ORIGIN_REBUILD = "dimension_rebuild"
 
 DOCUMENT_CHUNK_EMBEDDING_TEXT_VERSION = "document-chunk-v1"
 
-_RATE_LIMIT_STATUS_CODES = frozenset({429})
-_RATE_LIMIT_ERROR_CODES = frozenset(
+# Provider errors that say "not now" rather than "not this input": throttling,
+# quota, and the provider or its model being briefly unavailable. The sweep backs
+# off from these; any other error means the request itself was refused.
+_TRANSIENT_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+_TRANSIENT_ERROR_CODES = frozenset(
     {
         "throttlingexception",
         "toomanyrequestsexception",
@@ -29,9 +33,30 @@ _RATE_LIMIT_ERROR_CODES = frozenset(
         "ratelimitexceeded",
         "resource_exhausted",
         "servicequotaexceededexception",
+        "serviceunavailableexception",
+        "modelnotreadyexception",
+        "internalserverexception",
+        "internalfailure",
+        "unavailable",
     }
 )
-_RATE_LIMIT_NAME_FRAGMENTS = ("ratelimit", "throttl", "toomanyrequests", "resourceexhausted")
+_TRANSIENT_NAME_FRAGMENTS = (
+    "ratelimit",
+    "throttl",
+    "toomanyrequests",
+    "resourceexhausted",
+    "serviceunavailable",
+    "internalserver",
+    "modelnotready",
+    "apiconnection",
+    "apitimeout",
+    "connecterror",
+    "connectionerror",
+    "connectionreset",
+    "readerror",
+    "remoteprotocolerror",
+    "timeout",
+)
 
 
 def unverified_embedding_metadata(origin: str) -> dict[str, str | int]:
@@ -104,42 +129,45 @@ def mark_unverified_vector(
     return True
 
 
-def is_rate_limit_error(exc: BaseException) -> bool:
-    """Recognize provider throttling across SDKs without importing any of them.
+def is_transient_provider_error(exc: BaseException) -> bool:
+    """Recognize throttling and brief provider unavailability across SDKs.
 
     OpenAI and httpx raise with ``status_code``, google-genai with ``code``,
-    botocore with ``response['Error']['Code']``. Wrapped errors are unwrapped
-    through their cause chain.
+    botocore with ``response['Error']['Code']``, all without importing any
+    of them. Wrapped errors are unwrapped through their cause chain.
     """
     seen: set[int] = set()
     current: BaseException | None = exc
     while current is not None and id(current) not in seen:
         seen.add(id(current))
-        if _looks_throttled(current):
+        if _looks_transient(current):
             return True
         current = current.__cause__ or current.__context__
     return False
 
 
-def _looks_throttled(exc: BaseException) -> bool:
+def _looks_transient(exc: BaseException) -> bool:
+    # Refused, reset and aborted connections and any timeout are all "not now".
+    if isinstance(exc, ConnectionError | TimeoutError):
+        return True
     for attribute in ("status_code", "status", "code", "http_status"):
         value = getattr(exc, attribute, None)
-        if isinstance(value, int) and value in _RATE_LIMIT_STATUS_CODES:
+        if isinstance(value, int) and value in _TRANSIENT_STATUS_CODES:
             return True
-        if isinstance(value, str) and value.strip().lower() in _RATE_LIMIT_ERROR_CODES:
+        if isinstance(value, str) and value.strip().lower() in _TRANSIENT_ERROR_CODES:
             return True
     response = getattr(exc, "response", None)
     if isinstance(response, Mapping):
         error = response.get("Error")
         code = error.get("Code") if isinstance(error, Mapping) else None
-        if isinstance(code, str) and code.strip().lower() in _RATE_LIMIT_ERROR_CODES:
+        if isinstance(code, str) and code.strip().lower() in _TRANSIENT_ERROR_CODES:
             return True
     else:
         status = getattr(response, "status_code", None)
-        if isinstance(status, int) and status in _RATE_LIMIT_STATUS_CODES:
+        if isinstance(status, int) and status in _TRANSIENT_STATUS_CODES:
             return True
     name = type(exc).__name__.lower()
-    return any(fragment in name for fragment in _RATE_LIMIT_NAME_FRAGMENTS)
+    return any(fragment in name for fragment in _TRANSIENT_NAME_FRAGMENTS)
 
 
 __all__ = [
@@ -148,8 +176,9 @@ __all__ = [
     "UNVERIFIED_ORIGIN_ARCHIVE",
     "UNVERIFIED_ORIGIN_LEGACY",
     "UNVERIFIED_ORIGIN_OPERATOR",
+    "UNVERIFIED_ORIGIN_REBUILD",
     "document_chunk_embedding_metadata",
-    "is_rate_limit_error",
+    "is_transient_provider_error",
     "is_unverified_embedding_metadata",
     "mark_unverified_vector",
     "same_embedding_model",

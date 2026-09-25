@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import os
 import random
 import socket
@@ -43,7 +44,7 @@ from sibyl_core.embeddings.provenance import (
     UNVERIFIED_EMBEDDING_PROVIDER,
     UNVERIFIED_ORIGIN_LEGACY,
     UNVERIFIED_ORIGIN_OPERATOR,
-    is_rate_limit_error,
+    is_transient_provider_error,
     unverified_embedding_metadata,
 )
 from sibyl_core.projection.repair import LifecycleRepairResult
@@ -55,13 +56,38 @@ SWEEP_PARTIAL = "partial"
 SWEEP_CURRENT = "current"
 SWEEP_BUSY = "busy"
 SWEEP_PROVIDER_FAILING = "provider_failing"
+SWEEP_STORE_FAILING = "store_failing"
 SWEEP_SKIPPED_NO_PROVIDER = "skipped_no_provider"
 SWEEP_SKIPPED_DIMENSION_MISMATCH = "skipped_dimension_mismatch"
 
 _LEASE_MARGIN_SECONDS = 120.0
 _BACKOFF_BASE_SECONDS = 1.0
 _BACKOFF_CAP_SECONDS = 20.0
-_CONSECUTIVE_FAILURE_LIMIT = 3
+# How a pass decides the provider itself is down rather than rejecting some
+# rows. Bisecting a batch that holds bad rows fails at every level above the
+# clean halves, so failures alone prove nothing about the provider. Before any
+# call succeeds, a pass tolerates this many failures (a healthy provider with
+# a tenth of its rows rejected succeeds long before); after a success, it is
+# single-row calls failing in a row that mark an outage, because bad rows
+# never make good single rows fail.
+_FAILURES_BEFORE_ANY_SUCCESS_LIMIT = 128
+_SINGLE_ROW_FAILURES_IN_ROW_LIMIT = 8
+# When the store, not the data, is refusing writes. A refused batch write is
+# halved like a refused provider batch, so failures above a bad row prove
+# nothing: before any write lands a pass tolerates this many, and after one
+# lands it is single-row writes failing in a row that mark a store fault.
+_WRITE_FAILURES_BEFORE_ANY_SUCCESS_LIMIT = 16
+_SINGLE_ROW_WRITE_FAILURES_IN_ROW_LIMIT = 3
+# "Not now" answers a pass must collect, with nothing succeeding, before it
+# reports the provider down rather than merely busy.
+_TRANSIENT_FAILURES_FOR_OUTAGE = 4
+# Rows the provider refused, remembered per plane until their text or the
+# configured model changes, so they are not re-sent every pass.
+_REJECTION_MEMORY_LIMIT = 2000
+# Longest a single provider request may run. A batch that times out is split,
+# a single row that times out backs off like throttling, and both stay well
+# inside the lease margin.
+_EMBED_CALL_TIMEOUT_SECONDS = 60.0
 
 type SweepExecute = Callable[..., Awaitable[object]]
 type SweepRow = dict[str, Any]
@@ -105,6 +131,7 @@ class EmbeddingSweepResult(LifecycleRepairResult):
     status: str = SWEEP_COMPLETED
     adopted: int = 0
     skipped: int = 0
+    rejected: int = 0
     legacy_decision: str | None = None
     provider_dimensions: int | None = None
     schema_dimensions: int | None = None
@@ -149,12 +176,26 @@ class SweepTable:
             "ORDER BY uuid ASC LIMIT $limit;"
         )
 
+    def probe_query(self) -> str:
+        return (
+            f"SELECT uuid FROM {self.name} "
+            f"WHERE {self.scope_field} = $scope AND {self._candidate_predicate()} "
+            "ORDER BY uuid ASC LIMIT $limit;"
+        )
+
     def pending_query(self) -> str:
         return (
             f"SELECT count() AS count FROM {self.name} "
-            f"WHERE {self.scope_field} = $scope AND ("
+            f"WHERE {self.scope_field} = $scope AND $remembered CONTAINSNOT uuid AND ("
             f"({self.vector_field} != NONE AND {self.metadata_path} = NONE) "
             f"OR ({self._candidate_predicate()})) GROUP ALL;"
+        )
+
+    def remembered_query(self) -> str:
+        return (
+            f"SELECT uuid FROM {self.name} "
+            f"WHERE {self.scope_field} = $scope AND $remembered CONTAINS uuid "
+            f"AND {self._candidate_predicate()};"
         )
 
     def legacy_probe_query(self) -> str:
@@ -247,7 +288,112 @@ class _Counts:
     failed: int = 0
     skipped: int = 0
     adopted: int = 0
-    consecutive_failures: int = 0
+    rejected: int = 0
+    successes: int = 0
+    failures_before_success: int = 0
+    single_row_failures_in_row: int = 0
+    write_successes: int = 0
+    write_failures_before_success: int = 0
+    single_row_write_failures_in_row: int = 0
+    transient_failures: int = 0
+    backoff_exhausted: int = 0
+    seen: set[str] = field(default_factory=set)
+    rejections: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def provider_failing(self) -> bool:
+        if self.successes == 0:
+            return self.failures_before_success >= _FAILURES_BEFORE_ANY_SUCCESS_LIMIT
+        return self.single_row_failures_in_row >= _SINGLE_ROW_FAILURES_IN_ROW_LIMIT
+
+    @property
+    def store_failing(self) -> bool:
+        if self.write_successes == 0:
+            return self.write_failures_before_success >= _WRITE_FAILURES_BEFORE_ANY_SUCCESS_LIMIT
+        return self.single_row_write_failures_in_row >= _SINGLE_ROW_WRITE_FAILURES_IN_ROW_LIMIT
+
+    @property
+    def provider_unavailable(self) -> bool:
+        return (
+            self.successes == 0
+            and self.backoff_exhausted > 0
+            and self.transient_failures >= _TRANSIENT_FAILURES_FOR_OUTAGE
+        )
+
+    def write_failed(self, *, rows: int) -> None:
+        if self.write_successes == 0:
+            self.write_failures_before_success += 1
+        if rows == 1:
+            self.single_row_write_failures_in_row += 1
+
+    def write_succeeded(self) -> None:
+        self.write_successes += 1
+        self.single_row_write_failures_in_row = 0
+
+    def remembered_uuids(self, table: SweepTable) -> list[str]:
+        prefix = f"{table.name}:"
+        return [key.removeprefix(prefix) for key in self.rejections if key.startswith(prefix)]
+
+    def keep_rejections(self, table: SweepTable, uuids: set[str]) -> None:
+        prefix = f"{table.name}:"
+        self.rejections = {
+            key: digest
+            for key, digest in self.rejections.items()
+            if not key.startswith(prefix) or key.removeprefix(prefix) in uuids
+        }
+
+    def call_failed(self, *, rows: int) -> None:
+        if self.successes == 0:
+            self.failures_before_success += 1
+        if rows == 1:
+            self.single_row_failures_in_row += 1
+
+    def call_succeeded(self) -> None:
+        self.successes += 1
+        self.single_row_failures_in_row = 0
+
+    def remember_rejection(self, table: SweepTable, row: SweepRow) -> None:
+        # Only a provider that has accepted other rows this pass is trusted to
+        # be judging the text; a refusal before any success may be the
+        # provider's own fault (credentials, model id) and is retried later.
+        if self.successes and len(self.rejections) < _REJECTION_MEMORY_LIMIT:
+            self.rejections[_row_key(table, row)] = _row_digest(row)
+
+    def remembered(self, table: SweepTable, uuid: object) -> bool:
+        return f"{table.name}:{uuid}" in self.rejections
+
+    def known_rejection(self, table: SweepTable, row: SweepRow) -> bool:
+        return self.rejections.get(_row_key(table, row)) == _row_digest(row)
+
+    def rejections_for(self, table: SweepTable) -> int:
+        prefix = f"{table.name}:"
+        return sum(1 for key in self.rejections if key.startswith(prefix))
+
+
+def _row_key(table: SweepTable, row: SweepRow) -> str:
+    return f"{table.name}:{row['uuid']}"
+
+
+def _row_digest(row: SweepRow) -> str:
+    """What the provider was shown: every walked column except the identity."""
+    material = {key: value for key, value in row.items() if key != "uuid"}
+    return hashlib.sha256(json.dumps(material, sort_keys=True, default=str).encode()).hexdigest()[
+        :32
+    ]
+
+
+def _stamp_digest(stamp: EmbeddingStamp) -> str:
+    return hashlib.sha256(json.dumps(stamp, sort_keys=True, default=str).encode()).hexdigest()[:32]
+
+
+def _load_rejections(state: Mapping[str, Any], stamp: EmbeddingStamp) -> dict[str, str]:
+    memory = state.get("rejections")
+    if not isinstance(memory, Mapping) or memory.get("stamp") != _stamp_digest(stamp):
+        return {}
+    rows = memory.get("rows")
+    if not isinstance(rows, Mapping):
+        return {}
+    return {str(key): str(value) for key, value in rows.items()}
 
 
 class _AdaptiveLimiter:
@@ -289,6 +435,10 @@ class _AdaptiveLimiter:
 
 class _BudgetExhaustedError(Exception):
     """A throttled batch could not be retried inside the pass budget."""
+
+
+class _SplitRequiredError(Exception):
+    """A multi-row request ran past the call timeout; smaller requests may fit."""
 
 
 def configured_legacy_vector_policy() -> str:
@@ -413,7 +563,9 @@ async def run_embedding_sweep(
             provider_dimensions=plane.provider_dimensions,
             schema_dimensions=plane.schema_dimensions,
         )
-        return result(status=SWEEP_SKIPPED_DIMENSION_MISMATCH)
+        skipped = result(status=SWEEP_SKIPPED_DIMENSION_MISMATCH)
+        await _record_skip(plane, skipped)
+        return skipped
 
     owner = f"{socket.gethostname()}:{os.getpid()}:{uuid4().hex[:12]}"
     state = await ensure_legacy_decision(plane)
@@ -424,7 +576,7 @@ async def run_embedding_sweep(
     if not await _acquire_lease(plane, owner=owner, budget=budget):
         return result(status=SWEEP_BUSY, legacy_decision=legacy_decision)
 
-    counts = _Counts()
+    counts = _Counts(rejections=_load_rejections(state, plane.stamp))
     limiter = _AdaptiveLimiter(slots)
     status = SWEEP_PARTIAL
     cursors = _cursor_map(state.get("cursors"))
@@ -461,16 +613,23 @@ async def run_embedding_sweep(
                     finished.add(walk.table.name)
                     if table_done:
                         clean.add(walk.table.name)
-                if counts.consecutive_failures >= _CONSECUTIVE_FAILURE_LIMIT:
+                if counts.provider_failing:
                     status = SWEEP_PROVIDER_FAILING
                     break
-            if status == SWEEP_PROVIDER_FAILING:
+                if counts.store_failing:
+                    status = SWEEP_STORE_FAILING
+                    break
+            if status in {SWEEP_PROVIDER_FAILING, SWEEP_STORE_FAILING}:
                 break
-            await _save_cursors(plane, owner=owner, cursors=cursors)
+            await _save_cursors(plane, owner=owner, cursors=cursors, budget=budget)
         complete = adopted_all and clean == set(walkers)
         if complete:
             status = SWEEP_COMPLETED
-        pending = 0 if complete else await _pending(plane)
+        elif status == SWEEP_PARTIAL and counts.provider_unavailable:
+            # Every attempt this pass was told "not now" until the budget ran out.
+            status = SWEEP_PROVIDER_FAILING
+        await _forget_settled_rejections(plane, counts)
+        pending = 0 if complete else await _pending(plane, counts)
     except BaseException:
         await _release(
             plane,
@@ -479,6 +638,7 @@ async def run_embedding_sweep(
             receipt=None,
             complete=None,
             generation=generation,
+            rejections=counts.rejections,
         )
         raise
     outcome = result(
@@ -490,6 +650,7 @@ async def run_embedding_sweep(
         failed=counts.failed,
         adopted=counts.adopted,
         skipped=counts.skipped,
+        rejected=counts.rejected,
         elapsed_ms=round((time.monotonic() - started) * 1000, 2),
     )
     await _release(
@@ -499,6 +660,7 @@ async def run_embedding_sweep(
         receipt=outcome.receipt(),
         complete=dict(plane.stamp) if complete else None,
         generation=generation,
+        rejections=counts.rejections,
     )
     log.info(
         "embedding_sweep_pass",
@@ -510,6 +672,7 @@ async def run_embedding_sweep(
         adopted=counts.adopted,
         pending=pending,
         skipped=counts.skipped,
+        rejected=counts.rejected,
         failed=counts.failed,
         concurrency=limiter.limit,
         elapsed_ms=outcome.elapsed_ms,
@@ -562,8 +725,11 @@ async def _advance(
         walk.wrapped = True
         return None
     walk.cursor = ""
-    leftover = await _rows(plane, walk.table.walk_query(), cursor="", limit=1)
-    return not leftover
+    # Remembered rejections stay candidates; one more row than there are of
+    # them is enough to prove whether anything else is left.
+    remembered = counts.rejections_for(walk.table)
+    leftover = await _rows(plane, walk.table.probe_query(), limit=remembered + 1)
+    return all(counts.remembered(walk.table, row.get("uuid")) for row in leftover)
 
 
 async def _process_page(
@@ -576,26 +742,32 @@ async def _process_page(
     deadline: float,
     batch: int,
 ) -> None:
-    counts.checked += len(rows)
-    batches = [list(rows[start : start + batch]) for start in range(0, len(rows), batch)]
+    fresh: list[SweepRow] = []
+    for row in rows:
+        key = _row_key(table, row)
+        if key not in counts.seen:
+            counts.seen.add(key)
+            counts.checked += 1
+        if counts.known_rejection(table, row):
+            counts.rejected += 1
+        else:
+            fresh.append(row)
+    batches = [list(fresh[start : start + batch]) for start in range(0, len(fresh), batch)]
     outcomes = await asyncio.gather(
         *(
-            _embed_and_write(plane, table, chunk, limiter=limiter, deadline=deadline)
+            _embed_and_write(plane, table, chunk, counts=counts, limiter=limiter, deadline=deadline)
             for chunk in batches
         ),
         return_exceptions=True,
     )
     for chunk, outcome in zip(batches, outcomes, strict=True):
-        if isinstance(outcome, _BudgetExhaustedError):
-            counts.skipped += len(chunk)
-            continue
+        if isinstance(outcome, asyncio.CancelledError):
+            raise outcome
         if isinstance(outcome, BaseException):
-            if isinstance(outcome, asyncio.CancelledError):
-                raise outcome
+            # A store write failed: the vectors were computed but not kept.
             counts.failed += len(chunk)
-            counts.consecutive_failures += 1
             log.warning(
-                "embedding_sweep_batch_failed",
+                "embedding_sweep_write_failed",
                 organization_id=plane.organization_id,
                 plane=plane.name,
                 table=table.name,
@@ -603,10 +775,23 @@ async def _process_page(
                 error_type=type(outcome).__name__,
             )
             continue
-        counts.consecutive_failures = 0
-        written = outcome
-        counts.recovered += written
-        counts.skipped += len(chunk) - written
+        counts.recovered += outcome.written
+        counts.failed += outcome.failed
+        counts.skipped += outcome.skipped
+
+
+@dataclass(frozen=True, slots=True)
+class _BatchOutcome:
+    written: int = 0
+    failed: int = 0
+    skipped: int = 0
+
+    def __add__(self, other: _BatchOutcome) -> _BatchOutcome:
+        return _BatchOutcome(
+            self.written + other.written,
+            self.failed + other.failed,
+            self.skipped + other.skipped,
+        )
 
 
 async def _embed_and_write(
@@ -614,18 +799,163 @@ async def _embed_and_write(
     table: SweepTable,
     rows: list[SweepRow],
     *,
+    counts: _Counts,
     limiter: _AdaptiveLimiter,
     deadline: float,
-) -> int:
+) -> _BatchOutcome:
+    """Embed and store one batch, isolating rows the provider rejects.
+
+    A rejected batch is split in half and each half retried, down to single
+    rows, so one text the provider refuses cannot keep the other rows of its
+    batch stale forever; a batch that times out is split the same way. Only a
+    single row the provider refuses counts as failed. Rows left unattempted
+    (budget spent, provider judged down) are skipped and stay pending.
+    """
+    if counts.provider_failing or counts.store_failing:
+        return _BatchOutcome(skipped=len(rows))
+    try:
+        vectors, stamp = await _embed_with_backoff(
+            plane, table, rows, counts=counts, limiter=limiter, deadline=deadline
+        )
+    except _BudgetExhaustedError:
+        counts.backoff_exhausted += 1
+        return _BatchOutcome(skipped=len(rows))
+    except _SplitRequiredError:
+        return await _bisect(plane, table, rows, counts=counts, limiter=limiter, deadline=deadline)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        counts.call_failed(rows=len(rows))
+        if len(rows) == 1:
+            counts.remember_rejection(table, rows[0])
+            log.warning(
+                "embedding_sweep_row_rejected",
+                organization_id=plane.organization_id,
+                plane=plane.name,
+                table=table.name,
+                row=str(rows[0].get("uuid")),
+                error_type=type(exc).__name__,
+            )
+            return _BatchOutcome(failed=1)
+        if counts.provider_failing:
+            return _BatchOutcome(skipped=len(rows))
+        return await _bisect(plane, table, rows, counts=counts, limiter=limiter, deadline=deadline)
+    counts.call_succeeded()
+    rows_by_uuid = {
+        str(row["uuid"]): {
+            **row,
+            "embedding": [float(value) for value in vector],
+            "embedding_metadata": dict(stamp),
+        }
+        for row, vector in zip(rows, vectors, strict=True)
+    }
+    return await _write_vectors(plane, table, rows_by_uuid, counts=counts)
+
+
+async def _write_vectors(
+    plane: SweepPlane,
+    table: SweepTable,
+    rows_by_uuid: dict[str, dict[str, Any]],
+    *,
+    counts: _Counts,
+) -> _BatchOutcome:
+    """Store computed vectors, halving a refused write to find the row it refuses.
+
+    The vectors are already paid for, so isolating a row the store rejects
+    (an older row the current schema no longer accepts) costs writes only.
+    """
+    if counts.store_failing:
+        return _BatchOutcome(skipped=len(rows_by_uuid))
+    try:
+        written = await _rows(
+            plane,
+            table.write_query(),
+            uuids=list(rows_by_uuid),
+            rows_by_uuid=rows_by_uuid,
+        )
+    except Exception as exc:
+        counts.write_failed(rows=len(rows_by_uuid))
+        if len(rows_by_uuid) == 1:
+            log.warning(
+                "embedding_sweep_write_failed",
+                organization_id=plane.organization_id,
+                plane=plane.name,
+                table=table.name,
+                row=next(iter(rows_by_uuid)),
+                error_type=type(exc).__name__,
+            )
+            return _BatchOutcome(failed=1)
+        if counts.store_failing:
+            return _BatchOutcome(skipped=len(rows_by_uuid))
+        keys = list(rows_by_uuid)
+        middle = len(keys) // 2
+        left = await _write_vectors(
+            plane, table, {key: rows_by_uuid[key] for key in keys[:middle]}, counts=counts
+        )
+        right = await _write_vectors(
+            plane, table, {key: rows_by_uuid[key] for key in keys[middle:]}, counts=counts
+        )
+        return left + right
+    counts.write_succeeded()
+    return _BatchOutcome(written=len(written), skipped=len(rows_by_uuid) - len(written))
+
+
+async def _bisect(
+    plane: SweepPlane,
+    table: SweepTable,
+    rows: list[SweepRow],
+    *,
+    counts: _Counts,
+    limiter: _AdaptiveLimiter,
+    deadline: float,
+) -> _BatchOutcome:
+    middle = len(rows) // 2
+    left, right = await asyncio.gather(
+        _embed_and_write(
+            plane, table, rows[:middle], counts=counts, limiter=limiter, deadline=deadline
+        ),
+        _embed_and_write(
+            plane, table, rows[middle:], counts=counts, limiter=limiter, deadline=deadline
+        ),
+    )
+    return left + right
+
+
+async def _embed_with_backoff(
+    plane: SweepPlane,
+    table: SweepTable,
+    rows: list[SweepRow],
+    *,
+    counts: _Counts,
+    limiter: _AdaptiveLimiter,
+    deadline: float,
+) -> tuple[list[list[float]], EmbeddingStamp]:
+    """One provider call, retried with backoff while the provider signals capacity."""
     attempt = 0
     while True:
         async with limiter:
             try:
-                vectors, stamp = await plane.embed(table, rows)
+                vectors, stamp = await asyncio.wait_for(
+                    plane.embed(table, rows), timeout=_EMBED_CALL_TIMEOUT_SECONDS
+                )
+            except TimeoutError as exc:
+                limiter.throttled()
+                counts.transient_failures += 1
+                if len(rows) > 1:
+                    raise _SplitRequiredError from exc
+                log.info(
+                    "embedding_sweep_throttled",
+                    organization_id=plane.organization_id,
+                    plane=plane.name,
+                    table=table.name,
+                    concurrency=limiter.limit,
+                    error_type=type(exc).__name__,
+                )
             except Exception as exc:
-                if not is_rate_limit_error(exc):
+                if not is_transient_provider_error(exc):
                     raise
                 limiter.throttled()
+                counts.transient_failures += 1
                 log.info(
                     "embedding_sweep_throttled",
                     organization_id=plane.organization_id,
@@ -651,21 +981,7 @@ async def _embed_and_write(
         raise ValueError(
             f"embedding provider vectors do not fit the {table.dimensions}-dimension field"
         )
-    rows_by_uuid = {
-        str(row["uuid"]): {
-            **row,
-            "embedding": [float(value) for value in vector],
-            "embedding_metadata": dict(stamp),
-        }
-        for row, vector in zip(rows, vectors, strict=True)
-    }
-    written = await _rows(
-        plane,
-        table.write_query(),
-        uuids=list(rows_by_uuid),
-        rows_by_uuid=rows_by_uuid,
-    )
-    return len(written)
+    return vectors, stamp
 
 
 async def _stamp_legacy_rows(
@@ -693,12 +1009,23 @@ async def _stamp_legacy_rows(
     return True
 
 
-async def _pending(plane: SweepPlane) -> int:
+async def _pending(plane: SweepPlane, counts: _Counts) -> int:
+    """Rows still owed a vector, not counting rows the provider refused."""
     total = 0
     for table in plane.tables:
-        rows = await _rows(plane, table.pending_query())
+        rows = await _rows(plane, table.pending_query(), remembered=counts.remembered_uuids(table))
         total += int(rows[0].get("count") or 0) if rows else 0
     return total
+
+
+async def _forget_settled_rejections(plane: SweepPlane, counts: _Counts) -> None:
+    """Drop remembered refusals whose rows were deleted, edited away or embedded."""
+    for table in plane.tables:
+        remembered = counts.remembered_uuids(table)
+        if not remembered:
+            continue
+        rows = await _rows(plane, table.remembered_query(), remembered=remembered)
+        counts.keep_rejections(table, {str(row.get("uuid")) for row in rows})
 
 
 def _plane_current(state: Mapping[str, Any], stamp: EmbeddingStamp, interval: float) -> bool:
@@ -733,6 +1060,9 @@ _STATE_PROJECTION = (
 
 
 async def _ensure_state(plane: SweepPlane) -> dict[str, Any]:
+    state = await _read_state(plane)
+    if state:
+        return state
     await plane.execute(
         "UPSERT type::record($key) SET organization_id = $organization_id, "
         "plane = $plane, updated_at = time::now() RETURN NONE;",
@@ -741,6 +1071,18 @@ async def _ensure_state(plane: SweepPlane) -> dict[str, Any]:
         plane=plane.name,
     )
     return await _read_state(plane)
+
+
+async def _record_skip(plane: SweepPlane, skipped: EmbeddingSweepResult) -> None:
+    """Leave a receipt for a pass refused before it could start, for status surfaces."""
+    await _ensure_state(plane)
+    await plane.execute(
+        "UPDATE type::record($key) SET active_metadata = $stamp, last_run = $receipt, "
+        "updated_at = time::now() RETURN NONE;",
+        key=plane.state_key,
+        stamp=plane.stamp,
+        receipt={**skipped.receipt(), "finished_at": datetime.now(UTC)},
+    )
 
 
 async def _read_state(plane: SweepPlane) -> dict[str, Any]:
@@ -770,13 +1112,19 @@ async def _acquire_lease(plane: SweepPlane, *, owner: str, budget: float) -> boo
     return any(row.get("lease_owner") == owner for row in rows)
 
 
-async def _save_cursors(plane: SweepPlane, *, owner: str, cursors: Mapping[str, str]) -> None:
+async def _save_cursors(
+    plane: SweepPlane, *, owner: str, cursors: Mapping[str, str], budget: float
+) -> None:
+    # Saving progress also renews the lease, so a pass still working is never
+    # mistaken for a dead one by the next tick.
     await plane.execute(
-        "UPDATE type::record($key) SET cursors = $cursors, updated_at = time::now() "
+        "UPDATE type::record($key) SET cursors = $cursors, "
+        "lease_until = time::now() + <duration>$lease, updated_at = time::now() "
         "WHERE lease_owner = $owner RETURN NONE;",
         key=plane.state_key,
         owner=owner,
         cursors=dict(cursors),
+        lease=f"{int(budget + _LEASE_MARGIN_SECONDS)}s",
     )
 
 
@@ -788,10 +1136,15 @@ async def _release(
     receipt: Mapping[str, Any] | None,
     complete: EmbeddingStamp | None,
     generation: int,
+    rejections: Mapping[str, str],
 ) -> None:
     try:
         await plane.execute(
+            # A reopen during this pass forgot the plane's refusals on purpose;
+            # the generation it moved keeps this pass from writing them back.
             "UPDATE type::record($key) SET cursors = $cursors, "
+            "rejections = IF (generation ?? 0) = $generation THEN $rejections "
+            "ELSE rejections END, "
             "last_run = IF $receipt = NONE THEN last_run ELSE $receipt END, "
             "complete_metadata = IF $complete != NONE AND (generation ?? 0) = $generation "
             "THEN $complete ELSE complete_metadata END, "
@@ -807,6 +1160,7 @@ async def _release(
             ),
             complete=complete,
             generation=generation,
+            rejections={"stamp": _stamp_digest(plane.stamp), "rows": dict(rejections)},
         )
     except Exception as exc:
         # The lease expires on its own; a lost release only delays the next pass.
@@ -880,6 +1234,7 @@ __all__ = [
     "SWEEP_PROVIDER_FAILING",
     "SWEEP_SKIPPED_DIMENSION_MISMATCH",
     "SWEEP_SKIPPED_NO_PROVIDER",
+    "SWEEP_STORE_FAILING",
     "EmbedRows",
     "EmbeddingSweepResult",
     "LegacyEvidence",
