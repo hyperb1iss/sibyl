@@ -157,6 +157,15 @@ class CoreConfig(BaseSettings):
             "unset uses the memory model's default"
         ),
     )
+    consolidation_run_max_tokens: int = Field(
+        default=10_000_000,
+        gt=0,
+        description=(
+            "Token ceiling one reflection dream run may reserve across its proposals, "
+            "critiques, corrections and individual passes; the run stops admitting work "
+            "when the next reservation would cross it"
+        ),
+    )
 
     # Anthropic configuration
     anthropic_api_key: SecretStr = Field(
