@@ -302,9 +302,8 @@ manifest `no_regression` baseline comparison. Use
 `moon run bench-gate -- <artifact>.json --profile ai-memory --baseline <baseline>.json` for a single
 uncommitted artifact that needs the same no-regression policy.
 
-The canonical ledger for which rows are citable is
-`docs/_archive/SURREALDB_GRAPHITI_EXIT_BENCHMARK_EVIDENCE.md`. If a benchmark suite is missing from
-that ledger, add it there before citing the result anywhere else.
+The canonical ledger for which rows are citable is `benchmarks/results/ai-memory/manifest.json`. If
+a benchmark suite is missing from that ledger, add it there before citing the result anywhere else.
 
 ## Suggested PR Notes
 

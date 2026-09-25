@@ -28,17 +28,6 @@ Active executable plan:
 - post-1.0 releases (v1.1 → v1.3): [`SIBYL_POST_1_0_ROADMAP.md`](SIBYL_POST_1_0_ROADMAP.md)
 - v1.0 automatic memory operating system (shipped): [`SIBYL_1_0_ROADMAP.md`](SIBYL_1_0_ROADMAP.md)
 
-Shipped execution plans, kept in `docs/_archive/` as release receipts and design contracts:
-
-- v0.7 native memory core:
-  [`SURREALDB_NATIVE_MEMORY_CORE_SPEC.md`](../_archive/SURREALDB_NATIVE_MEMORY_CORE_SPEC.md)
-- v0.8 pure Surreal closure and memory trust:
-  [`SIBYL_V08_PURE_SURREAL_CLOSURE_AND_MEMORY_TRUST_PLAN.md`](../_archive/SIBYL_V08_PURE_SURREAL_CLOSURE_AND_MEMORY_TRUST_PLAN.md)
-- v0.9 synthesis and memory workspace:
-  [`SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_WORKSPACE_PLAN.md`](../_archive/SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_WORKSPACE_PLAN.md)
-- Native LLM provider substrate:
-  [`SIBYL_LLM_SUBSTRATE_PLAN.md`](../_archive/SIBYL_LLM_SUBSTRATE_PLAN.md)
-
 ## Northstar
 
 Sibyl becomes a domain-general, multi-user second brain for people and agents.

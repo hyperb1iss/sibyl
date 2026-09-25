@@ -11,7 +11,6 @@ and the knowledge graph, following SOTA Graph-RAG techniques:
 References:
 - Microsoft GraphRAG: https://arxiv.org/abs/2404.16130
 - Anthropic Contextual Retrieval
-- /Users/bliss/dev/sibyl/docs/graph-rag-sota-research.md
 """
 
 from __future__ import annotations
