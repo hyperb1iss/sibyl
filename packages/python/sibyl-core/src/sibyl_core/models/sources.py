@@ -294,7 +294,7 @@ class Community(Entity):
     member_ids: list[str] = Field(default_factory=list, description="Entity IDs in this community")
     member_count: int = Field(default=0, description="Number of members")
 
-    # Hierarchy (Leiden algorithm produces hierarchical levels)
+    # Hierarchy (one Louvain pass per configured resolution)
     level: int = Field(default=0, description="Hierarchy level (0 = leaf, higher = broader)")
     parent_community_id: str | None = Field(
         default=None, description="Parent community at higher level"

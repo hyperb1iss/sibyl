@@ -279,7 +279,6 @@ async def get_clusters_for_visualization(
                 max_levels=1,
                 store_in_graph=False,  # Don't persist, just visualize
             ),
-            algorithm="louvain",
         )
     except ImportError:
         # Fallback: Group by entity type if networkx not available

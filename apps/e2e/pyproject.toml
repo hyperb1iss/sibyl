@@ -18,11 +18,6 @@ authors = [{ name = "Stefanie Jane", email = "stef@hyperbliss.tech" }]
 # Minimal dependencies - tests only
 dependencies = []
 
-[project.optional-dependencies]
-browser = [
-    "playwright>=1.40",
-]
-
 [dependency-groups]
 dev = [
     "httpx",

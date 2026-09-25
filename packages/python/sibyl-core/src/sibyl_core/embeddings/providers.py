@@ -290,7 +290,7 @@ class LocalSentenceTransformerEmbeddingProvider:
             raise RuntimeError(
                 "local graph embedding provider requires the optional "
                 "`sentence-transformers` dependency; install the `reranking` "
-                "or `runtime` extra, or set SIBYL_GRAPH_EMBEDDING_PROVIDER=openai"
+                "extra, or set SIBYL_GRAPH_EMBEDDING_PROVIDER=openai"
             )
         self._validate_client_dimensions(self._client)
 
@@ -348,7 +348,7 @@ class LocalSentenceTransformerEmbeddingProvider:
                     raise RuntimeError(
                         "local graph embedding provider requires the optional "
                         "`sentence-transformers` dependency; install the `reranking` "
-                        "or `runtime` extra, or set SIBYL_GRAPH_EMBEDDING_PROVIDER=openai"
+                        "extra, or set SIBYL_GRAPH_EMBEDDING_PROVIDER=openai"
                     ) from exc
                 self._client = SentenceTransformer(self.metadata.model)
                 self._validate_client_dimensions(self._client)
