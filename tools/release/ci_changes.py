@@ -155,7 +155,6 @@ _RELEASE_WORKFLOWS = {
     ".github/workflows/ci.yml",
     ".github/workflows/image-cve-gate.yml",
     ".github/workflows/nightly-regression.yml",
-    ".github/workflows/publish-dogfood-images.yml",
     ".github/workflows/publish.yml",
     ".github/workflows/release.yml",
 }
