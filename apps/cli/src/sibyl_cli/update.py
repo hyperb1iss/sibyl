@@ -194,6 +194,10 @@ class ContainerRuntime:
         """
         return local_runtime.running_api_tag(self.compose_file)
 
+    def api_state(self) -> local_runtime.ApiState | None:
+        """Whether this runtime's API container runs, and its tag when that can be told."""
+        return local_runtime.running_api_state(self.compose_file)
+
     def upgrade_command(self, image_tag: str) -> list[str]:
         """The runtime's own upgrade command, run through the `sibyl` on PATH.
 
@@ -243,6 +247,7 @@ class ContainerPlan:
     target: ContainerTarget
     running: bool | None
     pinned_tag: str | None = None
+    owner_unknown: bool = False
 
     @property
     def api_missing(self) -> bool:
@@ -282,6 +287,12 @@ class ContainerPlan:
 
     def _status(self) -> str:
         current, target, source = self.current_tag, self.target_tag, self.target.source
+        if self.owner_unknown:
+            return (
+                f"{current or 'unknown'} [dim](a running sibyl-api container is claimed by "
+                "neither runtime's compose file, so its owner is unknown; left alone. Upgrade it "
+                "with sibyl local upgrade or sibyl docker upgrade, whichever started it)[/dim]"
+            )
         if self.api_missing:
             missing = f"no API container running (pin says {self.pinned_tag})"
             if self.applies:
@@ -314,14 +325,33 @@ class ContainerPlan:
 def plan_container_upgrades(cli_version: str | None) -> list[ContainerPlan]:
     """Compare each installed runtime with the image tag `cli_version` runs."""
     target = container_target(cli_version)
+    runtimes = installed_container_runtimes()
+    known = (*local_runtime.known_compose_files(), *(r.compose_file for r in runtimes))
+    unclaimed: bool | None = None
     plans = []
-    for runtime in installed_container_runtimes():
+    for runtime in runtimes:
         running = runtime.is_running()
         pinned = runtime.image_tag()
-        # What runs is the current version. The pin only speaks for a runtime
-        # with nothing up; a runtime that runs without its API is not current.
-        current = runtime.running_api_tag() if running else pinned
-        plans.append(ContainerPlan(runtime, current, target, running, pinned))
+        owner_unknown = False
+        if running:
+            # What runs is the current version. An API whose tag cannot be told
+            # (an image ID, say) falls back to the pin; a runtime up without its
+            # API is not current at all.
+            api = runtime.api_state()
+            if api is None or (api.present and api.tag is None):
+                current = pinned
+            else:
+                current = api.tag if api.present else None
+        else:
+            current = pinned
+            if running is False:
+                if unclaimed is None:
+                    unclaimed = local_runtime.unclaimed_api_running(known)
+                if unclaimed:
+                    # A server no label ties to either runtime is still a running
+                    # server, so this one must not read as stopped.
+                    running, owner_unknown = None, True
+        plans.append(ContainerPlan(runtime, current, target, running, pinned, owner_unknown))
     return plans
 
 
@@ -499,7 +529,8 @@ def update(
     # A runtime that is behind but not upgraded here, or whose tag cannot be
     # read, is not "up to date" even when nothing is left to apply.
     needs_attention = any(
-        (plan.behind and not plan.applies) or plan.current_tag is None for plan in container_plans
+        (plan.behind and not plan.applies) or plan.current_tag is None or plan.owner_unknown
+        for plan in container_plans
     )
 
     # Skills are always "updateable" (we just re-copy)

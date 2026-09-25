@@ -444,6 +444,24 @@ def upgrade_advice_for_running_server() -> str:
     )
 
 
+# A tag that is really an image ID: `docker ps` shows `sha256:<hex>` once the
+# tag a container started from has moved on to another image.
+_IMAGE_ID_TAG = re.compile(r"[0-9a-f]{12,64}")
+_DOCKER_TAG = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}")
+
+
+def tag_of(image: str | None) -> str | None:
+    """The tag of an image reference, or None for an image ID or an untagged name."""
+    if not image or image.startswith("sha256:"):
+        return None
+    repository, _, tag = image.rpartition(":")
+    if not repository or "/" in tag or not _DOCKER_TAG.fullmatch(tag):
+        return None
+    if _IMAGE_ID_TAG.fullmatch(tag):
+        return None
+    return tag
+
+
 @dataclass(frozen=True)
 class ComposeContainer:
     """A running container and the compose file and service that created it."""
@@ -451,19 +469,22 @@ class ComposeContainer:
     config_files: tuple[Path, ...]
     service: str
     image: str
+    container_id: str = ""
+    name: str = ""
 
     @property
     def image_tag(self) -> str | None:
-        repository, _, tag = self.image.rpartition(":")
-        return tag if repository and "/" not in tag else None
+        return tag_of(self.image)
 
 
 def running_compose_containers() -> list[ComposeContainer] | None:
-    """Every running container Compose labelled, or None when Docker did not answer."""
+    """Every running container, with its Compose labels, or None when Docker did not answer."""
     fields = (
         '{{.Label "com.docker.compose.project.config_files"}}',
         '{{.Label "com.docker.compose.service"}}',
         "{{.Image}}",
+        "{{.ID}}",
+        "{{.Names}}",
     )
     try:
         result = subprocess.run(
@@ -481,11 +502,13 @@ def running_compose_containers() -> list[ComposeContainer] | None:
         return None
     containers = []
     for line in (result.stdout or "").splitlines():
-        config_files, _, rest = line.partition("\t")
-        service, _, image = rest.partition("\t")
-        files = tuple(Path(f).resolve() for f in config_files.split(",") if f)
-        if files:
-            containers.append(ComposeContainer(files, service, image.strip()))
+        config_files, service, image, container_id, name = (line.split("\t") + [""] * 5)[:5]
+        # Compose writes absolute paths; a relative one cannot be placed, so it
+        # matches nothing rather than whatever the cwd happens to be.
+        files = tuple(Path(f).resolve() for f in config_files.split(",") if f.startswith("/"))
+        containers.append(
+            ComposeContainer(files, service, image.strip(), container_id.strip(), name.strip())
+        )
     return containers
 
 
@@ -503,12 +526,65 @@ def containers_for(compose_file: Path) -> list[ComposeContainer] | None:
     return [container for container in containers if target in container.config_files]
 
 
-def running_api_tag(compose_file: Path) -> str | None:
-    """The image tag of the API container `compose_file` runs, if one runs."""
-    for container in containers_for(compose_file) or []:
+def _created_image_tag(container_id: str) -> str | None:
+    """The tag a container was created from, which survives the tag moving on."""
+    if not container_id:
+        return None
+    try:
+        result = subprocess.run(
+            ["docker", "inspect", "--format", "{{.Config.Image}}", container_id],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=DOCKER_PROBE_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return tag_of((result.stdout or "").strip()) if result.returncode == 0 else None
+
+
+@dataclass(frozen=True)
+class ApiState:
+    """Whether a runtime's API container runs, and on which tag if that can be told."""
+
+    present: bool
+    tag: str | None = None
+
+
+def running_api_state(compose_file: Path) -> ApiState | None:
+    """The API container `compose_file` runs, or None when Docker did not answer."""
+    containers = containers_for(compose_file)
+    if containers is None:
+        return None
+    for container in containers:
         if container.service == "api":
-            return container.image_tag
-    return None
+            return ApiState(True, container.image_tag or _created_image_tag(container.container_id))
+    return ApiState(False)
+
+
+def running_api_tag(compose_file: Path) -> str | None:
+    """The image tag of the API container `compose_file` runs, when it can be told."""
+    state = running_api_state(compose_file)
+    return state.tag if state else None
+
+
+def unclaimed_api_running(compose_files: tuple[Path, ...]) -> bool:
+    """Whether a `sibyl-api` container runs that none of `compose_files` created.
+
+    A missing, stale, or relative Compose label leaves a running server
+    that no runtime can match, which must read as running, owner unknown,
+    and never as stopped.
+    """
+    known = {path.resolve() for path in compose_files}
+    for container in running_compose_containers() or []:
+        if container.name == "sibyl-api" and not known.intersection(container.config_files):
+            return True
+    return False
+
+
+def known_compose_files() -> tuple[Path, ...]:
+    """The compose files of both CLI runtimes (the Docker one lives beside this one)."""
+    return (SIBYL_LOCAL_COMPOSE, SIBYL_LOCAL_DIR.parent / "docker" / "docker-compose.yml")
 
 
 def get_api_keys_from_env() -> tuple[str, str]:
@@ -722,6 +798,8 @@ def upgrade(
             error(f"Could not read the image tag from {SIBYL_LOCAL_COMPOSE}. Nothing changed.")
             raise typer.Exit(1)
         # What runs outranks the pin, which an interrupted upgrade leaves ahead.
+        # An API whose tag cannot be told falls back to the pin, so the check
+        # below still refuses when that pin is newer.
         current_tag = (running_api_tag(SIBYL_LOCAL_COMPOSE) if running else None) or previous_tag
         tag_version, current_version = image_tag_version(tag), image_tag_version(current_tag)
         if (
@@ -746,6 +824,16 @@ def upgrade(
                 )
                 info("Upgrade it with: sibyl docker upgrade")
                 return
+            if unclaimed_api_running(known_compose_files()):
+                error(
+                    "A sibyl-api container is running, but its Compose labels name neither "
+                    "runtime's compose file, so its owner is unknown. Nothing changed."
+                )
+                info(
+                    "Upgrade it with sibyl local upgrade or sibyl docker upgrade, "
+                    "from whichever runtime started it."
+                )
+                raise typer.Exit(1)
             info("The local instance is not running, so there is nothing to upgrade in place.")
             info(f"Start it on {tag} with: SIBYL_IMAGE_TAG={tag} sibyl up --pull")
             return

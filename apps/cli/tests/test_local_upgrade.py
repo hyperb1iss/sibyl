@@ -41,6 +41,7 @@ class FakeCompose:
         *,
         running: bool = True,
         running_tag: str = "1.4.0",
+        api_image: str | None = None,
         fail: tuple[str, ...] = (),
         ps_fails: bool = False,
         ps_hangs: bool = False,
@@ -48,6 +49,7 @@ class FakeCompose:
     ) -> None:
         self.running = running
         self.running_tag = running_tag
+        self.api_image = api_image
         self.down_after_up = down_after_up
         self.fail = list(fail)
         self.ps_fails = ps_fails
@@ -84,9 +86,12 @@ class FakeCompose:
         if not self.running:
             return []
         files = (local.SIBYL_LOCAL_COMPOSE.resolve(),)
+        api_image = self.api_image or f"ghcr.io/hyperb1iss/sibyl-api:{self.running_tag}"
         return [
-            ComposeContainer(files, "surrealdb", "surrealdb/surrealdb:v3.2.4"),
-            ComposeContainer(files, "api", f"ghcr.io/hyperb1iss/sibyl-api:{self.running_tag}"),
+            ComposeContainer(
+                files, "surrealdb", "surrealdb/surrealdb:v3.2.4", "s1", "sibyl-surrealdb"
+            ),
+            ComposeContainer(files, "api", api_image, "a1", "sibyl-api"),
         ]
 
 
@@ -539,3 +544,102 @@ def test_containers_are_matched_on_the_compose_file_not_the_directory_name(
 
     monkeypatch.setattr(local.subprocess, "run", wedged)
     assert local.containers_for(ours) is None
+
+
+@pytest.mark.parametrize("created_from", ["ghcr.io/hyperb1iss/sibyl-api:1.6.0", None])
+def test_a_moved_tag_never_hides_a_newer_api(
+    local_runtime: Path, monkeypatch: pytest.MonkeyPatch, created_from: str | None
+) -> None:
+    """`docker ps` shows `sha256:<hex>` after the tag moves; that must not skip the refusal."""
+    monkeypatch.setattr(local, "DEFAULT_IMAGE_TAG", "1.5.0")
+    local.write_compose_file(local.compose_config_for("1.6.0"))
+    compose = FakeCompose(api_image="sha256:" + "9f" * 32)
+    inspected: list[list[str]] = []
+
+    def fake_inspect(cmd: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        inspected.append(cmd)
+        if created_from is None:
+            return subprocess.CompletedProcess(cmd, 1, stdout="")
+        return subprocess.CompletedProcess(cmd, 0, stdout=f"{created_from}\n")
+
+    monkeypatch.setattr(local.subprocess, "run", fake_inspect)
+
+    result = _invoke(monkeypatch, compose, healthy=[], args=())
+
+    # Either the creating image or, failing that, the pin says 1.6.0.
+    assert result.exit_code == 1
+    assert "on 1.6.0, newer than this CLI's 1.5.0" in result.output
+    assert inspected[0] == ["docker", "inspect", "--format", "{{.Config.Image}}", "a1"]
+    assert compose.calls == []
+
+
+def test_a_running_api_no_label_claims_is_not_called_stopped(
+    local_runtime: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A missing or stale Compose label must not send the user round `sibyl up` again."""
+    monkeypatch.setattr(local, "container_owner", lambda name="sibyl-api": None)
+    compose = FakeCompose(running=False)
+    stale = (Path("/somewhere/else/docker-compose.yml"),)
+    monkeypatch.setattr(local, "run_compose", compose)
+    monkeypatch.setattr(
+        local,
+        "running_compose_containers",
+        lambda: [
+            ComposeContainer(stale, "api", "ghcr.io/hyperb1iss/sibyl-api:1.4.0", "a1", "sibyl-api")
+        ],
+    )
+    monkeypatch.setattr(local, "wait_for_healthy", lambda timeout=120: True)
+
+    result = CliRunner().invoke(app, ["local", "upgrade", "--tag", "1.5.0"])
+
+    assert result.exit_code == 1
+    assert "owner is unknown" in result.output
+    assert "sibyl local upgrade or sibyl docker upgrade" in result.output
+    assert "not running" not in result.output
+    assert "sibyl up --pull" not in result.output
+    assert compose.calls == []
+
+
+@pytest.mark.parametrize(
+    ("image", "tag"),
+    [
+        ("ghcr.io/hyperb1iss/sibyl-api:1.4.0", "1.4.0"),
+        ("ghcr.io/hyperb1iss/sibyl-api:1.5.0-rc.2", "1.5.0-rc.2"),
+        ("ghcr.io/hyperb1iss/sibyl-api:main", "main"),
+        ("sha256:" + "ab" * 32, None),
+        ("ghcr.io/hyperb1iss/sibyl-api:" + "ab12" * 3, None),
+        ("localhost:5000/sibyl-api", None),
+        ("", None),
+    ],
+)
+def test_tag_of_refuses_image_ids(image: str, tag: str | None) -> None:
+    assert local.tag_of(image) == tag
+
+
+def test_the_listing_keeps_ids_and_names_and_drops_relative_labels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    listing = (
+        "/abs/local/docker-compose.yml\tapi\tghcr.io/hyperb1iss/sibyl-api:1.4.0\tc1\tsibyl-api\n"
+        "docker-compose.yml\tapi\tghcr.io/hyperb1iss/sibyl-api:1.4.0\tc2\told-api\n"
+        "\t\tbusybox:1.37\tc3\tloose\n"
+    )
+    monkeypatch.setattr(
+        local.subprocess,
+        "run",
+        lambda cmd, **_: subprocess.CompletedProcess(cmd, 0, stdout=listing),
+    )
+
+    containers = local.running_compose_containers()
+
+    assert containers is not None
+    assert [(c.container_id, c.name) for c in containers] == [
+        ("c1", "sibyl-api"),
+        ("c2", "old-api"),
+        ("c3", "loose"),
+    ]
+    assert containers[0].config_files == (Path("/abs/local/docker-compose.yml").resolve(),)
+    # A relative label cannot be placed, so it claims nothing.
+    assert containers[1].config_files == ()
+    assert local.unclaimed_api_running((Path("/abs/local/docker-compose.yml"),)) is False
+    assert local.unclaimed_api_running((Path("/other/docker-compose.yml"),)) is True

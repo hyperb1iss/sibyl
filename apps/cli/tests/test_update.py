@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 from sibyl_cli import docker as docker_module
 from sibyl_cli import local as local_module
 from sibyl_cli import update as update_module
+from sibyl_cli.local import ApiState
 from sibyl_cli.update import (
     ContainerPlan,
     ContainerRuntime,
@@ -252,8 +253,11 @@ _PINS: list[Path] = []
 
 
 @pytest.fixture(autouse=True)
-def _reset_pins() -> None:
+def _reset_pins(monkeypatch: pytest.MonkeyPatch) -> None:
     _PINS.clear()
+    # The unclaimed-server probe lists every container on the machine; tests
+    # that care replace this stand-in.
+    monkeypatch.setattr(local_module, "unclaimed_api_running", lambda _files: False)
 
 
 class TestContainerRuntimes:
@@ -405,7 +409,7 @@ class TestContainerPlans:
         runtime = _runtime(tmp_path, tag="1.4.0")
         monkeypatch.setattr(update_module, "installed_container_runtimes", lambda: [runtime])
         monkeypatch.setattr(ContainerRuntime, "is_running", lambda _self: True)
-        monkeypatch.setattr(ContainerRuntime, "running_api_tag", lambda _self: "1.4.0")
+        monkeypatch.setattr(ContainerRuntime, "api_state", lambda _self: ApiState(True, "1.4.0"))
 
         [plan] = plan_container_upgrades("1.5.0rc2")
 
@@ -454,7 +458,7 @@ class TestContainerPlans:
         runtime = _runtime(tmp_path, tag="1.5.0")
         monkeypatch.setattr(update_module, "installed_container_runtimes", lambda: [runtime])
         monkeypatch.setattr(ContainerRuntime, "is_running", lambda _self: True)
-        monkeypatch.setattr(ContainerRuntime, "running_api_tag", lambda _self: "1.4.0")
+        monkeypatch.setattr(ContainerRuntime, "api_state", lambda _self: ApiState(True, "1.4.0"))
 
         [plan] = plan_container_upgrades("1.5.0")
 
@@ -484,7 +488,7 @@ class TestContainerPlans:
         runtime = _runtime(tmp_path, tag=pinned)
         monkeypatch.setattr(update_module, "installed_container_runtimes", lambda: [runtime])
         monkeypatch.setattr(ContainerRuntime, "is_running", lambda _self: True)
-        monkeypatch.setattr(ContainerRuntime, "running_api_tag", lambda _self: None)
+        monkeypatch.setattr(ContainerRuntime, "api_state", lambda _self: ApiState(False))
 
         [plan] = plan_container_upgrades(target)
 
@@ -494,6 +498,65 @@ class TestContainerPlans:
         assert f"no API container running (pin says {pinned})" in plan.status()
         assert "matches" not in plan.status()
 
+    def test_an_api_on_a_moved_tag_is_judged_by_the_image_it_was_created_from(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`docker ps` shows `sha256:<hex>` once the tag moved; that is not a custom tag."""
+        monkeypatch.delenv("SIBYL_IMAGE_TAG", raising=False)
+        runtime = _runtime(tmp_path, tag="1.4.0")
+        monkeypatch.setattr(update_module, "installed_container_runtimes", lambda: [runtime])
+        digest = "sha256:" + "ab12" * 16
+        listing = (
+            f"{runtime.compose_file}\tapi\t{digest}\tc0ffee\tsibyl-api\n"
+            f"{runtime.compose_file}\tsurrealdb\tsurrealdb/surrealdb:v3.2.4\tbeef\tsibyl-surrealdb\n"
+        )
+
+        def fake_run(cmd: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+            if cmd[:2] == ["docker", "ps"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout=listing)
+            assert cmd == ["docker", "inspect", "--format", "{{.Config.Image}}", "c0ffee"]
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout="ghcr.io/hyperb1iss/sibyl-api:1.3.2\n"
+            )
+
+        with patch("sibyl_cli.update.subprocess.run", side_effect=fake_run):
+            [plan] = plan_container_upgrades("1.5.0")
+
+        assert (plan.current_tag, plan.applies) == ("1.3.2", True)
+        assert "custom tag" not in plan.status()
+
+        # With the creating image unknown too, the pin speaks rather than the digest.
+        def no_inspect(cmd: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+            if cmd[:2] == ["docker", "ps"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout=listing)
+            return subprocess.CompletedProcess(cmd, 1, stdout="")
+
+        with patch("sibyl_cli.update.subprocess.run", side_effect=no_inspect):
+            [plan] = plan_container_upgrades("1.5.0")
+        assert plan.current_tag == "1.4.0"
+        assert "custom tag" not in plan.status()
+
+    def test_an_unclaimed_running_api_is_not_a_stopped_runtime(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A stale or missing Compose label must not make a live server read as stopped."""
+        monkeypatch.delenv("SIBYL_IMAGE_TAG", raising=False)
+        runtime = _runtime(tmp_path, name="local", tag="1.4.0")
+        monkeypatch.setattr(update_module, "installed_container_runtimes", lambda: [runtime])
+        monkeypatch.setattr(ContainerRuntime, "is_running", lambda _self: False)
+        monkeypatch.setattr(local_module, "unclaimed_api_running", lambda _files: True)
+
+        [plan] = plan_container_upgrades("1.5.0")
+
+        assert plan.running is None
+        assert plan.owner_unknown is True
+        assert plan.applies is False
+        status = plan.status()
+        assert "stopped" not in status
+        assert "owner is unknown" in status
+        assert "sibyl local upgrade" in status
+        assert "sibyl docker upgrade" in status
+
     def test_the_pin_speaks_only_when_no_api_runs(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -502,7 +565,9 @@ class TestContainerPlans:
         monkeypatch.setattr(ContainerRuntime, "is_running", lambda _self: False)
         probed: list[str] = []
         monkeypatch.setattr(
-            ContainerRuntime, "running_api_tag", lambda _self: probed.append("x") or "9.9.9"
+            ContainerRuntime,
+            "api_state",
+            lambda _self: probed.append("x") or ApiState(True, "9.9.9"),
         )
 
         [plan] = plan_container_upgrades("1.5.0")
@@ -741,7 +806,7 @@ class TestUpdateCommand:
         calls, runtime = runtime_calls
         runtime.compose_file.write_text("services: {}\n")
         monkeypatch.setattr(ContainerRuntime, "is_running", lambda _self: True)
-        monkeypatch.setattr(ContainerRuntime, "running_api_tag", lambda _self: None)
+        monkeypatch.setattr(ContainerRuntime, "api_state", lambda _self: ApiState(True, None))
         monkeypatch.setattr(update_module, "get_current_cli_version", lambda: "1.5.0")
 
         result = CliRunner().invoke(update_module.app, ["--containers", "--check"])
