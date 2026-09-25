@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from typer.testing import CliRunner
 
+from sibyl_cli.config_store import Context
 from sibyl_cli.main import app
 
 
@@ -20,7 +21,7 @@ class _FakeClientContext:
 
 
 @patch("sibyl_cli.session.get_effective_server_url", return_value="http://localhost:3334")
-@patch("sibyl_cli.session.get_effective_project", return_value="project_123")
+@patch("sibyl_cli.session.resolve_project_from_cwd", return_value="project_123")
 @patch(
     "sibyl_cli.session.get_current_context", return_value=("project_123", "/Users/bliss/dev/sibyl")
 )
@@ -30,7 +31,7 @@ def test_session_bundle_json_packages_context_tasks_and_memories(
     mock_get_client: MagicMock,
     mock_resolve_effective_context: MagicMock,
     mock_get_current_context: MagicMock,
-    mock_get_effective_project: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
     mock_get_effective_server_url: MagicMock,
 ) -> None:
     context = MagicMock()
@@ -134,12 +135,12 @@ def test_session_bundle_json_packages_context_tasks_and_memories(
         include_graph=True,
     )
     mock_get_effective_server_url.assert_called_once_with()
-    mock_get_effective_project.assert_called_once_with()
+    mock_resolve_project_from_cwd.assert_called_once_with()
     mock_get_current_context.assert_called_once_with()
 
 
 @patch("sibyl_cli.session.get_effective_server_url", return_value="http://localhost:3334")
-@patch("sibyl_cli.session.get_effective_project", return_value="project_123")
+@patch("sibyl_cli.session.resolve_project_from_cwd", return_value="project_123")
 @patch(
     "sibyl_cli.session.get_current_context", return_value=("project_123", "/Users/bliss/dev/sibyl")
 )
@@ -149,7 +150,7 @@ def test_session_bundle_json_blends_raw_memory(
     mock_get_client: MagicMock,
     mock_resolve_effective_context: MagicMock,
     mock_get_current_context: MagicMock,
-    mock_get_effective_project: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
     mock_get_effective_server_url: MagicMock,
 ) -> None:
     context = MagicMock()
@@ -219,7 +220,7 @@ def test_session_bundle_json_blends_raw_memory(
 
 
 @patch("sibyl_cli.session.get_effective_server_url", return_value="http://localhost:3334")
-@patch("sibyl_cli.session.get_effective_project", return_value="project_123")
+@patch("sibyl_cli.session.resolve_project_from_cwd", return_value="project_123")
 @patch(
     "sibyl_cli.session.get_current_context", return_value=("project_123", "/Users/bliss/dev/sibyl")
 )
@@ -229,7 +230,7 @@ def test_session_bundle_dedupes_same_memory_with_different_ids(
     mock_get_client: MagicMock,
     mock_resolve_effective_context: MagicMock,
     mock_get_current_context: MagicMock,
-    mock_get_effective_project: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
     mock_get_effective_server_url: MagicMock,
 ) -> None:
     context = MagicMock()
@@ -280,7 +281,7 @@ def test_session_bundle_dedupes_same_memory_with_different_ids(
 
 
 @patch("sibyl_cli.session.get_effective_server_url", return_value="http://localhost:3334")
-@patch("sibyl_cli.session.get_effective_project", return_value=None)
+@patch("sibyl_cli.session.resolve_project_from_cwd", return_value=None)
 @patch("sibyl_cli.session.get_current_context", return_value=(None, None))
 @patch("sibyl_cli.session.resolve_effective_context", return_value=None)
 @patch("sibyl_cli.session.get_client")
@@ -288,13 +289,35 @@ def test_session_bundle_without_project_guides_user_to_link_one(
     mock_get_client: MagicMock,
     mock_resolve_effective_context: MagicMock,
     mock_get_current_context: MagicMock,
-    mock_get_effective_project: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
     mock_get_effective_server_url: MagicMock,
 ) -> None:
+    """An unlinked session start used to list other projects' tasks and memories."""
     mock_client = MagicMock()
-    mock_client.explore = AsyncMock(return_value={"entities": []})
-    mock_client.search = AsyncMock()
-    mock_client.recall_raw_memory = AsyncMock()
+    mock_client.explore = AsyncMock(
+        return_value={
+            "entities": [
+                {
+                    "id": "task_elsewhere",
+                    "name": "Another project's task",
+                    "metadata": {"status": "doing", "project_id": "project_other"},
+                }
+            ]
+        }
+    )
+    mock_client.search = AsyncMock(
+        return_value={
+            "results": [
+                {
+                    "id": "memory_elsewhere",
+                    "name": "Another project's memory",
+                    "entity_type": "pattern",
+                    "metadata": {"project_id": "project_other"},
+                }
+            ]
+        }
+    )
+    mock_client.recall_raw_memory = AsyncMock(return_value={"memories": []})
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
@@ -303,9 +326,12 @@ def test_session_bundle_without_project_guides_user_to_link_one(
     assert result.exit_code == 0
 
     payload = json.loads(result.stdout)
+    assert payload["context"]["project_id"] is None
+    assert payload["context"]["scope"] == "none"
     assert payload["query"] is None
     assert payload["tasks"] == []
     assert payload["relevant_entities"] == []
+    mock_client.explore.assert_not_called()
     assert (
         payload["remember_next"]
         == "Link this directory to a project so session context stays scoped."
@@ -315,12 +341,12 @@ def test_session_bundle_without_project_guides_user_to_link_one(
     mock_client.search.assert_not_called()
     mock_client.recall_raw_memory.assert_not_called()
     mock_get_effective_server_url.assert_called_once_with()
-    mock_get_effective_project.assert_called_once_with()
+    mock_resolve_project_from_cwd.assert_called_once_with()
     mock_get_current_context.assert_called_once_with()
 
 
 @patch("sibyl_cli.session.get_effective_server_url", return_value="http://localhost:3334")
-@patch("sibyl_cli.session.get_effective_project", return_value="project_123")
+@patch("sibyl_cli.session.resolve_project_from_cwd", return_value="project_123")
 @patch(
     "sibyl_cli.session.get_current_context", return_value=("project_123", "/Users/bliss/dev/sibyl")
 )
@@ -330,7 +356,7 @@ def test_session_bundle_renders_human_output(
     mock_get_client: MagicMock,
     mock_resolve_effective_context: MagicMock,
     mock_get_current_context: MagicMock,
-    mock_get_effective_project: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
     mock_get_effective_server_url: MagicMock,
 ) -> None:
     context = MagicMock()
@@ -397,3 +423,60 @@ def test_session_bundle_remember_next_uses_remember_without_active_tasks() -> No
         remember_next([], [], has_project=True)
         == "No active tasks yet. Start one or remember the next useful learning."
     )
+
+
+def _scoped_session_client() -> MagicMock:
+    client = MagicMock()
+    client.get_entity = AsyncMock(return_value={"name": "Default Project"})
+    client.explore = AsyncMock(return_value={"entities": []})
+    client.search = AsyncMock(return_value={"results": []})
+    client.recall_raw_memory = AsyncMock(return_value={"memories": []})
+    return client
+
+
+@patch("sibyl_cli.session.get_effective_server_url", return_value="http://localhost:3334")
+@patch("sibyl_cli.session.resolve_project_from_cwd", return_value=None)
+@patch("sibyl_cli.session.get_current_context", return_value=(None, None))
+@patch(
+    "sibyl_cli.session.resolve_effective_context",
+    return_value=Context(
+        name="local",
+        server_url="http://localhost:3334",
+        org_slug=None,
+        default_project="project_default",
+    ),
+)
+@patch("sibyl_cli.session.get_client")
+def test_session_bundle_uses_the_context_default_like_recall_does(
+    mock_get_client: MagicMock, *_mocks: MagicMock
+) -> None:
+    client = _scoped_session_client()
+    mock_get_client.return_value = _FakeClientContext(client)
+
+    result = CliRunner().invoke(app, ["session", "bundle", "--json"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["context"]["project_id"] == "project_default"
+    assert payload["context"]["scope"] == "project"
+    assert client.explore.await_args.kwargs["project"] == "project_default"
+
+
+@patch("sibyl_cli.project_scope.get_default_project", return_value="project_legacy")
+@patch("sibyl_cli.session.get_effective_server_url", return_value="http://localhost:3334")
+@patch("sibyl_cli.session.resolve_project_from_cwd", return_value=None)
+@patch("sibyl_cli.session.get_current_context", return_value=(None, None))
+@patch("sibyl_cli.session.resolve_effective_context", return_value=None)
+@patch("sibyl_cli.session.get_client")
+def test_session_bundle_honours_the_legacy_default_project(
+    mock_get_client: MagicMock, *_mocks: MagicMock
+) -> None:
+    client = _scoped_session_client()
+    mock_get_client.return_value = _FakeClientContext(client)
+
+    result = CliRunner().invoke(app, ["session", "bundle", "--json"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["context"]["project_id"] == "project_legacy"
+    assert client.explore.await_args.kwargs["project"] == "project_legacy"

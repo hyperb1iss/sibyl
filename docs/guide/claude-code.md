@@ -149,8 +149,11 @@ See [The Memory Loop](./memory-loop.md) for the cycle in full.
 ### Before Implementing
 
 ```python
-# Recall a working context pack for the goal
-context(goal="implement OAuth refresh", intent="build")
+# Recall a working context pack for the goal, scoped to one project
+context(goal="implement OAuth refresh", intent="build", project="proj_abc")
+
+# Reading every project you can access is a deliberate choice
+context(goal="find prior art for OAuth refresh", all_projects=True)
 
 # Or search directly for relevant patterns
 search("what you're building")

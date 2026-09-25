@@ -27,6 +27,12 @@ from sibyl_core.tools.traverse import (
 log = structlog.get_logger()
 
 
+PROJECT_SCOPE_REQUIRED = (
+    "A context pack reads one project. Pass project=<id> to scope it, or "
+    "all_projects=True to read every project you can access on purpose."
+)
+
+
 async def compile_context_pack(
     *,
     goal: str,
@@ -40,6 +46,7 @@ async def compile_context_pack(
     related_limit: int,
     audit: bool = False,
     markdown_token_budget: int | None = DEFAULT_MARKDOWN_TOKEN_BUDGET,
+    all_projects: bool = False,
 ) -> dict[str, Any]:
     from sibyl_core.tools.core import (
         compile_context as _compile_context,
@@ -47,6 +54,11 @@ async def compile_context_pack(
     )
 
     ctx = await mcp_context.require_context()
+    # Credentials are checked first, so an unauthorized caller learns nothing
+    # from the scope rule. A pack then reads one project unless every project
+    # was asked for by name.
+    if project is None and not all_projects:
+        raise ValueError(PROJECT_SCOPE_REQUIRED)
     accessible_projects = await mcp_context.resolve_project_scope(ctx, project)
     memory_scope = "project" if project else "private"
     scope_key = project
@@ -241,6 +253,7 @@ def register_retrieval_tools(mcp: MCPServer) -> None:
         related_limit: int = 3,
         audit: bool = False,
         markdown_token_budget: int | None = DEFAULT_MARKDOWN_TOKEN_BUDGET,
+        all_projects: bool = False,
     ) -> dict[str, Any]:
         """Compile a precise context pack for an agent goal.
 
@@ -258,7 +271,10 @@ def register_retrieval_tools(mcp: MCPServer) -> None:
             domain: Optional domain/category to scope context. This can be
                 software, creative work, home projects, research, or any other
                 modeled domain.
-            project: Optional project ID to scope active work.
+            project: Project ID to scope the pack. Required unless
+                all_projects is set; a pack never widens on its own.
+            all_projects: Read every project you can access, on purpose. The
+                pack reports scope "all_projects" so the reader can tell.
             agent_id: Optional agent diary identity to include alongside normal
                 private/project raw memory.
             limit: Maximum total context items, clamped to 1-50.
@@ -280,6 +296,7 @@ def register_retrieval_tools(mcp: MCPServer) -> None:
             related_limit=related_limit,
             audit=audit,
             markdown_token_budget=markdown_token_budget,
+            all_projects=all_projects,
         )
 
     @mcp.tool()

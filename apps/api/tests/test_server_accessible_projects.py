@@ -265,6 +265,7 @@ async def test_compile_mcp_context_pack_denies_api_key_memory_scope_mismatch() -
 
 @pytest.mark.asyncio
 async def test_compile_mcp_context_pack_allows_unscoped_project_memory_grant() -> None:
+    """A project-scoped grant still permits a pack over every project, asked for by name."""
     ctx = McpContext(
         org_id=str(uuid4()),
         user_id="user-1",
@@ -292,6 +293,7 @@ async def test_compile_mcp_context_pack_allows_unscoped_project_memory_grant() -
             limit=8,
             include_related=False,
             related_limit=0,
+            all_projects=True,
         )
 
     resolve_scope.assert_awaited_once_with(ctx, None)

@@ -19,6 +19,14 @@ sibyl session bundle --json
   task titles or your explicit query
 - One short "remember next" line
 
+## Project Scope
+
+The bundle resolves its project the way `sibyl context` does: the directory link, then the active
+context's default project, then the legacy `defaults.project` setting. When none of those names a
+project and `--all` was not passed, the bundle reads nothing. It returns no tasks or memories,
+reports `"scope": "none"`, and its "remember next" line asks you to link the directory. It never
+falls back to every project.
+
 ## Options
 
 | Option           | Short | Default | Description                          |

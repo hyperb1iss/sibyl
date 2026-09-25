@@ -371,3 +371,77 @@ def test_context_pack_can_request_agent_diary(
         markdown_token_budget=None,
     )
     mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+@patch("sibyl_cli.context.resolve_effective_context", return_value=None)
+@patch("sibyl_cli.context.resolve_project_from_cwd", return_value=None)
+@patch("sibyl_cli.context.get_client")
+def test_context_pack_refuses_to_read_every_project_by_accident(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+    mock_resolve_effective_context: MagicMock,
+) -> None:
+    """An unlinked directory used to widen the pack to every accessible project."""
+    mock_client = MagicMock()
+    mock_client.context_pack = AsyncMock(return_value=_context_pack() | {"project": None})
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["contexts", "pack", "ship faster"])
+
+    assert result.exit_code == 1
+    assert "No project for this directory" in result.output
+    assert "--all" in result.output
+    assert "sibyl project link" in result.output
+    mock_client.context_pack.assert_not_called()
+    mock_resolve_project_from_cwd.assert_called_once_with()
+    mock_resolve_effective_context.assert_called_once_with()
+
+
+@patch(
+    "sibyl_cli.context.resolve_effective_context",
+    return_value=Context(
+        name="local",
+        server_url="http://localhost:3334",
+        org_slug="hyperbliss",
+        default_project="project_default",
+    ),
+)
+@patch("sibyl_cli.context.resolve_project_from_cwd", return_value=None)
+@patch("sibyl_cli.context.get_client")
+def test_context_pack_falls_back_to_the_context_default_project_with_a_notice(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+    _mock_resolve_effective_context: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.context_pack = AsyncMock(return_value=_context_pack() | {"project": "project_default"})
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["contexts", "pack", "ship faster"])
+
+    assert result.exit_code == 0, result.output
+    assert "using the context default project_default" in result.output
+    assert mock_client.context_pack.await_args.kwargs["project"] == "project_default"
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+@patch("sibyl_cli.context.resolve_project_from_cwd")
+@patch("sibyl_cli.context.get_client")
+def test_context_pack_labels_a_cross_project_read(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.context_pack = AsyncMock(
+        return_value=_context_pack() | {"project": None, "scope": "all_projects"}
+    )
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["contexts", "pack", "ship faster", "--all"])
+
+    assert result.exit_code == 0, result.output
+    assert "all accessible projects" in result.output
+    mock_resolve_project_from_cwd.assert_not_called()

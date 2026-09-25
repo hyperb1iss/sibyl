@@ -1635,8 +1635,18 @@ async def compile_context(
     )
 
 
+ALL_PROJECTS_SCOPE = "all_projects"
+PROJECT_SCOPE = "project"
+
+
+def context_pack_scope(pack: ContextPack) -> str:
+    """Name the read's breadth, so a cross-project pack says so in every rendering."""
+    return PROJECT_SCOPE if pack.project else ALL_PROJECTS_SCOPE
+
+
 def context_pack_to_dict(pack: ContextPack) -> dict[str, Any]:
     payload = asdict(pack)
+    payload["scope"] = context_pack_scope(pack)
     for section in payload["sections"]:
         for item in section["items"]:
             item["metadata"] = public_memory_metadata(item["metadata"])
@@ -1655,6 +1665,7 @@ __all__ = [
     "context_item_lifecycle_state",
     "context_item_project_id",
     "context_item_source_id",
+    "context_pack_scope",
     "context_pack_to_dict",
     "context_pack_to_markdown",
     "render_context_pack",

@@ -214,6 +214,10 @@ class ContextPackResponse(BaseModel):
     query: str
     domain: str | None = None
     project: str | None = None
+    scope: Literal["project", "all_projects"] | None = Field(
+        default=None,
+        description="Whether the pack read one project or every accessible project",
+    )
     sections: list[ContextPackSection] = Field(default_factory=list)
     total_items: int = 0
     usage_metadata: dict[str, Any] = Field(default_factory=dict)

@@ -10,7 +10,8 @@ import typer
 from sibyl_cli import capture_support, command_support, memory_views
 from sibyl_cli.client import SibylClientError, get_client
 from sibyl_cli.common import CORAL, NEON_CYAN, console, error, info, print_json, run_async
-from sibyl_cli.config_store import resolve_project_from_cwd
+from sibyl_cli.config_store import resolve_effective_context, resolve_project_from_cwd
+from sibyl_cli.project_scope import resolve_recall_project
 from sibyl_core.models.context import ContextIntent
 
 CONTEXT_INTENT_VALUES = [intent.value for intent in ContextIntent]
@@ -50,8 +51,13 @@ def search(
         error("--docs-only can only be combined with --type document")
         raise typer.Exit(1)
 
-    # Auto-resolve project from context unless --all
-    effective_project = None if all_projects else resolve_project_from_cwd()
+    # Scope to one project unless --all asked for every project on purpose
+    effective_project = resolve_recall_project(
+        None,
+        all_projects,
+        resolve_linked=resolve_project_from_cwd,
+        resolve_context=resolve_effective_context,
+    )
     include_documents = not graph_only
     include_graph = not docs_only
 
@@ -181,7 +187,12 @@ def brief_context(
     expansion, no JSON envelope. Pipe or paste straight into a worker
     agent's prompt.
     """
-    effective_project = project or (None if all_projects else resolve_project_from_cwd())
+    effective_project = resolve_recall_project(
+        project,
+        all_projects,
+        resolve_linked=resolve_project_from_cwd,
+        resolve_context=resolve_effective_context,
+    )
 
     @run_async
     async def run_brief() -> None:
@@ -276,7 +287,12 @@ def recall_context(
     ),
 ) -> None:
     """Recall a compact working context pack for an agent."""
-    effective_project = project or (None if all_projects else resolve_project_from_cwd())
+    effective_project = resolve_recall_project(
+        project,
+        all_projects,
+        resolve_linked=resolve_project_from_cwd,
+        resolve_context=resolve_effective_context,
+    )
 
     @run_async
     async def run_recall() -> None:

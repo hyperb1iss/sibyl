@@ -43,7 +43,9 @@ PACK=$(sibyl brief "wire up OAuth2")
 
 - `brief` always uses the `wake` layer with related-graph expansion off, so it is faster and leaner
   than `context`. Reach for `context` when you need a deeper pack, raw memories, a diary, or JSON.
-- The project resolves from the current directory unless you pass `--project` or `--all`.
+- The project comes from `--project`, then the directory link, then the active context's default
+  project (with a notice). With none of those the command stops and says how to scope it; `--all`
+  reads every accessible project on purpose and labels the result.
 
 ## Related Commands
 
