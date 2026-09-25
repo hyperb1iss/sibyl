@@ -13,8 +13,8 @@ covers the client.
 # User install
 curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh
 
-# Remote-only install
-curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --remote
+# Remote-only install, then connect with sibyl setup
+curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --remote https://your-sibyl-host
 
 # For development
 moon run cli:install-dev
@@ -113,6 +113,7 @@ Auth, organizations, configuration, and operations.
 | [`sibyl org`](./org.md)         | Organizations and member management                  |
 | [`sibyl team`](./team.md)       | Teams, membership, and team project access           |
 | `sibyl config context`          | Server/org/project context bundles (see above)       |
+| [`sibyl setup`](./setup.md)     | Connect this machine to a server in one command      |
 | [`sibyl init`](./init.md)       | Create a local or remote context for first-run setup |
 | `sibyl config`                  | Manage CLI configuration                             |
 | `sibyl health`                  | Check Sibyl server health                            |

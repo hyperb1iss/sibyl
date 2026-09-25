@@ -41,15 +41,16 @@ sibyl init --local        # or: sibyl config context use local
 sibyl doctor
 ```
 
-To point the CLI at a remote or shared server instead:
+To connect to a remote or shared server instead, run [`sibyl setup`](../cli/setup.md). It creates
+the context, signs you in, and installs the skill and the Claude Code hook:
 
 ```bash
-sibyl init --remote https://your-sibyl-host
-sibyl auth login
+sibyl setup https://your-sibyl-host
 ```
 
-`sibyl auth login` opens the browser sign-in flow. On a team server behind corporate SSO, that
-browser flow uses the same OIDC provider as the web app.
+The sign-in opens the browser. On a team server behind corporate SSO, that browser flow uses the
+same OIDC provider as the web app. To do the steps by hand, run `sibyl init --remote <url>` and then
+`sibyl auth login`.
 
 For headless terminals, print the login URL instead:
 
