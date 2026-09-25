@@ -255,7 +255,7 @@ backend:
 backend:
   # Reference to existing secret for sensitive env vars
   # Must contain: SIBYL_JWT_SECRET and SIBYL_SETTINGS_KEY.
-  # Add provider and LLM API keys as needed.
+  # Add provider and LLM API keys as needed; Amazon Bedrock needs none.
   existingSecret: ""
 ```
 
@@ -670,6 +670,52 @@ serviceAccount:
   name: ""
   annotations: {}
 ```
+
+The backend, worker, bootstrap and frontend pods all run as this service account, so an annotation
+here reaches every pod that calls a model provider.
+
+## Amazon Bedrock
+
+On EKS, Sibyl can run Claude and Cohere embeddings through Amazon Bedrock with no provider API keys.
+Bind an IAM role to the service account with IRSA, set a Region, and select the `bedrock` provider:
+
+```yaml
+serviceAccount:
+  create: true
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::<account-id>:role/sibyl-bedrock
+
+backend:
+  # Still required in production, but it only needs SIBYL_JWT_SECRET and SIBYL_SETTINGS_KEY.
+  existingSecret: sibyl-secrets
+  env:
+    AWS_REGION: "us-west-2"
+    SIBYL_LLM_PROVIDER: "bedrock"
+    SIBYL_LLM_MODEL: "claude-haiku-4-5"
+    SIBYL_LLM_MEMORY_MODEL: "claude-opus-5-5"
+    SIBYL_BEDROCK_INFERENCE_SCOPE: "us"
+    SIBYL_EMBEDDING_PROVIDER: "bedrock"
+    SIBYL_EMBEDDING_MODEL: "cohere.embed-v4:0"
+    SIBYL_EMBEDDING_DIMENSIONS: "1536"
+    SIBYL_GRAPH_EMBEDDING_PROVIDER: "bedrock"
+```
+
+The IRSA webhook injects `AWS_ROLE_ARN` and `AWS_WEB_IDENTITY_TOKEN_FILE` into each pod, and the AWS
+credential chain exchanges that token for role credentials and refreshes them before they expire.
+EKS Pod Identity works the same way through an association on the service account, with no
+annotation. Both paths leave `SIBYL_ANTHROPIC_API_KEY` and `SIBYL_OPENAI_API_KEY` unset: the chart
+references them from `backend.existingSecret` as optional keys, so the Secret does not need them.
+
+The role needs `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream` on the inference
+profiles and foundation models it routes to, such as `us.anthropic.claude-*`, `anthropic.claude-*`
+and `cohere.embed-v4:0`. See [Amazon Bedrock](./environment.md#amazon-bedrock) for every setting,
+the inference scopes and the features Bedrock accepts per model. The admin AI settings page **Test**
+button proves the role works from inside the pod.
+
+With `networkPolicy.enabled`, add an `egress.extra` rule that allows HTTPS (443) to the Bedrock
+runtime and STS endpoints, or through the proxy or VPC endpoints your cluster uses for AWS APIs.
+Switching an embedding provider changes the vector space, so plan a re-embed before trusting mixed
+results.
 
 ## Production Example
 

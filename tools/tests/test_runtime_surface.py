@@ -135,6 +135,51 @@ def test_helm_production_render_succeeds_with_an_existing_secret() -> None:
 
 
 @requires_helm
+def test_helm_bedrock_render_needs_irsa_and_a_region_not_provider_keys() -> None:
+    role = "arn:aws:iam::123456789012:role/sibyl-bedrock"
+    result = _helm_template(
+        "--set",
+        "backend.existingSecret=sibyl-secrets",
+        "--set",
+        "backend.env.SIBYL_LLM_PROVIDER=bedrock",
+        "--set",
+        "backend.env.SIBYL_EMBEDDING_PROVIDER=bedrock",
+        "--set",
+        "backend.env.SIBYL_GRAPH_EMBEDDING_PROVIDER=bedrock",
+        "--set",
+        "backend.env.AWS_REGION=us-west-2",
+        "--set-string",
+        f"serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn={role}",
+    )
+
+    assert result.returncode == 0, result.stderr
+    documents = [doc for doc in yaml.safe_load_all(result.stdout) if doc]
+    account = next(doc for doc in documents if doc["kind"] == "ServiceAccount")
+    assert account["metadata"]["annotations"] == {"eks.amazonaws.com/role-arn": role}
+    config = next(doc for doc in documents if doc["kind"] == "ConfigMap")
+    assert config["data"]["SIBYL_LLM_PROVIDER"] == "bedrock"
+    assert config["data"]["AWS_REGION"] == "us-west-2"
+    deployments = [
+        doc
+        for doc in documents
+        if doc["kind"] == "Deployment" and doc["metadata"]["name"].endswith(("backend", "worker"))
+    ]
+    assert deployments
+    for deployment in deployments:
+        pod = deployment["spec"]["template"]["spec"]
+        assert pod["serviceAccountName"] == account["metadata"]["name"]
+        provider_keys = [
+            env
+            for container in pod["containers"]
+            for env in container.get("env", [])
+            if env["name"] in {"SIBYL_OPENAI_API_KEY", "SIBYL_ANTHROPIC_API_KEY"}
+        ]
+        # Bedrock signs with the IRSA role, so provider API keys stay optional.
+        assert provider_keys
+        assert all(env["valueFrom"]["secretKeyRef"]["optional"] is True for env in provider_keys)
+
+
+@requires_helm
 def test_helm_public_url_reaches_backend_and_frontend_consumers() -> None:
     result = _helm_template(
         "--set",

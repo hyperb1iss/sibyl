@@ -204,7 +204,7 @@ candidates live in `sibyl_core/models/relations.py`.
 ## Configuration
 
 ```bash
-SIBYL_LLM_PROVIDER=anthropic          # anthropic | openai | gemini
+SIBYL_LLM_PROVIDER=anthropic          # anthropic | bedrock | openai | gemini
 SIBYL_LLM_MODEL=claude-haiku-4-5
 SIBYL_LLM_TEMPERATURE=0
 SIBYL_LLM_MAX_TOKENS=2048
@@ -225,16 +225,22 @@ SIBYL_ANTHROPIC_API_KEY=...           # LLM provider key
 SIBYL_OPENAI_API_KEY=sk-...           # LLM or embedding provider key
 SIBYL_GEMINI_API_KEY=...              # LLM or embedding provider key
 
-SIBYL_EMBEDDING_PROVIDER=openai       # openai | gemini
+SIBYL_EMBEDDING_PROVIDER=openai       # openai | gemini | bedrock
 SIBYL_EMBEDDING_MODEL=text-embedding-3-small
 SIBYL_EMBEDDING_DIMENSIONS=1536
 SIBYL_GRAPH_EMBEDDING_PROVIDER=openai
 SIBYL_GRAPH_EMBEDDING_MODEL=text-embedding-3-small
 SIBYL_GRAPH_EMBEDDING_DIMENSIONS=1024
+
+# Amazon Bedrock: Claude and Cohere Embed v4 with no API key. Install
+# sibyl-core[bedrock]; requests sign with the default AWS credential chain.
+SIBYL_BEDROCK_REGION=us-west-2        # falls back to AWS_REGION
+SIBYL_BEDROCK_INFERENCE_SCOPE=us      # us | global | regional
 ```
 
 LLM settings are instance-wide. Environment variables win over database settings and mark individual
-fields as locked.
+fields as locked. On `bedrock`, configure Claude models by alias; the inference scope picks the
+Bedrock profile ID.
 
 Gemini keys can also come from `GEMINI_API_KEY` or `GOOGLE_API_KEY`. Changing embedding provider,
 model, or dimensions requires re-embedding existing graph and document vectors before comparing old
