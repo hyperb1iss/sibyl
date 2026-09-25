@@ -34,6 +34,7 @@ EXPECTED_WEBSOCKET_ROUTE_COUNT = 1
 EXPECTED_MCP_TOOL_COUNT = 13
 EXPECTED_MCP_RESOURCE_COUNT = 2
 EXPECTED_SQLMODEL_TABLE_COUNT = 0
+API_SERVICE_GID = 10001
 _GRAPHITI_PACKAGE = "graphiti" + "-core"
 _GRAPHITI_MODULE = "graphiti" + "_core"
 CORE_LEGACY_GRAPH_CONTRACT_TESTS = (
@@ -950,6 +951,57 @@ def test_helm_validation_receipts_require_and_share_persistent_claim() -> None:
             assert "emptyDir" not in volume
             checked.add(container["name"])
     assert checked == {"backend", "worker"}
+
+
+def _receipt_deployments(*overrides: str) -> dict[str, dict]:
+    rendered = _helm_template(
+        "--set",
+        "backend.existingSecret=runtime-secret",
+        "--set",
+        "coordinationBackend=redis",
+        "--set",
+        "backend.redis.password=fixture-only",
+        "--set",
+        "worker.enabled=true",
+        *overrides,
+    )
+    assert rendered.returncode == 0, rendered.stderr
+    return {
+        d["metadata"]["name"]: d
+        for d in yaml.safe_load_all(rendered.stdout)
+        if d and d.get("kind") == "Deployment"
+    }
+
+
+@requires_helm
+def test_helm_receipt_pods_keep_claim_private_and_attachable() -> None:
+    """Block-storage CSI drivers re-apply fsGroup on every mount, adding group
+    bits the private receipts directory refuses, and an RWO claim cannot
+    attach to a rolling-update surge pod scheduled onto another node."""
+    deployments = _receipt_deployments()
+    for name in ("sibyl-backend", "sibyl-worker"):
+        deployment = deployments[name]
+        security = deployment["spec"]["template"]["spec"]["securityContext"]
+        assert security["fsGroup"] == API_SERVICE_GID
+        assert security["fsGroupChangePolicy"] == "OnRootMismatch"
+        assert deployment["spec"]["strategy"] == {"type": "Recreate"}
+
+    scaled = _receipt_deployments(
+        "--set", "backend.replicaCount=2", "--set", "worker.autoscaling.enabled=true"
+    )
+    assert "strategy" not in scaled["sibyl-backend"]["spec"]
+    assert "strategy" not in scaled["sibyl-worker"]["spec"]
+
+    explicit = _receipt_deployments(
+        "--set",
+        "backend.strategy.type=RollingUpdate",
+        "--set",
+        "backend.strategy.rollingUpdate.maxSurge=0",
+    )
+    assert explicit["sibyl-backend"]["spec"]["strategy"] == {
+        "type": "RollingUpdate",
+        "rollingUpdate": {"maxSurge": 0},
+    }
 
 
 def test_production_compose_validation_receipts_share_durable_state() -> None:

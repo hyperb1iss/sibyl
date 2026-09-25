@@ -212,3 +212,17 @@ existing release to chart defaults, silently discarding every other override.
 {{- fail "backend.env.SIBYL_MCP_AUTH_MODE=off is forbidden in production. It serves every MCP tool unauthenticated regardless of the JWT secret. Use \"auto\" (enforce once a secret is set) or \"on\" (always enforce), or set backend.env.SIBYL_ENVIRONMENT=development for a local unauthenticated endpoint." -}}
 {{- end -}}
 {{- end }}
+
+{{/*
+Update strategy for a Deployment that mounts the validation receipts claim.
+An explicit strategy wins; a single fixed replica defaults to Recreate.
+*/}}
+{{- define "sibyl.receiptsStrategy" -}}
+{{- if .strategy }}
+strategy:
+  {{- toYaml .strategy | nindent 2 }}
+{{- else if and (not .autoscaling.enabled) (le (int .replicaCount) 1) }}
+strategy:
+  type: Recreate
+{{- end }}
+{{- end }}

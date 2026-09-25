@@ -113,6 +113,9 @@ backend:
   # Number of replicas (ignored if autoscaling is enabled)
   replicaCount: 1
 
+  # Empty selects Recreate for a single fixed replica, RollingUpdate otherwise
+  strategy: {}
+
   image:
     repository: ghcr.io/hyperb1iss/sibyl-api
     pullPolicy: IfNotPresent
@@ -354,6 +357,7 @@ backend:
     runAsUser: 10001
     runAsGroup: 10001
     fsGroup: 10001
+    fsGroupChangePolicy: OnRootMismatch
 
   securityContext:
     allowPrivilegeEscalation: false
@@ -821,6 +825,18 @@ upgrading. The chart rejects an absent claim at render time. API and worker moun
 Multi-node replicas require a ReadWriteMany volume; provision it with the storage class supported by
 your cluster. The service user (UID/GID 10001) must be able to create a private child directory. No
 temporary volume or single-replica fallback is used.
+
+Two chart defaults keep a ReadWriteOnce block volume (EBS, Persistent Disk, Azure Disk) working
+across restarts and rollouts:
+
+- `fsGroupChangePolicy: OnRootMismatch` on the backend and worker pod security contexts. Block CSI
+  drivers re-apply `fsGroup` on every mount by default, adding group permission bits to every file
+  and directory, and Sibyl refuses a receipts directory or file with any group or other bits. Keep
+  this key if you override `podSecurityContext`.
+- An empty `backend.strategy` or `worker.strategy` renders `Recreate` for a single fixed replica,
+  because a rolling-update surge pod scheduled onto another node cannot attach a ReadWriteOnce
+  claim. With more replicas or autoscaling the Kubernetes `RollingUpdate` default applies, which
+  assumes ReadWriteMany storage. Set the strategy explicitly to override either choice.
 
 Content schema 40 retains a per-execution receipt key and erases it when a source is purged. Older
 servers cannot recover these pending receipts. Schema repair must not replace the key-erasing purge

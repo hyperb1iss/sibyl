@@ -8,6 +8,7 @@ spec:
   {{- if not .Values.backend.autoscaling.enabled }}
   replicas: {{ .Values.backend.replicaCount }}
   {{- end }}
+  {{- include "sibyl.receiptsStrategy" .Values.backend | nindent 2 }}
   selector:
     matchLabels:
       {{- include "sibyl.backend.selectorLabels" . | nindent 6 }}
