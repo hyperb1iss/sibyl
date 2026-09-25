@@ -8,6 +8,7 @@ const hooks = vi.hoisted(() => ({
   useMe: vi.fn(),
   useOrgMetrics: vi.fn(),
   useSessionBundle: vi.fn(),
+  useSetupStatus: vi.fn(),
   useStats: vi.fn(),
   useTelemetrySummary: vi.fn(),
   useTasks: vi.fn(),
@@ -21,6 +22,8 @@ vi.mock('@/lib/project-context', () => ({
 
 vi.mock('@/components/dashboard', () => ({
   WelcomeBanner: () => <div data-testid="welcome-banner" />,
+  ConnectAgentModal: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="connect-modal" /> : null,
 }));
 vi.mock('@/components/layout/capture-memory-context', () => hooks);
 
@@ -97,6 +100,7 @@ describe('DashboardContent', () => {
       },
     });
     hooks.useOrgMetrics.mockReturnValue({ data: orgMetrics });
+    hooks.useSetupStatus.mockReturnValue({ data: { providers_configured: true } });
     hooks.useTelemetrySummary.mockReturnValue({
       data: {
         generated_at: '2026-05-16T12:00:00Z',
@@ -292,5 +296,57 @@ describe('DashboardContent', () => {
       '/tasks/task_1'
     );
     expect(screen.getByText('Archive review loop')).toBeInTheDocument();
+  });
+
+  describe('first run', () => {
+    const emptyStats: StatsResponse = { entity_counts: {}, total_entities: 0 };
+
+    function firstRunAs(isAdmin: boolean, providersConfigured: boolean) {
+      hooks.useStats.mockReturnValue({ data: emptyStats, isError: false });
+      hooks.useOrgMetrics.mockReturnValue({ data: { ...orgMetrics, total_tasks: 0 } });
+      hooks.useMe.mockReturnValue({
+        data: {
+          user: {
+            id: 'u1',
+            github_id: null,
+            email: null,
+            name: 'Ada',
+            avatar_url: null,
+            is_admin: isAdmin,
+          },
+          organization: null,
+          org_role: isAdmin ? 'owner' : 'member',
+        },
+      });
+      hooks.useSetupStatus.mockReturnValue({
+        data: { providers_configured: providersConfigured },
+      });
+      return render(<DashboardContent initialStats={emptyStats} />);
+    }
+
+    it('points a team member at the connect card, never at keys or API tokens', async () => {
+      const { user } = firstRunAs(false, false);
+
+      expect(await screen.findByText('Connect your tools')).toBeInTheDocument();
+      expect(screen.queryByText('Configure AI providers')).not.toBeInTheDocument();
+      expect(screen.queryByText(/api key/i)).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: /connect your tools/i }));
+      expect(screen.getByTestId('connect-modal')).toBeInTheDocument();
+    });
+
+    it('skips provider setup when the server already configured it', async () => {
+      firstRunAs(true, true);
+
+      expect(await screen.findByText('Connect your tools')).toBeInTheDocument();
+      expect(screen.queryByText('Configure AI providers')).not.toBeInTheDocument();
+    });
+
+    it('asks an admin to configure providers when none are ready', async () => {
+      firstRunAs(true, false);
+
+      expect(await screen.findByText('Configure AI providers')).toBeInTheDocument();
+      expect(screen.getByText('Connect your tools')).toBeInTheDocument();
+    });
   });
 });

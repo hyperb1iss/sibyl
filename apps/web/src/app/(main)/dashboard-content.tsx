@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { WelcomeBanner } from '@/components/dashboard';
+import { ConnectAgentModal, WelcomeBanner } from '@/components/dashboard';
 import { useCaptureMemory } from '@/components/layout/capture-memory-context';
 import { PerformanceTrendChart, VelocityLineChart } from '@/components/metrics/charts';
 import { EnhancedEmptyState } from '@/components/ui/empty-state';
@@ -18,7 +18,6 @@ import {
   Database,
   EditPencil,
   FileText,
-  Key,
   Layers,
   ListTodo,
   Network,
@@ -37,6 +36,7 @@ import {
   useMe,
   useOrgMetrics,
   useSessionBundle,
+  useSetupStatus,
   useStats,
   useTelemetrySummary,
 } from '@/lib/hooks';
@@ -155,22 +155,34 @@ function EntityRingChart({
 }
 
 interface FirstRunStep {
+  id: string;
   icon: IconComponent;
   accent: 'purple' | 'cyan' | 'coral' | 'green';
   title: string;
   description: string;
-  href: string;
+  /** Link target, or none for the step that opens the connect card. */
+  href?: string;
 }
+
+const PROVIDERS_STEP: FirstRunStep = {
+  id: 'providers',
+  icon: Settings,
+  accent: 'purple',
+  title: 'Configure AI providers',
+  description: 'Add OpenAI, Anthropic, or Gemini keys so memory and synthesis can run.',
+  href: '/settings/admin/ai',
+};
 
 const FIRST_RUN_STEPS: FirstRunStep[] = [
   {
-    icon: Settings,
-    accent: 'purple',
-    title: 'Configure AI providers',
-    description: 'Add OpenAI, Anthropic, or Gemini keys so memory and synthesis can run.',
-    href: '/settings/admin/ai',
+    id: 'connect',
+    icon: Network,
+    accent: 'coral',
+    title: 'Connect your tools',
+    description: 'One line in your terminal, or hand it to your agent.',
   },
   {
+    id: 'source',
     icon: BookOpen,
     accent: 'cyan',
     title: 'Add your first source',
@@ -178,13 +190,7 @@ const FIRST_RUN_STEPS: FirstRunStep[] = [
     href: '/sources',
   },
   {
-    icon: Key,
-    accent: 'coral',
-    title: 'Create an API key',
-    description: 'Mint a key so agents and the MCP server can reach Sibyl.',
-    href: '/settings/security',
-  },
-  {
+    id: 'capture',
     icon: EditPencil,
     accent: 'green',
     title: 'Make your first capture',
@@ -203,7 +209,16 @@ const FIRST_RUN_ACCENTS: Record<FirstRunStep['accent'], string> = {
 const FOCUS_RING =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated';
 
-function FirstRunWelcome({ onCapture }: { onCapture: () => void }) {
+function FirstRunWelcome({
+  onCapture,
+  needsProviders,
+}: {
+  onCapture: () => void;
+  /** Only an instance admin on a server with no ready model provider. */
+  needsProviders: boolean;
+}) {
+  const [connectOpen, setConnectOpen] = useState(false);
+  const steps = needsProviders ? [PROVIDERS_STEP, ...FIRST_RUN_STEPS] : FIRST_RUN_STEPS;
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="rounded-xl border border-sc-purple/20 bg-sc-bg-elevated p-6 sm:p-8 shadow-card">
@@ -214,15 +229,14 @@ function FirstRunWelcome({ onCapture }: { onCapture: () => void }) {
           actions={[{ label: 'Capture your first memory', onClick: onCapture }]}
         />
 
-        <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {FIRST_RUN_STEPS.map((step, index) => {
+        <div
+          className={`mt-2 grid grid-cols-1 gap-3 ${steps.length === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}
+        >
+          {steps.map((step, index) => {
             const StepIcon = step.icon;
-            return (
-              <Link
-                key={step.href}
-                href={step.href}
-                className={`group flex items-start gap-3 rounded-lg border bg-sc-bg-highlight p-4 transition-colors duration-200 ${FIRST_RUN_ACCENTS[step.accent]} ${FOCUS_RING}`}
-              >
+            const className = `group flex items-start gap-3 rounded-lg border bg-sc-bg-highlight p-4 text-left transition-colors duration-200 ${FIRST_RUN_ACCENTS[step.accent]} ${FOCUS_RING}`;
+            const body = (
+              <>
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-current/30">
                   <StepIcon width={18} height={18} />
                 </div>
@@ -240,11 +254,26 @@ function FirstRunWelcome({ onCapture }: { onCapture: () => void }) {
                   height={16}
                   className="mt-1 shrink-0 text-sc-fg-muted transition-colors duration-200 group-hover:text-sc-fg-primary"
                 />
+              </>
+            );
+            return step.href ? (
+              <Link key={step.id} href={step.href} className={className}>
+                {body}
               </Link>
+            ) : (
+              <button
+                key={step.id}
+                type="button"
+                onClick={() => setConnectOpen(true)}
+                className={className}
+              >
+                {body}
+              </button>
             );
           })}
         </div>
       </div>
+      <ConnectAgentModal open={connectOpen} onOpenChange={setConnectOpen} />
     </div>
   );
 }
@@ -381,6 +410,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
   const { data: health, isLoading: healthLoading } = useHealth();
   const { data: stats, isError: statsUnavailable } = useStats(initialStats);
   const { data: me } = useMe();
+  const { data: setupStatus } = useSetupStatus();
   const { data: orgMetrics } = useOrgMetrics();
   const { data: telemetry } = useTelemetrySummary({ window_seconds: 900, rollup_limit: 120 });
   const { data: sessionBundle, isLoading: sessionBundleLoading } = useSessionBundle({
@@ -442,7 +472,16 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
   const isFirstRun = mounted && totalEntities === 0 && taskStats.total === 0;
 
   if (isFirstRun) {
-    return <FirstRunWelcome onCapture={() => openCaptureMemory('dashboard')} />;
+    return (
+      <FirstRunWelcome
+        onCapture={() => openCaptureMemory('dashboard')}
+        needsProviders={
+          me?.user.is_admin === true &&
+          setupStatus !== undefined &&
+          !setupStatus.providers_configured
+        }
+      />
+    );
   }
 
   const firstName = me?.user?.name?.trim().split(/\s+/)[0] ?? null;
