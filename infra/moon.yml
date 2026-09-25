@@ -4,16 +4,16 @@ toolchains:
   default: system
 tasks:
   lint:
-    command: npx prettier --check '**/*.md' '**/*.yaml' '**/*.yml'
+    command: npx prettier --check --no-error-on-unmatched-pattern '**/*.md' '**/*.yaml' '**/*.yml'
     inputs:
       - "@group(sources)"
   fix:
-    command: npx prettier --write '**/*.md' '**/*.yaml' '**/*.yml'
+    command: npx prettier --write --no-error-on-unmatched-pattern '**/*.md' '**/*.yaml' '**/*.yml'
     inputs:
       - "@group(sources)"
     preset: server
   format:
-    command: npx prettier --write '**/*.md' '**/*.yaml' '**/*.yml'
+    command: npx prettier --write --no-error-on-unmatched-pattern '**/*.md' '**/*.yaml' '**/*.yml'
     inputs:
       - "@group(sources)"
     preset: server
