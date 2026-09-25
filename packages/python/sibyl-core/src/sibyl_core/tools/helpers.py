@@ -211,7 +211,6 @@ _DOMAIN_KEYWORDS: dict[str, list[str]] = {
         "index",
         "table",
         "collection",
-        "falkordb",
         "graph",
         "cypher",
         "neo4j",
