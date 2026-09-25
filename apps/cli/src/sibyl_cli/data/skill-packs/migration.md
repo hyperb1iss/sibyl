@@ -150,11 +150,10 @@ enterprise deployment with SSO) and they are not an operator of that server. Thi
 self-service lane; several teammates can each run it with their own login.
 
 **Do not reach for the archive/consolidate lane here.** It is operator-shaped (SSH or
-kubectl to the target, root store access), it migrates whole orgs rather than one
-project, and its exporter fails on live stores that contain record links (RecordID
-serialization, issue #459). The replay lane goes through the target's ordinary
-authenticated API instead: ownership lands on the caller's own server identity by
-construction, and the target re-projects and re-embeds from the verbatim raw records.
+kubectl to the target, root store access), and it migrates whole orgs rather than one
+project. The replay lane goes through the target's ordinary authenticated API instead:
+ownership lands on the caller's own server identity by construction, and the target
+re-projects and re-embeds from the verbatim raw records.
 
 One-time setup per person:
 
