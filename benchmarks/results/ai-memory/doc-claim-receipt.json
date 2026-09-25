@@ -94,7 +94,7 @@
     "docs/testing/longmemeval.md"
   ],
   "fixture": "doc-claim-truth-up-v1",
-  "generated_at": "2026-09-25T20:43:21.473352+00:00",
+  "generated_at": "2026-09-25T21:37:14.980190+00:00",
   "handoffs": [
     {
       "locations": [
@@ -152,6 +152,7 @@
     "unsupported_public_claim_count": 0,
     "v12_handoff_count": 8
   },
+  "public_scan_doc_count": 118,
   "requirements": [
     {
       "missing_phrases": [],
