@@ -1797,13 +1797,6 @@ tasks:
       - pyproject.toml
       - apps/api/pyproject.toml
 
-  auth-readonly:
-    command: uv run sibyld migrate auth-readonly
-    inputs:
-      - apps/api/src/**/*.py
-      - pyproject.toml
-      - apps/api/pyproject.toml
-
   # ==========================================================================
   # Coverage
   # ==========================================================================

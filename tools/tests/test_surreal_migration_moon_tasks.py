@@ -48,7 +48,6 @@ def test_surreal_migration_moon_tasks_match_cli_surface() -> None:
             "uv",
             ["run", "sibyld", "migrate", "auth-flow-compare"],
         ),
-        "auth-readonly": ("uv", ["run", "sibyld", "migrate", "auth-readonly"]),
     }
 
     for task_name, (command, args) in expected.items():
