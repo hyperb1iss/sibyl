@@ -237,6 +237,25 @@ Any `SIBYL_LLM_*` setting also takes a per-surface form, `SIBYL_LLM_<SURFACE>_<S
 runs on the memory surface and sends a whole cohort in one non-streaming request, so that surface
 waits ten minutes per attempt rather than one.
 
+### Consolidation Input Budget
+
+| Variable                              | Default           | Description                                                          |
+| ------------------------------------- | ----------------- | -------------------------------------------------------------------- |
+| `SIBYL_CONSOLIDATION_MAX_INPUT_CHARS` | unset (per model) | Character cap on one consolidation request: system, evidence, schema |
+
+Unset, each request takes the memory model's own budget: 1,600,000 characters for `claude-opus-5`
+and `claude-opus-5-5` on the `anthropic` provider, and 40,000 for every other model. The lookup
+matches the model id exactly, so a dated id, a `[1m]` suffix or an `anthropic/`-prefixed OpenRouter
+id gets 40,000. When the variable is set, its value replaces the model's budget, even a value equal
+to a default.
+
+This variable is the operator's knob for capping dream spend. At the Opus default one consolidation
+request can carry about 420K input tokens (screen48 evidence ran about 3.8 characters per token),
+and the nightly dream cycle's proposal, critique and correction requests are not counted against the
+monthly LLM token budgets. A lower value shrinks every such request and splits large task families
+into more, smaller cohorts. The budget is recorded in each validation policy, so changing it, or
+changing the memory model, re-sends consolidation work that was in flight or only partly complete.
+
 ## Embeddings
 
 Document chunk embeddings and graph node/relationship embeddings are configured separately. The
