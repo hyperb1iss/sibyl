@@ -93,7 +93,8 @@ def test_ansible_stack_trusts_caddy_for_the_client_address() -> None:
     default = defaults["sibyl_forwarded_allow_ips"]
     assert "SIBYL_FORWARDED_ALLOW_IPS={{ sibyl_forwarded_allow_ips }}" in ansible_env
     backend_env = compose["services"]["backend"]["environment"]
-    assert backend_env["SIBYL_FORWARDED_ALLOW_IPS"] == f"${{SIBYL_FORWARDED_ALLOW_IPS:-{default}}}"
+    # "-" rather than ":-", so an explicitly empty value really means loopback only.
+    assert backend_env["SIBYL_FORWARDED_ALLOW_IPS"] == f"${{SIBYL_FORWARDED_ALLOW_IPS-{default}}}"
     assert helm_values["backend"]["forwardedAllowIps"] == ""
 
     # Caddy's bridge address comes from Docker's default address pools

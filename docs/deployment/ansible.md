@@ -71,8 +71,9 @@ to that:
 docker network inspect sibyl-network --format '{{(index .IPAM.Config 0).Subnet}}'
 ```
 
-Change it too if the Docker daemon configures custom `default-address-pools`, or if you add
-`trusted_proxies` to Caddy for a proxy in front of it (then list that proxy as well). The
+Set it to an empty string to turn proxy trust off (loopback only). Change it if the Docker daemon
+configures custom `default-address-pools`, or if you add `trusted_proxies` to Caddy for a proxy in
+front of it (then list that proxy as well). The
 [environment reference](./environment.md#trusted-proxies) explains how the address resolves.
 
 ## Deploying

@@ -33,6 +33,7 @@ sibyl_mcp_auth_mode: "auto"
 # Without this, every login shares Caddy's rate-limit bucket. Narrow it to
 # the network's subnet (docker network inspect sibyl-network) if you like,
 # and change it if the Docker daemon sets custom default-address-pools.
+# An empty string turns proxy trust off (loopback only).
 sibyl_forwarded_allow_ips: "172.16.0.0/12,192.168.0.0/16"
 
 # Transactional email. Leave SMTP host empty to disable live delivery.

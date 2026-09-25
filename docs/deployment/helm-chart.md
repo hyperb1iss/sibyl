@@ -298,9 +298,10 @@ and satisfy `breakGlass.allowedIPs`. Keep the range as narrow as the topology al
 `networkPolicy` with `networkPolicy.ingress.from` naming the controller so nothing else in that
 range can reach the backend. Keep `/api` and `/mcp` routed straight to the backend service (the
 default route table): the Next.js frontend passes a client-supplied `X-Forwarded-For` through
-unchanged, so it must never be the hop the backend trusts. A value of `"*"` trusts every peer and
-makes the backend log `forwarded_allow_ips_trusts_every_peer` at startup; with it, the leftmost
-header entry wins, and a client writes that one unless every proxy in front overwrites the header.
+unchanged, so it must never be the hop the backend trusts. A value of `"*"` (or a `/0` range) trusts
+every peer and makes the backend log `forwarded_allow_ips_trusts_every_peer` at startup; with it,
+the leftmost header entry wins, and a client writes that one unless every proxy in front overwrites
+the header.
 
 :::
 
@@ -796,8 +797,8 @@ backend:
     repository: ghcr.io/hyperb1iss/sibyl-api
     tag: "1.4.1"
     pullPolicy: Always
-  existingSecret: sibyl-secrets
-  # Ingress controller pod range, so each user gets their own login rate-limit bucket.
+  existingSecret: sibyl-secrets # Ingress controller pod range, so each user gets their own login rate-limit bucket.
+  # Pair it with networkPolicy so only the controller can reach the backend (see Trusted Proxies).
   forwardedAllowIps: "10.244.0.0/16"
   validationReceipts:
     existingClaim: sibyl-validation-receipts

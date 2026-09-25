@@ -86,10 +86,9 @@ backend:
   # Reference pre-created secrets
   existingSecret: sibyl-secrets
   validationReceipts:
-    existingClaim: sibyl-validation-receipts
-
-  # Pod range of the ingress controller, so logins key on each user's address
-  # instead of the controller's. See "Client Addresses Behind the Ingress".
+    existingClaim: sibyl-validation-receipts # Pod range of the ingress controller, so logins key on each user's address
+  # instead of the controller's. Pair it with networkPolicy; see "Client
+  # Addresses Behind the Ingress".
   forwardedAllowIps: "10.244.0.0/16"
 
   # SurrealDB connection
