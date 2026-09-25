@@ -24,7 +24,8 @@ interface ContextInput {
   intent?: ContextIntent; // Goal mode (default "build")
   layer?: "wake" | "recall" | "deep_search"; // Retrieval depth (default "recall")
   domain?: string; // Domain/category to scope context
-  project?: string; // Project ID to scope active work
+  project?: string; // Project ID to scope the pack; required unless all_projects is true
+  all_projects?: boolean; // Read every accessible project on purpose (default false)
   agent_id?: string; // Agent diary identity to include
 
   // Limits
@@ -72,6 +73,7 @@ interface ContextPackResponse {
   query: string; // Derived retrieval query
   domain: string | null;
   project: string | null;
+  scope: "project" | "all_projects"; // Whether one project bounded the read
   layer: string;
   sections: ContextSection[];
   total_items: number;
@@ -168,6 +170,7 @@ ideation, planning, procedures, recent_memory, verification
     "intent": "research",
     "layer": "deep_search",
     "domain": "retrieval",
+    "all_projects": true,
     "limit": 40
   }
 }
@@ -203,13 +206,16 @@ project raw memory.
 ### Context Then Synthesis
 
 ```
-1. context(goal="...", layer="deep_search")  --> Gather working context
+1. context(goal="...", project="<project_id>", layer="deep_search")  --> Gather working context
 2. synthesis_plan(goal="...")                --> Plan a source-grounded artifact
 ```
 
 ## Notes
 
 - `limit` is clamped to the range 1-50 regardless of the value supplied.
+- A pack reads one project. Pass `project`, or set `all_projects: true` to read every project the
+  caller can access; a call with neither is refused rather than widened. A cross-project pack
+  reports `scope: "all_projects"` and its Markdown carries a `Scope: all accessible projects` line.
 - Project scope is enforced against the caller's accessible projects. Requesting a project the
   credential cannot access raises a project-access error.
 - The `markdown` field is a rendered view of the same pack, convenient for direct prompt injection.
@@ -220,10 +226,11 @@ project raw memory.
 
 ## Error Handling
 
-| Error                           | Cause                            | Resolution                            |
-| ------------------------------- | -------------------------------- | ------------------------------------- |
-| `Organization context required` | No org-scoped token              | Authenticate with an org-scoped token |
-| `Project access denied: <id>`   | Caller cannot access the project | Use an accessible project ID          |
+| Error                              | Cause                                          | Resolution                                              |
+| ---------------------------------- | ---------------------------------------------- | ------------------------------------------------------- |
+| `Organization context required`    | No org-scoped token                            | Authenticate with an org-scoped token                   |
+| `Project access denied: <id>`      | Caller cannot access the project               | Use an accessible project ID                            |
+| `A context pack reads one project` | Neither `project` nor `all_projects` was given | Pass `project=<id>`, or `all_projects: true` on purpose |
 
 ## Related
 
