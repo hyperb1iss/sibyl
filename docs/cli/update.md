@@ -61,9 +61,9 @@ sibyl update --skills
   tag passed explicitly: [`sibyl docker upgrade --tag <tag>`](./docker.md#docker-upgrade) or
   [`sibyl local upgrade --tag <tag>`](./local.md#local-upgrade). Both pull the new images before
   they restart anything, so a failed pull leaves the running server alone. `update` then re-reads
-  the pin and the running API image and only reports success when both reached the target. When the
-  new images pulled but did not start, neither command rolls back, and `update` points at the
-  runtime's logs.
+  the pin and the running API image and only reports success when both reached the target, so an API
+  that exits right after the start counts as a failure. When the new images pulled but did not
+  start, neither command rolls back, and `update` points at the runtime's logs.
 - `update` never starts a stopped runtime. A stopped local runtime runs the new tag on its next
   `sibyl up`; a stopped Docker deployment keeps its pin until you run
   `sibyl docker upgrade --tag <tag>`, which also starts it.

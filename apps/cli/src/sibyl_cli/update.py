@@ -413,11 +413,17 @@ def upgrade_container_runtime(plan: ContainerPlan) -> bool:
     pinned = plan.runtime.image_tag()
     running_tag = plan.runtime.running_api_tag()
     name = plan.runtime.name
-    if result.returncode == 0 and pinned == target and running_tag in (target, None):
+    if result.returncode == 0 and pinned == target and running_tag == target:
         success(f"The {name} runtime now runs {target}")
         return True
+    if result.returncode == 0 and running_tag is None:
+        # `docker upgrade` does not wait for health, so an API that exits right
+        # after `up -d` only shows up here.
+        error(f"{shown} finished, but no {name} API container is running {target}.")
+        info(f"Inspect it with: sibyl {name} logs")
+        return False
     if result.returncode == 0:
-        found = running_tag if running_tag not in (target, None) else pinned
+        found = running_tag if running_tag != target else pinned
         error(f"{shown} finished, but the {name} runtime is on {found}, not {target}.")
         return False
 

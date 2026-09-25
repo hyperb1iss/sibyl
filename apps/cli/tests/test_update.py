@@ -534,7 +534,10 @@ class TestUpdateFunctions:
         plan = _plan(tmp_path, "1.4.0", "1.5.0", name=name)
         _PINS.append(plan.runtime.compose_file)
 
-        with patch("sibyl_cli.update.subprocess.run", side_effect=_upgrader(calls, envs)):
+        with patch(
+            "sibyl_cli.update.subprocess.run",
+            side_effect=_upgrader(calls, envs, running="1.4.0"),
+        ):
             assert upgrade_container_runtime(plan) is True
 
         assert calls == [["sibyl", name, "upgrade", "--tag", "1.5.0"]]
@@ -619,6 +622,21 @@ class TestUpdateFunctions:
         ):
             assert upgrade_container_runtime(plan) is True
 
+    def test_an_api_that_exits_after_the_start_is_not_success(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """`docker upgrade` does not wait for health, so a crashed API must still fail."""
+        calls: list[list[str]] = []
+        plan = _plan(tmp_path, "1.4.0", "1.5.0", name="docker")
+        _PINS.append(plan.runtime.compose_file)
+
+        with patch("sibyl_cli.update.subprocess.run", side_effect=_upgrader(calls, running=None)):
+            assert upgrade_container_runtime(plan) is False
+
+        output = capsys.readouterr().out
+        assert "no docker API container is running 1.5.0" in output
+        assert "sibyl docker logs" in output
+
     def test_update_skills_delegates_to_setup(self) -> None:
         """update_skills calls setup_agent_integration."""
         from sibyl_cli.update import update_skills
@@ -642,7 +660,7 @@ class TestUpdateCommand:
 
         monkeypatch.setattr(update_module, "is_dev_mode", lambda: False)
         monkeypatch.setattr(update_module, "installed_container_runtimes", lambda: [runtime])
-        monkeypatch.setattr(update_module.subprocess, "run", _upgrader(calls))
+        monkeypatch.setattr(update_module.subprocess, "run", _upgrader(calls, running="1.4.0"))
         return calls, runtime
 
     def test_containers_follow_the_installed_cli(
@@ -683,6 +701,7 @@ class TestUpdateCommand:
         calls, runtime = runtime_calls
         runtime.compose_file.write_text("services: {}\n")
         monkeypatch.setattr(ContainerRuntime, "is_running", lambda _self: True)
+        monkeypatch.setattr(ContainerRuntime, "running_api_tag", lambda _self: None)
         monkeypatch.setattr(update_module, "get_current_cli_version", lambda: "1.5.0")
 
         result = CliRunner().invoke(update_module.app, ["--containers", "--check"])
