@@ -42,11 +42,37 @@ describe('WelcomeBanner', () => {
     });
   });
 
-  it('frames onboarding as local-first before MCP setup', () => {
+  it('points new users at the connect flow instead of MCP setup', () => {
     render(<WelcomeBanner totalEntities={0} />);
 
-    expect(screen.getByText(/local-first where possible/i)).toBeInTheDocument();
-    expect(screen.getByText(/local stack first/i)).toBeInTheDocument();
-    expect(screen.getByText(/optional when you are ready/i)).toBeInTheDocument();
+    expect(screen.getByText('Connect your tools')).toBeInTheDocument();
+    expect(
+      screen.getByText(/one line in your terminal, or hand it to your agent/i)
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/mcp/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/api keys/i)).not.toBeInTheDocument();
+  });
+
+  it('reports models ready when the server configured a keyless provider', () => {
+    hooks.useSetupStatus.mockReturnValue({
+      data: {
+        openai_configured: false,
+        anthropic_configured: false,
+        gemini_configured: false,
+        providers_configured: true,
+        configured_providers: ['bedrock'],
+      },
+    });
+
+    render(<WelcomeBanner totalEntities={0} />);
+
+    expect(screen.getByText('Models ready')).toBeInTheDocument();
+    expect(screen.queryByText('Models need setup')).not.toBeInTheDocument();
+  });
+
+  it('reports models need setup when no provider is ready', () => {
+    render(<WelcomeBanner totalEntities={0} />);
+
+    expect(screen.getByText('Models need setup')).toBeInTheDocument();
   });
 });

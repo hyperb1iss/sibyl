@@ -1,12 +1,5 @@
 import type { NextRequest } from 'next/server';
-
-function backendApiBase(): string {
-  const explicit = process.env.SIBYL_API_URL;
-  if (explicit) return explicit.replace(/\/$/, '');
-
-  const backend = process.env.SIBYL_BACKEND_URL || 'http://127.0.0.1:3334';
-  return `${backend.replace(/\/$/, '')}/api`;
-}
+import { backendApiBase } from '@/lib/backend-url';
 
 function setCookieHeaders(headers: Headers): string[] {
   const withGetSetCookie = headers as Headers & { getSetCookie?: () => string[] };

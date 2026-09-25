@@ -48,14 +48,8 @@ export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) 
   };
 
   const isNewUser = totalEntities === 0;
-  const openaiReady = setupStatus?.openai_valid === true || setupStatus?.openai_configured === true;
-  const geminiReady = setupStatus?.gemini_valid === true || setupStatus?.gemini_configured === true;
-  const anthropicReady =
-    setupStatus?.anthropic_valid === true || setupStatus?.anthropic_configured === true;
-  // Bedrock covers a plane only when that plane is routed to it.
-  const llmReady = anthropicReady || setupStatus?.bedrock_llm === true;
-  const embeddingsReady = openaiReady || geminiReady || setupStatus?.bedrock_embeddings === true;
-  const apisReady = llmReady && embeddingsReady;
+  // Keys are one way to be ready; a server-side provider such as Bedrock needs none.
+  const modelsReady = setupStatus?.providers_configured === true;
 
   return (
     <div className="relative bg-gradient-to-r from-sc-purple/10 via-sc-cyan/5 to-sc-coral/10 border border-sc-purple/20 rounded-xl sm:rounded-xl p-4 sm:p-6 mb-4 sm:mb-6 animate-fade-in overflow-hidden">
@@ -85,11 +79,8 @@ export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) 
             </h2>
             <p className="text-xs sm:text-sm text-sc-fg-muted">
               {isNewUser
-                ? 'Your local memory stack is ready. Capture and search here first, then wire in MCP tools when you want them.'
-                : `You have ${totalEntities} entities. Sibyl stays strongest when the local capture and review loop keeps moving.`}
-            </p>
-            <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-sc-fg-muted">
-              Local-first where possible. Org-safe by default.
+                ? 'Your memory is ready. Connect your tools, then capture and search.'
+                : `You have ${totalEntities} entities. Sibyl stays strongest when the capture and review loop keeps moving.`}
             </p>
           </div>
         </div>
@@ -99,8 +90,8 @@ export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) 
           {/* Step 1: Connect an agent */}
           <ChecklistStep
             step={1}
-            title="Connect your agent"
-            description="Optional when you are ready: add Sibyl as an MCP server for any agent."
+            title="Connect your tools"
+            description="One line in your terminal, or hand it to your agent."
             color="purple"
             isComplete={checklist.connected_agent}
             action={
@@ -186,15 +177,12 @@ export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) 
 
         {/* Status indicators */}
         <div className="flex flex-wrap items-center gap-3 text-xs">
-          <div className="rounded-full border border-sc-cyan/20 bg-sc-cyan/10 px-2.5 py-1 text-sc-cyan">
-            Local stack first
-          </div>
           <div className="flex items-center gap-1.5">
             <div
-              className={`w-2 h-2 rounded-full ${apisReady ? 'bg-sc-green shadow-[0_0_6px_color-mix(in_oklch,var(--sc-green)_60%,transparent)]' : 'bg-sc-fg-subtle'}`}
+              className={`w-2 h-2 rounded-full ${modelsReady ? 'bg-sc-green shadow-[0_0_6px_color-mix(in_oklch,var(--sc-green)_60%,transparent)]' : 'bg-sc-fg-subtle'}`}
             />
             <span className="text-sc-fg-muted">
-              {apisReady ? 'API keys configured' : 'API keys need setup'}
+              {modelsReady ? 'Models ready' : 'Models need setup'}
             </span>
           </div>
           <Link

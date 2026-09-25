@@ -1,4 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { SetupStatus } from '@/lib/api/admin';
+import { render, screen, userEvent } from '@/test/utils';
+import { SetupWizard, setupSteps } from './setup-wizard';
 
 // Test the step persistence utility functions directly
 const STEPS = ['welcome', 'api-keys', 'admin', 'connect'] as const;
@@ -71,5 +74,41 @@ describe('SetupWizard Step Persistence', () => {
       sessionStorage.setItem(STEP_STORAGE_KEY, 'admin');
       expect(getStoredStep()).toBe('admin');
     });
+  });
+});
+
+// =============================================================================
+// Step list: the keys step exists only while no model provider is ready
+// =============================================================================
+
+describe('setupSteps', () => {
+  const status = (providersConfigured: boolean) =>
+    ({
+      needs_setup: true,
+      providers_configured: providersConfigured,
+      configured_providers: providersConfigured ? ['bedrock'] : [],
+    }) as unknown as SetupStatus;
+
+  it('keeps the API keys step when the server has no ready provider', () => {
+    expect(setupSteps(status(false))).toEqual(['welcome', 'api-keys', 'admin', 'connect']);
+    expect(setupSteps(undefined)).toEqual(['welcome', 'api-keys', 'admin', 'connect']);
+  });
+
+  it('drops the API keys step when providers are configured server-side', () => {
+    expect(setupSteps(status(true))).toEqual(['welcome', 'admin', 'connect']);
+  });
+
+  it('goes from welcome straight to the admin account with a configured summary', async () => {
+    const user = userEvent.setup();
+    render(<SetupWizard initialStatus={status(true)} onComplete={vi.fn()} />);
+
+    expect(screen.getByText(/models are configured on the server/i)).toBeInTheDocument();
+    expect(screen.getByText('bedrock')).toBeInTheDocument();
+    expect(screen.getByText('Step 1 of 2')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: "Let's Get Started" }));
+
+    expect(await screen.findByText('Create Admin Account')).toBeInTheDocument();
+    expect(screen.queryByText('Configure API Keys')).not.toBeInTheDocument();
   });
 });

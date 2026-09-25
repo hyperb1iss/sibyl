@@ -1,4 +1,4 @@
-const PUBLIC_ROUTE_PATHS = new Set(['/login', '/reset-password', '/setup']);
+const PUBLIC_ROUTE_PATHS = new Set(['/agent', '/login', '/reset-password', '/setup']);
 
 export function isPublicRoutePath(pathname: string | null | undefined): boolean {
   if (!pathname) return false;

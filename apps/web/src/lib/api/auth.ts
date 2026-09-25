@@ -19,6 +19,8 @@ export interface AuthMeResponse {
     email: string | null;
     name: string;
     avatar_url: string | null;
+    /** Instance-wide admin: may change server settings such as model providers. */
+    is_admin?: boolean;
   };
   organization: { id: string; slug: string; name: string } | null;
   org_role: string | null;

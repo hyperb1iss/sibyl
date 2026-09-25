@@ -5,9 +5,11 @@ import { ClipboardCheck, Code, LightBulb, Page } from '@/components/ui/icons';
 
 interface WelcomeStepProps {
   onNext: () => void;
+  /** Model providers the server already configured, so no keys are needed. */
+  configuredProviders?: string[];
 }
 
-export function WelcomeStep({ onNext }: WelcomeStepProps) {
+export function WelcomeStep({ onNext, configuredProviders = [] }: WelcomeStepProps) {
   return (
     <div className="p-8">
       {/* Icon */}
@@ -42,6 +44,13 @@ export function WelcomeStep({ onNext }: WelcomeStepProps) {
           description="Use the sibyl CLI or connect any MCP client: Claude Code, Codex, opencode, OpenClaw, and more"
         />
       </div>
+
+      {configuredProviders.length > 0 && (
+        <p className="mb-6 text-center text-sm text-sc-fg-muted">
+          Models are configured on the server:{' '}
+          <span className="text-sc-green">{configuredProviders.join(', ')}</span>
+        </p>
+      )}
 
       {/* CTA */}
       <Button

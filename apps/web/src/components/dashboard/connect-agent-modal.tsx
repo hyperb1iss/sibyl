@@ -26,9 +26,9 @@ export function ConnectAgentModal({ open, onOpenChange }: ConnectAgentModalProps
               <Network aria-hidden="true" width={20} height={20} className="text-sc-on-accent" />
             </div>
             <div>
-              <DialogTitle>Connect your agent</DialogTitle>
+              <DialogTitle>Connect your tools</DialogTitle>
               <DialogDescription>
-                Install the CLI or wire Sibyl into any MCP client
+                One line in your terminal, or one for your agent
               </DialogDescription>
             </div>
           </div>

@@ -79,17 +79,15 @@ export function useValidateApiKeys(options?: { enabled?: boolean }) {
 }
 
 /**
- * Get the integration payload for connecting Sibyl to a CLI or MCP client.
- *
- * Returns the CLI install command, per-client MCP configs, and the agent
- * prompt snippet. Single source of truth behind the connect surfaces.
+ * How a machine connects to this server: the one-line install per OS and the
+ * setup command. Single source of truth behind every connect surface.
  */
-export function useIntegration(options?: { enabled?: boolean }) {
+export function useConnectInfo(options?: { enabled?: boolean }) {
   return useQuery({
-    queryKey: queryKeys.setup.integration,
-    queryFn: () => setupApi.integration(),
+    queryKey: queryKeys.setup.connect,
+    queryFn: () => setupApi.connect(),
     enabled: options?.enabled ?? true,
-    staleTime: Infinity, // Server URL and snippets are stable
+    staleTime: Infinity, // Server URL and commands are stable
   });
 }
 

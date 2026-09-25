@@ -129,6 +129,9 @@ export interface SetupStatus {
   /** Bedrock is configured and document embeddings use it, so no embedding key is needed. */
   bedrock_embeddings?: boolean;
   bedrock_valid?: boolean | null;
+  /** True when every model provider the server uses needs nothing from users. */
+  providers_configured: boolean;
+  configured_providers: string[];
 }
 
 export interface ApiKeyValidation {
@@ -145,27 +148,19 @@ export interface ApiKeyValidation {
   bedrock_embeddings?: boolean;
 }
 
-/** One way to wire Sibyl into an MCP-capable agent. */
-export interface McpClientConfig {
-  id: string;
-  label: string;
-  /** "command" to run in a terminal, or "config" to paste into a file. */
-  kind: 'command' | 'config';
-  /** Syntax hint for rendering. */
-  language: 'bash' | 'json' | 'toml';
-  snippet: string;
-  /** Where a "config" snippet belongs, when applicable. */
-  target: string | null;
-}
+/** Supported install lines, one per OS. */
+export type ConnectOs = 'macos' | 'linux' | 'windows';
 
-/** Everything a user needs to connect Sibyl to a CLI or MCP client. */
-export interface IntegrationResponse {
+/** How a machine connects to this server. Public and secret-free. */
+export interface ConnectInfo {
   server_url: string;
-  mcp_url: string;
-  cli_install: string;
-  cli_install_alt: string;
-  mcp_clients: McpClientConfig[];
-  prompt_snippet: string;
+  server_version: string;
+  minimum_client_version: string | null;
+  sso_enabled: boolean;
+  local_auth_enabled: boolean;
+  setup_command: string;
+  /** One copyable install-and-setup line per OS. */
+  install: Record<ConnectOs, string>;
 }
 
 export function isSetupAlreadyInitializedError(error: unknown): boolean {
@@ -539,7 +534,7 @@ export const setupApi = {
 
   validateKeys: () => fetchApi<ApiKeyValidation>('/setup/validate-keys'),
 
-  integration: () => fetchApi<IntegrationResponse>('/setup/integration'),
+  connect: () => fetchApi<ConnectInfo>('/setup/connect'),
 };
 
 export const settingsApi = {
