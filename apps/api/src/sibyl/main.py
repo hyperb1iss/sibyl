@@ -281,12 +281,12 @@ def uvicorn_config(app: Starlette, host: str, port: int) -> "uvicorn.Config":
 
 def create_dev_app() -> Starlette:
     """Factory for dev mode, with signal diagnostics enabled."""
-    from sibyl.proxy_trust import warn_if_every_peer_is_trusted
+    from sibyl.proxy_trust import warn_if_trust_is_too_broad
 
     _enable_dev_signal_diagnostics()
     # Dev launchers hand uvicorn the list on its command line; warn from here so
-    # every one of them, the moon dev script included, reports an open trust list.
-    warn_if_every_peer_is_trusted()
+    # every one of them, the moon dev script included, reports a too-broad trust list.
+    warn_if_trust_is_too_broad()
     return create_combined_app()
 
 

@@ -191,7 +191,7 @@ backend:
   # controller replace X-Forwarded-For from untrusted peers rather than append (ingress-nginx
   # does by default), and pair it with networkPolicy.enabled. For a load balancer in front,
   # let the controller resolve the client and keep this list to the controller.
-  # "*" trusts every peer and the backend logs a warning.
+  # "*", or any range broader than an IPv4 /8 or an IPv6 /32, makes the backend log a warning.
   # On the command line pass a list: --set 'backend.forwardedAllowIps={10.250.0.0/28}'
   forwardedAllowIps: ""
 

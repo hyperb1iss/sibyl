@@ -318,9 +318,10 @@ and satisfy `breakGlass.allowedIPs`, and so can any caller behind an appending i
 address is trusted. List the controller and nothing else. Keep `/api` and `/mcp` routed straight to
 the backend service (the default route table): the Next.js frontend passes a client-supplied
 `X-Forwarded-For` through unchanged, so it must never be the hop the backend trusts. A value of
-`"*"` (or a `/0` range) trusts every peer and makes the backend log
-`forwarded_allow_ips_trusts_every_peer` at startup; with it, the leftmost header entry wins, and a
-client writes that one unless every proxy in front overwrites the header.
+`"*"`, or any range broader than an IPv4 `/8` or an IPv6 `/32`, trusts every peer or nearly every
+one and makes the backend log `forwarded_allow_ips_trusts_every_peer` at startup; with every hop
+trusted, the leftmost header entry wins, and a client writes that one unless every proxy in front
+overwrites the header.
 
 :::
 

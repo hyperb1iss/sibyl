@@ -21,15 +21,24 @@ from sibyl.config import TRUST_EVERY_FORWARDING_PEER
 
 log = structlog.get_logger()
 
+# The broadest range, per address family, that passes without a warning. No
+# proxy fleet needs more than an IPv4 /8 or an IPv6 /32, and covering a whole
+# family takes either one wider entry or at least 256 of them, so split
+# catch-alls such as 0.0.0.0/1,128.0.0.0/1 are caught entry by entry.
+BROADEST_QUIET_PREFIXLEN = {4: 8, 6: 32}
 
-def _unbounded_entries(trusted: list[str]) -> list[str]:
-    """Entries that trust every peer: `*`, or a range covering a whole address family."""
-    return [
-        entry
-        for entry in trusted
-        if entry == TRUST_EVERY_FORWARDING_PEER
-        or ("/" in entry and ip_network(entry).prefixlen == 0)
-    ]
+
+def _broad_entries(trusted: list[str]) -> list[str]:
+    """Entries that trust every peer or almost every peer: `*`, or a very wide range."""
+    broad: list[str] = []
+    for entry in trusted:
+        if entry == TRUST_EVERY_FORWARDING_PEER:
+            broad.append(entry)
+        elif "/" in entry:
+            network = ip_network(entry)
+            if network.prefixlen < BROADEST_QUIET_PREFIXLEN[network.version]:
+                broad.append(entry)
+    return broad
 
 
 def _configured_by() -> str:
@@ -40,28 +49,28 @@ def _configured_by() -> str:
     return "SIBYL_FORWARDED_ALLOW_IPS"
 
 
-def warn_if_every_peer_is_trusted() -> None:
-    """Log loudly when the trust list lets any peer choose the client address."""
-    unbounded = _unbounded_entries(list(config_module.settings.forwarded_allow_ips))
-    if not unbounded:
+def warn_if_trust_is_too_broad() -> None:
+    """Log loudly when the trust list lets any peer, or nearly any, choose the client address."""
+    broad = _broad_entries(list(config_module.settings.forwarded_allow_ips))
+    if not broad:
         return
     log.warning(
         "forwarded_allow_ips_trusts_every_peer",
         setting=_configured_by(),
-        entries=unbounded,
+        entries=broad,
         message=(
-            "Every peer may set X-Forwarded-For, and with every hop trusted uvicorn takes "
-            "the leftmost entry, which the client controls unless every proxy in front "
-            "overwrites the header. Any client can then choose its own address, sidestep "
-            "per-address rate limits, and satisfy the break-glass IP allowlist. List the "
-            "proxy IPs or CIDR ranges instead."
+            "Every peer, or nearly every one, may set X-Forwarded-For, and with every hop "
+            "trusted uvicorn takes the leftmost entry, which the client controls unless every "
+            "proxy in front overwrites the header. Any client can then choose its own address, "
+            "sidestep per-address rate limits, and satisfy the break-glass IP allowlist. List "
+            "the proxy IPs or narrow CIDR ranges instead."
         ),
     )
 
 
 def forwarded_allow_ips() -> list[str]:
-    """Return the configured trust list for uvicorn, warning when it trusts every peer."""
-    warn_if_every_peer_is_trusted()
+    """Return the configured trust list for uvicorn, warning when it is too broad."""
+    warn_if_trust_is_too_broad()
     return list(config_module.settings.forwarded_allow_ips)
 
 

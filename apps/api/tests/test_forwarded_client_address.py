@@ -223,6 +223,34 @@ def test_catch_all_ranges_warn_like_star(trust: TrustSetter, catch_all: str) -> 
         assert _resolved_client(stranger, f"{CLIENT_A}, {CLIENT_B}") == CLIENT_A
 
 
+@pytest.mark.parametrize(
+    ("value", "broad"),
+    [
+        # Two halves that together cover every IPv4 address, with no /0 in sight.
+        ("0.0.0.0/1,128.0.0.0/1", ["0.0.0.0/1", "128.0.0.0/1"]),
+        (f"{TRUSTED_RANGE},10.0.0.0/7", ["10.0.0.0/7"]),
+        ("::/1,8000::/1", ["::/1", "8000::/1"]),
+        ("2001:db8::/31", ["2001:db8::/31"]),
+    ],
+)
+def test_broad_ranges_warn_like_star(trust: TrustSetter, value: str, broad: list[str]) -> None:
+    trust(value)
+
+    with capture_logs() as logs:
+        app = _served_app()
+
+    [warning] = [
+        entry for entry in logs if entry["event"] == "forwarded_allow_ips_trusts_every_peer"
+    ]
+    assert warning["entries"] == broad
+    assert "choose its own address" in warning["message"]
+
+    if value == "0.0.0.0/1,128.0.0.0/1":
+        # Every IPv4 hop is trusted, so the leftmost entry, which the client wrote, wins.
+        stranger = _peer(app, UNTRUSTED_PEER)
+        assert _resolved_client(stranger, f"{CLIENT_A}, {CLIENT_B}") == CLIENT_A
+
+
 def test_warning_names_uvicorns_variable_when_that_set_the_list(trust: TrustSetter) -> None:
     trust(None, uvicorn_env="*")
 
@@ -235,8 +263,18 @@ def test_warning_names_uvicorns_variable_when_that_set_the_list(trust: TrustSett
     assert warning["setting"] == "FORWARDED_ALLOW_IPS"
 
 
-def test_listed_proxies_do_not_warn(trust: TrustSetter) -> None:
-    trust(TRUSTED_RANGE)
+@pytest.mark.parametrize(
+    "value",
+    [
+        TRUSTED_RANGE,
+        # The broadest ranges that stay quiet, and the private blocks together.
+        "10.0.0.0/8",
+        "2001:db8::/32",
+        "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16",
+    ],
+)
+def test_listed_proxies_do_not_warn(trust: TrustSetter, value: str) -> None:
+    trust(value)
 
     with capture_logs() as logs:
         _served_app()

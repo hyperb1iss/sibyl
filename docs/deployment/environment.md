@@ -239,8 +239,9 @@ audit records, and the break-glass allowlist. Trusted peers also set the request
 - A lone `*` trusts every peer and cannot be combined with other entries. Uvicorn then takes the
   leftmost entry, which the client writes unless every proxy in front overwrites the header, so any
   client can choose its own address. Sibyl logs `forwarded_allow_ips_trusts_every_peer` at startup
-  when it is set. A `/0` range such as `0.0.0.0/0` does the same for its address family and logs the
-  same warning.
+  when it is set. The same warning fires for any range broader than an IPv4 `/8` or an IPv6 `/32`.
+  That covers a `/0` such as `0.0.0.0/0` and split halves such as `0.0.0.0/1,128.0.0.0/1`, either of
+  which trusts a whole address family the way `*` does.
 
 ::: warning Security note
 
