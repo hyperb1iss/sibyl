@@ -27,18 +27,16 @@ def _detect_communities_from_graph(
     G: Any,
     *,
     config: CommunityConfig,
-    algorithm: str,
 ) -> list[DetectedCommunity]:
     if G.number_of_nodes() < config.min_community_size:
         log.info("detect_communities_too_few_nodes", nodes=G.number_of_nodes())
         return []
 
-    detect_fn = detect_communities_leiden if algorithm == "leiden" else detect_communities_louvain
     all_level_communities: list[list[DetectedCommunity]] = []
 
     for level, resolution in enumerate(config.resolutions[: config.max_levels]):
         try:
-            partition, modularity = detect_fn(G, resolution=resolution)
+            partition, modularity = detect_communities_louvain(G, resolution=resolution)
 
             communities = partition_to_communities(
                 partition=partition,
@@ -183,54 +181,6 @@ def detect_communities_louvain(
     return partition, modularity
 
 
-def detect_communities_leiden(
-    G: Any,
-    resolution: float = 1.0,
-) -> tuple[dict[str, int], float]:
-    """Detect communities using Leiden algorithm.
-
-    Args:
-        G: NetworkX graph.
-        resolution: Resolution parameter (higher = more communities).
-
-    Returns:
-        Tuple of (node_id -> community_id mapping, modularity score).
-
-    Raises:
-        ImportError: If leidenalg/igraph is not installed.
-    """
-    try:
-        import igraph as ig
-        import leidenalg
-    except ImportError as e:
-        raise ImportError(
-            "leidenalg and igraph are required for Leiden algorithm. "
-            "Install with: pip install leidenalg igraph"
-        ) from e
-
-    if G.number_of_nodes() == 0:
-        return {}, 0.0
-
-    # Convert NetworkX to igraph
-    G_ig = ig.Graph.from_networkx(G)
-
-    # Run Leiden algorithm
-    partition = leidenalg.find_partition(
-        G_ig,
-        leidenalg.CPMVertexPartition,
-        resolution_parameter=resolution,
-    )
-
-    # Map back to node IDs
-    node_ids = list(G.nodes())
-    partition_dict = {node_ids[i]: partition.membership[i] for i in range(len(node_ids))}
-
-    # Calculate modularity
-    modularity = partition.quality() / (2 * G.number_of_edges()) if G.number_of_edges() > 0 else 0.0
-
-    return partition_dict, modularity
-
-
 def partition_to_communities(
     partition: dict[str, int],
     level: int,
@@ -320,17 +270,15 @@ async def detect_communities(
     client: Any,
     organization_id: str,
     config: CommunityConfig | None = None,
-    algorithm: str = "louvain",
     *,
     max_entities: int | None = None,
     max_relationships: int | None = None,
 ) -> list[DetectedCommunity]:
-    """Detect hierarchical communities in the knowledge graph.
+    """Detect hierarchical Louvain communities in the knowledge graph.
 
     Args:
         client: Graph client.
         config: Detection configuration.
-        algorithm: "louvain" or "leiden".
 
     Returns:
         List of detected communities with hierarchy links.
@@ -340,7 +288,6 @@ async def detect_communities(
 
     log.info(
         "detect_communities_start",
-        algorithm=algorithm,
         resolutions=config.resolutions,
         max_levels=config.max_levels,
     )
@@ -356,5 +303,4 @@ async def detect_communities(
         _detect_communities_from_graph,
         G,
         config=config,
-        algorithm=algorithm,
     )
