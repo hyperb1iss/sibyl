@@ -495,8 +495,9 @@ async def test_partition_places_an_unreciprocated_episode_in_its_nearest_cohort(
     install_proposal(monkeypatch, sources)
     _capacity_in_episodes(monkeypatch, capacity)
     # The first identifier seeds first, but every other episode's nearest
-    # neighbours are each other, so nothing reciprocates it. It joins the most
-    # similar cohort with room, and stands alone only when the budget says so.
+    # neighbours are each other, so nothing reciprocates it. It joins the
+    # cohort holding its own nearest neighbours when that has room, and stands
+    # alone only when the budget says so.
     await _embed(content_store, sources[0], _axis(3, tilt=0.5))
     for index in (1, 2, 3):
         await _embed(content_store, sources[index], _axis(0, tilt=index / 100))
@@ -505,6 +506,28 @@ async def test_partition_places_an_unreciprocated_episode_in_its_nearest_cohort(
         "org", "owner", ids, AsyncMock(return_value=SourceReadAuthority("owner"))
     )
     assert bins == ([ids[1:] + ids[:1]] if capacity == 5 else [ids[1:], ids[:1]])
+
+
+async def test_partition_never_places_a_leftover_where_its_neighbours_are_not(
+    cohort_sources, content_store, monkeypatch
+):
+    sources = await _family_sources(8)
+    install_proposal(monkeypatch, sources)
+    _capacity_in_episodes(monkeypatch, 4)
+    # The first identifier is an unreciprocated seed whose nearest neighbours
+    # all sit in the first family's cohort, which the budget fills. The second
+    # family's cohort has room, but none of the leftover's neighbours, so it
+    # stands alone rather than mixing into an unrelated cohort.
+    await _embed(content_store, sources[0], _vector({0: 0.6, 3: 0.8}))
+    for index in range(1, 5):
+        await _embed(content_store, sources[index], _axis(0, tilt=index / 100))
+    for index in range(5, 8):
+        await _embed(content_store, sources[index], _axis(1, tilt=index / 100))
+    ids = [source.id for source in sources]
+    bins = await service.partition_stored_cohort(
+        "org", "owner", ids, AsyncMock(return_value=SourceReadAuthority("owner"))
+    )
+    assert bins == [ids[1:5], ids[5:8], ids[:1]]
 
 
 async def test_partition_ranks_neighbours_among_unplaced_episodes(

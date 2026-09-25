@@ -563,10 +563,13 @@ def _partition_prepared_cohort(
 
     Embedded episodes grow each cohort from its seed's nearest neighbours, so a
     proposal compares related experience instead of whatever shared a page of
-    identifiers. Every other episode then joins the most similar cohort that
-    still fits, or the first one when it has no comparable vector, so a cohort
-    of one happens only when the budget forces it. Last, two finished cohorts
-    join when the union stands clearly apart from every other episode and fits.
+    identifiers. An embedded episode that growth leaves over then joins the
+    most similar cohort that fits among those holding one of its own nearest
+    neighbours, and otherwise stands alone: room in an unrelated cohort is no
+    evidence that it belongs there. An episode with no comparable vector joins
+    the first cohort that fits, since nothing shows where it belongs. Last, two
+    finished cohorts join when the union stands clearly apart from every other
+    episode and fits.
     """
     group = PartialCohort.model_validate_json(original.input_json)
     cohort_fields = group.model_dump(exclude={"episodes"})
@@ -613,6 +616,7 @@ def _partition_prepared_cohort(
         if cancelled.is_set():
             raise asyncio.CancelledError
         scores = similarity.get(episode.episode_id, {})
+        nearest = _nearest_ranked(scores)
 
         def affinity_to(bucket, scores=scores):
             known = [scores[member.episode_id] for member in bucket if member.episode_id in scores]
@@ -621,6 +625,8 @@ def _partition_prepared_cohort(
         # sorted() is stable, so an episode with no comparable vector keeps
         # plain first-fit order across the cohorts.
         for bucket in sorted(bins, key=affinity_to, reverse=True):
+            if nearest is not None and nearest.isdisjoint(m.episode_id for m in bucket):
+                continue
             if fits([*bucket, episode]):
                 bucket.append(episode)
                 break
@@ -634,10 +640,16 @@ def _partition_prepared_cohort(
 #: neighbours. A rank rather than a similarity cutoff, so it means the same
 #: thing across embedding models and between boilerplate-heavy transcripts and
 #: short notes. On the screen48 captures, paged and budgeted the way the dream
-#: job runs, two neighbours keep 92 percent of a cohort in one task family with
-#: no cohort of one, where nearest-neighbour growth alone keeps 75 and
-#: identifier order keeps 24.
+#: job runs, two neighbours keep 92 percent of a cohort in one task family,
+#: where nearest-neighbour growth alone keeps 75 and identifier order keeps 24.
 COHORT_NEIGHBOURS = 2
+
+
+def _nearest_ranked(scores: Mapping[str, float]) -> frozenset[str] | None:
+    """An episode's COHORT_NEIGHBOURS nearest ranked episodes; None without a vector."""
+    if not scores:
+        return None
+    return frozenset(sorted(scores, key=lambda other: (-scores[other], other))[:COHORT_NEIGHBOURS])
 
 
 def _similarity(episodes, vectors) -> dict[str, dict[str, float]]:
