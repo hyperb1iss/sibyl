@@ -63,7 +63,6 @@ function LoginContent() {
   const rawNext = searchParams.get('next');
   const error = searchParams.get('error');
   const inviteToken = searchParams.get('invite');
-  const setupComplete = searchParams.get('setup') === 'complete';
   const resetComplete = searchParams.get('reset') === 'complete';
   const next = getSafeRedirect(rawNext);
 
@@ -184,11 +183,6 @@ function LoginContent() {
 
           {/* Form Content - Fixed height container to prevent layout shift */}
           <div className="p-6">
-            {setupComplete && (
-              <div className="mb-4 text-sm px-3 py-2 rounded-lg border border-sc-green/30 bg-sc-green/10 text-sc-green">
-                Setup complete! Sign in to get started.
-              </div>
-            )}
             {resetComplete && (
               <div className="mb-4 text-sm px-3 py-2 rounded-lg border border-sc-green/30 bg-sc-green/10 text-sc-green">
                 Password updated. Sign in with your new password.
