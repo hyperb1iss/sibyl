@@ -118,11 +118,14 @@ async def _server_model_providers() -> tuple[bool, list[str]]:
     """Report whether the server's chosen model providers need nothing from users."""
     service = get_settings_service()
     try:
-        llm_provider = (await resolve_llm_config(LLMSurface.DEFAULT)).provider.value
+        # Each surface (memory, synthesis, crawler) can name its own provider.
+        llm_providers = {
+            (await resolve_llm_config(surface)).provider.value for surface in LLMSurface
+        }
     except LLMConfigError:
         return False, []
     providers = {
-        llm_provider,
+        *llm_providers,
         await _setting_or_default(service, "embedding_provider", settings.embedding_provider),
         await _setting_or_default(
             service, "graph_embedding_provider", settings.graph_embedding_provider

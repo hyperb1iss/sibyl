@@ -8,6 +8,7 @@ from pydantic import SecretStr
 from sibyl.api.routes import setup as setup_routes
 from sibyl.persistence.setup_common import SetupStatus
 from sibyl_core.ai.errors import LLMConfigError
+from sibyl_core.ai.llm.config import LLMSurface
 
 
 @pytest.mark.asyncio
@@ -286,6 +287,34 @@ async def test_status_reports_partial_providers_as_unconfigured(
     # Bedrock needs no key, but default OpenAI embeddings still do.
     assert status.providers_configured is False
     assert status.configured_providers == ["bedrock"]
+
+
+@pytest.mark.asyncio
+async def test_status_checks_the_provider_of_every_model_surface(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        setup_routes,
+        "get_runtime_setup_status",
+        AsyncMock(return_value=SetupStatus(has_users=True, has_orgs=True, setup_complete=True)),
+    )
+    monkeypatch.setattr(
+        setup_routes,
+        "get_settings_service",
+        lambda: _status_service(anthropic_api_key="sk-ant", openai_api_key="sk-openai"),
+    )
+
+    async def per_surface(surface: LLMSurface) -> SimpleNamespace:
+        provider = "gemini" if surface is LLMSurface.MEMORY else "anthropic"
+        return SimpleNamespace(provider=SimpleNamespace(value=provider))
+
+    monkeypatch.setattr(setup_routes, "resolve_llm_config", per_surface)
+
+    status = await setup_routes.get_setup_status()
+
+    # Memory runs on Gemini, which has no key, so the server is not ready.
+    assert status.providers_configured is False
+    assert status.configured_providers == ["anthropic", "openai"]
 
 
 @pytest.mark.asyncio
