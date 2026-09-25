@@ -92,7 +92,7 @@ describe('DashboardContent', () => {
           name: 'Alice Example',
           avatar_url: null,
         },
-        organization: { id: 'org_1', slug: 'hyper', name: 'Hyperbliss' },
+        organization: { id: 'org_1', slug: 'acme', name: 'Acme' },
         org_role: 'owner',
       },
     });
@@ -171,7 +171,7 @@ describe('DashboardContent', () => {
       data: {
         context: {
           generated_at: '2026-04-15T12:00:00Z',
-          org_slug: 'hyper',
+          org_slug: 'acme',
           project_ids: [],
           scope: 'all_projects',
         },

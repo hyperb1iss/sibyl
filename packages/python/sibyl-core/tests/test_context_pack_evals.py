@@ -136,7 +136,7 @@ async def test_context_pack_fixture_passes_coding_handoff_requirements(
         intent="build",
         domain="sibyl",
         project="project-sibyl",
-        organization_id="org-hyperbliss",
+        organization_id="org-acme",
     )
 
     result = evaluate_context_pack(
