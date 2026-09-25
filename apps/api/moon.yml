@@ -104,12 +104,13 @@ tasks:
   trust-control-mcp-test:
     command:
       uv run pytest tests/test_server_accessible_projects.py tests/test_mcp_credential_policy.py
-      tests/test_mcp_scope_enforcement.py tests/test_mcp_oauth_session_refresh.py
-      tests/test_mcp_oauth_multi_org_selection.py -v
+      tests/test_mcp_principal_identity.py tests/test_mcp_scope_enforcement.py
+      tests/test_mcp_oauth_session_refresh.py tests/test_mcp_oauth_multi_org_selection.py -v
     inputs:
       - "@group(sources)"
       - tests/test_server_accessible_projects.py
       - tests/test_mcp_credential_policy.py
+      - tests/test_mcp_principal_identity.py
       - tests/test_mcp_scope_enforcement.py
       - tests/test_mcp_oauth_session_refresh.py
       - tests/test_mcp_oauth_multi_org_selection.py
@@ -170,14 +171,16 @@ tasks:
   auth-session-test:
     command:
       uv run pytest tests/test_surreal_auth_runtime.py tests/test_auth_session_cache.py
-      tests/test_mcp_credential_policy.py tests/test_mcp_oauth_session_refresh.py
-      tests/test_mcp_oauth_multi_org_selection.py tests/test_routes_auth.py
+      tests/test_mcp_credential_policy.py tests/test_mcp_principal_identity.py
+      tests/test_mcp_oauth_session_refresh.py tests/test_mcp_oauth_multi_org_selection.py
+      tests/test_routes_auth.py
       tests/test_users_routes.py::test_revoke_all_sessions_returns_revoked_count -v
     inputs:
       - "@group(sources)"
       - tests/test_surreal_auth_runtime.py
       - tests/test_auth_session_cache.py
       - tests/test_mcp_credential_policy.py
+      - tests/test_mcp_principal_identity.py
       - tests/test_mcp_oauth_session_refresh.py
       - tests/test_mcp_oauth_multi_org_selection.py
       - tests/test_routes_auth.py
@@ -239,12 +242,13 @@ tasks:
   memory-trust-mcp-test:
     command:
       uv run pytest tests/test_server_accessible_projects.py tests/test_mcp_credential_policy.py
-      tests/test_mcp_scope_enforcement.py tests/test_mcp_oauth_session_refresh.py
-      tests/test_mcp_oauth_multi_org_selection.py -v
+      tests/test_mcp_principal_identity.py tests/test_mcp_scope_enforcement.py
+      tests/test_mcp_oauth_session_refresh.py tests/test_mcp_oauth_multi_org_selection.py -v
     inputs:
       - "@group(sources)"
       - tests/test_server_accessible_projects.py
       - tests/test_mcp_credential_policy.py
+      - tests/test_mcp_principal_identity.py
       - tests/test_mcp_scope_enforcement.py
       - tests/test_mcp_oauth_session_refresh.py
       - tests/test_mcp_oauth_multi_org_selection.py
