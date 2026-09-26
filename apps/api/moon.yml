@@ -284,10 +284,11 @@ tasks:
 
   # Live SurrealDB runtime tests (requires the CI SurrealDB service)
   test-live:
-    command: SIBYL_LIVE_SURREAL_TESTS=1 uv run pytest tests/test_surreal_live_runtime.py --no-cov -v
+    command: SIBYL_LIVE_SURREAL_TESTS=1 uv run pytest tests/test_surreal_live_runtime.py tests/test_surreal_live_raw_embedding_space.py --no-cov -v
     inputs:
       - "@group(sources)"
       - tests/test_surreal_live_runtime.py
+      - tests/test_surreal_live_raw_embedding_space.py
     options:
       cache: false
       runInCI: true

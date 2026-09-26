@@ -87,6 +87,9 @@ async def test_restore_embeds_the_restored_captures_on_its_own_client(
             "status": "completed",
             "provider_dimensions": None,
             "schema_dimensions": None,
+            "refused": 0,
+            "deferred": 0,
+            "cursor": "",
         }
     }
     elsewhere.assert_not_called()

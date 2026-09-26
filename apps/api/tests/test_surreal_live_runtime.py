@@ -243,8 +243,12 @@ async def _assert_live_raw_ingestion_path(
 
         embedding = [1.0, *([0.0] * (EMBEDDING_DIM - 1))]
 
-        async def raw_query_embedding(_query: str) -> list[float]:
-            return list(embedding)
+        async def raw_query_embedding(_query: str) -> content_raw_recall.RawQueryEmbedding:
+            from sibyl_core.services.content_models import raw_memory_embedding_space
+
+            space = raw_memory_embedding_space(_StaticEmbeddingProvider(embedding).metadata)
+            assert space is not None
+            return content_raw_recall.RawQueryEmbedding(list(embedding), space)
 
         class FakeExtractionProvider:
             async def extract_many(self, _prompts, *, max_concurrent: int):
@@ -1389,8 +1393,12 @@ async def test_live_raw_capture_membership_precedes_vector_limit(
     async def session():
         yield client
 
-    async def query_embedding(_query: str) -> list[float]:
-        return list(near)
+    async def query_embedding(_query: str) -> content_raw_recall.RawQueryEmbedding:
+        from sibyl_core.services.content_models import raw_memory_embedding_space
+
+        space = raw_memory_embedding_space(_StaticEmbeddingProvider(near).metadata)
+        assert space is not None
+        return content_raw_recall.RawQueryEmbedding(list(near), space)
 
     monkeypatch.setattr(content_client, "surreal_content_client", session)
     monkeypatch.setattr(content_raw_recall, "raw_memory_query_embedding", query_embedding)
@@ -2948,8 +2956,10 @@ async def test_live_raw_repair_writes_stay_flat_in_a_large_organization() -> Non
             )
 
         started = time.perf_counter()
+        # A budget wide enough for one pass, so the measure is the write shape
+        # rather than where the default budget stops a pass.
         repaired = await repair_raw_capture_embeddings(
-            organization_id, embedding_provider=provider, client=content
+            organization_id, embedding_provider=provider, client=content, budget_seconds=600.0
         )
         elapsed = time.perf_counter() - started
         left = await content_client.select_many(

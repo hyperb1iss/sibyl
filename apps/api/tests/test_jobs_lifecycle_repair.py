@@ -9,6 +9,7 @@ from sibyl.jobs import lifecycle_repair
 from sibyl.jobs.worker import WorkerSettings, get_schedule_specs
 from sibyl_core.config import settings as core_settings
 from sibyl_core.projection.repair import LifecycleRepairResult
+from sibyl_core.services.content_raw_embedding_repair import RawEmbeddingRepairResult
 from sibyl_core.services.embedding_sweep import (
     LEGACY_WARNING_ADOPTED_WITHOUT_EVIDENCE,
     SWEEP_CURRENT,
@@ -102,7 +103,9 @@ async def test_scheduled_repair_continues_after_org_failure(monkeypatch):
         AsyncMock(return_value=LifecycleRepairResult()),
     )
     embedding_repair = AsyncMock(
-        return_value=LifecycleRepairResult(checked=2, recovered=1, failed=1)
+        return_value=RawEmbeddingRepairResult(
+            checked=2, recovered=1, failed=1, refused=1, deferred=1
+        )
     )
     monkeypatch.setattr(lifecycle_repair, "repair_raw_capture_embeddings", embedding_repair)
     result = await lifecycle_repair.repair_lifecycle_all_orgs({})
@@ -113,6 +116,8 @@ async def test_scheduled_repair_continues_after_org_failure(monkeypatch):
         "recovered": 6,
         "pending": 1,
         "failed": 2,
+        "refused": 2,
+        "deferred": 2,
         **_NO_EMBEDDING_WORK,
     }
     repair.assert_awaited_once_with(runtime)

@@ -393,6 +393,10 @@ async def repair_lifecycle_all_orgs(ctx: dict[str, Any]) -> dict[str, int]:  # n
         "recovered": 0,
         "pending": 0,
         "failed": 0,
+        # Raw captures the provider refused, or the model kept failing on,
+        # stored and skipped by later passes.
+        "refused": 0,
+        "deferred": 0,
         **dict.fromkeys(_EMBEDDING_SUMMARY_KEYS, 0),
     }
     sweeping = await _content_schema_ready()

@@ -37,10 +37,34 @@ EMBEDDING_STAMP_VERSION = 2
 VECTOR_SPACE_FIELDS = ("provider", "model", "dimensions")
 VECTOR_IDENTITY_FIELDS = (*VECTOR_SPACE_FIELDS, "text_version", "input_kind_sensitive")
 
-# Provider errors that say "not now" rather than "not this input": throttling,
-# quota, and the provider or its model being briefly unavailable. The sweep backs
-# off from these; any other error means the request itself was refused.
-_TRANSIENT_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+# How a provider error bears on the rows in the request that failed:
+#  - input_rejected: the provider judged this request's content unacceptable.
+#    Only this kind may blame rows, and only once they stand alone.
+#  - transient: "not now" (throttling, quota, the model or service briefly
+#    failing). Back off or end the pass; the same rows can succeed later.
+#  - provider_fault: credentials, access, a missing model, or an error that
+#    says nothing about the input. End the pass; no row is to blame.
+PROVIDER_ERROR_INPUT = "input_rejected"
+PROVIDER_ERROR_TRANSIENT = "transient"
+PROVIDER_ERROR_FAULT = "provider_fault"
+
+# HTTP statuses that decide the kind when the error names no type. Bedrock's
+# ModelErrorException is 424 and its ModelTimeoutException 408.
+_TRANSIENT_STATUS_CODES = frozenset({408, 409, 424, 425, 429, 500, 502, 503, 504})
+_FAULT_STATUS_CODES = frozenset({401, 403, 404, 405})
+_INPUT_STATUS_CODES = frozenset({400, 413, 422})
+# Error names and codes across SDKs, lowercased: botocore's
+# ``Error.Code``, Bedrock's ``x-amzn-ErrorType``, OpenAI's ``code`` and
+# google-genai's ``status``. A name decides before a status does: Bedrock
+# answers both a malformed input and an exhausted quota with 400.
+_INPUT_ERROR_CODES = frozenset(
+    {
+        "validationexception",
+        "context_length_exceeded",
+        "string_above_max_length",
+        "invalid_argument",
+    }
+)
 _TRANSIENT_ERROR_CODES = frozenset(
     {
         "throttlingexception",
@@ -48,12 +72,46 @@ _TRANSIENT_ERROR_CODES = frozenset(
         "rate_limit_exceeded",
         "ratelimitexceeded",
         "resource_exhausted",
+        "insufficient_quota",
         "servicequotaexceededexception",
         "serviceunavailableexception",
         "modelnotreadyexception",
+        "modelerrorexception",
+        "modeltimeoutexception",
+        "modelstreamerrorexception",
         "internalserverexception",
         "internalfailure",
         "unavailable",
+        "deadline_exceeded",
+        "internal",
+    }
+)
+_MODEL_PROCESSING_ERROR_CODES = frozenset(
+    {
+        "modelerrorexception",
+        "modeltimeoutexception",
+        "modelstreamerrorexception",
+        "internalserverexception",
+        "internalfailure",
+        "internal",
+    }
+)
+_MODEL_PROCESSING_STATUS_CODES = frozenset({408, 424, 500})
+_FAULT_ERROR_CODES = frozenset(
+    {
+        "accessdeniedexception",
+        "unrecognizedclientexception",
+        "expiredtokenexception",
+        "invalidsignatureexception",
+        "incompletesignatureexception",
+        "missingauthenticationtokenexception",
+        "resourcenotfoundexception",
+        "unauthorizedexception",
+        "permission_denied",
+        "unauthenticated",
+        "not_found",
+        "invalid_api_key",
+        "model_not_found",
     }
 )
 _TRANSIENT_NAME_FRAGMENTS = (
@@ -235,45 +293,130 @@ def mark_unverified_vector(
     return True
 
 
-def is_transient_provider_error(exc: BaseException) -> bool:
-    """Recognize throttling and brief provider unavailability across SDKs.
+def provider_error_kind(exc: BaseException) -> str:
+    """Classify an embedding provider error by what it says about the input.
 
-    OpenAI and httpx raise with ``status_code``, google-genai with ``code``,
-    botocore with ``response['Error']['Code']``, all without importing any
-    of them. Wrapped errors are unwrapped through their cause chain.
+    Returns ``PROVIDER_ERROR_INPUT``, ``PROVIDER_ERROR_TRANSIENT`` or
+    ``PROVIDER_ERROR_FAULT``. Each error in the cause chain is read in turn,
+    outermost first, and the first one that says anything decides: its error
+    name or code, then its HTTP status, then its type (a timeout or a dropped
+    connection). OpenAI and httpx carry ``status_code``, google-genai
+    ``code`` and ``status``, botocore ``response['Error']['Code']`` and
+    ``ResponseMetadata.HTTPStatusCode``, and Bedrock embedding errors
+    ``error_type``, all read without importing any of them. An error that
+    says nothing, such as missing credentials or a malformed response, is a
+    provider fault: nothing in it blames the input.
     """
     seen: set[int] = set()
     current: BaseException | None = exc
     while current is not None and id(current) not in seen:
         seen.add(id(current))
-        if _looks_transient(current):
+        kind = _error_kind(current)
+        if kind is not None:
+            return kind
+        current = current.__cause__ or current.__context__
+    return PROVIDER_ERROR_FAULT
+
+
+def is_transient_provider_error(exc: BaseException) -> bool:
+    """Whether a provider error says "not now", so the caller should back off."""
+    return provider_error_kind(exc) == PROVIDER_ERROR_TRANSIENT
+
+
+def is_model_processing_error(exc: BaseException) -> bool:
+    """Whether a transient error is the model failing on this request, not a capacity signal.
+
+    Bedrock's ModelErrorException (424) and ModelTimeoutException (408) and a
+    provider's internal error (500) can follow one input around, so a caller
+    may split the request to find it. Throttling, quota and unavailability
+    never can: splitting only sends more requests the provider is turning
+    away. Neither kind blames the input.
+    """
+    if not is_transient_provider_error(exc):
+        return False
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        codes = _error_codes(current)
+        if any(code in _MODEL_PROCESSING_ERROR_CODES for code in codes):
             return True
+        if any(code in _TRANSIENT_ERROR_CODES for code in codes):
+            return False
+        status = _error_status(current)
+        if status is not None:
+            return status in _MODEL_PROCESSING_STATUS_CODES
         current = current.__cause__ or current.__context__
     return False
 
 
-def _looks_transient(exc: BaseException) -> bool:
-    # Refused, reset and aborted connections and any timeout are all "not now".
-    if isinstance(exc, ConnectionError | TimeoutError):
-        return True
-    for attribute in ("status_code", "status", "code", "http_status"):
-        value = getattr(exc, attribute, None)
-        if isinstance(value, int) and value in _TRANSIENT_STATUS_CODES:
-            return True
-        if isinstance(value, str) and value.strip().lower() in _TRANSIENT_ERROR_CODES:
-            return True
+def provider_error_status(exc: BaseException) -> int | None:
+    """The HTTP status a provider error carries anywhere in its cause chain."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        status = _error_status(current)
+        if status is not None:
+            return status
+        current = current.__cause__ or current.__context__
+    return None
+
+
+def _error_codes(exc: BaseException) -> list[str]:
+    codes = [
+        value
+        for attribute in ("error_type", "code", "status")
+        if isinstance(value := getattr(exc, attribute, None), str)
+    ]
     response = getattr(exc, "response", None)
     if isinstance(response, Mapping):
         error = response.get("Error")
         code = error.get("Code") if isinstance(error, Mapping) else None
-        if isinstance(code, str) and code.strip().lower() in _TRANSIENT_ERROR_CODES:
-            return True
-    else:
-        status = getattr(response, "status_code", None)
-        if isinstance(status, int) and status in _TRANSIENT_STATUS_CODES:
-            return True
+        if isinstance(code, str):
+            codes.append(code)
+    return [code.strip().lower() for code in codes if code.strip()]
+
+
+def _error_status(exc: BaseException) -> int | None:
+    response = getattr(exc, "response", None)
+    metadata = response.get("ResponseMetadata") if isinstance(response, Mapping) else None
+    for value in (
+        getattr(exc, "status_code", None),
+        getattr(exc, "http_status", None),
+        getattr(exc, "code", None),
+        getattr(exc, "status", None),
+        None if isinstance(response, Mapping) else getattr(response, "status_code", None),
+        metadata.get("HTTPStatusCode") if isinstance(metadata, Mapping) else None,
+    ):
+        if isinstance(value, int) and not isinstance(value, bool) and 100 <= value < 600:
+            return value
+    return None
+
+
+def _error_kind(exc: BaseException) -> str | None:
+    for code in _error_codes(exc):
+        if code in _INPUT_ERROR_CODES:
+            return PROVIDER_ERROR_INPUT
+        if code in _TRANSIENT_ERROR_CODES:
+            return PROVIDER_ERROR_TRANSIENT
+        if code in _FAULT_ERROR_CODES:
+            return PROVIDER_ERROR_FAULT
+    status = _error_status(exc)
+    if status is not None:
+        if status in _TRANSIENT_STATUS_CODES or status >= 500:
+            return PROVIDER_ERROR_TRANSIENT
+        if status in _INPUT_STATUS_CODES:
+            return PROVIDER_ERROR_INPUT
+        if status in _FAULT_STATUS_CODES or 400 <= status < 500:
+            return PROVIDER_ERROR_FAULT
+    # Refused, reset and aborted connections and any timeout are all "not now".
+    if isinstance(exc, ConnectionError | TimeoutError):
+        return PROVIDER_ERROR_TRANSIENT
     name = type(exc).__name__.lower()
-    return any(fragment in name for fragment in _TRANSIENT_NAME_FRAGMENTS)
+    if any(fragment in name for fragment in _TRANSIENT_NAME_FRAGMENTS):
+        return PROVIDER_ERROR_TRANSIENT
+    return None
 
 
 __all__ = [
@@ -281,6 +424,9 @@ __all__ = [
     "EMBEDDING_STAMP_KEY",
     "EMBEDDING_STAMP_VERSION",
     "OBSERVED_STAMP_FIELDS",
+    "PROVIDER_ERROR_FAULT",
+    "PROVIDER_ERROR_INPUT",
+    "PROVIDER_ERROR_TRANSIENT",
     "STAMP_VERSION_FIELD",
     "UNVERIFIED_EMBEDDING_PROVIDER",
     "UNVERIFIED_ORIGIN_ARCHIVE",
@@ -291,9 +437,12 @@ __all__ = [
     "VECTOR_SPACE_FIELDS",
     "document_chunk_embedding_metadata",
     "is_legacy_stamp",
+    "is_model_processing_error",
     "is_transient_provider_error",
     "is_unverified_embedding_metadata",
     "mark_unverified_vector",
+    "provider_error_kind",
+    "provider_error_status",
     "same_vector_identity",
     "same_vector_space",
     "stamp_unchanged_predicate",

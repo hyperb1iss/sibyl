@@ -60,6 +60,23 @@ def test_surreal_content_uses_canonical_record_normalizers() -> None:
     assert content_client.normalize_records is normalize_records
 
 
+@pytest.fixture(autouse=True)
+def _raw_vector_lane_runs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Scripted clients answer queries in order; the lane readiness read is tested elsewhere."""
+
+    async def run_lane(*_args: object) -> None:
+        return None
+
+    monkeypatch.setattr(content_raw_recall, "_raw_vector_lane_skip", run_lane)
+
+
+def _query_embedding(vector: list[float]) -> content_raw_recall.RawQueryEmbedding:
+    space = content_models.RawEmbeddingSpace(
+        provider="deterministic", model="unit-test", dimensions=len(vector)
+    )
+    return content_raw_recall.RawQueryEmbedding(vector, space)
+
+
 def _query_result(records: list[dict[str, object]]) -> list[dict[str, object]]:
     return [{"status": "OK", "result": records}]
 
@@ -2612,7 +2629,7 @@ class TestSurrealContentHelpers:
             yield fake_client
 
         async def query_embedding(_query: str):
-            return [1.0, 0.0]
+            return _query_embedding([1.0, 0.0])
 
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
@@ -2640,6 +2657,16 @@ class TestSurrealContentHelpers:
         assert "search::highlight('<mark>', '</mark>', 2) AS content_snippet" in fulltext_query
         assert "embedding <|8, 40|> $query_embedding" in vector_query
         assert vector_params["query_embedding"] == [1.0, 0.0]
+        # The model filter precedes the neighbour limit, inside the HNSW bracket.
+        assert (
+            "metadata.embedding_metadata.dimensions = $query_embedding_dimensions "
+            "AND embedding <|8, 40|> $query_embedding) ORDER BY" in vector_query
+        )
+        assert (
+            vector_params["query_embedding_provider"],
+            vector_params["query_embedding_models"],
+            vector_params["query_embedding_dimensions"],
+        ) == ("deterministic", ["unit-test"], 2)
         assert all(memory.score > 0 for memory in memories)
 
     @pytest.mark.asyncio
@@ -2664,7 +2691,7 @@ class TestSurrealContentHelpers:
             yield fake_client
 
         async def query_embedding(_query: str):
-            return [1.0, 0.0]
+            return _query_embedding([1.0, 0.0])
 
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
@@ -2706,7 +2733,7 @@ class TestSurrealContentHelpers:
             yield fake_client
 
         async def query_embedding(_query: str):
-            return [1.0, 0.0]
+            return _query_embedding([1.0, 0.0])
 
         fake_log = FakeLog()
 
@@ -2764,7 +2791,7 @@ class TestSurrealContentHelpers:
             yield fake_client
 
         async def query_embedding(_query: str):
-            return [1.0, 0.0]
+            return _query_embedding([1.0, 0.0])
 
         fake_log = FakeLog()
 
@@ -2819,7 +2846,7 @@ class TestSurrealContentHelpers:
             yield fake_client
 
         async def query_embedding(_query: str):
-            return [1.0, 0.0]
+            return _query_embedding([1.0, 0.0])
 
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setattr(content_client, "surreal_content_client", fake_session)

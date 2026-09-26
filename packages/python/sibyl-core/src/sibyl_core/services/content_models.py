@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Protocol
 
+from sibyl_core.ai.bedrock import arn_model_id, remove_geo_prefix
 from sibyl_core.embeddings import content as content_embeddings
 from sibyl_core.embeddings.providers import (
     DeterministicEmbeddingProvider,
@@ -489,6 +490,47 @@ def raw_memory_embedding_metadata(metadata: EmbeddingMetadata) -> dict[str, str 
     payload = metadata.to_dict()
     payload["text_version"] = _RAW_MEMORY_EMBEDDING_TEXT_VERSION
     return payload
+
+
+@dataclass(frozen=True, slots=True)
+class RawEmbeddingSpace:
+    """The model a raw capture vector came from, reduced to what decides comparability.
+
+    Provider, model and dimensions decide whether two vectors can be scored
+    against each other. The text contract, cache namespace and tokenizer
+    estimate in the rest of the stamp do not, so a text contract bump leaves
+    vectors comparable while the embedding repair refreshes them.
+    """
+
+    provider: str
+    model: str
+    dimensions: int
+
+
+def raw_memory_embedding_space(stamp: object) -> RawEmbeddingSpace | None:
+    """The vector space an embedding stamp names, or None when it names none.
+
+    Accepts a stored ``embedding_metadata`` mapping or a provider's
+    ``EmbeddingMetadata``. A Bedrock model reached through a geographic
+    inference profile or a model-bearing ARN is the same model as its base
+    ID, so both normalize to the base ID, as the Bedrock provider records it.
+    """
+    fields = stamp.to_dict() if isinstance(stamp, EmbeddingMetadata) else stamp
+    if not isinstance(fields, Mapping):
+        return None
+    provider = fields.get("provider")
+    model = fields.get("model")
+    dimensions = fields.get("dimensions")
+    if (
+        not isinstance(provider, str)
+        or not isinstance(model, str)
+        or not isinstance(dimensions, int)
+        or isinstance(dimensions, bool)
+    ):
+        return None
+    if provider == "bedrock":
+        model = remove_geo_prefix(arn_model_id(model) or model)
+    return RawEmbeddingSpace(provider=provider, model=model, dimensions=dimensions)
 
 
 def reset_raw_memory_embedding_provider_cache() -> None:

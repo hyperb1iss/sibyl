@@ -79,6 +79,37 @@ DEFINE INDEX IF NOT EXISTS idx_embedding_states_scope ON embedding_states
     FIELDS organization_id, plane UNIQUE;
 """
 
+# Raw captures the raw repair sets aside, one row per organization and
+# capture. ``refused`` marks a capture the provider rejected as unacceptable
+# input; ``deferred`` marks one the model kept failing on, which is never
+# refused and waits out an expiry that grows with ``attempts``. The repair
+# skips a capture while its row still matches the capture's revision and the
+# configured vector identity and has not expired. The table sits apart from
+# raw_captures because every raw capture column outside the embedding fields
+# feeds the sealed cohort snapshot digest.
+RAW_EMBEDDING_REFUSALS_TABLE = "raw_embedding_refusals"
+RAW_EMBEDDING_REFUSAL_SCHEMA_VERSION = 48
+RAW_EMBEDDING_REFUSAL_DEFINITIONS = """
+DEFINE TABLE IF NOT EXISTS raw_embedding_refusals SCHEMAFULL;
+ALTER TABLE IF EXISTS raw_embedding_refusals SCHEMAFULL;
+ALTER TABLE IF EXISTS raw_embedding_refusals PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS organization_id ON raw_embedding_refusals TYPE string;
+DEFINE FIELD IF NOT EXISTS capture_id ON raw_embedding_refusals TYPE string;
+DEFINE FIELD IF NOT EXISTS revision ON raw_embedding_refusals TYPE int;
+DEFINE FIELD IF NOT EXISTS identity ON raw_embedding_refusals TYPE string;
+DEFINE FIELD IF NOT EXISTS kind ON raw_embedding_refusals TYPE string DEFAULT 'refused'
+    ASSERT $value IN ['refused', 'deferred'];
+DEFINE FIELD IF NOT EXISTS attempts ON raw_embedding_refusals TYPE int DEFAULT 1;
+DEFINE FIELD IF NOT EXISTS error_type ON raw_embedding_refusals TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS status_code ON raw_embedding_refusals TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS refused_at ON raw_embedding_refusals TYPE datetime DEFAULT time::now();
+DEFINE FIELD IF NOT EXISTS expires_at ON raw_embedding_refusals TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_raw_embedding_refusals_capture ON raw_embedding_refusals
+    FIELDS organization_id, capture_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_raw_embedding_refusals_expiry ON raw_embedding_refusals
+    FIELDS organization_id, expires_at;
+"""
+
 EMBEDDING_DEPLOYMENT_DEFINITIONS = """
 DEFINE TABLE IF NOT EXISTS embedding_deployment SCHEMAFULL;
 ALTER TABLE IF EXISTS embedding_deployment SCHEMAFULL;
@@ -113,6 +144,12 @@ def embedding_state_key(organization_id: str, plane: str) -> str:
     """Record id of one organization's state row for one plane."""
     digest = hashlib.sha256(f"{organization_id}\x1f{plane}".encode()).hexdigest()
     return f"embedding_states:s{digest[:40]}"
+
+
+def raw_embedding_refusal_key(organization_id: str, capture_id: str) -> str:
+    """Record id of one organization's refusal row for one raw capture."""
+    digest = hashlib.sha256(f"{organization_id}\x1f{capture_id}".encode()).hexdigest()
+    return f"{RAW_EMBEDDING_REFUSALS_TABLE}:r{digest[:40]}"
 
 
 async def embedding_sweep_schema_ready(execute_query: _Execute, *, graph: bool) -> bool:
@@ -268,9 +305,13 @@ __all__ = [
     "EMBEDDING_STATE_DEFINITIONS",
     "GRAPH_EMBEDDING_STATE_PLANE",
     "GRAPH_SWEEP_SCHEMA_VERSION",
+    "RAW_EMBEDDING_REFUSALS_TABLE",
+    "RAW_EMBEDDING_REFUSAL_DEFINITIONS",
+    "RAW_EMBEDDING_REFUSAL_SCHEMA_VERSION",
     "REOPEN_EMBEDDING_STATES",
     "embedding_state_key",
     "embedding_sweep_schema_ready",
+    "raw_embedding_refusal_key",
     "snapshot_content_embedding_evidence",
     "snapshot_graph_embedding_evidence",
 ]
