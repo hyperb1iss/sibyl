@@ -228,9 +228,16 @@ class SweepTable:
     fence: str
     dimensions: int
 
+    # A stored NULL counts as no stamp: the previous release could keep a
+    # client's null, and NULL never equals NONE in SurrealQL.
+    def _unstamped(self) -> str:
+        return f"({self.metadata_path} ?? NONE) = NONE"
+
     def _candidate_predicate(self) -> str:
         differs = vector_identity_differs_predicate(self.metadata_path, "stamp")
-        return f"{self.metadata_path} != NONE AND ({self.vector_field} = NONE OR {differs})"
+        return (
+            f"({self.metadata_path} ?? NONE) != NONE AND ({self.vector_field} = NONE OR {differs})"
+        )
 
     # Pages start at their cursor inclusively and callers drop the cursor
     # row: the embedded engine's index range scan for ``uuid > $cursor``
@@ -254,7 +261,7 @@ class SweepTable:
         return (
             f"SELECT count() AS count FROM {self.name} "
             f"WHERE {self.scope_field} = $scope AND $remembered CONTAINSNOT uuid AND ("
-            f"({self.vector_field} != NONE AND {self.metadata_path} = NONE) "
+            f"({self.vector_field} != NONE AND {self._unstamped()}) "
             f"OR ({self._candidate_predicate()})) GROUP ALL;"
         )
 
@@ -269,14 +276,14 @@ class SweepTable:
         return (
             f"SELECT uuid FROM {self.name} "
             f"WHERE {self.scope_field} = $scope AND {self.vector_field} != NONE "
-            f"AND {self.metadata_path} = NONE LIMIT 1;"
+            f"AND {self._unstamped()} LIMIT 1;"
         )
 
     def legacy_page_query(self) -> str:
         return (
             f"SELECT uuid FROM {self.name} "
             f"WHERE {self.scope_field} = $scope AND uuid >= $cursor "
-            f"AND {self.vector_field} != NONE AND {self.metadata_path} = NONE "
+            f"AND {self.vector_field} != NONE AND {self._unstamped()} "
             "ORDER BY uuid ASC LIMIT $limit;"
         )
 
@@ -291,7 +298,7 @@ class SweepTable:
         return (
             f"UPDATE {self._rows_by_uuid()} SET {self.metadata_path} = $legacy "
             f"WHERE {self.scope_field} = $scope AND {self.vector_field} != NONE "
-            f"AND {self.metadata_path} = NONE RETURN uuid;"
+            f"AND {self._unstamped()} RETURN uuid;"
         )
 
     def in_model_count_query(self) -> str:

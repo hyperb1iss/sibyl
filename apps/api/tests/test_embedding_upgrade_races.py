@@ -361,3 +361,108 @@ async def test_a_plane_with_a_switch_in_another_organization_never_mixes_models(
     for step, hits, admitted in trace:
         assert not hits & legacy, step
         assert not admitted, step
+
+
+@pytest.mark.asyncio
+async def test_a_capture_stamped_null_is_embedded_on_the_first_pass(engine) -> None:
+    """The previous release could keep a client's null stamp; NULL never equals NONE."""
+    from sibyl_core.services import content_client
+    from sibyl_core.services.content_models import raw_memory_embedding_metadata
+    from sibyl_core.services.content_raw_embedding_repair import repair_raw_capture_embeddings
+
+    small = _provider(_SMALL, EMBEDDING_DIM, "raw-memory")
+    organization_id = str(uuid4())
+    content = _content(engine)
+    try:
+        await bootstrap_content_schema(content, reset=True)
+        uuid = str(uuid4())
+        await content_client.select_many(
+            content,
+            "CREATE raw_captures CONTENT {uuid: $uuid, organization_id: $organization_id, "
+            "principal_id: 'owner', source_id: $source, raw_content: 'captured', "
+            "embedding: $vector, metadata: {embedding_metadata: NULL}} RETURN NONE;",
+            uuid=uuid,
+            organization_id=organization_id,
+            source=str(uuid4()),
+            vector=_unit(0, EMBEDDING_DIM),
+        )
+        first = await repair_raw_capture_embeddings(
+            organization_id, embedding_provider=small, client=content
+        )
+        second = await repair_raw_capture_embeddings(
+            organization_id, embedding_provider=small, client=content
+        )
+        stored = await _stored(content, uuid)
+    finally:
+        await content.close()
+        await _drop_namespace(engine, content.namespace)
+
+    assert (first.recovered, first.pending) == (1, 0)
+    assert second.checked == 0
+    assert stored["stamp"] == raw_memory_embedding_metadata(small.metadata)
+
+
+@pytest.mark.asyncio
+async def test_a_graph_vector_stamped_null_is_adopted_and_proves_nothing(engine) -> None:
+    from sibyl_core.backends.surreal.records import normalize_records
+    from sibyl_core.services.embedding_evidence import read_graph_snapshot
+    from sibyl_core.services.graph import RelationshipManager
+    from sibyl_core.services.graph_embedding_sweep import sweep_graph_embeddings
+    from sibyl_core.services.graph_runtime import GraphRuntime
+
+    small = _provider(_SMALL, GRAPH_EMBEDDING_DIM, "graph")
+    client = SurrealGraphClient(
+        group_id=str(uuid4()),
+        url=_url(engine, "graph"),
+        username=engine["username"],
+        password=engine["password"],
+    )
+    try:
+        await prepare_graph_schema(client)
+        await client.execute_query(
+            "INSERT INTO entity $rows RETURN NONE;",
+            rows=[
+                {
+                    "uuid": "stamped",
+                    "group_id": client.group_id,
+                    "name": "stamped",
+                    "entity_type": "topic",
+                    "name_embedding": _unit(1, GRAPH_EMBEDDING_DIM),
+                    "attributes": {
+                        "embedding_metadata": previous_release_stamp(small.metadata.to_dict())
+                    },
+                }
+            ],
+        )
+        await client.execute_query(
+            "CREATE entity CONTENT {uuid: 'null-stamped', group_id: $group, name: 'null', "
+            "entity_type: 'topic', name_embedding: $vector, "
+            "attributes: {embedding_metadata: NULL}} RETURN NONE;",
+            group=client.group_id,
+            vector=_unit(2, GRAPH_EMBEDDING_DIM),
+        )
+        await upgrade_graph_to_sweep(client)
+        snapshot = await read_graph_snapshot(client.execute_query, client.group_id)
+        runtime = GraphRuntime(
+            client=client,
+            entity_manager=EntityManager(client, group_id=client.group_id),
+            relationship_manager=RelationshipManager(client, group_id=client.group_id),
+        )
+        swept = await sweep_graph_embeddings(runtime, embedding_provider=small)
+        stored = normalize_records(
+            await client.execute_query(
+                "SELECT attributes.embedding_metadata AS stamp FROM entity "
+                "WHERE uuid = 'null-stamped';"
+            )
+        )
+    finally:
+        await client.close()
+        with suppress(Exception):
+            await _drop_namespace(engine, client.namespace)
+
+    # Only the real stamp speaks for the plane; the null one is a vector from
+    # before stamping, adopted without an embedding call.
+    assert [(stamp["model"], stamp["rows"]) for stamp in snapshot] == [(_SMALL, 1)]
+    assert swept.adopted == 1
+    assert swept.recovered == 0
+    assert stored[0]["stamp"] == small.metadata.to_dict()

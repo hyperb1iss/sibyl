@@ -103,12 +103,13 @@ _RESTAMP_CONCURRENCY = 4
 # another repair (a process configured for another model, during a rolling
 # deploy) wrote its own vector and stamp in the meantime; without this fence
 # the restamp would relabel that vector as this pass's model. Raw repair holds
-# no lease, so the stamp is the fence.
+# no lease, so the stamp is the fence. A stored NULL counts as no stamp: the
+# previous release could keep a client's null, and NULL never equals NONE.
 _RAW_EMBEDDING_RESTAMP_QUERY = """
 UPDATE (SELECT VALUE id FROM raw_captures WHERE uuid IN $uuids)
 SET metadata.embedding_metadata = $embedding_metadata
 WHERE organization_id = $organization_id AND revision = $revisions[uuid]
-    AND embedding != NONE AND metadata.embedding_metadata = $observed[uuid]
+    AND embedding != NONE AND (metadata.embedding_metadata ?? NONE) = $observed[uuid]
 RETURN uuid;
 """
 
@@ -117,7 +118,7 @@ UPDATE (SELECT VALUE id FROM raw_captures WHERE uuid = $uuid) SET
     embedding = $embedding,
     metadata.embedding_metadata = $embedding_metadata
 WHERE organization_id = $organization_id AND revision = $revision
-    AND metadata.embedding_metadata = $observed
+    AND (metadata.embedding_metadata ?? NONE) = $observed
 RETURN uuid;
 """
 
