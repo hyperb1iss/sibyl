@@ -188,3 +188,55 @@ def test_model_keys_cover_profile_spellings_only_for_bedrock() -> None:
     assert keys(space("bedrock", opaque, 1536)) == ["abc123"]
     # A slash is part of other providers' model names, never an ARN separator.
     assert keys(space("local", "BAAI/bge-small-en-v1.5", 384)) == ["BAAI/bge-small-en-v1.5"]
+
+
+async def test_the_raw_lane_reads_the_repair_receipt_to_stand_aside_and_resume(
+    content_store, monkeypatch
+):
+    """The repair's own receipt tells the lane when a switch leaves it nothing to find."""
+    from sibyl_core.services import content_raw_embedding_repair as repair_module
+    from sibyl_core.services.embedding_lane_readiness import reset_lane_readiness_cache
+
+    org = str(uuid4())
+    old_model = StaticProvider("gemini", "gemini-embedding-001", FAR)
+    for index in range(30):
+        await capture(org, f"old-{index}", None)
+    assert (
+        await repair_module.repair_raw_capture_embeddings(org, embedding_provider=old_model)
+    ).status == "completed"
+    new_model = StaticProvider("openai", "text-embedding-3-small", NEAR)
+    monkeypatch.setattr(
+        content_models, "configured_raw_memory_embedding_provider", lambda: new_model
+    )
+
+    async def lane():
+        reset_lane_readiness_cache()
+        lanes = await recall(org, limit=1)
+        failure = lanes["raw_vector"].failure
+        return len(lanes["raw_vector"].candidates), failure.error_type if failure else None
+
+    switched = await lane()
+    # One page of one capture converts, then the budget runs out: 1 of 30 is under 5%.
+    now = [0.0]
+    monkeypatch.setattr(repair_module, "_clock", lambda: now[0])
+    monkeypatch.setattr(repair_module, "RAW_EMBEDDING_REPAIR_BUDGET_SECONDS", 5.0)
+
+    class Slow(StaticProvider):
+        async def embed_texts(self, texts, *, input_kind: str = "document"):
+            now[0] += 10.0
+            return await super().embed_texts(texts, input_kind=input_kind)
+
+    slow = Slow("openai", "text-embedding-3-small", NEAR)
+    partial = await repair_module.repair_raw_capture_embeddings(
+        org, page_size=1, embedding_provider=slow
+    )
+    sparse = await lane()
+    monkeypatch.setattr(repair_module, "RAW_EMBEDDING_REPAIR_BUDGET_SECONDS", 1000.0)
+    done = await repair_module.repair_raw_capture_embeddings(org, embedding_provider=new_model)
+    ready = await lane()
+
+    assert switched == (0, "vector_lane_model_switched")
+    assert (partial.status, partial.recovered) == ("partial", 1)
+    assert sparse == (0, "vector_lane_model_sparse")
+    assert done.status == "completed"
+    assert ready == (1, None)

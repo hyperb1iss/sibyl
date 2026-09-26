@@ -549,6 +549,37 @@ async def _raw_memory_scope_lacks_embeddings(
         return False
 
 
+async def _raw_vector_lane_skip(
+    client: SurrealContentClient, organization_id: str, space: models.RawEmbeddingSpace
+) -> str | None:
+    """Why the raw vector lane should stand aside for this model, or None to run it.
+
+    Right after a provider switch almost no capture holds a vector in the new
+    model, and an in-bracket model filter then walks the whole index to find
+    nothing: about 1.5 s at 20,000 captures on a native server. The raw repair
+    records how far it has come in the organization's raw plane state, and the
+    lane reads it through the same readiness rule the graph and chunk lanes
+    use. Missing or unreadable state runs the lane.
+    """
+    from sibyl_core.services.content_raw_embedding_repair import RAW_CAPTURE_EMBEDDING_PLANE
+    from sibyl_core.services.embedding_lane_readiness import vector_lane_readiness
+
+    async def execute(query: str, **params: object) -> object:
+        return await content_client.select_many(client, query, **params)
+
+    readiness = await vector_lane_readiness(
+        plane=RAW_CAPTURE_EMBEDDING_PLANE,
+        organization_id=organization_id,
+        execute=execute,
+        query_stamp={
+            "provider": space.provider,
+            "model": space.model,
+            "dimensions": space.dimensions,
+        },
+    )
+    return None if readiness.run else f"vector_lane_{readiness.reason}"
+
+
 async def raw_memory_query_embedding(query: str) -> RawQueryEmbedding | None:
     provider: EmbeddingProvider | None = None
     try:
@@ -800,7 +831,16 @@ async def _recall_raw_memory_result(
             source_results.append(CandidateSourceResult.failed("raw_fulltext", type(exc).__name__))
         else:
             source_results.append(CandidateSourceResult.success("raw_fulltext", fulltext_memories))
-        if query_embedding is not None:
+        skipped = (
+            await _raw_vector_lane_skip(client, organization_id, query_embedding.space)
+            if query_embedding is not None
+            else None
+        )
+        if skipped is not None:
+            # Almost no capture holds a vector in the query's model yet; the
+            # fulltext lane carries the query until the repair converts enough.
+            source_results.append(CandidateSourceResult.failed("raw_vector", skipped))
+        elif query_embedding is not None:
             try:
                 vector_memories = await _recall_raw_memory_vector(
                     client,

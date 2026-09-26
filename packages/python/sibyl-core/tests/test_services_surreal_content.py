@@ -60,6 +60,16 @@ def test_surreal_content_uses_canonical_record_normalizers() -> None:
     assert content_client.normalize_records is normalize_records
 
 
+@pytest.fixture(autouse=True)
+def _raw_vector_lane_runs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Scripted clients answer queries in order; the lane readiness read is tested elsewhere."""
+
+    async def run_lane(*_args: object) -> None:
+        return None
+
+    monkeypatch.setattr(content_raw_recall, "_raw_vector_lane_skip", run_lane)
+
+
 def _query_embedding(vector: list[float]) -> content_raw_recall.RawQueryEmbedding:
     space = content_models.RawEmbeddingSpace(
         provider="deterministic", model="unit-test", dimensions=len(vector)
