@@ -585,7 +585,11 @@ def _far(seed: int, dimensions: int) -> list[float]:
 async def test_a_never_switched_graph_keeps_full_vector_recall_through_adoption(
     engine, lane_clock
 ) -> None:
-    """Unstamped vectors from before stamping stay in the lanes from the first query on."""
+    """Unstamped vectors from before stamping count once the adopt verdict is recorded.
+
+    Before it they wait: another organization's unpublished evidence could
+    still turn the verdict into a re-embed.
+    """
     from sibyl_core.retrieval._search_plan import RetrievalPlan, SearchFilter
     from sibyl_core.retrieval._search_sources import _vector_candidate_sources_detailed
     from sibyl_core.services.graph import RelationshipManager
@@ -663,7 +667,8 @@ async def test_a_never_switched_graph_keeps_full_vector_recall_through_adoption(
                 fetch.as_metadata()["vector_status"],
             )
 
-        # The first query after the upgrade, before any lifecycle pass.
+        # The first query after the upgrade, before any lifecycle pass: the
+        # stamped vectors answer, the unstamped ones wait for the verdict.
         first = await top_five()
         # Part way through adoption, as a pass would leave a large plane: the
         # verdict is adopt and 1% of vectors carry a stamp.
@@ -702,11 +707,9 @@ async def test_a_never_switched_graph_keeps_full_vector_recall_through_adoption(
             g=client.group_id,
         )
 
-    for label, (entities, nodes, status) in (
-        ("first query", first),
-        ("adopting", adopting),
-        ("adopted", adopted),
-    ):
+    assert not first[0] & nearest
+    assert not first[1] & nearest
+    for label, (entities, nodes, status) in (("adopting", adopting), ("adopted", adopted)):
         assert entities == nearest, label
         assert nodes == nearest, label
         assert status == "ok", label
@@ -715,10 +718,13 @@ async def test_a_never_switched_graph_keeps_full_vector_recall_through_adoption(
 
 
 @pytest.mark.asyncio
-async def test_never_switched_chunks_keep_vector_recall_from_the_first_query(
-    engine, monkeypatch: pytest.MonkeyPatch
+async def test_never_switched_chunks_keep_vector_recall_once_adopted(
+    engine, lane_clock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Chunks carried no stamp before this release; a plain upgrade must not hide them."""
+    """Chunks carried no stamp before this release; once their plane adopts, every lane reads them.
+
+    Before the verdict they wait, as unstamped graph vectors do.
+    """
     from sibyl.persistence.surreal import content as app_content
     from sibyl_core.services import content_client
     from sibyl_core.services.content_documents import search_document_chunks
@@ -796,6 +802,28 @@ async def test_never_switched_chunks_keep_vector_recall_from_the_first_query(
         )
         await upgrade_content_to_sweep(client)
 
+        async def execute(statement: str, **params: object) -> object:
+            return await content_client.select_many(client, statement, **params)
+
+        before, _ = await search_document_chunks(
+            organization_id=organization_id,
+            query_text="",
+            query_embedding=list(query),
+            limit=3,
+            embedding_metadata=_TARGET_CHUNK_STAMP,
+        )
+        # The verdict a lifecycle pass records for this plane.
+        await _write_plane_state(
+            execute,
+            organization_id,
+            "document_chunks",
+            {
+                "legacy_decision": "adopt",
+                "legacy_basis": "prior_stamps_match",
+                "legacy_metadata": dict(_TARGET_CHUNK_STAMP),
+            },
+        )
+        lane_clock()
         core, _ = await search_document_chunks(
             organization_id=organization_id,
             query_text="",
@@ -831,6 +859,7 @@ async def test_never_switched_chunks_keep_vector_recall_from_the_first_query(
         await client.close()
         await _drop_namespace(engine, namespace)
 
+    assert not {str(hit[0].id) for hit in before} & nearest
     found = {
         name: {str(hit[0].id) for hit in hits}
         for name, hits in (("core", core), ("rag", rag), ("code", code), ("hybrid", hybrid))

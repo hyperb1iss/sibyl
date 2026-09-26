@@ -498,3 +498,82 @@ async def test_raw_captures_do_not_override_a_matching_saved_crawler_setting(
     assert verdicts.document_chunks["legacy_decision"] == "adopt"
     assert verdicts.document_chunks["legacy_basis"] == LegacyVectorBasis.PRIOR_STAMPS_MATCH.value
     assert _space(verdicts.document_chunks["legacy_metadata"]) == _space(PREVIOUS)
+
+
+async def test_an_adoption_waits_for_every_organization_to_publish(runtime, content_store) -> None:
+    """X's own stamps name the configured B, but Y, which has not published yet, holds A's.
+
+    Deciding X first would adopt its unstamped A vectors as B; it waits for Y
+    and then re-embeds on Y's evidence, whichever organization ran first.
+    """
+    from sibyl_core.services.embedding_sweep import read_embedding_sweep_state
+    from sibyl_core.services.graph import EntityManager, RelationshipManager, SurrealGraphClient
+    from sibyl_core.services.graph_runtime import GraphRuntime, prepare_graph_schema
+
+    configured = CountingProvider("configured")
+    earlier = CountingProvider("earlier")
+    # X: vectors from before stamping, plus newer ones stamped with the configured model.
+    await _entity(runtime, "legacy")
+    await _entity(runtime, "stamped", stamp=previous_release_stamp(configured.metadata.to_dict()))
+    await _upgrade(runtime)
+    other = SurrealGraphClient(group_id=f"y-{runtime.client.group_id}", url="memory://")
+    try:
+        await prepare_graph_schema(other)
+        y = GraphRuntime(
+            client=other,
+            entity_manager=EntityManager(other, group_id=other.group_id),
+            relationship_manager=RelationshipManager(other, group_id=other.group_id),
+        )
+        await _entity(y, "native", stamp=previous_release_stamp(earlier.metadata.to_dict()))
+        await upgrade_graph_to_sweep(other)
+        organizations = [runtime.client.group_id, other.group_id]
+
+        async def settle(target):
+            return await settle_legacy_verdicts(
+                target.client.group_id,
+                graph_client=target.client,
+                graph_provider=configured,
+                chunk_stamp=None,
+                embed_chunks=ChunkEmbedder(CURRENT),
+                deployment_organizations=organizations,
+            )
+
+        first = await settle(runtime)
+        waiting = await read_embedding_sweep_state(
+            "graph", runtime.client.group_id, runtime.client.execute_query
+        )
+        await settle(y)
+        second = await settle(runtime)
+    finally:
+        await other.close()
+
+    assert first.deferred
+    assert waiting.get("legacy_decision") is None
+    assert waiting.get("legacy_deferred_at") is not None
+    assert isinstance(second.graph, dict)
+    assert second.graph["legacy_decision"] == "reembed"
+    assert second.graph["legacy_basis"] == LegacyVectorBasis.DEPLOYMENT_STAMPS_DIFFER.value
+
+
+async def test_a_reembed_needs_no_wait_for_other_organizations(runtime, content_store) -> None:
+    configured = CountingProvider("configured")
+    await _entity(runtime, "legacy")
+    await _entity(
+        runtime,
+        "old",
+        stamp=previous_release_stamp(CountingProvider("earlier").metadata.to_dict()),
+    )
+    await _upgrade(runtime)
+
+    verdicts = await settle_legacy_verdicts(
+        runtime.client.group_id,
+        graph_client=runtime.client,
+        graph_provider=configured,
+        chunk_stamp=None,
+        embed_chunks=ChunkEmbedder(CURRENT),
+        deployment_organizations=[runtime.client.group_id, "never-published"],
+    )
+
+    assert isinstance(verdicts.graph, dict)
+    assert verdicts.graph["legacy_decision"] == "reembed"
+    assert verdicts.graph["legacy_basis"] == LegacyVectorBasis.PRIOR_STAMPS_DIFFER.value

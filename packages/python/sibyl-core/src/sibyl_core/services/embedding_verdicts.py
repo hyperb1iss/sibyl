@@ -22,6 +22,7 @@ the upgrade snapshot.
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Any
 
@@ -39,6 +40,7 @@ from sibyl_core.services.embedding_evidence import (
     GatheredEvidence,
     gather_legacy_evidence,
     publish_graph_snapshot,
+    read_published_organizations,
 )
 from sibyl_core.services.embedding_sweep import (
     EmbeddingSchemaPendingError,
@@ -127,14 +129,17 @@ async def settle_legacy_verdicts(
     client: SurrealContentClient | None = None,
     allow_unproven: bool = False,
     defer_limit_seconds: float | None = None,
+    deployment_organizations: Collection[str] | None = None,
 ) -> LegacyVerdicts:
     """Persist both planes' verdicts for one organization if they are not recorded yet.
 
     A plane whose verdict fails to settle reports the error and is left for
     the next pass; it is never decided on partial evidence. Unless
     ``allow_unproven``, a plane with no evidence anywhere is deferred rather
-    than adopted with a warning, for at most ``defer_limit_seconds`` after its
-    first deferral.
+    than adopted with a warning, and while any of ``deployment_organizations``
+    has not published its graph evidence an adoption is deferred too, each for
+    at most ``defer_limit_seconds`` after its first deferral. Without
+    ``deployment_organizations`` the published evidence counts as complete.
 
     Raises ``EmbeddingSchemaPendingError`` while the content namespace has
     not taken its upgrade snapshot; a graph namespace that has not reports
@@ -154,6 +159,9 @@ async def settle_legacy_verdicts(
                 graph_execute=graph_client.execute_query,
                 content_execute=content_execute,
             )
+        complete = deployment_organizations is None or set(deployment_organizations) <= (
+            await read_published_organizations(content_execute)
+        )
         evidence = _Evidence(
             organization_id=organization_id,
             graph_client=graph_client,
@@ -174,6 +182,7 @@ async def settle_legacy_verdicts(
                     ),
                     defer_unproven=not allow_unproven,
                     defer_limit_seconds=defer_limit_seconds,
+                    evidence_complete=complete,
                 )
             except Exception as exc:
                 graph = exc
@@ -196,6 +205,7 @@ async def settle_legacy_verdicts(
                     ),
                     defer_unproven=not allow_unproven,
                     defer_limit_seconds=defer_limit_seconds,
+                    evidence_complete=complete,
                 )
             except Exception as exc:
                 chunks = exc

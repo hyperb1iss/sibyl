@@ -1,7 +1,7 @@
 """Scheduled recovery of captures and graph rows awaiting source checks."""
 
 import asyncio
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Sequence
 from dataclasses import asdict
 from typing import Any
 
@@ -141,6 +141,7 @@ async def _settle_verdicts(
     runtime: Any,
     chunk_inputs: _ChunkInputs | BaseException,
     *,
+    organizations: Sequence[str],
     allow_unproven: bool = False,
 ) -> LegacyVerdicts | BaseException:
     """Record both planes' verdicts on unstamped vectors before any pass runs.
@@ -148,7 +149,9 @@ async def _settle_verdicts(
     Each verdict weighs the other plane's pre-upgrade evidence, so both are
     settled together against the organization's graph namespace and the
     shared content namespace. The evidence was photographed when each schema
-    upgraded, so the repairs that run alongside cannot disturb it.
+    upgraded, so the repairs that run alongside cannot disturb it. An
+    adoption waits until every one of ``organizations`` has published, so a
+    verdict never depends on which organization this pass reached first.
     """
     chunk_stamp: dict[str, Any] | None = None
     embed_chunks: ChunkEmbedder = _no_chunk_embedder
@@ -163,6 +166,7 @@ async def _settle_verdicts(
             embed_chunks=embed_chunks,
             allow_unproven=allow_unproven,
             defer_limit_seconds=settings.embedding_sweep_evidence_wait_seconds,
+            deployment_organizations=organizations,
         )
     except EmbeddingSchemaPendingError as exc:
         return exc
@@ -200,7 +204,11 @@ async def _graph_repairs(runtime: Any) -> list[object]:
 
 
 async def _repair_graph(
-    organization_id: str, chunk_inputs: _ChunkInputs | BaseException, *, sweeping: bool
+    organization_id: str,
+    chunk_inputs: _ChunkInputs | BaseException,
+    *,
+    sweeping: bool,
+    organizations: Sequence[str],
 ) -> tuple[object, ...]:
     """Settle both verdicts, then run the graph repairs beside both sweeps.
 
@@ -215,7 +223,9 @@ async def _repair_graph(
         reported: list[object] = []
         graph_settled = chunks_settled = False
         if sweeping:
-            verdicts = await _settle_verdicts(organization_id, runtime, chunk_inputs)
+            verdicts = await _settle_verdicts(
+                organization_id, runtime, chunk_inputs, organizations=organizations
+            )
             reported.append(verdicts)
             if isinstance(verdicts, LegacyVerdicts):
                 graph_settled = verdict_settled(verdicts.graph)
@@ -246,7 +256,7 @@ async def _repair_graph(
         return (*repaired, *swept, *reported)
 
 
-async def _settle_unproven(organization_id: str) -> None:
+async def _settle_unproven(organization_id: str, organizations: Sequence[str]) -> None:
     """Settle planes deferred for lack of evidence, now that every organization published.
 
     Their sweeps start on the next pass.
@@ -254,7 +264,13 @@ async def _settle_unproven(organization_id: str) -> None:
     chunk_inputs = await _chunk_sweep_inputs()
     try:
         async with background_graph_runtime(organization_id) as runtime:
-            await _settle_verdicts(organization_id, runtime, chunk_inputs, allow_unproven=True)
+            await _settle_verdicts(
+                organization_id,
+                runtime,
+                chunk_inputs,
+                organizations=organizations,
+                allow_unproven=True,
+            )
     except Exception as exc:
         log.warning(
             "embedding_sweep_deferred_verdicts_failed",
@@ -263,7 +279,9 @@ async def _settle_unproven(organization_id: str) -> None:
         )
 
 
-async def _repair_organization(organization_id: str, *, sweeping: bool = True) -> list[object]:
+async def _repair_organization(
+    organization_id: str, *, sweeping: bool = True, organizations: Sequence[str] = ()
+) -> list[object]:
     """Run every repair for one organization, isolating each one's failure.
 
     Without ``sweeping`` (the content schema has not upgraded yet) nothing
@@ -275,6 +293,7 @@ async def _repair_organization(organization_id: str, *, sweeping: bool = True) -
             organization_id,
             chunk_inputs if chunk_inputs is not None else RuntimeError("not sweeping"),
             sweeping=sweeping,
+            organizations=organizations or [organization_id],
         ),
         repair_raw_source_lifecycle(organization_id, authority_resolver=resolve_source_authority),
     ]
@@ -349,7 +368,7 @@ async def _settle_deferred(organizations: list[str], deferred: list[str], planes
         )
         return
     for organization_id in deferred:
-        await _settle_unproven(organization_id)
+        await _settle_unproven(organization_id, organizations)
 
 
 async def repair_lifecycle_all_orgs(ctx: dict[str, Any]) -> dict[str, int]:  # noqa: ARG001
@@ -371,7 +390,9 @@ async def repair_lifecycle_all_orgs(ctx: dict[str, Any]) -> dict[str, int]:  # n
     for organization_id in organizations:
         summary["organizations"] += 1
         outcomes: list[object] = []
-        for result in await _repair_organization(organization_id, sweeping=sweeping):
+        for result in await _repair_organization(
+            organization_id, sweeping=sweeping, organizations=organizations
+        ):
             if isinstance(result, tuple):
                 outcomes.extend(result)
             else:

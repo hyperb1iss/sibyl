@@ -594,15 +594,20 @@ async def ensure_legacy_decision(
     *,
     defer_unproven: bool = False,
     defer_limit_seconds: float | None = None,
+    evidence_complete: bool = True,
 ) -> dict[str, Any]:
     """Persist the plane's legacy verdict if no pass has recorded one yet.
 
     The first writer wins, so a racing pass reads the same verdict back.
     With ``defer_unproven``, a verdict that would adopt with no evidence at
-    all is not recorded; the returned state carries ``legacy_deferred`` so
-    the caller can settle it once more of the deployment has been read. The
-    first deferral is persisted, and once ``defer_limit_seconds`` have
-    passed since it the verdict is recorded on the evidence at hand.
+    all is not recorded, and neither is any evidence-based adoption while
+    ``evidence_complete`` is false: an organization that has not published
+    its graph evidence yet may hold the stamps that show a switch, and a
+    re-embed verdict needs no such wait. The returned state carries
+    ``legacy_deferred`` so the caller can settle it once more of the
+    deployment has been read. The first deferral is persisted, and once
+    ``defer_limit_seconds`` have passed since it the verdict is recorded on
+    the evidence at hand.
     """
     state = await _ensure_state(plane)
     if state.get("legacy_decision"):
@@ -624,7 +629,12 @@ async def ensure_legacy_decision(
         else unverified_embedding_metadata(UNVERIFIED_ORIGIN_LEGACY)
     )
     unproven = basis is LegacyVectorBasis.NO_PRIOR_EVIDENCE
-    if unproven and defer_unproven:
+    early = (
+        not evidence_complete
+        and decision is LegacyVectorDecision.ADOPT
+        and basis is not LegacyVectorBasis.OPERATOR_ADOPT
+    )
+    if (unproven or early) and defer_unproven:
         deferred = normalize_records(
             await plane.execute(
                 "UPDATE type::record($key) SET legacy_deferred_at = "

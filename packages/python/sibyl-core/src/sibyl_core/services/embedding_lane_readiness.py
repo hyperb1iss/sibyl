@@ -3,16 +3,16 @@
 Two questions, answered from the plane's persisted sweep state.
 
 Which stored vectors count as the query's model. Lanes filter by model
-inside the HNSW walk, so a vector without a stamp is invisible to them. On a
-plane whose unstamped vectors were adopted as the configured model, those
-vectors are the query's model, so they count until adoption stamps them.
-Before the plane's verdict is recorded they count only when the evidence
-already says the verdict will be adopt: the full deployment evidence for a
-chunk plane, whose lane holds the content client, and the plane's own
-pre-upgrade stamps naming the configured model for a graph plane. Without
-that, a plain upgrade would hide every vector from before stamping, every
-chunk vector included, until the first sweep pass; with it on ambiguous
-evidence, a same-restart switch would score old vectors against new queries.
+inside the HNSW walk, so a vector without a stamp is invisible to them. Once
+a plane's verdict adopted its unstamped vectors as the configured model,
+they are the query's model, so they count until adoption stamps them (one
+pass, in bulk). Before the verdict is recorded they never count: the verdict
+waits until every organization has published its evidence, and one that has
+not may hold the stamps that show a switch, so counting them early could
+score one model's vectors against another's queries. The price is a
+lexical-only window for those vectors until the first lifecycle pass records
+the verdict. An answer given before the verdict is never cached, so the
+verdict takes effect on the next query.
 
 Whether the lane can pay off at all. Only once the model has changed (the
 plane last finished a pass for another model, its unstamped vectors were
@@ -69,23 +69,14 @@ LANE_SKIPPED_SPARSE = "model_sparse"
 type Provisional = tuple[LegacyVectorDecision, LegacyVectorBasis]
 type ProvisionalVerdict = Callable[[], Awaitable[Provisional]]
 
-# Provisional adoptions that rest on recorded stamps, not on their absence.
-_EVIDENCED_ADOPTION = frozenset(
-    {
-        LegacyVectorBasis.OPERATOR_ADOPT,
-        LegacyVectorBasis.PRIOR_STAMPS_MATCH,
-        LegacyVectorBasis.DEPLOYMENT_STAMPS_MATCH,
-    }
-)
-
 
 @dataclass(frozen=True, slots=True)
 class LaneReadiness:
     run: bool
     reason: str
     in_model_fraction: float | None = None
-    # Unstamped vectors count as the query's model: the plane adopted them,
-    # or its evidence already says it will.
+    # Unstamped vectors count as the query's model: a recorded verdict
+    # adopted them as it (or found none).
     admit_unstamped: bool = False
 
 
@@ -120,9 +111,9 @@ def judge_lane_readiness(
 ) -> LaneReadiness:
     """Decide from a plane's persisted sweep state how its vector lane should read.
 
-    ``provisional`` is the verdict the plane's full evidence points to,
-    consulted only while none is recorded; without it the plane's own
-    pre-upgrade stamps stand in.
+    ``provisional`` is the verdict the plane's own pre-upgrade evidence points
+    to, consulted only while none is recorded and only to skip a lane that
+    evidently switched; without it the graph state row's snapshot stands in.
     """
     complete = state.get("complete_metadata")
     if same_vector_space(complete, query_stamp):
@@ -130,24 +121,23 @@ def judge_lane_readiness(
     recorded = state.get("legacy_decision") or None
     adopted = state.get("legacy_metadata")
     if recorded is not None:
-        decision, evidenced = LegacyVectorDecision(recorded), True
+        decision = LegacyVectorDecision(recorded)
     else:
-        decision, basis = provisional or _own_snapshot_verdict(state, query_stamp, legacy_policy)
-        evidenced = basis in _EVIDENCED_ADOPTION
+        decision, _basis = provisional or _own_snapshot_verdict(state, query_stamp, legacy_policy)
     switched = (
         decision == LegacyVectorDecision.REEMBED
         or isinstance(complete, Mapping)
         or (isinstance(adopted, Mapping) and not same_vector_space(adopted, query_stamp))
     )
     if not switched:
-        if decision == LegacyVectorDecision.ADOPT and evidenced:
+        # Only a recorded verdict lets unstamped vectors in; one still pending
+        # may yet go the other way on evidence not published so far.
+        if recorded == LegacyVectorDecision.ADOPT:
             return LaneReadiness(run=True, reason=LANE_READY_ADOPTING, admit_unstamped=True)
-        # No legacy vectors, or an adoption nothing vouches for yet: the lane
-        # reads stamped vectors only until the verdict is recorded.
         return LaneReadiness(
             run=True,
             reason=LANE_READY_UNKNOWN,
-            admit_unstamped=decision == LegacyVectorDecision.NONE,
+            admit_unstamped=recorded == LegacyVectorDecision.NONE,
         )
     last_run = state.get("last_run")
     if isinstance(last_run, Mapping) and same_vector_space(last_run.get("space"), query_stamp):
@@ -198,7 +188,10 @@ async def vector_lane_readiness(
             provisional=verdict,
             legacy_policy=settings.embedding_legacy_vectors,
         )
-    _cache[key] = (now + _CACHE_SECONDS, readiness)
+        # A verdict can be recorded at any moment before this; an answer given
+        # without one is not kept, so the next query sees the verdict.
+        if state.get("legacy_decision"):
+            _cache[key] = (now + _CACHE_SECONDS, readiness)
     if not readiness.run:
         log.info(
             "vector_lane_skipped",
@@ -218,22 +211,23 @@ async def chunk_vector_lane_readiness(
         return LaneReadiness(run=True, reason=LANE_READY_UNKNOWN)
     from sibyl_core.services import content_client
     from sibyl_core.services.document_embedding_sweep import DOCUMENT_CHUNK_EMBEDDING_PLANE
-    from sibyl_core.services.embedding_evidence import gather_legacy_evidence
+    from sibyl_core.services.embedding_evidence import (
+        classify_partial_stamps,
+        read_chunk_evidence,
+    )
 
     async def execute(query: str, **params: object) -> object:
         return await content_client.select_many(client, query, **params)
 
     async def provisional() -> Provisional:
-        # The deployment-wide evidence the chunk verdict will weigh, read
-        # without recording anything.
-        gathered = await gather_legacy_evidence(
-            organization_id=organization_id,
-            content_execute=execute,
-            content_stamp=dict(query_stamp),
+        # The chunk plane's own pre-upgrade evidence, to skip a lane that
+        # evidently switched; it never lets unstamped chunks in.
+        differs, matches = classify_partial_stamps(
+            await read_chunk_evidence(execute), dict(query_stamp)
         )
         return decide_legacy_vectors(
             legacy_rows=True,
-            evidence=gathered.document_chunks,
+            evidence=LegacyEvidence(differs=differs, matches=matches),
             policy=settings.embedding_legacy_vectors,
         )
 

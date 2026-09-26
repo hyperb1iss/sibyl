@@ -84,8 +84,9 @@ def _receipt(space: dict[str, Any], in_model: int | None, pending: int | None) -
             False,
         ),
         ({"legacy_decision": "none"}, True, LANE_READY_UNKNOWN, True),
-        # Unclassified: the plane's own pre-upgrade stamps stand in.
-        ({"legacy_evidence": {"stamps": [_NEW]}}, True, LANE_READY_ADOPTING, True),
+        # Unclassified: the plane's own pre-upgrade stamps can show a switch,
+        # but only a recorded verdict lets unstamped vectors in.
+        ({"legacy_evidence": {"stamps": [_NEW]}}, True, LANE_READY_UNKNOWN, False),
         ({"legacy_evidence": {"stamps": [_NEW, _OLD]}}, False, LANE_SKIPPED_SWITCHED, False),
         # A receipt for some other model says nothing about this one.
         ({"last_run": _receipt(_OLD, 0, 100)}, True, LANE_READY_UNKNOWN, False),
@@ -112,9 +113,9 @@ def test_a_plane_that_never_switched_never_skips() -> None:
 
     for state in (adopting, matching, silent):
         assert judge_lane_readiness(state, _NEW_STAMP).run, state
-    # Unstamped vectors count wherever the evidence already says adopt.
+    # Unstamped vectors count once the adopt verdict is recorded, not before.
     assert judge_lane_readiness(adopting, _NEW_STAMP).admit_unstamped
-    assert judge_lane_readiness(matching, _NEW_STAMP).admit_unstamped
+    assert not judge_lane_readiness(matching, _NEW_STAMP).admit_unstamped
     assert not judge_lane_readiness(silent, _NEW_STAMP).admit_unstamped
 
 
@@ -125,11 +126,13 @@ def test_unclassified_planes_follow_the_provisional_verdict() -> None:
     matched = (LegacyVectorDecision.ADOPT, LegacyVectorBasis.DEPLOYMENT_STAMPS_MATCH)
     unproven = (LegacyVectorDecision.ADOPT, LegacyVectorBasis.NO_PRIOR_EVIDENCE)
 
-    # Other organizations' records show a switch the plane's own do not.
+    # A switch the plane's evidence shows skips the lane before any verdict.
     assert not judge_lane_readiness({}, _NEW_STAMP, provisional=reembed).run
-    assert judge_lane_readiness({}, _NEW_STAMP, provisional=matched).admit_unstamped
-    unvouched = judge_lane_readiness({}, _NEW_STAMP, provisional=unproven)
-    assert unvouched.run and not unvouched.admit_unstamped
+    # An adoption the evidence points to still waits for the recorded verdict,
+    # which weighs every organization's evidence first.
+    for verdict in (matched, unproven):
+        waiting = judge_lane_readiness({}, _NEW_STAMP, provisional=verdict)
+        assert waiting.run and not waiting.admit_unstamped
     # The operator's policy reaches the plane's own snapshot too.
     assert not judge_lane_readiness({}, _NEW_STAMP, legacy_policy="reembed").run
     # Once a verdict is recorded, the provisional one no longer matters.
@@ -153,7 +156,8 @@ def test_threshold_sits_where_the_measured_lanes_answered_within_half_a_second()
 @pytest.mark.asyncio
 async def test_lane_resumes_once_the_cached_state_expires(monkeypatch: pytest.MonkeyPatch) -> None:
     clock = [1000.0]
-    state: dict[str, Any] = {"complete_metadata": _OLD}
+    # A plane that finished for the old model, whose verdict was recorded then.
+    state: dict[str, Any] = {"legacy_decision": "none", "complete_metadata": _OLD}
     reads: list[str] = []
 
     async def execute(query: str, **params: object) -> list[dict[str, Any]]:
@@ -169,12 +173,38 @@ async def test_lane_resumes_once_the_cached_state_expires(monkeypatch: pytest.Mo
         return verdict.run
 
     assert await ask() is False
-    state = {"complete_metadata": _OLD, "last_run": _receipt(_NEW, 50, 50)}
+    state = {**state, "last_run": _receipt(_NEW, 50, 50)}
     clock[0] += 10
     assert await ask() is False, "a fresh verdict is reused inside the refresh window"
     clock[0] += 25
     assert await ask() is True
     assert len(reads) == 2
+
+
+@pytest.mark.asyncio
+async def test_an_answer_given_before_the_verdict_is_never_cached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state: dict[str, Any] = {"legacy_evidence": {"stamps": [_NEW]}}
+    reads: list[str] = []
+
+    async def execute(query: str, **params: object) -> list[dict[str, Any]]:
+        reads.append(str(params["key"]))
+        return [dict(state)]
+
+    monkeypatch.setattr(readiness_module.time, "monotonic", lambda: 1000.0)
+
+    async def ask() -> Any:
+        return await vector_lane_readiness(
+            plane="graph", organization_id="org-p", execute=execute, query_stamp=_NEW_STAMP
+        )
+
+    assert not (await ask()).admit_unstamped
+    # The verdict lands in another process; the very next query sees it.
+    state = {**state, "legacy_decision": "adopt", "legacy_metadata": _NEW_STAMP}
+    assert (await ask()).admit_unstamped
+    assert (await ask()).admit_unstamped
+    assert len(reads) == 2, "the recorded verdict is cached, the pending one was not"
 
 
 @pytest.mark.asyncio

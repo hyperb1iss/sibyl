@@ -1,24 +1,28 @@
 """Writes and reads that race the upgrade's own bookkeeping, on both engines.
 
 Raw capture repair holds no lease, so two processes configured for different
-models (a rolling deploy) can repair the same capture at once. Every case
-runs on embedded SurrealKV and, when the live server is enabled, on native
-SurrealDB.
+models (a rolling deploy) can repair the same capture at once; a vector lane
+can read a plane before its verdict is recorded. Every case runs on embedded
+SurrealKV and, when the live server is enabled, on native SurrealDB.
 """
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager, suppress
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
 
 from sibyl_core.backends.surreal import SurrealContentClient, bootstrap_content_schema
 from sibyl_core.backends.surreal.content_schema import EMBEDDING_DIM
+from sibyl_core.backends.surreal.schema import EMBEDDING_DIM as GRAPH_EMBEDDING_DIM
 from sibyl_core.embeddings.providers import DeterministicEmbeddingProvider, EmbeddingMetadata
-from tests.embedding_upgrade import previous_release_stamp
-from tests.test_vector_lane_crowding import _EMBEDDED, _drop_namespace, engine
+from sibyl_core.services.graph import EntityManager, SurrealGraphClient, prepare_graph_schema
+from tests.embedding_upgrade import previous_release_stamp, upgrade_graph_to_sweep
+from tests.test_vector_lane_crowding import _EMBEDDED, _drop_namespace, engine, lane_clock
 
-__all__ = ["engine"]
+__all__ = ["engine", "lane_clock"]
 
 _SMALL = "text-embedding-3-small"
 _LARGE = "text-embedding-3-large"
@@ -208,3 +212,152 @@ async def test_a_reembed_never_overwrites_a_vector_another_repair_just_wrote(eng
     assert (result.recovered, result.pending) == (0, 1)
     assert stored["stamp"] == large_stamp
     assert stored["embedding"] == large_vector
+
+
+@pytest.mark.asyncio
+async def test_a_plane_with_a_switch_in_another_organization_never_mixes_models(
+    engine, lane_clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """X: unstamped small vectors and newer large stamps. Y: small stamps. Configured: large.
+
+    X's own snapshot names only the configured model, but Y's names the one
+    X's unstamped vectors came from. No query on X may score those vectors
+    against a large-model query, before, during or after X's verdict, and the
+    verdict is a re-embed whichever organization settles first.
+    """
+    from sibyl_core.services import content_client
+    from sibyl_core.services.embedding_verdicts import settle_legacy_verdicts
+
+    async def no_chunks(_rows: object) -> tuple[list[list[float]], dict[str, object]]:
+        raise AssertionError("no chunk plane is configured here")
+
+    small = _provider(_SMALL, GRAPH_EMBEDDING_DIM, "graph")
+    large = _provider(_LARGE, GRAPH_EMBEDDING_DIM, "graph")
+    query = (await large.embed_texts(["mixed query"], input_kind="query"))[0]
+    content = _content(engine)
+    x = SurrealGraphClient(
+        group_id=str(uuid4()),
+        url=_url(engine, "x"),
+        username=engine["username"],
+        password=engine["password"],
+    )
+    y = SurrealGraphClient(
+        group_id=str(uuid4()),
+        url=_url(engine, "y"),
+        username=engine["username"],
+        password=engine["password"],
+    )
+
+    async def seed(client, rows) -> None:
+        await client.execute_query(
+            "INSERT INTO entity $rows RETURN NONE;",
+            rows=[
+                {
+                    "group_id": client.group_id,
+                    "entity_type": "topic",
+                    "created_at": datetime.now(UTC),
+                    **row,
+                }
+                for row in rows
+            ],
+        )
+
+    legacy = {f"legacy-{index}" for index in range(3)}
+    trace: list[tuple[str, set[str], bool]] = []
+    try:
+        await bootstrap_content_schema(content, reset=True)
+
+        @asynccontextmanager
+        async def session():
+            yield content
+
+        monkeypatch.setattr(content_client, "surreal_content_client", session)
+        for client in (x, y):
+            await prepare_graph_schema(client)
+        await seed(
+            x,
+            [
+                {
+                    "uuid": uuid,
+                    "name": uuid,
+                    "name_embedding": list(query),
+                    "attributes": {},
+                }
+                for uuid in sorted(legacy)
+            ]
+            + [
+                {
+                    "uuid": "stamped-large",
+                    "name": "stamped large",
+                    "name_embedding": _unit(5, GRAPH_EMBEDDING_DIM),
+                    "attributes": {
+                        "embedding_metadata": previous_release_stamp(large.metadata.to_dict())
+                    },
+                }
+            ],
+        )
+        await seed(
+            y,
+            [
+                {
+                    "uuid": "native-small",
+                    "name": "native small",
+                    "name_embedding": _unit(6, GRAPH_EMBEDDING_DIM),
+                    "attributes": {
+                        "embedding_metadata": previous_release_stamp(small.metadata.to_dict())
+                    },
+                }
+            ],
+        )
+        for client in (x, y):
+            await upgrade_graph_to_sweep(client)
+        searcher = EntityManager(x, group_id=x.group_id, embedding_provider=large)
+        organizations = [x.group_id, y.group_id]
+
+        async def look(step: str) -> None:
+            from sibyl_core.services.embedding_lane_readiness import vector_lane_readiness
+
+            readiness = await vector_lane_readiness(
+                plane="graph",
+                organization_id=x.group_id,
+                execute=x.execute_query,
+                query_stamp=large.metadata.to_dict(),
+            )
+            hits = await searcher._vector_search(query="mixed query", entity_types=None, limit=5)
+            trace.append((step, {entity.id for entity, _ in hits}, readiness.admit_unstamped))
+            lane_clock()
+
+        async def settle(client):
+            return await settle_legacy_verdicts(
+                client.group_id,
+                graph_client=client,
+                graph_provider=large,
+                chunk_stamp=None,
+                embed_chunks=no_chunks,
+                client=content,
+                deployment_organizations=organizations,
+            )
+
+        await look("before any verdict")
+        first = await settle(x)
+        await look("x waiting for y")
+        await settle(y)
+        second = await settle(x)
+        await look("after x's verdict")
+    finally:
+        await content.close()
+        for client in (x, y):
+            await client.close()
+        with suppress(Exception):
+            await _drop_namespace(engine, content.namespace)
+        for client in (x, y):
+            with suppress(Exception):
+                await _drop_namespace(engine, client.namespace)
+
+    assert first.deferred
+    assert isinstance(second.graph, dict)
+    assert second.graph["legacy_decision"] == "reembed"
+    assert second.graph["legacy_basis"] == "deployment_stamps_differ"
+    for step, hits, admitted in trace:
+        assert not hits & legacy, step
+        assert not admitted, step

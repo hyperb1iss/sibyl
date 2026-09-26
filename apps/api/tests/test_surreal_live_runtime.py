@@ -3077,3 +3077,95 @@ async def test_live_a_saved_crawler_setting_decides_what_embedded_the_chunks(
     for chunk in stored:
         assert chunk["embedding_metadata"] == _TARGET_CHUNK_STAMP
         assert chunk["embedding"][:2] == [0.0, 1.0]
+
+
+@pytest.mark.asyncio
+async def test_live_an_organization_settled_first_still_sees_another_ones_switch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Lifecycle order puts X first. X's own stamps name the configured model; Y's name the old one.
+
+    X's unstamped vectors came from the old model. Decided on X's evidence
+    alone they would be adopted; the verdict waits for Y within the same
+    pass and re-embeds them.
+    """
+    from sibyl.jobs import lifecycle_repair
+
+    target = _SweepTargetProvider(GRAPH_EMBEDDING_DIM, model="live-order-target")
+    namespace = f"sweep_order_live_{uuid4().hex}"
+    content = _live_content_client(namespace)
+    x, y = str(uuid4()), str(uuid4())
+    clients = {x: _live_graph_client(x), y: _live_graph_client(y)}
+    try:
+        await bootstrap_content_schema(content, reset=True)
+        for client in clients.values():
+            await prepare_graph_schema(client)
+        await clients[x].execute_query(
+            "INSERT INTO entity $rows RETURN NONE;",
+            rows=[
+                {
+                    "uuid": f"legacy-{index}",
+                    "group_id": x,
+                    "name": f"Legacy {index}",
+                    "entity_type": "topic",
+                    "name_embedding": list(_OLD_GRAPH_VECTOR),
+                    "attributes": {},
+                }
+                for index in range(3)
+            ]
+            + [
+                {
+                    "uuid": "stamped-target",
+                    "group_id": x,
+                    "name": "Stamped",
+                    "entity_type": "topic",
+                    "name_embedding": [0.0, 1.0, *([0.0] * (GRAPH_EMBEDDING_DIM - 2))],
+                    "attributes": {
+                        "embedding_metadata": previous_release_stamp(target.metadata.to_dict())
+                    },
+                }
+            ],
+        )
+        await clients[y].execute_query(
+            "INSERT INTO entity $rows RETURN NONE;",
+            rows=[
+                {
+                    "uuid": "native-old",
+                    "group_id": y,
+                    "name": "Native",
+                    "entity_type": "topic",
+                    "name_embedding": list(_OLD_GRAPH_VECTOR),
+                    "attributes": {"embedding_metadata": _previous_graph_stamp()},
+                }
+            ],
+        )
+        for client in clients.values():
+            await _rewind_graph_schema(client)
+        _run_lifecycle_against(
+            monkeypatch,
+            content=content,
+            clients=clients,
+            graph_target=target,
+            chunk_stamp=_TARGET_CHUNK_STAMP,
+            embedded_chunks=[],
+        )
+        first = await lifecycle_repair.repair_lifecycle_all_orgs({})
+        graph_state, _chunks = await _plane_states(content, clients[x])
+        await lifecycle_repair.repair_lifecycle_all_orgs({})
+        stamps = await _live_vector_stamps(clients[x], "entity")
+    finally:
+        await content.close()
+        with suppress(Exception):
+            await _drop_surreal_namespace(namespace)
+        for client in clients.values():
+            await client.close()
+            with suppress(Exception):
+                await _drop_surreal_namespace(client.namespace)
+
+    assert first["failed_organizations"] == 0, first
+    assert graph_state["legacy_decision"] == "reembed"
+    assert graph_state["legacy_basis"] == "deployment_stamps_differ"
+    stamp = target.metadata.to_dict()
+    for row_id in (f"legacy-{index}" for index in range(3)):
+        assert stamps[row_id]["stamp"] == stamp, row_id
+        assert stamps[row_id]["vector"] != _OLD_GRAPH_VECTOR, row_id
