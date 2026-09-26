@@ -17,24 +17,51 @@ on:
           - minor
           - major
       dry_run:
-        description: "Dry run (skip tag, publish, and release)"
+        description: "Dry run (prove every gate; push nothing, tag nothing, publish nothing)"
         required: false
         type: boolean
         default: false
       nightly_run_id:
-        description: "Nightly Regression run ID (auto-resolved from the base SHA if empty)"
+        description: "Nightly Regression run ID to cite (empty: find or dispatch one)"
         required: false
         default: ""
 
+# Each job asks for what it uses. Only the release job can write contents, and
+# it runs only after every gate below has passed.
 permissions:
-  actions: write
-  contents: write
+  contents: read
 
+# Real cuts share one group, so two can never tag at the same time. A dry run
+# changes no remote release state, so each one gets a group of its own. In the
+# shared group a dry run would queue behind a real cut, and as the newest
+# pending run it would cancel a real cut that was itself still pending.
 concurrency:
-  group: release
+  group: ${{ inputs.dry_run && format('release-dry-run-{0}', github.run_id) || 'release' }}
   cancel-in-progress: false
 
 jobs:
+  # A real cut pushes a version commit and a tag to the ref it runs on, so it
+  # runs only on main. A dry run may rehearse any branch.
+  preflight:
+    name: "△ Preflight"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: "△ Refuse a real cut outside main"
+        if: ${{ !inputs.dry_run && github.ref != 'refs/heads/main' }}
+        env:
+          RELEASE_REF: ${{ github.ref }}
+        run: |
+          echo "::error::A real release cuts from main, and this run was dispatched on $RELEASE_REF."
+          echo "::error::Dispatch again with --ref main, or set dry_run=true to rehearse this ref."
+          exit 1
+
+      - name: "△ Record the candidate"
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: echo "Candidate $GITHUB_SHA on $GITHUB_REF (dry_run=$DRY_RUN)"
+
   # =========================================================================
   # Image CVE gate: prove the shipped images are clean before a release exists
   #
@@ -52,6 +79,7 @@ jobs:
   # =========================================================================
   image-cve-gate:
     name: "◆ Image CVE gate"
+    needs: preflight
     uses: ./.github/workflows/image-cve-gate.yml
     permissions:
       contents: read
@@ -63,16 +91,233 @@ jobs:
       images: '["api", "web"]'
       platforms: '["amd64", "arm64"]'
 
-  release:
-    name: Release
-    needs: image-cve-gate
+  # The browser and API end-to-end suites need a production-shaped fixture:
+  # SurrealDB, the API, the job worker, the seeded baseline corpus and a built
+  # frontend. CI runs this fixture only when a change reaches runtime, CI or
+  # release paths, and CI on main is cancelled whenever a newer push lands, so
+  # CI on the candidate commit may never have run it. The release runs it on
+  # the candidate itself.
+  #
+  # The steps mirror ci.yml's E2E job, and test_release_workflow pins this copy
+  # to that one so the two cannot drift. Two deliberate differences: no moon
+  # output cache is restored, and the suites pass --force, so a pass recorded
+  # on another commit can never stand in for this one.
+  e2e-gate:
+    name: "◇ E2E gate"
+    needs: preflight
     runs-on: ubuntu-latest
-    timeout-minutes: 75
-
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      COMPOSE_PROJECT_NAME: sibyl-ci
+      SIBYL_ENVIRONMENT: production
+      SIBYL_JWT_SECRET: not-a-real-secret-not-a-real-secret
+      SIBYL_STORE: surreal
+      SIBYL_AUTH_STORE: surreal
+      SIBYL_LOCAL_AUTH_ENABLED: "true"
+      SIBYL_COORDINATION_BACKEND: local
+      SIBYL_SURREAL_URL: ws://localhost:8000/rpc
+      SIBYL_SURREAL_USERNAME: sibyl_ci
+      SIBYL_SURREAL_PASSWORD: sibyl_ci_password
+      SIBYL_OPENAI_API_KEY: sk-test-key
+      SIBYL_ANTHROPIC_API_KEY: sk-ant-test-key
+      SIBYL_MOCK_LLM: true
+      # The API writes transactional mail here and the auth replay reads the
+      # password-reset link back out of it.
+      SIBYL_EMAIL_OUTBOX_PATH: /tmp/sibyl-e2e-email-outbox.jsonl
     steps:
       - name: "◆ Checkout"
         uses: actions/checkout@v7
         with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Start SurrealDB
+        uses: ./.github/actions/start-surrealdb
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxml2-dev libxslt-dev
+
+      - name: Setup moonrepo toolchain
+        uses: moonrepo/setup-toolchain@v0.6.4
+        with:
+          proto-version: "0.61.1"
+          auto-install: true
+          auto-setup: true
+          cache-version: release-rc-v1
+
+      - name: Verify toolchain
+        run: |
+          chmod +x "$HOME/.proto/shims"/* 2>/dev/null || true
+          chmod +x "$HOME/.proto/bin"/* 2>/dev/null || true
+          moon --version
+          proto --version
+          uv --version
+
+      - name: Cache pnpm store
+        uses: actions/cache@v6
+        with:
+          path: ~/.local/share/pnpm/store
+          key: pnpm-release-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-release-${{ runner.os }}-
+
+      - name: Cache uv
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/uv
+          key: uv-release-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            uv-release-${{ runner.os }}-
+
+      - name: Install Node dependencies
+        run: cd apps/web && pnpm install --frozen-lockfile
+
+      - name: Build frontend for E2E
+        run: |
+          moon run web:build
+          test -f apps/web/.next/BUILD_ID
+
+      - name: Start backend server
+        run: |
+          cd apps/api
+          uv run sibyld serve > /tmp/sibyld.log 2>&1 &
+          echo "Waiting for backend to start..."
+          for i in {1..60}; do
+            if curl -fsS http://localhost:3334/api/health > /dev/null; then
+              echo "Backend is ready!"
+              sleep 2
+              break
+            fi
+            echo "Attempt $i: Backend not ready yet..."
+            sleep 1
+          done
+          curl -fsS http://localhost:3334/api/health | head -c 200
+
+      - name: Start background job worker
+        run: |
+          cd apps/api
+          uv run sibyld worker > /tmp/sibyl-worker.log 2>&1 &
+          echo "Background job worker started"
+          sleep 2
+
+      - name: Seed deterministic baseline fixture
+        run: moon run baseline-seed
+
+      - name: Replay committed baseline corpus
+        run: moon run baseline-replay-runtime
+
+      - name: Start frontend server
+        run: |
+          cd apps/web
+          pnpm start > /tmp/sibyl-web.log 2>&1 &
+          web_pid=$!
+          echo "Waiting for frontend to start..."
+          for i in {1..60}; do
+            if curl -fsS http://localhost:3337 > /dev/null; then
+              echo "Frontend is ready!"
+              break
+            fi
+            if ! kill -0 "$web_pid" 2>/dev/null; then
+              echo "Frontend exited before becoming ready."
+              cat /tmp/sibyl-web.log
+              exit 1
+            fi
+            echo "Attempt $i: Frontend not ready yet..."
+            sleep 1
+          done
+          curl -fsS http://localhost:3337 > /dev/null
+
+      - name: Run e2e tests
+        env:
+          SIBYL_E2E_CLI_COMMAND: uv run --project ../cli sibyl
+          SIBYL_E2E_EMAIL: baseline-corpus@sibyl.dev
+          SIBYL_E2E_PASSWORD: baseline-corpus-password-secure-123!
+        run: |
+          moon run e2e:test --force -- --ignore=tests/browser
+          moon run e2e:test-browser --force
+
+      - name: Collect diagnostics on failure
+        if: failure()
+        run: |
+          echo "=== Backend server logs ==="
+          tail -n 200 /tmp/sibyld.log || true
+          echo ""
+          echo "=== Worker logs ==="
+          tail -n 200 /tmp/sibyl-worker.log || true
+          echo ""
+          echo "=== Frontend logs ==="
+          tail -n 200 /tmp/sibyl-web.log || true
+          echo ""
+          echo "=== SurrealDB logs ==="
+          docker compose --env-file /dev/null logs surrealdb || true
+
+  # Nightly Regression owns the live-graph, baseline-parity and restore gates.
+  # This job finds a run on the candidate commit whose every job passed, and
+  # dispatches one and waits for it when none exists. The daily schedule skips
+  # Restore To Scratch, so only a dispatched run or the Monday schedule counts;
+  # tools/release/nightly_evidence.py holds that rule and its tests. An
+  # explicit nightly_run_id is validated instead of searched for.
+  #
+  # The job timeout outlasts the script's own 50 minute deadline so a slow
+  # nightly fails with a message that names the run rather than a bare
+  # cancellation. Nightly's longest job has a 45 minute timeout.
+  nightly-evidence:
+    name: "◇ Nightly Regression evidence"
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      actions: write
+      contents: read
+    outputs:
+      run_id: ${{ steps.nightly.outputs.run_id }}
+      url: ${{ steps.nightly.outputs.url }}
+      event: ${{ steps.nightly.outputs.event }}
+      source: ${{ steps.nightly.outputs.source }}
+    steps:
+      - name: "◆ Checkout"
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+
+      - name: "◇ Find or dispatch same-SHA Nightly Regression"
+        id: nightly
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NIGHTLY_RUN_ID: ${{ inputs.nightly_run_id }}
+        run: |
+          python3 -m tools.release.nightly_evidence resolve \
+            --repo "$GITHUB_REPOSITORY" \
+            --sha "$GITHUB_SHA" \
+            --ref "$GITHUB_REF" \
+            --run-id "$NIGHTLY_RUN_ID" \
+            --timeout-minutes 50
+
+  release:
+    name: Release
+    needs: [image-cve-gate, e2e-gate, nightly-evidence]
+    runs-on: ubuntu-latest
+    # The forced RC bundle took 17 to 23 minutes across the 1.4.x cuts and the
+    # release-only gates add about two. Sixty minutes leaves room for the suite
+    # to grow without letting a hung test hold the release group for long.
+    timeout-minutes: 60
+    permissions:
+      # Triggers publish.yml and reads the cited Nightly Regression run.
+      actions: write
+      # Pushes the version commit and tag and creates the release.
+      contents: write
+
+    steps:
+      # Pinned to the dispatched commit, the one the gate jobs checked out and
+      # the one the cited nightly ran on, even if the branch has moved since.
+      - name: "◆ Checkout"
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -180,7 +425,14 @@ jobs:
 
       - name: "△ Record validated base SHA"
         id: base
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        run: |
+          set -euo pipefail
+          base_sha="$(git rev-parse HEAD)"
+          if [[ "$base_sha" != "$GITHUB_SHA" ]]; then
+            echo "::error::Checked out $base_sha, but the gates ran on $GITHUB_SHA."
+            exit 1
+          fi
+          echo "sha=$base_sha" >> "$GITHUB_OUTPUT"
 
       # The workflow bumps the version itself rather than demanding a
       # hand-made commit. The same-SHA safety property survives because the
@@ -315,85 +567,67 @@ jobs:
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "short_sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
+      # The Helm contract tests inside :check skip themselves when no helm
+      # binary exists. Installing the pinned version makes them run on every
+      # cut instead of depending on what the runner image happens to ship.
+      - name: "◇ Setup Helm"
+        uses: azure/setup-helm@v5.0.1
+        with:
+          version: v3.20.2
+
+      # Every task is forced. The moon output cache above is restored across
+      # runs, and the 1.4.0 and 1.4.1 cuts replayed the dry run's :check from
+      # it in two seconds, so a cut proved nothing on its own. A gate whose
+      # declared inputs miss a real dependency would replay a stale pass the
+      # same way on a new candidate.
+      #
+      # :check holds the trust gates, every project's lint, typecheck and
+      # tests, and the Helm contracts. The two gates after it run in no CI job
+      # at all. doc-claim-gate rewrites its tracked receipt, so it runs after
+      # the version commit exists and cannot leak into it.
       - name: "◇ Run RC gate bundle"
         id: rc_check
-        run: moon run :check
+        run: |
+          set -euo pipefail
+          moon run :check --force
+          moon run bench-longmemeval-v2-release-ci-test --force
+          moon run doc-claim-gate --force
+          mkdir -p .moon/cache/release
+          cp benchmarks/results/ai-memory/doc-claim-receipt.json \
+            .moon/cache/release/doc-claim-receipt.json
 
+      # The evidence job already chose this run. Checking it again here, as
+      # the last gate before the tag, pins the cited run to the base SHA the
+      # workflow actually validated.
       - name: "◇ Validate same-SHA Nightly Regression"
-        if: ${{ !inputs.dry_run || inputs.nightly_run_id != '' }}
         id: nightly
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NIGHTLY_RUN_ID: ${{ inputs.nightly_run_id }}
+          NIGHTLY_RUN_ID: ${{ needs.nightly-evidence.outputs.run_id }}
           # Validated against the base SHA, not the tag. When the workflow
-          # bumps the version it adds one commit that the step above proved
+          # bumps the version it adds one commit that the steps above proved
           # touches only generated pins, so the validated code is unchanged.
           CANDIDATE_SHA: ${{ steps.base.outputs.sha }}
         run: |
-          set -euo pipefail
-
-          if [[ -z "$NIGHTLY_RUN_ID" ]]; then
-            NIGHTLY_RUN_ID="$(
-              gh run list --repo "$GITHUB_REPOSITORY" \
-                --workflow "Nightly Regression" --status success \
-                --commit "$CANDIDATE_SHA" --limit 1 --json databaseId \
-                --jq '.[0].databaseId // empty'
-            )"
-          fi
-
-          if [[ -z "$NIGHTLY_RUN_ID" ]]; then
-            echo "::error::No successful Nightly Regression run found for $CANDIDATE_SHA."
-            echo "::error::Dispatch Nightly Regression on that SHA, or pass nightly_run_id."
-            exit 1
-          fi
-          echo "Using Nightly Regression run $NIGHTLY_RUN_ID"
-          echo "run_id=$NIGHTLY_RUN_ID" >> "$GITHUB_OUTPUT"
-
-          nightly_json="$(
-            gh run view "$NIGHTLY_RUN_ID" \
-              --repo "$GITHUB_REPOSITORY" \
-              --json conclusion,headSha,status,url,workflowName
-          )"
-          export NIGHTLY_JSON="$nightly_json"
-
-          python - <<'PY'
-          import json
-          import os
-          import sys
-
-          run = json.loads(os.environ["NIGHTLY_JSON"])
-          expected_sha = os.environ["CANDIDATE_SHA"]
-          failures: list[str] = []
-
-          if run.get("workflowName") != "Nightly Regression":
-              failures.append("run is not a Nightly Regression workflow")
-          if run.get("status") != "completed":
-              failures.append(f"run is not completed: {run.get('status')}")
-          if run.get("conclusion") != "success":
-              failures.append(f"run conclusion is not success: {run.get('conclusion')}")
-          if run.get("headSha") != expected_sha:
-              failures.append(
-                  f"run SHA {run.get('headSha')} does not match candidate {expected_sha}"
-              )
-
-          if failures:
-              for failure in failures:
-                  print(f"::error::{failure}")
-              sys.exit(1)
-
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              print(f"url={run['url']}", file=output)
-          PY
+          python3 -m tools.release.nightly_evidence verify \
+            --repo "$GITHUB_REPOSITORY" \
+            --sha "$CANDIDATE_SHA" \
+            --run-id "$NIGHTLY_RUN_ID"
 
       - name: "◇ Record RC gate receipt"
         if: always()
         env:
           DRY_RUN: ${{ inputs.dry_run }}
           VERSION: ${{ steps.version.outputs.version }}
+          BASE_SHA: ${{ steps.base.outputs.sha }}
           CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
+          IMAGE_CVE_GATE_RESULT: ${{ needs.image-cve-gate.result }}
+          E2E_GATE_RESULT: ${{ needs.e2e-gate.result }}
           RC_CHECK_CONCLUSION: ${{ steps.rc_check.conclusion }}
           NIGHTLY_RUN_ID: ${{ steps.nightly.outputs.run_id }}
           NIGHTLY_URL: ${{ steps.nightly.outputs.url }}
+          NIGHTLY_EVENT: ${{ steps.nightly.outputs.event }}
+          NIGHTLY_SOURCE: ${{ needs.nightly-evidence.outputs.source }}
           NIGHTLY_CONCLUSION: ${{ steps.nightly.conclusion }}
         run: |
           mkdir -p .moon/cache/release
@@ -404,12 +638,25 @@ jobs:
 
           receipt = {
               "version": os.environ["VERSION"],
+              "base_sha": os.environ["BASE_SHA"],
               "candidate_sha": os.environ["CANDIDATE_SHA"],
               "dry_run": os.environ["DRY_RUN"].lower() == "true",
-              "rc_gate_command": "moon run :check",
+              "image_cve_gate_result": os.environ["IMAGE_CVE_GATE_RESULT"],
+              "e2e_gate_commands": [
+                  "moon run e2e:test --force -- --ignore=tests/browser",
+                  "moon run e2e:test-browser --force",
+              ],
+              "e2e_gate_result": os.environ["E2E_GATE_RESULT"],
+              "rc_gate_commands": [
+                  "moon run :check --force",
+                  "moon run bench-longmemeval-v2-release-ci-test --force",
+                  "moon run doc-claim-gate --force",
+              ],
               "rc_gate_conclusion": os.environ["RC_CHECK_CONCLUSION"],
               "nightly_run_id": os.environ["NIGHTLY_RUN_ID"],
               "nightly_url": os.environ["NIGHTLY_URL"],
+              "nightly_event": os.environ["NIGHTLY_EVENT"],
+              "nightly_source": os.environ["NIGHTLY_SOURCE"],
               "nightly_conclusion": os.environ["NIGHTLY_CONCLUSION"],
           }
           Path(".moon/cache/release/rc-gate-receipt.json").write_text(
@@ -471,12 +718,14 @@ jobs:
           {
             echo "## Release ${{ inputs.dry_run && '[DRY RUN] ' || '' }}v${{ steps.version.outputs.version }}"
             echo ""
+            echo "- Base SHA: \`${{ steps.base.outputs.sha }}\`"
             echo "- Candidate SHA: \`${{ steps.candidate.outputs.sha }}\`"
+            echo "- Version: \`${{ steps.version.outputs.current }}\` → \`${{ steps.version.outputs.version }}\`"
             echo "- Previous release: \`${{ steps.version.outputs.previous_tag }}\`"
+            echo "- Image CVE gate: \`${{ needs.image-cve-gate.result }}\`"
+            echo "- E2E gate: \`${{ needs.e2e-gate.result }}\`"
             echo "- RC gate: \`${{ steps.rc_check.conclusion }}\`"
-            if [[ -n "${{ steps.nightly.outputs.url }}" ]]; then
-              echo "- Nightly Regression: ${{ steps.nightly.outputs.url }}"
-            fi
+            echo "- Nightly Regression: ${{ steps.nightly.outputs.url }} (${{ steps.nightly.outputs.event }}, ${{ needs.nightly-evidence.outputs.source }})"
             echo ""
             if [[ "${{ inputs.dry_run }}" == "true" ]]; then
               echo "No version commit, tag, release, or publish was created."
