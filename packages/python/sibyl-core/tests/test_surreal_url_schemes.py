@@ -8,6 +8,11 @@ Scheme checks used to live in half a dozen lists that disagreed:
 
 Every check now goes through sibyl_core.backends.surreal.url_schemes, and
 this table pins what each scheme gets.
+
+CoreConfig itself never refuses a URL: the client CLI imports it, and a
+server URL it never opens must not break `sibyl --help`. The verdicts here
+come from surreal_url_problem(), which core code checks where it opens a
+store; the server's Settings refuse the same URLs at startup.
 """
 
 from __future__ import annotations
@@ -54,16 +59,13 @@ SCHEMES = [
 
 
 def _production_verdict(url: str, *, opt_in: bool) -> str:
-    try:
-        CoreConfig(
-            environment="production",
-            surreal_url=url,
-            surreal_data_dir="",
-            allow_embedded_single_writer=opt_in,
-        )
-    except ValueError as exc:
-        return str(exc)
-    return _OK
+    config = CoreConfig(
+        environment="production",
+        surreal_url=url,
+        surreal_data_dir="",
+        allow_embedded_single_writer=opt_in,
+    )
+    return config.surreal_url_problem() or _OK
 
 
 @pytest.mark.parametrize("scheme", SCHEMES, ids=lambda scheme: scheme.url.split("://")[0])
@@ -94,17 +96,41 @@ def test_every_scheme_gets_one_consistent_treatment(scheme: Scheme) -> None:
     [
         ("rocksdb:///var/sibyl", "storage argument for `surreal start`"),
         ("tikv://pd:2379", "tikv:// is not supported"),
-        ("localhost:8000", "is not supported"),
+        ("localhost:8000", "has no scheme"),
+        ("surrealdb://surreal:8000", "surrealdb:// is not supported"),
     ],
 )
-def test_urls_the_sdk_cannot_open_fail_at_configuration(url: str, hint: str) -> None:
+def test_urls_the_sdk_cannot_open_are_refused_before_a_store_opens(
+    monkeypatch, url: str, hint: str
+) -> None:
     assert not url_schemes.is_embedded_surreal_url(url)
     reason = url_schemes.unsupported_surreal_url_reason(url)
     assert reason is not None
     assert hint in reason
     for environment in ("development", "production"):
-        with pytest.raises(ValueError, match="not"):
-            CoreConfig(environment=environment, surreal_url=url, surreal_data_dir="")
+        # Loading the config never fails on the URL...
+        config = CoreConfig(environment=environment, surreal_url=url, surreal_data_dir="")
+        # ...but nothing opens a store on it.
+        with pytest.raises(ValueError, match=hint.split("`")[0].strip()):
+            config.require_serviceable_surreal_url()
+
+    from sibyl_core.config import core_config
+    from sibyl_core.services import content_client, graph_client
+
+    monkeypatch.setattr(core_config, "surreal_url", url)
+    monkeypatch.setattr(core_config, "surreal_data_dir", "")
+    with pytest.raises(ValueError, match="Supported: "):
+        graph_client._new_graph_client("org_refused")
+    with pytest.raises(ValueError, match="Supported: "):
+        content_client.build_surreal_content_client()
+
+
+def test_scheme_errors_never_echo_the_url_beyond_its_scheme() -> None:
+    # A URL can carry credentials; only its scheme may reach a log line.
+    for url in ("tikv://admin:hunter2@pd:2379", "admin:hunter2@surreal:8000"):
+        reason = url_schemes.unsupported_surreal_url_reason(url)
+        assert reason is not None
+        assert "hunter2" not in reason
 
 
 def test_scheme_sets_match_the_sdk(tmp_path) -> None:

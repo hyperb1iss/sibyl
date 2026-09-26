@@ -400,7 +400,33 @@ def test_api_settings_treat_every_surreal_scheme_consistently(
                 Settings(**kwargs)
 
 
-@pytest.mark.parametrize("url", ["rocksdb:///var/lib/sibyl", "tikv://pd:2379"])
+@pytest.mark.parametrize(
+    "url",
+    ["rocksdb:///var/lib/sibyl", "tikv://pd:2379", "surrealdb://surreal:8000", "surreal:8000"],
+)
 def test_api_settings_refuse_urls_the_sdk_cannot_open(url: str) -> None:
-    with pytest.raises(ValueError, match="not"):
+    with pytest.raises(ValueError, match="Supported: "):
         Settings(_env_file=None, environment="development", surreal_url=url)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "shown"),
+    [
+        ({"surreal_url": "rocksdb:///data/sibyl.db"}, "storage argument for `surreal start`"),
+        ({"environment": "production", "surreal_url": "mem://"}, _MEMORY_BAN),
+    ],
+)
+def test_settings_errors_name_the_problem_but_never_a_secret(
+    overrides: dict[str, str], shown: str
+) -> None:
+    secret = "sk-live-api-0123456789abcdefsecret"
+    for secret_field in ("openai_api_key", "surreal_password", "jwt_secret"):
+        # pydantic abbreviates the input it prints to its head and tail, so
+        # the secret goes last, where an unhidden error would show it.
+        with pytest.raises(ValueError) as caught:
+            Settings(_env_file=None, **overrides, **{secret_field: secret})
+
+        message = str(caught.value)
+        assert secret not in message, secret_field
+        assert "input_value" not in message
+        assert shown in message

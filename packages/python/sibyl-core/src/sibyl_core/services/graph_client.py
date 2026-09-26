@@ -69,7 +69,7 @@ _background_lock = asyncio.Lock()
 def _new_graph_client(group_id: str) -> SurrealGraphClient:
     return SurrealGraphClient(
         group_id=group_id,
-        url=settings.resolved_surreal_url,
+        url=settings.require_serviceable_surreal_url(),
         username=settings.surreal_username,
         password=settings.surreal_password.get_secret_value(),
         token=settings.surreal_token.get_secret_value(),

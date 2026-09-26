@@ -235,6 +235,9 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="SIBYL_",
         extra="ignore",
+        # A validation error would otherwise print the whole settings input,
+        # API keys and database passwords included.
+        hide_input_in_errors=True,
     )
 
     # Server configuration

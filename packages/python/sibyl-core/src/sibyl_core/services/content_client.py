@@ -54,7 +54,7 @@ _UPSERT_RECORD = {
 
 def build_surreal_content_client() -> SurrealContentClient:
     return SurrealContentClient(
-        url=settings.resolved_surreal_url,
+        url=settings.require_serviceable_surreal_url(),
         username=settings.surreal_username,
         password=settings.surreal_password.get_secret_value(),
         token=settings.surreal_token.get_secret_value(),

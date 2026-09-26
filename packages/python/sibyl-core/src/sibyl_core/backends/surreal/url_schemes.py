@@ -60,8 +60,10 @@ def unsupported_surreal_url_reason(url: str) -> str | None:
             "Run a SurrealDB server on RocksDB and point SIBYL_SURREAL_URL at its "
             f"ws:// endpoint, or use surrealkv:// for an embedded store. Supported: {supported}"
         )
-    shown = f"{scheme}://" if scheme else repr(url)
-    return f"SurrealDB URL scheme {shown} is not supported. Supported: {supported}"
+    # Name only the scheme: the rest of a URL can carry credentials.
+    if not scheme:
+        return f"SurrealDB URL has no scheme. Supported: {supported}"
+    return f"SurrealDB URL scheme {scheme}:// is not supported. Supported: {supported}"
 
 
 def production_surreal_url_problem(url: str, *, allow_embedded_single_writer: bool) -> str | None:

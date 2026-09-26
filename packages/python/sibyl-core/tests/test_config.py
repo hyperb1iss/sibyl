@@ -49,24 +49,29 @@ def test_core_config_ignores_project_dotenv(tmp_path, monkeypatch) -> None:
 
 
 class TestCoreConfigEmbeddedStoreGuard:
-    """CoreConfig must refuse embedded stores in production like apps/api does."""
+    """Core refuses embedded stores in production like apps/api does.
+
+    The refusal happens where a store is opened, not when the config loads:
+    the client CLI imports CoreConfig, and a server URL it never opens must
+    not stop it from starting.
+    """
 
     def test_in_memory_forbidden_in_production(self) -> None:
+        config = CoreConfig(_env_file=None, environment="production", surreal_url="")
+
         with pytest.raises(ValueError, match="In-memory SurrealDB is forbidden in production"):
-            CoreConfig(
-                _env_file=None,
-                environment="production",
-                surreal_url="",
-            )
+            config.require_serviceable_surreal_url()
 
     def test_surrealkv_forbidden_in_production_without_single_writer_opt_in(self) -> None:
+        config = CoreConfig(
+            _env_file=None,
+            environment="production",
+            surreal_url="",
+            surreal_data_dir="/var/lib/sibyl/surreal",
+        )
+
         with pytest.raises(ValueError, match="Embedded SurrealDB requires explicit single-writer"):
-            CoreConfig(
-                _env_file=None,
-                environment="production",
-                surreal_url="",
-                surreal_data_dir="/var/lib/sibyl/surreal",
-            )
+            config.require_serviceable_surreal_url()
 
     def test_surrealkv_allowed_in_production_with_single_writer_opt_in(self) -> None:
         config = CoreConfig(
@@ -77,7 +82,7 @@ class TestCoreConfigEmbeddedStoreGuard:
             allow_embedded_single_writer=True,
         )
 
-        assert config.resolved_surreal_url == "surrealkv:///var/lib/sibyl/surreal"
+        assert config.require_serviceable_surreal_url() == "surrealkv:///var/lib/sibyl/surreal"
 
     def test_remote_surreal_allowed_in_production(self) -> None:
         config = CoreConfig(
@@ -86,7 +91,7 @@ class TestCoreConfigEmbeddedStoreGuard:
             surreal_url="ws://surrealdb:8000/rpc",
         )
 
-        assert config.resolved_surreal_url == "ws://surrealdb:8000/rpc"
+        assert config.require_serviceable_surreal_url() == "ws://surrealdb:8000/rpc"
 
     def test_embedded_allowed_outside_production(self) -> None:
         config = CoreConfig(
@@ -95,7 +100,36 @@ class TestCoreConfigEmbeddedStoreGuard:
             surreal_url="",
         )
 
-        assert config.resolved_surreal_url == "memory://"
+        assert config.require_serviceable_surreal_url() == "memory://"
+
+    def test_url_and_data_dir_together_are_refused_where_the_store_opens(self) -> None:
+        config = CoreConfig(
+            _env_file=None,
+            surreal_url="ws://surrealdb:8000/rpc",
+            surreal_data_dir="/var/lib/sibyl/surreal",
+        )
+
+        with pytest.raises(ValueError, match="Configure only one of surreal_url"):
+            config.require_serviceable_surreal_url()
+
+
+def test_validation_errors_never_print_a_secret() -> None:
+    secret = "sk-live-core-0123456789abcdefsecret"
+    with pytest.raises(ValueError) as caught:
+        # pydantic abbreviates the input it prints to its head and tail, so
+        # the secret goes last, where an unhidden error would show it.
+        CoreConfig(
+            _env_file=None,
+            embedding_provider="bedrock",
+            embedding_dimensions=777,
+            openai_api_key=secret,
+        )
+
+    message = str(caught.value)
+    assert secret not in message
+    assert "input_value" not in message
+    # The operator still sees what was wrong and how to fix it.
+    assert "SIBYL_EMBEDDING_DIMENSIONS=777" in message
 
 
 def test_surreal_client_pool_size_uses_default_for_each_client_kind() -> None:
