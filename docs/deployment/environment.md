@@ -445,6 +445,10 @@ vector whose recorded model differs from the configured one. It works in time-bu
 resume where they stopped, including after a restart, and `sibyl debug status` shows each plane's
 progress. Until a row is re-embedded, vector search skips it and lexical search still finds it.
 
+A vector is replaced only when a field that shapes it changes: the provider, the model, the
+dimensions, the embedded text format, or whether the provider embeds documents and queries
+differently. Bookkeeping fields such as the embedding cache namespace never trigger a re-embed.
+
 Change embedding settings through the environment and restart every API and worker process. A change
 saved in the settings UI only reaches the process that served the request, and the sweep, which runs
 in the worker, re-embeds toward the worker's configuration.
@@ -454,22 +458,57 @@ regenerates the cleared vectors. The document chunk vector field is sized once f
 `SIBYL_EMBEDDING_DIMENSIONS`, so a chunk dimension change reports `skipped_dimension_mismatch`
 instead of re-embedding until that field is rebuilt.
 
-Vectors written before Sibyl recorded their model are classified once per plane, the first time the
-sweep runs for it, and the verdict is stored:
+#### Upgrading and switching providers in the same deploy
 
-| `SIBYL_EMBEDDING_LEGACY_VECTORS` | Unrecorded vectors are                                                                                                                                         |
-| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `auto` (default)                 | Re-embedded when any recorded vector names another model, and adopted as the configured model otherwise. Document chunks read the organization's raw captures. |
-| `adopt`                          | Adopted as the configured model                                                                                                                                |
-| `reembed`                        | Re-embedded                                                                                                                                                    |
+If you upgrade to this release and change the embedding provider or model in the same deploy, do one
+of these:
 
-Upgrading and switching providers in the same deploy needs no extra step when the plane already
-holds vectors recorded under the old model, because `auto` sees it in them. A plane with none (for
-example an organization whose only content is documents crawled before this release, with no raw
-captures) offers no evidence and is adopted, so set `SIBYL_EMBEDDING_LEGACY_VECTORS=reembed` for
-that deploy. To replace vectors that were adopted wrongly, run
-`sibyld db reembed --org-id <id> --plane graph|documents|all`; it only marks them, and the sweep
-does the embedding.
+- Set `SIBYL_EMBEDDING_LEGACY_VECTORS=reembed` for that deploy. Every vector written before this
+  release is re-embedded with the new model.
+- Deploy twice. Upgrade on the old provider, wait until `sibyl debug status` shows every plane
+  `complete`, then switch providers in a second deploy. Every vector then carries a record of its
+  model and the switch re-embeds exactly the stale ones.
+
+Without either step Sibyl still decides from what the store held before the upgrade, and in most
+deployments it decides correctly. Vectors written before Sibyl recorded their model are classified
+once per organization and plane, and the verdict is stored. With the default `auto`, a plane is
+re-embedded when any of these name a model other than the configured one:
+
+- the recorded models on the plane's own vectors (graph vectors have recorded one for several
+  releases);
+- the recorded models on raw captures anywhere in the deployment, for document chunks, which did not
+  record a model before this release;
+- another organization's graph vectors, since one configuration embeds every organization;
+- the models the deployment was configured with on earlier starts of this release;
+- the other plane's evidence, since a deployment that moved one provider has usually moved both.
+
+Only evidence that existed before this release first touched the store counts. Each schema upgrade
+takes a snapshot of it, so vectors written after the restart are never mistaken for proof. A plane
+whose snapshot shows only the configured model adopts its vectors in place, with no provider calls.
+
+A plane with no evidence anywhere adopts its vectors too, logs a warning, and shows
+`adopted_without_evidence` in `sibyl debug status` instead of `complete`. That state is exactly what
+an undetected switch would look like, which is why the steps above exist. If the model did change,
+replace the vectors:
+
+```bash
+sibyld db reembed --dry-run                                  # rows each organization would re-embed
+sibyld db reembed --org-id <id> --plane graph|documents|all  # mark them; the sweep re-embeds them
+```
+
+`sibyld db reembed` only writes metadata; the sweep does the embedding on its next passes, and the
+warning clears.
+
+| `SIBYL_EMBEDDING_LEGACY_VECTORS` | Vectors written before Sibyl recorded their model are                                                      |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `auto` (default)                 | Re-embedded when the evidence above names another model, adopted otherwise (with a warning if it is empty) |
+| `adopt`                          | Adopted as the configured model                                                                            |
+| `reembed`                        | Re-embedded                                                                                                |
+
+Bedrock model IDs record the model without their routing: `us.`, `eu.`, `apac.` and `global.`
+prefixes, foundation-model ARNs and inference-profile ARNs all record the same model, so moving
+between them re-embeds nothing. An application inference profile ARN does not name its model, so it
+is recorded as the full ARN. Moving between one and a model ID re-embeds every vector.
 
 Restored archives keep each vector's recorded model. Vectors restored without one are marked
 unverified and re-embedded.
