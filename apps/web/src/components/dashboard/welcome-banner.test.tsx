@@ -4,6 +4,7 @@ import { render, screen } from '@/test/utils';
 const hooks = vi.hoisted(() => ({
   useSetupStatus: vi.fn(),
   useOnboardingProgress: vi.fn(),
+  useMe: vi.fn(),
 }));
 const storage = vi.hoisted(() => ({
   getItem: vi.fn(),
@@ -11,7 +12,10 @@ const storage = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/hooks/admin', () => ({ useSetupStatus: hooks.useSetupStatus }));
-vi.mock('@/lib/hooks/auth', () => ({ useOnboardingProgress: hooks.useOnboardingProgress }));
+vi.mock('@/lib/hooks/auth', () => ({
+  useOnboardingProgress: hooks.useOnboardingProgress,
+  useMe: hooks.useMe,
+}));
 vi.mock('@/components/dashboard/connect-agent-modal', () => ({
   ConnectAgentModal: () => <div data-testid="connect-agent-modal" />,
 }));
@@ -30,6 +34,7 @@ describe('WelcomeBanner', () => {
         anthropic_valid: false,
       },
     });
+    hooks.useMe.mockReturnValue({ data: { user: { is_admin: true } } });
     hooks.useOnboardingProgress.mockReturnValue({
       checklist: {
         connected_agent: false,
@@ -42,11 +47,54 @@ describe('WelcomeBanner', () => {
     });
   });
 
-  it('frames onboarding as local-first before MCP setup', () => {
+  it('points new users at the connect flow instead of MCP setup', () => {
     render(<WelcomeBanner totalEntities={0} />);
 
-    expect(screen.getByText(/local-first where possible/i)).toBeInTheDocument();
-    expect(screen.getByText(/local stack first/i)).toBeInTheDocument();
-    expect(screen.getByText(/optional when you are ready/i)).toBeInTheDocument();
+    expect(screen.getByText('Connect your tools')).toBeInTheDocument();
+    expect(
+      screen.getByText(/one line in your terminal, or hand it to your agent/i)
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/mcp/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/api keys/i)).not.toBeInTheDocument();
+  });
+
+  it('reports models ready when the server says Bedrock covers every plane', () => {
+    hooks.useSetupStatus.mockReturnValue({
+      data: {
+        openai_configured: false,
+        anthropic_configured: false,
+        gemini_configured: false,
+        providers_configured: true,
+        configured_providers: ['bedrock'],
+      },
+    });
+
+    render(<WelcomeBanner totalEntities={0} />);
+
+    expect(screen.getByText('Models ready')).toBeInTheDocument();
+    expect(screen.queryByText('Models need setup')).not.toBeInTheDocument();
+  });
+
+  it('reports models need setup when no provider is ready', () => {
+    render(<WelcomeBanner totalEntities={0} />);
+
+    expect(screen.getByText('Models need setup')).toBeInTheDocument();
+  });
+
+  it('never tells a member that models need setup', () => {
+    hooks.useMe.mockReturnValue({ data: { user: { is_admin: false } } });
+
+    render(<WelcomeBanner totalEntities={0} />);
+
+    expect(screen.queryByText('Models need setup')).not.toBeInTheDocument();
+  });
+
+  it('shows no model status until the server has answered', () => {
+    hooks.useSetupStatus.mockReturnValue({ data: undefined });
+
+    render(<WelcomeBanner totalEntities={0} />);
+
+    expect(screen.queryByText('Models need setup')).not.toBeInTheDocument();
+    expect(screen.queryByText('Models ready')).not.toBeInTheDocument();
   });
 });

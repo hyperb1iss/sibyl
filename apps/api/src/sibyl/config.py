@@ -19,6 +19,7 @@ from sibyl_core.backends.surreal.url_schemes import (
     production_surreal_url_problem,
     unsupported_surreal_url_reason,
 )
+from sibyl_core.integration import is_clean_server_url
 
 _log = structlog.get_logger()
 
@@ -42,6 +43,23 @@ _LOCAL_EMBEDDING_MODEL_DIMENSIONS = {
 
 def _local_embedding_dimensions(model: str) -> int | None:
     return _LOCAL_EMBEDDING_MODEL_DIMENSIONS.get(model.strip().lower())
+
+
+def _url_host(host: str) -> str:
+    """A bind host as it appears in a URL: wildcards become localhost, IPv6 is bracketed."""
+    host = host.strip()
+    if host in {"0.0.0.0", "::", "[::]", ""}:
+        return "localhost"
+    if host.startswith("["):
+        return host
+    try:
+        address = ip_address(host)
+    except ValueError:
+        return host
+    if address.version == 6:
+        # RFC 6874: a zone ID's % is itself percent-encoded inside the brackets.
+        return f"[{host.replace('%', '%25')}]"
+    return host
 
 
 class OIDCProviderSettings(BaseModel):
@@ -432,12 +450,20 @@ class Settings(BaseSettings):
             if "public_url" in self.model_fields_set:
                 object.__setattr__(self, "server_url", self.public_url.rstrip("/"))
             else:
-                host = self.server_host
-                if host in {"0.0.0.0", "::"}:
-                    host = "localhost"
-                object.__setattr__(self, "server_url", f"http://{host}:{self.server_port}")
+                object.__setattr__(
+                    self, "server_url", f"http://{_url_host(self.server_host)}:{self.server_port}"
+                )
         if not self.frontend_url:
             object.__setattr__(self, "frontend_url", self.public_url.rstrip("/") + "/")
+        # Every connect surface hands these URLs to users and their shells, so
+        # credentials, queries, fragments and whitespace are refused at boot.
+        for field in ("public_url", "server_url", "frontend_url"):
+            value = getattr(self, field)
+            if value and not is_clean_server_url(value):
+                raise ValueError(
+                    f"{field} must be an http(s) URL without credentials, a query, a "
+                    f"fragment or whitespace, not {value!r}"
+                )
         return self
 
     cookie_domain: str | None = Field(

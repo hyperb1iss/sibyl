@@ -15,14 +15,20 @@ interface SetupWizardProps {
   onComplete: () => void;
 }
 
-const STEPS: SetupStep[] = ['welcome', 'api-keys', 'admin', 'connect'];
 const STEP_STORAGE_KEY = 'sibyl-setup-step';
 
-function getStoredStep(): SetupStep {
+/** The keys step exists only while the server has no ready model provider. */
+export function setupSteps(status: SetupStatus | undefined): SetupStep[] {
+  return status?.providers_configured
+    ? ['welcome', 'admin', 'connect']
+    : ['welcome', 'api-keys', 'admin', 'connect'];
+}
+
+function getStoredStep(steps: SetupStep[]): SetupStep {
   if (typeof window === 'undefined') return 'welcome';
   try {
     const stored = sessionStorage.getItem(STEP_STORAGE_KEY);
-    if (stored && STEPS.includes(stored as SetupStep)) {
+    if (stored && steps.includes(stored as SetupStep)) {
       return stored as SetupStep;
     }
   } catch {
@@ -32,7 +38,10 @@ function getStoredStep(): SetupStep {
 }
 
 export function SetupWizard({ initialStatus, onComplete }: SetupWizardProps) {
-  const [step, setStep] = useState<SetupStep>(getStoredStep);
+  // Fixed at mount: saving keys refreshes the status, and a list rebuilt from it
+  // would drop the step the owner is standing on.
+  const [steps] = useState(() => setupSteps(initialStatus));
+  const [step, setStep] = useState<SetupStep>(() => getStoredStep(steps));
 
   // Persist step to sessionStorage so tab switches don't reset progress
   useEffect(() => {
@@ -53,22 +62,22 @@ export function SetupWizard({ initialStatus, onComplete }: SetupWizardProps) {
     onComplete();
   }, [onComplete]);
 
-  const currentIndex = STEPS.indexOf(step);
+  const currentIndex = steps.indexOf(step);
   const isLastStep = step === 'connect';
 
   const handleNext = useCallback(() => {
     const nextIndex = currentIndex + 1;
-    if (nextIndex < STEPS.length) {
-      setStep(STEPS[nextIndex]);
+    if (nextIndex < steps.length) {
+      setStep(steps[nextIndex]);
     }
-  }, [currentIndex]);
+  }, [currentIndex, steps]);
 
   const handleBack = useCallback(() => {
     const prevIndex = currentIndex - 1;
     if (prevIndex >= 0) {
-      setStep(STEPS[prevIndex]);
+      setStep(steps[prevIndex]);
     }
-  }, [currentIndex]);
+  }, [currentIndex, steps]);
 
   const handleApiKeysValidated = useCallback(
     (valid: boolean) => {
@@ -91,7 +100,7 @@ export function SetupWizard({ initialStatus, onComplete }: SetupWizardProps) {
           <div className="px-6 pt-5 pb-3 border-b border-sc-fg-subtle/10">
             <div className="flex items-center justify-between">
               <div className="flex gap-2">
-                {STEPS.slice(0, -1).map((s, i) => (
+                {steps.slice(0, -1).map((s, i) => (
                   <div
                     key={s}
                     className={`w-2 h-2 rounded-full transition-colors duration-200 ${
@@ -105,7 +114,7 @@ export function SetupWizard({ initialStatus, onComplete }: SetupWizardProps) {
                 ))}
               </div>
               <span className="text-sc-fg-subtle text-xs">
-                Step {currentIndex + 1} of {STEPS.length - 1}
+                Step {currentIndex + 1} of {steps.length - 1}
               </span>
             </div>
           </div>
@@ -121,7 +130,12 @@ export function SetupWizard({ initialStatus, onComplete }: SetupWizardProps) {
               exit={{ opacity: 0, x: -20 }}
               transition={{ duration: 0.2 }}
             >
-              <WelcomeStep onNext={handleNext} />
+              <WelcomeStep
+                onNext={handleNext}
+                configuredProviders={
+                  initialStatus?.providers_configured ? initialStatus.configured_providers : []
+                }
+              />
             </motion.div>
           )}
 

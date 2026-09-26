@@ -17,6 +17,7 @@ uv() {
 }
 sibyl() {
     printf 'sibyl %s\n' "$*" >> "$INSTALLER_CALL_LOG"
+    if [ "$1" = setup ] && [ "${INSTALLER_FAIL_SETUP:-0}" = 1 ]; then return 3; fi
     if [ "$1" = start ]; then
         if [ "${INSTALLER_FAIL_START:-0}" = 1 ]; then return 7; fi
         INSTALLER_STARTED=1
@@ -302,3 +303,78 @@ def test_slow_startup_waits_for_dependency_readiness(tmp_path: Path, args: list[
     assert "Installation complete" in result.stdout
     probes = [call for call in calls if call.startswith("curl -fsS --noproxy")]
     assert len(probes) == unready_probes + 1
+
+
+@pytest.mark.parametrize(
+    ("args", "env"),
+    [
+        (["--remote", "https://sibyl.example.com"], {}),
+        (["--remote"], {"SIBYL_INSTALL_SERVER_URL": "https://sibyl.example.com"}),
+    ],
+)
+def test_remote_with_a_url_hands_off_to_sibyl_setup(
+    tmp_path: Path, args: list[str], env: dict[str, str]
+) -> None:
+    result, calls = _run_installer(tmp_path, *args, env=env)
+    assert result.returncode == 0, result.stderr
+    assert calls == [
+        "uv --version",
+        "uv tool install sibyl-dev@latest --force",
+        "sibyl skill install --quiet",
+        # No terminal to answer prompts, so setup runs with its defaults.
+        "sibyl setup https://sibyl.example.com --yes",
+    ]
+    assert "Installation complete" in result.stdout
+
+
+def test_remote_without_a_url_points_at_sibyl_setup(tmp_path: Path) -> None:
+    result, calls = _run_installer(tmp_path, "--remote", "--version", "1.4.1")
+    assert result.returncode == 0, result.stderr
+    assert "uv tool install sibyl-dev==1.4.1 --force" in calls
+    assert not any(call.startswith("sibyl setup") for call in calls)
+    assert "sibyl setup https://sibyl.example.com" in result.stdout
+    assert "sibyl init --remote" not in result.stdout
+
+
+def test_failed_remote_setup_never_reports_completion(tmp_path: Path) -> None:
+    result, calls = _run_installer(
+        tmp_path, "--remote", "https://sibyl.example.com", env={"INSTALLER_FAIL_SETUP": "1"}
+    )
+    assert result.returncode != 0
+    assert calls[-1] == "sibyl setup https://sibyl.example.com --yes"
+    assert "Re-run: sibyl setup https://sibyl.example.com" in result.stderr
+    assert "Installation complete" not in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("args", "env"),
+    [
+        # The URL alone implies remote mode, so no local Docker stack starts.
+        ([], {"SIBYL_INSTALL_SERVER_URL": "https://sibyl.example.com"}),
+        (["https://sibyl.example.com"], {}),
+        (["--remote", "--version", "1.4.1", "https://sibyl.example.com"], {}),
+    ],
+)
+def test_a_server_url_selects_remote_mode_wherever_it_appears(
+    tmp_path: Path, args: list[str], env: dict[str, str]
+) -> None:
+    result, calls = _run_installer(tmp_path, *args, env=env)
+    assert result.returncode == 0, result.stderr
+    assert "docker info" not in calls
+    assert not any(call.startswith("sibyl up") for call in calls)
+    assert calls[-1] == "sibyl setup https://sibyl.example.com --yes"
+
+
+def test_a_mode_keyword_after_remote_is_not_taken_as_the_url(tmp_path: Path) -> None:
+    result, calls = _run_installer(tmp_path, "--remote", "cli")
+    assert result.returncode == 0, result.stderr
+    assert not any(call.startswith("sibyl setup") for call in calls)
+
+
+def test_a_server_url_with_a_local_mode_fails_before_installing(tmp_path: Path) -> None:
+    result, calls = _run_installer(
+        tmp_path, "--daemon", env={"SIBYL_INSTALL_SERVER_URL": "https://sibyl.example.com"}
+    )
+    assert result.returncode != 0
+    assert calls == []
+    assert "needs --remote" in result.stderr

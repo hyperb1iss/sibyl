@@ -8,6 +8,7 @@ Installs the Sibyl skill and optional Claude hooks for assistant tooling:
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from contextlib import suppress
 from datetime import datetime
@@ -48,7 +49,6 @@ SKILL_NAMES = ["sibyl"]
 
 def get_sibyl_hooks_config() -> dict:
     """Generate Sibyl hooks configuration for settings.json."""
-    hooks_dir = str(CLAUDE_HOOKS_DIR)
     return {
         "SessionStart": [
             {
@@ -56,7 +56,7 @@ def get_sibyl_hooks_config() -> dict:
                 "hooks": [
                     {
                         "type": "command",
-                        "command": f"python3 {hooks_dir}/session-start.py",
+                        "command": managed_hook_command(CLAUDE_HOOKS_DIR, "session-start.py"),
                         "timeout": 10,
                     }
                 ],
@@ -66,7 +66,7 @@ def get_sibyl_hooks_config() -> dict:
                 "hooks": [
                     {
                         "type": "command",
-                        "command": f"python3 {hooks_dir}/session-start.py",
+                        "command": managed_hook_command(CLAUDE_HOOKS_DIR, "session-start.py"),
                         "timeout": 10,
                     }
                 ],
@@ -75,16 +75,128 @@ def get_sibyl_hooks_config() -> dict:
     }
 
 
-def is_sibyl_hook(hook_entry: dict) -> bool:
-    """Check if a hook entry is a Sibyl hook."""
-    for hook in hook_entry.get("hooks", []):
-        cmd = str(hook.get("command", ""))
-        if "sibyl" in cmd or "hooks/sibyl" in cmd:
-            return True
-        prompt = str(hook.get("prompt", ""))
-        if "Sibyl" in prompt and ("knowledge graph" in prompt or "sibyl add" in prompt.lower()):
-            return True
+def valid_hooks_shape(hooks: object) -> bool:
+    """True when `hooks` has the shape Claude Code reads: event -> list of entries.
+
+    Each entry is an object whose optional `hooks` is a list of objects. Anything
+    else is a file someone edited by hand, and rewriting it would lose their data.
+    """
+    if not isinstance(hooks, dict):
+        return False
+    for entries in hooks.values():
+        if not isinstance(entries, list):
+            return False
+        for entry in entries:
+            if not isinstance(entry, dict):
+                return False
+            inner = entry.get("hooks", [])
+            if not isinstance(inner, list) or not all(isinstance(h, dict) for h in inner):
+                return False
+    return True
+
+
+# ============================================================================
+# Managed hook templates
+# ============================================================================
+# Every hook Sibyl has ever written into Claude settings, and nothing else. A
+# hook is Sibyl's only when it equals one of these after light normalization;
+# wrappers, flags, `bash -c` and commands that merely mention the path are the
+# user's. Keep in step with hooks/configure.py (a test pins the two equal).
+
+# Scripts installed into ~/.claude/hooks/sibyl/, including retired ones so a
+# re-run can prune them.
+MANAGED_HOOK_SCRIPTS = ("session-start.py", "user-prompt-submit.py", "post-tool-use.py", "stop.py")
+
+# The prompt-type Stop hook hooks/configure.py wrote on 2025-12-30 (49cf9729a),
+# retired the same day (7a10519af).
+LEGACY_STOP_HOOK_PROMPT = (
+    "You are evaluating whether Claude should stop or first capture learnings to Sibyl (a knowledge graph).\n"
+    "\n"
+    "Session context: $ARGUMENTS\n"
+    "\n"
+    "Analyze the conversation for UNCAPTURED valuable learnings:\n"
+    "1. Non-obvious solutions or workarounds discovered\n"
+    "2. Gotchas, edge cases, or debugging insights\n"
+    "3. Architectural decisions with reasoning\n"
+    "4. Integration patterns or configuration quirks\n"
+    "\n"
+    "IMPORTANT:\n"
+    "- If stop_hook_active is true, ALWAYS return ok:true (prevents infinite loops)\n"
+    "- Only block if there are SPECIFIC, CONCRETE learnings worth capturing\n"
+    "- Skip trivial info, well-documented basics, or temporary hacks\n"
+    "- Look for 'sibyl add' calls - if learnings were already captured, approve\n"
+    "\n"
+    "Respond with JSON:\n"
+    '- To BLOCK (has uncaptured learnings): {"ok": false, "reason": "Before stopping, capture these learnings to Sibyl via \'sibyl add\':\\n\\n1. [Title]: [What, why, caveats]\\n2. ..."}\n'
+    '- To APPROVE (no learnings or already captured): {"ok": true, "reason": "No uncaptured learnings"}'
+)
+
+
+def managed_hook_command(hooks_dir: Path, script: str) -> str:
+    """The exact command the installer writes for `script`."""
+    return f"python3 {hooks_dir}/{script}"
+
+
+def _normalize_hook_text(text: str, home: str) -> str:
+    """Trim and collapse spaces and tabs, expand ~ and $HOME, and tidy slashes.
+
+    Only ASCII space and tab separate words here. Any other whitespace or
+    control character, such as a no-break space or a carriage return, is part
+    of a filename to the shell, so it is kept and the comparison fails.
+    """
+    text = " ".join(re.split(r"[ \t]+", text.strip(" \t")))
+    text = text.replace("${HOME}", home).replace("$HOME", home)
+    text = re.sub(r"(^| )~(?=/|$)", lambda match: match.group(1) + home, text)
+    text = re.sub(r"/{2,}", "/", text)
+    while "/./" in text:
+        text = text.replace("/./", "/")
+    return text
+
+
+def is_managed_hook(hook: object, hooks_dir: Path | None = None) -> bool:
+    """True only for a hook object equal to one Sibyl's installer wrote."""
+    if not isinstance(hook, dict):
+        return False
+    directory = hooks_dir or CLAUDE_HOOKS_DIR
+    home = str(directory.parents[2])
+    kind = hook.get("type", "command")
+    if kind == "command":
+        command = _normalize_hook_text(str(hook.get("command", "")), home)
+        return command in {
+            _normalize_hook_text(managed_hook_command(directory, script), home)
+            for script in MANAGED_HOOK_SCRIPTS
+        }
+    if kind == "prompt":
+        prompt = " ".join(str(hook.get("prompt", "")).split())
+        return prompt == " ".join(LEGACY_STOP_HOOK_PROMPT.split())
     return False
+
+
+def entry_has_managed_hook(entry: object) -> bool:
+    """True when a hook group contains a hook Sibyl installed."""
+    if not isinstance(entry, dict):
+        return False
+    return any(is_managed_hook(hook) for hook in entry.get("hooks") or [])
+
+
+def remove_managed_hooks(hooks: dict) -> dict:
+    """Drop only Sibyl's hook objects, keeping every other hook and its group.
+
+    A group left empty by the removal held nothing but Sibyl's hooks, so it goes
+    too; a group with other hooks keeps them, its matcher and its position.
+    """
+    cleaned: dict = {}
+    for event, entries in hooks.items():
+        kept = []
+        for entry in entries:
+            inner = entry.get("hooks", [])
+            remaining = [hook for hook in inner if not is_managed_hook(hook)]
+            if len(remaining) == len(inner):
+                kept.append(entry)
+            elif remaining:
+                kept.append({**entry, "hooks": remaining})
+        cleaned[event] = kept
+    return cleaned
 
 
 # ============================================================================
@@ -277,14 +389,19 @@ def configure_claude_hooks() -> bool:
     """Update Claude Code settings.json with Sibyl hooks."""
     CLAUDE_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-    # Load existing settings
+    # Load existing settings. An unreadable file is the user's, not ours to
+    # replace: rewriting it from an empty dict would drop every other setting.
     try:
         if CLAUDE_SETTINGS_FILE.exists():
             settings = json.loads(CLAUDE_SETTINGS_FILE.read_text())
         else:
             settings = {}
-    except json.JSONDecodeError:
-        settings = {}
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(settings, dict):
+        return False
+    if "hooks" in settings and not valid_hooks_shape(settings["hooks"]):
+        return False
 
     # Backup if there are existing hooks
     existing_hooks = settings.get("hooks", {})
@@ -292,10 +409,8 @@ def configure_claude_hooks() -> bool:
         backup = CLAUDE_SETTINGS_FILE.with_suffix(f".json.{datetime.now():%Y%m%d-%H%M%S}.bak")
         shutil.copy2(CLAUDE_SETTINGS_FILE, backup)
 
-    # Remove old Sibyl hooks but preserve others
-    hooks = settings.get("hooks", {})
-    for event in list(hooks.keys()):
-        hooks[event] = [h for h in hooks[event] if not is_sibyl_hook(h)]
+    # Remove Sibyl's own hooks, leaving every other hook where it was.
+    hooks = remove_managed_hooks(settings.get("hooks") or {})
 
     # Add new Sibyl hooks
     sibyl_hooks = get_sibyl_hooks_config()
@@ -482,7 +597,7 @@ def get_installation_status() -> dict:
             for event in ["SessionStart"]:
                 if event in hooks:
                     for h in hooks[event]:
-                        if is_sibyl_hook(h):
+                        if entry_has_managed_hook(h):
                             claude_hooks_configured = True
                             break
         except Exception:

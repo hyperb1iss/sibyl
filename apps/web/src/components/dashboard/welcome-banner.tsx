@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { ConnectAgentModal } from '@/components/dashboard/connect-agent-modal';
 import { ArrowRight, BookOpen, Check, Network, Search, Xmark } from '@/components/ui/icons';
 import { useSetupStatus } from '@/lib/hooks/admin';
-import { useOnboardingProgress } from '@/lib/hooks/auth';
+import { useMe, useOnboardingProgress } from '@/lib/hooks/auth';
 
 /** Minimum entities before automatically hiding the welcome banner */
 const WELCOME_BANNER_ENTITY_THRESHOLD = 10;
@@ -20,16 +20,16 @@ interface WelcomeBannerProps {
 
 export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) {
   const [isDismissed, setIsDismissed] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const [showConnectModal, setShowConnectModal] = useState(false);
-  const { data: setupStatus } = useSetupStatus({
-    validateKeys: false,
-    enabled: totalEntities === 0,
-  });
+  const { data: setupStatus } = useSetupStatus({ validateKeys: false });
+  const { data: me } = useMe();
   const { checklist, markConnectedAgent, markAddedSource, markTriedSearch } =
     useOnboardingProgress();
 
   // Load dismissal state from localStorage on mount
   useEffect(() => {
+    setMounted(true);
     const dismissed = localStorage.getItem(BANNER_DISMISSED_KEY);
     if (dismissed === 'true') {
       setIsDismissed(true);
@@ -48,14 +48,12 @@ export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) 
   };
 
   const isNewUser = totalEntities === 0;
-  const openaiReady = setupStatus?.openai_valid === true || setupStatus?.openai_configured === true;
-  const geminiReady = setupStatus?.gemini_valid === true || setupStatus?.gemini_configured === true;
-  const anthropicReady =
-    setupStatus?.anthropic_valid === true || setupStatus?.anthropic_configured === true;
-  // Bedrock covers a plane only when that plane is routed to it.
-  const llmReady = anthropicReady || setupStatus?.bedrock_llm === true;
-  const embeddingsReady = openaiReady || geminiReady || setupStatus?.bedrock_embeddings === true;
-  const apisReady = llmReady && embeddingsReady;
+  // The server decides readiness for every plane, Bedrock included.
+  // Server rendering never has the status, so the pill waits for the client, and
+  // "needs setup" is only worth showing to an admin who can act on it.
+  const modelsReady = setupStatus?.providers_configured === true;
+  const showModels =
+    mounted && setupStatus !== undefined && (modelsReady || me?.user.is_admin === true);
 
   return (
     <div className="relative bg-gradient-to-r from-sc-purple/10 via-sc-cyan/5 to-sc-coral/10 border border-sc-purple/20 rounded-xl sm:rounded-xl p-4 sm:p-6 mb-4 sm:mb-6 animate-fade-in overflow-hidden">
@@ -85,11 +83,8 @@ export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) 
             </h2>
             <p className="text-xs sm:text-sm text-sc-fg-muted">
               {isNewUser
-                ? 'Your local memory stack is ready. Capture and search here first, then wire in MCP tools when you want them.'
-                : `You have ${totalEntities} entities. Sibyl stays strongest when the local capture and review loop keeps moving.`}
-            </p>
-            <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-sc-fg-muted">
-              Local-first where possible. Org-safe by default.
+                ? 'Your memory is ready. Connect your tools, then capture and search.'
+                : `You have ${totalEntities} entities. Sibyl stays strongest when the capture and review loop keeps moving.`}
             </p>
           </div>
         </div>
@@ -99,8 +94,8 @@ export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) 
           {/* Step 1: Connect an agent */}
           <ChecklistStep
             step={1}
-            title="Connect your agent"
-            description="Optional when you are ready: add Sibyl as an MCP server for any agent."
+            title="Connect your tools"
+            description="One line in your terminal, or hand it to your agent."
             color="purple"
             isComplete={checklist.connected_agent}
             action={
@@ -186,17 +181,16 @@ export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) 
 
         {/* Status indicators */}
         <div className="flex flex-wrap items-center gap-3 text-xs">
-          <div className="rounded-full border border-sc-cyan/20 bg-sc-cyan/10 px-2.5 py-1 text-sc-cyan">
-            Local stack first
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div
-              className={`w-2 h-2 rounded-full ${apisReady ? 'bg-sc-green shadow-[0_0_6px_color-mix(in_oklch,var(--sc-green)_60%,transparent)]' : 'bg-sc-fg-subtle'}`}
-            />
-            <span className="text-sc-fg-muted">
-              {apisReady ? 'API keys configured' : 'API keys need setup'}
-            </span>
-          </div>
+          {showModels && (
+            <div className="flex items-center gap-1.5">
+              <div
+                className={`w-2 h-2 rounded-full ${modelsReady ? 'bg-sc-green shadow-[0_0_6px_color-mix(in_oklch,var(--sc-green)_60%,transparent)]' : 'bg-sc-fg-subtle'}`}
+              />
+              <span className="text-sc-fg-muted">
+                {modelsReady ? 'Models ready' : 'Models need setup'}
+              </span>
+            </div>
+          )}
           <Link
             href="/graph"
             className="flex items-center gap-1.5 rounded text-sc-purple hover:text-sc-purple/80 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"

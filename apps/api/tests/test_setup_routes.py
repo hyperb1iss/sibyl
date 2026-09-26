@@ -1,10 +1,14 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.routing import APIRoute
+from pydantic import SecretStr
 
 from sibyl.api.routes import setup as setup_routes
 from sibyl.persistence.setup_common import SetupStatus
+from sibyl_core.ai.errors import LLMConfigError
+from sibyl_core.ai.llm.config import LLMSurface
 
 
 @pytest.mark.asyncio
@@ -207,26 +211,477 @@ async def test_get_config_status_uses_settings_service(monkeypatch: pytest.Monke
     assert response.gemini_source == "environment"
 
 
+def _status_service(**keys: str | None) -> AsyncMock:
+    """A settings service whose `get` answers from `keys` (missing means unset)."""
+    service = AsyncMock()
+    service.get_openai_key.return_value = keys.get("openai_api_key")
+    service.get_anthropic_key.return_value = keys.get("anthropic_api_key")
+    service.get_gemini_key.return_value = keys.get("gemini_api_key")
+    service.get.side_effect = keys.get
+    return service
+
+
+class _PerSurfaceSource:
+    """A config source answering each LLM surface from a mapping (default otherwise)."""
+
+    def __init__(self, default: str, **surfaces: str) -> None:
+        self.default = default
+        self.surfaces = surfaces
+
+    async def resolve(self, surface: LLMSurface) -> SimpleNamespace:
+        provider = self.surfaces.get(surface.value, self.default)
+        return SimpleNamespace(provider=SimpleNamespace(value=provider))
+
+
+def _server(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    llm_provider: str,
+    region: str | None = None,
+    local_embeddings_installed: bool = False,
+    surfaces: dict[str, str] | None = None,
+    aws_env: dict[str, str] | None = None,
+    **keys: str | None,
+) -> None:
+    """Point every readiness input at a fake server: config, settings, AWS env, deps."""
+    monkeypatch.setattr(
+        setup_routes,
+        "get_runtime_setup_status",
+        AsyncMock(return_value=SetupStatus(has_users=True, has_orgs=True, setup_complete=True)),
+    )
+    monkeypatch.setattr(setup_routes, "get_settings_service", lambda: _status_service(**keys))
+    source = _PerSurfaceSource(llm_provider, **(surfaces or {}))
+    monkeypatch.setattr(setup_routes, "get_config_source", lambda: source)
+    monkeypatch.setattr(
+        setup_routes, "sentence_transformers_available", lambda: local_embeddings_installed
+    )
+    for name in (
+        "SIBYL_EMBEDDING_PROVIDER",
+        "SIBYL_GRAPH_EMBEDDING_PROVIDER",
+        "SIBYL_BEDROCK_REGION",
+        "AWS_REGION",
+        "AWS_DEFAULT_REGION",
+        "SIBYL_BEDROCK_API",
+        "SIBYL_BEDROCK_API_KEY",
+        "AWS_BEARER_TOKEN_BEDROCK",
+        "ANTHROPIC_AWS_API_KEY",
+        "SIBYL_BEDROCK_PROFILE",
+        "AWS_PROFILE",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_WEB_IDENTITY_TOKEN_FILE",
+        "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+        "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    if region:
+        monkeypatch.setenv("SIBYL_BEDROCK_REGION", region)
+    for name, value in (aws_env or {}).items():
+        monkeypatch.setenv(name, value)
+
+
+async def _status_with(
+    monkeypatch: pytest.MonkeyPatch, *, llm_provider: str, **options: object
+) -> setup_routes.SetupStatus:
+    _server(monkeypatch, llm_provider=llm_provider, **options)  # type: ignore[arg-type]
+    return await setup_routes.get_setup_status()
+
+
 @pytest.mark.asyncio
-async def test_get_integration_returns_client_agnostic_payload() -> None:
-    response = await setup_routes.get_integration()
+async def test_status_reports_providers_unconfigured_on_a_fresh_install(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    status = await _status_with(monkeypatch, llm_provider="anthropic")
 
-    assert response.server_url
-    assert response.mcp_url.endswith("/mcp")
-    assert response.cli_install.startswith("curl -fsSL")
-    assert [client.id for client in response.mcp_clients] == [
-        "claude",
-        "codex",
-        "opencode",
-        "generic",
-    ]
-    for client in response.mcp_clients:
-        assert response.mcp_url in client.snippet
-    assert "memory loop" in response.prompt_snippet
+    assert status.providers_configured is False
+    assert status.configured_providers == []
 
 
-def test_integration_route_requires_setup_mode_or_auth() -> None:
-    routes = [route for route in setup_routes.router.routes if isinstance(route, APIRoute)]
-    route = next(route for route in routes if route.path.endswith("/integration"))
+@pytest.mark.asyncio
+async def test_status_reports_keyed_providers_configured_when_keys_are_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    status = await _status_with(
+        monkeypatch,
+        llm_provider="anthropic",
+        anthropic_api_key="sk-ant",
+        openai_api_key="sk-openai",
+    )
 
-    assert route.dependencies[0].dependency is setup_routes.require_setup_mode_or_auth
+    assert status.providers_configured is True
+    assert status.configured_providers == ["anthropic", "openai"]
+
+
+ALL_BEDROCK = {"embedding_provider": "bedrock", "graph_embedding_provider": "bedrock"}
+SIGV4 = {"AWS_ACCESS_KEY_ID": "AKIDEXAMPLE"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "aws_env",
+    [
+        {"AWS_ACCESS_KEY_ID": "AKIDEXAMPLE"},
+        {"AWS_PROFILE": "sibyl"},
+        {"AWS_WEB_IDENTITY_TOKEN_FILE": "/var/run/secrets/token"},
+        {"AWS_CONTAINER_CREDENTIALS_FULL_URI": "http://169.254.170.23/v1/credentials"},
+        {"SIBYL_BEDROCK_API_KEY": "bedrock-api-key"},
+    ],
+)
+async def test_bedrock_with_a_region_and_credentials_is_ready_without_keys(
+    monkeypatch: pytest.MonkeyPatch, aws_env: dict[str, str]
+) -> None:
+    status = await _status_with(
+        monkeypatch, llm_provider="bedrock", region="us-east-1", aws_env=aws_env, **ALL_BEDROCK
+    )
+
+    assert status.providers_configured is True
+    assert status.configured_providers == ["bedrock"]
+    assert status.anthropic_configured is False
+    assert status.openai_configured is False
+
+
+@pytest.mark.asyncio
+async def test_a_region_without_credentials_is_not_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+    status = await _status_with(
+        monkeypatch, llm_provider="bedrock", region="us-east-1", **ALL_BEDROCK
+    )
+
+    assert status.providers_configured is False
+    assert status.configured_providers == []
+    # The keys step's routing check still sees Bedrock selected.
+    assert (status.bedrock_llm, status.bedrock_embeddings) == (True, True)
+
+
+@pytest.mark.asyncio
+async def test_a_mantle_key_does_not_cover_bedrock_embeddings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mantle = {"SIBYL_BEDROCK_API": "mantle", "ANTHROPIC_AWS_API_KEY": "mantle-key"}
+    status = await _status_with(
+        monkeypatch, llm_provider="bedrock", region="us-east-1", aws_env=mantle, **ALL_BEDROCK
+    )
+
+    # Claude can use the Mantle key; Cohere on bedrock-runtime cannot.
+    assert status.providers_configured is False
+    assert status.configured_providers == []
+
+
+@pytest.mark.asyncio
+async def test_a_mantle_key_covers_claude_when_embeddings_use_a_keyed_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mantle = {"SIBYL_BEDROCK_API": "mantle", "ANTHROPIC_AWS_API_KEY": "mantle-key"}
+    status = await _status_with(
+        monkeypatch,
+        llm_provider="bedrock",
+        region="us-east-1",
+        aws_env=mantle,
+        openai_api_key="sk-openai",
+    )
+
+    assert status.providers_configured is True
+    assert status.configured_providers == ["bedrock", "openai"]
+
+
+@pytest.mark.asyncio
+async def test_the_mantle_key_is_ignored_outside_the_mantle_api(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    status = await _status_with(
+        monkeypatch,
+        llm_provider="bedrock",
+        region="us-east-1",
+        aws_env={"ANTHROPIC_AWS_API_KEY": "mantle-key"},
+        openai_api_key="sk-openai",
+    )
+
+    assert status.providers_configured is False
+    assert status.configured_providers == ["openai"]
+
+
+@pytest.mark.asyncio
+async def test_a_bedrock_key_beside_a_profile_is_not_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The Anthropic SDK refuses both at once, so the runtime would fail.
+    conflict = {"SIBYL_BEDROCK_API_KEY": "bedrock-api-key", "SIBYL_BEDROCK_PROFILE": "sibyl"}
+    status = await _status_with(
+        monkeypatch, llm_provider="bedrock", region="us-east-1", aws_env=conflict, **ALL_BEDROCK
+    )
+
+    assert status.providers_configured is False
+
+
+@pytest.mark.asyncio
+async def test_status_never_counts_bedrock_without_a_region(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # An AWS profile alone proves nothing: Bedrock needs a Region to be ready.
+    status = await _status_with(
+        monkeypatch, llm_provider="bedrock", aws_env={"AWS_PROFILE": "dev"}, **ALL_BEDROCK
+    )
+
+    assert status.providers_configured is False
+    assert status.configured_providers == []
+    assert (status.bedrock_llm, status.bedrock_embeddings) == (False, False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("installed", [True, False])
+async def test_status_counts_local_graph_embeddings_only_with_their_dependency(
+    monkeypatch: pytest.MonkeyPatch, installed: bool
+) -> None:
+    status = await _status_with(
+        monkeypatch,
+        llm_provider="bedrock",
+        region="us-east-1",
+        aws_env=SIGV4,
+        local_embeddings_installed=installed,
+        embedding_provider="bedrock",
+        graph_embedding_provider="local",
+    )
+
+    assert status.providers_configured is installed
+    assert status.bedrock_embeddings is installed
+    assert ("local" in status.configured_providers) is installed
+
+
+@pytest.mark.asyncio
+async def test_status_reports_partial_providers_as_unconfigured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    status = await _status_with(
+        monkeypatch, llm_provider="bedrock", region="us-east-1", aws_env=SIGV4
+    )
+
+    # Bedrock is ready, but default OpenAI embeddings still need a key.
+    assert status.providers_configured is False
+    assert status.configured_providers == ["bedrock"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("region", [None, "us-east-1"])
+@pytest.mark.parametrize("graph", ["bedrock", "local"])
+@pytest.mark.parametrize("installed", [True, False])
+@pytest.mark.parametrize("aws_env", [None, SIGV4])
+async def test_an_all_bedrock_server_is_ready_only_when_bedrock_selection_agrees(
+    monkeypatch: pytest.MonkeyPatch,
+    region: str | None,
+    graph: str,
+    installed: bool,
+    aws_env: dict[str, str] | None,
+) -> None:
+    # Readiness never exceeds the keys step's Bedrock routing check, and with
+    # credentials present the two agree exactly.
+    status = await _status_with(
+        monkeypatch,
+        llm_provider="bedrock",
+        region=region,
+        aws_env=aws_env,
+        local_embeddings_installed=installed,
+        embedding_provider="bedrock",
+        graph_embedding_provider=graph,
+    )
+
+    selected = status.bedrock_llm and status.bedrock_embeddings
+    assert status.providers_configured <= selected
+    if aws_env:
+        assert status.providers_configured is selected
+
+
+@pytest.mark.asyncio
+async def test_status_checks_the_provider_of_every_model_surface(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    status = await _status_with(
+        monkeypatch,
+        llm_provider="anthropic",
+        surfaces={"memory": "gemini"},
+        anthropic_api_key="sk-ant",
+        openai_api_key="sk-openai",
+    )
+
+    # Memory runs on Gemini, which has no key, so the server is not ready.
+    assert status.providers_configured is False
+    assert status.configured_providers == ["anthropic", "openai"]
+
+
+@pytest.mark.asyncio
+async def test_status_reports_unresolvable_llm_config_as_unconfigured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _server(monkeypatch, llm_provider="anthropic", openai_api_key="sk")
+
+    class Broken:
+        async def resolve(self, surface: LLMSurface) -> None:
+            raise LLMConfigError("Unsupported LLM provider: nope")
+
+    monkeypatch.setattr(setup_routes, "get_config_source", Broken)
+
+    status = await setup_routes.get_setup_status()
+
+    assert status.providers_configured is False
+    assert status.configured_providers == []
+
+
+SECRET_SENTINEL = "sk-live-secret-value-that-must-never-leak"
+
+
+def _configure_server(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    server_url: str,
+    minimum: str | None,
+    oidc: bool,
+    local_auth: bool,
+    frontend_url: str | None = None,
+) -> None:
+    providers = [SimpleNamespace(name="entra")] if oidc else []
+    monkeypatch.setattr(setup_routes.settings, "server_url", server_url)
+    monkeypatch.setattr(setup_routes.settings, "frontend_url", frontend_url or server_url)
+    monkeypatch.setattr(setup_routes.settings, "minimum_client_version", minimum)
+    monkeypatch.setattr(setup_routes.settings, "local_auth_enabled", local_auth)
+    monkeypatch.setattr(setup_routes.settings, "oidc", SimpleNamespace(providers=providers))
+    # Present on the settings object so a leak would show up in the payload.
+    monkeypatch.setenv("SIBYL_OPENAI_API_KEY", SECRET_SENTINEL)
+    monkeypatch.setattr(
+        setup_routes.settings, "jwt_secret", SecretStr(SECRET_SENTINEL), raising=False
+    )
+
+
+@pytest.mark.asyncio
+async def test_connect_info_for_a_default_local_install(monkeypatch: pytest.MonkeyPatch) -> None:
+    _configure_server(
+        monkeypatch,
+        server_url="http://localhost:3334/",
+        minimum=None,
+        oidc=False,
+        local_auth=True,
+    )
+
+    info = await setup_routes.get_connect_info()
+
+    assert info.server_url == "http://localhost:3334"
+    assert info.minimum_client_version is None
+    assert info.sso_enabled is False
+    assert info.local_auth_enabled is True
+    assert info.setup_command == "sibyl setup http://localhost:3334"
+    assert info.agent_url == "http://localhost:3334/agent"
+    assert info.install["macos"] == (
+        "brew install hyperb1iss/tap/sibyl && sibyl setup http://localhost:3334"
+    )
+    assert info.install["linux"] == (
+        "uv tool install --upgrade sibyl-dev && sibyl setup http://localhost:3334"
+    )
+    assert info.install["windows"] == (
+        "uv tool install --upgrade sibyl-dev; sibyl setup 'http://localhost:3334'"
+    )
+    assert SECRET_SENTINEL not in info.model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test_connect_info_for_a_team_sso_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    _configure_server(
+        monkeypatch,
+        server_url="https://sibyl.example.com",
+        minimum=" 1.5.0 ",
+        oidc=True,
+        local_auth=False,
+    )
+
+    info = await setup_routes.get_connect_info()
+
+    assert info.server_url == "https://sibyl.example.com"
+    assert info.minimum_client_version == "1.5.0"
+    assert info.sso_enabled is True
+    assert info.local_auth_enabled is False
+    assert info.install["macos"].endswith("sibyl setup https://sibyl.example.com")
+    assert info.install["linux"].endswith("sibyl setup https://sibyl.example.com")
+    assert info.install["windows"].endswith("sibyl setup 'https://sibyl.example.com'")
+    assert SECRET_SENTINEL not in info.model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test_agent_setup_is_markdown_tailored_to_the_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_server(
+        monkeypatch,
+        server_url="https://sibyl.example.com/",
+        minimum="1.5.0",
+        oidc=True,
+        local_auth=False,
+    )
+
+    response = await setup_routes.get_agent_setup()
+    body = bytes(response.body).decode()
+
+    assert response.media_type == "text/markdown; charset=utf-8"
+    assert "`sibyl setup https://sibyl.example.com --yes`" in body
+    assert "version 1.5.0 or newer" in body
+    assert "company SSO" in body
+    assert SECRET_SENTINEL not in body
+    assert "token" not in body.lower()
+
+
+@pytest.mark.asyncio
+async def test_agent_setup_for_a_local_auth_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    _configure_server(
+        monkeypatch,
+        server_url="http://localhost:3334",
+        minimum=None,
+        oidc=False,
+        local_auth=True,
+    )
+
+    body = bytes((await setup_routes.get_agent_setup()).body).decode()
+
+    assert "`sibyl setup http://localhost:3334 --yes`" in body
+    assert "email and password" in body
+    assert "or newer" not in body
+
+
+@pytest.mark.asyncio
+async def test_agent_url_points_at_the_api_when_the_web_app_lives_elsewhere(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Local dev default: API on :3334, web app on :3337, so /agent is not on the API.
+    _configure_server(
+        monkeypatch,
+        server_url="http://localhost:3334",
+        minimum=None,
+        oidc=False,
+        local_auth=True,
+        frontend_url="http://localhost:3337/",
+    )
+
+    info = await setup_routes.get_connect_info()
+
+    assert info.agent_url == "http://localhost:3334/api/setup/agent.md"
+
+
+@pytest.mark.asyncio
+async def test_agent_url_uses_the_short_page_behind_one_ingress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_server(
+        monkeypatch,
+        server_url="https://sibyl.example.com",
+        minimum=None,
+        oidc=True,
+        local_auth=False,
+        frontend_url="https://sibyl.example.com/",
+    )
+
+    info = await setup_routes.get_connect_info()
+
+    assert info.agent_url == "https://sibyl.example.com/agent"
+
+
+def test_connect_routes_are_public() -> None:
+    routes = {
+        route.path: route for route in setup_routes.router.routes if isinstance(route, APIRoute)
+    }
+
+    assert routes["/setup/connect"].dependencies == []
+    assert routes["/setup/agent.md"].dependencies == []
+    assert "/setup/integration" not in routes

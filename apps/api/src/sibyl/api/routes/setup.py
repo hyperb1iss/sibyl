@@ -15,17 +15,18 @@ from dataclasses import replace
 
 import structlog
 from fastapi import APIRouter, Depends
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from sibyl.config import settings
 from sibyl.persistence.operations_runtime import (
     get_setup_status as get_runtime_setup_status,
     require_setup_mode_or_admin,
-    require_setup_mode_or_auth,
 )
 from sibyl.services.settings import get_settings_service
 from sibyl_core.ai.bedrock import (
     API_KEY_ENV_VARS as BEDROCK_API_KEY_ENV_VARS,
+    BedrockConfigError,
     bedrock_region_configured,
     resolve_bedrock_credentials,
     resolve_bedrock_settings,
@@ -33,7 +34,7 @@ from sibyl_core.ai.bedrock import (
 from sibyl_core.ai.llm.config import LLMProviderName, LLMSurface, get_config_source
 from sibyl_core.ai.validation import KeyValidationResult, check_provider_key
 from sibyl_core.embeddings.providers import sentence_transformers_available
-from sibyl_core.integration import integration_content
+from sibyl_core.integration import agent_setup_markdown, install_commands, setup_command
 
 router = APIRouter(prefix="/setup", tags=["setup"])
 log = structlog.get_logger()
@@ -83,6 +84,16 @@ class SetupStatus(BaseModel):
     )
     bedrock_valid: bool | None = Field(
         default=None, description="True if Bedrock answers (only checked by validate-keys)"
+    )
+    providers_configured: bool = Field(
+        default=False,
+        description="True when every model provider this server uses is ready without "
+        "user input: keyed providers have their key, Bedrock has a Region and a "
+        "credential source for each plane routed to it, and local graph embeddings "
+        "have their dependency",
+    )
+    configured_providers: list[str] = Field(
+        default_factory=list, description="Names of the ready model providers"
     )
 
 
@@ -223,11 +234,78 @@ def bedrock_configured(environ: Mapping[str, str] | None = None) -> bool:
     return any(env.get(name, "").strip() for name in _AWS_CREDENTIAL_HINTS)
 
 
+# Providers that authenticate with a key someone pastes into Sibyl.
+_PROVIDER_KEY_SETTINGS = {
+    "anthropic": "anthropic_api_key",
+    "gemini": "gemini_api_key",
+    "openai": "openai_api_key",
+}
+
+
+async def _provider_ready(provider: str) -> bool:
+    """Readiness of a provider that is not Bedrock: its key, or its local dependency."""
+    key_setting = _PROVIDER_KEY_SETTINGS.get(provider)
+    if key_setting is not None:
+        return bool(await get_settings_service().get(key_setting))
+    if provider == "local":
+        return sentence_transformers_available()
+    return False
+
+
+def bedrock_credential_paths(environ: Mapping[str, str] | None = None) -> tuple[bool, bool]:
+    """Whether the Claude client and the embedding client each have a credential source.
+
+    Both need a Region. Claude can send a Bedrock API key, the Mantle key when
+    the Mantle API is selected, or sign SigV4. Cohere embeddings on
+    bedrock-runtime never read the Mantle key, so they need a Bedrock API key or
+    SigV4 credentials of their own. SigV4 is judged by the same environment hints
+    as `bedrock_configured`; an instance role leaves none, so such a server reads
+    as not ready here and validate-keys is what proves it.
+    """
+    env = os.environ if environ is None else environ
+    try:
+        bedrock = resolve_bedrock_settings(env)
+    except BedrockConfigError:
+        return False, False
+    sigv4 = any(env.get(name, "").strip() for name in _SIGV4_CREDENTIAL_HINTS)
+    return bool(bedrock.claude_api_key) or sigv4, bool(bedrock.api_key) or sigv4
+
+
+async def model_providers_ready() -> tuple[bool, list[str]]:
+    """Whether every model provider this server uses is ready, and which ones are.
+
+    Every plane counts: each LLM surface (memory, synthesis and the crawler can
+    each name their own provider) plus document and graph embeddings, read the
+    way the runtime reads them. Bedrock must satisfy the credential path of each
+    plane routed to it. This decides who sees a keys step, so it answers no
+    whenever a plane would fail.
+    """
+    source = get_config_source()
+    try:
+        llm = {(await source.resolve(surface)).provider.value for surface in LLMSurface}
+    except Exception as e:
+        log.warning("Could not resolve the LLM providers", error=str(e))
+        return False, []
+    embeddings = {
+        await effective_embedding_setting("embedding_provider") or "",
+        await effective_embedding_setting("graph_embedding_provider") or "",
+    }
+    readiness = {
+        provider: await _provider_ready(provider) for provider in (llm | embeddings) - {"bedrock"}
+    }
+    if "bedrock" in llm | embeddings:
+        claude_ok, embeddings_ok = bedrock_credential_paths()
+        readiness["bedrock"] = ("bedrock" not in llm or claude_ok) and (
+            "bedrock" not in embeddings or embeddings_ok
+        )
+    ready = sorted(provider for provider, ok in readiness.items() if ok)
+    return all(readiness.values()), ready
+
+
 #: Environment variables that point the AWS credential chain at a source: a
 #: Bedrock API key, static keys, a profile, IRSA web identity, EKS Pod Identity
 #: or an ECS task role. Instance roles leave no hint, so validate-keys probes.
-_AWS_CREDENTIAL_HINTS = (
-    *BEDROCK_API_KEY_ENV_VARS,
+_SIGV4_CREDENTIAL_HINTS = (
     "SIBYL_BEDROCK_PROFILE",
     "AWS_PROFILE",
     "AWS_ACCESS_KEY_ID",
@@ -235,6 +313,7 @@ _AWS_CREDENTIAL_HINTS = (
     "AWS_CONTAINER_CREDENTIALS_FULL_URI",
     "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
 )
+_AWS_CREDENTIAL_HINTS = (*BEDROCK_API_KEY_ENV_VARS, *_SIGV4_CREDENTIAL_HINTS)
 
 
 async def _check_provider_key(
@@ -287,6 +366,7 @@ async def get_setup_status(
     anthropic_configured = bool(anthropic_key)
     gemini_configured = bool(gemini_key)
     bedrock_llm, bedrock_embeddings = await bedrock_selection()
+    providers_configured, configured_providers = await model_providers_ready()
 
     return SetupStatus(
         needs_setup=not setup_status.setup_complete,
@@ -304,6 +384,8 @@ async def get_setup_status(
         bedrock_configured=bedrock_configured(),
         bedrock_llm=bedrock_llm,
         bedrock_embeddings=bedrock_embeddings,
+        providers_configured=providers_configured,
+        configured_providers=configured_providers,
     )
 
 
@@ -341,47 +423,81 @@ async def validate_api_keys() -> ApiKeyValidation:
     )
 
 
-class McpClientConfig(BaseModel):
-    """One way to wire Sibyl into an MCP-capable agent."""
+class ConnectInfo(BaseModel):
+    """What a machine needs to connect to this server. Public and secret-free."""
 
-    id: str = Field(description="Stable client identifier")
-    label: str = Field(description="Human-readable client name")
-    kind: str = Field(description='"command" to run in a terminal or "config" to paste into a file')
-    language: str = Field(description="Syntax hint for rendering: bash, json, or toml")
-    snippet: str = Field(description="The command or config text to use")
-    target: str | None = Field(default=None, description="Where a config snippet belongs")
-
-
-class IntegrationResponse(BaseModel):
-    """Everything a user needs to connect Sibyl to a CLI or MCP client."""
-
-    server_url: str = Field(description="Public base URL of this Sibyl server")
-    mcp_url: str = Field(description="MCP endpoint URL")
-    cli_install: str = Field(description="One-liner command to install the sibyl CLI")
-    cli_install_alt: str = Field(description="Alternative install command via uv")
-    mcp_clients: list[McpClientConfig] = Field(
-        description="Per-client MCP setup snippets (Claude Code, Codex, opencode, generic)"
+    server_url: str = Field(description="Public base URL clients connect to")
+    server_version: str = Field(description="Version this server runs")
+    minimum_client_version: str | None = Field(
+        default=None, description="Oldest CLI this server accepts, when a floor is set"
     )
-    prompt_snippet: str = Field(
-        description="Client-agnostic snippet for an agent's system prompt or AGENTS.md"
+    sso_enabled: bool = Field(description="True when sign-in goes through OIDC SSO")
+    local_auth_enabled: bool = Field(description="True when email and password sign-in works")
+    setup_command: str = Field(description="The command that connects a machine")
+    agent_url: str = Field(description="Public URL of the agent setup document")
+    install: dict[str, str] = Field(
+        description="One copyable install-and-setup line per OS: macos, linux, windows"
     )
 
 
-@router.get(
-    "/integration",
-    response_model=IntegrationResponse,
-    dependencies=[Depends(require_setup_mode_or_auth)],
-)
-async def get_integration() -> IntegrationResponse:
-    """Get everything needed to connect Sibyl to a CLI or MCP client.
+def _server_url() -> str:
+    return settings.server_url.rstrip("/")
 
-    Returns the CLI install command, per-client MCP configuration snippets,
-    and the agent prompt snippet. This is the single source of truth behind
-    the web setup wizard and the dashboard connect panel.
 
-    During initial setup: accessible without auth. After setup: requires authentication.
+def _agent_url(server_url: str) -> str:
+    """The short `/agent` page when the web app shares the API's origin, else the API route.
+
+    `/agent` is served by the web app, so it only resolves on the server URL when
+    one ingress fronts both; a split deployment points at the API document.
     """
-    return IntegrationResponse.model_validate(integration_content(settings.server_url))
+    frontend = settings.frontend_url.rstrip("/")
+    if frontend == server_url:
+        return f"{server_url}/agent"
+    return f"{server_url}/api/setup/agent.md"
+
+
+def _minimum_client_version() -> str | None:
+    return (settings.minimum_client_version or "").strip() or None
+
+
+@router.get("/connect", response_model=ConnectInfo)
+async def get_connect_info() -> ConnectInfo:
+    """Describe how a machine connects to this server.
+
+    Public so the connect card and the agent setup document work before and
+    after sign-in. Everything returned is already visible to anyone who can
+    reach the server: its URL, version, version floor, and sign-in methods.
+    """
+    from sibyl import __version__
+
+    server_url = _server_url()
+    return ConnectInfo(
+        server_url=server_url,
+        server_version=__version__,
+        minimum_client_version=_minimum_client_version(),
+        sso_enabled=bool(settings.oidc.providers),
+        local_auth_enabled=settings.local_auth_enabled,
+        setup_command=setup_command(server_url),
+        agent_url=_agent_url(server_url),
+        install=install_commands(server_url),
+    )
+
+
+@router.get("/agent.md", response_class=PlainTextResponse)
+async def get_agent_setup() -> PlainTextResponse:
+    """Markdown an AI coding agent follows to connect this machine.
+
+    Public by design: a person pastes the URL into an agent that has no
+    session yet. It carries only the public connect facts, never credentials.
+    """
+    return PlainTextResponse(
+        agent_setup_markdown(
+            _server_url(),
+            minimum_client_version=_minimum_client_version(),
+            sso=bool(settings.oidc.providers),
+        ),
+        media_type="text/markdown; charset=utf-8",
+    )
 
 
 class ConfigUpdateRequest(BaseModel):

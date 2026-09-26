@@ -78,7 +78,7 @@ export const queryKeys = {
   setup: {
     status: ['setup', 'status'] as const,
     validation: ['setup', 'validation'] as const,
-    integration: ['setup', 'integration'] as const,
+    connect: ['setup', 'connect'] as const,
   },
   settings: {
     all: ['settings'] as const,

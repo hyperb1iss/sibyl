@@ -253,6 +253,57 @@ def test_settings_server_url_uses_public_url_when_explicit() -> None:
     assert s.server_url == "https://public.example.com"
 
 
+@pytest.mark.parametrize("field", ["public_url", "server_url", "frontend_url"])
+@pytest.mark.parametrize(
+    "value",
+    [
+        "https://sibyl.example.com/team?next=x",
+        "https://sibyl.example.com/#frag",
+        "https://user:secret@sibyl.example.com",
+        "https://sibyl.example.com/$(printf QUOTING_PROBE)",
+        "https://sibyl.example.com/`id`",
+        "https://<your-sibyl-host>",
+        "https://sibyl.example.com:99999",
+        "javascript:alert(1)",
+    ],
+)
+def test_settings_refuse_urls_with_credentials_queries_or_junk(field: str, value: str) -> None:
+    with pytest.raises(ValidationError, match="without credentials"):
+        Settings(_env_file=None, **{field: value})
+
+
+@pytest.mark.parametrize(
+    "public_url",
+    [
+        "https://sibyl.example.com/team/",
+        "https://sibyl.example.com/team+blue",
+        "https://sibyl.example.com/team:v1",
+        "https://sibyl.example.com/a@b/~x/%20y/!$&'()*,;=",
+        "https://[2001:db8::5]:8443",
+    ],
+)
+def test_settings_accept_every_legal_proxy_path(public_url: str) -> None:
+    s = Settings(_env_file=None, public_url=public_url)
+    assert s.server_url == public_url.rstrip("/")
+
+
+@pytest.mark.parametrize(
+    ("host", "server_url"),
+    [
+        ("::1", "http://[::1]:3334"),
+        ("::", "http://localhost:3334"),
+        ("0.0.0.0", "http://localhost:3334"),  # noqa: S104 - a bind host fixture
+        ("2001:db8:85a3::8a2e:370:7334", "http://[2001:db8:85a3::8a2e:370:7334]:3334"),
+        ("fe80::1%eth0", "http://[fe80::1%25eth0]:3334"),
+        ("127.0.0.1", "http://127.0.0.1:3334"),
+        ("sibyl.internal", "http://sibyl.internal:3334"),
+    ],
+)
+def test_settings_derive_a_valid_server_url_from_any_bind_host(host: str, server_url: str) -> None:
+    s = Settings(_env_file=None, server_host=host)
+    assert s.server_url == server_url
+
+
 def test_settings_mcp_auth_mode_default() -> None:
     s = Settings(_env_file=None)
     assert s.mcp_auth_mode == "auto"

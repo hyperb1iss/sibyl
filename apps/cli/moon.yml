@@ -40,6 +40,8 @@ tasks:
     inputs:
     - '@group(sources)'
     - '@group(tests)'
+    # test_doctor pins the repo's hooks installer to the CLI's hook templates.
+    - /hooks/configure.py
   memory-trust-test:
     command:
       uv run pytest tests/test_main_capture.py tests/test_main_search.py

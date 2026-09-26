@@ -186,6 +186,7 @@ export default defineConfig({
                 {
                     text: 'System',
                     items: [
+                        { text: 'setup', link: '/cli/setup' },
                         { text: 'init', link: '/cli/init' },
                         { text: 'auth', link: '/cli/auth' },
                         { text: 'org', link: '/cli/org' },

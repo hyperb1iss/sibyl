@@ -7,6 +7,8 @@ describe('isPublicRoutePath', () => {
     expect(isPublicRoutePath('/reset-password')).toBe(true);
     expect(isPublicRoutePath('/reset-password/')).toBe(true);
     expect(isPublicRoutePath('/setup')).toBe(true);
+    // Agents fetch their setup steps before anyone has signed in.
+    expect(isPublicRoutePath('/agent')).toBe(true);
   });
 
   it('keeps application pages protected', () => {

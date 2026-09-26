@@ -3,6 +3,7 @@
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh
 #   curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --remote
+#   curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --remote https://sibyl.example.com
 #   curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --daemon
 #
 # This script:
@@ -47,11 +48,13 @@ usage() {
 Sibyl installer
 
 Usage:
-  install.sh [--server|--remote|--daemon] [--version VERSION] [--no-start] [--no-open] [--no-pull]
+  install.sh [--server|--remote [URL]|--daemon] [--version VERSION] [--no-start] [--no-open] [--no-pull]
 
 Modes:
   --server   Install Sibyl, start the local API + web UI, and open the browser (default)
-  --remote   Install only the sibyl CLI for an existing remote Sibyl server
+  --remote   Install only the sibyl CLI for an existing remote Sibyl server;
+             with a URL, also run 'sibyl setup URL' to connect this machine
+             (a URL on its own implies --remote)
   --daemon   Install sibyl + sibyld for the embedded daemon without the web UI
 
 Options:
@@ -62,6 +65,7 @@ Options:
 
 Environment:
   SIBYL_INSTALL_MODE      server, remote, or daemon
+  SIBYL_INSTALL_SERVER_URL  remote server to connect with 'sibyl setup'
   SIBYL_INSTALL_VERSION   package version to install, such as 1.3.2
   SIBYL_INSTALL_START     0 to install without starting
   SIBYL_INSTALL_OPEN      0 to skip opening the browser
@@ -185,6 +189,20 @@ install_skill_stub() {
     fi
 }
 
+connect_remote_server() {
+    if [ -z "$SERVER_URL" ]; then
+        return
+    fi
+
+    info "Connecting this machine to $SERVER_URL..."
+    # Piped into sh, stdin is this script, so prompts read from the terminal.
+    if [ -t 1 ] && (: </dev/tty) 2>/dev/null; then
+        sibyl setup "$SERVER_URL" </dev/tty || error "Setup did not finish. Re-run: sibyl setup $SERVER_URL"
+    else
+        sibyl setup "$SERVER_URL" --yes || error "Setup did not finish. Re-run: sibyl setup $SERVER_URL"
+    fi
+}
+
 install_sibyld() {
     install_tool "sibyld" "sibyld" "Sibyl local daemon"
 }
@@ -299,9 +317,10 @@ print_next_steps() {
             fi
             ;;
         remote)
-            printf '%s\n' "${BOLD}Connect to a remote Sibyl server:${RESET}"
-            printf '%s\n' "  sibyl init --remote https://sibyl.example.com"
-            printf '%s\n' "  sibyl auth login"
+            if [ -z "$SERVER_URL" ]; then
+                printf '%s\n' "${BOLD}Connect to your Sibyl server:${RESET}"
+                printf '%s\n' "  sibyl setup https://sibyl.example.com"
+            fi
             ;;
         daemon)
             if [ "$START_AFTER_INSTALL" = "1" ]; then
@@ -317,6 +336,8 @@ print_next_steps() {
 
 parse_args() {
     MODE="${SIBYL_INSTALL_MODE:-server}"
+    MODE_CHOSEN="${SIBYL_INSTALL_MODE:+1}"
+    SERVER_URL="${SIBYL_INSTALL_SERVER_URL:-}"
     SIBYL_INSTALL_VERSION="${SIBYL_INSTALL_VERSION:-}"
     START_AFTER_INSTALL="${SIBYL_INSTALL_START:-1}"
     OPEN_BROWSER="${SIBYL_INSTALL_OPEN:-1}"
@@ -326,12 +347,22 @@ parse_args() {
         case "$1" in
             --server|server|--local|local|--docker|docker)
                 MODE=server
+                MODE_CHOSEN=1
                 ;;
             --remote|remote|--cli|cli)
                 MODE=remote
+                MODE_CHOSEN=1
+                case "${2:-}" in
+                    ''|-*|server|local|docker|remote|cli|daemon) ;;
+                    *) SERVER_URL="$2"; shift ;;
+                esac
                 ;;
             --daemon|daemon)
                 MODE=daemon
+                MODE_CHOSEN=1
+                ;;
+            http://*|https://*)
+                SERVER_URL="$1"
                 ;;
             --no-start)
                 START_AFTER_INSTALL=0
@@ -359,6 +390,15 @@ parse_args() {
         esac
         shift
     done
+
+    # A server URL means connecting to that server, which is remote mode.
+    if [ -n "$SERVER_URL" ]; then
+        if [ -z "$MODE_CHOSEN" ]; then
+            MODE=remote
+        elif [ "$MODE" != remote ]; then
+            error "A server URL needs --remote, not --$MODE."
+        fi
+    fi
 }
 
 main() {
@@ -396,6 +436,7 @@ main() {
             start_embedded_daemon
             ;;
         remote)
+            connect_remote_server
             ;;
     esac
 

@@ -53,12 +53,23 @@ sibyl up
 
 ### Remote CLI
 
+Connecting to a team server is one line. The web app's Connect card shows it with your server's URL
+filled in:
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --remote
-sibyl init --remote https://sibyl.example.com
-sibyl auth login
-sibyl doctor
+# macOS
+brew install hyperb1iss/tap/sibyl && sibyl setup https://sibyl.example.com
+
+# Anywhere with uv
+uv tool install --upgrade sibyl-dev && sibyl setup https://sibyl.example.com
+
+# No uv yet: the installer bootstraps it, then runs sibyl setup
+curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --remote https://sibyl.example.com
 ```
+
+[`sibyl setup`](../cli/setup.md) signs you in, installs the skill, and adds the Claude Code hook. To
+let an agent do it instead, give it
+`Set up Sibyl on this machine by following https://sibyl.example.com/agent`.
 
 ### Docker Self-Host
 

@@ -1,62 +1,68 @@
-"""Tests for client-agnostic integration content."""
+"""Tests for the shared connect instructions."""
+
+import shlex
+import shutil
+import subprocess
+
+import pytest
 
 from sibyl_core.integration import (
     AGENT_PROMPT_SNIPPET,
-    integration_content,
-    mcp_clients,
+    agent_setup_markdown,
+    install_commands,
+    is_clean_server_url,
+    setup_command,
 )
 
 
-class TestMcpClients:
-    """MCP client config builders."""
+class TestInstallCommands:
+    """The one line each OS copies."""
 
-    def test_covers_expected_clients(self) -> None:
-        clients = mcp_clients("http://localhost:3334/mcp")
-        assert [c.id for c in clients] == ["claude", "codex", "opencode", "generic"]
+    def test_every_line_ends_with_setup_for_the_server(self) -> None:
+        commands = install_commands("https://sibyl.example.com/")
+        assert set(commands) == {"macos", "linux", "windows"}
+        assert commands["macos"].endswith("sibyl setup https://sibyl.example.com")
+        assert commands["linux"].endswith("sibyl setup https://sibyl.example.com")
+        assert commands["windows"].endswith("sibyl setup 'https://sibyl.example.com'")
 
-    def test_every_snippet_embeds_the_mcp_url(self) -> None:
-        mcp_url = "https://sibyl.example.com/mcp"
-        for client in mcp_clients(mcp_url):
-            assert mcp_url in client.snippet
+    def test_macos_uses_homebrew_and_others_use_an_upgrading_uv_install(self) -> None:
+        commands = install_commands("https://sibyl.example.com")
+        assert commands["macos"].startswith("brew install hyperb1iss/tap/sibyl && ")
+        assert commands["linux"].startswith("uv tool install --upgrade sibyl-dev && ")
+        # Windows PowerShell 5.1 has no `&&`.
+        assert commands["windows"].startswith("uv tool install --upgrade sibyl-dev; ")
 
-    def test_claude_uses_the_mcp_add_command(self) -> None:
-        claude = next(c for c in mcp_clients("http://localhost:3334/mcp") if c.id == "claude")
-        assert claude.kind == "command"
-        assert claude.snippet == "claude mcp add sibyl --transport http http://localhost:3334/mcp"
-
-    def test_config_clients_name_a_target_file(self) -> None:
-        for client in mcp_clients("http://localhost:3334/mcp"):
-            if client.kind == "config":
-                assert client.target
+    def test_setup_command_strips_trailing_slash(self) -> None:
+        assert setup_command("http://localhost:3334/") == "sibyl setup http://localhost:3334"
 
 
-class TestIntegrationContent:
-    """Full integration payload assembly."""
+class TestAgentSetupMarkdown:
+    """The document an agent follows to connect a machine."""
 
-    def test_strips_trailing_slash_from_server_url(self) -> None:
-        content = integration_content("http://localhost:3334/")
-        assert content["server_url"] == "http://localhost:3334"
-        assert content["mcp_url"] == "http://localhost:3334/mcp"
+    def test_tailors_url_floor_and_sso_sign_in(self) -> None:
+        doc = agent_setup_markdown(
+            "https://sibyl.example.com/", minimum_client_version="1.5.0", sso=True
+        )
+        assert "Sibyl server at https://sibyl.example.com\n" in doc
+        assert "`sibyl setup https://sibyl.example.com --yes`" in doc
+        assert "version 1.5.0 or newer" in doc
+        assert "company SSO" in doc
+        assert "`brew install hyperb1iss/tap/sibyl`" in doc
+        assert "`uv tool install --upgrade sibyl-dev`" in doc
+        assert "sibyl whoami" in doc
+        assert "sibyl doctor" in doc
 
-    def test_payload_has_all_onboarding_fields(self) -> None:
-        content = integration_content("http://localhost:3334")
-        assert set(content) == {
-            "server_url",
-            "mcp_url",
-            "cli_install",
-            "cli_install_alt",
-            "mcp_clients",
-            "prompt_snippet",
-        }
-        assert content["cli_install"].startswith("curl -fsSL")
-        assert content["cli_install_alt"] == "brew install hyperb1iss/tap/sibyl && sibyl up"
-        assert len(content["mcp_clients"]) == 4
+    def test_local_auth_server_signs_in_with_password_and_no_floor(self) -> None:
+        doc = agent_setup_markdown("http://localhost:3334", minimum_client_version=None, sso=False)
+        assert "email and password" in doc
+        assert "SSO" not in doc
+        assert "or newer" not in doc
 
-    def test_mcp_clients_serialize_to_dicts(self) -> None:
-        content = integration_content("http://localhost:3334")
-        first = content["mcp_clients"][0]
-        assert isinstance(first, dict)
-        assert set(first) == {"id", "label", "kind", "language", "snippet", "target"}
+    def test_stays_short(self) -> None:
+        doc = agent_setup_markdown(
+            "https://sibyl.example.com", minimum_client_version="1.5.0", sso=True
+        )
+        assert len(doc.splitlines()) <= 40
 
 
 class TestAgentPromptSnippet:
@@ -87,3 +93,143 @@ class TestAgentPromptSnippet:
     def test_points_at_the_doctor_command(self) -> None:
         # Users should know how to verify their setup.
         assert "sibyl doctor" in AGENT_PROMPT_SNIPPET
+
+
+# Legal RFC 3986 URLs whose path holds characters a shell treats as syntax.
+SHELL_SPECIAL_URLS = [
+    "https://sibyl.example.com/$(id)",
+    "https://sibyl.example.com/it's",
+    "https://sibyl.example.com/a;b&c",
+    "https://sibyl.example.com/!$&'()*+,;=",
+    "https://sibyl.example.com/team+blue",
+    "https://sibyl.example.com/team:v1",
+    "https://sibyl.example.com/a@b/~x/%20y",
+]
+# Strings that reach quoting from anywhere, legal URLs or not.
+HOSTILE_URLS = [
+    *SHELL_SPECIAL_URLS,
+    "https://sibyl.example.com/$(printf QUOTING_PROBE)",
+    "https://sibyl.example.com/`touch /tmp/probe`",
+    'https://sibyl.example.com/"x"',
+    "https://sibyl.example.com/a&b|c",
+]
+
+
+class TestShellQuoting:
+    """Configured URLs reach shells as plain text, never as syntax."""
+
+    @pytest.mark.parametrize("url", HOSTILE_URLS)
+    def test_posix_lines_pass_the_url_through_verbatim(self, url: str) -> None:
+        for os_name in ("macos", "linux"):
+            line = install_commands(url)[os_name]
+            argument = line.split(" && sibyl setup ", 1)[1]
+            result = subprocess.run(
+                ["/bin/sh", "-c", f"printf '%s' {argument}"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            assert result.stdout == url
+
+    @pytest.mark.parametrize("url", HOSTILE_URLS)
+    def test_powershell_line_single_quotes_and_doubles_quotes(self, url: str) -> None:
+        argument = install_commands(url)["windows"].split("; sibyl setup ", 1)[1]
+        # Always quoted: a bare URL is read as code in expression context.
+        assert argument.startswith("'") and argument.endswith("'")
+        inner = argument[1:-1]
+        assert "'" not in inner.replace("''", "")
+        assert inner.replace("''", "'") == url
+
+    @pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell is not installed")
+    @pytest.mark.parametrize("url", HOSTILE_URLS)
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "[Console]::Write({arg})",  # expression context
+            "& {{ param($u) [Console]::Write($u) }} {arg}",  # argument context
+        ],
+    )
+    def test_powershell_passes_the_url_through_verbatim(self, url: str, template: str) -> None:
+        argument = install_commands(url)["windows"].split("; sibyl setup ", 1)[1]
+        result = subprocess.run(
+            ["pwsh", "-NoProfile", "-NonInteractive", "-Command", template.format(arg=argument)],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert result.stdout == url
+
+    @pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell is not installed")
+    @pytest.mark.parametrize("url", ["https://sibyl.example.com", *HOSTILE_URLS])
+    def test_the_whole_windows_line_runs_in_powershell(self, url: str) -> None:
+        # Stand-ins for uv and sibyl record what the real line would run.
+        stubs = (
+            "function uv { [Console]::Write('uv ' + ($args -join ' ') + '|') }; "
+            "function sibyl { [Console]::Write(($args -join ' ')) }; "
+        )
+        result = subprocess.run(
+            [
+                "pwsh",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                stubs + install_commands(url)["windows"],
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert result.stdout == f"uv tool install --upgrade sibyl-dev|setup {url}"
+
+    def test_clean_urls_stay_bare_for_posix_and_quoted_for_powershell(self) -> None:
+        url = "https://sibyl.example.com:8443/team"
+        commands = install_commands(url)
+        assert commands["macos"].endswith(f"sibyl setup {url}")
+        assert commands["linux"].endswith(f"sibyl setup {url}")
+        assert commands["windows"].endswith(f"sibyl setup '{url}'")
+
+    def test_the_agent_document_quotes_the_setup_command(self) -> None:
+        url = HOSTILE_URLS[0]
+        doc = agent_setup_markdown(url, minimum_client_version=None, sso=True)
+        assert f"`sibyl setup {shlex.quote(url)} --yes`" in doc
+
+
+class TestCleanServerUrl:
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://sibyl.example.com",
+            "http://localhost:3334",
+            "https://sibyl.example.com:8443/team/",
+            "http://10.0.0.5:3334",
+            "https://[::1]:3334",
+            "http://[fe80::1%25eth0]:3334",
+            "HTTPS://Sibyl.Example.com",
+            *SHELL_SPECIAL_URLS,
+        ],
+    )
+    def test_accepts_every_legal_http_url(self, url: str) -> None:
+        assert is_clean_server_url(url)
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://user:pass@sibyl.example.com",
+            "https://sibyl.example.com?x=1",
+            "https://sibyl.example.com/team?x=1",
+            "https://sibyl.example.com#frag",
+            "https://sibyl.example.com/a b",
+            "https://sibyl.example.com/a\tb",
+            "https://sibyl.example.com/a\x01b",
+            "https://sibyl.example.com:99999",
+            "https://sibyl.example.com/`id`",
+            'https://sibyl.example.com/"x"',
+            "https://<your-sibyl-host>",
+            "ftp://sibyl.example.com",
+            "sibyl.example.com",
+            "https://",
+            "",
+        ],
+    )
+    def test_rejects_credentials_queries_fragments_whitespace_and_junk(self, url: str) -> None:
+        assert not is_clean_server_url(url)

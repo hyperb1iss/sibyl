@@ -39,6 +39,7 @@ from sibyl_cli.common import (
     warn,
 )
 from sibyl_cli.config_cmd import app as config_app
+from sibyl_cli.connect import setup_cmd
 from sibyl_cli.context import app as context_app
 from sibyl_cli.crawl import app as crawl_app
 from sibyl_cli.debug import app as debug_app
@@ -175,6 +176,7 @@ memory_admin.register_root_commands(app)
 app.add_typer(synthesis_app, name="synthesis")
 app.add_typer(team_app, name="team")
 app.command("tasks", hidden=True)(list_tasks)
+app.command("setup")(setup_cmd)
 app.command("doctor")(doctor_cmd)
 app.command("login")(login_cmd)
 app.command("logout")(logout_cmd)
@@ -222,6 +224,9 @@ _CONTEXT_REPAIR_COMMANDS = frozenset(
         # doctor stays reachable because it is what you run when the selection
         # is broken, and it drops to filesystem checks once that happens.
         ("doctor",),
+        # setup picks or creates the context itself, so a stale selection must
+        # not block the command that repairs it.
+        ("setup",),
         *[("config", leaf) for leaf in _LOCAL_CONFIG_LEAVES],
         *[("config", "context", leaf) for leaf in _LOCAL_CONTEXT_LEAVES],
         *[("contexts", leaf) for leaf in _LOCAL_CONTEXT_LEAVES],

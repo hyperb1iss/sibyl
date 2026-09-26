@@ -13,9 +13,8 @@ curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | 
 # Develop this package
 moon run cli:install-dev
 
-# Configure
-sibyl init --remote https://sibyl.example.com
-sibyl auth login
+# Connect to a server: sign in, install the skill and hooks
+sibyl setup https://sibyl.example.com
 
 # Link to project (scopes all commands)
 sibyl project link <project_id>
