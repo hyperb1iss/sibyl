@@ -137,7 +137,9 @@ def _stamp_groups_query(
         f"SELECT {metadata_path}.provider AS provider, {metadata_path}.model AS model, "
         f"{metadata_path}.dimensions AS dimensions, count() AS rows FROM {table} "
         f"WHERE {scope}{vector_field} != NONE AND ({metadata_path} ?? NONE) != NONE "
-        f"AND {metadata_path}.provider != $unverified AND {metadata_path}.stamp_version = NONE "
+        f"AND ({metadata_path}.provider ?? NONE) != NONE AND ({metadata_path}.model ?? NONE) != NONE "
+        f"AND {metadata_path}.provider != $unverified "
+        f"AND ({metadata_path}.stamp_version ?? NONE) = NONE "
         "GROUP BY provider, model, dimensions;"
     )
 

@@ -466,3 +466,54 @@ async def test_a_graph_vector_stamped_null_is_adopted_and_proves_nothing(engine)
     assert swept.adopted == 1
     assert swept.recovered == 0
     assert stored[0]["stamp"] == small.metadata.to_dict()
+
+
+@pytest.mark.parametrize("current_model", [True, False], ids=["restamp", "reembed"])
+@pytest.mark.asyncio
+async def test_a_stamp_with_a_nested_null_is_repaired_on_the_first_pass(
+    engine, current_model: bool
+) -> None:
+    """A NULL inside a stamp reads back as None and is sent as NONE; the fence must still hold."""
+    from sibyl_core.services import content_client
+    from sibyl_core.services.content_models import raw_memory_embedding_metadata
+    from sibyl_core.services.content_raw_embedding_repair import repair_raw_capture_embeddings
+
+    small = _provider(_SMALL, EMBEDDING_DIM, "raw-memory")
+    stamp = previous_release_stamp(raw_memory_embedding_metadata(small.metadata))
+    if not current_model:
+        stamp = {**stamp, "model": "an-older-model"}
+    organization_id = str(uuid4())
+    content = _content(engine)
+    try:
+        await bootstrap_content_schema(content, reset=True)
+        uuid = str(uuid4())
+        await content_client.select_many(
+            content,
+            "CREATE raw_captures CONTENT {uuid: $uuid, organization_id: $organization_id, "
+            "principal_id: 'owner', source_id: $source, raw_content: 'captured', "
+            "embedding: $vector, metadata: {embedding_metadata: "
+            "object::from_entries(array::concat(object::entries($stamp), "
+            "[['tokenizer_estimate_method', NULL]]))}} RETURN NONE;",
+            uuid=uuid,
+            organization_id=organization_id,
+            source=str(uuid4()),
+            vector=_unit(0, EMBEDDING_DIM),
+            stamp={k: v for k, v in stamp.items() if k != "tokenizer_estimate_method"},
+        )
+        seeded = await _stored(content, uuid)
+        first = await repair_raw_capture_embeddings(
+            organization_id, embedding_provider=small, client=content
+        )
+        second = await repair_raw_capture_embeddings(
+            organization_id, embedding_provider=small, client=content
+        )
+        stored = await _stored(content, uuid)
+    finally:
+        await content.close()
+        await _drop_namespace(engine, content.namespace)
+
+    assert "tokenizer_estimate_method" in seeded["stamp"]
+    assert seeded["stamp"]["tokenizer_estimate_method"] is None
+    assert (first.recovered, first.pending) == (1, 0)
+    assert second.checked == 0
+    assert stored["stamp"] == raw_memory_embedding_metadata(small.metadata)

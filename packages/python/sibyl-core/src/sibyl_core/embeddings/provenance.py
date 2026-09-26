@@ -182,9 +182,37 @@ def vector_identity_differs_predicate(path: str, param: str) -> str:
     """SurrealQL: the stamp at ``path`` differs from ``$param`` in a field that shapes the vector.
 
     A field absent from both stamps compares as equal, so chunk stamps, which
-    carry no provider input-kind flag, still compare cleanly.
+    carry no provider input-kind flag, still compare cleanly. A stored NULL
+    counts as absent on either side: the previous release could keep a
+    client's null, NULL never equals NONE, and a Python None arrives as NONE.
     """
-    return "(" + " OR ".join(f"{path}.{f} != ${param}.{f}" for f in VECTOR_IDENTITY_FIELDS) + ")"
+    return (
+        "("
+        + " OR ".join(
+            f"({path}.{f} ?? NONE) != (${param}.{f} ?? NONE)" for f in VECTOR_IDENTITY_FIELDS
+        )
+        + ")"
+    )
+
+
+# The fields a write fences on to tell that a stamp it read is still the one
+# stored: what shapes the vector, and whether the stamp is in the previous
+# release's format.
+OBSERVED_STAMP_FIELDS = (*VECTOR_IDENTITY_FIELDS, STAMP_VERSION_FIELD)
+
+
+def stamp_unchanged_predicate(path: str, observed: str) -> str:
+    """SurrealQL: the stamp at ``path`` still matches ``observed`` (an expression) where it counts.
+
+    Compared field by field rather than as whole objects: a stored NULL inside
+    a stamp reads back as None and is sent as NONE, so whole-object equality
+    never holds again and the write would be refused on every pass. A NULL or
+    missing stamp matches a missing one. Another model's write changes one of
+    these fields, so the write still loses that race.
+    """
+    return " AND ".join(
+        f"({path}.{f} ?? NONE) = ({observed}.{f} ?? NONE)" for f in OBSERVED_STAMP_FIELDS
+    )
 
 
 def mark_unverified_vector(
@@ -252,6 +280,7 @@ __all__ = [
     "DOCUMENT_CHUNK_EMBEDDING_TEXT_VERSION",
     "EMBEDDING_STAMP_KEY",
     "EMBEDDING_STAMP_VERSION",
+    "OBSERVED_STAMP_FIELDS",
     "STAMP_VERSION_FIELD",
     "UNVERIFIED_EMBEDDING_PROVIDER",
     "UNVERIFIED_ORIGIN_ARCHIVE",
@@ -267,6 +296,7 @@ __all__ = [
     "mark_unverified_vector",
     "same_vector_identity",
     "same_vector_space",
+    "stamp_unchanged_predicate",
     "unverified_embedding_metadata",
     "vector_identity",
     "vector_identity_differs_predicate",

@@ -424,8 +424,11 @@ async def test_walk_leaves_text_and_vectors_on_the_server(content_store, monkeyp
         projection = walk.split(" FROM ", 1)[0]
         assert "raw_content" not in projection
         assert "embedding" not in projection
-        assert "embedding = NONE OR metadata.embedding_metadata = NONE" in walk
-        assert "metadata.embedding_metadata.model != $expected_metadata.model" in walk
+        assert "embedding = NONE OR (metadata.embedding_metadata ?? NONE) = NONE" in walk
+        assert (
+            "(metadata.embedding_metadata.model ?? NONE) != ($expected_metadata.model ?? NONE)"
+            in walk
+        )
     fetches = [q for q in queries if "uuid IN $ids" in q]
     assert len(fetches) == 1
     assert "raw_content" in fetches[0]

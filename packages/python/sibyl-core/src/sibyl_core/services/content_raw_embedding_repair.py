@@ -16,6 +16,7 @@ from sibyl_core.backends.surreal.schema_embedding_states import embedding_sweep_
 from sibyl_core.embeddings.provenance import (
     is_legacy_stamp,
     same_vector_identity,
+    stamp_unchanged_predicate,
     vector_identity_differs_predicate,
 )
 from sibyl_core.embeddings.providers import EmbeddingProvider
@@ -68,8 +69,8 @@ _RAW_EMBEDDING_WALK_QUERY = (
     f"SELECT {_RAW_EMBEDDING_WALK_FIELDS} FROM raw_captures "
     "WHERE organization_id = $organization_id AND uuid >= $cursor "
     "AND deleted_at = NONE "
-    "AND (embedding = NONE OR metadata.embedding_metadata = NONE "
-    "OR metadata.embedding_metadata.stamp_version = NONE OR "
+    "AND (embedding = NONE OR (metadata.embedding_metadata ?? NONE) = NONE "
+    "OR (metadata.embedding_metadata.stamp_version ?? NONE) = NONE OR "
     + vector_identity_differs_predicate("metadata.embedding_metadata", "expected_metadata")
     + ") "
     "ORDER BY uuid ASC LIMIT $limit;"
@@ -98,27 +99,29 @@ _RESTAMP_CONCURRENCY = 4
 # the organization has for each row (seconds per row at 50,000 captures); by
 # uuid alone it uses the unique index.
 #
-# Both also require the stamp this pass read to be the one stored. Replacing a
-# vector leaves the revision alone, so the revision cannot tell a restamp that
+# Both also require the stamp this pass read to still be the one stored, in
+# every field that shapes the vector and in its format. Replacing a vector
+# leaves the revision alone, so the revision cannot tell a restamp that
 # another repair (a process configured for another model, during a rolling
 # deploy) wrote its own vector and stamp in the meantime; without this fence
 # the restamp would relabel that vector as this pass's model. Raw repair holds
-# no lease, so the stamp is the fence. A stored NULL counts as no stamp: the
-# previous release could keep a client's null, and NULL never equals NONE.
-_RAW_EMBEDDING_RESTAMP_QUERY = """
+# no lease, so the stamp is the fence (see ``stamp_unchanged_predicate`` for
+# why it compares fields and how it treats NULLs).
+_RAW_STAMP = "metadata.embedding_metadata"
+_RAW_EMBEDDING_RESTAMP_QUERY = f"""
 UPDATE (SELECT VALUE id FROM raw_captures WHERE uuid IN $uuids)
 SET metadata.embedding_metadata = $embedding_metadata
 WHERE organization_id = $organization_id AND revision = $revisions[uuid]
-    AND embedding != NONE AND (metadata.embedding_metadata ?? NONE) = $observed[uuid]
+    AND embedding != NONE AND {stamp_unchanged_predicate(_RAW_STAMP, "$observed[uuid]")}
 RETURN uuid;
 """
 
-_RAW_EMBEDDING_UPDATE_QUERY = """
+_RAW_EMBEDDING_UPDATE_QUERY = f"""
 UPDATE (SELECT VALUE id FROM raw_captures WHERE uuid = $uuid) SET
     embedding = $embedding,
     metadata.embedding_metadata = $embedding_metadata
 WHERE organization_id = $organization_id AND revision = $revision
-    AND (metadata.embedding_metadata ?? NONE) = $observed
+    AND {stamp_unchanged_predicate(_RAW_STAMP, "$observed")}
 RETURN uuid;
 """
 
