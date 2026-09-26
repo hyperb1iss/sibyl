@@ -34,6 +34,7 @@ from sibyl_core.backends.surreal.records import (
     raise_on_error as _raise_on_error,
     utcnow as _utcnow,
 )
+from sibyl_core.embeddings.provenance import vector_space_predicate
 from sibyl_core.memory_pipeline.quality import (
     expand_memory_quality_storage_metadata,
     normalize_memory_quality_metadata,
@@ -709,7 +710,7 @@ def _chunk_space_clause(
     """
     if embedding_metadata is None:
         return "", {}
-    return "AND embedding_metadata = $embedding_metadata ", {
+    return f"AND {vector_space_predicate('embedding_metadata', 'embedding_metadata')} ", {
         "embedding_metadata": dict(embedding_metadata)
     }
 

@@ -294,6 +294,33 @@ async def test_legacy_verdict_is_decided_once_even_after_the_evidence_is_gone(
     assert finished.recovered == 4
 
 
+async def test_only_fields_that_shape_the_vector_trigger_a_reembed(runtime) -> None:
+    current = CountingProvider("current")
+    stamp = current.metadata.to_dict()
+    await _entity(runtime, "bookkeeping", stamp={**stamp, "cache_namespace": "renamed"})
+    await _entity(runtime, "estimator", stamp={**stamp, "tokenizer_estimate_method": "other"})
+    await _entity(runtime, "text", stamp={**stamp, "text_version": "native-graph-v0"})
+    await _entity(runtime, "input-kind", stamp={**stamp, "input_kind_sensitive": False})
+
+    result = await sweep_graph_embeddings(runtime, embedding_provider=current)
+
+    assert result.status == SWEEP_COMPLETED
+    assert result.recovered == 2
+    assert len(current.texts) == 2
+    entities = await _rows(runtime, "entity")
+    assert entities["bookkeeping"]["stamp"]["cache_namespace"] == "renamed"
+    assert entities["estimator"]["stamp"]["tokenizer_estimate_method"] == "other"
+    assert entities["text"]["stamp"] == stamp
+    assert entities["input-kind"]["stamp"] == stamp
+    # A finished plane stays current when only bookkeeping differs.
+    assert (
+        await sweep_graph_embeddings(
+            runtime,
+            embedding_provider=CountingProvider("current"),
+        )
+    ).status == SWEEP_CURRENT
+
+
 async def test_operator_policy_reembeds_vectors_without_evidence(runtime, monkeypatch) -> None:
     monkeypatch.setenv("SIBYL_EMBEDDING_LEGACY_VECTORS", "reembed")
     provider = CountingProvider("current")

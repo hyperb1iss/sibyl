@@ -15,6 +15,7 @@ from sibyl_core.backends.surreal.fulltext import (
 )
 from sibyl_core.backends.surreal.knn import knn_overfetch_pool, knn_search_effort
 from sibyl_core.config import settings
+from sibyl_core.embeddings.provenance import vector_space_predicate
 from sibyl_core.embeddings.providers import EmbeddingProvider
 from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.query_anchors import (
@@ -42,6 +43,12 @@ from sibyl_core.services.graph_search import row_score as _row_score
 log = structlog.get_logger()
 
 _FULLTEXT_FIELDS = ("name", "summary", "description", "content")
+
+
+# Vector lanes score only rows embedded in the query's vector space.
+_STAMP_IN_QUERY_SPACE = vector_space_predicate(
+    "attributes.embedding_metadata", "embedding_metadata"
+)
 
 
 def _build_explicit_anchor_search_query(query: str) -> str:
@@ -379,7 +386,7 @@ class _EntitySearchManager:
             " FROM entity WHERE group_id = $group_id"
             f" AND name_embedding <|{pool}, {overfetch_knn_effort}|> $query_embedding"
             ") WHERE entity_type IN $entity_types"
-            " AND attributes.embedding_metadata = $embedding_metadata"
+            f" AND {_STAMP_IN_QUERY_SPACE}"
             " ORDER BY score DESC, created_at DESC, uuid DESC"
             " LIMIT $limit;"
         )
@@ -455,7 +462,7 @@ class _EntitySearchManager:
                     + f"""
                           AND name_embedding <|{candidate_limit}, {knn_effort}|> $query_embedding
                     )
-                    WHERE attributes.embedding_metadata = $embedding_metadata
+                    WHERE {_STAMP_IN_QUERY_SPACE}
                     ORDER BY score DESC, created_at DESC, uuid DESC
                     LIMIT $limit;
                     """,

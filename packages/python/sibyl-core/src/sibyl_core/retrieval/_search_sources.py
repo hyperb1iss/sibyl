@@ -16,6 +16,7 @@ from sibyl_core.backends.surreal.fulltext import (
 )
 from sibyl_core.backends.surreal.knn import knn_overfetch_pool, knn_search_effort
 from sibyl_core.config import core_config
+from sibyl_core.embeddings.provenance import vector_space_predicate
 from sibyl_core.embeddings.providers import EmbeddingMetadata, EmbeddingProvider
 from sibyl_core.memory_pipeline.retrieval import CandidateSourceFailure, CandidateSourceResult
 from sibyl_core.models.context import ContextFacet
@@ -48,6 +49,12 @@ EDGE_FULLTEXT_MIN_MATCH_LIMIT = 32
 NODE_FULLTEXT_FIELDS = ("name", "summary", "description", "content")
 _RAW_MEMORY_CONTEXT_TYPES = {"raw_memory", "session", "episode", "note"}
 log = structlog.get_logger()
+
+
+# Vector lanes score only rows embedded in the query's vector space.
+_STAMP_IN_QUERY_SPACE = vector_space_predicate(
+    "attributes.embedding_metadata", "embedding_metadata"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -647,7 +654,7 @@ async def _node_vector_candidates(
                   AND name_embedding <|{pool}, {pool_knn_effort}|> $query_embedding
             )
             WHERE score >= $min_score AND entity_type IN $node_types
-              AND attributes.embedding_metadata = $embedding_metadata
+              AND {_STAMP_IN_QUERY_SPACE}
             ORDER BY score DESC, created_at DESC, uuid DESC
             LIMIT $limit;
             """,
@@ -681,7 +688,7 @@ async def _node_vector_candidates(
         + f"""
               AND name_embedding <|{candidate_limit}, {knn_effort}|> $query_embedding
         )
-        WHERE score >= $min_score AND attributes.embedding_metadata = $embedding_metadata
+        WHERE score >= $min_score AND {_STAMP_IN_QUERY_SPACE}
         ORDER BY score DESC, created_at DESC, uuid DESC
         LIMIT $limit;
         """,
@@ -734,7 +741,7 @@ async def _edge_vector_candidates(
               AND fact_embedding <|{pool}, {pool_knn_effort}|> $query_embedding
             )
             WHERE score >= $min_score AND name IN $edge_types
-              AND attributes.embedding_metadata = $embedding_metadata
+              AND {_STAMP_IN_QUERY_SPACE}
             ORDER BY score DESC, created_at DESC, uuid DESC
             LIMIT $limit;
             """,
@@ -764,7 +771,7 @@ async def _edge_vector_candidates(
         + f"""
           AND fact_embedding <|{candidate_limit}, {knn_effort}|> $query_embedding
         )
-        WHERE score >= $min_score AND attributes.embedding_metadata = $embedding_metadata
+        WHERE score >= $min_score AND {_STAMP_IN_QUERY_SPACE}
         ORDER BY score DESC, created_at DESC, uuid DESC
         LIMIT $limit;
         """,

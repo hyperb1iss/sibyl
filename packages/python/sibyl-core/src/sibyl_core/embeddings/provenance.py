@@ -1,11 +1,18 @@
 """Which model produced a stored vector, and how an unknown origin is recorded.
 
-Every vector Sibyl stores sits beside an ``embedding_metadata`` object. A vector
-counts as usable only while that object equals what the configured provider
-would write today. Rows whose origin cannot be proven carry an explicit
-unverified marker instead of no marker at all: no configured provider ever
-produces it, so the embedding sweep replaces those vectors and the vector
-lanes ignore them until it does.
+Every vector Sibyl stores sits beside an ``embedding_metadata`` object. Two
+projections of it matter. The vector space (provider, model and dimensions)
+decides whether a stored vector can be scored against a query vector. The
+vector identity adds what else changes the vector for the same model (the
+embedded text contract and whether the provider embeds documents and queries
+differently); the embedding sweep replaces a vector whose identity differs
+from what the configured provider writes today. Bookkeeping fields such as a
+cache namespace or a token estimator never trigger either.
+
+Rows whose origin cannot be proven carry an explicit unverified marker
+instead of no marker at all: no configured provider ever produces it, so the
+embedding sweep replaces those vectors and the vector lanes ignore them until
+it does.
 """
 
 from __future__ import annotations
@@ -20,6 +27,9 @@ UNVERIFIED_ORIGIN_OPERATOR = "operator_reembed"
 UNVERIFIED_ORIGIN_REBUILD = "dimension_rebuild"
 
 DOCUMENT_CHUNK_EMBEDDING_TEXT_VERSION = "document-chunk-v1"
+
+VECTOR_SPACE_FIELDS = ("provider", "model", "dimensions")
+VECTOR_IDENTITY_FIELDS = (*VECTOR_SPACE_FIELDS, "text_version", "input_kind_sensitive")
 
 # Provider errors that say "not now" rather than "not this input": throttling,
 # quota, and the provider or its model being briefly unavailable. The sweep backs
@@ -100,19 +110,37 @@ def document_chunk_embedding_metadata(
     }
 
 
-def same_embedding_model(stamp: object, *, provider: str, model: str, dimensions: int) -> bool:
-    """Whether a stamp from another plane names the same model and size.
-
-    Planes stamp different text contracts, so cross-plane evidence compares
-    only the fields that decide the vector space.
-    """
+def vector_space(stamp: object) -> dict[str, Any] | None:
+    """The part of a stamp that decides which query vectors a stored vector can meet."""
     if not isinstance(stamp, Mapping):
+        return None
+    return {field: stamp.get(field) for field in VECTOR_SPACE_FIELDS}
+
+
+def same_vector_space(left: object, right: object) -> bool:
+    space = vector_space(left)
+    return space is not None and space == vector_space(right)
+
+
+def same_vector_identity(left: object, right: object) -> bool:
+    """Whether two stamps describe vectors the sweep would not replace for each other."""
+    if not isinstance(left, Mapping) or not isinstance(right, Mapping):
         return False
-    return (
-        stamp.get("provider") == provider
-        and stamp.get("model") == model
-        and stamp.get("dimensions") == dimensions
-    )
+    return all(left.get(field) == right.get(field) for field in VECTOR_IDENTITY_FIELDS)
+
+
+def vector_space_predicate(path: str, param: str) -> str:
+    """SurrealQL: the stamp at ``path`` is in the same vector space as ``$param``."""
+    return "(" + " AND ".join(f"{path}.{f} = ${param}.{f}" for f in VECTOR_SPACE_FIELDS) + ")"
+
+
+def vector_identity_differs_predicate(path: str, param: str) -> str:
+    """SurrealQL: the stamp at ``path`` differs from ``$param`` in a field that shapes the vector.
+
+    A field absent from both stamps compares as equal, so chunk stamps, which
+    carry no provider input-kind flag, still compare cleanly.
+    """
+    return "(" + " OR ".join(f"{path}.{f} != ${param}.{f}" for f in VECTOR_IDENTITY_FIELDS) + ")"
 
 
 def mark_unverified_vector(
@@ -183,10 +211,16 @@ __all__ = [
     "UNVERIFIED_ORIGIN_LEGACY",
     "UNVERIFIED_ORIGIN_OPERATOR",
     "UNVERIFIED_ORIGIN_REBUILD",
+    "VECTOR_IDENTITY_FIELDS",
+    "VECTOR_SPACE_FIELDS",
     "document_chunk_embedding_metadata",
     "is_transient_provider_error",
     "is_unverified_embedding_metadata",
     "mark_unverified_vector",
-    "same_embedding_model",
+    "same_vector_identity",
+    "same_vector_space",
     "unverified_embedding_metadata",
+    "vector_identity_differs_predicate",
+    "vector_space",
+    "vector_space_predicate",
 ]

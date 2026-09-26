@@ -4,8 +4,9 @@ A plane is a set of tables whose vectors share one configured model: the
 graph plane holds entity and relationship vectors, the document chunk plane
 holds chunk vectors. Every vector carries an ``embedding_metadata`` stamp, and
 the sweep's single rule is that a row whose stamp differs from what the
-configured provider writes today, or whose stamp survived its vector, gets a
-new vector from the configured provider.
+configured provider writes today in a field that shapes the vector (see
+``VECTOR_IDENTITY_FIELDS``), or whose stamp survived its vector, gets a new
+vector from the configured provider.
 
 Rows written before Sibyl stamped vectors carry no stamp. The first pass over
 a plane classifies them once and persists the verdict (see
@@ -44,8 +45,11 @@ from sibyl_core.embeddings.provenance import (
     UNVERIFIED_EMBEDDING_PROVIDER,
     UNVERIFIED_ORIGIN_LEGACY,
     UNVERIFIED_ORIGIN_OPERATOR,
+    VECTOR_IDENTITY_FIELDS,
     is_transient_provider_error,
+    same_vector_identity,
     unverified_embedding_metadata,
+    vector_identity_differs_predicate,
 )
 from sibyl_core.projection.repair import LifecycleRepairResult
 
@@ -163,10 +167,8 @@ class SweepTable:
     dimensions: int
 
     def _candidate_predicate(self) -> str:
-        return (
-            f"{self.metadata_path} != NONE "
-            f"AND ({self.vector_field} = NONE OR {self.metadata_path} != $stamp)"
-        )
+        differs = vector_identity_differs_predicate(self.metadata_path, "stamp")
+        return f"{self.metadata_path} != NONE AND ({self.vector_field} = NONE OR {differs})"
 
     def walk_query(self) -> str:
         return (
@@ -383,7 +385,10 @@ def _row_digest(row: SweepRow) -> str:
 
 
 def _stamp_digest(stamp: EmbeddingStamp) -> str:
-    return hashlib.sha256(json.dumps(stamp, sort_keys=True, default=str).encode()).hexdigest()[:32]
+    identity = {field: stamp.get(field) for field in VECTOR_IDENTITY_FIELDS}
+    return hashlib.sha256(json.dumps(identity, sort_keys=True, default=str).encode()).hexdigest()[
+        :32
+    ]
 
 
 def _load_rejections(state: Mapping[str, Any], stamp: EmbeddingStamp) -> dict[str, str]:
@@ -1029,7 +1034,7 @@ async def _forget_settled_rejections(plane: SweepPlane, counts: _Counts) -> None
 
 
 def _plane_current(state: Mapping[str, Any], stamp: EmbeddingStamp, interval: float) -> bool:
-    if interval <= 0 or state.get("complete_metadata") != stamp:
+    if interval <= 0 or not same_vector_identity(state.get("complete_metadata"), stamp):
         return False
     completed = state.get("complete_age_seconds")
     return isinstance(completed, int | float) and completed < interval

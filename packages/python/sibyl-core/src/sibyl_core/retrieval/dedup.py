@@ -21,6 +21,7 @@ from sibyl_core.config import settings
 from sibyl_core.embeddings.provenance import (
     UNVERIFIED_EMBEDDING_PROVIDER,
     is_unverified_embedding_metadata,
+    vector_space_predicate,
 )
 from sibyl_core.models.entities import Entity
 from sibyl_core.services.graph import normalize_records
@@ -492,7 +493,9 @@ class EntityDeduplicator:
                 space_clause = " AND embedding_space = NONE"
             elif space is not None:
                 params[f"seed_space_{index}"] = space
-                space_clause = f" AND embedding_space = $seed_space_{index}"
+                space_clause = " AND " + vector_space_predicate(
+                    "embedding_space", f"seed_space_{index}"
+                )
             statements.append(
                 f"""
                 SELECT seed_id, uuid, name, entity_type, score, created_at
@@ -592,7 +595,7 @@ class EntityDeduplicator:
             space_clause = " AND embedding_space = NONE"
         elif seed_space is not None:
             params["seed_space"] = seed_space
-            space_clause = " AND embedding_space = $seed_space"
+            space_clause = " AND " + vector_space_predicate("embedding_space", "seed_space")
         knn_effort = knn_search_effort(candidate_limit, settings.graph_knn_ef)
         rows = normalize_records(
             await execute_query(

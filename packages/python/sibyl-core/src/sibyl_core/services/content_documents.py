@@ -11,6 +11,7 @@ from sibyl_core.backends.surreal.fulltext import (
     build_fulltext_query,
 )
 from sibyl_core.backends.surreal.knn import knn_search_effort
+from sibyl_core.embeddings.provenance import vector_space_predicate
 from sibyl_core.services import content_client
 from sibyl_core.services import content_models as models
 from sibyl_core.services.content_models import ContentChunk, ContentDocument, ContentSource
@@ -24,6 +25,10 @@ _DOCUMENT_CHUNK_SELECT = (
 )
 
 ContentSearchRow = tuple[ContentChunk, ContentDocument, str, str, float]
+
+
+# Vector lanes score only rows embedded in the query's vector space.
+_CHUNK_IN_QUERY_SPACE = vector_space_predicate("embedding_metadata", "embedding_metadata")
 
 
 async def load_sources_for_org(
@@ -382,7 +387,7 @@ async def search_document_chunks(
             space_clause = ""
             if embedding_metadata is not None:
                 vector_params["embedding_metadata"] = dict(embedding_metadata)
-                space_clause = "AND embedding_metadata = $embedding_metadata "
+                space_clause = f"AND {_CHUNK_IN_QUERY_SPACE} "
             try:
                 vector_rows = await with_timeout(
                     content_client.select_many_raw(

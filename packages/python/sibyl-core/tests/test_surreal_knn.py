@@ -199,7 +199,7 @@ async def test_entity_search_vector_lane_reads_the_whole_pool_on_the_embedded_en
 async def test_entity_vector_lane_ignores_vectors_from_another_model() -> None:
     client = SurrealGraphClient(group_id="org-knn-entity-space", url="memory://")
     provider = _overfetch_provider("knn-space-test")
-    other = _overfetch_provider("knn-space-other").metadata.to_dict()
+    other = _overfetch_provider("knn-space-test", model="another-model").metadata.to_dict()
     try:
         await prepare_graph_schema(client)
         await _seed_entities(client, 30, stamp=other)
@@ -220,6 +220,25 @@ async def test_entity_vector_lane_ignores_vectors_from_another_model() -> None:
     assert {entity.id for entity, _score in current} == {
         f"knn_pool_{index:04d}" for index in range(10)
     }
+
+
+@pytest.mark.asyncio
+async def test_entity_vector_lane_keeps_vectors_whose_stamp_differs_only_in_bookkeeping() -> None:
+    client = SurrealGraphClient(group_id="org-knn-entity-bookkeeping", url="memory://")
+    provider = _overfetch_provider("knn-space-test")
+    # Same provider, model and size; only the cache namespace and the token
+    # estimator moved, neither of which changes a vector.
+    renamed = _overfetch_provider("renamed-cache", tokenizer="another-estimator")
+    try:
+        await prepare_graph_schema(client)
+        await _seed_entities(client, 12, stamp=renamed.metadata.to_dict())
+        manager = EntityManager(client, group_id=client.group_id, embedding_provider=provider)
+        found = await manager._vector_search(query="pool depth", entity_types=None, limit=5)
+    finally:
+        await client.close()
+
+    assert found
+    assert {entity.id for entity, _score in found} <= {f"knn_pool_{i:04d}" for i in range(12)}
 
 
 # --- typed-overfetch arm (knn_type_overfetch) --------------------------------
@@ -274,14 +293,16 @@ def _entity_row(uuid: str, entity_type: str = "topic", score: float = 0.9) -> di
     }
 
 
-def _overfetch_provider(namespace: str) -> DeterministicEmbeddingProvider:
+def _overfetch_provider(
+    namespace: str, *, model: str = "unit-test", tokenizer: str = "utf8-byte-length"
+) -> DeterministicEmbeddingProvider:
     return DeterministicEmbeddingProvider(
         EmbeddingMetadata(
             provider="deterministic",
-            model="unit-test",
+            model=model,
             dimensions=EMBEDDING_DIM,
             cache_namespace=namespace,
-            tokenizer_estimate_method="utf8-byte-length",
+            tokenizer_estimate_method=tokenizer,
         )
     )
 
