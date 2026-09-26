@@ -4,6 +4,9 @@ Automatic integration between Sibyl and Claude Code.
 
 ## Install
 
+`sibyl setup <url>` registers the SessionStart hook when Claude Code is installed, so most machines
+need nothing else. From a Sibyl checkout, install the repo's hooks with:
+
 ```bash
 moon run hooks:install
 ```
