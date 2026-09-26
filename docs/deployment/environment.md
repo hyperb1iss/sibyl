@@ -44,7 +44,7 @@ SurrealDB is the default and only runtime store. These settings apply to every S
 
 | Variable                         | Default | Description                                                           |
 | -------------------------------- | ------- | --------------------------------------------------------------------- |
-| `SIBYL_SURREAL_URL`              | (empty) | Connection URL (`ws://`, `http://`, `surrealkv://`, `memory://`)      |
+| `SIBYL_SURREAL_URL`              | (empty) | Connection URL; see [URL forms](#surrealdb-url-forms) below           |
 | `SIBYL_SURREAL_DATA_DIR`         | (empty) | Local SurrealKV path used when `SIBYL_SURREAL_URL` is unset           |
 | `SIBYL_SURREAL_USERNAME`         | (empty) | Root username for remote runtimes                                     |
 | `SIBYL_SURREAL_PASSWORD`         | (empty) | Root password for remote runtimes                                     |
@@ -55,22 +55,36 @@ SurrealDB is the default and only runtime store. These settings apply to every S
 
 ### Connection Pooling
 
-| Variable                                | Default     | Description                                           |
-| --------------------------------------- | ----------- | ----------------------------------------------------- |
-| `SIBYL_SURREAL_POOL_SIZE`               | `8`         | Concurrent connections per dedicated client (1-256)   |
-| `SIBYL_SURREAL_AUTH_POOL_SIZE`          | (pool size) | Override for the auth client pool                     |
-| `SIBYL_SURREAL_CONTENT_POOL_SIZE`       | (pool size) | Override for the content client pool                  |
-| `SIBYL_SURREAL_GRAPH_POOL_SIZE`         | (pool size) | Override for org graph client pools                   |
-| `SIBYL_SURREAL_GRAPH_CLIENT_CACHE_SIZE` | `64`        | Org-scoped graph clients kept open per process (LRU)  |
-| `SIBYL_ALLOW_EMBEDDED_SINGLE_WRITER`    | `false`     | Allow embedded (`surrealkv://`) storage in production |
+| Variable                                | Default     | Description                                          |
+| --------------------------------------- | ----------- | ---------------------------------------------------- |
+| `SIBYL_SURREAL_POOL_SIZE`               | `8`         | Concurrent connections per dedicated client (1-256)  |
+| `SIBYL_SURREAL_AUTH_POOL_SIZE`          | (pool size) | Override for the auth client pool                    |
+| `SIBYL_SURREAL_CONTENT_POOL_SIZE`       | (pool size) | Override for the content client pool                 |
+| `SIBYL_SURREAL_GRAPH_POOL_SIZE`         | (pool size) | Override for org graph client pools                  |
+| `SIBYL_SURREAL_GRAPH_CLIENT_CACHE_SIZE` | `64`        | Org-scoped graph clients kept open per process (LRU) |
+| `SIBYL_ALLOW_EMBEDDED_SINGLE_WRITER`    | `false`     | Allow file-backed embedded storage in production     |
 
 `SIBYL_SURREAL_URL` and `SIBYL_SURREAL_DATA_DIR` are mutually exclusive; set only one. When neither
-is set, Sibyl falls back to in-memory mode. In-memory mode (`memory://`) is rejected in production.
+is set, Sibyl falls back to in-memory mode (`memory://`), which is rejected in production.
 
-Embedded (`surrealkv://`) and in-memory URLs clamp every pool to a single connection because the
-storage is single-writer. Running embedded storage in production additionally requires the explicit
-`SIBYL_ALLOW_EMBEDDED_SINGLE_WRITER=1` opt-in, and only when one daemon owns the database; otherwise
-startup fails validation.
+### SurrealDB URL forms
+
+| Form                                                | Runs            | Production                                    |
+| --------------------------------------------------- | --------------- | --------------------------------------------- |
+| `ws://`, `wss://`, `http://`, `https://`            | Remote server   | Allowed                                       |
+| `surrealkv://`, `surrealkv+versioned://`, `file://` | Embedded, files | Requires `SIBYL_ALLOW_EMBEDDED_SINGLE_WRITER` |
+| `memory://`, `mem://`                               | Embedded, RAM   | Rejected                                      |
+
+Schemes are case-insensitive. sibyld refuses any other scheme at startup in every environment,
+including `rocksdb://`, `tikv://`, `surrealdb://`, and a bare `host:port`. `rocksdb://` is a storage
+argument for `surreal start`, not a client URL: run a SurrealDB server on RocksDB and point
+`SIBYL_SURREAL_URL` at its `ws://` endpoint. The `sibyl` client CLI does not validate this setting,
+since it never opens the store itself.
+
+Embedded URLs clamp every pool to a single connection. The embedded engine misses concurrent
+write-write conflicts, so each namespace must write through one connection. Running file-backed
+embedded storage in production also requires the explicit `SIBYL_ALLOW_EMBEDDED_SINGLE_WRITER=1`
+opt-in, and only when one daemon owns the database; otherwise startup fails validation.
 
 ## URL Configuration
 

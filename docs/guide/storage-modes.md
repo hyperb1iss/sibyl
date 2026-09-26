@@ -20,7 +20,9 @@ What varies is how a process reaches SurrealDB:
 
 Set exactly one of `SIBYL_SURREAL_URL` and `SIBYL_SURREAL_DATA_DIR`; setting both fails config
 validation. With neither set, Sibyl falls back to `memory://`, which the production config validator
-rejects.
+rejects. The embedded modes also accept `surrealkv+versioned://`, `file://`, and `mem://`; any other
+scheme, such as `rocksdb://`, fails at startup. See
+[SurrealDB URL forms](../deployment/environment.md#surrealdb-url-forms) for the full list.
 
 ## Server
 
@@ -56,8 +58,8 @@ SIBYL_SURREAL_DATA_DIR=./data/surreal
 
 ## In-Memory
 
-`memory://` exists for test suites. It holds nothing across restarts and is forbidden when
-`SIBYL_ENVIRONMENT=production`.
+`memory://` (or `mem://`) exists for test suites. It holds nothing across restarts and is forbidden
+when `SIBYL_ENVIRONMENT=production`.
 
 ## Coordination
 
