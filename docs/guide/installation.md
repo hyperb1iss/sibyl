@@ -5,7 +5,46 @@ description: Installing Sibyl and its dependencies
 
 # Installation
 
-This guide covers the main ways to run Sibyl:
+Connecting to a Sibyl server someone already runs takes one line. The rest of this page covers
+running a server yourself and working on the monorepo.
+
+## Connect to a Sibyl Server
+
+Install the CLI, then run [`sibyl setup`](../cli/setup.md) with your server's URL. The web app's
+Connect card shows the same line with your server's URL filled in:
+
+```bash
+# macOS
+brew install hyperb1iss/tap/sibyl && sibyl setup https://sibyl.example.com
+
+# Linux
+uv tool install --upgrade sibyl-dev && sibyl setup https://sibyl.example.com
+
+# Windows (PowerShell)
+uv tool install --upgrade sibyl-dev; sibyl setup 'https://sibyl.example.com'
+
+# No uv yet: the installer bootstraps it, then runs sibyl setup
+curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --remote https://sibyl.example.com
+```
+
+`sibyl setup` signs you in through the browser, installs the Sibyl skill for Claude Code, Codex, and
+other agents, and adds the Claude Code SessionStart hook. Keep `--upgrade` on the uv line: a plain
+`uv tool install` leaves an older CLI in place. Connecting needs no provider API keys and no MCP
+config; the server's operator configures the models once.
+
+To let an agent do it instead, give it this sentence:
+
+```text
+Set up Sibyl on this machine by following https://sibyl.example.com/agent
+```
+
+Copy the exact sentence from the web app's Connect card: `/agent` is served by the web app, so on a
+deployment where the web app and API have separate origins the card points at `/api/setup/agent.md`
+on the API instead. See [Hand It To An Agent](../cli/setup.md#hand-it-to-an-agent).
+
+## Run a Server
+
+This covers the ways to run Sibyl yourself:
 
 - run the shell installer and start the local server UI
 - install the Homebrew formula on systems where you already use Homebrew
@@ -14,13 +53,14 @@ This guide covers the main ways to run Sibyl:
 
 ## Prerequisites
 
-Sibyl requires the following for development:
+Running Sibyl from source requires:
 
 - **Python 3.13+** - Core backend language
 - **Node.js 24** - For the web frontend
 - **Docker** - For local SurrealDB and optional dev services
-- **Anthropic API Key** - For LLM entity extraction and synthesis
-- **OpenAI or Gemini API Key** - For generating embeddings
+- **A language model** - Anthropic, OpenAI, Gemini, or Claude through Amazon Bedrock, for entity
+  extraction and synthesis
+- **An embedding provider** - OpenAI, Gemini, or Cohere Embed v4 through Amazon Bedrock
 
 ### Version Management
 
@@ -51,25 +91,8 @@ brew install hyperb1iss/tap/sibyl
 sibyl up
 ```
 
-### Remote CLI
-
-Connecting to a team server is one line. The web app's Connect card shows it with your server's URL
-filled in:
-
-```bash
-# macOS
-brew install hyperb1iss/tap/sibyl && sibyl setup https://sibyl.example.com
-
-# Anywhere with uv
-uv tool install --upgrade sibyl-dev && sibyl setup https://sibyl.example.com
-
-# No uv yet: the installer bootstraps it, then runs sibyl setup
-curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --remote https://sibyl.example.com
-```
-
-[`sibyl setup`](../cli/setup.md) signs you in, installs the skill, and adds the Claude Code hook. To
-let an agent do it instead, give it
-`Set up Sibyl on this machine by following https://sibyl.example.com/agent`.
+When the setup wizard finishes, run `sibyl setup` to connect this machine. Without a URL it connects
+the server the CLI already talks to, `http://localhost:3334` on a fresh install.
 
 ### Docker Self-Host
 
@@ -111,8 +134,10 @@ moon run cli:install-dev
 moon run api:install-dev
 ```
 
-Direct `uv tool install` commands are developer and CI escape hatches. User-facing installs should
-go through the shell installer, Homebrew, or Docker flow so the CLI and daemon stay paired.
+The uv install (`uv tool install --upgrade sibyl-dev`) puts only the `sibyl` CLI on a machine, which
+is all a machine that connects to a server needs. To run a server, go through the shell installer,
+Homebrew, or Docker flow so the CLI and daemon stay paired; installing `sibyld` directly is a
+developer and CI escape hatch.
 
 ## Infrastructure Setup
 
@@ -157,10 +182,14 @@ export SIBYL_ANTHROPIC_API_KEY=...        # For LLM entity extraction and synthe
 
 ### Required Environment Variables
 
-| Variable               | Description                                                          |
-| ---------------------- | -------------------------------------------------------------------- |
-| `SIBYL_OPENAI_API_KEY` | OpenAI API key for embeddings (or `SIBYL_GEMINI_API_KEY` for Gemini) |
-| `SIBYL_JWT_SECRET`     | Secret key for production JWT signing                                |
+| Variable               | Description                                               |
+| ---------------------- | --------------------------------------------------------- |
+| `SIBYL_OPENAI_API_KEY` | OpenAI key for the default embedding provider (see below) |
+| `SIBYL_JWT_SECRET`     | Secret key for production JWT signing                     |
+
+Gemini (`SIBYL_GEMINI_API_KEY`) and Amazon Bedrock also serve embeddings, and Bedrock needs no API
+key. See [Embeddings](../deployment/environment.md#embeddings) and
+[Amazon Bedrock](../deployment/environment.md#amazon-bedrock).
 
 ### Optional Environment Variables
 
@@ -319,4 +348,5 @@ references in `~/.sibyl/docker/docker-compose.yml`.
 ## Next Steps
 
 - [Quick Start](./quick-start.md) - 5-minute tutorial
-- [MCP Configuration](./mcp-configuration.md) - Configure Claude Code integration
+- [`sibyl setup`](../cli/setup.md) - Connect a machine and its agents
+- [MCP Configuration](./mcp-configuration.md) - Configure MCP-only clients

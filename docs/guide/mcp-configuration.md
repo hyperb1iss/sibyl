@@ -5,7 +5,9 @@ description: Configuring Sibyl's MCP server
 
 # MCP Configuration
 
-This guide covers advanced configuration of Sibyl's MCP (Model Context Protocol) server.
+This guide covers advanced configuration of Sibyl's MCP (Model Context Protocol) server. Connecting
+a machine does not need any of it: [`sibyl setup`](../cli/setup.md) signs the CLI in and installs
+the skill agents use. Configure MCP for clients that only speak MCP.
 
 ## Server Architecture
 
@@ -192,10 +194,13 @@ and is rejected by the production config validator.
 
 ### Embedding Settings
 
-| Variable                | Default                  | Description               |
-| ----------------------- | ------------------------ | ------------------------- |
-| `SIBYL_OPENAI_API_KEY`  | -                        | OpenAI API key (required) |
-| `SIBYL_EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding model           |
+| Variable                | Default                  | Description                       |
+| ----------------------- | ------------------------ | --------------------------------- |
+| `SIBYL_OPENAI_API_KEY`  | -                        | OpenAI API key (default provider) |
+| `SIBYL_EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding model                   |
+
+Gemini and Amazon Bedrock (Cohere Embed v4, no API key) also serve embeddings; see
+[Embeddings](../deployment/environment.md#embeddings).
 
 ## Server Implementation
 

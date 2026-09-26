@@ -5,8 +5,10 @@ description: Connecting Cursor, Claude Code, and Claude Desktop to Sibyl
 
 # MCP Setup
 
-Sibyl exposes an HTTP MCP endpoint at `/mcp`. Use a scoped API key with the `mcp` scope for client
-integrations.
+Sibyl exposes an HTTP MCP endpoint at `/mcp`. Most agents do not need it: an agent that can run
+shell commands uses the `sibyl` CLI, and [`sibyl setup`](../cli/setup.md) signs the CLI in and
+installs the skill that teaches it. Use this page for clients that only speak MCP, such as Cursor or
+Claude Desktop, with a scoped API key that has the `mcp` scope.
 
 ## Create The Key
 
@@ -111,8 +113,8 @@ Restart Claude Desktop after changing the MCP config.
 
 ## Verify
 
-A connected client sees 11 Sibyl tools plus the `sibyl://health` resource. Ask the client to search
-Sibyl for a known memory. If the request fails:
+A connected client sees 13 Sibyl tools plus the `sibyl://health` and `sibyl://stats` resources. Ask
+the client to search Sibyl for a known memory. If the request fails:
 
 - Confirm the API key starts with `sk_live_` or `sk_test_`.
 - Confirm the key has the `mcp` scope.

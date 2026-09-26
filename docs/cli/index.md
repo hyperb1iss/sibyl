@@ -10,24 +10,29 @@ covers the client.
 ## Installation
 
 ```bash
-# User install
-curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh
+# Connect to a server (macOS)
+brew install hyperb1iss/tap/sibyl && sibyl setup https://your-sibyl-host
 
-# Remote-only install, then connect with sibyl setup
-curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --remote https://your-sibyl-host
+# Connect to a server (Linux, or anywhere with uv)
+uv tool install --upgrade sibyl-dev && sibyl setup https://your-sibyl-host
+
+# Run a local server and web UI instead
+curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh
 
 # For development
 moon run cli:install-dev
 ```
 
+[`sibyl setup`](./setup.md) creates the context, signs you in, and installs the skill and the Claude
+Code hook. Agents can do the same by following the sentence on the web app's Connect card; see
+[Hand It To An Agent](./setup.md#hand-it-to-an-agent).
+
 ## Quick Start
 
 ```bash
-# Running Sibyl locally? Start it; the CLI points at localhost by default.
-sibyl up
-
-# Connecting to a remote or shared server instead? Authenticate first.
-sibyl auth login
+# Connect this machine to a server (no URL: the current configured server; a fresh install
+# defaults to localhost:3334)
+sibyl setup https://your-sibyl-host
 
 # Link the current directory to a project
 sibyl project link <project_id>

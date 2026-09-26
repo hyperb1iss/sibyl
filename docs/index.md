@@ -120,11 +120,25 @@ before you have to go looking for it.
 
 ## Quick Start
 
-```bash
-# Start a local daemon
-sibyl init --local
-sibyl serve
+Install the CLI and connect it to your Sibyl server in one line:
 
+```bash
+# macOS
+brew install hyperb1iss/tap/sibyl && sibyl setup https://sibyl.example.com
+
+# Linux, or anywhere with uv
+uv tool install --upgrade sibyl-dev && sibyl setup https://sibyl.example.com
+```
+
+[`sibyl setup`](./cli/setup) signs you in and installs the Sibyl skill and the Claude Code hook. To
+let your agent do it, give it the sentence on the web app's Connect card, such as
+`Set up Sibyl on this machine by following https://sibyl.example.com/agent`
+([other deployments](./cli/setup#hand-it-to-an-agent)). No server yet?
+[Installation](./guide/installation) starts one locally with one command.
+
+Then run the loop:
+
+```bash
 # Capture a learning
 sibyl remember "Redis insight" "Pool size must be >= concurrent requests" --kind rule
 

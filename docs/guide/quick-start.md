@@ -5,13 +5,38 @@ description: Install Sibyl and run your first memory loop in five minutes
 
 # Quick Start
 
-This guide takes you from nothing to a running Sibyl with your first captured memory, in about five
-minutes.
+This guide takes you from nothing to your first captured memory, in about five minutes.
 
 ::: tip Working on Sibyl itself? This guide is for _using_ Sibyl. To set up the monorepo for
 development, see [Installation](./installation.md). :::
 
-## Step 1: Install Sibyl
+## Step 1: Connect to a Sibyl server
+
+If your team already runs Sibyl, install the CLI and run `sibyl setup` with the server's URL:
+
+```bash
+# macOS
+brew install hyperb1iss/tap/sibyl && sibyl setup https://sibyl.example.com
+
+# Linux, or anywhere with uv
+uv tool install --upgrade sibyl-dev && sibyl setup https://sibyl.example.com
+```
+
+[`sibyl setup`](../cli/setup.md) signs you in through the browser, installs the Sibyl skill for your
+agents, and adds the Claude Code SessionStart hook. You can also give your agent one sentence and
+let it run the same steps:
+
+```text
+Set up Sibyl on this machine by following https://sibyl.example.com/agent
+```
+
+Copy the exact sentence from the web app's Connect card: `/agent` is served by the web app, so on a
+deployment where the web app and API have separate origins the card points at `/api/setup/agent.md`
+on the API instead. See [Hand It To An Agent](../cli/setup.md#hand-it-to-an-agent).
+
+Connected? Skip to [Step 3](#step-3-run-the-memory-loop).
+
+## Step 2: No server yet? Run one locally
 
 The shell installer starts the local API + web stack and opens the setup UI:
 
@@ -26,33 +51,31 @@ brew install hyperb1iss/tap/sibyl
 sibyl up
 ```
 
-## Step 2: Open Sibyl
-
 | Service   | URL                   |
 | --------- | --------------------- |
 | Web UI    | http://localhost:3337 |
 | API + MCP | http://localhost:3334 |
 
-## Step 3: Finish setup in the browser
+The first time you open the web UI, a setup wizard runs:
 
-The first time you open the web UI, a setup wizard runs. It walks you through three things:
+1. **Welcome:** names the configured providers once every provider the server uses is ready.
+2. **API keys:** shown unless every model and embedding provider the server uses is ready, so a
+   server on the default providers with an Anthropic key but no OpenAI key still shows it. Sibyl
+   needs a language model (Anthropic, OpenAI, Gemini, or Claude through Amazon Bedrock) and an
+   embedding provider (OpenAI, Gemini, or Cohere Embed v4 through Bedrock).
+3. **Admin account:** the first account, which holds owner privileges.
+4. **Connect:** the one line that connects a terminal, and the sentence to hand an agent.
 
-1. **API keys:** Sibyl needs an Anthropic key for entity extraction and an OpenAI or Gemini key for
-   embeddings.
-2. **Admin account:** the first account, which holds owner privileges.
-3. **Connect:** how to start using Sibyl from the terminal or an agent.
-
-## Step 4: Connect the CLI
-
-Confirm the CLI can reach your local server:
+Then connect this machine:
 
 ```bash
-sibyl health
+sibyl setup
 ```
 
-Sibyl is now yours from any terminal.
+Without a URL, `sibyl setup` connects the server the CLI already talks to, which is
+`http://localhost:3334` on a fresh install.
 
-## Step 5: Run the memory loop
+## Step 3: Run the memory loop
 
 Sibyl's core is a loop: **recall, act, remember, reflect**. Try it.
 
@@ -81,14 +104,12 @@ Semantic search finds that memory even though you searched with different words.
 Pull the full record back with `sibyl show <id>`. You can also seed memory from past agent sessions:
 `sibyl ingest claude-code <path>` and `sibyl ingest codex <path>` import transcript JSONL.
 
-## Step 6: Connect your AI agent
+## Step 4: Use Sibyl from your agent
 
-Sibyl earns its keep when your AI agent uses it too. Any agent can reach Sibyl through the `sibyl`
-CLI, and MCP-capable agents (Claude Code, Codex, opencode, OpenClaw, and others) can connect to the
-MCP endpoint.
-
-Use the Connect page in the web UI for per-client MCP configuration and the agent prompt snippet, or
-see [Agents & MCP](./claude-code.md).
+Sibyl earns its keep when your AI agent uses it too. After `sibyl setup`, an agent that supports
+skills (Claude Code, Codex, and others) loads the workflow with `/sibyl`, and any agent that can run
+a shell command reaches Sibyl through the `sibyl` CLI. Clients that only speak MCP connect to the
+`/mcp` endpoint with an API key; see [Agents & MCP](./claude-code.md).
 
 ## Where to go next
 
@@ -101,6 +122,7 @@ see [Agents & MCP](./claude-code.md).
 
 | Action           | Command                                      |
 | ---------------- | -------------------------------------------- |
+| Connect a server | `sibyl setup <url>`                          |
 | Capture a memory | `sibyl remember "Title" "What matters"`      |
 | Load context     | `sibyl context "goal" --intent build`        |
 | Search broadly   | `sibyl context "query" --all`                |

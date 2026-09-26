@@ -123,8 +123,8 @@ namespace or breaks isolation. :::
 Each organization gets a connection-pooled SurrealDB client scoped to its namespace. The pool hands
 out independent sockets (one query per socket at a time), so queries within an org run concurrently
 with no single per-client query lock. `EntityManager` methods are safe to call concurrently; no
-application-level locking is needed. Embedded and `memory://` URLs are clamped to a single
-connection because a pool would fragment single-writer state.
+application-level locking is needed. Embedded URLs are clamped to a single connection because the
+embedded engine misses write-write conflicts, so each namespace must write through one connection.
 
 ## Hybrid Search
 

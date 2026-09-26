@@ -95,6 +95,31 @@ yours.**
 
 ## ⚡ Quickstart
 
+Connecting a machine to a Sibyl server takes one line: install the CLI, then run `sibyl setup` with
+the server's URL.
+
+```bash
+# macOS
+brew install hyperb1iss/tap/sibyl && sibyl setup https://sibyl.example.com
+
+# Linux, or anywhere with uv
+uv tool install --upgrade sibyl-dev && sibyl setup https://sibyl.example.com
+```
+
+[`sibyl setup`](docs/cli/setup.md) signs you in through the browser, installs the Sibyl skill for
+Claude Code, Codex, and other agents, and adds a Claude Code SessionStart hook. You can also hand
+the job to your agent:
+
+```text
+Set up Sibyl on this machine by following https://sibyl.example.com/agent
+```
+
+Copy the exact sentence from the web app's Connect card: `/agent` is served by the web app, so on a
+deployment where the web app and API have separate origins the card points at `/api/setup/agent.md`
+on the API instead.
+
+### No Server Yet? Run One Locally
+
 ```bash
 # Shell installer: puts sibyl on your PATH, starts the local stack, opens setup UI
 curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh
@@ -103,9 +128,10 @@ curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | 
 brew install hyperb1iss/tap/sibyl && sibyl up
 ```
 
-Use `--remote` for a CLI-only install against a hosted server, or `--daemon` for the embedded daemon
-without the web UI. For containers, `sibyl docker init && sibyl docker up` brings up API, web, and
-SurrealDB. Full matrix in [Installation](docs/guide/installation.md).
+Finish the setup wizard in the browser, then run `sibyl setup` to connect this machine to the local
+server. Use `--daemon` for the embedded daemon without the web UI. For containers,
+`sibyl docker init && sibyl docker up` brings up API, web, and SurrealDB. Windows and the other
+paths are in [Installation](docs/guide/installation.md).
 
 ### First Five Minutes
 
@@ -209,9 +235,10 @@ command, it speaks Sibyl" real. The loader teaches the memory loop, every CLI ve
 that actually exist on your machine, context-pack usage, and the error patterns to avoid, so agents
 stop guessing the interface from stale training data.
 
-**Skills are not Claude-only.** `sibyl skill install` drops the loader into every agent skill root
-it knows: Claude Code (`~/.claude/skills`), Codex (`~/.codex/skills`), and the generic
-`~/.agents/skills` convention. The same workflow follows you across tools.
+**Skills are not Claude-only.** The loader goes into every agent skill root Sibyl knows: Claude Code
+(`~/.claude/skills`), Codex (`~/.codex/skills`), and the generic `~/.agents/skills` convention. The
+same workflow follows you across tools. `sibyl setup` installs it for you; the `skill` commands
+manage it on their own.
 
 ```bash
 sibyl skill install        # Install the tiny /sibyl loader into every agent skill root
@@ -228,12 +255,15 @@ and a subagent on any host gets the same source of truth from one command.
 
 Hooks are separate and, for now, specific to Claude Code: a single **SessionStart** hook prints a
 compact wake-up bundle with active tasks and relevant memory, then the agent owns invoking the
-`sibyl` skill and calling `sibyl context` for working context. See
-[Skills & Hooks](docs/guide/skills.md).
+`sibyl` skill and calling `sibyl context` for working context. `sibyl setup` registers it when
+Claude Code is installed (`--no-hooks` skips it). See [Skills & Hooks](docs/guide/skills.md).
 
 ## MCP Integration
 
-Connect Claude Code, Cursor, or any MCP client to Sibyl:
+Most agents need no MCP config: they run the `sibyl` CLI, and `sibyl setup` already taught them how.
+For a client that only speaks MCP, such as Cursor or Claude Desktop, create a key with
+`sibyl auth api-key create --name cursor --scopes mcp` and point the client at your server's `/mcp`
+endpoint:
 
 ```json
 {
@@ -290,7 +320,8 @@ sibyl/
 - **Backend:** Python 3.13 / FastAPI / MCP SDK 2 / SurrealDB-native runtime
 - **Frontend:** Next.js 16 / React 19 / React Query / Tailwind 4
 - **Storage:** SurrealDB unifies graph, content, and auth in one runtime
-- **AI routing:** Anthropic, OpenAI, and Gemini swap per surface; embeddings are pluggable
+- **AI routing:** Anthropic, OpenAI, Gemini, and Amazon Bedrock swap per surface; embeddings are
+  pluggable
 - **Coordination:** In-process by default; Redis/Valkey is optional for multi-process deployments
 - **Build:** moonrepo + uv (Python) + pnpm (TypeScript)
 
@@ -365,12 +396,16 @@ retrieval quality, see the [Benchmarks](#-benchmarks) above.
 
 ### What LLM APIs do I need?
 
-- **Anthropic, OpenAI, or Gemini** (required): for language-model surfaces such as crawler
-  extraction, synthesis, and reflection.
-- **OpenAI or Gemini** (required): for embeddings and semantic search.
+- **A language model** (required): Anthropic, OpenAI, Gemini, or Claude through Amazon Bedrock, for
+  surfaces such as crawler extraction, synthesis, and reflection.
+- **An embedding provider** (required): OpenAI, Gemini, or Cohere Embed v4 through Amazon Bedrock,
+  for embeddings and semantic search.
 
-Providers and models are configurable globally or per surface from the web admin settings. A typical
-solo developer uses around $5/month in API costs.
+Bedrock signs requests with AWS credentials, so it needs no provider API key; see
+[Amazon Bedrock](docs/deployment/environment.md#amazon-bedrock). The server holds these settings, so
+on a shared server the operator configures them once and nobody connecting with `sibyl setup` enters
+a key. Providers and models are configurable globally or per surface from the web admin settings. A
+typical solo developer uses around $5/month in API costs.
 
 ### Is it production-ready?
 

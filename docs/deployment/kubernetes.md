@@ -220,7 +220,11 @@ ingress:
 
 For a scalable in-cluster shape, deploy the TiDB Operator, create a small TiKV/PD cluster, and point
 the official SurrealDB Helm chart at `tikv://<pd-service>:2379`. For single-pod installs, a
-RocksDB-backed PVC is simpler.
+RocksDB-backed PVC is simpler. Either way, `tikv://` and `rocksdb://` configure the SurrealDB server
+only. Point Sibyl's `backend.surreal.url` at that server with a `ws://`, `wss://`, `http://`, or
+`https://` URL. The backend rejects unsupported schemes such as `rocksdb://` and `tikv://` at
+startup; the embedded forms have their own rules and are not meant for a cluster (see
+[SurrealDB URL forms](./environment.md#surrealdb-url-forms)).
 
 ### Coordination Requirements
 
@@ -339,7 +343,8 @@ straight to the backend service (the Next.js frontend passes a client's own `X-F
 through untouched). After an upgrade, sign in and check that the backend's `request` log lines
 (`kubectl logs -n sibyl deploy/sibyl-backend`) carry your own address in `client`, not a controller
 pod's. The [Helm reference](./helm-chart.md#trusted-proxies) covers the value's forms and the `"*"`
-escape hatch.
+escape hatch, and the [environment reference](./environment.md#trusted-proxies) explains how the
+address resolves.
 
 ### Kong Gateway (standalone HTTPRoute)
 

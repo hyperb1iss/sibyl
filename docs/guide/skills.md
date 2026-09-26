@@ -66,6 +66,12 @@ the point of the skill. Agents now drive context and capture explicitly via `sib
 
 ### Installing Hooks
 
+[`sibyl setup`](../cli/setup.md) registers the SessionStart hook when Claude Code is installed. It
+replaces only hooks exactly as Sibyl's installer writes them and keeps every other hook. When
+`~/.claude/settings.json` already has hooks configured, it writes a timestamped backup first; a
+settings file with no hooks is updated without one. From a Sibyl checkout, the moon tasks install
+and remove the repo's hooks:
+
 ```bash
 # Install hooks to ~/.claude/hooks/sibyl
 moon run hooks:install
@@ -150,7 +156,8 @@ allowed-tools: Bash, Grep, Glob, Read
 
 ## Installing Skills
 
-Install the stable loader skill with:
+[`sibyl setup <url>`](../cli/setup.md) installs the loader as part of connecting a machine. To
+install it on its own:
 
 ```bash
 sibyl skill install
@@ -186,8 +193,8 @@ Because the packs ship inside the CLI, the guidance always matches the exact Sib
 machine. Upgrade the CLI and the skill content upgrades with it. No stale copies drift out of sync,
 and a subagent on any host gets the same source of truth from one command.
 
-Hooks are separate from skills because they execute automatically on session events. Install hooks
-only when that automation is explicitly desired, and only on Claude Code.
+Hooks are separate from skills because they execute automatically on session events, and only Claude
+Code has one. `sibyl setup` registers it by default; pass `--no-hooks` to leave it out.
 
 ### Manual Installation
 

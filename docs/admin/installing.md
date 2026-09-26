@@ -170,9 +170,12 @@ At minimum, the backend secret should provide:
 SIBYL_JWT_SECRET
 SIBYL_SETTINGS_KEY
 SIBYL_OIDC_ENTRA_CLIENT_SECRET
-SIBYL_OPENAI_API_KEY
-SIBYL_ANTHROPIC_API_KEY
 ```
+
+Add the API key for each model provider the server routes to, such as `SIBYL_ANTHROPIC_API_KEY` and
+`SIBYL_OPENAI_API_KEY`. On AWS, [Amazon Bedrock](../deployment/helm-chart.md#amazon-bedrock) serves
+Claude and Cohere embeddings through the service account's IAM role and needs no provider key. An
+admin can also enter keys in the web app, which stores them encrypted with `SIBYL_SETTINGS_KEY`.
 
 Use a generated 32-byte or stronger `SIBYL_JWT_SECRET`. Keep `SIBYL_SETTINGS_KEY` stable so
 encrypted settings can be read after a restart.
@@ -241,3 +244,31 @@ unless you are actively running the break-glass path. Set `expiresAt` no more th
 for an emergency window and keep `allowedIPs` scoped to the operator network. When break-glass is
 enabled, Sibyl denies login if either field is missing, if the expiry has passed, or if the expiry
 is more than four hours out.
+
+## Connect Machines
+
+Once the owner can sign in, each person connects their machine with one line. The web app shows it
+on the Connect card, in the setup wizard's last step, and in each user's onboarding, with your
+server's URL filled in:
+
+```bash
+# macOS
+brew install hyperb1iss/tap/sibyl && sibyl setup https://sibyl.example.com
+
+# Linux, or anywhere with uv
+uv tool install --upgrade sibyl-dev && sibyl setup https://sibyl.example.com
+```
+
+[`sibyl setup`](../cli/setup.md) signs the user in through the browser (with your OIDC provider when
+SSO is on), installs the Sibyl skill, and adds the Claude Code SessionStart hook. People can also
+hand the job to an agent with the sentence on the Connect card, such as
+`Set up Sibyl on this machine by following https://sibyl.example.com/agent`. The web app serves
+`/agent`; the API serves the same document at `/api/setup/agent.md`. When the web app and API have
+separate origins (`SIBYL_FRONTEND_URL` differs from the server URL), the card points agents at the
+API form. The `/agent` page and the `/api/setup/connect` and `/api/setup/agent.md` routes carry only
+facts anyone who reaches the server can already see: the public URL, the minimum CLI version, and
+the sign-in methods.
+
+Users never enter model provider keys. When every provider the server uses is ready (each language
+model surface plus both embedding planes), onboarding skips the API keys step for everyone; when any
+one is not, only an instance admin sees it.

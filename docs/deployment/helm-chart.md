@@ -326,7 +326,9 @@ overwrites the header.
 :::
 
 To confirm the setting took, sign in through the ingress and check that the backend's `request` log
-lines carry your own address in `client`, not the controller pod's.
+lines carry your own address in `client`, not the controller pod's. The
+[environment reference](./environment.md#trusted-proxies) explains how the backend resolves the
+address and which values it accepts.
 
 ### Secrets
 
@@ -396,6 +398,11 @@ backend:
     namespacePrefix: "org_"
     database: "graph"
 ```
+
+The chart renders `backend.surreal.url` into `SIBYL_SURREAL_URL`. Point it at a SurrealDB server
+(`ws://`, `wss://`, `http://`, or `https://`). The backend refuses an unsupported scheme at startup:
+`rocksdb://` and `tikv://` are storage arguments for the SurrealDB server, not client URLs. See
+[SurrealDB URL forms](./environment.md#surrealdb-url-forms).
 
 ### Redis or Valkey Coordination
 
@@ -781,6 +788,10 @@ backend:
     SIBYL_EMBEDDING_DIMENSIONS: "1536"
     SIBYL_GRAPH_EMBEDDING_PROVIDER: "bedrock"
 ```
+
+The chart renders `backend.env` into the ConfigMap the worker also loads, and the worker loads the
+same `backend.existingSecret` into its environment and runs as the same service account, so a
+separate worker gets these settings and the role with no extra values.
 
 The IRSA webhook injects `AWS_ROLE_ARN` and `AWS_WEB_IDENTITY_TOKEN_FILE` into each pod, and the AWS
 credential chain exchanges that token for role credentials and refreshes them before they expire.

@@ -138,6 +138,7 @@ cp .env.example ~/.sibyl/prod.env
 # Edit ~/.sibyl/prod.env with required secrets:
 #   SIBYL_JWT_SECRET=<generate with: openssl rand -hex 32>
 #   SIBYL_OPENAI_API_KEY=sk-...
+#   SIBYL_ANTHROPIC_API_KEY=sk-ant-...
 
 # Start the repo production compose directly
 docker compose --env-file ~/.sibyl/prod.env -f docker-compose.prod.yml up -d
@@ -153,6 +154,20 @@ sibyl docker up
 sibyl docker logs
 sibyl docker down
 ```
+
+The repo's `docker-compose.prod.yml` refuses to start without both `SIBYL_OPENAI_API_KEY` and
+`SIBYL_ANTHROPIC_API_KEY`, and it pins Anthropic as the language model, so switching providers there
+means editing the file. The bundle `sibyl docker init` generates sets no provider keys: an admin
+enters keys and picks providers in the setup wizard and the admin AI settings.
+
+Amazon Bedrock takes its settings (the Region, inference scope, API choice, and an optional Bedrock
+API key) only from the environment; the settings UI has no field for them. AWS credentials resolve
+through the standard AWS credential chain instead: environment keys, a shared profile
+(`SIBYL_BEDROCK_PROFILE` or `AWS_PROFILE`), SSO, or an instance role. Every process that calls a
+model reads these for itself, and a worker container has its own `environment` block, so on either
+stack add the [Bedrock variables](./environment.md#amazon-bedrock) and credential access to the API
+container and to every enabled worker. The [Helm chart](./helm-chart.md#amazon-bedrock) shares them
+across pods for you.
 
 ### Production Compose Services
 
@@ -222,6 +237,12 @@ services:
 volumes:
   surreal_data:
 ```
+
+Behind nginx, Caddy, or another reverse proxy, set `SIBYL_FORWARDED_ALLOW_IPS` to the proxy's own
+address so logins rate-limit per user instead of per proxy. Run the proxy as a container on the same
+network and stop publishing port 3334; the
+[trusted proxy reference](./environment.md#trusted-proxies) explains why a Docker bridge range is
+never safe to list.
 
 The production compose persists SurrealDB to a named Docker volume (`surreal_data`) rather than a
 bind mount. `NEXT_PUBLIC_API_URL` is the browser-facing API URL; `SIBYL_API_URL` is the in-network

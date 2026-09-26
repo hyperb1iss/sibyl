@@ -8,49 +8,58 @@ description: Installing and authenticating the Sibyl CLI
 The `sibyl` CLI is the fastest way to recall memory, capture learnings, manage tasks, and create API
 keys for MCP clients.
 
-## Install
+## Connect To Your Server
 
-Homebrew is the preferred install path on macOS and Linux:
-
-```bash
-brew install hyperb1iss/tap/sibyl
-```
-
-For remote-only installs, the shell installer skips the local daemon and web UI:
+Install the CLI and run [`sibyl setup`](../cli/setup.md) with your server's URL. It creates the
+context, signs you in, and installs the skill and the Claude Code hook:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --remote
+# macOS
+brew install hyperb1iss/tap/sibyl && sibyl setup https://your-sibyl-host
+
+# Linux, or anywhere with uv
+uv tool install --upgrade sibyl-dev && sibyl setup https://your-sibyl-host
+
+# Windows (PowerShell)
+uv tool install --upgrade sibyl-dev; sibyl setup 'https://your-sibyl-host'
 ```
 
-If your environment distributes the Python package directly, install the CLI package with your
-Python tool of choice:
+Keep `--upgrade` on the uv line: a plain `uv tool install` leaves an older CLI in place. When the
+server needs a newer CLI, `sibyl setup` stops and prints the upgrade command. No uv yet? The shell
+installer bootstraps it, then runs `sibyl setup`:
 
 ```bash
-python -m pip install sibyl-dev
+curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --remote https://your-sibyl-host
 ```
 
-## Point The CLI At Your Server
+To let your agent do all of this, give it one sentence:
 
-A fresh Sibyl CLI defaults to `http://localhost:3334`, so if you run Sibyl locally with `sibyl up`
-you can usually skip ahead to [Daily Checks](#daily-checks). `sibyl up` does not change your CLI's
-active context, though, so if you previously pointed it at a remote server, switch back to the local
-context (it defaults to localhost, so no URL is needed):
+```text
+Set up Sibyl on this machine by following https://your-sibyl-host/agent
+```
+
+Copy the exact sentence from the web app's Connect card: `/agent` is served by the web app, so on a
+deployment where the web app and API have separate origins the card points at `/api/setup/agent.md`
+on the API instead. See [Hand It To An Agent](../cli/setup.md#hand-it-to-an-agent).
+
+The sign-in opens the browser. On a team server behind corporate SSO, that browser flow uses the
+same OIDC provider as the web app. You never enter provider API keys to connect; the server's
+operator configures models once. To do the steps by hand, run `sibyl init --remote <url>` and then
+`sibyl auth login`.
+
+### A Local Server
+
+A fresh Sibyl CLI defaults to `http://localhost:3334`, so if you run Sibyl locally with `sibyl up`,
+`sibyl setup` with no URL connects it. `sibyl up` does not change your CLI's active context, though,
+so if you previously pointed it at a remote server, switch back to the local context (it defaults to
+localhost, so no URL is needed):
 
 ```bash
 sibyl init --local        # or: sibyl config context use local
 sibyl doctor
 ```
 
-To connect to a remote or shared server instead, run [`sibyl setup`](../cli/setup.md). It creates
-the context, signs you in, and installs the skill and the Claude Code hook:
-
-```bash
-sibyl setup https://your-sibyl-host
-```
-
-The sign-in opens the browser. On a team server behind corporate SSO, that browser flow uses the
-same OIDC provider as the web app. To do the steps by hand, run `sibyl init --remote <url>` and then
-`sibyl auth login`.
+### Signing In By Hand
 
 For headless terminals, print the login URL instead:
 
@@ -67,8 +76,9 @@ sibyl whoami
 
 ## Create An API Key
 
-MCP clients and automation should use API keys, not copied browser cookies. In the web UI, open
-Settings, Security, API Keys and create a key with the right scope. From the CLI:
+You only need a key for an MCP-only client or for automation; `sibyl setup` signs the CLI in without
+one. Use API keys there, not copied browser cookies. In the web UI, open Settings, Security, API
+Keys and create a key with the right scope. From the CLI:
 
 ```bash
 sibyl auth api-key create --name "claude-code" --scopes mcp

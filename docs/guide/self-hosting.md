@@ -8,9 +8,10 @@ description: The solo self-host path - one command to a private memory graph on 
 Sibyl's default shape is personal. No company, no identity provider, no hosted Sibyl tenant. One
 command brings up a private knowledge graph on your own machine, you create your own owner account,
 and every agent you run talks to it at `localhost`. Your memory graph lives on your hardware and
-stays there. The one caveat: extraction and embeddings call the AI providers you configure
-(Anthropic for entity extraction, OpenAI or Gemini for embeddings), so that text is sent to those
-APIs the same way it would be with any tool that uses them.
+stays there. The one caveat: extraction and embeddings call the AI providers you configure (a
+language model such as Anthropic, OpenAI, Gemini, or Claude through Amazon Bedrock, plus an
+embedding provider), so that text is sent to those APIs the same way it would be with any tool that
+uses them.
 
 This page is the end-to-end solo path. If you administer Sibyl for a team behind corporate SSO, see
 [Self-Hosting & Admin](../admin/installing.md) instead.
@@ -51,31 +52,36 @@ in your environment, you add them in the setup wizard instead (Step 2). Everythi
 
 The first time the web UI opens at `http://localhost:3337`, a short wizard runs:
 
-1. **API keys:** Sibyl needs an Anthropic key for entity extraction and an OpenAI or Gemini key for
-   embeddings. Keys you enter in the wizard are stored encrypted in your local database.
-2. **Your owner account:** the first account you create holds owner privileges. This is local
+1. **Welcome:** names the configured providers once every provider the server uses is ready, for
+   example when `sibyl up` picked up both keys from your environment.
+2. **API keys:** shown unless every model and embedding provider the server uses is ready, so a
+   single missing key still brings it up. Sibyl needs a language model and an embedding provider
+   (see [Environment](../deployment/environment.md#llm-configuration) for every option, including
+   Amazon Bedrock). Keys you enter in the wizard are stored encrypted in your local database.
+3. **Your owner account:** the first account you create holds owner privileges. This is local
    username/password auth; there is no external sign-in to configure. After setup, new accounts are
    invite-only unless you deliberately turn on public signups.
-3. **Connect:** the wizard shows the MCP config and agent prompt snippet for your tools.
+4. **Connect:** the one line that connects a terminal, and the sentence to hand an agent.
 
 That is the whole account story for a solo install. No OIDC, no role claims, no identity provider.
 
-## Step 3: Point the CLI at Your Local Server
+## Step 3: Connect This Machine
 
-A fresh Sibyl CLI already defaults to `http://localhost:3334`, so on a clean setup you can go
-straight to a health check:
+Run `sibyl setup`. Without a URL it connects the server the CLI already talks to, which is
+`http://localhost:3334` on a fresh install:
 
 ```bash
-sibyl health
+sibyl setup
 ```
 
-`sibyl up` starts the server but does not change your CLI's active context. If you previously
-pointed the CLI at a remote server, create or switch to the local context explicitly (it defaults to
-localhost, so no URL is needed):
+It signs you in through the browser, installs the Sibyl skill for Claude Code, Codex, and other
+agents, and registers the Claude Code SessionStart hook. `sibyl up` does not change your CLI's
+active context, so if you previously pointed the CLI at a remote server, switch back first (the
+local context defaults to localhost, so no URL is needed):
 
 ```bash
 sibyl init --local        # or: sibyl config context use local
-sibyl doctor
+sibyl setup
 ```
 
 Sibyl is now yours from any terminal.
@@ -85,17 +91,9 @@ Sibyl is now yours from any terminal.
 The primary way an agent uses Sibyl is the `sibyl` CLI. If a tool can run a shell command, it can
 use Sibyl: the agent runs `sibyl context`, `sibyl remember`, and the other task or correction verbs
 against the local server from Step 3. This is the recommended path: it is lighter weight than MCP
-(less token overhead) and every Sibyl command is available. Sign in once with `sibyl auth login` if
-a write reports that authentication is required.
+(less token overhead) and every Sibyl command is available.
 
-Teach your agent the workflow by installing the Sibyl skill (and, for Claude Code, the session
-hooks):
-
-```bash
-sibyl local setup
-```
-
-This installs the `sibyl` skill for Claude Code and Codex. In a client that supports skills,
+The skill `sibyl setup` installed teaches your agent the workflow. In a client that supports skills,
 `/sibyl` loads the full memory-loop workflow; run `sibyl local setup --snippet` to print a prompt
 snippet you can paste into any agent's instructions instead. See
 [Working with Agents](./working-with-agents.md) and [Skills & Hooks](./skills.md).
@@ -166,6 +164,11 @@ You have three ways to run the server on your own machine. Pick one:
 | [`sibyl up` / `sibyl local`](../cli/local.md)         | Batteries-included Docker stack, `~/.sibyl/local` | The default. Easiest personal instance.        |
 | [`sibyl serve` / `start` / `stop`](../cli/service.md) | Embedded native daemon, no Docker                 | Lightweight, no container runtime              |
 | [`sibyl docker`](../cli/docker.md)                    | Pinned Docker stack with explicit image tags      | Reproducible upgrades, worker/crawler services |
+
+The embedded daemon keeps auth, content, and every org graph in `~/.sibyl/data/surreal` and holds
+them across restarts. It is a single writer: one daemon owns that directory. Through 1.4.1 the
+daemon ran its graph in memory, so a restart dropped the memories stored there; upgrade before you
+rely on it.
 
 Common lifecycle commands:
 

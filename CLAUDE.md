@@ -179,8 +179,10 @@ Each org gets a dedicated, connection-pooled SurrealDB client scoped to its name
 across orgs. The pool hands out independent sockets (one query per socket at a time), so queries
 within an org run concurrently — there is no single per-client query lock anymore. Clients are
 cached per `group_id` in an LRU (`surreal_graph_client_cache_size`, default 64); an evicted client
-is closed and its schema marked dirty. Embedded/`memory://` URLs are clamped to a single connection
-(a pool would fragment single-writer state).
+is closed and its schema marked dirty. Embedded URLs (`memory://`, `mem://`, `surrealkv://`,
+`surrealkv+versioned://`, `file://`) are clamped to a single connection, and that is a correctness
+boundary: the embedded engine misses write-write conflicts, so each namespace must write through one
+client. Don't lift the clamp as a tuning knob.
 
 ### Package Imports
 

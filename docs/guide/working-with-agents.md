@@ -25,18 +25,21 @@ with the context you already own instead of rebuilding it.
 
 ## Setting Up Your Environment
 
-### 1. Install Skills
+### 1. Connect and Install Skills
 
 Skills teach your agent HOW to use Sibyl. The installed skill is a tiny pointer, and the CLI serves
-the full markdown guidance for the installed version.
+the full markdown guidance for the installed version. [`sibyl setup`](../cli/setup.md) installs it
+while it connects the machine, and registers the Claude Code SessionStart hook:
 
 ```bash
-sibyl skill install
+sibyl setup https://your-sibyl-host
 sibyl skill get core
 ```
 
-Hooks inject context automatically, but they execute on session and prompt events. Add them only
-when you explicitly want that behavior.
+To hand the whole setup to your agent, give it the sentence on the web app's Connect card, such as
+`Set up Sibyl on this machine by following https://your-sibyl-host/agent` (a server whose web app
+and API have separate origins uses `/api/setup/agent.md` on the API instead). The hook runs once at
+session start; pass `--no-hooks` to skip it, or run `sibyl skill install` to install only the skill.
 
 ### 2. Configure Your CLAUDE.md
 
@@ -278,7 +281,7 @@ Help future sessions (and other agents) by documenting state:
 ### Agent Isn't Using Sibyl
 
 1. Did you run `/sibyl` at session start?
-2. Is your agent configured from the Connect page?
+2. Did `sibyl setup` finish? (`sibyl doctor` reports any missing step)
 3. Is the server running? (`sibyl health`)
 
 ### No Results from Searches

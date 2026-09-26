@@ -86,6 +86,12 @@ write-write conflicts, so each namespace must write through one connection. Runn
 embedded storage in production also requires the explicit `SIBYL_ALLOW_EMBEDDED_SINGLE_WRITER=1`
 opt-in, and only when one daemon owns the database; otherwise startup fails validation.
 
+Sibyl redacts this URL wherever it reports a connection. Connection errors, logs, and status
+payloads (`sibyl debug status` and the admin health payload) show only the scheme and, for a server,
+its host and port; userinfo, path, query, and fragment are left out, so an error you paste into an
+issue carries no secret from `SIBYL_SURREAL_URL`. The embedded daemon's startup banner is the one
+place a path appears: `sibyld serve --embedded` prints its own data directory.
+
 ## URL Configuration
 
 | Variable             | Default                   | Description                                    |
@@ -454,11 +460,11 @@ installed, the path degrades cleanly to the fused order instead of raising.
 
 ## API Keys
 
-| Variable                  | Default | Description                              |
-| ------------------------- | ------- | ---------------------------------------- |
-| `SIBYL_OPENAI_API_KEY`    | (empty) | OpenAI API key (required for embeddings) |
-| `SIBYL_ANTHROPIC_API_KEY` | (empty) | Anthropic API key                        |
-| `SIBYL_GEMINI_API_KEY`    | (empty) | Gemini API key (for Google embeddings)   |
+| Variable                  | Default | Description                        |
+| ------------------------- | ------- | ---------------------------------- |
+| `SIBYL_OPENAI_API_KEY`    | (empty) | OpenAI API key (LLM or embeddings) |
+| `SIBYL_ANTHROPIC_API_KEY` | (empty) | Anthropic API key                  |
+| `SIBYL_GEMINI_API_KEY`    | (empty) | Gemini API key (LLM or embeddings) |
 
 The `bedrock` provider needs none of these: it signs with AWS credentials, or a Bedrock API key from
 `SIBYL_BEDROCK_API_KEY`. That key comes from the environment only and is never stored in the

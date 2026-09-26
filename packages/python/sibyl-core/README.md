@@ -110,7 +110,8 @@ results = await manager.search(query="authentication patterns", limit=20)
 
 Each org gets a dedicated, connection-pooled client scoped to its namespace
 (`get_graph_client(group_id=...)`). The pool hands out independent sockets, so queries within an org
-run concurrently. Embedded and `memory://` URLs are clamped to a single connection.
+run concurrently. Embedded URLs are clamped to a single connection, because the embedded engine
+misses write-write conflicts.
 
 ```python
 # Direct write, no embedding call
