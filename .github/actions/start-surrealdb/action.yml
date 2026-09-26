@@ -9,8 +9,14 @@ runs:
       run: |
         set -euo pipefail
 
+        # Compose mounts SURREAL_DATA_DIR at /data. The default stays on
+        # disk because SurrealDB's memory engine is not exclusive under
+        # contention: two callers can both win one conditional UPDATE, and
+        # even one atomic CREATE, so lease and fence tests flake on it.
+        # RocksDB and SurrealKV held those writes exclusive in the same
+        # trials, and RocksDB is what the compose service ships with.
         export SURREAL_DATA_DIR="${RUNNER_TEMP}/sibyl-surrealdb"
-        export SIBYL_SURREAL_PATH="${SIBYL_SURREAL_PATH:-memory}"
+        export SIBYL_SURREAL_PATH="${SIBYL_SURREAL_PATH:-rocksdb:///data/sibyl.db}"
         mkdir -p "$SURREAL_DATA_DIR"
         chmod 777 "$SURREAL_DATA_DIR"
 
