@@ -528,12 +528,16 @@ the rows a re-embed replaces, which is the most such a record can cost. If users
 could write to the deployment before this upgrade, set `SIBYL_EMBEDDING_LEGACY_VECTORS=reembed` for
 the upgrade deploy and every plane is re-embedded regardless of records.
 
-A plane with no evidence of its own waits (`awaiting_evidence` in status) until every organization
-has published its graph evidence, so the verdict never depends on which organization the scheduler
-reached first. An organization counts once it has published in any pass. If one cannot publish, for
-example because its graph namespace is unreachable, the logs name it (status names it to deployment
-admins and counts it for everyone else), and the waiting planes are settled on the evidence
-published so far once `SIBYL_EMBEDDING_SWEEP_EVIDENCE_WAIT_SECONDS` have passed.
+A plane whose verdict would adopt its vectors, and a plane with no evidence of its own, waits
+(`awaiting_evidence` in status) until every organization has published its graph evidence: an
+organization that has not published yet may hold the recorded models that show a switch, so the
+verdict never depends on which organization the scheduler reached first. In a healthy deployment
+every organization publishes during the first lifecycle pass, and the waiting planes are settled at
+its end. A plane whose evidence already shows a switch is re-embedded without waiting. An
+organization counts once it has published in any pass. If one cannot publish, for example because
+its graph namespace is unreachable, the logs name it (status names it to deployment admins and
+counts it for everyone else), and the waiting planes are settled on the evidence published so far
+once `SIBYL_EMBEDDING_SWEEP_EVIDENCE_WAIT_SECONDS` have passed.
 
 A plane with no evidence anywhere adopts its vectors too, logs a warning, and shows
 `adopted_without_evidence` in `sibyl debug status` instead of `complete`. That state is exactly what
@@ -561,8 +565,8 @@ chart's backend `startupProbe` allows 10 minutes before liveness checks begin; r
 Adopting vectors and rewriting raw capture records in the current format are metadata-only and
 finish in the first pass that reaches them, whatever the pass budget: about 1,600 vectors a second
 on a native 3.2 server (100,000 graph vectors in 64 seconds), and a 20,000-capture organization's
-raw captures in under a minute. Until then vector search already counts the unstamped vectors
-wherever the evidence points to adopt, so a plain upgrade loses no vector results.
+raw captures in under a minute. Vector search counts the unstamped vectors from the moment the adopt
+verdict is recorded, so adoption itself costs no vector results.
 
 | `SIBYL_EMBEDDING_LEGACY_VECTORS` | Vectors written before Sibyl recorded their model are                                                      |
 | -------------------------------- | ---------------------------------------------------------------------------------------------------------- |
@@ -581,29 +585,30 @@ unverified and re-embedded.
 #### Search while vectors are re-embedded
 
 Vector search only compares a query with vectors from the query's model. A vector from before
-stamping counts as the configured model once its plane's verdict is adopt, and before any verdict is
-recorded wherever the evidence already points to adopt (for document chunks the deployment's
-evidence, for the graph the plane's own recorded models), so a plain upgrade whose records name its
-model keeps full vector recall from its first query. With nothing to vouch for them yet, such
-vectors wait for the verdict, usually the first lifecycle pass, so a same-restart switch never
-scores old vectors against new queries. Once the model has changed (a plane last finished for
-another model, or its vectors from before stamping were judged another model's), right after the
-switch almost none qualify, and a vector lane that has to pass over nearly every stored vector to
-find a few is slow and finds little. So while fewer than 5% of a switched plane's vectors are in the
-configured model, graph search and document hybrid search skip their vector lane and answer from
-lexical search. A plane that never switched never skips. Retrieval diagnostics report the vector
-status as `vector_lane_model_switched` or `vector_lane_model_sparse`, and the log records
-`vector_lane_skipped`. Each process re-reads the sweep's progress at most every 30 seconds, so the
-lane comes back on its own as the sweep converts vectors, and is fully back when the plane
-completes. The threshold comes from lanes measured on a native SurrealDB 3.2 server at 20,000
-entities: at a fresh switch each lane took 1 to 2 seconds and found nothing, with 1% of vectors
-converted 0.3 to 1 second, from 5% 0.1 to 0.5 seconds, and 13 to 40 milliseconds once the sweep had
-finished. The vector-only document endpoints (`/api/rag/search` and `/api/rag/code-examples`) have
-no lexical lane to fall back on, so they always run.
+stamping counts as the configured model once its plane's verdict to adopt it is recorded, which in a
+healthy deployment happens at the end of the first lifecycle pass. Until then such vectors are
+reached only through lexical search: a verdict still pending may yet turn to re-embed on another
+organization's evidence, so counting them early could score an old model's vectors against a new
+model's queries. Once the model has changed (a plane last finished for another model, or its vectors
+from before stamping were judged another model's), right after the switch almost none qualify, and a
+vector lane that has to pass over nearly every stored vector to find a few is slow and finds little.
+So while fewer than 5% of a switched plane's vectors are in the configured model, graph search and
+document hybrid search skip their vector lane and answer from lexical search. A plane that never
+switched never skips. Retrieval diagnostics report the vector status as `vector_lane_model_switched`
+or `vector_lane_model_sparse`, and the log records `vector_lane_skipped`. Each process re-reads the
+sweep's progress at most every 30 seconds, so the lane comes back on its own as the sweep converts
+vectors, and is fully back when the plane completes. The threshold comes from lanes measured on a
+native SurrealDB 3.2 server at 20,000 entities: at a fresh switch each lane took 1 to 2 seconds and
+found nothing, with 1% of vectors converted 0.3 to 1 second, from 5% 0.1 to 0.5 seconds, and 13 to
+40 milliseconds once the sweep had finished. The vector-only document endpoints (`/api/rag/search`
+and `/api/rag/code-examples`) have no lexical lane to fall back on, so they always run.
 
 Each pass holds a lease on its plane and checks it in the same statement as every vector write, so a
 pass that loses its lease to another process, for example after a long provider stall, writes
-nothing and stops. A pass also stops starting provider requests once its time budget is spent.
+nothing and stops. A pass also stops starting provider requests once its time budget is spent. Raw
+capture repair holds no lease; each of its writes lands only if the capture still carries the record
+it read, so two processes configured for different models, as in a rolling deploy, cannot leave one
+model's vector labeled with the other's.
 
 A row whose text the provider refuses is remembered and not sent again until its text or the
 configured model changes, an import reopens the plane, or `sibyld db reembed` runs; status counts it
