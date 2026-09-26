@@ -143,8 +143,9 @@ def _policy_context_project_id(policy_context: MemoryPolicyContext) -> str | Non
 
 
 def _is_retryable_surreal_write_conflict(exc: BaseException) -> bool:
-    message = str(exc).lower()
-    return "transaction conflict" in message and "can be retried" in message
+    from sibyl_core.backends.surreal.dedicated_client import is_retryable_transaction_conflict
+
+    return is_retryable_transaction_conflict(exc)
 
 
 async def _retry_surreal_write_conflict[T](

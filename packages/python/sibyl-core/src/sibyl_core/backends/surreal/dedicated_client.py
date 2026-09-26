@@ -160,22 +160,31 @@ async def _release_shared_embedded_engine(engine: _SharedEmbeddedEngine) -> None
                 del _shared_embedded_engines[engine.key]
 
 
+async def _finish_despite_cancellation(awaitable: Awaitable[object]) -> None:
+    """Run teardown to completion even when the awaiting task is cancelled.
+
+    Cancellation is absorbed until the work finishes and then re-raised, so a
+    caller that is torn down mid-close still releases what it held.
+    """
+    work = asyncio.ensure_future(awaitable)
+    cancelled = False
+    while not work.done():
+        try:
+            await asyncio.shield(work)
+        except asyncio.CancelledError:
+            cancelled = True
+    work.result()
+    if cancelled:
+        raise asyncio.CancelledError
+
+
 async def _close_to_completion(client: SurrealClient) -> None:
     """Finish closing an engine even when the releasing task is cancelled.
 
     The caller holds the engine's lock until this returns, so no new lease can
     open a second engine on the directory while the old one is still closing.
     """
-    closing = asyncio.ensure_future(client.close())
-    cancelled = False
-    while not closing.done():
-        try:
-            await asyncio.shield(closing)
-        except asyncio.CancelledError:
-            cancelled = True
-    closing.result()
-    if cancelled:
-        raise asyncio.CancelledError
+    await _finish_despite_cancellation(client.close())
 
 
 def _without_scope_result(response: object) -> object:
@@ -277,7 +286,7 @@ def _checked_query_result(response: object, *, all_results: bool = False) -> obj
         for error in errors:
             details = error.get("details")
             message = error.get("result")
-            if isinstance(message, str) and _is_retryable_transaction_conflict(message):
+            if isinstance(message, str) and is_retryable_transaction_conflict(message):
                 raise parse_query_error(error)
             if isinstance(message, str) and message in {
                 "The query was not executed due to a failed transaction",
@@ -295,9 +304,22 @@ def _checked_query_result(response: object, *, all_results: bool = False) -> obj
     return statements[0]["result"]
 
 
-def _is_retryable_transaction_conflict(exc: BaseException | str) -> bool:
+# A commit that lost a race says so in two wordings. A SurrealDB 3.x server
+# reports "Transaction conflict: <reason>. This transaction can be retried";
+# the engine the Python SDK embeds (surrealdb-core 2.3) reports "Failed to
+# commit transaction due to a read or write conflict. This transaction can be
+# retried". Both markers require the retry suffix, so an error that merely
+# mentions a conflict is never replayed.
+_TRANSACTION_CONFLICT_MARKERS = ("transaction conflict", "read or write conflict")
+_TRANSACTION_RETRY_MARKER = "can be retried"
+
+
+def is_retryable_transaction_conflict(exc: BaseException | str) -> bool:
+    """Whether SurrealDB rejected a commit only because another commit won."""
     message = str(exc).lower()
-    return "transaction conflict" in message and "can be retried" in message
+    return _TRANSACTION_RETRY_MARKER in message and any(
+        marker in message for marker in _TRANSACTION_CONFLICT_MARKERS
+    )
 
 
 def _can_replay_query(query: str, response: object = None) -> bool:
@@ -605,11 +627,18 @@ class DedicatedSurrealClient:
             # closed mid-query: each get() blocks until an in-flight query
             # returns its connection. Closed connections go back in the queue so
             # a later query reconnects them lazily.
-            drained = [await self._available.get() for _ in range(self._pool_size)]
+            drained: list[_PooledConnection] = []
             try:
-                await asyncio.gather(
-                    *(connection.close() for connection in drained),
-                    return_exceptions=True,
+                for _ in range(self._pool_size):
+                    drained.append(await self._available.get())
+                # Shielded so a caller cancelled mid-close cannot cancel a
+                # connection's close before it runs, which would leave that
+                # connection holding its socket or shared-engine lease.
+                await _finish_despite_cancellation(
+                    asyncio.gather(
+                        *(connection.close() for connection in drained),
+                        return_exceptions=True,
+                    )
                 )
             finally:
                 for connection in drained:
@@ -743,7 +772,7 @@ class DedicatedSurrealClient:
                                 isinstance(statement, dict)
                                 and statement.get("status") == "ERR"
                                 and isinstance(statement.get("result"), str)
-                                and _is_retryable_transaction_conflict(statement["result"])
+                                and is_retryable_transaction_conflict(statement["result"])
                                 for statement in statements
                             ):
                                 _checked_query_result(response)
@@ -752,7 +781,7 @@ class DedicatedSurrealClient:
                         result = _checked_query_result(response, all_results=all_results)
                     break
                 except Exception as exc:
-                    if transaction_retry_allowed and _is_retryable_transaction_conflict(exc):
+                    if transaction_retry_allowed and is_retryable_transaction_conflict(exc):
                         if transaction_retry_count >= _MAX_TRANSACTION_CONFLICT_RETRIES:
                             raise
                         transaction_retry_count += 1
@@ -844,4 +873,4 @@ def _pop_query_label(params: QueryParams) -> str | None:
     return str(value)
 
 
-__all__ = ["DedicatedSurrealClient", "PoolHealth"]
+__all__ = ["DedicatedSurrealClient", "PoolHealth", "is_retryable_transaction_conflict"]

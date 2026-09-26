@@ -111,6 +111,127 @@ async def test_statement_results_exclude_the_namespace_scope(tmp_path) -> None:
         await client.close()
 
 
+async def test_namespaces_stay_isolated_under_concurrent_mixed_traffic(tmp_path) -> None:
+    """The multi-tenant guarantee: on one shared engine, no row crosses namespaces.
+
+    Every row records the namespace its writer believed it was in. Writers run
+    single statements, multi-statement batches, and transactions concurrently,
+    with sleeps inside so the executions interleave on the engine. Each read
+    must see only its own namespace, and a fresh engine must find each
+    namespace holding exactly the rows its writer was told succeeded.
+    """
+    url = f"surrealkv://{tmp_path / 'store'}"
+    namespaces = [f"org_{index:02d}" for index in range(6)] + ["sibyl_auth", "sibyl_content"]
+    clients = {namespace: _client(url, namespace, "graph") for namespace in namespaces}
+    rounds = 20
+
+    async def tenant(namespace: str, client: DedicatedSurrealClient) -> int:
+        written = 0
+        for step in range(rounds):
+            tag = f"{namespace}:{step}"
+            await client.execute_query(
+                "CREATE probe SET ns = $ns, tag = $tag, pad = $pad;",
+                ns=namespace,
+                tag=tag,
+                pad=_PAD,
+            )
+            seen = await client.execute_query("SELECT VALUE ns FROM probe;")
+            assert set(seen) == {namespace}
+            batch = await client.execute_query_batch(
+                "CREATE probe SET ns = $ns, tag = $tag, pad = $pad;"
+                " RETURN sleep(2ms);"
+                " RETURN [session::ns(), session::db()];"
+                " SELECT VALUE ns FROM probe WHERE tag = $tag;",
+                ns=namespace,
+                tag=tag,
+                pad=_PAD,
+            )
+            assert len(batch) == 4
+            assert batch[2] == [namespace, "graph"]
+            assert batch[3] == [namespace, namespace]
+            committed = await client.execute_query(
+                "BEGIN;"
+                " CREATE probe SET ns = $ns, tag = $tag, phase = 'tx1';"
+                " LET $pause = sleep(1ms);"
+                " CREATE probe SET ns = $ns, tag = $tag, phase = 'tx2';"
+                " COMMIT;",
+                ns=namespace,
+                tag=tag,
+            )
+            assert isinstance(committed, list)
+            assert [row["ns"] for row in committed] == [namespace]
+            written += 4
+        return written
+
+    try:
+        written = await asyncio.gather(
+            *(tenant(namespace, client) for namespace, client in clients.items())
+        )
+    finally:
+        await asyncio.gather(*(client.close() for client in clients.values()))
+    assert dedicated_client_module._shared_embedded_engines == {}
+
+    from surrealdb import AsyncSurreal
+
+    reader = AsyncSurreal(url)
+    await reader.connect()
+    try:
+        for namespace, expected in zip(clients, written, strict=True):
+            await reader.use(namespace, "graph")
+            rows = await reader.query("SELECT ns, count() AS n FROM probe GROUP BY ns;")
+            assert rows == [{"ns": namespace, "n": expected}]
+    finally:
+        await reader.close()
+
+
+async def test_same_namespace_writers_survive_commit_conflicts(monkeypatch, tmp_path) -> None:
+    """Writers racing on one record retry the engine's conflict instead of failing.
+
+    The embedded engine words a lost commit race differently from a server
+    ("read or write conflict"), and the retry used to miss it, so the losing
+    write surfaced as an InternalError.
+    """
+    retries = 0
+    retry_delay = dedicated_client_module._transaction_conflict_retry_delay
+
+    def counted_delay(retry_count: int) -> float:
+        nonlocal retries
+        retries += 1
+        return retry_delay(retry_count)
+
+    monkeypatch.setattr(dedicated_client_module, "_transaction_conflict_retry_delay", counted_delay)
+    url = f"surrealkv://{tmp_path / 'store'}"
+    writers = [_client(url, "org_shared", "graph") for _ in range(4)]
+    rounds = 60
+    attempts = 0
+
+    async def write(worker: int, offset: int) -> None:
+        for step in range(offset, offset + rounds):
+            await writers[worker].execute_query(
+                "BEGIN; CREATE probe SET worker = $worker, step = $step;"
+                " UPSERT counter:hot SET n += 1; COMMIT;",
+                worker=worker,
+                step=step,
+            )
+
+    try:
+        # Conflicts are a race, so keep writing until one has been retried.
+        while retries == 0 and attempts < 10:
+            await asyncio.gather(
+                *(write(worker, attempts * rounds) for worker in range(len(writers)))
+            )
+            attempts += 1
+        assert retries > 0, "no commit conflict occurred to exercise the retry"
+        rows = await writers[0].execute_query(
+            "SELECT worker, step, count() AS n FROM probe GROUP BY worker, step;"
+        )
+        # Every write landed exactly once: none surfaced, none was doubled.
+        assert len(rows) == len(writers) * rounds * attempts
+        assert {row["n"] for row in rows} == {1}
+    finally:
+        await asyncio.gather(*(writer.close() for writer in writers))
+
+
 def _install_counting_surreal(monkeypatch) -> list[Any]:
     engines: list[Any] = []
 
@@ -204,6 +325,21 @@ async def test_a_cancelled_last_close_still_finishes_before_a_reopen(monkeypatch
     assert len(engines) == 2
     assert engines[0].closed
     await second.close()
+
+
+async def test_a_cancelled_client_close_still_releases_its_lease(monkeypatch, tmp_path) -> None:
+    engines = _install_counting_surreal(monkeypatch)
+    client = _client(f"surrealkv://{tmp_path / 'store'}", "sibyl_auth")
+    await client.execute_query("RETURN 1")
+    closing = asyncio.create_task(client.close())
+    # Let close() schedule the per-connection closes, then cancel it before
+    # they get to run.
+    await asyncio.sleep(0)
+    closing.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await closing
+    assert engines[0].closed
+    assert dedicated_client_module._shared_embedded_engines == {}
 
 
 async def test_memory_urls_keep_one_store_per_connection(monkeypatch) -> None:
