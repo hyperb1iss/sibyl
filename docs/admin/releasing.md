@@ -5,30 +5,35 @@ takes two dispatches of it: a dry run, then, after the maintainer approves, the 
 workflow proves every release gate on the exact candidate commit, so nobody runs a gate list by
 hand. A local gate run is a debugging aid and never release evidence.
 
-The workflow may add one generated version commit, and that commit can touch only `VERSION` and the
-pins listed by `tools/release/sync_versions.py --list-targets`. The workflow proves that boundary
-before it creates a tag.
+The candidate is the commit the workflow was dispatched on, recorded as `base_sha`. The workflow may
+add one generated version commit on top of it, recorded as `candidate_sha` and tagged. That commit
+can touch only `VERSION` and the pins listed by `tools/release/sync_versions.py --list-targets`, and
+the workflow proves that boundary before it creates a tag.
 
 ## What the workflow proves
 
-Each dispatch runs these gates on the dispatched commit, the candidate:
+Each dispatch runs these gates on the candidate:
 
 | Job or step                 | What it proves                                                                                                                         |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Preflight                   | A real cut runs only on `main`. A dry run may rehearse any branch.                                                                     |
+| Preflight                   | A real cut runs only on `main`, and only on the commit its dry run proved (`expected_sha`). A dry run may rehearse any branch.         |
 | Image CVE gate              | The `api` and `web` images, built for `amd64` and `arm64`, carry no fixable high or critical advisory.                                 |
 | E2E gate                    | The API, CLI and browser end-to-end suites pass against a production-shaped fixture (SurrealDB, API, worker, seeded corpus, frontend). |
 | Nightly Regression evidence | A Nightly Regression run on the candidate finished with every job green. The job finds one, or dispatches one and waits for it.        |
+| CI evidence                 | The candidate's own CI run finished green, including the dependency audit, which runs on every commit.                                 |
 | Determine version and bump  | The version parses, its tag does not exist, and the bump commit touches only generated pins.                                           |
 | Run RC gate bundle          | `moon run :check`, the LongMemEval V2 release CI test and the doc claim gate pass, all forced past the moon cache.                     |
 | Release notes               | On the real run, the generated notes pass the public claim gate.                                                                       |
-| Validate same-SHA Nightly   | The cited nightly is checked once more, as the last gate before the tag.                                                               |
+| Validate same-SHA Nightly   | The cited nightly is checked once more, as the last gate before the tag, and must still be the newest verdict on the candidate.        |
 | Tag, release, publish       | On the real run only: the version commit and tag are pushed, a prerelease is created, and `publish.yml` starts.                        |
 
 The RC bundle forces every task because the moon output cache is restored across runs. Without
 `--force`, a gate whose declared inputs miss a real dependency would replay a pass recorded on
 another commit. `:check` holds the root trust gates, every project's lint, typecheck and tests, and
 the Helm contract tests, which run against the pinned Helm the workflow installs.
+
+CI evidence accepts path-skipped CI jobs, because the release proves those gates on the candidate
+itself, but it waits for a CI run that is still in progress and stops on a red one.
 
 The nightly evidence rule is stricter than the run's own conclusion. The daily schedule skips
 Restore To Scratch, and GitHub still reports that run as a success, so it does not count. A run
@@ -66,7 +71,9 @@ explicitly.
 ## Dispatch the dry run
 
 Dispatch the workflow on `main` with `dry_run` enabled. Anyone with write access may do this,
-including an agent, because a dry run changes no remote release state.
+including an agent, because a dry run changes no remote release state. Its only side effect is the
+Nightly Regression run it may dispatch, which, through the nightly's own concurrency group, cancels
+any older nightly still running on the same branch.
 
 ```bash
 gh workflow run release.yml --ref main -f version=X.Y.Z -f dry_run=true
@@ -91,13 +98,14 @@ candidate, and it needs its own dry run.
 Confirm each of these before reading the result as a pass:
 
 - the run's head SHA is the candidate (`gh run view <run-id> --json headSha`)
-- the Preflight, Image CVE gate, E2E gate, Nightly Regression evidence and Release jobs all passed,
-  including all four image scans (`api` and `web` on `amd64` and `arm64`)
+- the Preflight, Image CVE gate, E2E gate, Nightly Regression evidence, CI evidence and Release jobs
+  all passed, including all four image scans (`api` and `web` on `amd64` and `arm64`)
 - the Nightly Regression evidence summary names a run on the candidate with Baseline Parity, Live
   Graph Regression and Restore To Scratch all `success`
 - the `Determine version` step reports the expected version change and no existing tag
 - the `Run RC gate bundle` step passed
-- the step summary ends with "No version commit, tag, release, or publish was created."
+- the step summary says "No version commit, tag, release, or publish was created." and prints the
+  real-run command for this exact commit
 - the `rc-gate-receipt-<sha>` artifact records `dry_run: true`, a `base_sha` equal to the candidate,
   `success` for every gate, and the cited nightly run, with `doc-claim-receipt.json` beside it
 
@@ -120,11 +128,14 @@ present its evidence, but no agent tags, publishes, or pushes to `main` on its o
 
 ## Cut and publish
 
-Dispatch the same workflow without `dry_run`, on the commit the dry run proved:
+Dispatch the command the dry run's summary printed. It names the commit the dry run proved:
 
 ```bash
-gh workflow run release.yml --ref main -f version=X.Y.Z -f dry_run=false
+gh workflow run release.yml --ref main -f version=X.Y.Z -f dry_run=false -f expected_sha=<sha>
 ```
+
+A real cut refuses to start without `expected_sha`, and refuses when `main` no longer points at it.
+If `main` moved after the dry run, the new head needs its own dry run and approval.
 
 The real run proves every gate again on the same candidate rather than replaying the dry run. It
 cites the same nightly when that run is still the latest verdict on the commit. Then it performs
@@ -144,7 +155,7 @@ the current version. Do not create or replace the tag by hand while either workf
 
 ## Verify the published release
 
-Record the tag commit and compare it with the candidate SHA reported by the Release workflow:
+Record the tag commit and compare it with the `candidate_sha` in the real run's receipt:
 
 ```bash
 git fetch --tags origin
@@ -167,8 +178,8 @@ artifact points at the recorded version.
 ## Keep the receipts
 
 The `rc-gate-receipt-<sha>` artifact of the real run holds the base and candidate SHAs, every gate
-result, the cited Nightly Regression run, the release notes claim receipt and the doc claim receipt.
-Store it together with:
+result, the cited Nightly Regression and CI runs, the release notes claim receipt and the doc claim
+receipt. Store it together with:
 
 - the release tag and tag commit
 - image scan results, image digests, and Cosign receipt
@@ -216,16 +227,17 @@ Use these only to debug a gate the workflow failed. A local pass is not release 
 fix still has to land on `main` and pass a new dry run. Pass `--force` so moon runs the task instead
 of replaying a cached result.
 
-| Failing gate                | Reproduce with                                                                                       |
-| --------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Run RC gate bundle          | `moon run :check --force`, or the failing project task, such as `moon run core:test --force`         |
-| LongMemEval V2 release CI   | `moon run bench-longmemeval-v2-release-ci-test --force`                                              |
-| Doc claim gate              | `moon run doc-claim-gate --force`                                                                    |
-| Helm contracts              | `moon run helm-test --force`, with Helm 3 on `PATH` (the tests skip without it)                      |
-| Version or pin sync         | `moon run release-version-validate -- X.Y.Z` and `moon run sync-versions-check`                      |
-| Workflow contract           | `moon run release-workflow-test --force`                                                             |
-| E2E gate                    | Start the fixture the `e2e-gate` job starts, then run its two forced `moon run e2e:*` commands       |
-| Nightly Regression evidence | `python3 -m tools.release.nightly_evidence verify --repo hyperb1iss/sibyl --sha <sha> --run-id <id>` |
+| Failing gate                | Reproduce with                                                                                         |
+| --------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Run RC gate bundle          | `moon run :check --force`, or the failing project task, such as `moon run core:test --force`           |
+| LongMemEval V2 release CI   | `moon run bench-longmemeval-v2-release-ci-test --force`                                                |
+| Doc claim gate              | `moon run doc-claim-gate --force`                                                                      |
+| Helm contracts              | `moon run helm-test --force`, with Helm 3 on `PATH` (the tests skip without it)                        |
+| Version or pin sync         | `moon run release-version-validate -- X.Y.Z` and `moon run sync-versions-check`                        |
+| Workflow contract           | `moon run release-workflow-test --force`                                                               |
+| E2E gate                    | Start the fixture the `e2e-gate` job starts, then run its two forced `moon run e2e:*` commands         |
+| Nightly Regression evidence | `python3 -m tools.release.nightly_evidence verify --repo hyperb1iss/sibyl --sha <sha> --run-id <id>`   |
+| CI evidence                 | The candidate's own CI run finished green, including the dependency audit, which runs on every commit. |
 
 The E2E fixture is SurrealDB (the `start-surrealdb` action), `sibyld serve` and `sibyld worker` in
 `apps/api`, `moon run baseline-seed` and `moon run baseline-replay-runtime`, and a production build

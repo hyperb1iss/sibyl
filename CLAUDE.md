@@ -245,8 +245,8 @@ When working on Sibyl itself:
 
 Releases go through the Release workflow (`.github/workflows/release.yml`), following
 [`docs/admin/releasing.md`](docs/admin/releasing.md). The workflow proves every release gate on the
-exact candidate commit: the image CVE scans, the E2E fixture, same-SHA Nightly Regression evidence,
-and the forced RC gate bundle.
+exact candidate commit: the image CVE scans, the E2E fixture, same-SHA Nightly Regression and CI
+evidence, and the forced RC gate bundle.
 
 - **Never hand-run the release gate list or cut a release manually.** No local `moon run` sequence,
   hand-made version commit, tag, or `gh release create` stands in for the workflow. Run a gate
@@ -256,7 +256,8 @@ and the forced RC gate bundle.
   empty; the workflow finds or dispatches the same-SHA nightly itself.
 - **The real run needs the maintainer's explicit approval** for the version commit on `main`, the
   tag, and the publish run, given after a green dry run. A green dry run is evidence for that
-  request, not the approval. No agent dispatches `dry_run=false` on its own.
+  request, not the approval. The real run takes the `expected_sha` the dry run's summary prints, so
+  it cuts only the approved commit. No agent dispatches `dry_run=false` on its own.
 
 ---
 
