@@ -121,6 +121,50 @@ def test_migrate_refuses_a_non_server_source_without_echoing_it(surreal_url: str
     assert "hunter2" not in str(caught.value).lower()
 
 
+# The CLI half of apps/api/tests/test_surreal_url_leak_canary.py, which the
+# CLI suite runs because the API suite does not install this package.
+_PASSWORD_CANARY = "PwCanary91"
+_PATH_CANARY = "PathCanary42"
+_CANARY_URLS = [
+    f"wss://admin:{_PASSWORD_CANARY}@127.0.0.1:9/private/{_PATH_CANARY}/rpc?t={_PASSWORD_CANARY}",
+    f"admin:{_PASSWORD_CANARY}@host:8000/{_PATH_CANARY}/rpc?next=http://x",
+    f"ws:///admin:{_PASSWORD_CANARY}@host:8000/{_PATH_CANARY}/rpc",
+    f"ws://admin:{_PASSWORD_CANARY}@host\N{FULLWIDTH SOLIDUS}{_PATH_CANARY}/rpc",
+    f"ws://admin:{_PASSWORD_CANARY}@host:{_PATH_CANARY}/rpc",
+    f"surrealkv:///srv/{_PATH_CANARY}/sibyl",
+]
+
+
+def _assert_no_canary(text: str) -> None:
+    for canary in (_PASSWORD_CANARY, _PATH_CANARY):
+        assert canary.lower() not in text.lower(), text
+
+
+@pytest.mark.parametrize("surreal_url", _CANARY_URLS)
+@pytest.mark.parametrize("failure", ["transport", "status"])
+def test_migrate_errors_never_carry_the_canary(monkeypatch, surreal_url: str, failure: str) -> None:
+    import traceback
+
+    import httpx
+
+    from sibyl_cli import migrate
+
+    def fake_post(url: str, **kwargs: object) -> object:
+        request = httpx.Request("POST", url)
+        if failure == "transport":
+            raise httpx.ConnectError(f"All connection attempts failed for {url}", request=request)
+        return httpx.Response(401, request=request)
+
+    monkeypatch.setattr(migrate.httpx, "post", fake_post)
+    with pytest.raises((ValueError, RuntimeError)) as caught:
+        migrate._source_sql(
+            surreal_url=surreal_url, username=None, password=None, statement="RETURN 1;"
+        )
+
+    _assert_no_canary(str(caught.value))
+    _assert_no_canary("".join(traceback.format_exception(caught.value)))
+
+
 @pytest.mark.parametrize(
     ("surreal_url", "username", "password", "expected"),
     [
