@@ -984,12 +984,49 @@ async def test_embedding_sweep_status_reads_each_plane_and_survives_a_dead_store
     monkeypatch.setattr(
         "sibyl_core.services.embedding_sweep.read_embedding_sweep_state", read_state
     )
+    monkeypatch.setattr(
+        "sibyl_core.backends.surreal.schema_embedding_states.embedding_sweep_schema_ready",
+        AsyncMock(return_value=True),
+    )
 
     status = await get_embedding_sweep_status("org")
 
     assert status["graph"]["state"] == "sweeping"
     assert status["graph"]["last_run"]["pending"] == 1200
     assert status["document_chunks"] == {"state": "unavailable", "error_type": "ConnectionError"}
+
+
+async def test_embedding_sweep_status_names_schema_waits_and_evidence_waits(monkeypatch) -> None:
+    from sibyl.api.routes.admin import get_embedding_sweep_status
+
+    async def ready(_execute, *, graph):
+        return graph
+
+    async def read_state(plane, _organization_id, _execute):
+        return {"legacy_deferred_at": "2026-09-26T00:00:00Z", "deferred_age_seconds": 120}
+
+    monkeypatch.setattr(
+        "sibyl_core.services.graph_runtime.get_graph_client",
+        AsyncMock(return_value=SimpleNamespace(execute_query=AsyncMock())),
+    )
+    monkeypatch.setattr(
+        "sibyl_core.backends.surreal.schema_embedding_states.embedding_sweep_schema_ready", ready
+    )
+    monkeypatch.setattr(
+        "sibyl_core.services.embedding_sweep.read_embedding_sweep_state", read_state
+    )
+    monkeypatch.setattr(
+        "sibyl_core.services.embedding_evidence.read_evidence_wait",
+        AsyncMock(return_value={"organizations": ["broken-org"], "count": 1}),
+    )
+
+    status = await get_embedding_sweep_status("org")
+
+    # The content schema has not upgraded; the graph plane waits on evidence.
+    assert status["document_chunks"] == {"state": "awaiting_schema_upgrade"}
+    assert status["graph"]["state"] == "awaiting_evidence"
+    assert status["graph"]["waiting_on_organizations"] == ["broken-org"]
+    assert status["graph"]["waiting_on_count"] == 1
 
 
 def test_embedding_plane_state_reports_only_the_current_model_as_complete() -> None:

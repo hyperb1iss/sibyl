@@ -67,11 +67,6 @@ async def test_fully_surreal_mode_skips_legacy_postgres_bootstrap(
         "install_core_runtime_ports",
         MagicMock(side_effect=lambda: startup_events.append("core_ports")),
     )
-    monkeypatch.setattr(
-        runtime_services_module,
-        "record_configured_embedding_models",
-        AsyncMock(side_effect=lambda: startup_events.append("embedding_models")),
-    )
     monkeypatch.setattr("sibyl.api.pubsub.init_pubsub", init_pubsub)
     monkeypatch.setattr("sibyl.api.pubsub.shutdown_pubsub", shutdown_pubsub)
     monkeypatch.setattr("sibyl.locks.init_locks", init_locks)
@@ -87,9 +82,7 @@ async def test_fully_surreal_mode_skips_legacy_postgres_bootstrap(
     async with app.router.lifespan_context(app):
         pass
 
-    # The embedding models are recorded once the database-held settings that
-    # choose them are loaded.
-    assert startup_events == ["surreal", "llm", "core_ports", "embedding_models"]
+    assert startup_events == ["surreal", "llm", "core_ports"]
     init_pubsub.assert_awaited_once()
     init_locks.assert_awaited_once()
     shutdown_pubsub.assert_awaited_once()

@@ -55,8 +55,10 @@ async def record_configured_embedding_models(
 ) -> dict[str, Any] | None:
     """Write the graph and content models this process runs with to the deployment record.
 
-    Called at every startup and before each lifecycle pass. The record keeps
-    the first models it ever saw, so a later start on another model is
+    Lifecycle repair calls this only after a pass that swept under this
+    configuration without the provider or store failing, so a process that
+    merely started with a wrong configuration never pins it. The record
+    keeps the first models it saw, so a later pass on another model is
     switch evidence for planes whose verdict is still open. A failure is
     logged and returns ``None``: the record only adds evidence, and the
     migration-time stamps still decide every plane they cover.

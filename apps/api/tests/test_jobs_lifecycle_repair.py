@@ -7,10 +7,13 @@ import pytest
 
 from sibyl.jobs import lifecycle_repair
 from sibyl.jobs.worker import WorkerSettings, get_schedule_specs
+from sibyl_core.config import settings as core_settings
 from sibyl_core.projection.repair import LifecycleRepairResult
 from sibyl_core.services.embedding_sweep import (
     LEGACY_WARNING_ADOPTED_WITHOUT_EVIDENCE,
     SWEEP_CURRENT,
+    SWEEP_PROVIDER_FAILING,
+    EmbeddingSchemaPendingError,
     EmbeddingSweepResult,
 )
 from sibyl_core.services.embedding_verdicts import LegacyVerdicts
@@ -25,6 +28,7 @@ _NO_EMBEDDING_WORK = {
     "embedding_failed": 0,
     "embedding_unverified": 0,
     "embedding_deferred": 0,
+    "embedding_schema_pending": 0,
 }
 
 
@@ -47,6 +51,18 @@ def quiet_embedding_sweeps(monkeypatch):
     )
     monkeypatch.setattr(lifecycle_repair, "configured_embedding_provider", lambda: None)
     monkeypatch.setattr(lifecycle_repair, "record_configured_embedding_models", AsyncMock())
+    monkeypatch.setattr(lifecycle_repair, "_content_schema_ready", AsyncMock(return_value=True))
+
+    @asynccontextmanager
+    async def content_session():
+        yield object()
+
+    monkeypatch.setattr(lifecycle_repair.content_client, "surreal_content_client", content_session)
+    monkeypatch.setattr(
+        lifecycle_repair, "read_published_organizations", AsyncMock(return_value=set())
+    )
+    monkeypatch.setattr(lifecycle_repair, "read_evidence_wait", AsyncMock(return_value={}))
+    monkeypatch.setattr(lifecycle_repair, "record_evidence_wait", AsyncMock())
     monkeypatch.setattr(
         lifecycle_repair,
         "sweep_document_chunk_embeddings",
@@ -244,6 +260,7 @@ async def test_both_verdicts_settle_together_before_either_sweep(monkeypatch):
         "embedding_failed": 0,
         "embedding_unverified": 1,
         "embedding_deferred": 0,
+        "embedding_schema_pending": 0,
     }
 
 
@@ -262,6 +279,9 @@ async def test_unproven_verdicts_settle_only_after_every_organization_published(
     graph_sweep = AsyncMock(return_value=EmbeddingSweepResult(plane="graph", status=SWEEP_CURRENT))
     monkeypatch.setattr(lifecycle_repair, "settle_legacy_verdicts", settle)
     monkeypatch.setattr(lifecycle_repair, "sweep_graph_embeddings", graph_sweep)
+    monkeypatch.setattr(
+        lifecycle_repair, "read_published_organizations", AsyncMock(return_value={"c", "d"})
+    )
 
     result = await lifecycle_repair.repair_lifecycle_all_orgs({})
 
@@ -278,28 +298,135 @@ async def test_unproven_verdicts_wait_when_an_organization_could_not_publish(mon
     monkeypatch.setattr(lifecycle_repair, "list_org_ids", AsyncMock(return_value=["c", "down"]))
     calls: list[tuple[str, bool]] = []
 
+    limits: list[object] = []
+
     async def settle(organization_id, **kwargs):
         calls.append((organization_id, kwargs["allow_unproven"]))
+        limits.append(kwargs["defer_limit_seconds"])
         if organization_id == "down":
             raise ConnectionError("graph namespace unavailable")
         return LegacyVerdicts(graph={"legacy_deferred": True}, document_chunks=None)
+
+    record_wait = AsyncMock()
+    monkeypatch.setattr(lifecycle_repair, "settle_legacy_verdicts", settle)
+    # "c" published in an earlier pass; "down" never has.
+    monkeypatch.setattr(
+        lifecycle_repair, "read_published_organizations", AsyncMock(return_value={"c"})
+    )
+    monkeypatch.setattr(lifecycle_repair, "record_evidence_wait", record_wait)
+
+    result = await lifecycle_repair.repair_lifecycle_all_orgs({})
+
+    assert calls == [("c", False), ("down", False)]
+    # The wait is bounded, and whoever holds it up is named for status.
+    assert limits == [core_settings.embedding_sweep_evidence_wait_seconds] * 2
+    assert record_wait.await_args.kwargs["waiting_on"] == ["down"]
+    assert result["embedding_deferred"] == 1
+
+
+async def test_a_failing_graph_repair_still_reports_the_verdicts(monkeypatch):
+    order: list[str] = []
+    _quiet_repairs(monkeypatch, order)
+    monkeypatch.setattr(lifecycle_repair, "list_org_ids", AsyncMock(return_value=["c"]))
+    monkeypatch.setattr(
+        lifecycle_repair, "repair_graph_lifecycle", AsyncMock(side_effect=RuntimeError("boom"))
+    )
+    monkeypatch.setattr(
+        lifecycle_repair, "read_published_organizations", AsyncMock(return_value={"c"})
+    )
+    calls: list[bool] = []
+
+    async def settle(_organization_id, **kwargs):
+        calls.append(kwargs["allow_unproven"])
+        deferred = not kwargs["allow_unproven"]
+        state = {"legacy_deferred": True} if deferred else {"legacy_decision": "adopt"}
+        return LegacyVerdicts(graph=state, document_chunks=None)
 
     monkeypatch.setattr(lifecycle_repair, "settle_legacy_verdicts", settle)
 
     result = await lifecycle_repair.repair_lifecycle_all_orgs({})
 
-    assert calls == [("c", False), ("down", False)]
-    assert result["embedding_deferred"] == 1
+    assert calls == [False, True]
+    assert result["failed_organizations"] == 1
+    assert "repair_promoted_embeddings" in order
 
 
-async def test_the_deployment_model_record_is_refreshed_every_pass(monkeypatch):
+async def test_nothing_touches_embedding_evidence_before_the_content_upgrade(monkeypatch):
+    order: list[str] = []
+    _quiet_repairs(monkeypatch, order)
+    monkeypatch.setattr(lifecycle_repair, "_content_schema_ready", AsyncMock(return_value=False))
+    settle = AsyncMock()
+    graph_sweep = AsyncMock()
+    chunk_sweep = AsyncMock()
+    record = AsyncMock()
+    monkeypatch.setattr(lifecycle_repair, "settle_legacy_verdicts", settle)
+    monkeypatch.setattr(lifecycle_repair, "sweep_graph_embeddings", graph_sweep)
+    monkeypatch.setattr(lifecycle_repair, "sweep_document_chunk_embeddings", chunk_sweep)
+    monkeypatch.setattr(lifecycle_repair, "record_configured_embedding_models", record)
+
+    result = await lifecycle_repair.repair_lifecycle_all_orgs({})
+
+    for mock in (settle, graph_sweep, chunk_sweep, record):
+        mock.assert_not_awaited()
+    assert "repair_raw_capture_embeddings" not in order
+    assert "repair_graph_lifecycle" in order
+    assert result["embedding_schema_pending"] == 2
+    assert result["failed_organizations"] == 0
+
+
+async def test_a_graph_namespace_before_its_upgrade_waits_without_failing(monkeypatch):
+    order: list[str] = []
+    _quiet_repairs(monkeypatch, order)
+    pending = EmbeddingSchemaPendingError("graph namespace has not upgraded")
+    monkeypatch.setattr(
+        lifecycle_repair,
+        "settle_legacy_verdicts",
+        AsyncMock(return_value=LegacyVerdicts(graph=pending, document_chunks=pending)),
+    )
+    graph_sweep = AsyncMock()
+    monkeypatch.setattr(lifecycle_repair, "sweep_graph_embeddings", graph_sweep)
+
+    result = await lifecycle_repair.repair_lifecycle_all_orgs({})
+
+    graph_sweep.assert_not_awaited()
+    assert result["embedding_schema_pending"] == 2
+    assert result["failed_organizations"] == 0
+
+
+@pytest.mark.parametrize(
+    ("statuses", "recorded"),
+    [
+        ([SWEEP_CURRENT, SWEEP_CURRENT], True),
+        ([SWEEP_CURRENT, SWEEP_PROVIDER_FAILING], False),
+        ([SWEEP_CURRENT, "refused"], False),
+        ([], False),
+    ],
+)
+async def test_the_model_record_follows_only_a_healthy_pass(monkeypatch, statuses, recorded):
+    order: list[str] = []
+    _quiet_repairs(monkeypatch, order)
+    results = iter(
+        EmbeddingSweepResult(plane=plane, status="partial", failed=3)
+        if status == "refused"
+        else EmbeddingSweepResult(plane=plane, status=status)
+        for plane, status in zip(("graph", "document_chunks"), statuses, strict=False)
+    )
     record = AsyncMock()
     monkeypatch.setattr(lifecycle_repair, "record_configured_embedding_models", record)
-    monkeypatch.setattr(lifecycle_repair, "list_org_ids", AsyncMock(return_value=[]))
+    if not statuses:
+        monkeypatch.setattr(lifecycle_repair, "list_org_ids", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        lifecycle_repair, "sweep_graph_embeddings", AsyncMock(side_effect=lambda _r: next(results))
+    )
+    monkeypatch.setattr(
+        lifecycle_repair,
+        "sweep_document_chunk_embeddings",
+        AsyncMock(side_effect=lambda *_a, **_k: next(results)),
+    )
 
     await lifecycle_repair.repair_lifecycle_all_orgs({})
 
-    record.assert_awaited_once()
+    assert record.await_count == (1 if recorded else 0)
 
 
 async def test_an_unsettled_chunk_verdict_skips_only_the_chunk_sweep(monkeypatch):

@@ -217,20 +217,25 @@ _EMBEDDING_SWEEP_STATUS_FIELDS = (
     "legacy_decision",
     "legacy_basis",
     "legacy_warning",
+    "deferred_age_seconds",
     "active_metadata",
     "complete_metadata",
     "complete_at",
     "lease_until",
     "last_run",
 )
+_EMBEDDING_SCHEMA_PENDING_STATE = "awaiting_schema_upgrade"
+_EMBEDDING_AWAITING_EVIDENCE_STATE = "awaiting_evidence"
 
 
 def _embedding_plane_state(state: dict[str, Any]) -> str:
     """Complete only for the model the plane is swept toward now.
 
-    A plane that adopted unstamped vectors with no evidence of their model
-    never reads complete: it reports the warning until an operator re-embeds
-    it, because a provider switch in the same deploy would look identical.
+    A plane waiting for other organizations to publish their evidence says
+    so. A plane that adopted unstamped vectors with no evidence of their
+    model never reads complete: it reports the warning until an operator
+    re-embeds it, because a provider switch in the same deploy would look
+    identical.
     """
     from sibyl_core.embeddings.provenance import same_vector_identity
 
@@ -238,6 +243,8 @@ def _embedding_plane_state(state: dict[str, Any]) -> str:
     last_status = last_run.get("status") if isinstance(last_run, dict) else None
     if last_status in {"skipped_dimension_mismatch", "provider_failing", "store_failing"}:
         return str(last_status)
+    if not state.get("legacy_decision") and state.get("legacy_deferred_at"):
+        return _EMBEDDING_AWAITING_EVIDENCE_STATE
     if state.get("legacy_warning"):
         return str(state["legacy_warning"])
     if same_vector_identity(state.get("complete_metadata"), state.get("active_metadata")):
@@ -248,30 +255,49 @@ def _embedding_plane_state(state: dict[str, Any]) -> str:
 async def get_embedding_sweep_status(organization_id: str) -> dict[str, object]:
     """Each embedding plane's persisted sweep state, for the status dashboard.
 
-    A plane that has not been swept yet reports ``{"state": "not_started"}``;
-    a store that cannot be read reports the error type instead of failing
-    the dashboard.
+    A plane that has not been swept yet reports ``{"state": "not_started"}``,
+    one whose namespace has not run the sweep's migration reports
+    ``awaiting_schema_upgrade``, and one waiting on other organizations'
+    evidence names them. A store that cannot be read reports the error type
+    instead of failing the dashboard.
     """
     from sibyl.persistence.surreal.content import surreal_content_client
+    from sibyl_core.backends.surreal.schema_embedding_states import embedding_sweep_schema_ready
     from sibyl_core.services import content_client
     from sibyl_core.services.document_embedding_sweep import DOCUMENT_CHUNK_EMBEDDING_PLANE
+    from sibyl_core.services.embedding_evidence import read_evidence_wait
     from sibyl_core.services.embedding_sweep import read_embedding_sweep_state
     from sibyl_core.services.graph_embedding_sweep import GRAPH_EMBEDDING_PLANE
     from sibyl_core.services.graph_runtime import get_graph_client
 
-    async def graph_state() -> dict[str, Any]:
+    async def graph_state() -> dict[str, Any] | None:
         client = await get_graph_client(organization_id)
+        if not await embedding_sweep_schema_ready(client.execute_query, graph=True):
+            return None
         return await read_embedding_sweep_state(
             GRAPH_EMBEDDING_PLANE, organization_id, client.execute_query
         )
 
-    async def chunk_state() -> dict[str, Any]:
+    async def chunk_state() -> dict[str, Any] | None:
         async with surreal_content_client() as client:
+
+            async def execute(query: str, **params: object) -> object:
+                return await content_client.select_many(client, query, **params)
+
+            if not await embedding_sweep_schema_ready(execute, graph=False):
+                return None
             return await read_embedding_sweep_state(
-                DOCUMENT_CHUNK_EMBEDDING_PLANE,
-                organization_id,
-                lambda query, **params: content_client.select_many(client, query, **params),
+                DOCUMENT_CHUNK_EMBEDDING_PLANE, organization_id, execute
             )
+
+    async def evidence_wait() -> dict[str, Any]:
+        try:
+            async with surreal_content_client() as client:
+                return await read_evidence_wait(
+                    lambda query, **params: content_client.select_many(client, query, **params)
+                )
+        except Exception:
+            return {}
 
     status: dict[str, object] = {}
     for plane, read in (
@@ -283,16 +309,21 @@ async def get_embedding_sweep_status(organization_id: str) -> dict[str, object]:
         except Exception as exc:
             status[plane] = {"state": "unavailable", "error_type": type(exc).__name__}
             continue
+        if state is None:
+            status[plane] = {"state": _EMBEDDING_SCHEMA_PENDING_STATE}
+            continue
         if not state:
             status[plane] = {"state": "not_started"}
             continue
-        status[plane] = jsonable_encoder(
-            {
-                "state": _embedding_plane_state(state),
-                **{key: state.get(key) for key in _EMBEDDING_SWEEP_STATUS_FIELDS},
-            },
-            custom_encoder={SurrealDatetime: str},
-        )
+        entry: dict[str, Any] = {
+            "state": _embedding_plane_state(state),
+            **{key: state.get(key) for key in _EMBEDDING_SWEEP_STATUS_FIELDS},
+        }
+        if entry["state"] == _EMBEDDING_AWAITING_EVIDENCE_STATE:
+            wait = await evidence_wait()
+            entry["waiting_on_organizations"] = wait.get("organizations") or []
+            entry["waiting_on_count"] = wait.get("count") or 0
+        status[plane] = jsonable_encoder(entry, custom_encoder={SurrealDatetime: str})
     return status
 
 

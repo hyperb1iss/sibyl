@@ -19,16 +19,31 @@ from sibyl.persistence.auth_runtime import (
     resolve_auth_context,
 )
 from sibyl.persistence.organization_runtime import list_org_ids
+from sibyl_core.config import settings
 from sibyl_core.embeddings.providers import configured_embedding_provider
-from sibyl_core.projection.repair import repair_graph_lifecycle
+from sibyl_core.projection.repair import LifecycleRepairResult, repair_graph_lifecycle
+from sibyl_core.services import content_client
 from sibyl_core.services.content_raw_embedding_repair import repair_raw_capture_embeddings
 from sibyl_core.services.document_embedding_sweep import (
     ChunkEmbedder,
+    content_sweep_schema_ready,
     sweep_document_chunk_embeddings,
 )
+from sibyl_core.services.embedding_evidence import (
+    read_evidence_wait,
+    read_published_organizations,
+    record_evidence_wait,
+)
 from sibyl_core.services.embedding_sweep import (
+    SWEEP_COMPLETED,
     SWEEP_CURRENT,
+    SWEEP_PARTIAL,
+    SWEEP_PROVIDER_FAILING,
+    SWEEP_SKIPPED_DIMENSION_MISMATCH,
     SWEEP_SKIPPED_NO_PROVIDER,
+    SWEEP_SKIPPED_SCHEMA_PENDING,
+    SWEEP_STORE_FAILING,
+    EmbeddingSchemaPendingError,
     EmbeddingSweepResult,
 )
 from sibyl_core.services.embedding_verdicts import (
@@ -84,7 +99,15 @@ _EMBEDDING_SUMMARY_KEYS = (
     "embedding_failed",
     "embedding_unverified",
     "embedding_deferred",
+    "embedding_schema_pending",
 )
+# Pass outcomes that say the configured provider or store is not working, so
+# the pass does not vouch for its configuration in the deployment record.
+_UNHEALTHY_SWEEP_STATUSES = frozenset(
+    {SWEEP_PROVIDER_FAILING, SWEEP_STORE_FAILING, SWEEP_SKIPPED_DIMENSION_MISMATCH}
+)
+
+_EXERCISED_SWEEP_STATUSES = frozenset({SWEEP_COMPLETED, SWEEP_CURRENT, SWEEP_PARTIAL})
 
 type _ChunkInputs = tuple[dict[str, Any], bool, ChunkEmbedder]
 
@@ -95,6 +118,22 @@ async def _chunk_sweep_inputs() -> _ChunkInputs | BaseException:
     except Exception as exc:
         log.warning("embedding_sweep_chunk_inputs_failed", error_type=type(exc).__name__)
         return exc
+
+
+async def _content_schema_ready() -> bool:
+    """Whether the shared content namespace has taken the sweep's evidence snapshot.
+
+    A worker can tick before the API has migrated the content schema. Until it
+    has, nothing in this pass may read or rewrite embedding evidence: raw
+    capture repair would restamp the captures the upgrade is about to
+    photograph, and the chunk plane's bookkeeping does not exist yet.
+    """
+    try:
+        async with content_client.surreal_content_client() as client:
+            return await content_sweep_schema_ready(client)
+    except Exception as exc:
+        log.warning("embedding_sweep_schema_check_failed", error_type=type(exc).__name__)
+        return False
 
 
 async def _settle_verdicts(
@@ -123,7 +162,10 @@ async def _settle_verdicts(
             chunk_stamp=chunk_stamp,
             embed_chunks=embed_chunks,
             allow_unproven=allow_unproven,
+            defer_limit_seconds=settings.embedding_sweep_evidence_wait_seconds,
         )
+    except EmbeddingSchemaPendingError as exc:
+        return exc
     except Exception as exc:
         log.warning(
             "embedding_sweep_verdicts_failed",
@@ -137,29 +179,52 @@ async def _no_chunk_embedder(_rows: object) -> tuple[list[list[float]], dict[str
     raise RuntimeError("no chunk embedder is configured")
 
 
+async def _graph_repairs(runtime: Any) -> list[object]:
+    """Graph lifecycle and promoted-embedding repair, each failing on its own."""
+    results: list[object] = []
+    for repair in (repair_graph_lifecycle, repair_promoted_embeddings):
+        try:
+            results.append(await repair(runtime))
+        except Exception as exc:
+            results.append(exc)
+    lifecycle, embeddings = results
+    if isinstance(lifecycle, LifecycleRepairResult) and isinstance(
+        embeddings, LifecycleRepairResult
+    ):
+        return [
+            type(lifecycle)(
+                **{key: value + asdict(embeddings)[key] for key, value in asdict(lifecycle).items()}
+            )
+        ]
+    return results
+
+
 async def _repair_graph(
-    organization_id: str, chunk_inputs: _ChunkInputs | BaseException
+    organization_id: str, chunk_inputs: _ChunkInputs | BaseException, *, sweeping: bool
 ) -> tuple[object, ...]:
     """Settle both verdicts, then run the graph repairs beside both sweeps.
 
     One background runtime serves the whole organization pass. A plane whose
     verdict could not be settled, or was deferred until every organization
     has published its evidence, skips its sweep this pass rather than
-    deciding on partial evidence. The verdicts ride back in the result so the
-    caller can settle deferred planes.
+    deciding on partial evidence. The verdicts ride back in the result, even
+    when a graph repair fails, so the caller can settle deferred planes.
+    Without ``sweeping`` only the graph repairs run.
     """
     async with background_graph_runtime(organization_id) as runtime:
-        verdicts = await _settle_verdicts(organization_id, runtime, chunk_inputs)
-        reported: list[object] = [verdicts]
+        reported: list[object] = []
         graph_settled = chunks_settled = False
-        if isinstance(verdicts, LegacyVerdicts):
-            graph_settled = verdict_settled(verdicts.graph)
-            chunks_settled = verdict_settled(verdicts.document_chunks)
-            reported.extend(
-                verdict
-                for verdict in (verdicts.graph, verdicts.document_chunks)
-                if isinstance(verdict, BaseException)
-            )
+        if sweeping:
+            verdicts = await _settle_verdicts(organization_id, runtime, chunk_inputs)
+            reported.append(verdicts)
+            if isinstance(verdicts, LegacyVerdicts):
+                graph_settled = verdict_settled(verdicts.graph)
+                chunks_settled = verdict_settled(verdicts.document_chunks)
+                reported.extend(
+                    verdict
+                    for verdict in (verdicts.graph, verdicts.document_chunks)
+                    if isinstance(verdict, BaseException)
+                )
         sweeps: list[asyncio.Task[EmbeddingSweepResult]] = []
         if graph_settled:
             sweeps.append(asyncio.create_task(sweep_graph_embeddings(runtime)))
@@ -175,14 +240,10 @@ async def _repair_graph(
                 )
             )
         try:
-            lifecycle = await repair_graph_lifecycle(runtime)
-            embeddings = await repair_promoted_embeddings(runtime)
+            repaired = await _graph_repairs(runtime)
         finally:
             swept = await asyncio.gather(*sweeps, return_exceptions=True)
-        combined = type(lifecycle)(
-            **{key: value + asdict(embeddings)[key] for key, value in asdict(lifecycle).items()}
-        )
-        return (combined, *swept, *reported)
+        return (*repaired, *swept, *reported)
 
 
 async def _settle_unproven(organization_id: str) -> None:
@@ -202,14 +263,23 @@ async def _settle_unproven(organization_id: str) -> None:
         )
 
 
-async def _repair_organization(organization_id: str) -> list[object]:
-    """Run every repair for one organization, isolating each one's failure."""
-    chunk_inputs = await _chunk_sweep_inputs()
+async def _repair_organization(organization_id: str, *, sweeping: bool = True) -> list[object]:
+    """Run every repair for one organization, isolating each one's failure.
+
+    Without ``sweeping`` (the content schema has not upgraded yet) nothing
+    that reads or rewrites embedding evidence runs.
+    """
+    chunk_inputs = await _chunk_sweep_inputs() if sweeping else None
     repairs: list[Awaitable[object]] = [
-        _repair_graph(organization_id, chunk_inputs),
+        _repair_graph(
+            organization_id,
+            chunk_inputs if chunk_inputs is not None else RuntimeError("not sweeping"),
+            sweeping=sweeping,
+        ),
         repair_raw_source_lifecycle(organization_id, authority_resolver=resolve_source_authority),
-        repair_raw_capture_embeddings(organization_id),
     ]
+    if sweeping:
+        repairs.append(repair_raw_capture_embeddings(organization_id))
     outcomes: list[object] = [chunk_inputs] if isinstance(chunk_inputs, BaseException) else []
     outcomes.extend(await asyncio.gather(*repairs, return_exceptions=True))
     return outcomes
@@ -226,6 +296,7 @@ def _record_embedding_sweep(
     summary["embedding_rejected"] += sweep.rejected
     summary["embedding_failed"] += sweep.failed
     summary["embedding_unverified"] += 1 if sweep.warning else 0
+    summary["embedding_schema_pending"] += 1 if sweep.status == SWEEP_SKIPPED_SCHEMA_PENDING else 0
     if sweep.status in {SWEEP_CURRENT, SWEEP_SKIPPED_NO_PROVIDER}:
         return
     log.info(
@@ -244,6 +315,43 @@ def _record_embedding_sweep(
     )
 
 
+async def _settle_deferred(organizations: list[str], deferred: list[str], planes: int) -> None:
+    """Settle deferred planes once every organization has published, and say who is missing.
+
+    Publication is persistent, so an organization counts once it has
+    published in any pass. While some have not, the deferred planes keep
+    waiting (each for at most the configured evidence wait, enforced when it
+    is next weighed) and the missing organizations are logged and recorded
+    for status.
+    """
+    async with content_client.surreal_content_client() as client:
+
+        async def execute(query: str, **params: object) -> object:
+            return await content_client.select_many(client, query, **params)
+
+        published = await read_published_organizations(execute)
+        waiting_on = [
+            organization for organization in organizations if organization not in published
+        ]
+        if deferred or (await read_evidence_wait(execute)).get("count"):
+            await record_evidence_wait(
+                execute, waiting_on=waiting_on if deferred else [], deferred_planes=planes
+            )
+    if not deferred:
+        return
+    if waiting_on:
+        log.warning(
+            "embedding_evidence_waiting_on_organizations",
+            deferred_planes=planes,
+            waiting_on=len(waiting_on),
+            organizations=waiting_on[:10],
+            wait_seconds=settings.embedding_sweep_evidence_wait_seconds,
+        )
+        return
+    for organization_id in deferred:
+        await _settle_unproven(organization_id)
+
+
 async def repair_lifecycle_all_orgs(ctx: dict[str, Any]) -> dict[str, int]:  # noqa: ARG001
     summary = {
         "organizations": 0,
@@ -254,34 +362,42 @@ async def repair_lifecycle_all_orgs(ctx: dict[str, Any]) -> dict[str, int]:  # n
         "failed": 0,
         **dict.fromkeys(_EMBEDDING_SUMMARY_KEYS, 0),
     }
-    # Startup records the configured models too; refreshing here keeps the
-    # record current for a process whose startup write failed.
-    await record_configured_embedding_models()
+    sweeping = await _content_schema_ready()
+    if not sweeping:
+        log.info("embedding_sweep_waiting_for_content_schema")
+    organizations = await list_org_ids()
     deferred: list[str] = []
-    every_organization_published = True
-    for organization_id in await list_org_ids():
+    exercised = unhealthy = False
+    for organization_id in organizations:
         summary["organizations"] += 1
         outcomes: list[object] = []
-        for result in await _repair_organization(organization_id):
+        for result in await _repair_organization(organization_id, sweeping=sweeping):
             if isinstance(result, tuple):
                 outcomes.extend(result)
             else:
                 outcomes.append(result)
+        if not sweeping:
+            summary["embedding_schema_pending"] += 2
         verdicts = next((item for item in outcomes if isinstance(item, LegacyVerdicts)), None)
-        if verdicts is None:
-            # This organization's graph photograph may not have been published.
-            every_organization_published = False
-        elif verdicts.deferred:
+        if verdicts is not None and verdicts.deferred:
             deferred.append(organization_id)
             summary["embedding_deferred"] += sum(
                 1
                 for verdict in (verdicts.graph, verdicts.document_chunks)
                 if not verdict_settled(verdict) and not isinstance(verdict, BaseException)
             )
-        if any(isinstance(outcome, BaseException) for outcome in outcomes):
+        failures = [
+            outcome
+            for outcome in outcomes
+            if isinstance(outcome, BaseException)
+            and not isinstance(outcome, EmbeddingSchemaPendingError)
+        ]
+        if failures:
             summary["failed_organizations"] += 1
         for outcome in outcomes:
-            if isinstance(outcome, BaseException):
+            if isinstance(outcome, EmbeddingSchemaPendingError):
+                summary["embedding_schema_pending"] += 1
+            elif isinstance(outcome, BaseException):
                 log.warning(
                     "lifecycle_repair_org_failed",
                     group_id=organization_id,
@@ -289,16 +405,28 @@ async def repair_lifecycle_all_orgs(ctx: dict[str, Any]) -> dict[str, int]:  # n
                 )
             elif isinstance(outcome, EmbeddingSweepResult):
                 _record_embedding_sweep(summary, organization_id, outcome)
+                exercised = exercised or outcome.status in _EXERCISED_SWEEP_STATUSES
+                # A provider that refused every row it was sent is not a
+                # configuration to vouch for, even short of the outage breaker.
+                unhealthy = unhealthy or (
+                    outcome.status in _UNHEALTHY_SWEEP_STATUSES
+                    or (outcome.failed > 0 and outcome.recovered == 0)
+                )
             elif isinstance(outcome, LegacyVerdicts):
                 continue
             else:
                 for key, value in asdict(outcome).items():
                     if key in summary and isinstance(value, int):
                         summary[key] += value
-    # Planes with no evidence of their own wait until every organization's
-    # graph has spoken, so the verdict never depends on which went first.
-    if deferred and every_organization_published:
-        for organization_id in deferred:
-            await _settle_unproven(organization_id)
+    if sweeping:
+        try:
+            await _settle_deferred(organizations, deferred, summary["embedding_deferred"])
+        except Exception as exc:
+            log.warning("embedding_deferred_settle_failed", error_type=type(exc).__name__)
+    # The deployment record vouches only for a configuration a pass actually
+    # swept under without the provider or store failing, so a process that
+    # merely started with a wrong configuration leaves no mark.
+    if sweeping and exercised and not unhealthy:
+        await record_configured_embedding_models()
     log.info("lifecycle_repair_completed", **summary)
     return summary

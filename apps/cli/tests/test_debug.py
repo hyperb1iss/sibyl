@@ -164,6 +164,21 @@ def test_embedding_lines_tell_the_operator_how_to_resolve_an_unproven_adoption()
     assert "sibyld db reembed --plane documents" in lines[1]
 
 
+def test_embedding_lines_name_the_organizations_a_plane_waits_on() -> None:
+    lines = debug._embedding_sweep_lines(
+        {
+            "graph": {
+                "state": "awaiting_evidence",
+                "waiting_on_count": 1,
+                "waiting_on_organizations": ["broken-org"],
+            }
+        }
+    )
+
+    assert "graph awaiting_evidence" in lines[0]
+    assert "broken-org" in lines[1]
+
+
 @patch("sibyl_cli.debug.get_client")
 def test_debug_query_explain_prefixes_query_and_formats_plan(
     mock_get_client: MagicMock,

@@ -344,6 +344,13 @@ def _embedding_sweep_lines(sweep: object) -> list[str]:
         if state.get("legacy_basis"):
             summary += f", legacy {state.get('legacy_decision')} ({state.get('legacy_basis')})"
         lines.append(f"{label}{plane} {summary}")
+        waiting = state.get("waiting_on_count")
+        if summary.startswith("awaiting_evidence") and isinstance(waiting, int) and waiting:
+            names = ", ".join(str(item) for item in state.get("waiting_on_organizations") or [])
+            lines.append(
+                f"                [{ELECTRIC_YELLOW}]waiting for {waiting:,} organization(s) to"
+                f" publish their graph evidence: {names}[/{ELECTRIC_YELLOW}]"
+            )
         if state.get("legacy_warning"):
             target = "graph" if plane == "graph" else "documents"
             lines.append(
