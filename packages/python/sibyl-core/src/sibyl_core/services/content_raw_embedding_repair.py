@@ -28,6 +28,7 @@ from sibyl_core.services.content_raw_persistence import (
     _raw_memories_with_embeddings,
     _raw_memory_without_embedding,
 )
+from sibyl_core.services.embedding_sweep import page_after_cursor
 
 log = structlog.get_logger()
 
@@ -65,7 +66,7 @@ _RAW_EMBEDDING_WALK_FIELDS = ", ".join(
 )
 _RAW_EMBEDDING_WALK_QUERY = (
     f"SELECT {_RAW_EMBEDDING_WALK_FIELDS} FROM raw_captures "
-    "WHERE organization_id = $organization_id AND uuid > $cursor "
+    "WHERE organization_id = $organization_id AND uuid >= $cursor "
     "AND deleted_at = NONE "
     "AND (embedding = NONE OR metadata.embedding_metadata = NONE "
     "OR metadata.embedding_metadata.stamp_version = NONE OR "
@@ -73,29 +74,42 @@ _RAW_EMBEDDING_WALK_QUERY = (
     + ") "
     "ORDER BY uuid ASC LIMIT $limit;"
 )
+# Found by uuid alone (see the writes below): beside the organization, a 3.x
+# server reads this page through an organization index, ten times slower.
 _RAW_EMBEDDING_FETCH_QUERY = (
     "SELECT uuid, revision, organization_id, source_id, principal_id, review_state, "
-    "deleted_at, title, raw_content, embedding, metadata FROM raw_captures "
-    "WHERE organization_id = $organization_id AND uuid IN $ids;"
+    "deleted_at, title, raw_content, embedding, metadata "
+    "FROM (SELECT VALUE id FROM raw_captures WHERE uuid IN $ids) "
+    "WHERE organization_id = $organization_id;"
 )
+# Rows per restamp statement; the statements of one page run concurrently.
+_RESTAMP_BATCH_ROWS = 64
+_RESTAMP_CONCURRENCY = 4
 
 # Only the vector and its provenance move. A full-row upsert would bump the
 # revision, and revision is what sealed readers compare against their snapshots.
 # A legacy stamp that already names the configured model is rewritten in the
-# current format without an embedding call; only after the content upgrade has
-# photographed the old stamps may they be rewritten at all.
+# current format without an embedding call, a page at a time; only after the
+# content upgrade has photographed the old stamps may they be rewritten at all.
+#
+# Both writes find their rows by uuid alone and check the organization and the
+# revision on the rows found. Given the organization beside the uuid, a 3.x
+# server plans the UPDATE through an organization index and walks every capture
+# the organization has for each row (seconds per row at 50,000 captures); by
+# uuid alone it uses the unique index.
 _RAW_EMBEDDING_RESTAMP_QUERY = """
-UPDATE raw_captures SET metadata.embedding_metadata = $embedding_metadata
-WHERE uuid = $uuid AND organization_id = $organization_id AND revision = $revision
+UPDATE (SELECT VALUE id FROM raw_captures WHERE uuid IN $uuids)
+SET metadata.embedding_metadata = $embedding_metadata
+WHERE organization_id = $organization_id AND revision = $revisions[uuid]
     AND embedding != NONE
 RETURN uuid;
 """
 
 _RAW_EMBEDDING_UPDATE_QUERY = """
-UPDATE raw_captures SET
+UPDATE (SELECT VALUE id FROM raw_captures WHERE uuid = $uuid) SET
     embedding = $embedding,
     metadata.embedding_metadata = $embedding_metadata
-WHERE uuid = $uuid AND organization_id = $organization_id AND revision = $revision
+WHERE organization_id = $organization_id AND revision = $revision
 RETURN uuid;
 """
 
@@ -197,13 +211,18 @@ async def repair_raw_capture_embeddings(
     cursor = ""
     while True:
         async with _content_session(client) as session:
-            rows = await content_client.select_many(
-                session,
-                _RAW_EMBEDDING_WALK_QUERY,
-                organization_id=organization_id,
-                cursor=cursor,
-                expected_metadata=expected_metadata,
-                limit=limit,
+            # Pages read from the cursor inclusively (see ``page_after_cursor``).
+            rows, more = page_after_cursor(
+                await content_client.select_many(
+                    session,
+                    _RAW_EMBEDDING_WALK_QUERY,
+                    organization_id=organization_id,
+                    cursor=cursor,
+                    expected_metadata=expected_metadata,
+                    limit=limit + 1,
+                ),
+                cursor,
+                limit,
             )
             if not rows:
                 break
@@ -220,7 +239,7 @@ async def repair_raw_capture_embeddings(
                 )
                 for outcome in outcomes:
                     counts[outcome] += 1
-        if len(rows) < limit:
+        if not more:
             break
     log.info(
         "raw_capture_embedding_repair_completed",
@@ -266,17 +285,30 @@ async def _repair_page(
     outcomes: list[str] = ["recovered"] * (len(candidate_ids) - len(targets))
     restamps = [memory for memory in targets if _needs_restamp_only(memory, provider)]
     if restamps:
-        expected = models.raw_memory_embedding_metadata(provider.metadata)
-        for memory in restamps:
-            rows = await content_client.select_many(
-                client,
-                _RAW_EMBEDDING_RESTAMP_QUERY,
-                uuid=memory.id,
-                organization_id=organization_id,
-                revision=memory.revision,
-                embedding_metadata=expected,
+        stamp = models.raw_memory_embedding_metadata(provider.metadata)
+        slots = asyncio.Semaphore(_RESTAMP_CONCURRENCY)
+
+        async def restamp(batch: Sequence[RawMemory]) -> list[models.SurrealRecord]:
+            async with slots:
+                return await content_client.select_many(
+                    client,
+                    _RAW_EMBEDDING_RESTAMP_QUERY,
+                    uuids=[memory.id for memory in batch],
+                    revisions={memory.id: memory.revision for memory in batch},
+                    organization_id=organization_id,
+                    embedding_metadata=stamp,
+                )
+
+        # A row update costs about 3.5 ms on raw_captures whatever the batch
+        # size, so a page's restamps run as concurrent statements.
+        batches = await asyncio.gather(
+            *(
+                restamp(restamps[start : start + _RESTAMP_BATCH_ROWS])
+                for start in range(0, len(restamps), _RESTAMP_BATCH_ROWS)
             )
-            outcomes.append("recovered" if rows else "pending")
+        )
+        restamped = {str(row.get("uuid")) for rows in batches for row in rows}
+        outcomes.extend("recovered" if memory.id in restamped else "pending" for memory in restamps)
         targets = [memory for memory in targets if not _needs_restamp_only(memory, provider)]
     if not targets:
         return outcomes

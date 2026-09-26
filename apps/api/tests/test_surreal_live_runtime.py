@@ -2885,6 +2885,92 @@ async def test_live_two_step_upgrade_adopts_without_warnings_then_switches(
 
 
 @pytest.mark.asyncio
+async def test_live_raw_repair_writes_stay_flat_in_a_large_organization() -> None:
+    """A plain upgrade restamps 20,000 captures in one pass; per-row writes do not grow with them.
+
+    A row write that names the organization beside the uuid is planned
+    through an organization index on 3.x and walks every capture the
+    organization has, which cost seconds per row at 50,000 captures.
+    """
+    import random
+    import time
+
+    from sibyl_core.services import content_client
+    from sibyl_core.services.content_models import raw_memory_embedding_metadata
+    from sibyl_core.services.content_raw_embedding_repair import repair_raw_capture_embeddings
+    from tests.embedding_upgrade import previous_release_stamp
+
+    total, switched = 20_000, 400
+    namespace = f"raw_repair_scale_live_{uuid4().hex}"
+    content = _live_content_client(namespace)
+    organization_id, neighbour = str(uuid4()), str(uuid4())
+    provider = _content_raw_provider(_TARGET_CHUNK_STAMP)
+    current = raw_memory_embedding_metadata(provider.metadata)
+    legacy_current = previous_release_stamp(current)
+    legacy_other = previous_release_stamp({**current, "model": "an-older-model"})
+    rng = random.Random(11)  # noqa: S311 - test vectors, not secrets
+
+    def capture(owner: str, index: int, stamp: dict[str, object]) -> dict[str, object]:
+        return {
+            "uuid": f"{owner[:8]}-{index:06d}",
+            "organization_id": owner,
+            "principal_id": "owner",
+            "source_id": f"source-{index}",
+            "raw_content": f"captured under the previous release {index}",
+            "embedding": [rng.uniform(-1.0, 1.0) for _ in range(EMBEDDING_DIM)],
+            "metadata": {"embedding_metadata": stamp},
+        }
+
+    try:
+        await bootstrap_content_schema(content, reset=True)
+        rows = [
+            capture(organization_id, index, legacy_other if index < switched else legacy_current)
+            for index in range(total)
+        ] + [capture(neighbour, index, legacy_current) for index in range(1_000)]
+        for start in range(0, len(rows), 500):
+            await content_client.select_many(
+                content,
+                "INSERT INTO raw_captures $rows RETURN NONE;",
+                rows=rows[start : start + 500],
+            )
+
+        started = time.perf_counter()
+        repaired = await repair_raw_capture_embeddings(
+            organization_id, embedding_provider=provider, client=content
+        )
+        elapsed = time.perf_counter() - started
+        left = await content_client.select_many(
+            content,
+            "SELECT count() AS count FROM raw_captures WHERE organization_id = $org "
+            "AND metadata.embedding_metadata.stamp_version = NONE GROUP ALL;",
+            org=organization_id,
+        )
+        models = await content_client.select_many(
+            content,
+            "SELECT metadata.embedding_metadata.model AS model, count() AS count "
+            "FROM raw_captures WHERE organization_id = $org GROUP BY model;",
+            org=organization_id,
+        )
+    finally:
+        await content.close()
+        with suppress(Exception):
+            await _drop_surreal_namespace(namespace)
+
+    # One pass restamped every matching capture and re-embedded the rest.
+    assert (repaired.checked, repaired.recovered, repaired.pending, repaired.failed) == (
+        total,
+        total,
+        0,
+        0,
+    )
+    assert not left or left[0]["count"] == 0
+    assert {row["model"]: row["count"] for row in models} == {current["model"]: total}
+    # The re-embed writes are one per row, so the whole pass bounds them.
+    per_row_ms = elapsed * 1000 / total
+    assert per_row_ms < 20, f"{per_row_ms:.1f} ms per row over {total} rows"
+
+
+@pytest.mark.asyncio
 async def test_live_a_saved_crawler_setting_decides_what_embedded_the_chunks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

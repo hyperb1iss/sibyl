@@ -1807,8 +1807,11 @@ async def mark_raw_capture_projected(
     async with surreal_content_client() as client:
         rows = await _select_many(
             client,
-            "UPDATE raw_captures SET metadata.projected_capture_id = $projected_capture_id "
-            "WHERE uuid = $raw_capture_id AND organization_id = $organization_id "
+            # Found by uuid alone; with the organization beside it the server
+            # plans the UPDATE through an organization index.
+            "UPDATE (SELECT VALUE id FROM raw_captures WHERE uuid = $raw_capture_id) "
+            "SET metadata.projected_capture_id = $projected_capture_id "
+            "WHERE organization_id = $organization_id "
             "AND principal_id = $principal_id "
             "AND entity_type = 'raw_memory' AND metadata.projected_capture_id IS NONE "
             "RETURN uuid;",
@@ -1896,11 +1899,12 @@ async def update_raw_capture_review_state(
             "BEGIN TRANSACTION; "
             "LET $current = (SELECT * FROM raw_captures WHERE uuid = $capture_id "
             "AND organization_id = $organization_id LIMIT 1)[0]; "
-            "LET $saved = (UPDATE raw_captures MERGE {"
+            "LET $saved = (UPDATE (SELECT VALUE id FROM raw_captures WHERE uuid = $capture_id) "
+            "MERGE {"
             "metadata: object::from_entries(array::concat(object::entries($current.metadata), "
             "object::entries($review_patch))), "
             "review_state: $review_state, revision: $current.revision + 1} "
-            "WHERE uuid = $capture_id AND organization_id = $organization_id RETURN AFTER); "
+            "WHERE organization_id = $organization_id RETURN AFTER); "
             "COMMIT TRANSACTION; RETURN $saved;",
             capture_id=str(capture_id),
             organization_id=str(organization_id),

@@ -73,6 +73,14 @@ EMBEDDING_DIM = core_config.embedding_dimensions
 DOCUMENT_CHUNK_EMBEDDING_METADATA_FIELD = (
     "DEFINE FIELD IF NOT EXISTS embedding_metadata ON document_chunks TYPE option<object> FLEXIBLE;"
 )
+# Raw capture repair walks one organization's captures in uuid order. Through
+# the organization index alone every page re-reads and sorts the whole
+# organization (about a second a page at 20,000 captures); this index keeps
+# pages near the cost of the rows they return.
+RAW_CAPTURE_ORGANIZATION_UUID_INDEX = (
+    "DEFINE INDEX IF NOT EXISTS idx_raw_captures_org_uuid "
+    "ON raw_captures FIELDS organization_id, uuid UNIQUE;"
+)
 
 if TYPE_CHECKING:
     from sibyl_core.backends.surreal.content_client import SurrealContentClient
@@ -1112,6 +1120,7 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             name="content_embedding_provenance",
             statements=(
                 DOCUMENT_CHUNK_EMBEDDING_METADATA_FIELD,
+                RAW_CAPTURE_ORGANIZATION_UUID_INDEX,
                 *split_statements(EMBEDDING_STATE_DEFINITIONS),
                 *split_statements(EMBEDDING_DEPLOYMENT_DEFINITIONS),
             ),

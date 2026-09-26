@@ -1030,10 +1030,12 @@ async def save_raw_memory(
                             WHERE organization_id = $organization_id AND uuid = $uuid LIMIT 1)[0];
                         LET $next = object::from_entries(array::concat(
                             object::entries($record), [['revision', $current.revision + 1]]));
+                        -- The row is found by uuid alone: given the organization too,
+                        -- the server plans the UPDATE through an organization index
+                        -- and walks every capture the organization has.
                         LET $saved = (
-                            UPDATE raw_captures MERGE $next
+                            UPDATE (SELECT VALUE id FROM raw_captures WHERE uuid = $uuid) MERGE $next
                             WHERE organization_id = $organization_id
-                                AND uuid = $uuid
                                 AND ($expected_revision = NONE OR revision = $expected_revision)
                             RETURN AFTER
                         );
@@ -1044,8 +1046,10 @@ async def save_raw_memory(
                                 AND $ledger.promoted_entity_id != $record.metadata.promoted_entity_id {
                                 THROW 'publication_source_observation_changed';
                             };
-                            UPDATE eval_consolidations SET promoted_entity_id = $record.metadata.promoted_entity_id
-                                WHERE uuid = $publication_operation_id AND organization_id = $organization_id;
+                            UPDATE (SELECT VALUE id FROM eval_consolidations
+                                    WHERE uuid = $publication_operation_id)
+                                SET promoted_entity_id = $record.metadata.promoted_entity_id
+                                WHERE organization_id = $organization_id;
                         };
                         IF $supersession != NONE AND array::len($saved) > 0 {
                             LET $replacement = (
