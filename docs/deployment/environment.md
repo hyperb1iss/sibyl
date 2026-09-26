@@ -479,8 +479,11 @@ re-embedded when any of these name a model other than the configured one:
 
 - the recorded models on the plane's own vectors (graph vectors have recorded one for several
   releases);
-- the recorded models on raw captures anywhere in the deployment, for document chunks, which did not
-  record a model before this release;
+- for document chunks, which did not record a model before this release, the content embedding
+  settings saved in the settings UI, or where none were saved the recorded models on raw captures
+  anywhere in the deployment. The previous release's crawler read a saved setting before the
+  environment while raw captures read the environment first, so a saved setting is what embedded the
+  chunks, and raw captures on another model do not override it;
 - another organization's graph vectors, since one configuration embeds every organization;
 - the models earlier lifecycle passes of this release ran with;
 - the other plane's evidence, since a deployment that moved one provider has usually moved both.
@@ -511,9 +514,19 @@ configuration leaves no trace.
 
 Sibyl writes model records itself. A record sent with a write through the API or the MCP tools is
 discarded and replaced by the server's own, and only restored archives bring their records in.
-Earlier releases accepted a client-supplied record, and a record forged that way cannot be told from
-a genuine one. If an untrusted client could write to the deployment before this upgrade, set
-`SIBYL_EMBEDDING_LEGACY_VECTORS=reembed` for the upgrade deploy.
+
+Earlier releases accepted a model record sent with a write, and one sent that way cannot be told
+apart from a genuine one. Records on one organization's graph count as evidence for every
+organization, so a user of release 1.4.1 or earlier who wrote a record naming some other model could
+make other organizations' planes re-embed after the upgrade. That costs provider calls; it does not
+put wrong vectors in search. A forged record naming the model the deployment will run next can at
+most make a plane with no record of its own adopt its vectors, and that plane then shows
+`adopted_on_deployment_evidence` in status, never `complete`. `sibyl debug status` names each
+plane's basis, so a re-embed decided by another organization's records reads
+`deployment_stamps_differ`, and `sibyld db reembed --dry-run` counts, per organization and plane,
+the rows a re-embed replaces, which is the most such a record can cost. If users you do not trust
+could write to the deployment before this upgrade, set `SIBYL_EMBEDDING_LEGACY_VECTORS=reembed` for
+the upgrade deploy and every plane is re-embedded regardless of records.
 
 A plane with no evidence of its own waits (`awaiting_evidence` in status) until every organization
 has published its graph evidence, so the verdict never depends on which organization the scheduler
@@ -538,12 +551,18 @@ warning clears.
 #### Upgrade time
 
 The migrations that take the evidence snapshot scan existing rows once. The content upgrade scans
-raw captures before the API answers requests, about 12 seconds per 100,000 rows on a native
-SurrealDB 3.2 server, so a million raw captures add about two minutes to that start. Each
-organization's graph upgrade scans its entities and relationships, about 5.4 seconds per 100,000
-entities, the first time the organization is used after the upgrade. The Helm chart's backend
-`startupProbe` allows 10 minutes before liveness checks begin; raise its `failureThreshold` for
-larger stores so a long migration is not killed and restarted.
+raw captures and builds an index on them before the API answers requests, about 16 seconds per
+100,000 rows on a native SurrealDB 3.2 server, so a million raw captures add about three minutes to
+that start. Each organization's graph upgrade scans its entities and relationships, about 5.4
+seconds per 100,000 entities, the first time the organization is used after the upgrade. The Helm
+chart's backend `startupProbe` allows 10 minutes before liveness checks begin; raise its
+`failureThreshold` for larger stores so a long migration is not killed and restarted.
+
+Adopting vectors and rewriting raw capture records in the current format are metadata-only and
+finish in the first pass that reaches them, whatever the pass budget: about 1,600 vectors a second
+on a native 3.2 server (100,000 graph vectors in 64 seconds), and a 20,000-capture organization's
+raw captures in under a minute. Until then vector search already counts the unstamped vectors
+wherever the evidence points to adopt, so a plain upgrade loses no vector results.
 
 | `SIBYL_EMBEDDING_LEGACY_VECTORS` | Vectors written before Sibyl recorded their model are                                                      |
 | -------------------------------- | ---------------------------------------------------------------------------------------------------------- |
@@ -561,18 +580,26 @@ unverified and re-embedded.
 
 #### Search while vectors are re-embedded
 
-Vector search only compares a query with vectors from the query's model. Right after a switch almost
-none qualify, and a vector lane that has to pass over nearly every stored vector to find a few is
-slow and finds little. So while fewer than 5% of a plane's vectors are in the configured model,
-graph search and document hybrid search skip their vector lane and answer from lexical search.
-Retrieval diagnostics report the vector status as `vector_lane_model_switched` or
-`vector_lane_model_sparse`, and the log records `vector_lane_skipped`. Each process re-reads the
-sweep's progress at most every 30 seconds, so the lane comes back on its own as the sweep converts
-vectors, and is fully back when the plane completes. The threshold comes from lanes measured on a
-native SurrealDB 3.2 server at 20,000 entities: at a fresh switch each lane took 1 to 2 seconds and
-found nothing, with 1% of vectors converted 0.3 to 1 second, from 5% 0.1 to 0.5 seconds, and 13 to
-40 milliseconds once the sweep had finished. The vector-only document endpoints (`/api/rag/search`
-and `/api/rag/code-examples`) have no lexical lane to fall back on, so they always run.
+Vector search only compares a query with vectors from the query's model. A vector from before
+stamping counts as the configured model once its plane's verdict is adopt, and before any verdict is
+recorded wherever the evidence already points to adopt (for document chunks the deployment's
+evidence, for the graph the plane's own recorded models), so a plain upgrade whose records name its
+model keeps full vector recall from its first query. With nothing to vouch for them yet, such
+vectors wait for the verdict, usually the first lifecycle pass, so a same-restart switch never
+scores old vectors against new queries. Once the model has changed (a plane last finished for
+another model, or its vectors from before stamping were judged another model's), right after the
+switch almost none qualify, and a vector lane that has to pass over nearly every stored vector to
+find a few is slow and finds little. So while fewer than 5% of a switched plane's vectors are in the
+configured model, graph search and document hybrid search skip their vector lane and answer from
+lexical search. A plane that never switched never skips. Retrieval diagnostics report the vector
+status as `vector_lane_model_switched` or `vector_lane_model_sparse`, and the log records
+`vector_lane_skipped`. Each process re-reads the sweep's progress at most every 30 seconds, so the
+lane comes back on its own as the sweep converts vectors, and is fully back when the plane
+completes. The threshold comes from lanes measured on a native SurrealDB 3.2 server at 20,000
+entities: at a fresh switch each lane took 1 to 2 seconds and found nothing, with 1% of vectors
+converted 0.3 to 1 second, from 5% 0.1 to 0.5 seconds, and 13 to 40 milliseconds once the sweep had
+finished. The vector-only document endpoints (`/api/rag/search` and `/api/rag/code-examples`) have
+no lexical lane to fall back on, so they always run.
 
 Each pass holds a lease on its plane and checks it in the same statement as every vector write, so a
 pass that loses its lease to another process, for example after a long provider stall, writes
