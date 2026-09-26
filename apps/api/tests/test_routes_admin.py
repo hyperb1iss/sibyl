@@ -781,10 +781,12 @@ async def test_dev_status_reports_coordination_backend() -> None:
         patch(
             "sibyl.api.routes.admin.get_embedding_sweep_status",
             AsyncMock(return_value={"graph": {"state": "complete"}}),
-        ),
+        ) as sweep_status,
     ):
-        response = await dev_status(org=org)
+        response = await dev_status(org=org, user=SimpleNamespace(is_admin=False))
 
+    # An organization owner is not a deployment admin.
+    assert sweep_status.await_args.kwargs == {"deployment_admin": False}
     assert response.api_healthy is True
     assert response.graph_healthy is True
     assert response.embedding_sweep == {"graph": {"state": "complete"}}
@@ -1020,13 +1022,16 @@ async def test_embedding_sweep_status_names_schema_waits_and_evidence_waits(monk
         AsyncMock(return_value={"organizations": ["broken-org"], "count": 1}),
     )
 
-    status = await get_embedding_sweep_status("org")
+    owner = await get_embedding_sweep_status("org")
+    admin = await get_embedding_sweep_status("org", deployment_admin=True)
 
     # The content schema has not upgraded; the graph plane waits on evidence.
-    assert status["document_chunks"] == {"state": "awaiting_schema_upgrade"}
-    assert status["graph"]["state"] == "awaiting_evidence"
-    assert status["graph"]["waiting_on_organizations"] == ["broken-org"]
-    assert status["graph"]["waiting_on_count"] == 1
+    assert owner["document_chunks"] == {"state": "awaiting_schema_upgrade"}
+    assert owner["graph"]["state"] == "awaiting_evidence"
+    assert owner["graph"]["waiting_on_count"] == 1
+    # Another tenant's identifier reaches only a deployment admin.
+    assert "waiting_on_organizations" not in owner["graph"]
+    assert admin["graph"]["waiting_on_organizations"] == ["broken-org"]
 
 
 def test_embedding_plane_state_reports_only_the_current_model_as_complete() -> None:

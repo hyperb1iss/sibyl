@@ -250,7 +250,7 @@ async def test_debug_status_payload_never_carries_the_canary(monkeypatch, url: s
         ),
     ):
         # The handler behind `sibyl debug status --json`.
-        response = await admin_routes.dev_status(org=org)
+        response = await admin_routes.dev_status(org=org, user=SimpleNamespace(is_admin=False))
 
     _assert_no_canary(response.model_dump_json(), "/admin/dev-status")
     observability = await admin_routes.get_surreal_observability_status()

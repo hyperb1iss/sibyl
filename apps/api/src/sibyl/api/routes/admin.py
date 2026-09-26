@@ -255,13 +255,17 @@ def _embedding_plane_state(state: dict[str, Any]) -> str:
     return "sweeping"
 
 
-async def get_embedding_sweep_status(organization_id: str) -> dict[str, object]:
+async def get_embedding_sweep_status(
+    organization_id: str, *, deployment_admin: bool = False
+) -> dict[str, object]:
     """Each embedding plane's persisted sweep state, for the status dashboard.
 
     A plane that has not been swept yet reports ``{"state": "not_started"}``,
     one whose namespace has not run the sweep's migration reports
     ``awaiting_schema_upgrade``, and one waiting on other organizations'
-    evidence names them. A store that cannot be read reports the error type
+    evidence says how many it waits on. Only a deployment admin sees which
+    organizations those are: an organization owner may not learn other
+    tenants' identifiers. A store that cannot be read reports the error type
     instead of failing the dashboard.
     """
     from sibyl.persistence.surreal.content import surreal_content_client
@@ -324,8 +328,9 @@ async def get_embedding_sweep_status(organization_id: str) -> dict[str, object]:
         }
         if entry["state"] == _EMBEDDING_AWAITING_EVIDENCE_STATE:
             wait = await evidence_wait()
-            entry["waiting_on_organizations"] = wait.get("organizations") or []
             entry["waiting_on_count"] = wait.get("count") or 0
+            if deployment_admin:
+                entry["waiting_on_organizations"] = wait.get("organizations") or []
         status[plane] = jsonable_encoder(entry, custom_encoder={SurrealDatetime: str})
     return status
 
@@ -1215,6 +1220,7 @@ async def debug_query(
 )
 async def dev_status(
     org: AuthOrganization = Depends(get_current_organization),
+    user: AuthUser = Depends(get_current_user),
 ) -> DevStatusResponse:
     """Get comprehensive developer status dashboard.
 
@@ -1258,7 +1264,9 @@ async def dev_status(
     error_entries = buffer.tail(n=10, level="error")
     recent_errors = [e.to_dict() for e in error_entries]
     surreal_observability = await get_surreal_observability_status()
-    embedding_sweep = await get_embedding_sweep_status(str(org.id))
+    embedding_sweep = await get_embedding_sweep_status(
+        str(org.id), deployment_admin=user.is_admin is True
+    )
 
     return DevStatusResponse(
         api_healthy=api_healthy,

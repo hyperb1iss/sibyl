@@ -2725,7 +2725,7 @@ async def test_live_a_broken_organization_holds_unproven_verdicts_only_for_the_b
 
         first = await lifecycle_repair.repair_lifecycle_all_orgs({})
         assert first["embedding_deferred"] == 2
-        status = await get_embedding_sweep_status(waiting.group_id)
+        status = await get_embedding_sweep_status(waiting.group_id, deployment_admin=True)
         assert status["graph"]["state"] == "awaiting_evidence"
         assert status["graph"]["waiting_on_organizations"] == [broken]
 

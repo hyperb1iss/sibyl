@@ -349,7 +349,7 @@ def _embedding_sweep_lines(sweep: object) -> list[str]:
             names = ", ".join(str(item) for item in state.get("waiting_on_organizations") or [])
             lines.append(
                 f"                [{ELECTRIC_YELLOW}]waiting for {waiting:,} organization(s) to"
-                f" publish their graph evidence: {names}[/{ELECTRIC_YELLOW}]"
+                f" publish their graph evidence{': ' + names if names else ''}[/{ELECTRIC_YELLOW}]"
             )
         if state.get("legacy_notice") and not state.get("legacy_warning"):
             lines.append(
