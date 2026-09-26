@@ -97,11 +97,18 @@ _RESTAMP_CONCURRENCY = 4
 # server plans the UPDATE through an organization index and walks every capture
 # the organization has for each row (seconds per row at 50,000 captures); by
 # uuid alone it uses the unique index.
+#
+# Both also require the stamp this pass read to be the one stored. Replacing a
+# vector leaves the revision alone, so the revision cannot tell a restamp that
+# another repair (a process configured for another model, during a rolling
+# deploy) wrote its own vector and stamp in the meantime; without this fence
+# the restamp would relabel that vector as this pass's model. Raw repair holds
+# no lease, so the stamp is the fence.
 _RAW_EMBEDDING_RESTAMP_QUERY = """
 UPDATE (SELECT VALUE id FROM raw_captures WHERE uuid IN $uuids)
 SET metadata.embedding_metadata = $embedding_metadata
 WHERE organization_id = $organization_id AND revision = $revisions[uuid]
-    AND embedding != NONE
+    AND embedding != NONE AND metadata.embedding_metadata = $observed[uuid]
 RETURN uuid;
 """
 
@@ -110,6 +117,7 @@ UPDATE (SELECT VALUE id FROM raw_captures WHERE uuid = $uuid) SET
     embedding = $embedding,
     metadata.embedding_metadata = $embedding_metadata
 WHERE organization_id = $organization_id AND revision = $revision
+    AND metadata.embedding_metadata = $observed
 RETURN uuid;
 """
 
@@ -295,6 +303,9 @@ async def _repair_page(
                     _RAW_EMBEDDING_RESTAMP_QUERY,
                     uuids=[memory.id for memory in batch],
                     revisions={memory.id: memory.revision for memory in batch},
+                    observed={
+                        memory.id: memory.metadata.get("embedding_metadata") for memory in batch
+                    },
                     organization_id=organization_id,
                     embedding_metadata=stamp,
                 )
@@ -312,6 +323,7 @@ async def _repair_page(
         targets = [memory for memory in targets if not _needs_restamp_only(memory, provider)]
     if not targets:
         return outcomes
+    observed = {memory.id: memory.metadata.get("embedding_metadata") for memory in targets}
     stripped = [_raw_memory_without_embedding(memory) for memory in targets]
     try:
         embedded = await _raw_memories_with_embeddings(stripped, provider)
@@ -325,7 +337,7 @@ async def _repair_page(
         return [*outcomes, *(["failed"] * len(targets))]
     writes = await asyncio.gather(
         *(
-            _write_embedding(client, memory, organization_id)
+            _write_embedding(client, memory, organization_id, observed=observed.get(memory.id))
             for memory in embedded
             if memory.embedding is not None
         ),
@@ -350,7 +362,11 @@ async def _repair_page(
 
 
 async def _write_embedding(
-    client: SurrealContentClient, memory: RawMemory, organization_id: str
+    client: SurrealContentClient,
+    memory: RawMemory,
+    organization_id: str,
+    *,
+    observed: object,
 ) -> bool:
     rows = await content_client.select_many(
         client,
@@ -358,6 +374,7 @@ async def _write_embedding(
         uuid=memory.id,
         organization_id=organization_id,
         revision=memory.revision,
+        observed=observed,
         embedding=memory.embedding,
         embedding_metadata=memory.metadata.get("embedding_metadata"),
     )
