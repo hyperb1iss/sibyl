@@ -1632,6 +1632,60 @@ async def test_live_embedding_sweep_replaces_another_models_vectors_across_a_cra
 
 
 @pytest.mark.asyncio
+async def test_live_a_sweep_that_loses_its_lease_mid_batch_writes_nothing() -> None:
+    from sibyl_core.services.embedding_sweep import (
+        SWEEP_LEASE_LOST,
+        embedding_state_key,
+        read_embedding_sweep_state,
+    )
+    from sibyl_core.services.graph import RelationshipManager
+    from sibyl_core.services.graph_embedding_sweep import (
+        GRAPH_EMBEDDING_PLANE,
+        sweep_graph_embeddings,
+    )
+    from sibyl_core.services.graph_runtime import GraphRuntime
+
+    async with _live_graph_manager() as (client, manager):
+        await _seed_live_graph(manager, client, stamp=_previous_graph_stamp())
+        await upgrade_graph_to_sweep(client)
+        target = _SweepTargetProvider(GRAPH_EMBEDDING_DIM)
+        runtime = GraphRuntime(
+            client=client,
+            entity_manager=EntityManager(client, group_id=client.group_id),
+            relationship_manager=RelationshipManager(client, group_id=client.group_id),
+        )
+        embed = target.embed_texts
+
+        async def taken_over(texts, *, input_kind="document"):
+            # While this call is in flight another process takes the plane.
+            await client.execute_query(
+                "UPDATE type::record($key) SET lease_owner = 'another-process', "
+                "lease_until = time::now() + 5m;",
+                key=embedding_state_key(client.group_id, GRAPH_EMBEDDING_PLANE),
+            )
+            return await embed(texts, input_kind=input_kind)
+
+        target.embed_texts = taken_over  # type: ignore[method-assign]
+        before = await _live_vector_stamps(client, "entity")
+
+        result = await sweep_graph_embeddings(
+            runtime, embedding_provider=target, page_size=2, batch_size=2, concurrency=1
+        )
+
+        assert result.status == SWEEP_LEASE_LOST
+        assert result.recovered == 0
+        after = await _live_vector_stamps(client, "entity")
+        stamp = target.metadata.to_dict()
+        for row_id, row in after.items():
+            assert row["vector"] == before[row_id]["vector"], row_id
+            assert row["stamp"] != stamp, row_id
+        state = await read_embedding_sweep_state(
+            GRAPH_EMBEDDING_PLANE, client.group_id, client.execute_query
+        )
+        assert state["lease_owner"] == "another-process"
+
+
+@pytest.mark.asyncio
 async def test_live_embedding_sweep_adopts_vectors_on_a_plain_upgrade() -> None:
     from sibyl_core.services.embedding_sweep import SWEEP_COMPLETED, SWEEP_CURRENT
     from sibyl_core.services.graph import RelationshipManager

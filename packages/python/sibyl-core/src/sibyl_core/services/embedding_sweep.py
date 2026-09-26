@@ -69,6 +69,8 @@ SWEEP_STORE_FAILING = "store_failing"
 SWEEP_SKIPPED_NO_PROVIDER = "skipped_no_provider"
 SWEEP_SKIPPED_DIMENSION_MISMATCH = "skipped_dimension_mismatch"
 SWEEP_SKIPPED_SCHEMA_PENDING = "skipped_schema_pending"
+# Another process took the plane's lease while this pass still held work.
+SWEEP_LEASE_LOST = "lease_lost"
 
 _LEASE_MARGIN_SECONDS = 120.0
 _BACKOFF_BASE_SECONDS = 1.0
@@ -286,13 +288,17 @@ class SweepTable:
     def write_query(self) -> str:
         # Only the vector and its provenance move: no revision or updated_at
         # bump, because a sweep is not an edit and recency ranks on updated_at.
+        # Every row write re-reads the plane's lease in the same statement, so
+        # a pass that lost its lease to another process writes nothing.
         return (
             f"UPDATE (SELECT VALUE id FROM {self.name} "
             f"WHERE {self.scope_field} = $scope AND uuid IN $uuids) SET "
             f"{self.vector_field} = <array<float, {self.dimensions}>>"
             "$rows_by_uuid[uuid].embedding, "
             f"{self.metadata_path} = $rows_by_uuid[uuid].embedding_metadata "
-            f"WHERE {self.fence} AND ({self.vector_field} = NONE "
+            "WHERE (SELECT VALUE lease_owner FROM type::record($lease_key) "
+            "WHERE lease_until > time::now())[0] = $owner "
+            f"AND {self.fence} AND ({self.vector_field} = NONE "
             f"OR {self.metadata_path} != $rows_by_uuid[uuid].embedding_metadata) "
             "RETURN uuid;"
         )
@@ -345,6 +351,8 @@ class _Counts:
     backoff_exhausted: int = 0
     seen: set[str] = field(default_factory=set)
     rejections: dict[str, str] = field(default_factory=dict)
+    owner: str = ""
+    lease_lost: bool = False
 
     @property
     def provider_failing(self) -> bool:
@@ -484,6 +492,10 @@ class _AdaptiveLimiter:
 
 class _BudgetExhaustedError(Exception):
     """A throttled batch could not be retried inside the pass budget."""
+
+
+class _DeadlineReachedError(Exception):
+    """The pass budget is spent (or the lease lost); no further provider call may start."""
 
 
 class _SplitRequiredError(Exception):
@@ -688,7 +700,7 @@ async def run_embedding_sweep(
             status=SWEEP_BUSY, legacy_decision=legacy_decision, warning=warning, notice=notice
         )
 
-    counts = _Counts(rejections=_load_rejections(state, plane.stamp))
+    counts = _Counts(rejections=_load_rejections(state, plane.stamp), owner=owner)
     limiter = _AdaptiveLimiter(slots)
     status = SWEEP_PARTIAL
     cursors = _cursor_map(state.get("cursors"))
@@ -731,10 +743,13 @@ async def run_embedding_sweep(
                 if counts.store_failing:
                     status = SWEEP_STORE_FAILING
                     break
-            if status in {SWEEP_PROVIDER_FAILING, SWEEP_STORE_FAILING}:
+                if counts.lease_lost:
+                    status = SWEEP_LEASE_LOST
+                    break
+            if status in {SWEEP_PROVIDER_FAILING, SWEEP_STORE_FAILING, SWEEP_LEASE_LOST}:
                 break
             await _save_cursors(plane, owner=owner, cursors=cursors, budget=budget)
-        complete = adopted_all and clean == set(walkers)
+        complete = adopted_all and clean == set(walkers) and not counts.lease_lost
         if complete:
             status = SWEEP_COMPLETED
         elif status == SWEEP_PARTIAL and counts.provider_unavailable:
@@ -926,12 +941,14 @@ async def _embed_and_write(
     single row the provider refuses counts as failed. Rows left unattempted
     (budget spent, provider judged down) are skipped and stay pending.
     """
-    if counts.provider_failing or counts.store_failing:
+    if counts.provider_failing or counts.store_failing or counts.lease_lost:
         return _BatchOutcome(skipped=len(rows))
     try:
         vectors, stamp = await _embed_with_backoff(
             plane, table, rows, counts=counts, limiter=limiter, deadline=deadline
         )
+    except _DeadlineReachedError:
+        return _BatchOutcome(skipped=len(rows))
     except _BudgetExhaustedError:
         counts.backoff_exhausted += 1
         return _BatchOutcome(skipped=len(rows))
@@ -979,7 +996,7 @@ async def _write_vectors(
     The vectors are already paid for, so isolating a row the store rejects
     (an older row the current schema no longer accepts) costs writes only.
     """
-    if counts.store_failing:
+    if counts.store_failing or counts.lease_lost:
         return _BatchOutcome(skipped=len(rows_by_uuid))
     try:
         written = await _rows(
@@ -987,6 +1004,8 @@ async def _write_vectors(
             table.write_query(),
             uuids=list(rows_by_uuid),
             rows_by_uuid=rows_by_uuid,
+            lease_key=plane.state_key,
+            owner=counts.owner,
         )
     except Exception as exc:
         counts.write_failed(rows=len(rows_by_uuid))
@@ -1011,8 +1030,28 @@ async def _write_vectors(
             plane, table, {key: rows_by_uuid[key] for key in keys[middle:]}, counts=counts
         )
         return left + right
+    if len(written) < len(rows_by_uuid) and not await _lease_held(plane, counts.owner):
+        # Rows also drop out when their text moved under the vector; only a
+        # lost lease stops the pass.
+        counts.lease_lost = True
+        log.warning(
+            "embedding_sweep_lease_lost",
+            organization_id=plane.organization_id,
+            plane=plane.name,
+            table=table.name,
+            unwritten=len(rows_by_uuid) - len(written),
+        )
     counts.write_succeeded()
     return _BatchOutcome(written=len(written), skipped=len(rows_by_uuid) - len(written))
+
+
+async def _lease_held(plane: SweepPlane, owner: str) -> bool:
+    rows = await _rows(
+        plane,
+        "SELECT lease_owner FROM type::record($key) WHERE lease_until > time::now();",
+        key=plane.state_key,
+    )
+    return bool(rows) and rows[0].get("lease_owner") == owner
 
 
 async def _bisect(
@@ -1045,10 +1084,19 @@ async def _embed_with_backoff(
     limiter: _AdaptiveLimiter,
     deadline: float,
 ) -> tuple[list[list[float]], EmbeddingStamp]:
-    """One provider call, retried with backoff while the provider signals capacity."""
+    """One provider call, retried with backoff while the provider signals capacity.
+
+    No call starts once the pass budget is spent, including a call that waited
+    for a concurrency slot and the halves of a split batch, so a pass always
+    ends well inside its lease.
+    """
     attempt = 0
     while True:
+        if time.monotonic() >= deadline or counts.lease_lost:
+            raise _DeadlineReachedError
         async with limiter:
+            if time.monotonic() >= deadline or counts.lease_lost:
+                raise _DeadlineReachedError
             try:
                 vectors, stamp = await asyncio.wait_for(
                     plane.embed(table, rows), timeout=_EMBED_CALL_TIMEOUT_SECONDS
@@ -1369,6 +1417,7 @@ __all__ = [
     "SWEEP_BUSY",
     "SWEEP_COMPLETED",
     "SWEEP_CURRENT",
+    "SWEEP_LEASE_LOST",
     "SWEEP_PARTIAL",
     "SWEEP_PROVIDER_FAILING",
     "SWEEP_SKIPPED_DIMENSION_MISMATCH",

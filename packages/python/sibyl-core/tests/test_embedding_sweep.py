@@ -1058,3 +1058,69 @@ def test_bedrock_chunk_stamps_name_the_model_not_the_route() -> None:
         )
     }
     assert stamps == {"cohere.embed-v4:0"}
+
+
+async def test_a_pass_that_loses_its_lease_mid_batch_writes_nothing(runtime) -> None:
+    from sibyl_core.services.embedding_sweep import SWEEP_LEASE_LOST, embedding_state_key
+
+    previous = CountingProvider("previous")
+    current = CountingProvider("current")
+    for index in range(4):
+        await _entity(runtime, f"old-{index}", stamp=previous.metadata.to_dict())
+    await upgrade_graph_to_sweep(runtime.client)
+    embed = current.embed_texts
+
+    async def taken_over(texts, *, input_kind="document"):
+        # While this call is in flight another process takes the plane.
+        await runtime.client.execute_query(
+            "UPDATE type::record($key) SET lease_owner = 'another-process', "
+            "lease_until = time::now() + 5m;",
+            key=embedding_state_key(runtime.client.group_id, GRAPH_EMBEDDING_PLANE),
+        )
+        return await embed(texts, input_kind=input_kind)
+
+    current.embed_texts = taken_over  # type: ignore[method-assign]
+    before = await _rows(runtime, "entity")
+
+    result = await sweep_graph_embeddings(
+        runtime, embedding_provider=current, page_size=2, batch_size=2, concurrency=1
+    )
+
+    assert result.status == SWEEP_LEASE_LOST
+    assert result.recovered == 0
+    after = await _rows(runtime, "entity")
+    assert all(after[key]["stamp"] == before[key]["stamp"] for key in after)
+    assert all(after[key]["vector"] == before[key]["vector"] for key in after)
+    # The pass stopped at the first unwritten page instead of embedding on.
+    assert len(current.texts) == 2
+    state = await read_embedding_sweep_state(
+        GRAPH_EMBEDDING_PLANE, runtime.client.group_id, runtime.client.execute_query
+    )
+    assert state["lease_owner"] == "another-process"
+
+
+async def test_no_provider_call_starts_once_the_budget_is_spent(runtime) -> None:
+    previous = CountingProvider("previous")
+    current = CountingProvider("current")
+    for index in range(3):
+        await _entity(runtime, f"old-{index}", stamp=previous.metadata.to_dict())
+    await upgrade_graph_to_sweep(runtime.client)
+    embed = current.embed_texts
+    calls = 0
+
+    async def slow(texts, *, input_kind="document"):
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.4)
+        raise ValueError("refused slowly")
+
+    current.embed_texts = slow  # type: ignore[method-assign]
+
+    result = await sweep_graph_embeddings(
+        runtime, embedding_provider=current, budget_seconds=0.3, batch_size=3, concurrency=1
+    )
+
+    # One call started inside the budget; neither half of its split did.
+    assert calls == 1
+    assert result.pending == 3
+    current.embed_texts = embed  # type: ignore[method-assign]
