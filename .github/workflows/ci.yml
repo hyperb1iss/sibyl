@@ -615,8 +615,9 @@ jobs:
             exit "$test_status"
           }
           trap cleanup EXIT
-          # -n logical starts one worker per vCPU. Plain auto finds psutil
-          # and counts physical cores only, which undercounts SMT runners.
+          # -n logical starts one worker per vCPU. Plain auto would drop to
+          # one per physical core, half of these 2-core SMT runners, as soon
+          # as psutil joined the test env.
           /usr/bin/time -v ${{ matrix.command }} -- \
             -p sibyl_core.pytest_shard --shard "$CORE_SHARD" \
             -n logical --dist worksteal \
