@@ -232,6 +232,12 @@ volumes:
   surreal_data:
 ```
 
+Behind nginx, Caddy, or another reverse proxy, set `SIBYL_FORWARDED_ALLOW_IPS` to the proxy's own
+address so logins rate-limit per user instead of per proxy. Run the proxy as a container on the same
+network and stop publishing port 3334; the
+[trusted proxy reference](./environment.md#trusted-proxies) explains why a Docker bridge range is
+never safe to list.
+
 The production compose persists SurrealDB to a named Docker volume (`surreal_data`) rather than a
 bind mount. `NEXT_PUBLIC_API_URL` is the browser-facing API URL; `SIBYL_API_URL` is the in-network
 URL the Next.js server uses for SSR fetches.

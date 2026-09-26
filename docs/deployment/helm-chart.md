@@ -326,7 +326,9 @@ overwrites the header.
 :::
 
 To confirm the setting took, sign in through the ingress and check that the backend's `request` log
-lines carry your own address in `client`, not the controller pod's.
+lines carry your own address in `client`, not the controller pod's. The
+[environment reference](./environment.md#trusted-proxies) explains how the backend resolves the
+address and which values it accepts.
 
 ### Secrets
 
@@ -396,6 +398,11 @@ backend:
     namespacePrefix: "org_"
     database: "graph"
 ```
+
+The chart renders `backend.surreal.url` into `SIBYL_SURREAL_URL`. Point it at a SurrealDB server
+(`ws://`, `wss://`, `http://`, or `https://`). The backend refuses an unsupported scheme at startup:
+`rocksdb://` and `tikv://` are storage arguments for the SurrealDB server, not client URLs. See
+[SurrealDB URL forms](./environment.md#surrealdb-url-forms).
 
 ### Redis or Valkey Coordination
 

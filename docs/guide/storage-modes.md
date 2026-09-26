@@ -21,7 +21,8 @@ What varies is how a process reaches SurrealDB:
 Set exactly one of `SIBYL_SURREAL_URL` and `SIBYL_SURREAL_DATA_DIR`; setting both fails config
 validation. With neither set, Sibyl falls back to `memory://`, which the production config validator
 rejects. The embedded modes also accept `surrealkv+versioned://`, `file://`, and `mem://`; any other
-scheme, such as `rocksdb://`, fails at startup. See
+scheme, such as `rocksdb://`, fails at startup. Schemes are case-insensitive, and errors and logs
+never show the URL's credentials. See
 [SurrealDB URL forms](../deployment/environment.md#surrealdb-url-forms) for the full list.
 
 ## Server
@@ -49,10 +50,15 @@ SIBYL_SURREAL_PASSWORD=<secure-password>
 SIBYL_SURREAL_DATA_DIR=./data/surreal
 ```
 
+- The embedded daemon (`sibyld serve --embedded`, which `sibyl serve`, `sibyl start`, and
+  `install.sh --daemon` run) uses this mode with `~/.sibyl/data/surreal`. Auth, content, and every
+  org graph share one engine on that directory and persist across restarts. Through 1.4.1 the
+  daemon's graph ran in memory, so upgrade before relying on it.
 - Use a directory of its own. The `moon run dev` server keeps RocksDB data in
   `.moon/cache/surreal-dev`, so do not point SurrealKV there.
-- Embedded mode is single-writer. Sibyl clamps embedded clients to one connection, so keep it to a
-  single process. For real concurrency, run SurrealDB as a server.
+- Embedded mode is single-writer. The embedded engine misses concurrent write-write conflicts, so
+  Sibyl clamps embedded clients to one connection and each namespace writes through one client. Keep
+  it to a single process. For real concurrency, run SurrealDB as a server.
 - In production, embedded mode also needs `SIBYL_ALLOW_EMBEDDED_SINGLE_WRITER=1`. Set it only when
   one daemon owns the database.
 
