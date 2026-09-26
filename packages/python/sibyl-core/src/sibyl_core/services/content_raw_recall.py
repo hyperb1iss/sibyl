@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
 import structlog
 
+from sibyl_core.ai.bedrock import BEDROCK_GEO_PREFIXES, is_arn
 from sibyl_core.backends.surreal import SurrealContentClient
 from sibyl_core.backends.surreal.fulltext import (
     build_fulltext_terms,
@@ -51,7 +52,8 @@ DREAM_NEIGHBOUR_POOL_FACTOR = 4
 
 log = structlog.get_logger()
 
-# Reported by the raw_vector lane when the scope has captures but no vectors.
+# Reported by the raw_vector lane when the scope has captures but none holds a
+# vector from the query's embedding model.
 RAW_VECTOR_EMBEDDINGS_MISSING = "RawEmbeddingsMissing"
 # Noted on an empty raw_vector result when the coverage walk hit its row cap
 # before it could tell a scope without vectors from one with no matches.
@@ -90,6 +92,76 @@ _RAW_MEMORY_RECALL_FIELDS = ", ".join(
         "created_at",
     )
 )
+
+
+@dataclass(frozen=True, slots=True)
+class RawQueryEmbedding:
+    """A query vector and the model that produced it.
+
+    Cosine similarity between vectors from two models is noise, so the raw
+    vector lane scores the vector only against captures stamped with the
+    same space.
+    """
+
+    vector: list[float]
+    space: models.RawEmbeddingSpace
+
+
+def _raw_vector_model_key(space: models.RawEmbeddingSpace) -> str:
+    """The expression a stored stamp's model is matched by.
+
+    A Bedrock stamp may name its model through an inference-profile or
+    foundation-model ARN, so it is matched by the last path segment, which is
+    the model or profile ID the ARN ends in. Other providers' model names can
+    contain slashes of their own, so they are matched whole.
+    """
+    if space.provider == "bedrock":
+        return "array::last(string::split(metadata.embedding_metadata.model ?? '', '/'))"
+    return "metadata.embedding_metadata.model"
+
+
+def _raw_vector_model_keys(space: models.RawEmbeddingSpace) -> list[str]:
+    """Every value ``_raw_vector_model_key`` yields for a stamp in this space.
+
+    A scope-free Bedrock ID also matches under any geographic profile prefix,
+    whether the stamp holds the prefixed ID or an ARN naming it. An opaque
+    application-profile ARN matches only a stamp ending in the same profile ID.
+    """
+    if space.provider != "bedrock":
+        return [space.model]
+    if is_arn(space.model):
+        return [space.model.rsplit("/", 1)[-1]]
+    return [space.model, *(f"{prefix}.{space.model}" for prefix in BEDROCK_GEO_PREFIXES)]
+
+
+def _raw_vector_space_params(space: models.RawEmbeddingSpace) -> dict[str, object]:
+    return {
+        "query_embedding_provider": space.provider,
+        "query_embedding_models": _raw_vector_model_keys(space),
+        "query_embedding_dimensions": space.dimensions,
+    }
+
+
+def _raw_vector_space_match(space: models.RawEmbeddingSpace) -> str:
+    """A capture whose stamp names the query's model, as plain conjuncts.
+
+    Plain conjuncts, with no grouping, are what embedded KNN can prefilter on.
+    """
+    return (
+        "metadata.embedding_metadata.provider = $query_embedding_provider "
+        f"AND {_raw_vector_model_key(space)} IN $query_embedding_models "
+        "AND metadata.embedding_metadata.dimensions = $query_embedding_dimensions"
+    )
+
+
+def _raw_vector_space_mismatch(space: models.RawEmbeddingSpace) -> str:
+    """A capture the query's vector cannot score: no vector, no stamp, or another model."""
+    return _raw_memory_disjunction(
+        "embedding = NONE",
+        "metadata.embedding_metadata.provider != $query_embedding_provider",
+        f"{_raw_vector_model_key(space)} NOT IN $query_embedding_models",
+        "metadata.embedding_metadata.dimensions != $query_embedding_dimensions",
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -325,10 +397,23 @@ async def _recall_raw_memory_vector(
     *,
     where_clause: str,
     params: Mapping[str, object],
-    query_embedding: list[float],
+    query_embedding: RawQueryEmbedding,
     as_of: datetime | None,
     limit: int,
 ) -> list[RawMemory]:
+    """Nearest captures whose vector comes from the query's embedding model.
+
+    The model filter sits inside the HNSW bracket beside the scope filters,
+    so membership, scope and model all precede the neighbour limit. Nearer
+    vectors from a model the deployment switched away from therefore cannot
+    fill the pool and crowd current captures out of it. When every capture
+    shares the query's model, the predicate holds for every candidate and
+    the walk goes no deeper. Captures it excludes remain reachable through
+    the fulltext lane.
+
+    There is no score floor. Once every scored vector shares the query's
+    model the cosine is meaningful, and fusion ranks by position, not score.
+    """
     candidate_limit = max(limit * content_client.LIFECYCLE_FILTER_OVERFETCH_FACTOR, limit)
     knn_effort = knn_search_effort(candidate_limit, content_client.CONTENT_KNN_EF_FLOOR)
     rows = await with_timeout(
@@ -339,10 +424,12 @@ async def _recall_raw_memory_vector(
             "(1 - vector::distance::knn()) AS score "
             "FROM raw_captures WITH INDEX idx_raw_captures_embedding "
             f"WHERE {where_clause} "
+            f"AND {_raw_vector_space_match(query_embedding.space)} "
             f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding"
             ") ORDER BY score DESC, captured_at DESC LIMIT $candidate_limit;",
             **params,
-            query_embedding=query_embedding,
+            **_raw_vector_space_params(query_embedding.space),
+            query_embedding=query_embedding.vector,
             candidate_limit=candidate_limit,
         ),
         timeout_seconds=content_client.DIRECT_SEARCH_QUERY_TIMEOUT_SECONDS,
@@ -411,16 +498,19 @@ async def _raw_memory_scope_lacks_embeddings(
     *,
     where_clause: str,
     params: Mapping[str, object],
+    space: models.RawEmbeddingSpace,
     as_of: datetime | None,
     limit: int,
     organization_id: str,
 ) -> bool | None:
-    """Tell whether the scope has recall-eligible captures and none carries a vector.
+    """Tell whether the scope has recall-eligible captures and none carries a usable vector.
 
-    A KNN read over such a scope returns nothing and looks identical to a scope
-    with no matches, so the raw arm would degrade to BM25 alone without anyone
-    noticing. Captures restored from an archive, or written while no embedding
-    provider was configured, land here until the embedding repair runs.
+    A usable vector is one from the query's embedding model. A KNN read over
+    a scope without one returns nothing and looks identical to a scope with
+    no matches, so the raw arm would degrade to BM25 alone without anyone
+    noticing. Captures restored from an archive, written while no embedding
+    provider was configured, or embedded by the model a deployment switched
+    away from land here until the embedding repair runs.
 
     Eligibility is judged exactly as recall judges it, through the lifecycle
     and as-of filters, so an archived or not-yet-valid row can neither mask a
@@ -431,22 +521,23 @@ async def _raw_memory_scope_lacks_embeddings(
     rather than asserting either way.
     """
     page_size = max(limit * content_client.LIFECYCLE_FILTER_OVERFETCH_FACTOR, 128)
+    side_params = {**params, **_raw_vector_space_params(space)}
 
     async def present(extra_clause: str) -> bool | None:
         return await _eligible_rows_present(
             client,
             where_clause=where_clause,
-            params=params,
+            params=side_params,
             as_of=as_of,
             extra_clause=extra_clause,
             page_size=page_size,
         )
 
     try:
-        embedded = await present(" AND embedding != NONE")
+        embedded = await present(f" AND embedding != NONE AND {_raw_vector_space_match(space)}")
         if embedded is not False:
             return None if embedded is None else False
-        return await present(" AND embedding = NONE")
+        return await present(f" AND {_raw_vector_space_mismatch(space)}")
     except Exception as exc:
         # The probe is diagnostic only; a failed probe must not turn an empty
         # vector read into a failed recall.
@@ -458,14 +549,51 @@ async def _raw_memory_scope_lacks_embeddings(
         return False
 
 
-async def raw_memory_query_embedding(query: str) -> list[float] | None:
+async def _raw_vector_lane_skip(
+    client: SurrealContentClient, organization_id: str, space: models.RawEmbeddingSpace
+) -> str | None:
+    """Why the raw vector lane should stand aside for this model, or None to run it.
+
+    Right after a provider switch almost no capture holds a vector in the new
+    model, and an in-bracket model filter then walks the whole index to find
+    nothing: about 1.5 s at 20,000 captures on a native server. The raw repair
+    records how far it has come in the organization's raw plane state, and the
+    lane reads it through the same readiness rule the graph and chunk lanes
+    use. Missing or unreadable state runs the lane.
+    """
+    from sibyl_core.services.content_raw_embedding_repair import RAW_CAPTURE_EMBEDDING_PLANE
+    from sibyl_core.services.embedding_lane_readiness import vector_lane_readiness
+
+    async def execute(query: str, **params: object) -> object:
+        return await content_client.select_many(client, query, **params)
+
+    readiness = await vector_lane_readiness(
+        plane=RAW_CAPTURE_EMBEDDING_PLANE,
+        organization_id=organization_id,
+        execute=execute,
+        query_stamp={
+            "provider": space.provider,
+            "model": space.model,
+            "dimensions": space.dimensions,
+        },
+    )
+    return None if readiness.run else f"vector_lane_{readiness.reason}"
+
+
+async def raw_memory_query_embedding(query: str) -> RawQueryEmbedding | None:
     provider: EmbeddingProvider | None = None
     try:
         provider = models.configured_raw_memory_embedding_provider()
         if provider is None:
             return None
+        space = models.raw_memory_embedding_space(provider.metadata)
+        if space is None:
+            return None
         embeddings = await provider.embed_texts([query], input_kind="query")
-        return models.embedding_vector_from_batch(embeddings, provider.metadata.dimensions)
+        return RawQueryEmbedding(
+            vector=models.embedding_vector_from_batch(embeddings, provider.metadata.dimensions),
+            space=space,
+        )
     except Exception as exc:
         metadata = provider.metadata if provider is not None else None
         log.warning(
@@ -674,7 +802,7 @@ async def _recall_raw_memory_result(
         return RawMemoryRecallResult(())
 
     source_results: list[CandidateSourceResult[RawMemory]] = []
-    query_embedding: list[float] | None = None
+    query_embedding: RawQueryEmbedding | None = None
     try:
         query_embedding = await raw_memory_query_embedding(normalized_query)
     except Exception as exc:
@@ -703,7 +831,16 @@ async def _recall_raw_memory_result(
             source_results.append(CandidateSourceResult.failed("raw_fulltext", type(exc).__name__))
         else:
             source_results.append(CandidateSourceResult.success("raw_fulltext", fulltext_memories))
-        if query_embedding is not None:
+        skipped = (
+            await _raw_vector_lane_skip(client, organization_id, query_embedding.space)
+            if query_embedding is not None
+            else None
+        )
+        if skipped is not None:
+            # Almost no capture holds a vector in the query's model yet; the
+            # fulltext lane carries the query until the repair converts enough.
+            source_results.append(CandidateSourceResult.failed("raw_vector", skipped))
+        elif query_embedding is not None:
             try:
                 vector_memories = await _recall_raw_memory_vector(
                     client,
@@ -731,6 +868,7 @@ async def _recall_raw_memory_result(
                         client,
                         where_clause=where_clause,
                         params=params,
+                        space=query_embedding.space,
                         as_of=effective_as_of,
                         limit=limit,
                         organization_id=organization_id,
@@ -744,6 +882,8 @@ async def _recall_raw_memory_result(
                         organization_id=organization_id,
                         memory_scope=normalized_scope.value,
                         has_scope_key=scope_key is not None,
+                        provider=query_embedding.space.provider,
+                        model=query_embedding.space.model,
                     )
                     source_results.append(
                         CandidateSourceResult.failed("raw_vector", RAW_VECTOR_EMBEDDINGS_MISSING)

@@ -7,8 +7,14 @@ from uuid import uuid4
 import pytest
 
 from sibyl_core.backends.surreal.content_schema import EMBEDDING_DIM
+from sibyl_core.embeddings.providers import EmbeddingMetadata
 from sibyl_core.services import content_client, content_raw_recall
-from sibyl_core.services.content_models import RawMemoryRecallResult, RawMemoryWrite
+from sibyl_core.services.content_models import (
+    RawMemoryRecallResult,
+    RawMemoryWrite,
+    raw_memory_embedding_metadata,
+    raw_memory_embedding_space,
+)
 from sibyl_core.services.memory_correction import apply_memory_correction
 from sibyl_core.services.surreal_content import (
     recall_raw_memory,
@@ -125,8 +131,19 @@ async def test_capture_and_scope_filters_precede_vector_neighbor_limit(
     org = str(uuid4())
     near = [1.0, *([0.0] * (EMBEDDING_DIM - 1))]
     far = [0.0, 1.0, *([0.0] * (EMBEDDING_DIM - 2))]
+    model = EmbeddingMetadata(
+        provider="deterministic",
+        model="capture-filter",
+        dimensions=EMBEDDING_DIM,
+        cache_namespace="raw-memory",
+        tokenizer_estimate_method="unit-test",
+    )
+    space = raw_memory_embedding_space(model)
+    assert space is not None
     monkeypatch.setattr(
-        content_raw_recall, "raw_memory_query_embedding", AsyncMock(return_value=near)
+        content_raw_recall,
+        "raw_memory_query_embedding",
+        AsyncMock(return_value=content_raw_recall.RawQueryEmbedding(near, space)),
     )
     future = (datetime.now(UTC) + timedelta(days=1)).isoformat()
     memories = await remember_raw_memories(
@@ -151,11 +168,13 @@ async def test_capture_and_scope_filters_precede_vector_neighbor_limit(
     retained_id = memories[0].id
     async with content_client.surreal_content_client() as client:
         await client.execute_query(
-            "UPDATE raw_captures SET embedding = IF uuid = $retained THEN $far ELSE $near END "
+            "UPDATE raw_captures SET embedding = IF uuid = $retained THEN $far ELSE $near END, "
+            "metadata.embedding_metadata = $stamp "
             "WHERE organization_id = $org;",
             retained=retained_id,
             far=far,
             near=near,
+            stamp=raw_memory_embedding_metadata(model),
             org=org,
         )
     memberships = (None, [retained_id]) if nearer_exclusion == "capture_ids" else (None,)

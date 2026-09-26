@@ -252,11 +252,16 @@ def _repair_raw_embeddings_phase(output: Path, extra: Sequence[str], record: dic
     receipt["result"] = asdict(result)
     # Completed is the repair's word for "the walk finished", not "every row
     # now carries a vector": a revoked key or a rejected write lands in
-    # failed, a contended row in pending, and status stays completed. The
-    # lane is only fair when nothing is left behind; a walk that had nothing
-    # to do is fine.
+    # failed, a contended row in pending, a text the provider will not embed
+    # in refused, one the model keeps failing on in deferred, and status stays
+    # completed. The lane is only fair when nothing is left behind; a walk
+    # that had nothing to do is fine.
     embedded_everything = (
-        result.status == REPAIR_COMPLETED and result.failed == 0 and result.pending == 0
+        result.status == REPAIR_COMPLETED
+        and result.failed == 0
+        and result.pending == 0
+        and result.refused == 0
+        and result.deferred == 0
     )
     receipt["embedded_everything"] = embedded_everything
     receipt["finished_at"] = datetime.now(UTC).isoformat()
