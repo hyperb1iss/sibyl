@@ -351,6 +351,11 @@ def _embedding_sweep_lines(sweep: object) -> list[str]:
                 f"                [{ELECTRIC_YELLOW}]waiting for {waiting:,} organization(s) to"
                 f" publish their graph evidence: {names}[/{ELECTRIC_YELLOW}]"
             )
+        if state.get("legacy_notice") and not state.get("legacy_warning"):
+            lines.append(
+                "                adopted because other organizations' vectors record the"
+                " configured model; this plane had no record of its own"
+            )
         if state.get("legacy_warning"):
             target = "graph" if plane == "graph" else "documents"
             lines.append(

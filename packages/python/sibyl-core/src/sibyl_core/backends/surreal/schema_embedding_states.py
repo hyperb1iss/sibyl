@@ -61,6 +61,7 @@ DEFINE FIELD IF NOT EXISTS legacy_decision ON embedding_states TYPE option<strin
 DEFINE FIELD IF NOT EXISTS legacy_basis ON embedding_states TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS legacy_metadata ON embedding_states TYPE option<object> FLEXIBLE;
 DEFINE FIELD IF NOT EXISTS legacy_warning ON embedding_states TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS legacy_notice ON embedding_states TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS legacy_deferred_at ON embedding_states TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS decided_at ON embedding_states TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS active_metadata ON embedding_states TYPE option<object> FLEXIBLE;

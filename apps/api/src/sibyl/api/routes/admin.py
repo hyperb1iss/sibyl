@@ -217,6 +217,7 @@ _EMBEDDING_SWEEP_STATUS_FIELDS = (
     "legacy_decision",
     "legacy_basis",
     "legacy_warning",
+    "legacy_notice",
     "deferred_age_seconds",
     "active_metadata",
     "complete_metadata",
@@ -247,6 +248,8 @@ def _embedding_plane_state(state: dict[str, Any]) -> str:
         return _EMBEDDING_AWAITING_EVIDENCE_STATE
     if state.get("legacy_warning"):
         return str(state["legacy_warning"])
+    if state.get("legacy_notice"):
+        return str(state["legacy_notice"])
     if same_vector_identity(state.get("complete_metadata"), state.get("active_metadata")):
         return "complete"
     return "sweeping"

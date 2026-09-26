@@ -390,6 +390,9 @@ async def test_other_organizations_matching_stamps_adopt_without_a_warning(
     assert isinstance(verdicts.graph, dict)
     assert verdicts.graph["legacy_basis"] == LegacyVectorBasis.DEPLOYMENT_STAMPS_MATCH.value
     assert verdicts.graph.get("legacy_warning") is None
+    # Another organization's stamps are not this plane's own, so the adoption
+    # is reported rather than shown as complete.
+    assert verdicts.graph["legacy_notice"] == "adopted_on_deployment_evidence"
     assert await read_published_organizations(_execute) == {
         native.group_id,
         runtime.client.group_id,

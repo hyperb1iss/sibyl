@@ -2790,9 +2790,14 @@ async def test_live_two_step_upgrade_adopts_without_warnings_then_switches(
         assert upgraded["embedding_unverified"] == 0
         assert previous.texts == []
         for shape in shapes:
-            for state in await _plane_states(content, clients[orgs[shape]]):
+            graph_state, chunk_state = await _plane_states(content, clients[orgs[shape]])
+            for state in (graph_state, chunk_state):
                 assert state.get("legacy_decision") in {"adopt", "none"}, shape
                 assert not state.get("legacy_warning"), shape
+            # Unstamped graphs adopt on the stamped one's evidence, reported
+            # as such rather than as complete.
+            expected_notice = None if shape == "A2" else "adopted_on_deployment_evidence"
+            assert graph_state.get("legacy_notice") == expected_notice, shape
 
         # Step two: switch providers; every vector now names its model.
         embedded: list[object] = []

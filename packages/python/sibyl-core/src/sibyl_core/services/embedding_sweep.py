@@ -128,6 +128,11 @@ class LegacyVectorBasis(StrEnum):
 # A plane that adopted unstamped vectors with nothing to vouch for their model
 # carries this warning until an operator re-embeds it.
 LEGACY_WARNING_ADOPTED_WITHOUT_EVIDENCE = "adopted_without_evidence"
+# A plane with no evidence of its own that adopted because other
+# organizations' graph stamps name the configured model. Informational: that
+# evidence is not the plane's own, and a tenant on the previous release could
+# have forged the stamps behind it.
+LEGACY_NOTICE_ADOPTED_ON_DEPLOYMENT_EVIDENCE = "adopted_on_deployment_evidence"
 
 
 class EmbeddingSchemaPendingError(RuntimeError):
@@ -182,6 +187,7 @@ class EmbeddingSweepResult(LifecycleRepairResult):
     rejected: int = 0
     legacy_decision: str | None = None
     warning: str | None = None
+    notice: str | None = None
     provider_dimensions: int | None = None
     schema_dimensions: int | None = None
     elapsed_ms: float = 0.0
@@ -583,13 +589,18 @@ async def ensure_legacy_decision(
         await plane.execute(
             "UPDATE type::record($key) SET legacy_decision = $decision, "
             "legacy_basis = $basis, legacy_metadata = $legacy, legacy_warning = $warning, "
-            "legacy_deferred_at = NONE, decided_at = time::now(), updated_at = time::now() "
-            "WHERE legacy_decision = NONE RETURN AFTER;",
+            "legacy_notice = $notice, legacy_deferred_at = NONE, decided_at = time::now(), "
+            "updated_at = time::now() WHERE legacy_decision = NONE RETURN AFTER;",
             key=plane.state_key,
             decision=decision.value,
             basis=basis.value,
             legacy=legacy,
             warning=LEGACY_WARNING_ADOPTED_WITHOUT_EVIDENCE if unproven else None,
+            notice=(
+                LEGACY_NOTICE_ADOPTED_ON_DEPLOYMENT_EVIDENCE
+                if basis is LegacyVectorBasis.DEPLOYMENT_STAMPS_MATCH
+                else None
+            ),
         )
     )
     if rows:
@@ -667,10 +678,15 @@ async def run_embedding_sweep(
     decision = state.get("legacy_decision")
     legacy_decision = str(decision) if decision else None
     warning = state.get("legacy_warning") or None
+    notice = state.get("legacy_notice") or None
     if _plane_current(state, plane.stamp, verify_interval):
-        return result(status=SWEEP_CURRENT, legacy_decision=legacy_decision, warning=warning)
+        return result(
+            status=SWEEP_CURRENT, legacy_decision=legacy_decision, warning=warning, notice=notice
+        )
     if not await _acquire_lease(plane, owner=owner, budget=budget):
-        return result(status=SWEEP_BUSY, legacy_decision=legacy_decision, warning=warning)
+        return result(
+            status=SWEEP_BUSY, legacy_decision=legacy_decision, warning=warning, notice=notice
+        )
 
     counts = _Counts(rejections=_load_rejections(state, plane.stamp))
     limiter = _AdaptiveLimiter(slots)
@@ -740,6 +756,7 @@ async def run_embedding_sweep(
     outcome = result(
         legacy_decision=legacy_decision,
         warning=warning,
+        notice=notice,
         status=status,
         checked=counts.checked,
         recovered=counts.recovered,
@@ -1306,7 +1323,8 @@ async def mark_plane_for_reembed(
     # blindly, so an adoption warning no longer applies.
     await execute(
         REOPEN_EMBEDDING_STATES.replace(
-            "updated_at = time::now()", "legacy_warning = NONE, updated_at = time::now()"
+            "updated_at = time::now()",
+            "legacy_warning = NONE, legacy_notice = NONE, updated_at = time::now()",
         ).replace(
             "WHERE $organizations CONTAINS organization_id",
             "WHERE $organizations CONTAINS organization_id AND plane = $plane",
@@ -1346,6 +1364,7 @@ async def read_embedding_sweep_state(
 
 
 __all__ = [
+    "LEGACY_NOTICE_ADOPTED_ON_DEPLOYMENT_EVIDENCE",
     "LEGACY_WARNING_ADOPTED_WITHOUT_EVIDENCE",
     "SWEEP_BUSY",
     "SWEEP_COMPLETED",
