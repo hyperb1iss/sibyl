@@ -17,6 +17,8 @@ from sibyl_core.backends.surreal.schema_embedding_states import (
     EMBEDDING_DEPLOYMENT_TABLE,
     EMBEDDING_STATE_DEFINITIONS,
     EMBEDDING_STATES_TABLE,
+    RAW_EMBEDDING_REFUSAL_DEFINITIONS,
+    RAW_EMBEDDING_REFUSALS_TABLE,
     snapshot_content_embedding_evidence,
 )
 from sibyl_core.backends.surreal.schema_helpers import is_missing_table_error, split_statements
@@ -121,8 +123,9 @@ CONTENT_TABLES = (
     "reflection_supersessions",
     EMBEDDING_STATES_TABLE,
     EMBEDDING_DEPLOYMENT_TABLE,
+    RAW_EMBEDDING_REFUSALS_TABLE,
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 47
+CONTENT_SCHEMA_CURRENT_VERSION = 48
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -177,6 +180,7 @@ CONTENT_SCHEMA_DEFINITIONS = (
     + CONTENT_REFLECTION_SUPERSESSION_DEFINITIONS
     + EMBEDDING_STATE_DEFINITIONS
     + EMBEDDING_DEPLOYMENT_DEFINITIONS
+    + RAW_EMBEDDING_REFUSAL_DEFINITIONS
     + VALIDATION_EXECUTION_SCHEMA
     + VALIDATION_DEPENDENCY_SCHEMA
 )
@@ -310,6 +314,7 @@ ALTER TABLE IF EXISTS dream_source_cursors PERMISSIONS NONE;
 ALTER TABLE IF EXISTS reflection_supersessions PERMISSIONS NONE;
 ALTER TABLE IF EXISTS embedding_states PERMISSIONS NONE;
 ALTER TABLE IF EXISTS embedding_deployment PERMISSIONS NONE;
+ALTER TABLE IF EXISTS raw_embedding_refusals PERMISSIONS NONE;
 ALTER TABLE IF EXISTS eval_consolidations PERMISSIONS NONE;
 ALTER TABLE IF EXISTS eval_attempts PERMISSIONS NONE;
 ALTER TABLE IF EXISTS crawl_sources PERMISSIONS
@@ -1125,6 +1130,11 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
                 *split_statements(EMBEDDING_DEPLOYMENT_DEFINITIONS),
             ),
             action=snapshot_content_embedding_evidence,
+        ),
+        SchemaMigration(
+            version=48,
+            name="content_raw_embedding_refusals",
+            statements=tuple(split_statements(RAW_EMBEDDING_REFUSAL_DEFINITIONS)),
         ),
     )
 
