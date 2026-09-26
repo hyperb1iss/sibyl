@@ -179,11 +179,26 @@ def test_legacy_verdict_prefers_the_operator_then_the_plane_evidence() -> None:
     assert decide_legacy_vectors(
         legacy_rows=True, evidence=LegacyEvidence(other_plane_switched=True), policy="auto"
     ) == (LegacyVectorDecision.REEMBED, LegacyVectorBasis.OTHER_PLANE_SWITCHED)
+    # Any switch outranks any continuity: conflicting evidence re-embeds.
     assert decide_legacy_vectors(
         legacy_rows=True,
-        evidence=LegacyEvidence(matches=True, model_changed=True, other_plane_switched=True),
+        evidence=LegacyEvidence(matches=True, other_plane_switched=True),
         policy="auto",
-    ) == (LegacyVectorDecision.ADOPT, LegacyVectorBasis.PRIOR_STAMPS_MATCH)
+    ) == (LegacyVectorDecision.REEMBED, LegacyVectorBasis.OTHER_PLANE_SWITCHED)
+    assert decide_legacy_vectors(
+        legacy_rows=True,
+        evidence=LegacyEvidence(matches=True, model_changed=True),
+        policy="auto",
+    ) == (LegacyVectorDecision.REEMBED, LegacyVectorBasis.DEPLOYMENT_MODEL_CHANGED)
+    assert decide_legacy_vectors(
+        legacy_rows=True,
+        evidence=LegacyEvidence(matches=True, deployment_differs=True),
+        policy="auto",
+    ) == (LegacyVectorDecision.REEMBED, LegacyVectorBasis.DEPLOYMENT_STAMPS_DIFFER)
+    # Another organization's matching stamps adopt without a warning.
+    assert decide_legacy_vectors(
+        legacy_rows=True, evidence=LegacyEvidence(deployment_matches=True), policy="auto"
+    ) == (LegacyVectorDecision.ADOPT, LegacyVectorBasis.DEPLOYMENT_STAMPS_MATCH)
     assert decide_legacy_vectors(legacy_rows=True, evidence=matches, policy="reembed") == (
         LegacyVectorDecision.REEMBED,
         LegacyVectorBasis.OPERATOR_REEMBED,

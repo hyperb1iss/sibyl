@@ -15,7 +15,10 @@ from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING, Any, cast
 
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM
-from sibyl_core.backends.surreal.schema_embedding_states import GRAPH_EMBEDDING_STATE_PLANE
+from sibyl_core.backends.surreal.schema_embedding_states import (
+    GRAPH_EMBEDDING_STATE_PLANE,
+    embedding_sweep_schema_ready,
+)
 from sibyl_core.backends.surreal.schema_version import get_schema_embedding_dimension
 from sibyl_core.embeddings.providers import (
     EmbeddingProvider,
@@ -26,6 +29,8 @@ from sibyl_core.embeddings.providers import (
 from sibyl_core.services.embedding_evidence import classify_stamps, read_graph_snapshot
 from sibyl_core.services.embedding_sweep import (
     SWEEP_SKIPPED_NO_PROVIDER,
+    SWEEP_SKIPPED_SCHEMA_PENDING,
+    EmbeddingSchemaPendingError,
     EmbeddingStamp,
     EmbeddingSweepResult,
     LegacyEvidence,
@@ -190,9 +195,18 @@ async def decide_graph_legacy_vectors(
     provider = _resolve_provider(embedding_provider)
     if provider is None:
         return None
+    await require_graph_sweep_schema(runtime.client)
     return await ensure_legacy_decision(
         await graph_embedding_plane(runtime.client, provider, evidence=evidence)
     )
+
+
+async def require_graph_sweep_schema(client: Any) -> None:
+    """Refuse to touch graph embedding evidence before the namespace's upgrade snapshot."""
+    if not await embedding_sweep_schema_ready(client.execute_query, graph=True):
+        raise EmbeddingSchemaPendingError(
+            f"graph namespace for {client.group_id} has not run its embedding sweep migration"
+        )
 
 
 async def sweep_graph_embeddings(
@@ -209,6 +223,10 @@ async def sweep_graph_embeddings(
     provider = _resolve_provider(embedding_provider)
     if provider is None:
         return EmbeddingSweepResult(plane=GRAPH_EMBEDDING_PLANE, status=SWEEP_SKIPPED_NO_PROVIDER)
+    if not await embedding_sweep_schema_ready(runtime.client.execute_query, graph=True):
+        return EmbeddingSweepResult(
+            plane=GRAPH_EMBEDDING_PLANE, status=SWEEP_SKIPPED_SCHEMA_PENDING
+        )
     plane = await graph_embedding_plane(runtime.client, provider)
     return await run_embedding_sweep(plane, **options)
 
@@ -249,5 +267,6 @@ __all__ = [
     "mark_graph_embeddings_for_reembed",
     "relationship_row_embedding_text",
     "relationship_sweep_table",
+    "require_graph_sweep_schema",
     "sweep_graph_embeddings",
 ]

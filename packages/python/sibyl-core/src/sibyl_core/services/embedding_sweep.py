@@ -68,6 +68,7 @@ SWEEP_PROVIDER_FAILING = "provider_failing"
 SWEEP_STORE_FAILING = "store_failing"
 SWEEP_SKIPPED_NO_PROVIDER = "skipped_no_provider"
 SWEEP_SKIPPED_DIMENSION_MISMATCH = "skipped_dimension_mismatch"
+SWEEP_SKIPPED_SCHEMA_PENDING = "skipped_schema_pending"
 
 _LEASE_MARGIN_SECONDS = 120.0
 _BACKOFF_BASE_SECONDS = 1.0
@@ -116,6 +117,7 @@ class LegacyVectorBasis(StrEnum):
     PRIOR_STAMPS_MATCH = "prior_stamps_match"
     PRIOR_STAMPS_DIFFER = "prior_stamps_differ"
     DEPLOYMENT_STAMPS_DIFFER = "deployment_stamps_differ"
+    DEPLOYMENT_STAMPS_MATCH = "deployment_stamps_match"
     DEPLOYMENT_MODEL_CHANGED = "deployment_model_changed"
     OTHER_PLANE_SWITCHED = "other_plane_switched"
     NO_PRIOR_EVIDENCE = "no_prior_evidence"
@@ -128,14 +130,24 @@ class LegacyVectorBasis(StrEnum):
 LEGACY_WARNING_ADOPTED_WITHOUT_EVIDENCE = "adopted_without_evidence"
 
 
+class EmbeddingSchemaPendingError(RuntimeError):
+    """A namespace has not taken the sweep's evidence snapshot yet.
+
+    Whoever runs the migration, nothing may read or rewrite embedding
+    evidence before it: the snapshot must see the stamps the previous
+    release left.
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class LegacyEvidence:
     """What predates this release says about the model behind a plane's unstamped vectors.
 
     ``differs`` and ``matches`` come from the stamps the plane's own rows
-    carried when its schema upgraded. ``deployment_differs`` means the same
-    plane in another organization carried stamps from another model: one
-    configuration embeds every organization's graph. ``model_changed`` means
+    carried when its schema upgraded. ``deployment_differs`` and
+    ``deployment_matches`` say the same of the plane in the other
+    organizations: one configuration embeds every organization's graph.
+    ``model_changed`` means
     the deployment record saw this plane's configured model change since this
     release first ran. ``other_plane_switched`` means the other plane shows a
     switch: graph and content are configured separately, but a deployment
@@ -145,6 +157,7 @@ class LegacyEvidence:
     differs: bool = False
     matches: bool = False
     deployment_differs: bool = False
+    deployment_matches: bool = False
     model_changed: bool = False
     other_plane_switched: bool = False
 
@@ -481,15 +494,15 @@ def decide_legacy_vectors(
 ) -> tuple[LegacyVectorDecision, LegacyVectorBasis]:
     """Classify a plane's unstamped vectors.
 
-    An operator policy wins. Otherwise the plane's own pre-upgrade stamps
-    decide: any stamp from another model proves the deployment has used one,
-    so the unstamped vectors cannot be assumed current and are replaced, and
-    stamps that all match mean they are what the unchanged configuration
-    produced. Without stamps of its own, a plane is replaced when the
-    deployment record or the other plane shows a switch, because re-embedding
-    a plane that did not change costs provider calls while adopting one that
-    did corrupts search. Only with no evidence anywhere are the vectors
-    adopted, and that verdict carries a warning.
+    An operator policy wins. Otherwise any evidence of a switch wins over any
+    evidence of continuity, because re-embedding a plane that did not change
+    costs provider calls while adopting one that did corrupts search: the
+    plane's own pre-upgrade stamps naming another model, then another
+    organization's, then the deployment record, then the other plane. With
+    no switch in sight, stamps that name the configured model (the plane's
+    own, then another organization's) adopt the vectors as what the unchanged
+    configuration produced. Only with no evidence anywhere are they adopted
+    with a warning.
     """
     if not legacy_rows:
         return LegacyVectorDecision.NONE, LegacyVectorBasis.NO_LEGACY_ROWS
@@ -500,26 +513,33 @@ def decide_legacy_vectors(
     evidence = evidence or LegacyEvidence()
     if evidence.differs:
         return LegacyVectorDecision.REEMBED, LegacyVectorBasis.PRIOR_STAMPS_DIFFER
-    if evidence.matches:
-        return LegacyVectorDecision.ADOPT, LegacyVectorBasis.PRIOR_STAMPS_MATCH
     if evidence.deployment_differs:
         return LegacyVectorDecision.REEMBED, LegacyVectorBasis.DEPLOYMENT_STAMPS_DIFFER
     if evidence.model_changed:
         return LegacyVectorDecision.REEMBED, LegacyVectorBasis.DEPLOYMENT_MODEL_CHANGED
     if evidence.other_plane_switched:
         return LegacyVectorDecision.REEMBED, LegacyVectorBasis.OTHER_PLANE_SWITCHED
+    if evidence.matches:
+        return LegacyVectorDecision.ADOPT, LegacyVectorBasis.PRIOR_STAMPS_MATCH
+    if evidence.deployment_matches:
+        return LegacyVectorDecision.ADOPT, LegacyVectorBasis.DEPLOYMENT_STAMPS_MATCH
     return LegacyVectorDecision.ADOPT, LegacyVectorBasis.NO_PRIOR_EVIDENCE
 
 
 async def ensure_legacy_decision(
-    plane: SweepPlane, *, defer_unproven: bool = False
+    plane: SweepPlane,
+    *,
+    defer_unproven: bool = False,
+    defer_limit_seconds: float | None = None,
 ) -> dict[str, Any]:
     """Persist the plane's legacy verdict if no pass has recorded one yet.
 
     The first writer wins, so a racing pass reads the same verdict back.
     With ``defer_unproven``, a verdict that would adopt with no evidence at
     all is not recorded; the returned state carries ``legacy_deferred`` so
-    the caller can settle it once more of the deployment has been read.
+    the caller can settle it once more of the deployment has been read. The
+    first deferral is persisted, and once ``defer_limit_seconds`` have
+    passed since it the verdict is recorded on the evidence at hand.
     """
     state = await _ensure_state(plane)
     if state.get("legacy_decision"):
@@ -542,12 +562,28 @@ async def ensure_legacy_decision(
     )
     unproven = basis is LegacyVectorBasis.NO_PRIOR_EVIDENCE
     if unproven and defer_unproven:
-        return {**state, "legacy_deferred": True}
+        deferred = normalize_records(
+            await plane.execute(
+                "UPDATE type::record($key) SET legacy_deferred_at = "
+                "legacy_deferred_at ?? time::now(), updated_at = time::now() "
+                "WHERE legacy_decision = NONE RETURN legacy_deferred_at, "
+                "duration::secs(time::now() - legacy_deferred_at) AS deferred_age_seconds;",
+                key=plane.state_key,
+            )
+        )
+        age = deferred[0].get("deferred_age_seconds") if deferred else None
+        waited = isinstance(age, int | float) and (
+            defer_limit_seconds is not None and age >= defer_limit_seconds
+        )
+        if not deferred:
+            return await _read_state(plane)
+        if not waited:
+            return {**state, **deferred[0], "legacy_deferred": True}
     rows = normalize_records(
         await plane.execute(
             "UPDATE type::record($key) SET legacy_decision = $decision, "
             "legacy_basis = $basis, legacy_metadata = $legacy, legacy_warning = $warning, "
-            "decided_at = time::now(), updated_at = time::now() "
+            "legacy_deferred_at = NONE, decided_at = time::now(), updated_at = time::now() "
             "WHERE legacy_decision = NONE RETURN AFTER;",
             key=plane.state_key,
             decision=decision.value,
@@ -1117,7 +1153,9 @@ async def _rows(plane: SweepPlane, query: str, **params: object) -> list[dict[st
 
 _STATE_PROJECTION = (
     "*, IF complete_at = NONE THEN NONE "
-    "ELSE duration::secs(time::now() - complete_at) END AS complete_age_seconds"
+    "ELSE duration::secs(time::now() - complete_at) END AS complete_age_seconds, "
+    "IF legacy_deferred_at = NONE THEN NONE "
+    "ELSE duration::secs(time::now() - legacy_deferred_at) END AS deferred_age_seconds"
 )
 
 
@@ -1316,8 +1354,10 @@ __all__ = [
     "SWEEP_PROVIDER_FAILING",
     "SWEEP_SKIPPED_DIMENSION_MISMATCH",
     "SWEEP_SKIPPED_NO_PROVIDER",
+    "SWEEP_SKIPPED_SCHEMA_PENDING",
     "SWEEP_STORE_FAILING",
     "EmbedRows",
+    "EmbeddingSchemaPendingError",
     "EmbeddingSweepResult",
     "LegacyEvidence",
     "LegacyVectorBasis",

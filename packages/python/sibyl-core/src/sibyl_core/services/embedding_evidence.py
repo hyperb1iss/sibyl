@@ -13,10 +13,13 @@ are fixed before this release writes a single vector:
   content schema upgraded (``embedding_deployment:evidence``), which speak
   for every organization's chunks because one content configuration embeds
   them all;
-- the models the deployment has been configured with since this release
-  first started (``embedding_deployment:models``), refreshed at every
-  startup, which catches a switch made after that first start for a plane no
-  pass has classified yet.
+- the models lifecycle passes of this release have swept under
+  (``embedding_deployment:models``), written only after a pass the provider
+  did not refuse, which catches a switch made after the first such pass for
+  a plane no pass has classified yet.
+
+Only stamps that sit beside a vector count, so a model name a client
+supplied on a row that was never embedded proves nothing.
 
 Comparisons use the vector space (provider, model, dimensions): the stamps
 belong to different text contracts, so only the model behind them matters.
@@ -31,6 +34,7 @@ from typing import Any
 from sibyl_core.backends.surreal.records import normalize_records
 from sibyl_core.backends.surreal.schema_embedding_states import (
     DEPLOYMENT_EVIDENCE_KEY,
+    DEPLOYMENT_EVIDENCE_WAIT_KEY,
     DEPLOYMENT_GRAPH_EVIDENCE_KEY,
     DEPLOYMENT_MODELS_KEY,
     GRAPH_EMBEDDING_STATE_PLANE,
@@ -103,8 +107,11 @@ async def publish_graph_snapshot(
 ) -> bool:
     """Add one graph namespace's pre-upgrade models to the deployment's, once.
 
-    Returns whether this call published. A namespace that has not taken its
-    upgrade photograph yet publishes nothing.
+    The organization joins the deployment's published set in the same write,
+    before its own marker is set, so an organization that published once
+    counts as published for good even if later passes fail for it. Returns
+    whether this call published. A namespace that has not taken its upgrade
+    photograph yet publishes nothing.
     """
     key = embedding_state_key(organization_id, GRAPH_EMBEDDING_STATE_PLANE)
     rows = await _records(graph_execute, "SELECT legacy_evidence FROM type::record($key);", key=key)
@@ -116,10 +123,11 @@ async def publish_graph_snapshot(
         content_execute,
         f"UPSERT {DEPLOYMENT_GRAPH_EVIDENCE_KEY} SET kind = 'graph_evidence', data = {{"
         "stamps: array::union(data.stamps ?? [], $stamps), "
-        "organizations: (data.organizations ?? 0) + 1, "
+        "published: array::union(data.published ?? [], [$organization]), "
         "updated_at: time::now()"
         "}, updated_at = time::now() RETURN NONE;",
         stamps=spaces,
+        organization=organization_id,
     )
     await _records(
         graph_execute,
@@ -127,6 +135,39 @@ async def publish_graph_snapshot(
         key=key,
     )
     return True
+
+
+async def read_published_organizations(execute: SweepExecute) -> set[str]:
+    """Organizations whose graph snapshot the deployment has already heard."""
+    rows = await _records(execute, f"SELECT data FROM {DEPLOYMENT_GRAPH_EVIDENCE_KEY};")
+    data = rows[0].get("data") if rows else None
+    published = data.get("published") if isinstance(data, Mapping) else None
+    return {str(item) for item in published} if isinstance(published, list) else set()
+
+
+async def record_evidence_wait(
+    execute: SweepExecute, *, waiting_on: Sequence[str], deferred_planes: int
+) -> None:
+    """Note which organizations have not published while planes wait on them.
+
+    Status surfaces read it so an operator can see why a plane is waiting.
+    An empty list clears the note.
+    """
+    await _records(
+        execute,
+        f"UPSERT {DEPLOYMENT_EVIDENCE_WAIT_KEY} SET kind = 'evidence_wait', data = {{"
+        "organizations: $sample, count: $count, deferred_planes: $deferred, "
+        "checked_at: time::now()}, updated_at = time::now() RETURN NONE;",
+        sample=list(waiting_on)[:20],
+        count=len(waiting_on),
+        deferred=deferred_planes,
+    )
+
+
+async def read_evidence_wait(execute: SweepExecute) -> dict[str, Any]:
+    rows = await _records(execute, f"SELECT data FROM {DEPLOYMENT_EVIDENCE_WAIT_KEY};")
+    data = rows[0].get("data") if rows else None
+    return dict(data) if isinstance(data, Mapping) else {}
 
 
 async def read_deployment_graph_snapshot(execute: SweepExecute) -> list[dict[str, Any]]:
@@ -153,9 +194,9 @@ async def record_deployment_models(
     graph: EmbeddingStamp | None,
     content: EmbeddingStamp | None,
 ) -> dict[str, Any]:
-    """Note the models this process is configured with.
+    """Note the models this process swept under.
 
-    The first models ever recorded are kept, so a later start on another
+    The first models ever recorded are kept, so a later pass on another
     model is evidence of a switch for every plane no pass has classified.
     A plane with no configured provider keeps its last recorded model.
     """
@@ -213,12 +254,11 @@ async def gather_legacy_evidence(
     )
     graph = _plane_evidence(graph_stamps, graph_stamp, models, GRAPH_MODEL_KIND)
     graph_current = graph_stamp if graph_stamp is not None else models.get(GRAPH_MODEL_KIND)
-    deployment_differs = (
-        isinstance(graph_current, Mapping)
-        and classify_stamps(
+    deployment_differs = deployment_matches = False
+    if isinstance(graph_current, Mapping):
+        deployment_differs, deployment_matches = classify_stamps(
             await read_deployment_graph_snapshot(content_execute), dict(graph_current)
-        )[0]
-    )
+        )
     content = _plane_evidence(
         await read_content_snapshot(content_execute), content_stamp, models, CONTENT_MODEL_KIND
     )
@@ -227,6 +267,7 @@ async def gather_legacy_evidence(
             differs=graph.differs,
             matches=graph.matches,
             deployment_differs=deployment_differs,
+            deployment_matches=deployment_matches,
             model_changed=graph.model_changed,
             other_plane_switched=content.switched,
         ),
@@ -250,6 +291,9 @@ __all__ = [
     "read_content_snapshot",
     "read_deployment_graph_snapshot",
     "read_deployment_models",
+    "read_evidence_wait",
     "read_graph_snapshot",
+    "read_published_organizations",
     "record_deployment_models",
+    "record_evidence_wait",
 ]

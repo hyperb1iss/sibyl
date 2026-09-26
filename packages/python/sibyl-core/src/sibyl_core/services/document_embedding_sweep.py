@@ -21,11 +21,14 @@ from typing import Any
 
 from sibyl_core.backends.surreal import SurrealContentClient
 from sibyl_core.backends.surreal.content_schema import EMBEDDING_DIM
+from sibyl_core.backends.surreal.schema_embedding_states import embedding_sweep_schema_ready
 from sibyl_core.backends.surreal.schema_invariants import fetch_vector_field_dimension
 from sibyl_core.services import content_client
 from sibyl_core.services.embedding_evidence import gather_legacy_evidence
 from sibyl_core.services.embedding_sweep import (
     SWEEP_SKIPPED_NO_PROVIDER,
+    SWEEP_SKIPPED_SCHEMA_PENDING,
+    EmbeddingSchemaPendingError,
     EmbeddingStamp,
     EmbeddingSweepResult,
     LegacyEvidence,
@@ -113,6 +116,23 @@ async def document_chunk_embedding_plane(
     )
 
 
+async def content_sweep_schema_ready(client: SurrealContentClient) -> bool:
+    """Whether the shared content namespace has taken the sweep's evidence snapshot."""
+
+    async def execute(query: str, **params: object) -> object:
+        return await content_client.select_many(client, query, **params)
+
+    return await embedding_sweep_schema_ready(execute, graph=False)
+
+
+async def require_content_sweep_schema(client: SurrealContentClient) -> None:
+    """Refuse to touch chunk or raw capture evidence before the content upgrade snapshot."""
+    if not await content_sweep_schema_ready(client):
+        raise EmbeddingSchemaPendingError(
+            "the content namespace has not run its embedding sweep migration"
+        )
+
+
 @asynccontextmanager
 async def content_session(
     client: SurrealContentClient | None,
@@ -136,6 +156,7 @@ async def decide_document_chunk_legacy_vectors(
     if stamp is None:
         return None
     async with content_session(client) as session:
+        await require_content_sweep_schema(session)
         plane = await document_chunk_embedding_plane(
             organization_id,
             client=session,
@@ -164,6 +185,10 @@ async def sweep_document_chunk_embeddings(
             plane=DOCUMENT_CHUNK_EMBEDDING_PLANE, status=SWEEP_SKIPPED_NO_PROVIDER
         )
     async with content_session(client) as session:
+        if not await content_sweep_schema_ready(session):
+            return EmbeddingSweepResult(
+                plane=DOCUMENT_CHUNK_EMBEDDING_PLANE, status=SWEEP_SKIPPED_SCHEMA_PENDING
+            )
         plane = await document_chunk_embedding_plane(
             organization_id, client=session, stamp=stamp, embed_chunks=embed_chunks
         )
@@ -171,6 +196,7 @@ async def sweep_document_chunk_embeddings(
 
 
 async def _chunk_tables(session: SurrealContentClient) -> tuple[SweepTable]:
+    await require_content_sweep_schema(session)
     declared = await fetch_vector_field_dimension(
         session.execute_query, "document_chunks", "embedding"
     )
@@ -214,10 +240,12 @@ __all__ = [
     "DOCUMENT_CHUNK_EMBEDDING_PLANE",
     "ChunkEmbedder",
     "content_session",
+    "content_sweep_schema_ready",
     "count_document_chunk_embeddings_for_reembed",
     "decide_document_chunk_legacy_vectors",
     "document_chunk_embedding_plane",
     "document_chunk_sweep_table",
     "mark_document_chunk_embeddings_for_reembed",
+    "require_content_sweep_schema",
     "sweep_document_chunk_embeddings",
 ]

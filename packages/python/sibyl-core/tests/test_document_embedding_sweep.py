@@ -67,19 +67,22 @@ async def _chunk(org: str, chunk_id: str, *, stamp=None, vector=True) -> None:
         )
 
 
-async def _raw_capture(org: str, stamp: dict[str, object]) -> None:
+async def _raw_capture(org: str, stamp: dict[str, object], *, vector: bool = True) -> None:
+    record: dict[str, object] = {
+        "uuid": str(uuid4()),
+        "organization_id": org,
+        "principal_id": "owner",
+        "source_id": str(uuid4()),
+        "raw_content": "captured",
+        "metadata": {"embedding_metadata": stamp},
+    }
+    if vector:
+        record["embedding"] = [0.5, *([0.0] * (EMBEDDING_DIM - 1))]
     async with content_client.surreal_content_client() as client:
         await content_client.select_many(
             client,
             "CREATE raw_captures CONTENT $record RETURN NONE;",
-            record={
-                "uuid": str(uuid4()),
-                "organization_id": org,
-                "principal_id": "owner",
-                "source_id": str(uuid4()),
-                "raw_content": "captured",
-                "metadata": {"embedding_metadata": stamp},
-            },
+            record=record,
         )
 
 

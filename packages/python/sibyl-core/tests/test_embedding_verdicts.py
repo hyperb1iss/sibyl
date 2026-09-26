@@ -220,3 +220,169 @@ async def test_bedrock_chunk_stamps_compare_by_model_not_route(runtime, content_
 
     assert isinstance(verdicts.document_chunks, dict)
     assert verdicts.document_chunks["legacy_basis"] == LegacyVectorBasis.PRIOR_STAMPS_MATCH.value
+
+
+async def _rewind(client, name: str, version: int) -> None:
+    from sibyl_core.backends.surreal.schema_version import schema_version_record_id
+
+    await client.execute_query(
+        "UPDATE type::record($record) SET version = $version;",
+        record=schema_version_record_id(name),
+        version=version,
+    )
+
+
+async def test_nothing_touches_embedding_evidence_before_the_content_upgrade(
+    runtime, content_store
+) -> None:
+    import pytest
+
+    from sibyl_core.embeddings.providers import DeterministicEmbeddingProvider, EmbeddingMetadata
+    from sibyl_core.services.content_raw_embedding_repair import (
+        REPAIR_SKIPPED_SCHEMA_PENDING,
+        repair_raw_capture_embeddings,
+    )
+    from sibyl_core.services.document_embedding_sweep import sweep_document_chunk_embeddings
+    from sibyl_core.services.embedding_sweep import (
+        SWEEP_SKIPPED_SCHEMA_PENDING,
+        EmbeddingSchemaPendingError,
+    )
+
+    org = runtime.client.group_id
+    await _raw_capture(org, {**PREVIOUS, "cache_namespace": "raw-memory"})
+    async with content_client.surreal_content_client() as client:
+        await _rewind(client, "content", 46)
+    raw_provider = DeterministicEmbeddingProvider(
+        EmbeddingMetadata(
+            provider="bedrock",
+            model="cohere.embed-v4:0",
+            dimensions=CURRENT["dimensions"],
+            cache_namespace="raw-memory",
+            tokenizer_estimate_method="provider-default",
+        )
+    )
+
+    repaired = await repair_raw_capture_embeddings(org, embedding_provider=raw_provider)
+    with pytest.raises(EmbeddingSchemaPendingError):
+        await _settle(runtime, CountingProvider("current"))
+    swept = await sweep_document_chunk_embeddings(
+        org, stamp=CURRENT, embed_chunks=ChunkEmbedder(CURRENT)
+    )
+
+    assert repaired.status == REPAIR_SKIPPED_SCHEMA_PENDING
+    assert swept.status == SWEEP_SKIPPED_SCHEMA_PENDING
+    stamps = await _execute("SELECT metadata.embedding_metadata.model AS model FROM raw_captures;")
+    assert [row["model"] for row in stamps] == [PREVIOUS["model"]]
+
+
+async def test_a_graph_namespace_before_its_upgrade_publishes_and_decides_nothing(
+    runtime, content_store
+) -> None:
+    from sibyl_core.services.embedding_evidence import read_published_organizations
+    from sibyl_core.services.embedding_sweep import (
+        SWEEP_SKIPPED_SCHEMA_PENDING,
+        EmbeddingSchemaPendingError,
+    )
+
+    await _entity(runtime, "legacy")
+    await _chunk(runtime.client.group_id, "legacy-chunk")
+    await _upgrade(runtime)
+    await _rewind(runtime.client, "graph", 30)
+
+    verdicts = await _settle(runtime, CountingProvider("current"))
+    swept = await sweep_graph_embeddings(runtime, embedding_provider=CountingProvider("current"))
+
+    assert isinstance(verdicts.graph, EmbeddingSchemaPendingError)
+    assert isinstance(verdicts.document_chunks, EmbeddingSchemaPendingError)
+    assert await read_published_organizations(_execute) == set()
+    assert swept.status == SWEEP_SKIPPED_SCHEMA_PENDING
+
+
+async def test_stamps_without_a_vector_are_not_evidence(runtime, content_store) -> None:
+    from sibyl_core.services.embedding_evidence import read_content_snapshot, read_graph_snapshot
+
+    org = runtime.client.group_id
+    current = CountingProvider("current")
+    # A client could supply these: neither sits beside a vector.
+    await _raw_capture(org, {**CURRENT, "cache_namespace": "raw-memory"}, vector=False)
+    await _entity(runtime, "planted", stamp=current.metadata.to_dict(), vector=False)
+    await _entity(runtime, "legacy")
+    await _chunk(org, "legacy-chunk")
+    await _upgrade(runtime)
+
+    assert await read_content_snapshot(_execute) == []
+    assert await read_graph_snapshot(runtime.client.execute_query, org) == []
+    verdicts = await _settle(runtime, current)
+
+    for verdict in (verdicts.graph, verdicts.document_chunks):
+        assert isinstance(verdict, dict)
+        assert verdict["legacy_basis"] == LegacyVectorBasis.NO_PRIOR_EVIDENCE.value
+
+
+async def test_a_deferral_waits_at_most_the_configured_time(runtime, content_store) -> None:
+    await _entity(runtime, "legacy")
+    await _upgrade(runtime)
+    current = CountingProvider("current")
+
+    first = await _settle(runtime, current, allow_unproven=False)
+    again = await settle_legacy_verdicts(
+        runtime.client.group_id,
+        graph_client=runtime.client,
+        graph_provider=current,
+        chunk_stamp=None,
+        embed_chunks=ChunkEmbedder(CURRENT),
+        defer_limit_seconds=3600,
+    )
+    assert first.deferred
+    assert again.deferred
+    assert isinstance(again.graph, dict)
+    assert again.graph["legacy_deferred_at"] is not None
+
+    # Once the wait is over the plane is settled on what has been published.
+    settled = await settle_legacy_verdicts(
+        runtime.client.group_id,
+        graph_client=runtime.client,
+        graph_provider=current,
+        chunk_stamp=None,
+        embed_chunks=ChunkEmbedder(CURRENT),
+        defer_limit_seconds=0,
+    )
+    assert isinstance(settled.graph, dict)
+    assert settled.graph["legacy_basis"] == LegacyVectorBasis.NO_PRIOR_EVIDENCE.value
+    assert settled.graph.get("legacy_deferred_at") is None
+
+
+async def test_other_organizations_matching_stamps_adopt_without_a_warning(
+    runtime, content_store
+) -> None:
+    from sibyl_core.services.embedding_evidence import read_published_organizations
+    from sibyl_core.services.graph import EntityManager, RelationshipManager, SurrealGraphClient
+    from sibyl_core.services.graph_runtime import GraphRuntime, prepare_graph_schema
+
+    current = CountingProvider("current")
+    await _entity(runtime, "legacy")
+    await _upgrade(runtime)
+    native = SurrealGraphClient(group_id=f"native-{runtime.client.group_id}", url="memory://")
+    try:
+        await prepare_graph_schema(native)
+        other = GraphRuntime(
+            client=native,
+            entity_manager=EntityManager(native, group_id=native.group_id),
+            relationship_manager=RelationshipManager(native, group_id=native.group_id),
+        )
+        await _entity(other, "native", stamp=current.metadata.to_dict())
+        await upgrade_graph_to_sweep(native)
+        await _settle(other, current, allow_unproven=False)
+        assert await read_published_organizations(_execute) == {native.group_id}
+
+        verdicts = await _settle(runtime, current, allow_unproven=False)
+    finally:
+        await native.close()
+
+    assert isinstance(verdicts.graph, dict)
+    assert verdicts.graph["legacy_basis"] == LegacyVectorBasis.DEPLOYMENT_STAMPS_MATCH.value
+    assert verdicts.graph.get("legacy_warning") is None
+    assert await read_published_organizations(_execute) == {
+        native.group_id,
+        runtime.client.group_id,
+    }

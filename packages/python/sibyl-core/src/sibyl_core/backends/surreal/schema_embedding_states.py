@@ -14,7 +14,14 @@ deployment has been configured with since.
 The stamps a plane's verdict weighs are photographed by the migration that
 creates this bookkeeping, before any code from this release can write to
 that namespace. A verdict therefore never mistakes a vector written after
-the upgrade for evidence of the model that preceded it.
+the upgrade for evidence of the model that preceded it. Only stamps that sit
+beside a vector count: a stamp on a row without one was never proven by an
+embedding call and may have been supplied by a client.
+
+Nothing that reads or rewrites embedding evidence may run against a
+namespace whose schema predates these migrations (see
+``embedding_sweep_schema_ready``): a process that ticks before the upgrade
+would otherwise rewrite the stamps the upgrade is about to photograph.
 """
 
 from __future__ import annotations
@@ -24,6 +31,10 @@ from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
 from sibyl_core.backends.surreal.records import normalize_records
+from sibyl_core.backends.surreal.schema_version import (
+    GRAPH_SCHEMA_NAME,
+    schema_version_record_id,
+)
 from sibyl_core.embeddings.provenance import UNVERIFIED_EMBEDDING_PROVIDER
 
 EMBEDDING_STATES_TABLE = "embedding_states"
@@ -31,7 +42,13 @@ EMBEDDING_DEPLOYMENT_TABLE = "embedding_deployment"
 GRAPH_EMBEDDING_STATE_PLANE = "graph"
 DEPLOYMENT_EVIDENCE_KEY = "embedding_deployment:evidence"
 DEPLOYMENT_GRAPH_EVIDENCE_KEY = "embedding_deployment:graph_evidence"
+DEPLOYMENT_EVIDENCE_WAIT_KEY = "embedding_deployment:evidence_wait"
 DEPLOYMENT_MODELS_KEY = "embedding_deployment:models"
+CONTENT_SCHEMA_RECORD_NAME = "content"
+# The schema versions whose migrations create the sweep bookkeeping and take
+# the evidence snapshots.
+GRAPH_SWEEP_SCHEMA_VERSION = 31
+CONTENT_SWEEP_SCHEMA_VERSION = 47
 
 EMBEDDING_STATE_DEFINITIONS = """
 DEFINE TABLE IF NOT EXISTS embedding_states SCHEMAFULL;
@@ -44,6 +61,7 @@ DEFINE FIELD IF NOT EXISTS legacy_decision ON embedding_states TYPE option<strin
 DEFINE FIELD IF NOT EXISTS legacy_basis ON embedding_states TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS legacy_metadata ON embedding_states TYPE option<object> FLEXIBLE;
 DEFINE FIELD IF NOT EXISTS legacy_warning ON embedding_states TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS legacy_deferred_at ON embedding_states TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS decided_at ON embedding_states TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS active_metadata ON embedding_states TYPE option<object> FLEXIBLE;
 DEFINE FIELD IF NOT EXISTS complete_metadata ON embedding_states TYPE option<object> FLEXIBLE;
@@ -95,12 +113,30 @@ def embedding_state_key(organization_id: str, plane: str) -> str:
     return f"embedding_states:s{digest[:40]}"
 
 
-def _stamp_groups_query(table: str, metadata_path: str, *, scope_field: str | None) -> str:
+async def embedding_sweep_schema_ready(execute_query: _Execute, *, graph: bool) -> bool:
+    """Whether a namespace's schema has taken the sweep's evidence snapshot.
+
+    Reads the version record by id, which a namespace without the version
+    table answers with no rows rather than an error.
+    """
+    name = GRAPH_SCHEMA_NAME if graph else CONTENT_SCHEMA_RECORD_NAME
+    required = GRAPH_SWEEP_SCHEMA_VERSION if graph else CONTENT_SWEEP_SCHEMA_VERSION
+    rows = normalize_records(
+        await execute_query(f"SELECT version FROM [{schema_version_record_id(name)}];")
+    )
+    version = rows[0].get("version") if rows else None
+    return isinstance(version, int | float) and version >= required
+
+
+def _stamp_groups_query(
+    table: str, metadata_path: str, *, vector_field: str, scope_field: str | None
+) -> str:
     scope = f"{scope_field} = $scope AND " if scope_field else ""
     return (
         f"SELECT {metadata_path}.provider AS provider, {metadata_path}.model AS model, "
         f"{metadata_path}.dimensions AS dimensions, count() AS rows FROM {table} "
-        f"WHERE {scope}{metadata_path} != NONE AND {metadata_path}.provider != $unverified "
+        f"WHERE {scope}{vector_field} != NONE AND {metadata_path} != NONE "
+        f"AND {metadata_path}.provider != $unverified "
         "GROUP BY provider, model, dimensions;"
     )
 
@@ -137,11 +173,16 @@ async def snapshot_graph_embedding_evidence(
     if not group_id:
         return
     stamps: list[dict[str, Any]] = []
-    for table in ("entity", "relates_to"):
+    for table, vector_field in (("entity", "name_embedding"), ("relates_to", "fact_embedding")):
         stamps.extend(
             await _stamp_groups(
                 execute_query,
-                _stamp_groups_query(table, "attributes.embedding_metadata", scope_field="group_id"),
+                _stamp_groups_query(
+                    table,
+                    "attributes.embedding_metadata",
+                    vector_field=vector_field,
+                    scope_field="group_id",
+                ),
                 scope=group_id,
             )
         )
@@ -166,7 +207,12 @@ async def snapshot_content_embedding_evidence(execute_query: _Execute) -> None:
     """
     stamps = await _stamp_groups(
         execute_query,
-        _stamp_groups_query("raw_captures", "metadata.embedding_metadata", scope_field=None),
+        _stamp_groups_query(
+            "raw_captures",
+            "metadata.embedding_metadata",
+            vector_field="embedding",
+            scope_field=None,
+        ),
     )
     await execute_query(
         f"UPSERT {DEPLOYMENT_EVIDENCE_KEY} SET kind = 'evidence', "
@@ -177,7 +223,9 @@ async def snapshot_content_embedding_evidence(execute_query: _Execute) -> None:
 
 
 __all__ = [
+    "CONTENT_SWEEP_SCHEMA_VERSION",
     "DEPLOYMENT_EVIDENCE_KEY",
+    "DEPLOYMENT_EVIDENCE_WAIT_KEY",
     "DEPLOYMENT_GRAPH_EVIDENCE_KEY",
     "DEPLOYMENT_MODELS_KEY",
     "EMBEDDING_DEPLOYMENT_DEFINITIONS",
@@ -185,8 +233,10 @@ __all__ = [
     "EMBEDDING_STATES_TABLE",
     "EMBEDDING_STATE_DEFINITIONS",
     "GRAPH_EMBEDDING_STATE_PLANE",
+    "GRAPH_SWEEP_SCHEMA_VERSION",
     "REOPEN_EMBEDDING_STATES",
     "embedding_state_key",
+    "embedding_sweep_schema_ready",
     "snapshot_content_embedding_evidence",
     "snapshot_graph_embedding_evidence",
 ]

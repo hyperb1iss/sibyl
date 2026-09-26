@@ -12,6 +12,7 @@ import structlog
 
 from sibyl_core.backends.surreal import SurrealContentClient
 from sibyl_core.backends.surreal.content_schema import EMBEDDING_DIM
+from sibyl_core.backends.surreal.schema_embedding_states import embedding_sweep_schema_ready
 from sibyl_core.embeddings.providers import EmbeddingProvider
 from sibyl_core.projection.repair import LifecycleRepairResult
 from sibyl_core.services import content_client
@@ -30,6 +31,7 @@ RAW_EMBEDDING_REPAIR_PAGE_SIZE = 256
 REPAIR_COMPLETED = "completed"
 REPAIR_SKIPPED_NO_PROVIDER = "skipped_no_provider"
 REPAIR_SKIPPED_DIMENSION_MISMATCH = "skipped_dimension_mismatch"
+REPAIR_SKIPPED_SCHEMA_PENDING = "skipped_schema_pending"
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +146,19 @@ async def repair_raw_capture_embeddings(
             provider_dimensions=provider.metadata.dimensions,
             schema_dimensions=EMBEDDING_DIM,
         )
+    async with _content_session(client) as session:
+        # Raw capture stamps are the chunk plane's evidence of the model that
+        # preceded this release; restamping them before the content upgrade
+        # photographs them would erase that evidence.
+        async def execute(query: str, **params: object) -> object:
+            return await content_client.select_many(session, query, **params)
+
+        if not await embedding_sweep_schema_ready(execute, graph=False):
+            log.info(
+                "raw_capture_embedding_repair_waiting_for_schema",
+                organization_id=organization_id,
+            )
+            return RawEmbeddingRepairResult(status=REPAIR_SKIPPED_SCHEMA_PENDING)
     expected_metadata = models.raw_memory_embedding_metadata(provider.metadata)
     limit = max(1, page_size)
     counts = {"checked": 0, "recovered": 0, "pending": 0, "failed": 0}
