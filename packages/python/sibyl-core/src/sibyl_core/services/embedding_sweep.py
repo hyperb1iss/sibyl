@@ -687,7 +687,7 @@ async def ensure_legacy_decision(
             defer_limit_seconds is not None and age >= defer_limit_seconds
         )
         if not deferred:
-            return await _read_state(plane)
+            return await _settled_by_another(plane, evidence_complete=evidence_complete)
         if not waited:
             return {**state, **deferred[0], "legacy_deferred": True}
     rows = normalize_records(
@@ -748,7 +748,20 @@ async def ensure_legacy_decision(
         elif not early:
             log.info("embedding_legacy_vectors_decided", **fields)
         return rows[0]
-    return await _read_state(plane)
+    return await _settled_by_another(plane, evidence_complete=evidence_complete)
+
+
+async def _settled_by_another(plane: SweepPlane, *, evidence_complete: bool) -> dict[str, Any]:
+    """The verdict another process recorded first.
+
+    A provisional one is weighed again on this process's evidence rather than
+    taken on trust: during a rolling deploy the two processes can disagree,
+    and this one may know of a switch the other did not.
+    """
+    winner = await _read_state(plane)
+    if winner.get("legacy_provisional"):
+        return await _reweigh_provisional(plane, evidence_complete=evidence_complete)
+    return winner
 
 
 async def _reweigh_provisional(plane: SweepPlane, *, evidence_complete: bool) -> dict[str, Any]:

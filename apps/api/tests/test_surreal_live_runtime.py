@@ -3271,6 +3271,82 @@ async def _sweep_as(client, provider):
 
 
 @pytest.mark.asyncio
+async def test_live_a_rolling_worker_race_leaves_no_stale_vector_under_a_new_stamp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two workers on different models, the verdict write raced, one row refused, late evidence.
+
+    1. X holds a genuine large row (a-good) and an unstamped small vector
+       (z-reject); Y's small evidence is unpublished.
+    2. A small-configured worker computes reembed and pauses before saving;
+       the large worker, past the wait bound, wins with a provisional adopt.
+    3. The small worker's write loses, and it weighs that provisional winner
+       on its own evidence instead of taking it on trust.
+    4. The small worker's sweep embeds a-good and has z-reject refused.
+    5. The large worker resumes, then Y publishes.
+    No row may end with its original vector under a large-model stamp.
+    """
+    from sibyl_core.services.embedding_sweep import PROVISIONAL_ADOPTION_KEY
+
+    small = _RefusingTarget(GRAPH_EMBEDDING_DIM, model=_SMALL_MODEL, refuse="z-reject")
+    large = _SweepTargetProvider(GRAPH_EMBEDDING_DIM, model=_LARGE_MODEL)
+    large_stamp = large.metadata.to_dict()
+    namespace = f"rolling_race_live_{uuid4().hex}"
+    content = _live_content_client(namespace)
+    x, y = str(uuid4()), str(uuid4())
+    other = None
+    small_worker = _live_graph_client(x)
+    large_worker = _live_graph_client(x)
+    try:
+        await bootstrap_content_schema(content, reset=True)
+        other = await _provisional_race_orgs(x, y, large_stamp, small.metadata.to_dict())
+        settle = _settler(content, [x, y])
+        # Step 2: the small worker pauses just before its verdict write while
+        # the large worker, past the wait, records a provisional adoption.
+        write = small_worker.execute_query
+        raced: list[object] = []
+
+        async def paused(query, **params):
+            if not raced and "SET legacy_decision = $decision" in query:
+                raced.append(await settle(large_worker, large, wait=0))
+            return await write(query, **params)
+
+        monkeypatch.setattr(small_worker, "execute_query", paused)
+        small_verdict = await settle(small_worker, small, wait=0)  # step 3
+        monkeypatch.setattr(small_worker, "execute_query", write)
+        small_pass = await _sweep_as(small_worker, small)  # step 4
+        await settle(large_worker, large, wait=600)  # step 5
+        large_pass = await _sweep_as(large_worker, large)
+        await settle(other, large, wait=600)
+        await settle(large_worker, large, wait=600)
+        await _sweep_as(large_worker, large)
+        stamps = await _live_vector_stamps(large_worker, "entity")
+    finally:
+        await content.close()
+        with suppress(Exception):
+            await _drop_surreal_namespace(namespace)
+        for client in (small_worker, large_worker, other):
+            if client is not None:
+                await client.close()
+        for group in (x, y):
+            with suppress(Exception):
+                await _drop_surreal_namespace(f"org_{group.replace('-', '')}")
+
+    winner = raced[0]
+    assert winner.graph["legacy_warning"] == "adopted_on_incomplete_evidence"
+    # The losing writer weighed the provisional winner on its own evidence.
+    assert small_verdict.graph["legacy_decision"] == "reembed"
+    # The refusal is remembered, so the small worker's pass completes.
+    assert (small_pass.status, small_pass.failed) == ("completed", 1)
+    assert large_pass.recovered == 2
+    for row_id in ("a-good", "z-reject"):
+        row = stamps[row_id]
+        assert row["stamp"] == large_stamp, row_id
+        assert PROVISIONAL_ADOPTION_KEY not in row["stamp"], row_id
+    assert stamps["z-reject"]["vector"] != _OLD_GRAPH_VECTOR
+
+
+@pytest.mark.asyncio
 async def test_live_a_refused_provisional_row_keeps_the_adoption_provisional(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
