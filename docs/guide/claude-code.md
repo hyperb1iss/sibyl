@@ -12,13 +12,15 @@ personal assistants like OpenClaw.
 
 ::: tip The CLI is the default agent interface. Most agents use Sibyl by running `sibyl` shell
 commands (taught by the [`sibyl` skill](./skills.md)), which is lighter-weight than MCP and needs no
-per-client config. Reach for the MCP tools below when a client works better with structured tool
-calls. See [Working with Agents](./working-with-agents.md). :::
+per-client config. [`sibyl setup <url>`](../cli/setup.md) signs the CLI in and installs the skill
+and the Claude Code hook in one step, or an agent can do it by following `<server>/agent`. Reach for
+the MCP tools below when a client works better with structured tool calls. See
+[Working with Agents](./working-with-agents.md). :::
 
 ## What is MCP?
 
 The Model Context Protocol (MCP) is an open standard that lets AI agents interact with external
-tools and data sources. Sibyl exposes 11 MCP tools:
+tools and data sources. Sibyl exposes 13 MCP tools:
 
 | Tool               | Purpose                                                        |
 | ------------------ | -------------------------------------------------------------- |
@@ -69,7 +71,7 @@ Clients that use a JSON config file take the standard MCP server block:
 }
 ```
 
-The Sibyl web UI generates the exact command for your server in the Connect panel. See
+On a remote server, swap in its URL for `http://localhost:3334`. See
 [MCP Configuration](./mcp-configuration.md) for transport, auth, and per-client detail.
 
 ### Subprocess Mode
@@ -336,11 +338,9 @@ that teaches the agent how to use the knowledge graph effectively.
 
 ### Installing Skills
 
-Use the Connect page in the Sibyl web UI for the current MCP config and prompt snippet. The CLI
-helper remains available for advanced local setups, but it should be an explicit choice rather than
-part of install.
-
-The helper installs the Sibyl skill and hooks for Claude Code, and the skill for Codex.
+[`sibyl setup`](../cli/setup.md) installs the skill into Claude Code, Codex, and the generic
+`~/.agents/skills` root, and registers the Claude Code SessionStart hook, as part of connecting a
+machine. To install only the skill, run `sibyl skill install`.
 
 ### Using Skills
 

@@ -5,7 +5,9 @@ description: Configuring Sibyl's MCP server
 
 # MCP Configuration
 
-This guide covers advanced configuration of Sibyl's MCP (Model Context Protocol) server.
+This guide covers advanced configuration of Sibyl's MCP (Model Context Protocol) server. Connecting
+a machine does not need any of it: [`sibyl setup`](../cli/setup.md) signs the CLI in and installs
+the skill agents use. Configure MCP for clients that only speak MCP.
 
 ## Server Architecture
 
