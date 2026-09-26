@@ -78,6 +78,13 @@ SWEEP_LEASE_LOST = "lease_lost"
 _LEASE_MARGIN_SECONDS = 120.0
 # Rows per adoption statement; ``slots`` statements run at once.
 _ADOPT_BATCH_ROWS = 1000
+# In a row write's WHERE: the pass still holds the plane's lease, re-read in
+# the same statement, so a pass that lost it (or was granted it twice by an
+# engine race) writes nothing.
+_LEASE_HELD = (
+    "(SELECT VALUE lease_owner FROM type::record($lease_key) "
+    "WHERE lease_until > time::now())[0] = $owner"
+)
 _BACKOFF_BASE_SECONDS = 1.0
 _BACKOFF_CAP_SECONDS = 20.0
 # How a pass decides the provider itself is down rather than rejecting some
@@ -313,9 +320,12 @@ class SweepTable:
         return f"(SELECT VALUE id FROM {self.name} WHERE uuid IN $uuids)"
 
     def adopt_query(self, *, reopened: bool = False) -> str:
+        # Fenced on the lease like every vector write: a pass that no longer
+        # holds the plane stamps nothing.
         return (
             f"UPDATE {self._rows_by_uuid()} SET {self.metadata_path} = $legacy "
-            f"WHERE {self.scope_field} = $scope AND {self.vector_field} != NONE "
+            f"WHERE {self.scope_field} = $scope AND {_LEASE_HELD} "
+            f"AND {self.vector_field} != NONE "
             f"AND {self._legacy_rows(reopened=reopened)} RETURN uuid;"
         )
 
@@ -365,9 +375,7 @@ class SweepTable:
             f"{self.vector_field} = <array<float, {self.dimensions}>>"
             "$rows_by_uuid[uuid].embedding, "
             f"{self.metadata_path} = $rows_by_uuid[uuid].embedding_metadata "
-            f"WHERE {self.scope_field} = $scope "
-            "AND (SELECT VALUE lease_owner FROM type::record($lease_key) "
-            "WHERE lease_until > time::now())[0] = $owner "
+            f"WHERE {self.scope_field} = $scope AND {_LEASE_HELD} "
             f"AND {self.fence} AND ({self.vector_field} = NONE "
             f"OR {self.metadata_path} != $rows_by_uuid[uuid].embedding_metadata) "
             "RETURN uuid;"
@@ -1387,7 +1395,12 @@ async def _stamp_legacy_rows(
             if counts.lease_lost:
                 return []
             stamped = await _rows(
-                plane, table.adopt_query(reopened=reopened), legacy=legacy, uuids=list(uuids)
+                plane,
+                table.adopt_query(reopened=reopened),
+                legacy=legacy,
+                uuids=list(uuids),
+                lease_key=plane.state_key,
+                owner=owner,
             )
             if not await _renew_lease(plane, owner=owner, budget=budget):
                 counts.lease_lost = True
@@ -1565,7 +1578,17 @@ async def _acquire_lease(plane: SweepPlane, *, owner: str, budget: float) -> boo
             stamp=plane.stamp,
         )
     )
-    return any(row.get("lease_owner") == owner for row in rows)
+    if not any(row.get("lease_owner") == owner for row in rows):
+        return False
+    # Read the lease back before trusting the grant: an engine that let two
+    # conditional updates both succeed (SurrealDB's memory storage does, under
+    # contention) leaves only the last writer as the owner.
+    held = await _rows(
+        plane,
+        "SELECT lease_owner FROM type::record($key) WHERE lease_until > time::now();",
+        key=plane.state_key,
+    )
+    return bool(held) and held[0].get("lease_owner") == owner
 
 
 async def _save_cursors(

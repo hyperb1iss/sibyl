@@ -1206,3 +1206,80 @@ async def test_adoption_renews_its_lease_after_every_statement(runtime, monkeypa
     assert result.adopted == 20
     # One page of 20 rows in four statements, each followed by a renewal.
     assert renewals == [True, True, True, True]
+
+
+async def _seed_double_grant_plane(runtime, previous, current) -> None:
+    """Unstamped vectors, a previous-model row, and a row the holder already re-embedded."""
+    from sibyl_core.services.embedding_sweep import embedding_state_key
+
+    await _entity(runtime, "old", stamp=previous_release_stamp(previous.metadata.to_dict()))
+    for index in range(3):
+        await _entity(runtime, f"legacy-{index}")
+    await upgrade_graph_to_sweep(runtime.client)
+    await runtime.client.execute_query(
+        "UPDATE entity SET name_embedding = $vector, attributes.embedding_metadata = $stamp "
+        "WHERE uuid = 'old';",
+        vector=_vector(0.9),
+        stamp=current.metadata.to_dict(),
+    )
+    # Another process holds the plane.
+    await runtime.client.execute_query(
+        "UPDATE type::record($key) SET lease_owner = 'holder', lease_until = time::now() + 5m;",
+        key=embedding_state_key(runtime.client.group_id, GRAPH_EMBEDDING_PLANE),
+    )
+
+
+async def test_a_double_granted_lease_is_caught_by_reading_it_back(runtime, monkeypatch) -> None:
+    """The engine lets both conditional updates succeed; only the holder owns the row."""
+    from sibyl_core.services.embedding_sweep import SWEEP_BUSY
+
+    previous = CountingProvider("previous")
+    current = CountingProvider("current")
+    await _seed_double_grant_plane(runtime, previous, current)
+    before = await _rows(runtime, "entity")
+    execute = runtime.client.execute_query
+
+    async def double_grant(query: str, **params: object) -> object:
+        if query.startswith("UPDATE type::record($key) SET lease_owner = $owner"):
+            # The update reports success without owning the row, as memory
+            # storage does when two contenders race.
+            return [{"uuid": "state", "lease_owner": params["owner"]}]
+        return await execute(query, **params)
+
+    monkeypatch.setattr(runtime.client, "execute_query", double_grant)
+
+    result = await sweep_graph_embeddings(runtime, embedding_provider=current)
+
+    assert result.status == SWEEP_BUSY
+    assert current.texts == []
+    assert await _rows(runtime, "entity") == before
+
+
+async def test_a_pass_granted_the_lease_twice_writes_nothing_and_stops(
+    runtime, monkeypatch
+) -> None:
+    """Past the read-back too, the losing pass's first write is fenced on the lease."""
+    from sibyl_core.services import embedding_sweep as sweep_module
+    from sibyl_core.services.embedding_sweep import SWEEP_LEASE_LOST
+
+    previous = CountingProvider("previous")
+    current = CountingProvider("current")
+    await _seed_double_grant_plane(runtime, previous, current)
+    before = await _rows(runtime, "entity")
+
+    async def granted(plane, *, owner, budget):
+        return True
+
+    monkeypatch.setattr(sweep_module, "_acquire_lease", granted)
+
+    result = await sweep_graph_embeddings(runtime, embedding_provider=current)
+
+    after = await _rows(runtime, "entity")
+    assert result.status == SWEEP_LEASE_LOST
+    assert current.texts == []
+    # The unstamped vectors were not marked by the pass that lost, and the row
+    # the holder re-embedded kept its vector and stamp.
+    for index in range(3):
+        assert after[f"legacy-{index}"]["stamp"] is None, index
+    assert after["old"]["stamp"] == before["old"]["stamp"]
+    assert after["old"]["vector"] == before["old"]["vector"]
