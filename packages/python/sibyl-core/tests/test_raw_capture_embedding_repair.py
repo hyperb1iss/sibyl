@@ -31,6 +31,16 @@ def provider(model: str) -> DeterministicEmbeddingProvider:
     )
 
 
+async def query_embedding(embedding_provider: DeterministicEmbeddingProvider) -> AsyncMock:
+    """A stand-in for the recall's query embedding, from ``embedding_provider``'s model."""
+    from sibyl_core.services.content_models import raw_memory_embedding_space
+
+    vector = (await embedding_provider.embed_texts(["percent"], input_kind="query"))[0]
+    space = raw_memory_embedding_space(embedding_provider.metadata)
+    assert space is not None
+    return AsyncMock(return_value=content_raw_recall.RawQueryEmbedding(vector, space))
+
+
 async def remember(org: str, source: str, *, embedding_provider=None, metadata=None):
     return await remember_raw_memory(
         organization_id=org,
@@ -161,9 +171,7 @@ async def test_vector_lane_reports_an_unembedded_scope_until_repair_runs(
     monkeypatch.setattr(
         content_raw_recall,
         "raw_memory_query_embedding",
-        AsyncMock(
-            return_value=(await query_provider.embed_texts(["percent"], input_kind="query"))[0]
-        ),
+        await query_embedding(query_provider),
     )
     remembered = [await remember(org, f"unembedded-{index}") for index in range(2)]
 
@@ -201,9 +209,7 @@ async def test_vector_lane_stays_healthy_over_an_empty_scope(content_store, monk
     monkeypatch.setattr(
         content_raw_recall,
         "raw_memory_query_embedding",
-        AsyncMock(
-            return_value=(await query_provider.embed_texts(["percent"], input_kind="query"))[0]
-        ),
+        await query_embedding(query_provider),
     )
 
     result = await recall_raw_memory_with_sources(
@@ -224,9 +230,7 @@ async def test_vector_lane_keeps_its_result_when_the_coverage_probe_fails(
     monkeypatch.setattr(
         content_raw_recall,
         "raw_memory_query_embedding",
-        AsyncMock(
-            return_value=(await query_provider.embed_texts(["percent"], input_kind="query"))[0]
-        ),
+        await query_embedding(query_provider),
     )
     await remember(org, "probe-failure")
     select_many_raw = content_client.select_many_raw
@@ -256,9 +260,7 @@ async def test_coverage_judges_eligibility_the_way_recall_does(content_store, mo
     monkeypatch.setattr(
         content_raw_recall,
         "raw_memory_query_embedding",
-        AsyncMock(
-            return_value=(await query_provider.embed_texts(["percent"], input_kind="query"))[0]
-        ),
+        await query_embedding(query_provider),
     )
     ineligible_embedded = await remember(
         org,
@@ -304,9 +306,7 @@ async def test_coverage_walks_past_ineligible_rows_before_judging(content_store,
     monkeypatch.setattr(
         content_raw_recall,
         "raw_memory_query_embedding",
-        AsyncMock(
-            return_value=(await query_provider.embed_texts(["percent"], input_kind="query"))[0]
-        ),
+        await query_embedding(query_provider),
     )
     eligible = await remember(org, "older-eligible")
     for index in range(150):
@@ -336,11 +336,13 @@ async def test_coverage_reports_unknown_when_its_walk_is_inconclusive(content_st
     monkeypatch.setattr(
         content_raw_recall,
         "raw_memory_query_embedding",
-        AsyncMock(
-            return_value=(await query_provider.embed_texts(["percent"], input_kind="query"))[0]
-        ),
+        await query_embedding(query_provider),
     )
     await remember(org, "eligible-behind-the-cap")
+    from sibyl_core.services.content_models import raw_memory_embedding_space
+
+    space = raw_memory_embedding_space(query_provider.metadata)
+    assert space is not None
     sides: list[str] = []
 
     async def capped_walk(client, *, extra_clause, **kwargs):
@@ -354,7 +356,10 @@ async def test_coverage_reports_unknown_when_its_walk_is_inconclusive(content_st
     )
 
     lanes = {source.source: source for source in result.sources}
-    assert sides == [" AND embedding != NONE", " AND embedding = NONE"]
+    assert sides == [
+        f" AND embedding != NONE AND {content_raw_recall._raw_vector_space_match(space)}",
+        f" AND {content_raw_recall._raw_vector_space_mismatch(space)}",
+    ]
     assert lanes["raw_vector"].failure is None
     assert lanes["raw_vector"].candidates == ()
     assert lanes["raw_vector"].note == RAW_VECTOR_COVERAGE_UNKNOWN
