@@ -25,6 +25,10 @@ on:
         description: "Nightly Regression run ID to cite (empty: find or dispatch one)"
         required: false
         default: ""
+      expected_sha:
+        description: "Full SHA the dry run proved and the maintainer approved (required for a real cut)"
+        required: false
+        default: ""
 
 # Each job asks for what it uses. Only the release job can write contents, and
 # it runs only after every gate below has passed.
@@ -42,6 +46,11 @@ concurrency:
 jobs:
   # A real cut pushes a version commit and a tag to the ref it runs on, so it
   # runs only on main. A dry run may rehearse any branch.
+  #
+  # `gh workflow run --ref main` takes whatever main's head is when it is
+  # dispatched, so a real cut names the commit its dry run proved. If main
+  # moved after the approval, the cut refuses instead of releasing a commit
+  # nobody approved.
   preflight:
     name: "△ Preflight"
     runs-on: ubuntu-latest
@@ -56,6 +65,23 @@ jobs:
           echo "::error::A real release cuts from main, and this run was dispatched on $RELEASE_REF."
           echo "::error::Dispatch again with --ref main, or set dry_run=true to rehearse this ref."
           exit 1
+
+      - name: "△ Pin the approved commit"
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$DRY_RUN" != "true" && -z "$EXPECTED_SHA" ]]; then
+            echo "::error::A real cut needs expected_sha: the full SHA its dry run proved."
+            echo "::error::The dry run's summary prints the exact command to dispatch."
+            exit 1
+          fi
+          if [[ -n "$EXPECTED_SHA" && "$EXPECTED_SHA" != "$GITHUB_SHA" ]]; then
+            echo "::error::expected_sha is $EXPECTED_SHA, but this run is on $GITHUB_SHA."
+            echo "::error::The ref moved after the dry run. Dry-run the new head before cutting it."
+            exit 1
+          fi
 
       - name: "△ Record the candidate"
         env:
@@ -109,6 +135,11 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+    # ci.yml runs every step as bash with pipefail. Without it a readiness
+    # probe piped into head would pass here while it fails there.
+    defaults:
+      run:
+        shell: bash
     env:
       COMPOSE_PROJECT_NAME: sibyl-ci
       SIBYL_ENVIRONMENT: production
@@ -297,9 +328,41 @@ jobs:
             --run-id "$NIGHTLY_RUN_ID" \
             --timeout-minutes 50
 
+  # CI still owns checks the release does not repeat, such as the shipped
+  # dependency audit and the Storybook build, so the candidate's own CI run
+  # has to be green. Path-skipped CI jobs are fine: the gates above prove
+  # those on the candidate. tools/release/ci_evidence.py holds the rule and
+  # waits for a CI run that is still in progress.
+  ci-evidence:
+    name: "◇ CI evidence"
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      run_id: ${{ steps.ci.outputs.run_id }}
+      url: ${{ steps.ci.outputs.url }}
+    steps:
+      - name: "◆ Checkout"
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+
+      - name: "◇ Require green CI on the candidate"
+        id: ci
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 -m tools.release.ci_evidence \
+            --repo "$GITHUB_REPOSITORY" \
+            --sha "$GITHUB_SHA" \
+            --timeout-minutes 50
+
   release:
     name: Release
-    needs: [image-cve-gate, e2e-gate, nightly-evidence]
+    needs: [image-cve-gate, e2e-gate, nightly-evidence, ci-evidence]
     runs-on: ubuntu-latest
     # The forced RC bundle took 17 to 23 minutes across the 1.4.x cuts and the
     # release-only gates add about two. Sixty minutes leaves room for the suite
@@ -623,6 +686,7 @@ jobs:
           CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
           IMAGE_CVE_GATE_RESULT: ${{ needs.image-cve-gate.result }}
           E2E_GATE_RESULT: ${{ needs.e2e-gate.result }}
+          CI_RUN_URL: ${{ needs.ci-evidence.outputs.url }}
           RC_CHECK_CONCLUSION: ${{ steps.rc_check.conclusion }}
           NIGHTLY_RUN_ID: ${{ steps.nightly.outputs.run_id }}
           NIGHTLY_URL: ${{ steps.nightly.outputs.url }}
@@ -647,6 +711,7 @@ jobs:
                   "moon run e2e:test-browser --force",
               ],
               "e2e_gate_result": os.environ["E2E_GATE_RESULT"],
+              "ci_run_url": os.environ["CI_RUN_URL"],
               "rc_gate_commands": [
                   "moon run :check --force",
                   "moon run bench-longmemeval-v2-release-ci-test --force",
@@ -724,11 +789,19 @@ jobs:
             echo "- Previous release: \`${{ steps.version.outputs.previous_tag }}\`"
             echo "- Image CVE gate: \`${{ needs.image-cve-gate.result }}\`"
             echo "- E2E gate: \`${{ needs.e2e-gate.result }}\`"
+            echo "- CI: ${{ needs.ci-evidence.outputs.url }}"
             echo "- RC gate: \`${{ steps.rc_check.conclusion }}\`"
             echo "- Nightly Regression: ${{ steps.nightly.outputs.url }} (${{ steps.nightly.outputs.event }}, ${{ needs.nightly-evidence.outputs.source }})"
             echo ""
             if [[ "${{ inputs.dry_run }}" == "true" ]]; then
               echo "No version commit, tag, release, or publish was created."
+              echo ""
+              echo "After the maintainer approves the version commit, tag and publish, cut this"
+              echo "exact commit with:"
+              echo ""
+              echo '```bash'
+              echo "gh workflow run release.yml --ref main -f version=${{ steps.version.outputs.version }} -f dry_run=false -f expected_sha=${{ steps.base.outputs.sha }}"
+              echo '```'
             else
               echo "✓ Released: ${{ steps.version.outputs.previous_tag }} → v${{ steps.version.outputs.version }}"
               echo ""

@@ -49,6 +49,7 @@ RELEASE_WORKFLOW_REQUIRED_FRAGMENTS = (
     # verifies the chosen run again right before the tag.
     "python3 -m tools.release.nightly_evidence resolve",
     "python3 -m tools.release.nightly_evidence verify",
+    "python3 -m tools.release.ci_evidence",
     "NIGHTLY_RUN_ID: ${{ inputs.nightly_run_id }}",
     "NIGHTLY_RUN_ID: ${{ needs.nightly-evidence.outputs.run_id }}",
     "CANDIDATE_SHA: ${{ steps.base.outputs.sha }}",
@@ -159,7 +160,7 @@ def _assert_fragments_absent(content: str, fragments: tuple[str, ...]) -> None:
     assert [fragment for fragment in fragments if fragment in content] == []
 
 
-RELEASE_GATE_JOBS = ("image-cve-gate", "e2e-gate", "nightly-evidence")
+RELEASE_GATE_JOBS = ("image-cve-gate", "e2e-gate", "nightly-evidence", "ci-evidence")
 DRY_RUN_GUARD = "${{ !inputs.dry_run }}"
 # The steps that stand up and tear down the production-shaped E2E fixture.
 # The release copy must run exactly what CI's E2E job runs.
@@ -276,6 +277,27 @@ def test_real_cut_refuses_any_ref_but_main() -> None:
     assert preflight["permissions"] == {}
 
 
+def test_real_cut_releases_only_the_commit_its_dry_run_proved() -> None:
+    # gh workflow run --ref main takes main's head at dispatch time, so the
+    # approval is pinned to a SHA and a moved main is refused, not released.
+    workflow = _load_workflow("release.yml")
+    # PyYAML reads the bare `on:` key as the boolean True.
+    inputs = cast("dict[Any, Any]", workflow)[True]["workflow_dispatch"]["inputs"]
+    pin = _steps_by_name(workflow["jobs"]["preflight"])["△ Pin the approved commit"]
+
+    assert inputs["expected_sha"]["default"] == ""
+    assert pin["env"] == {
+        "DRY_RUN": "${{ inputs.dry_run }}",
+        "EXPECTED_SHA": "${{ inputs.expected_sha }}",
+    }
+    assert '[[ "$DRY_RUN" != "true" && -z "$EXPECTED_SHA" ]]' in pin["run"]
+    assert '[[ -n "$EXPECTED_SHA" && "$EXPECTED_SHA" != "$GITHUB_SHA" ]]' in pin["run"]
+    assert pin["run"].count("exit 1") == len(("missing", "mismatched"))
+
+    summary = _steps_by_name(workflow["jobs"]["release"])["► Summary"]["run"]
+    assert "-f dry_run=false -f expected_sha=${{ steps.base.outputs.sha }}" in summary
+
+
 def test_dry_run_never_changes_remote_release_state() -> None:
     jobs = _release_jobs()
     remote_effects: list[str] = []
@@ -326,10 +348,11 @@ def test_only_the_release_job_can_write() -> None:
     assert jobs["e2e-gate"]["permissions"] == {"contents": "read"}
     # Dispatching Nightly Regression needs actions: write and nothing more.
     assert jobs["nightly-evidence"]["permissions"] == {"actions": "write", "contents": "read"}
+    assert jobs["ci-evidence"]["permissions"] == {"actions": "read", "contents": "read"}
 
 
 def test_every_release_checkout_is_the_dispatched_commit() -> None:
-    for name in ("e2e-gate", "nightly-evidence", "release"):
+    for name in ("e2e-gate", "nightly-evidence", "ci-evidence", "release"):
         checkouts = [
             step
             for step in _release_jobs()[name]["steps"]
@@ -350,6 +373,8 @@ def test_release_e2e_gate_mirrors_the_ci_fixture() -> None:
     release_steps = _steps_by_name(release_job)
 
     assert release_job["env"] == {**ci["env"], **ci_job["env"]}
+    # ci.yml runs steps as bash with pipefail; the copy must fail the same way.
+    assert release_job["defaults"] == ci["defaults"]
     for name in E2E_FIXTURE_STEPS:
         assert release_steps[name].get("run") == ci_steps[name].get("run"), name
         assert release_steps[name].get("if") == ci_steps[name].get("if"), name
@@ -451,6 +476,7 @@ def test_release_receipt_records_every_gate() -> None:
         "dry_run",
         "image_cve_gate_result",
         "e2e_gate_result",
+        "ci_run_url",
         "rc_gate_commands",
         "rc_gate_conclusion",
         "nightly_run_id",
