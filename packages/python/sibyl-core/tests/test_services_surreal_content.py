@@ -1082,7 +1082,7 @@ class TestSurrealContentHelpers:
         assert source_params["organization_id"] == "org-1"
         assert source_params["source_id"] == "src-1"
         assert "FROM document_chunks WHERE organization_id = $organization_id" in vector_query
-        assert "source_id INSIDE $source_ids" in vector_query
+        assert "$source_ids CONTAINS source_id" in vector_query
         assert "FROM document_chunks WHERE organization_id = $organization_id" in lexical_query
         assert "source_id INSIDE $source_ids" in lexical_query
         assert "embedding <|25, 40|> $query_embedding" in vector_query

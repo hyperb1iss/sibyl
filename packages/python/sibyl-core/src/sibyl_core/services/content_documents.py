@@ -400,7 +400,9 @@ async def search_document_chunks(
                         "has_entities, entity_ids, embedding_metadata, "
                         "(1 - vector::distance::knn()) AS score "
                         "FROM document_chunks WHERE organization_id = $organization_id "
-                        "AND source_id INSIDE $source_ids"
+                        # CONTAINS, not INSIDE: the embedded engine drops every
+                        # row for an INSIDE predicate inside an HNSW bracket.
+                        "AND $source_ids CONTAINS source_id"
                         f"{language_clause} {space_clause}"
                         f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding"
                         ") WHERE score >= $similarity_threshold "

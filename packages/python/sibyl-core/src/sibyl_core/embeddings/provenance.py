@@ -163,8 +163,13 @@ def same_vector_identity(left: object, right: object) -> bool:
 
 
 def vector_space_predicate(path: str, param: str) -> str:
-    """SurrealQL: the stamp at ``path`` is in the same vector space as ``$param``."""
-    return "(" + " AND ".join(f"{path}.{f} = ${param}.{f}" for f in VECTOR_SPACE_FIELDS) + ")"
+    """SurrealQL: the stamp at ``path`` is in the same vector space as ``$param``.
+
+    A bare AND chain, never parenthesized: callers AND-join it, and the
+    embedded engine silently drops a parenthesized group inside an HNSW
+    bracket, which would empty every vector lane there.
+    """
+    return " AND ".join(f"{path}.{f} = ${param}.{f}" for f in VECTOR_SPACE_FIELDS)
 
 
 def vector_identity_differs_predicate(path: str, param: str) -> str:

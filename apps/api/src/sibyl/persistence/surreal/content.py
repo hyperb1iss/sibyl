@@ -709,7 +709,9 @@ def _chunk_space_clause(
     old model's vector; they drop out of the vector lane, not the lexical one.
     The clause goes inside the HNSW bracket, beside the scope filters: applied
     after the read, nearer old-model chunks would fill the candidate pool and
-    leave the lane empty until the sweep finished.
+    leave the lane empty until the sweep finished. The source filter beside it
+    is spelled ``$source_ids CONTAINS source_id``, because the embedded engine
+    drops every row for an INSIDE predicate inside the bracket.
     """
     if embedding_metadata is None:
         return "", {}
@@ -2452,7 +2454,7 @@ async def search_rag_chunks(
             "chunk_type, content, context, heading_path, language, has_entities, entity_ids, "
             "embedding_metadata, (1 - vector::distance::knn()) AS score "
             "FROM document_chunks WHERE organization_id = $organization_id "
-            f"AND source_id INSIDE $source_ids {space_clause}"
+            f"AND $source_ids CONTAINS source_id {space_clause}"
             f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding"
             ") WHERE score >= $similarity_threshold "
             "ORDER BY score DESC LIMIT $candidate_limit;",
@@ -2511,7 +2513,7 @@ async def search_code_example_chunks(
             "chunk_type, content, context, heading_path, language, has_entities, entity_ids, "
             "embedding_metadata, (1 - vector::distance::knn()) AS score "
             "FROM document_chunks WHERE organization_id = $organization_id "
-            "AND source_id INSIDE $source_ids"
+            "AND $source_ids CONTAINS source_id"
             f"{language_clause} {space_clause}"
             f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding "
             ") "
@@ -2575,7 +2577,7 @@ async def hybrid_search_chunks(
             "chunk_type, content, context, heading_path, language, has_entities, entity_ids, "
             "embedding_metadata, (1 - vector::distance::knn()) AS score "
             "FROM document_chunks WHERE organization_id = $organization_id "
-            f"AND source_id INSIDE $source_ids {space_clause}"
+            f"AND $source_ids CONTAINS source_id {space_clause}"
             f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding"
             ") WHERE score >= $similarity_threshold "
             "ORDER BY score DESC LIMIT $candidate_limit;",
