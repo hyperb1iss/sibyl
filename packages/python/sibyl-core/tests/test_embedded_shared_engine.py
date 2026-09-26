@@ -111,6 +111,54 @@ async def test_statement_results_exclude_the_namespace_scope(tmp_path) -> None:
         await client.close()
 
 
+async def test_same_namespace_writers_survive_commit_conflicts(monkeypatch, tmp_path) -> None:
+    """Writers racing on one record retry the engine's conflict instead of failing.
+
+    The embedded engine words a lost commit race differently from a server
+    ("read or write conflict"), and the retry used to miss it, so the losing
+    write surfaced as an InternalError.
+    """
+    retries = 0
+    retry_delay = dedicated_client_module._transaction_conflict_retry_delay
+
+    def counted_delay(retry_count: int) -> float:
+        nonlocal retries
+        retries += 1
+        return retry_delay(retry_count)
+
+    monkeypatch.setattr(dedicated_client_module, "_transaction_conflict_retry_delay", counted_delay)
+    url = f"surrealkv://{tmp_path / 'store'}"
+    writers = [_client(url, "org_shared", "graph") for _ in range(4)]
+    rounds = 60
+    attempts = 0
+
+    async def write(worker: int, offset: int) -> None:
+        for step in range(offset, offset + rounds):
+            await writers[worker].execute_query(
+                "BEGIN; CREATE probe SET worker = $worker, step = $step;"
+                " UPSERT counter:hot SET n += 1; COMMIT;",
+                worker=worker,
+                step=step,
+            )
+
+    try:
+        # Conflicts are a race, so keep writing until one has been retried.
+        while retries == 0 and attempts < 10:
+            await asyncio.gather(
+                *(write(worker, attempts * rounds) for worker in range(len(writers)))
+            )
+            attempts += 1
+        assert retries > 0, "no commit conflict occurred to exercise the retry"
+        rows = await writers[0].execute_query(
+            "SELECT worker, step, count() AS n FROM probe GROUP BY worker, step;"
+        )
+        # Every write landed exactly once: none surfaced, none was doubled.
+        assert len(rows) == len(writers) * rounds * attempts
+        assert {row["n"] for row in rows} == {1}
+    finally:
+        await asyncio.gather(*(writer.close() for writer in writers))
+
+
 def _install_counting_surreal(monkeypatch) -> list[Any]:
     engines: list[Any] = []
 

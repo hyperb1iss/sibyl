@@ -439,6 +439,80 @@ async def test_execute_query_does_not_retry_unmarked_transaction_conflicts(monke
     assert calls == 1
 
 
+_SERVER_CONFLICT = "Transaction conflict: Resource busy. This transaction can be retried"
+_EMBEDDED_CONFLICT = (
+    "Failed to commit transaction due to a read or write conflict. This transaction can be retried"
+)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        _SERVER_CONFLICT,
+        "Transaction conflict: Write conflict. This transaction can be retried",
+        "Cannot COMMIT: Transaction conflict: Write conflict, retry the transaction. "
+        "This transaction can be retried",
+        # The engine the Python SDK embeds, bare and as a statement envelope
+        # reports it once its implicit transaction fails.
+        _EMBEDDED_CONFLICT,
+        f"The query was not executed due to a failed transaction. {_EMBEDDED_CONFLICT}",
+    ],
+)
+def test_retryable_conflict_matches_server_and_embedded_wordings(message: str) -> None:
+    assert dedicated_client_module.is_retryable_transaction_conflict(message)
+    assert dedicated_client_module.is_retryable_transaction_conflict(RuntimeError(message))
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Transaction conflict: retry safety is unknown",
+        "Failed to commit transaction due to a read or write conflict",
+        "This transaction can be retried",
+        "The query was not executed due to a failed transaction",
+        "Database record `entity:one` already exists",
+        "Resource busy",
+        "An error occurred: source changed during the conflict check",
+    ],
+)
+def test_retryable_conflict_rejects_everything_else(message: str) -> None:
+    assert not dedicated_client_module.is_retryable_transaction_conflict(message)
+
+
+@pytest.mark.parametrize("wording", [_SERVER_CONFLICT, _EMBEDDED_CONFLICT])
+async def test_statement_level_conflicts_retry_in_either_wording(monkeypatch, wording) -> None:
+    calls = 0
+
+    class FakeAsyncSurreal:
+        def __init__(self, _url: str) -> None:
+            pass
+
+        async def use(self, _namespace: str, _database: str) -> None:
+            return None
+
+        async def query_raw(self, query: str, _params: object | None = None) -> object:
+            nonlocal calls
+            if query == "RETURN true;":
+                return {"result": [{"status": "OK", "result": True}]}
+            calls += 1
+            if calls == 1:
+                return {"result": [{"status": "ERR", "result": wording}]}
+            return {"result": [{"status": "OK", "result": [{"n": 2}]}]}
+
+        async def close(self) -> None:
+            return None
+
+    async def fake_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr("surrealdb.AsyncSurreal", FakeAsyncSurreal)
+    monkeypatch.setattr(dedicated_client_module.asyncio, "sleep", fake_sleep)
+    client = DedicatedSurrealClient(url="memory://", namespace="org_conflict", database="graph")
+
+    assert await client.execute_query("UPSERT counter:c SET n += 1;") == [{"n": 2}]
+    assert calls == 2
+
+
 async def test_schema_renewal_has_capacity_when_graph_pool_is_occupied(monkeypatch):
     tracker = _ConcurrencyTracker()
     clients = _install_overlap_surreal(monkeypatch, tracker)

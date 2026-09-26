@@ -277,7 +277,7 @@ def _checked_query_result(response: object, *, all_results: bool = False) -> obj
         for error in errors:
             details = error.get("details")
             message = error.get("result")
-            if isinstance(message, str) and _is_retryable_transaction_conflict(message):
+            if isinstance(message, str) and is_retryable_transaction_conflict(message):
                 raise parse_query_error(error)
             if isinstance(message, str) and message in {
                 "The query was not executed due to a failed transaction",
@@ -295,9 +295,22 @@ def _checked_query_result(response: object, *, all_results: bool = False) -> obj
     return statements[0]["result"]
 
 
-def _is_retryable_transaction_conflict(exc: BaseException | str) -> bool:
+# A commit that lost a race says so in two wordings. A SurrealDB 3.x server
+# reports "Transaction conflict: <reason>. This transaction can be retried";
+# the engine the Python SDK embeds (surrealdb-core 2.3) reports "Failed to
+# commit transaction due to a read or write conflict. This transaction can be
+# retried". Both markers require the retry suffix, so an error that merely
+# mentions a conflict is never replayed.
+_TRANSACTION_CONFLICT_MARKERS = ("transaction conflict", "read or write conflict")
+_TRANSACTION_RETRY_MARKER = "can be retried"
+
+
+def is_retryable_transaction_conflict(exc: BaseException | str) -> bool:
+    """Whether SurrealDB rejected a commit only because another commit won."""
     message = str(exc).lower()
-    return "transaction conflict" in message and "can be retried" in message
+    return _TRANSACTION_RETRY_MARKER in message and any(
+        marker in message for marker in _TRANSACTION_CONFLICT_MARKERS
+    )
 
 
 def _can_replay_query(query: str, response: object = None) -> bool:
@@ -743,7 +756,7 @@ class DedicatedSurrealClient:
                                 isinstance(statement, dict)
                                 and statement.get("status") == "ERR"
                                 and isinstance(statement.get("result"), str)
-                                and _is_retryable_transaction_conflict(statement["result"])
+                                and is_retryable_transaction_conflict(statement["result"])
                                 for statement in statements
                             ):
                                 _checked_query_result(response)
@@ -752,7 +765,7 @@ class DedicatedSurrealClient:
                         result = _checked_query_result(response, all_results=all_results)
                     break
                 except Exception as exc:
-                    if transaction_retry_allowed and _is_retryable_transaction_conflict(exc):
+                    if transaction_retry_allowed and is_retryable_transaction_conflict(exc):
                         if transaction_retry_count >= _MAX_TRANSACTION_CONFLICT_RETRIES:
                             raise
                         transaction_retry_count += 1
@@ -844,4 +857,4 @@ def _pop_query_label(params: QueryParams) -> str | None:
     return str(value)
 
 
-__all__ = ["DedicatedSurrealClient", "PoolHealth"]
+__all__ = ["DedicatedSurrealClient", "PoolHealth", "is_retryable_transaction_conflict"]
