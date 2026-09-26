@@ -170,9 +170,12 @@ At minimum, the backend secret should provide:
 SIBYL_JWT_SECRET
 SIBYL_SETTINGS_KEY
 SIBYL_OIDC_ENTRA_CLIENT_SECRET
-SIBYL_OPENAI_API_KEY
-SIBYL_ANTHROPIC_API_KEY
 ```
+
+Add the API key for each model provider the server routes to, such as `SIBYL_ANTHROPIC_API_KEY` and
+`SIBYL_OPENAI_API_KEY`. On AWS, [Amazon Bedrock](../deployment/helm-chart.md#amazon-bedrock) serves
+Claude and Cohere embeddings through the service account's IAM role and needs no provider key. An
+admin can also enter keys in the web app, which stores them encrypted with `SIBYL_SETTINGS_KEY`.
 
 Use a generated 32-byte or stronger `SIBYL_JWT_SECRET`. Keep `SIBYL_SETTINGS_KEY` stable so
 encrypted settings can be read after a restart.

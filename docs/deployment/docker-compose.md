@@ -138,6 +138,7 @@ cp .env.example ~/.sibyl/prod.env
 # Edit ~/.sibyl/prod.env with required secrets:
 #   SIBYL_JWT_SECRET=<generate with: openssl rand -hex 32>
 #   SIBYL_OPENAI_API_KEY=sk-...
+#   SIBYL_ANTHROPIC_API_KEY=sk-ant-...
 
 # Start the repo production compose directly
 docker compose --env-file ~/.sibyl/prod.env -f docker-compose.prod.yml up -d
@@ -153,6 +154,14 @@ sibyl docker up
 sibyl docker logs
 sibyl docker down
 ```
+
+The repo's `docker-compose.prod.yml` refuses to start without both `SIBYL_OPENAI_API_KEY` and
+`SIBYL_ANTHROPIC_API_KEY`, and it pins Anthropic as the language model, so switching providers there
+means editing the file. The bundle `sibyl docker init` generates sets no provider keys: an admin
+enters keys and picks providers in the setup wizard and the admin AI settings. Amazon Bedrock reads
+its Region and credentials only from the environment, so on either stack add the
+[Bedrock variables](./environment.md#amazon-bedrock) to the API container's `environment` block, or
+run the [Helm chart](./helm-chart.md#amazon-bedrock).
 
 ### Production Compose Services
 

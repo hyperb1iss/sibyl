@@ -46,7 +46,10 @@ compiles on the host.
 
 Secrets have no defaults and must be supplied, ideally through ansible-vault: `sibyl_jwt_secret`,
 `sibyl_surreal_password`, `sibyl_openai_api_key`, `sibyl_anthropic_api_key`, `sibyl_cf_api_token`.
-The role asserts each one is set before doing any work.
+The role asserts each one is set before doing any work. It wires Anthropic for language models and
+OpenAI for embeddings and has no switch for Gemini or Amazon Bedrock yet; the
+[environment reference](./environment.md#llm-configuration) lists every provider the server itself
+supports.
 
 ### Client addresses behind Caddy
 

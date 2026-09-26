@@ -454,11 +454,11 @@ installed, the path degrades cleanly to the fused order instead of raising.
 
 ## API Keys
 
-| Variable                  | Default | Description                              |
-| ------------------------- | ------- | ---------------------------------------- |
-| `SIBYL_OPENAI_API_KEY`    | (empty) | OpenAI API key (required for embeddings) |
-| `SIBYL_ANTHROPIC_API_KEY` | (empty) | Anthropic API key                        |
-| `SIBYL_GEMINI_API_KEY`    | (empty) | Gemini API key (for Google embeddings)   |
+| Variable                  | Default | Description                        |
+| ------------------------- | ------- | ---------------------------------- |
+| `SIBYL_OPENAI_API_KEY`    | (empty) | OpenAI API key (LLM or embeddings) |
+| `SIBYL_ANTHROPIC_API_KEY` | (empty) | Anthropic API key                  |
+| `SIBYL_GEMINI_API_KEY`    | (empty) | Gemini API key (LLM or embeddings) |
 
 The `bedrock` provider needs none of these: it signs with AWS credentials, or a Bedrock API key from
 `SIBYL_BEDROCK_API_KEY`. That key comes from the environment only and is never stored in the
