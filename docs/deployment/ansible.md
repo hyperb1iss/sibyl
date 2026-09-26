@@ -5,7 +5,8 @@ instance on a small cloud VM: one box, no Kubernetes, modest cost.
 
 ## Architecture
 
-Four containers, managed by a `sibyl.service` systemd unit:
+Four long-running containers plus a one-shot volume initializer (`surreal-init`), managed by a
+`sibyl.service` systemd unit:
 
 | Container   | Source                                              | Purpose                        |
 | ----------- | --------------------------------------------------- | ------------------------------ |

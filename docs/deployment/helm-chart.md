@@ -789,9 +789,9 @@ backend:
     SIBYL_GRAPH_EMBEDDING_PROVIDER: "bedrock"
 ```
 
-The chart renders `backend.env` into the ConfigMap the worker also loads, and the worker mounts the
-same `backend.existingSecret` and runs as the same service account, so a separate worker gets these
-settings and the role with no extra values.
+The chart renders `backend.env` into the ConfigMap the worker also loads, and the worker loads the
+same `backend.existingSecret` into its environment and runs as the same service account, so a
+separate worker gets these settings and the role with no extra values.
 
 The IRSA webhook injects `AWS_ROLE_ARN` and `AWS_WEB_IDENTITY_TOKEN_FILE` into each pod, and the AWS
 credential chain exchanges that token for role credentials and refreshes them before they expire.
