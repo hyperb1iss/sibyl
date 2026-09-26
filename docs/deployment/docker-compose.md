@@ -158,10 +158,16 @@ sibyl docker down
 The repo's `docker-compose.prod.yml` refuses to start without both `SIBYL_OPENAI_API_KEY` and
 `SIBYL_ANTHROPIC_API_KEY`, and it pins Anthropic as the language model, so switching providers there
 means editing the file. The bundle `sibyl docker init` generates sets no provider keys: an admin
-enters keys and picks providers in the setup wizard and the admin AI settings. Amazon Bedrock reads
-its Region and credentials only from the environment, so on either stack add the
-[Bedrock variables](./environment.md#amazon-bedrock) to the API container's `environment` block, or
-run the [Helm chart](./helm-chart.md#amazon-bedrock).
+enters keys and picks providers in the setup wizard and the admin AI settings.
+
+Amazon Bedrock takes its settings (the Region, inference scope, API choice, and an optional Bedrock
+API key) only from the environment; the settings UI has no field for them. AWS credentials resolve
+through the standard AWS credential chain instead: environment keys, a shared profile
+(`SIBYL_BEDROCK_PROFILE` or `AWS_PROFILE`), SSO, or an instance role. Every process that calls a
+model reads these for itself, and a worker container has its own `environment` block, so on either
+stack add the [Bedrock variables](./environment.md#amazon-bedrock) and credential access to the API
+container and to every enabled worker. The [Helm chart](./helm-chart.md#amazon-bedrock) shares them
+across pods for you.
 
 ### Production Compose Services
 

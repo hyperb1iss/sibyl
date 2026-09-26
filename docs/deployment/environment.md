@@ -86,10 +86,11 @@ write-write conflicts, so each namespace must write through one connection. Runn
 embedded storage in production also requires the explicit `SIBYL_ALLOW_EMBEDDED_SINGLE_WRITER=1`
 opt-in, and only when one daemon owns the database; otherwise startup fails validation.
 
-Sibyl never prints the credentials in this URL. Errors, logs, CLI output, `sibyl debug status`, and
-the admin health payload show only the scheme and, for a server, its host and port. Userinfo, path,
-query, fragment, and an embedded store's path are left out, so an error you paste into an issue
-carries no secret from `SIBYL_SURREAL_URL`.
+Sibyl redacts this URL wherever it reports a connection. Connection errors, logs, and status
+payloads (`sibyl debug status` and the admin health payload) show only the scheme and, for a server,
+its host and port; userinfo, path, query, and fragment are left out, so an error you paste into an
+issue carries no secret from `SIBYL_SURREAL_URL`. The embedded daemon's startup banner is the one
+place a path appears: `sibyld serve --embedded` prints its own data directory.
 
 ## URL Configuration
 

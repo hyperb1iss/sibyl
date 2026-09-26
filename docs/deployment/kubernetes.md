@@ -221,8 +221,9 @@ ingress:
 For a scalable in-cluster shape, deploy the TiDB Operator, create a small TiKV/PD cluster, and point
 the official SurrealDB Helm chart at `tikv://<pd-service>:2379`. For single-pod installs, a
 RocksDB-backed PVC is simpler. Either way, `tikv://` and `rocksdb://` configure the SurrealDB server
-only. Point Sibyl's `backend.surreal.url` at that server's `ws://` or `wss://` endpoint; the backend
-refuses any other scheme at startup (see
+only. Point Sibyl's `backend.surreal.url` at that server with a `ws://`, `wss://`, `http://`, or
+`https://` URL. The backend rejects unsupported schemes such as `rocksdb://` and `tikv://` at
+startup; the embedded forms have their own rules and are not meant for a cluster (see
 [SurrealDB URL forms](./environment.md#surrealdb-url-forms)).
 
 ### Coordination Requirements
