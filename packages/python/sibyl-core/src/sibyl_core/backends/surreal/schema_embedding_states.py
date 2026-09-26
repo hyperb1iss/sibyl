@@ -12,11 +12,11 @@ every organization's graph stamps named when it upgraded, and the models the
 deployment has been configured with since.
 
 The stamps a plane's verdict weighs are photographed by the migration that
-creates this bookkeeping, before any code from this release can write to
-that namespace. A verdict therefore never mistakes a vector written after
-the upgrade for evidence of the model that preceded it. Only stamps that sit
-beside a vector count: a stamp on a row without one was never proven by an
-embedding call and may have been supplied by a client.
+creates this bookkeeping. Only stamps in the previous release's format count
+(stamps this release writes carry a version), so nothing a new process wrote,
+even before the migration ran, passes for evidence of the model that
+preceded the upgrade. Only stamps that sit beside a vector count: a stamp on
+a row without one was never proven by an embedding call.
 
 Nothing that reads or rewrites embedding evidence may run against a
 namespace whose schema predates these migrations (see
@@ -136,7 +136,7 @@ def _stamp_groups_query(
         f"SELECT {metadata_path}.provider AS provider, {metadata_path}.model AS model, "
         f"{metadata_path}.dimensions AS dimensions, count() AS rows FROM {table} "
         f"WHERE {scope}{vector_field} != NONE AND {metadata_path} != NONE "
-        f"AND {metadata_path}.provider != $unverified "
+        f"AND {metadata_path}.provider != $unverified AND {metadata_path}.stamp_version = NONE "
         "GROUP BY provider, model, dimensions;"
     )
 

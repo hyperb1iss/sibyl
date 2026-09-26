@@ -23,6 +23,7 @@ from sibyl_core.embeddings.gemini import (
     build_gemini_contents,
     format_gemini_embedding_text,
 )
+from sibyl_core.embeddings.provenance import EMBEDDING_STAMP_VERSION, STAMP_VERSION_FIELD
 from sibyl_core.models.entities import Entity, Relationship
 
 log = structlog.get_logger()
@@ -81,7 +82,12 @@ class EmbeddingMetadata:
     input_kind_sensitive: bool = True
 
     def to_dict(self) -> dict[str, str | int | bool]:
-        return asdict(self)
+        """The stamp stored beside every vector this provider produces.
+
+        It carries the stamp version so a stamp from this release is never
+        mistaken for one the previous release left.
+        """
+        return {**asdict(self), STAMP_VERSION_FIELD: EMBEDDING_STAMP_VERSION}
 
 
 class EmbeddingProvider(Protocol):

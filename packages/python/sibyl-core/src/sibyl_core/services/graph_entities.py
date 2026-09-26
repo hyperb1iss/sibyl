@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from sibyl_core.embeddings.provenance import same_vector_identity
 from sibyl_core.embeddings.providers import entity_embedding_text
 from sibyl_core.errors import RevisionConflictError
 from sibyl_core.models.entities import Entity
@@ -222,7 +223,9 @@ class EntityManager(_EntityWorkItemManager):
             if entity.embedding
             and (
                 provider_metadata is None
-                or entity.metadata.get("embedding_metadata") == provider_metadata
+                or same_vector_identity(
+                    entity.metadata.get("embedding_metadata"), provider_metadata
+                )
             )
         }
         pending_entities = [

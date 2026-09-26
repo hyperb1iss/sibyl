@@ -197,6 +197,7 @@ async def test_chunk_vectors_come_back_with_the_model_that_made_them(
         "model": "gemini-embedding-2",
         "dimensions": 1536,
         "text_version": "document-chunk-v1",
+        "stamp_version": 2,
     }
     assert embeddings == [[0.4, 0.5, 0.6]]
     assert metadata == expected
@@ -227,6 +228,7 @@ async def test_chunk_stamp_survives_an_embedder_that_cannot_run(
         "model": "configured-model",
         "dimensions": 1536,
         "text_version": "document-chunk-v1",
+        "stamp_version": 2,
     }
 
 

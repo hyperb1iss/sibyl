@@ -11,7 +11,11 @@ from sibyl_core.services.embedding_sweep import (
 )
 from sibyl_core.services.embedding_verdicts import settle_legacy_verdicts
 from sibyl_core.services.graph_embedding_sweep import sweep_graph_embeddings
-from tests.embedding_upgrade import upgrade_content_to_sweep, upgrade_graph_to_sweep
+from tests.embedding_upgrade import (
+    previous_release_stamp,
+    upgrade_content_to_sweep,
+    upgrade_graph_to_sweep,
+)
 from tests.test_document_embedding_sweep import (
     CURRENT,
     PREVIOUS,
@@ -52,7 +56,7 @@ async def test_raw_captures_prove_a_switch_for_a_graph_with_no_stamps(
     org = runtime.client.group_id
     for index in range(3):
         await _entity(runtime, f"legacy-{index}")
-    await _raw_capture(org, {**PREVIOUS, "cache_namespace": "raw-memory"})
+    await _raw_capture(org, previous_release_stamp({**PREVIOUS, "cache_namespace": "raw-memory"}))
     await _upgrade(runtime)
     current = CountingProvider("current")
 
@@ -69,7 +73,7 @@ async def test_graph_stamps_prove_a_switch_for_chunks_with_no_raw_captures(
     runtime, content_store
 ) -> None:
     org = runtime.client.group_id
-    previous = CountingProvider("previous").metadata.to_dict()
+    previous = previous_release_stamp(CountingProvider("previous").metadata.to_dict())
     await _entity(runtime, "native", stamp=previous)
     await _chunk(org, "legacy-chunk")
     await _upgrade(runtime)
@@ -133,10 +137,10 @@ async def test_an_unchanged_deployment_adopts_both_planes_without_a_warning(
 ) -> None:
     org = runtime.client.group_id
     current = CountingProvider("current")
-    await _entity(runtime, "native", stamp=current.metadata.to_dict())
+    await _entity(runtime, "native", stamp=previous_release_stamp(current.metadata.to_dict()))
     await _entity(runtime, "legacy")
     await _chunk(org, "legacy-chunk")
-    await _raw_capture(org, {**CURRENT, "cache_namespace": "raw-memory"})
+    await _raw_capture(org, previous_release_stamp({**CURRENT, "cache_namespace": "raw-memory"}))
     await _upgrade(runtime)
 
     verdicts = await _settle(runtime, current)
@@ -158,7 +162,7 @@ async def test_another_organizations_graph_stamps_speak_for_an_unstamped_graph(
     from sibyl_core.services.graph_runtime import GraphRuntime, prepare_graph_schema
 
     current = CountingProvider("current")
-    previous = CountingProvider("previous").metadata.to_dict()
+    previous = previous_release_stamp(CountingProvider("previous").metadata.to_dict())
     await _entity(runtime, "legacy")
     await _upgrade(runtime)
     native = SurrealGraphClient(group_id=f"native-{runtime.client.group_id}", url="memory://")
@@ -213,7 +217,7 @@ async def test_bedrock_chunk_stamps_compare_by_model_not_route(runtime, content_
         provider="bedrock", model="us.cohere.embed-v4:0", dimensions=CURRENT["dimensions"]
     )
     await _chunk(org, "legacy-chunk")
-    await _raw_capture(org, {**CURRENT, "cache_namespace": "raw-memory"})
+    await _raw_capture(org, previous_release_stamp({**CURRENT, "cache_namespace": "raw-memory"}))
     await _upgrade(runtime)
 
     verdicts = await _settle(runtime, CountingProvider("current"), chunk_stamp=routed)
@@ -249,7 +253,7 @@ async def test_nothing_touches_embedding_evidence_before_the_content_upgrade(
     )
 
     org = runtime.client.group_id
-    await _raw_capture(org, {**PREVIOUS, "cache_namespace": "raw-memory"})
+    await _raw_capture(org, previous_release_stamp({**PREVIOUS, "cache_namespace": "raw-memory"}))
     async with content_client.surreal_content_client() as client:
         await _rewind(client, "content", 46)
     raw_provider = DeterministicEmbeddingProvider(
@@ -304,8 +308,12 @@ async def test_stamps_without_a_vector_are_not_evidence(runtime, content_store) 
     org = runtime.client.group_id
     current = CountingProvider("current")
     # A client could supply these: neither sits beside a vector.
-    await _raw_capture(org, {**CURRENT, "cache_namespace": "raw-memory"}, vector=False)
-    await _entity(runtime, "planted", stamp=current.metadata.to_dict(), vector=False)
+    await _raw_capture(
+        org, previous_release_stamp({**CURRENT, "cache_namespace": "raw-memory"}), vector=False
+    )
+    await _entity(
+        runtime, "planted", stamp=previous_release_stamp(current.metadata.to_dict()), vector=False
+    )
     await _entity(runtime, "legacy")
     await _chunk(org, "legacy-chunk")
     await _upgrade(runtime)
@@ -370,7 +378,7 @@ async def test_other_organizations_matching_stamps_adopt_without_a_warning(
             entity_manager=EntityManager(native, group_id=native.group_id),
             relationship_manager=RelationshipManager(native, group_id=native.group_id),
         )
-        await _entity(other, "native", stamp=current.metadata.to_dict())
+        await _entity(other, "native", stamp=previous_release_stamp(current.metadata.to_dict()))
         await upgrade_graph_to_sweep(native)
         await _settle(other, current, allow_unproven=False)
         assert await read_published_organizations(_execute) == {native.group_id}

@@ -28,6 +28,12 @@ UNVERIFIED_ORIGIN_REBUILD = "dimension_rebuild"
 
 DOCUMENT_CHUNK_EMBEDDING_TEXT_VERSION = "document-chunk-v1"
 
+# Every stamp this release writes carries this marker, so code can tell a stamp
+# it wrote from one the previous release left: only the latter is evidence of
+# the model that preceded the upgrade, however early a new process wrote.
+STAMP_VERSION_FIELD = "stamp_version"
+EMBEDDING_STAMP_VERSION = 2
+
 VECTOR_SPACE_FIELDS = ("provider", "model", "dimensions")
 VECTOR_IDENTITY_FIELDS = (*VECTOR_SPACE_FIELDS, "text_version", "input_kind_sensitive")
 
@@ -83,6 +89,25 @@ def unverified_embedding_metadata(origin: str) -> dict[str, str | int]:
     }
 
 
+EMBEDDING_STAMP_KEY = "embedding_metadata"
+
+
+def without_client_embedding_stamp(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Drop an embedding stamp a caller supplied.
+
+    Stamps are server-owned: only the code that produced a vector may say
+    which model produced it. A client-supplied stamp on a row whose vector the
+    server keeps would otherwise vouch for that vector, and the upgrade's
+    evidence would believe it.
+    """
+    return {key: value for key, value in (metadata or {}).items() if key != EMBEDDING_STAMP_KEY}
+
+
+def is_legacy_stamp(value: object) -> bool:
+    """Whether a stamp was written before stamps carried a version."""
+    return isinstance(value, Mapping) and value.get(STAMP_VERSION_FIELD) is None
+
+
 def is_unverified_embedding_metadata(value: object) -> bool:
     return isinstance(value, Mapping) and value.get("provider") == UNVERIFIED_EMBEDDING_PROVIDER
 
@@ -107,6 +132,7 @@ def document_chunk_embedding_metadata(
         "model": model,
         "dimensions": int(dimensions),
         "text_version": DOCUMENT_CHUNK_EMBEDDING_TEXT_VERSION,
+        STAMP_VERSION_FIELD: EMBEDDING_STAMP_VERSION,
     }
 
 
@@ -115,6 +141,13 @@ def vector_space(stamp: object) -> dict[str, Any] | None:
     if not isinstance(stamp, Mapping):
         return None
     return {field: stamp.get(field) for field in VECTOR_SPACE_FIELDS}
+
+
+def vector_identity(stamp: object) -> dict[str, Any] | None:
+    """The part of a stamp that decides whether the sweep would replace the vector."""
+    if not isinstance(stamp, Mapping):
+        return None
+    return {field: stamp.get(field) for field in VECTOR_IDENTITY_FIELDS}
 
 
 def same_vector_space(left: object, right: object) -> bool:
@@ -206,6 +239,9 @@ def _looks_transient(exc: BaseException) -> bool:
 
 __all__ = [
     "DOCUMENT_CHUNK_EMBEDDING_TEXT_VERSION",
+    "EMBEDDING_STAMP_KEY",
+    "EMBEDDING_STAMP_VERSION",
+    "STAMP_VERSION_FIELD",
     "UNVERIFIED_EMBEDDING_PROVIDER",
     "UNVERIFIED_ORIGIN_ARCHIVE",
     "UNVERIFIED_ORIGIN_LEGACY",
@@ -214,13 +250,16 @@ __all__ = [
     "VECTOR_IDENTITY_FIELDS",
     "VECTOR_SPACE_FIELDS",
     "document_chunk_embedding_metadata",
+    "is_legacy_stamp",
     "is_transient_provider_error",
     "is_unverified_embedding_metadata",
     "mark_unverified_vector",
     "same_vector_identity",
     "same_vector_space",
     "unverified_embedding_metadata",
+    "vector_identity",
     "vector_identity_differs_predicate",
     "vector_space",
     "vector_space_predicate",
+    "without_client_embedding_stamp",
 ]

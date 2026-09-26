@@ -25,7 +25,7 @@ from sibyl_core.services.embedding_sweep import (
     LegacyVectorDecision,
     read_embedding_sweep_state,
 )
-from tests.embedding_upgrade import upgrade_content_to_sweep
+from tests.embedding_upgrade import previous_release_stamp, upgrade_content_to_sweep
 from tests.test_reflection_identity import content_store as content_store
 
 PREVIOUS = document_chunk_embedding_metadata(
@@ -117,7 +117,7 @@ async def _state(org: str) -> dict[str, object]:
 
 async def test_raw_capture_stamps_prove_a_switch_for_unstamped_chunks(content_store) -> None:
     org = str(uuid4())
-    await _raw_capture(org, {**PREVIOUS, "cache_namespace": "raw-memory"})
+    await _raw_capture(org, previous_release_stamp({**PREVIOUS, "cache_namespace": "raw-memory"}))
     await _chunk(org, "legacy")
     await _upgrade()
     embed = ChunkEmbedder(CURRENT)
@@ -150,7 +150,7 @@ async def test_raw_capture_stamps_prove_a_switch_for_unstamped_chunks(content_st
 
 async def test_matching_raw_stamps_adopt_unstamped_chunks_in_place(content_store) -> None:
     org = str(uuid4())
-    await _raw_capture(org, {**CURRENT, "cache_namespace": "raw-memory"})
+    await _raw_capture(org, previous_release_stamp({**CURRENT, "cache_namespace": "raw-memory"}))
     await _chunk(org, "legacy")
     await _chunk(org, "lexical", vector=False)
     await _upgrade()
@@ -232,7 +232,9 @@ async def test_any_organizations_raw_captures_speak_for_every_chunk_plane(
     content_store,
 ) -> None:
     capturing, crawling = str(uuid4()), str(uuid4())
-    await _raw_capture(capturing, {**PREVIOUS, "cache_namespace": "raw-memory"})
+    await _raw_capture(
+        capturing, previous_release_stamp({**PREVIOUS, "cache_namespace": "raw-memory"})
+    )
     await _chunk(crawling, "legacy")
     await _upgrade()
     embed = ChunkEmbedder(CURRENT)

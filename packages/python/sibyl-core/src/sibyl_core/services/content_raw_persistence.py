@@ -15,6 +15,7 @@ from sibyl_core.auth.memory_policy import (
 )
 from sibyl_core.backends.surreal import SurrealContentClient
 from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
+from sibyl_core.embeddings.provenance import EMBEDDING_STAMP_KEY
 from sibyl_core.embeddings.providers import (
     EmbeddingProvider,
 )
@@ -176,6 +177,8 @@ def _raw_memory_from_write(write: RawMemoryWrite, *, captured_at: datetime) -> R
     metadata = normalize_memory_quality_metadata(write.metadata or {})
     for key in MEMORY_PROVENANCE_METADATA_KEYS:
         metadata.pop(key, None)
+    # The stamp is attached when this capture is embedded, never by the caller.
+    metadata.pop(EMBEDDING_STAMP_KEY, None)
     sources = declared_source_ids(metadata)
     if sources:
         metadata["raw_source_ids"] = list(sources)

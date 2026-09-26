@@ -2362,6 +2362,7 @@ async def test_deterministic_embedding_provider_batches_stably() -> None:
         "text_version": "native-graph-v1",
         "normalize": True,
         "input_kind_sensitive": True,
+        "stamp_version": 2,
     }
 
 

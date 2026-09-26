@@ -13,6 +13,11 @@ import structlog
 from sibyl_core.backends.surreal import SurrealContentClient
 from sibyl_core.backends.surreal.content_schema import EMBEDDING_DIM
 from sibyl_core.backends.surreal.schema_embedding_states import embedding_sweep_schema_ready
+from sibyl_core.embeddings.provenance import (
+    is_legacy_stamp,
+    same_vector_identity,
+    vector_identity_differs_predicate,
+)
 from sibyl_core.embeddings.providers import EmbeddingProvider
 from sibyl_core.projection.repair import LifecycleRepairResult
 from sibyl_core.services import content_client
@@ -62,7 +67,10 @@ _RAW_EMBEDDING_WALK_QUERY = (
     f"SELECT {_RAW_EMBEDDING_WALK_FIELDS} FROM raw_captures "
     "WHERE organization_id = $organization_id AND uuid > $cursor "
     "AND deleted_at = NONE "
-    "AND (embedding = NONE OR metadata.embedding_metadata != $expected_metadata) "
+    "AND (embedding = NONE OR metadata.embedding_metadata = NONE "
+    "OR metadata.embedding_metadata.stamp_version = NONE OR "
+    + vector_identity_differs_predicate("metadata.embedding_metadata", "expected_metadata")
+    + ") "
     "ORDER BY uuid ASC LIMIT $limit;"
 )
 _RAW_EMBEDDING_FETCH_QUERY = (
@@ -73,6 +81,16 @@ _RAW_EMBEDDING_FETCH_QUERY = (
 
 # Only the vector and its provenance move. A full-row upsert would bump the
 # revision, and revision is what sealed readers compare against their snapshots.
+# A legacy stamp that already names the configured model is rewritten in the
+# current format without an embedding call; only after the content upgrade has
+# photographed the old stamps may they be rewritten at all.
+_RAW_EMBEDDING_RESTAMP_QUERY = """
+UPDATE raw_captures SET metadata.embedding_metadata = $embedding_metadata
+WHERE uuid = $uuid AND organization_id = $organization_id AND revision = $revision
+    AND embedding != NONE
+RETURN uuid;
+"""
+
 _RAW_EMBEDDING_UPDATE_QUERY = """
 UPDATE raw_captures SET
     embedding = $embedding,
@@ -83,11 +101,25 @@ RETURN uuid;
 
 
 def raw_memory_embedding_current(memory: RawMemory, provider: EmbeddingProvider) -> bool:
-    """A vector counts only when its recorded provenance matches the configured provider."""
+    """A vector counts only when its recorded provenance matches the configured provider.
+
+    It must also be in the current stamp format; a matching legacy stamp is
+    rewritten in place, without an embedding call.
+    """
     if memory.embedding is None:
         return False
-    return memory.metadata.get("embedding_metadata") == models.raw_memory_embedding_metadata(
-        provider.metadata
+    stamp = memory.metadata.get("embedding_metadata")
+    return not is_legacy_stamp(stamp) and same_vector_identity(
+        stamp, models.raw_memory_embedding_metadata(provider.metadata)
+    )
+
+
+def _needs_restamp_only(memory: RawMemory, provider: EmbeddingProvider) -> bool:
+    stamp = memory.metadata.get("embedding_metadata")
+    return (
+        memory.embedding is not None
+        and is_legacy_stamp(stamp)
+        and same_vector_identity(stamp, models.raw_memory_embedding_metadata(provider.metadata))
     )
 
 
@@ -232,6 +264,20 @@ async def _repair_page(
     # A row gone or made current between the walk and this fetch needs nothing
     # from this pass and will not reappear in the next one.
     outcomes: list[str] = ["recovered"] * (len(candidate_ids) - len(targets))
+    restamps = [memory for memory in targets if _needs_restamp_only(memory, provider)]
+    if restamps:
+        expected = models.raw_memory_embedding_metadata(provider.metadata)
+        for memory in restamps:
+            rows = await content_client.select_many(
+                client,
+                _RAW_EMBEDDING_RESTAMP_QUERY,
+                uuid=memory.id,
+                organization_id=organization_id,
+                revision=memory.revision,
+                embedding_metadata=expected,
+            )
+            outcomes.append("recovered" if rows else "pending")
+        targets = [memory for memory in targets if not _needs_restamp_only(memory, provider)]
     if not targets:
         return outcomes
     stripped = [_raw_memory_without_embedding(memory) for memory in targets]

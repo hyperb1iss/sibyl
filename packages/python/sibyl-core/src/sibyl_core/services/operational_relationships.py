@@ -7,6 +7,7 @@ from typing import Any
 
 from sibyl_core.backends.surreal.records import normalize_records
 from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
+from sibyl_core.embeddings.provenance import same_vector_identity
 from sibyl_core.embeddings.providers import EmbeddingProvider
 from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind, evidence_hash
 from sibyl_core.migrate.source_integrity import encode_record
@@ -263,7 +264,9 @@ async def publish_operational_relationships(
             vector = old.get("fact_embedding")
             if vector and (
                 embedding_provider is None
-                or attributes.get("embedding_metadata") == embedding_provider.metadata.to_dict()
+                or same_vector_identity(
+                    attributes.get("embedding_metadata"), embedding_provider.metadata.to_dict()
+                )
             ):
                 metadata["fact_embedding"] = vector
                 metadata["embedding_metadata"] = attributes.get("embedding_metadata")

@@ -54,7 +54,11 @@ from sibyl_core.services.surreal_content import (
     recall_raw_memory,
     remember_raw_memories,
 )
-from tests.embedding_upgrade import upgrade_content_to_sweep, upgrade_graph_to_sweep
+from tests.embedding_upgrade import (
+    previous_release_stamp,
+    upgrade_content_to_sweep,
+    upgrade_graph_to_sweep,
+)
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("SIBYL_LIVE_SURREAL_TESTS") != "1",
@@ -1443,14 +1447,16 @@ async def test_live_raw_capture_membership_precedes_vector_limit(
 
 
 def _previous_graph_stamp() -> dict[str, object]:
-    return EmbeddingMetadata(
-        provider="openai",
-        model="text-embedding-3-small",
-        dimensions=GRAPH_EMBEDDING_DIM,
-        cache_namespace="graph",
-        tokenizer_estimate_method="provider-default",
-        input_kind_sensitive=False,
-    ).to_dict()
+    return previous_release_stamp(
+        EmbeddingMetadata(
+            provider="openai",
+            model="text-embedding-3-small",
+            dimensions=GRAPH_EMBEDDING_DIM,
+            cache_namespace="graph",
+            tokenizer_estimate_method="provider-default",
+            input_kind_sensitive=False,
+        ).to_dict()
+    )
 
 
 class _SweepTargetProvider:
@@ -1757,8 +1763,11 @@ async def test_live_chunk_sweep_reads_raw_evidence_and_filters_the_chunk_lane(
         yield client
 
     monkeypatch.setattr(content_client, "surreal_content_client", session)
-    previous = document_chunk_embedding_metadata(
-        provider="openai", model="text-embedding-3-small", dimensions=EMBEDDING_DIM
+    # Rows the previous release wrote, so their stamps carry no stamp version.
+    previous = previous_release_stamp(
+        document_chunk_embedding_metadata(
+            provider="openai", model="text-embedding-3-small", dimensions=EMBEDDING_DIM
+        )
     )
     target = document_chunk_embedding_metadata(
         provider="deterministic", model="live-chunk-target", dimensions=EMBEDDING_DIM
@@ -2510,8 +2519,9 @@ async def test_live_a_worker_that_ticks_before_the_content_upgrade_changes_nothi
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from sibyl.jobs import lifecycle_repair
+    from sibyl_core.embeddings.provenance import EMBEDDING_STAMP_VERSION, STAMP_VERSION_FIELD
     from sibyl_core.services import content_client
-    from sibyl_core.services.embedding_evidence import read_content_snapshot
+    from sibyl_core.services.embedding_evidence import read_content_snapshot, read_graph_snapshot
 
     graph_target = _SweepTargetProvider(GRAPH_EMBEDDING_DIM, model="live-restart-target")
     graph_stamp = graph_target.metadata.to_dict()
@@ -2552,6 +2562,44 @@ async def test_live_a_worker_that_ticks_before_the_content_upgrade_changes_nothi
         )
         assert {row["model"] for row in raw} == {_PREVIOUS_CHUNK_STAMP["model"]}
 
+        # New code writes in the new model before either migration runs. Its
+        # stamps carry a stamp version, so neither snapshot counts them as
+        # evidence of what the previous release wrote.
+        await content_client.select_many(
+            content,
+            "CREATE raw_captures CONTENT $record RETURN NONE;",
+            record={
+                "uuid": str(uuid4()),
+                "organization_id": native,
+                "principal_id": "owner",
+                "source_id": str(uuid4()),
+                "raw_content": "captured by the new release before its migration",
+                "embedding": list(_NEW_CHUNK_VECTOR),
+                "metadata": {
+                    "embedding_metadata": {
+                        **_TARGET_CHUNK_STAMP,
+                        "cache_namespace": "raw-memory",
+                        "text_version": "raw-capture-v1",
+                        STAMP_VERSION_FIELD: EMBEDDING_STAMP_VERSION,
+                    }
+                },
+            },
+        )
+        await clients[native].execute_query(
+            "INSERT INTO entity $rows;",
+            rows=[
+                {
+                    "uuid": "written-by-new-release",
+                    "group_id": native,
+                    "name": "Written by the new release",
+                    "entity_type": "topic",
+                    "name_embedding": [0.0, 1.0, *([0.0] * (GRAPH_EMBEDDING_DIM - 2))],
+                    "attributes": {"embedding_metadata": graph_stamp},
+                    "created_at": datetime.now(UTC),
+                }
+            ],
+        )
+
         # The API starts and migrates; the snapshot sees the old raw stamps.
         await bootstrap_content_schema(content)
 
@@ -2564,6 +2612,8 @@ async def test_live_a_worker_that_ticks_before_the_content_upgrade_changes_nothi
         for _tick in range(3):
             summary = await lifecycle_repair.repair_lifecycle_all_orgs({})
             assert summary["failed_organizations"] == 0, summary
+        graph_snapshot = await read_graph_snapshot(clients[native].execute_query, native)
+        assert {stamp["model"] for stamp in graph_snapshot} == {"text-embedding-3-small"}
         for org in (native, bare):
             _graph, chunks = await _plane_states(content, clients[org])
             assert chunks["legacy_decision"] == "reembed", org

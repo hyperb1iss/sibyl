@@ -13,6 +13,7 @@ from sibyl_core.ai.operational_distillation import (
     build_operational_note_entities_with_receipt,
     operational_distilled_note_id,
 )
+from sibyl_core.embeddings.provenance import same_vector_identity
 from sibyl_core.services.graph_derivations import graph_target_digest
 from sibyl_core.services.graph_embeddings import _entities_with_native_embeddings
 from sibyl_core.services.graph_entity_store import _publish_operational_inventory
@@ -81,8 +82,10 @@ async def publish_operational_notes(
             old is not None
             and graph_target_digest(old) == graph_target_digest(entity)
             and manager._embedding_provider is not None
-            and old.metadata.get("embedding_metadata")
-            == manager._embedding_provider.metadata.to_dict()
+            and same_vector_identity(
+                old.metadata.get("embedding_metadata"),
+                manager._embedding_provider.metadata.to_dict(),
+            )
         ):
             entity = entity.model_copy(
                 update={

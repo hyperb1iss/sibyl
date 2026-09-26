@@ -39,7 +39,7 @@ from sibyl_core.services.graph_embedding_sweep import (
     sweep_graph_embeddings,
 )
 from sibyl_core.services.graph_runtime import GraphRuntime, prepare_graph_schema
-from tests.embedding_upgrade import upgrade_graph_to_sweep
+from tests.embedding_upgrade import previous_release_stamp, upgrade_graph_to_sweep
 
 
 class CountingProvider(DeterministicEmbeddingProvider):
@@ -239,7 +239,7 @@ def test_transient_provider_errors_are_recognized_through_their_cause() -> None:
 async def test_plain_upgrade_adopts_unstamped_vectors_without_embedding(runtime) -> None:
     provider = CountingProvider("current")
     stamp = provider.metadata.to_dict()
-    await _entity(runtime, "stamped", stamp=stamp)
+    await _entity(runtime, "stamped", stamp=previous_release_stamp(stamp))
     await _entity(runtime, "legacy-a")
     await _entity(runtime, "legacy-b")
     await _entity(runtime, "lexical", vector=False)
@@ -255,8 +255,11 @@ async def test_plain_upgrade_adopts_unstamped_vectors_without_embedding(runtime)
     assert (result.adopted, result.recovered, result.pending, result.failed) == (3, 0, 0, 0)
     assert provider.texts == []
     entities = await _rows(runtime, "entity")
+    # The stamped row keeps the previous release's stamp: its model matches.
+    assert entities["stamped"]["stamp"] == previous_release_stamp(stamp)
     for entity_id in ("stamped", "legacy-a", "legacy-b"):
-        assert entities[entity_id]["stamp"] == stamp
+        if entity_id != "stamped":
+            assert entities[entity_id]["stamp"] == stamp
         assert entities[entity_id]["vector"] == before[entity_id]["vector"]
         assert entities[entity_id]["revision"] == before[entity_id]["revision"]
     # A row that never had a vector stays lexical: the sweep repairs models, not coverage.
@@ -277,9 +280,15 @@ async def test_plain_upgrade_adopts_unstamped_vectors_without_embedding(runtime)
 async def test_switch_during_upgrade_reembeds_old_stamps_and_unstamped_vectors(runtime) -> None:
     previous = CountingProvider("previous")
     current = CountingProvider("current")
-    await _entity(runtime, "old", stamp=previous.metadata.to_dict())
+    await _entity(runtime, "old", stamp=previous_release_stamp(previous.metadata.to_dict()))
     await _entity(runtime, "legacy")
-    await _relationship(runtime, "edge-old", "old", "legacy", stamp=previous.metadata.to_dict())
+    await _relationship(
+        runtime,
+        "edge-old",
+        "old",
+        "legacy",
+        stamp=previous_release_stamp(previous.metadata.to_dict()),
+    )
     await upgrade_graph_to_sweep(runtime.client)
     # Written by the upgraded process before its first pass.
     await _entity(runtime, "fresh", stamp=current.metadata.to_dict())
@@ -311,7 +320,7 @@ async def test_legacy_verdict_is_decided_once_even_after_the_evidence_is_gone(
 ) -> None:
     previous = CountingProvider("previous")
     current = CountingProvider("current")
-    await _entity(runtime, "old", stamp=previous.metadata.to_dict())
+    await _entity(runtime, "old", stamp=previous_release_stamp(previous.metadata.to_dict()))
     for index in range(4):
         await _entity(runtime, f"legacy-{index}")
     await upgrade_graph_to_sweep(runtime.client)
@@ -348,7 +357,7 @@ async def test_the_upgrade_photographs_stamps_once_by_model(runtime) -> None:
     )
     from sibyl_core.services.embedding_evidence import read_graph_snapshot
 
-    previous = CountingProvider("previous").metadata.to_dict()
+    previous = previous_release_stamp(CountingProvider("previous").metadata.to_dict())
     await _entity(runtime, "old-a", stamp=previous)
     await _entity(runtime, "old-b", stamp=previous)
     await _entity(
@@ -840,12 +849,13 @@ def test_every_kind_of_dropped_connection_or_timeout_is_transient() -> None:
 
 
 def test_the_embedding_stamp_shape_is_pinned() -> None:
-    """Every stored graph vector is compared against this exact shape.
+    """The stamp every stored graph vector carries.
 
-    Adding, renaming or re-defaulting a field changes every provider's stamp,
-    so the next sweep re-embeds every graph vector in every deployment and the
-    vector lanes stay dark for the rows it has not reached yet. If that is the
-    intent, update this set deliberately and say so in the release notes.
+    The sweep and the vector lanes compare only the fields that shape a vector
+    (``VECTOR_IDENTITY_FIELDS``), so a bookkeeping field can move freely, but a
+    change to one of those re-embeds every graph vector in every deployment.
+    The stamp version marks stamps this release writes; stamps without it are
+    the previous release's, the only ones counted as pre-upgrade evidence.
     """
     stamp = EmbeddingMetadata(
         provider="p",
@@ -864,12 +874,14 @@ def test_the_embedding_stamp_shape_is_pinned() -> None:
         "text_version",
         "normalize",
         "input_kind_sensitive",
+        "stamp_version",
     }
-    assert (stamp["text_version"], stamp["normalize"], stamp["input_kind_sensitive"]) == (
-        "native-graph-v1",
-        True,
-        True,
-    )
+    assert (
+        stamp["text_version"],
+        stamp["normalize"],
+        stamp["input_kind_sensitive"],
+        stamp["stamp_version"],
+    ) == ("native-graph-v1", True, True, 2)
 
 
 async def test_a_store_that_refuses_writes_stops_the_pass(runtime, monkeypatch) -> None:

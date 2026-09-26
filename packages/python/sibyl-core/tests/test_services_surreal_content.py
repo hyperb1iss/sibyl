@@ -1800,6 +1800,7 @@ class TestSurrealContentHelpers:
             "text_version": "raw-capture-v1",
             "normalize": True,
             "input_kind_sensitive": True,
+            "stamp_version": 2,
         }
         persisted_memory = {
             "uuid": "memory-1",

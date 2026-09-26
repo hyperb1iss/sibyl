@@ -37,3 +37,10 @@ async def upgrade_content_to_sweep(client) -> None:
         version=CONTENT_VERSION_BEFORE_SWEEP,
     )
     await bootstrap_content_schema(client)
+
+
+def previous_release_stamp(stamp):
+    """A stamp as the previous release wrote it: the same fields, no stamp version."""
+    from sibyl_core.embeddings.provenance import STAMP_VERSION_FIELD
+
+    return {key: value for key, value in dict(stamp).items() if key != STAMP_VERSION_FIELD}

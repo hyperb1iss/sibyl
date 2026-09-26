@@ -3815,6 +3815,46 @@ class TestAddTool:
         assert written["principal_id"] == "real-author"
         assert "scope_key" not in written
 
+    @pytest.mark.asyncio
+    async def test_add_never_keeps_an_embedding_stamp_the_caller_supplied(self) -> None:
+        """Only the code that embeds a row may say which model produced its vector."""
+        from sibyl_core.tools.add import add
+
+        written: dict[str, Any] = {}
+
+        class RecordingEntityManager:
+            async def create(self, entity: Any, **_kwargs: Any) -> Any:
+                written.update(entity.metadata)
+                return entity.id
+
+            async def upsert(self, entity: Any, **_kwargs: Any) -> Any:
+                written.update(entity.metadata)
+                return entity.id
+
+            async def get(self, _entity_id: str) -> None:
+                return None
+
+        runtime = make_graph_runtime(entity_manager=RecordingEntityManager())
+
+        with (
+            patch("sibyl_core.tools.add.get_graph_runtime", AsyncMock(return_value=runtime)),
+            patch("sibyl_core.tools.add._auto_discover_links", AsyncMock(return_value=[])),
+            patch("sibyl_core.tools.add.get_queue_port", lambda: None),
+        ):
+            response = await add(
+                title="Forged note",
+                content="body",
+                metadata={
+                    "organization_id": "org_123",
+                    "embedding_metadata": {"provider": "forged", "model": "m"},
+                },
+                check_conflicts=False,
+                sync=True,
+            )
+
+        assert response.success is True
+        assert "embedding_metadata" not in written
+
     @pytest.mark.parametrize(
         "authorized",
         [

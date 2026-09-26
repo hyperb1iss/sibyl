@@ -19,6 +19,7 @@ from sibyl_core.services.graph_embedding_sweep import (
     sweep_graph_embeddings,
 )
 from sibyl_core.tools.admin import create_backup, restore_backup
+from tests.test_reflection_identity import content_store as content_store
 from tests.test_source_integrity_archive import destination as destination
 from tests.test_source_integrity_archive import runtime as runtime
 from tests.test_synthesis_source_observations import (
@@ -160,3 +161,68 @@ def test_merge_never_lends_a_stamp_to_a_vector_it_did_not_produce() -> None:
 
     assert target["embedding"] == [0.1, 0.2]
     assert "embedding_metadata" not in target["metadata"]
+
+
+def test_an_update_that_keeps_the_vector_cannot_relabel_it() -> None:
+    from sibyl_core.services.graph_entity_store import _entity_update_metadata_patch
+
+    forged = {"provider": "forged", "model": "m", "dimensions": 3}
+
+    kept_vector = _entity_update_metadata_patch(
+        {"metadata": {"embedding_metadata": forged, "note": "x"}, "embedding_metadata": forged}
+    )
+    with_vector = _entity_update_metadata_patch(
+        {"metadata": {"embedding_metadata": forged}, "embedding": [0.1, 0.2, 0.3]}
+    )
+
+    assert "embedding_metadata" not in kept_vector
+    assert kept_vector["note"] == "x"
+    assert with_vector["embedding_metadata"] == forged
+
+
+async def test_a_metadata_only_update_keeps_the_stored_stamp(runtime) -> None:
+    from sibyl_core.models.entities import Entity, EntityType
+    from tests.test_embedding_sweep import _rows, _vector
+
+    stamp = {"provider": "deterministic", "model": "real", "dimensions": len(_vector(0.5))}
+    await runtime.entity_manager.create_direct(
+        Entity(
+            id="kept",
+            entity_type=EntityType.TOPIC,
+            name="Kept",
+            metadata={"embedding_metadata": stamp},
+            embedding=_vector(0.5),
+        ),
+        generate_embedding=False,
+    )
+
+    await runtime.entity_manager.update(
+        "kept", {"metadata": {"embedding_metadata": {"provider": "forged"}, "note": "x"}}
+    )
+
+    row = (await _rows(runtime, "entity"))["kept"]
+    assert row["stamp"] == stamp
+    assert row["vector"] == _vector(0.5)
+
+
+async def test_a_raw_write_never_keeps_a_client_embedding_stamp(content_store) -> None:
+    from uuid import uuid4
+
+    from sibyl_core.services import content_client
+    from sibyl_core.services.surreal_content import remember_raw_memory
+
+    memory = await remember_raw_memory(
+        organization_id=str(uuid4()),
+        principal_id="tenant",
+        source_id="planted",
+        raw_content="planted",
+        embedding_provider=None,
+        metadata={"embedding_metadata": {"provider": "forged"}, "kept": "yes"},
+    )
+
+    async with content_client.surreal_content_client() as client:
+        rows = await content_client.select_many(
+            client, "SELECT metadata FROM raw_captures WHERE uuid = $id;", id=memory.id
+        )
+    assert "embedding_metadata" not in rows[0]["metadata"]
+    assert rows[0]["metadata"]["kept"] == "yes"
