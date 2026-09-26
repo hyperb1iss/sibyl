@@ -82,6 +82,7 @@ dev = [
     "pytest",
     "pytest-asyncio",
     "pytest-cov>=7.0.0",
+    "pytest-xdist>=3.8.0",
     "ruff",
     # Test-only mirrors of the runtime extras the suite exercises directly:
     # the graph backend, the numeric stack, and the pydantic-ai client layer.
