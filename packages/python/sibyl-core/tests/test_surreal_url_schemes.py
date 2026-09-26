@@ -372,3 +372,49 @@ async def test_the_client_boundary_keeps_clean_errors_and_replaces_leaky_ones(mo
     assert replaced.value.__cause__ is None
     assert replaced.value.__context__ is None
     assert replaced.value.cause_type == "Conflict"
+
+
+def test_partly_normalized_urls_are_caught_by_canonical_comparison() -> None:
+    url = "http://host:8000/Path%3AToken%2FCanary42/rpc"
+    # aiohttp decodes %3A but keeps %2F; no fixed list of spellings has this.
+    printed = RuntimeError("503, url='http://host:8000/Path:Token%2FCanary42/rpc'")
+    assert url_schemes.error_mentions_url_secret(printed, url)
+    assert url_schemes.canonical_url_text("Path:Token%2FCanary42") == "path:token/canary42"
+    assert url_schemes.canonical_url_text("A%252Fb+c") == "a/b c"
+
+
+def test_raw_envelopes_withhold_only_url_quoting_error_text() -> None:
+    from sibyl_core.backends.surreal.connection import withhold_url_secrets_in_envelope
+
+    url = "http://host:8000/private/Deploy%20Path/rpc"
+    clean = {
+        "id": "q1",
+        "result": [
+            {"status": "OK", "result": [{"ref": "/private/Deploy Path"}]},
+            {"status": "ERR", "result": "Database record `entity:one` already exists"},
+        ],
+    }
+    # Clean envelopes, including OK data that happens to match, pass as is.
+    assert withhold_url_secrets_in_envelope(clean, url) is clean
+
+    leaky = {
+        "id": "q2",
+        "result": [
+            {"status": "OK", "result": []},
+            {
+                "status": "ERR",
+                "result": "cannot serve /private/Deploy%20Path?x/rpc",
+                "details": {"kind": "Internal"},
+            },
+        ],
+        "error": {"code": -32000, "message": "proxy said /private/Deploy Path"},
+    }
+    scrubbed = withhold_url_secrets_in_envelope(leaky, url)
+    assert isinstance(scrubbed, dict)
+    assert scrubbed["id"] == "q2"
+    assert scrubbed["result"][0] is leaky["result"][0]
+    assert scrubbed["result"][1]["status"] == "ERR"
+    assert scrubbed["result"][1]["details"] == {"kind": "Internal"}
+    assert "withheld" in scrubbed["result"][1]["result"]
+    assert scrubbed["error"]["code"] == -32000
+    assert "Deploy" not in str(scrubbed)

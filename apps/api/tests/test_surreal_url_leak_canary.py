@@ -45,7 +45,10 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 PASSWORD_CANARY = "PwCanary91"
 PATH_CANARY = "PathCanary42"
 TOKEN_CANARY = "TokenCanary91"
-CANARIES = (PASSWORD_CANARY, PATH_CANARY, TOKEN_CANARY)
+# Carried in a path segment with mixed escapes, "MixCanary57%3Ax%2Fy": aiohttp
+# prints it as "MixCanary57:x%2Fy", decoding one escape and keeping the other.
+MIXED_CANARY = "MixCanary57"
+CANARIES = (PASSWORD_CANARY, PATH_CANARY, TOKEN_CANARY, MIXED_CANARY)
 # urlsplit rejects it under NFKC normalization, quoting the netloc.
 FULLWIDTH_SOLIDUS = "\N{FULLWIDTH SOLIDUS}"
 
@@ -313,6 +316,8 @@ _TRANSPORT_PATHS = {
     # The same with nothing else secret in the URL, so only the decoded
     # spelling of the path can catch it.
     "encoded-path-only": f"/%50ath{PATH_CANARY[4:]}/rpc",
+    # Partly normalized by the HTTP stack; only canonical comparison catches it.
+    "mixed-encoding": f"/{MIXED_CANARY}%3Ax%2Fy/rpc",
 }
 
 
@@ -327,14 +332,20 @@ def _cbor_reply(message: dict[str, object]) -> bytes:
 async def _surreal_http_server(fail: str) -> AsyncIterator[int]:
     """A SurrealDB HTTP endpoint that answers the handshake, then fails.
 
-    ``fail`` is "query" (503 on the first query) or "handshake" (503 always).
+    ``fail`` is "query" (503 on the first query), "handshake" (503 always), or
+    "envelope" (HTTP 200 whose ERR statement quotes the request path).
     """
     from aiohttp import web
-    from surrealdb.data.cbor import decode
+    from surrealdb.data.cbor import decode, encode
 
     async def rpc(request: web.Request) -> web.Response:
         message = decode(await request.read())
-        if fail == "handshake" or message.get("method") not in _HANDSHAKE_METHODS:
+        handshake = message.get("method") in _HANDSHAKE_METHODS
+        if fail == "envelope" and not handshake:
+            statement = {"status": "ERR", "result": f"cannot serve {request.path_qs}"}
+            body = encode({"id": message["id"], "result": [statement]})
+            return web.Response(body=body, content_type="application/cbor")
+        if fail == "handshake" or not handshake:
             return web.Response(status=503, text=f"unavailable: {request.path_qs}")
         return web.Response(body=_cbor_reply(message), content_type="application/cbor")
 
@@ -480,3 +491,29 @@ async def test_a_query_time_error_through_admin_health_never_carries_the_canary(
     _assert_no_canary(body, "the /admin/health response body")
     _assert_no_canary(repr(entries), "structlog output of /admin/health")
     _assert_no_canary(_sibyl_logs(caplog), "stdlib log output of /admin/health")
+
+
+@pytest.mark.parametrize("path", _TRANSPORT_PATHS.values(), ids=_TRANSPORT_PATHS.keys())
+async def test_an_err_envelope_raised_by_content_never_carries_the_canary(
+    caplog, path: str
+) -> None:
+    """A 200 response whose ERR statement quotes the path, raised by content.py."""
+    from sibyl.persistence.surreal.content import _select_many_raw
+    from sibyl_core.backends.surreal import SurrealContentClient
+
+    caplog.set_level(logging.DEBUG)
+    async with _surreal_http_server("envelope") as port:
+        client = SurrealContentClient(url=f"http://admin:{PASSWORD_CANARY}@127.0.0.1:{port}{path}")
+        with capture_logs() as entries:
+            try:
+                raw = await client.execute_query_raw("SELECT * FROM raw_captures;")
+                with pytest.raises(RuntimeError) as caught:
+                    await _select_many_raw(client, "SELECT * FROM raw_captures;")
+            finally:
+                await client.close()
+
+    # The envelope keeps its shape: still one ERR statement, text withheld.
+    assert [statement["status"] for statement in raw["result"]] == ["ERR"]
+    assert "withheld" in raw["result"][0]["result"]
+    _assert_no_canary(json.dumps(raw, default=str), "the raw ERR envelope")
+    _assert_error_clean(caught.value, entries, _sibyl_logs(caplog), "content's raised ERR text")

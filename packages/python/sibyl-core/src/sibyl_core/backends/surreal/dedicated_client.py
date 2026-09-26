@@ -23,6 +23,7 @@ from sibyl_core.backends.surreal.connection import (
     _is_transient_connection_error,
     _query_tokens,
     detach_url_secrets,
+    withhold_url_secrets_in_envelope,
 )
 from sibyl_core.backends.surreal.observability import (
     elapsed_ms,
@@ -670,7 +671,7 @@ class DedicatedSurrealClient:
 
     async def execute_query_raw(self, query: str, **params: object) -> object:
         query_label = _pop_query_label(params)
-        return await _at_boundary(
+        response = await _at_boundary(
             self._url,
             self._execute(
                 query,
@@ -680,6 +681,9 @@ class DedicatedSurrealClient:
                 query_origin=_caller_origin(),
             ),
         )
+        # Raw envelopes leave the client unraised, and callers raise their ERR
+        # text later, so that text passes the same URL check here.
+        return withhold_url_secrets_in_envelope(response, self._url)
 
     async def close(self) -> None:
         await _at_boundary(self._url, self._close_pool())

@@ -9,6 +9,7 @@ from sibyl_core.backends.surreal.url_schemes import (
     redact_surreal_url,
     safe_error_detail,
     surreal_url_scheme,
+    text_mentions_url_secret,
 )
 
 _READ_ONLY_QUERY_TOKENS = {"SELECT", "RETURN", "INFO", "SHOW"}
@@ -180,6 +181,50 @@ def detach_url_secrets(error: Exception, url: str) -> Exception | None:
             url=url, attempt=error.attempt, timeout_seconds=error.timeout_seconds
         )
     return SurrealTransportError(url=url, cause=error)
+
+
+def _withhold_in_statement(statement: object, url: str, withheld: str) -> object:
+    """An ERR statement with every URL-quoting text field withheld, else itself."""
+    if not isinstance(statement, dict) or statement.get("status") != "ERR":
+        return statement
+    leaky = {
+        key
+        for key, value in statement.items()
+        if key not in {"status", "time"}
+        and isinstance(value, str)
+        and text_mentions_url_secret(value, url)
+    }
+    if not leaky:
+        return statement
+    return {key: withheld if key in leaky else value for key, value in statement.items()}
+
+
+def withhold_url_secrets_in_envelope(response: object, url: str) -> object:
+    """A raw query response with URL-quoting error text withheld.
+
+    Raw callers receive statement envelopes, and several raise an ERR
+    statement's text themselves, outside the client. A statement or RPC error
+    whose text quotes a secret piece of the URL has that text replaced; its
+    status, details, and position stay, so callers still branch the same way.
+    A response with nothing to withhold is returned as the same object.
+    """
+    if not isinstance(response, dict):
+        return response
+    withheld = f"SurrealDB error withheld: it quoted the configured URL ({redact_surreal_url(url)})"
+    replaced: dict[str, object] = {}
+    error = response.get("error")
+    if (
+        isinstance(error, dict)
+        and isinstance(error.get("message"), str)
+        and text_mentions_url_secret(error["message"], url)
+    ):
+        replaced["error"] = {**error, "message": withheld}
+    statements = response.get("result")
+    if isinstance(statements, list):
+        scrubbed = [_withhold_in_statement(statement, url, withheld) for statement in statements]
+        if any(new is not old for new, old in zip(scrubbed, statements, strict=True)):
+            replaced["result"] = scrubbed
+    return {**response, **replaced} if replaced else response
 
 
 class SurrealQueryError(RuntimeError):

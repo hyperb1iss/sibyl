@@ -26,7 +26,7 @@ connect fail.
 from __future__ import annotations
 
 import re
-from urllib.parse import quote, quote_plus, unquote, unquote_plus, urlsplit
+from urllib.parse import unquote, urlsplit
 
 EMBEDDED_MEMORY_SCHEMES = frozenset({"memory", "mem"})
 EMBEDDED_FILE_SCHEMES = frozenset({"surrealkv", "surrealkv+versioned", "file"})
@@ -200,22 +200,22 @@ def _secret_parts(url: str) -> set[str]:
     return {piece for piece in secret if piece}
 
 
-def _spellings(piece: str) -> set[str]:
-    """The piece raw, percent-decoded, percent-encoded, and with "+" and space swapped."""
-    decoded = unquote(piece)
-    decoded_plus = unquote_plus(piece)
-    spellings = {
-        piece,
-        decoded,
-        decoded_plus,
-        quote(decoded, safe=""),
-        quote(decoded, safe="/:@!$&'()*,;="),
-        quote_plus(decoded_plus),
-        piece.replace("+", " "),
-        piece.replace(" ", "+"),
-        piece.replace(" ", "%20"),
-    }
-    return {spelling.lower() for spelling in spellings if spelling}
+def canonical_url_text(text: str) -> str:
+    """One comparable form of any URL-bearing text.
+
+    Percent-decoded repeatedly until stable, "+" read as a space, and
+    casefolded. HTTP stacks normalize the URL they print in their own ways
+    (aiohttp decodes %3A but keeps %2F), so the secret pieces and the error
+    text are both reduced to this form and compared there, rather than
+    enumerating spellings that can never cover every mix.
+    """
+    current = text
+    for _ in range(8):
+        decoded = unquote(current)
+        if decoded == current:
+            break
+        current = decoded
+    return current.replace("+", " ").casefold()
 
 
 # A piece shorter than this cannot be told apart from ordinary text ("T" in a
@@ -224,16 +224,20 @@ def _spellings(piece: str) -> set[str]:
 _MIN_SECRET_LENGTH = 3
 
 
-def url_secret_spellings(url: str) -> list[str]:
-    """Every spelling of every secret piece of the URL, lowercased, longest first."""
-    spellings: set[str] = set()
-    for piece in _secret_parts(url):
-        spellings |= _spellings(piece)
+def canonical_url_secrets(url: str) -> list[str]:
+    """Every secret piece of the URL in canonical form, longest first."""
+    pieces = {canonical_url_text(piece) for piece in _secret_parts(url)}
     return sorted(
-        (spelling for spelling in spellings if len(spelling) >= _MIN_SECRET_LENGTH),
+        (piece for piece in pieces if len(piece) >= _MIN_SECRET_LENGTH),
         key=len,
         reverse=True,
     )
+
+
+def text_mentions_url_secret(text: str, url: str) -> bool:
+    """Whether the text quotes a secret piece of the URL, in any normalization."""
+    canonical = canonical_url_text(text)
+    return any(piece in canonical for piece in canonical_url_secrets(url))
 
 
 def _chain(error: BaseException) -> list[BaseException]:
@@ -263,14 +267,13 @@ def _error_texts(error: BaseException) -> list[str]:
 def error_mentions_url_secret(error: BaseException, url: str) -> bool:
     """Whether the error or anything chained to it quotes a secret piece of the URL.
 
-    Checks every spelling (raw, percent-decoded, percent-encoded, "+" and space
-    swapped), case-insensitively, since an HTTP stack may echo a normalized
-    form of the URL it requested.
+    Both sides are compared in canonical form (canonical_url_text), since an
+    HTTP stack may echo the URL it requested in its own normalization.
     """
-    spellings = url_secret_spellings(url)
+    secrets = canonical_url_secrets(url)
     for text in _error_texts(error):
-        lowered = text.lower()
-        if any(spelling in lowered for spelling in spellings):
+        canonical = canonical_url_text(text)
+        if any(piece in canonical for piece in secrets):
             return True
     return False
 
@@ -358,6 +361,8 @@ __all__ = [
     "EMBEDDED_SCHEMES",
     "REMOTE_SCHEMES",
     "SUPPORTED_SCHEMES",
+    "canonical_url_secrets",
+    "canonical_url_text",
     "error_mentions_url_secret",
     "is_embedded_surreal_url",
     "is_file_backed_surreal_url",
@@ -372,6 +377,6 @@ __all__ = [
     "surreal_url_credentials",
     "surreal_url_host_port",
     "surreal_url_scheme",
+    "text_mentions_url_secret",
     "unsupported_surreal_url_reason",
-    "url_secret_spellings",
 ]
