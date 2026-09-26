@@ -48,7 +48,13 @@ _REFLECTION_DREAM_EXCLUDED_CAPTURE_SURFACES = frozenset(
 #: pool runs deeper than the page to keep the nearest pending sources inside it.
 DREAM_NEIGHBOUR_POOL_FACTOR = 4
 
-_EMBEDDED_SURREAL_SCHEMES = ("memory://", "surrealkv://", "rocksdb://", "file://")
+_EMBEDDED_SURREAL_SCHEMES = (
+    "memory://",
+    "surrealkv://",
+    "surrealkv+versioned://",
+    "rocksdb://",
+    "file://",
+)
 
 log = structlog.get_logger()
 
