@@ -3575,7 +3575,7 @@ requires-dist = [
     { name = "mcp", specifier = ">=2.2.0,<3" },
     { name = "mistune", specifier = ">=3.3.4" },
     { name = "pydantic-settings", specifier = ">=2.7" },
-    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.13.0,<3" },
+    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.14.0,<3" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "resend", specifier = ">=2.47.0,<3" },
     { name = "rich", specifier = ">=13.0" },
