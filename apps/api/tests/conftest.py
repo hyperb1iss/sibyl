@@ -15,6 +15,15 @@ def disable_raw_memory_auto_embedding(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+@pytest.fixture(autouse=True)
+def reset_vector_lane_readiness() -> None:
+    # Lane verdicts are cached per process; one test's plane state must not
+    # decide another test's lanes.
+    from sibyl_core.services.embedding_lane_readiness import reset_lane_readiness_cache
+
+    reset_lane_readiness_cache()
+
+
 # =============================================================================
 # Git Repository Fixtures
 # =============================================================================

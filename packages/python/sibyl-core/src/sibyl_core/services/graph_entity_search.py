@@ -403,6 +403,19 @@ class _EntitySearchManager:
     ) -> list[tuple[Entity, float]]:
         if self._embedding_provider is None:
             return []
+        from sibyl_core.backends.surreal.schema_embedding_states import (
+            GRAPH_EMBEDDING_STATE_PLANE,
+        )
+        from sibyl_core.services.embedding_lane_readiness import vector_lane_readiness
+
+        readiness = await vector_lane_readiness(
+            plane=GRAPH_EMBEDDING_STATE_PLANE,
+            organization_id=str(self._group_id),
+            execute=self._client.execute_query,
+            query_stamp=self._embedding_provider.metadata.to_dict(),
+        )
+        if not readiness.run:
+            return []
         type_values = [entity_type.value for entity_type in entity_types or ()]
         type_clause = "AND entity_type IN $entity_types" if type_values else ""
         candidate_limit = min(max(int(limit) * 4, 32), 200)

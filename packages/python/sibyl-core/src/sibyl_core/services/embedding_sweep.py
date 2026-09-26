@@ -55,6 +55,8 @@ from sibyl_core.embeddings.provenance import (
     same_vector_identity,
     unverified_embedding_metadata,
     vector_identity_differs_predicate,
+    vector_space,
+    vector_space_predicate,
 )
 from sibyl_core.projection.repair import LifecycleRepairResult
 
@@ -190,6 +192,10 @@ class EmbeddingSweepResult(LifecycleRepairResult):
     legacy_decision: str | None = None
     warning: str | None = None
     notice: str | None = None
+    # The model's vector space and, after a partial pass, how many of the
+    # plane's vectors are already in it; vector lanes read both.
+    space: dict[str, Any] | None = None
+    in_model: int | None = None
     provider_dimensions: int | None = None
     schema_dimensions: int | None = None
     elapsed_ms: float = 0.0
@@ -266,6 +272,15 @@ class SweepTable:
             f"WHERE {self.scope_field} = $scope AND {self.vector_field} != NONE "
             f"AND {self.metadata_path} = NONE LIMIT $limit) "
             f"SET {self.metadata_path} = $legacy RETURN uuid;"
+        )
+
+    def in_model_count_query(self) -> str:
+        return (
+            f"SELECT count() AS count FROM {self.name} "
+            f"WHERE {self.scope_field} = $scope AND {self.vector_field} != NONE "
+            f"AND {self.metadata_path} != NONE AND "
+            + vector_space_predicate(self.metadata_path, "stamp")
+            + " GROUP ALL;"
         )
 
     def reembed_count_query(self) -> str:
@@ -666,6 +681,7 @@ async def run_embedding_sweep(
     def result(**fields: Any) -> EmbeddingSweepResult:
         return EmbeddingSweepResult(
             plane=plane.name,
+            space=vector_space(plane.stamp),
             provider_dimensions=plane.provider_dimensions,
             schema_dimensions=plane.schema_dimensions,
             **fields,
@@ -757,6 +773,7 @@ async def run_embedding_sweep(
             status = SWEEP_PROVIDER_FAILING
         await _forget_settled_rejections(plane, counts)
         pending = 0 if complete else await _pending(plane, counts)
+        in_model = None if complete else await _in_model(plane)
     except BaseException:
         await _release(
             plane,
@@ -772,6 +789,7 @@ async def run_embedding_sweep(
         legacy_decision=legacy_decision,
         warning=warning,
         notice=notice,
+        in_model=in_model,
         status=status,
         checked=counts.checked,
         recovered=counts.recovered,
@@ -1178,6 +1196,16 @@ async def _pending(plane: SweepPlane, counts: _Counts) -> int:
     for table in plane.tables:
         rows = await _rows(plane, table.pending_query(), remembered=counts.remembered_uuids(table))
         total += int(rows[0].get("count") or 0) if rows else 0
+    return total
+
+
+async def _in_model(plane: SweepPlane) -> int:
+    """Vectors already in the configured model's space, for the vector lanes' readiness."""
+    total = 0
+    for table in plane.tables:
+        rows = await _rows(plane, table.in_model_count_query())
+        count = rows[0].get("count") if rows else None
+        total += count if isinstance(count, int) else 0
     return total
 
 

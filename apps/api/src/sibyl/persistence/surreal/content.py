@@ -46,6 +46,7 @@ from sibyl_core.models.reflection import (
     memory_lifecycle_from_metadata,
     with_memory_lifecycle_metadata,
 )
+from sibyl_core.services.embedding_lane_readiness import chunk_vector_lane_ready
 from sibyl_core.services.link_graph_status import LinkGraphSourceStatusData, LinkGraphStatusData
 from sibyl_core.utils.query import query_tokens
 
@@ -2570,24 +2571,28 @@ async def hybrid_search_chunks(
 
         source_ids = [str(source.id) for source in sources]
         sources_by_id = {str(source.id): source for source in sources}
-        vector_rows = await _select_many_raw(
-            client,
-            "SELECT * FROM ("  # noqa: S608
-            "SELECT uuid, organization_id, source_id, document_id, chunk_index, "
-            "chunk_type, content, context, heading_path, language, has_entities, entity_ids, "
-            "embedding_metadata, (1 - vector::distance::knn()) AS score "
-            "FROM document_chunks WHERE organization_id = $organization_id "
-            f"AND $source_ids CONTAINS source_id {space_clause}"
-            f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding"
-            ") WHERE score >= $similarity_threshold "
-            "ORDER BY score DESC LIMIT $candidate_limit;",
-            organization_id=str(organization_id),
-            source_ids=source_ids,
-            query_embedding=query_embedding,
-            similarity_threshold=similarity_threshold,
-            candidate_limit=candidate_limit,
-            **space_params,
-        )
+        # The lexical lane below carries the query while the chunk plane has
+        # too few vectors in the query's model for the vector lane to pay off.
+        vector_rows: list[SurrealRecord] = []
+        if await chunk_vector_lane_ready(client, str(organization_id), embedding_metadata):
+            vector_rows = await _select_many_raw(
+                client,
+                "SELECT * FROM ("  # noqa: S608
+                "SELECT uuid, organization_id, source_id, document_id, chunk_index, "
+                "chunk_type, content, context, heading_path, language, has_entities, entity_ids, "
+                "embedding_metadata, (1 - vector::distance::knn()) AS score "
+                "FROM document_chunks WHERE organization_id = $organization_id "
+                f"AND $source_ids CONTAINS source_id {space_clause}"
+                f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding"
+                ") WHERE score >= $similarity_threshold "
+                "ORDER BY score DESC LIMIT $candidate_limit;",
+                organization_id=str(organization_id),
+                source_ids=source_ids,
+                query_embedding=query_embedding,
+                similarity_threshold=similarity_threshold,
+                candidate_limit=candidate_limit,
+                **space_params,
+            )
         lexical_rows = await _select_many_raw(
             client,
             "SELECT uuid, organization_id, source_id, document_id, chunk_index, "

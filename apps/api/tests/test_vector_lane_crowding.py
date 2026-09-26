@@ -356,3 +356,207 @@ async def test_chunk_vector_lanes_reach_new_rows_behind_nearer_old_ones(
         if not hits or not {str(hit[0].id) for hit in hits} <= new_chunks
     }
     assert not starved, starved
+
+
+async def _write_plane_state(
+    execute, organization_id: str, plane: str, state: dict[str, object]
+) -> None:
+    from sibyl_core.backends.surreal.schema_embedding_states import embedding_state_key
+
+    await execute(
+        "UPSERT type::record($key) MERGE $state RETURN NONE;",
+        key=embedding_state_key(organization_id, plane),
+        state={"organization_id": organization_id, "plane": plane, **state},
+    )
+
+
+_SWITCHED = {"complete_metadata": _PREVIOUS_CHUNK_STAMP}
+
+
+def _converting(stamp: dict[str, object], in_model: int, pending: int) -> dict[str, object]:
+    """A plane mid-sweep: last completed for the old model, partway into the new one."""
+    from sibyl_core.embeddings.provenance import vector_space
+
+    return {
+        "complete_metadata": _PREVIOUS_CHUNK_STAMP,
+        "last_run": {
+            "status": "partial",
+            "space": vector_space(stamp),
+            "in_model": in_model,
+            "pending": pending,
+        },
+    }
+
+
+@pytest.fixture
+def lane_clock(monkeypatch: pytest.MonkeyPatch):
+    """Advance past the lanes' cached readiness verdict on demand."""
+    from sibyl_core.services import embedding_lane_readiness as readiness
+
+    clock = [5000.0]
+    monkeypatch.setattr(readiness.time, "monotonic", lambda: clock[0])
+
+    def advance() -> None:
+        clock[0] += 31
+
+    return advance
+
+
+@pytest.mark.asyncio
+async def test_graph_vector_lanes_stand_aside_after_a_switch_and_resume(engine, lane_clock) -> None:
+    from sibyl_core.retrieval._search_plan import RetrievalPlan, SearchFilter
+    from sibyl_core.retrieval._search_sources import _vector_candidate_sources_detailed
+
+    async with _graph_client(engine) as client:
+        new = _SweepTargetProvider(GRAPH_EMBEDDING_DIM, model="live-crowding-new")
+        query = (await new.embed_texts(["converted query"], input_kind="query"))[0]
+        await client.execute_query(
+            "INSERT INTO entity $rows;",
+            rows=[
+                {
+                    "uuid": "new-converted",
+                    "group_id": client.group_id,
+                    "name": "Converted",
+                    "entity_type": "topic",
+                    "name_embedding": list(query),
+                    "attributes": {"embedding_metadata": new.metadata.to_dict()},
+                    "created_at": datetime.now(UTC),
+                }
+            ],
+        )
+        searcher = EntityManager(client, group_id=client.group_id, embedding_provider=new)
+        plan = RetrievalPlan(
+            query="converted query",
+            organization_id=client.group_id,
+            facets=(),
+            facet_types={},
+            scopes=(),
+            denied_scopes=(),
+        )
+
+        async def lanes_after(state: dict[str, object] | None) -> tuple[list[str], str]:
+            if state is not None:
+                await _write_plane_state(client.execute_query, client.group_id, "graph", state)
+                lane_clock()
+            hits = await searcher._vector_search(
+                query="converted query", entity_types=None, limit=1
+            )
+            fetch = await _vector_candidate_sources_detailed(
+                client=client, plan=plan, search_filter=SearchFilter(), embedding_provider=new
+            )
+            return [entity.id for entity, _ in hits], fetch.as_metadata()["vector_status"]
+
+        stamp = new.metadata.to_dict()
+        trace = [
+            await lanes_after(None),
+            await lanes_after(_SWITCHED),
+            await lanes_after(_converting(stamp, 2, 98)),
+            await lanes_after(_converting(stamp, 30, 70)),
+        ]
+
+    assert trace == [
+        (["new-converted"], "ok"),
+        ([], "vector_lane_model_switched"),
+        ([], "vector_lane_model_sparse"),
+        (["new-converted"], "ok"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_chunk_vector_lanes_stand_aside_after_a_switch_and_resume(
+    engine, lane_clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sibyl.persistence.surreal import content as app_content
+    from sibyl_core.services import content_client
+    from sibyl_core.services.content_documents import search_document_chunks
+
+    namespace = f"chunk_readiness_{uuid4().hex}"
+    organization_id, source_id, document_id = str(uuid4()), str(uuid4()), str(uuid4())
+    client = _content_client(engine, namespace)
+
+    @asynccontextmanager
+    async def session():
+        yield client
+
+    monkeypatch.setattr(content_client, "surreal_content_client", session)
+    monkeypatch.setattr(app_content, "surreal_content_client", session)
+    query = [1.0 / (EMBEDDING_DIM**0.5)] * EMBEDDING_DIM
+
+    async def execute(statement: str, **params: object) -> object:
+        return await content_client.select_many(client, statement, **params)
+
+    async def lanes_after(state: dict[str, object] | None) -> dict[str, int]:
+        if state is not None:
+            await _write_plane_state(execute, organization_id, "document_chunks", state)
+            lane_clock()
+        vector, lexical = await search_document_chunks(
+            organization_id=organization_id,
+            query_text="converted",
+            query_embedding=list(query),
+            limit=5,
+            embedding_metadata=_TARGET_CHUNK_STAMP,
+        )
+        hybrid = await app_content.hybrid_search_chunks(
+            None,
+            query_text="nothing lexical matches",
+            query_embedding=list(query),
+            organization_id=organization_id,
+            similarity_threshold=0.0,
+            match_count=5,
+            embedding_metadata=_TARGET_CHUNK_STAMP,
+        )
+        return {"vector": len(vector), "lexical": len(lexical), "hybrid": len(hybrid)}
+
+    try:
+        await bootstrap_content_schema(client, reset=True)
+        for table, record in (
+            (
+                "crawl_sources",
+                {
+                    "uuid": source_id,
+                    "organization_id": organization_id,
+                    "name": "Converted guide",
+                    "url": "https://docs.example.test",
+                },
+            ),
+            (
+                "crawled_documents",
+                {
+                    "uuid": document_id,
+                    "organization_id": organization_id,
+                    "source_id": source_id,
+                    "url": "https://docs.example.test/converted",
+                    "title": "Converted page",
+                    "content": "body",
+                },
+            ),
+            (
+                "document_chunks",
+                {
+                    "uuid": str(uuid4()),
+                    "organization_id": organization_id,
+                    "source_id": source_id,
+                    "document_id": document_id,
+                    "content": "converted chunk body",
+                    "chunk_type": "text",
+                    "embedding": list(query),
+                    "embedding_metadata": _TARGET_CHUNK_STAMP,
+                },
+            ),
+        ):
+            await execute(f"CREATE {table} CONTENT $record RETURN NONE;", record=record)
+        trace = [
+            await lanes_after(None),
+            await lanes_after(_SWITCHED),
+            await lanes_after(_converting(_TARGET_CHUNK_STAMP, 1, 1)),
+        ]
+    finally:
+        await client.close()
+        await _drop_namespace(engine, namespace)
+
+    # The lexical lane keeps answering while the vector lane stands aside.
+    assert trace == [
+        {"vector": 1, "lexical": 1, "hybrid": 1},
+        {"vector": 0, "lexical": 1, "hybrid": 0},
+        {"vector": 1, "lexical": 1, "hybrid": 1},
+    ]

@@ -530,6 +530,27 @@ async def _vector_candidate_sources_detailed(
         return empty
     if not vector_requested:
         return empty
+    from sibyl_core.backends.surreal.schema_embedding_states import (
+        GRAPH_EMBEDDING_STATE_PLANE,
+    )
+    from sibyl_core.services.embedding_lane_readiness import vector_lane_readiness
+
+    readiness = await vector_lane_readiness(
+        plane=GRAPH_EMBEDDING_STATE_PLANE,
+        organization_id=plan.organization_id,
+        execute=client.execute_query,
+        query_stamp=embedding_provider.metadata.to_dict(),
+    )
+    if not readiness.run:
+        # Almost no stored vector is in the query's model yet; the lexical
+        # lanes carry the query until the sweep has converted enough.
+        return VectorCandidateFetch(
+            node_candidates=[],
+            edge_candidates=[],
+            requested=True,
+            attempted=False,
+            reason=f"vector_lane_{readiness.reason}",
+        )
     try:
         embeddings = await embedding_provider.embed_texts([plan.query], input_kind="query")
     except Exception as exc:

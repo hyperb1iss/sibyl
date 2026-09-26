@@ -15,6 +15,7 @@ from sibyl_core.embeddings.provenance import vector_space_predicate
 from sibyl_core.services import content_client
 from sibyl_core.services import content_models as models
 from sibyl_core.services.content_models import ContentChunk, ContentDocument, ContentSource
+from sibyl_core.services.embedding_lane_readiness import chunk_vector_lane_ready
 from sibyl_core.utils.resilience import with_timeout
 
 _TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_]+")
@@ -377,7 +378,9 @@ async def search_document_chunks(
 
         vector_rows: list[models.SurrealRecord] = []
         vector_errors: list[str] = []
-        if query_embedding is not None:
+        if query_embedding is not None and await chunk_vector_lane_ready(
+            client, organization_id, embedding_metadata
+        ):
             vector_params: dict[str, object] = {
                 "organization_id": organization_id,
                 "source_ids": source_ids,
