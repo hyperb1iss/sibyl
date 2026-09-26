@@ -5,12 +5,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 import random
 import sys
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 import structlog
 
@@ -59,6 +60,194 @@ def _connect_timeout_seconds(url: str) -> float | None:
     from sibyl_core.config import core_config
 
     return core_config.surreal_connect_timeout_seconds
+
+
+# A file-backed embedded engine keeps its own in-memory index over the files on
+# disk, so two engines opened on one path in one process append to the same log
+# and read each other's bytes back as corrupt values ("Invalid revision `N` for
+# type `Value`"), and neither sees the other's writes. Every client on such a
+# path therefore shares one engine. memory:// has no files behind it, and each
+# connection there stays its own store.
+_SHARED_EMBEDDED_URL_SCHEMES = ("surrealkv://", "surrealkv+versioned://", "rocksdb://", "file://")
+
+
+def _shares_embedded_engine(url: str) -> bool:
+    return url.startswith(_SHARED_EMBEDDED_URL_SCHEMES)
+
+
+def _embedded_engine_key(url: str) -> str:
+    # Spellings of one directory (a symlinked /tmp, a trailing slash) must map
+    # to one engine, or the registry would open the same files twice.
+    scheme, separator, location = url.partition("://")
+    if not separator or not location or "?" in location:
+        return url
+    return f"{scheme}://{os.path.realpath(os.path.expanduser(location))}"
+
+
+def _surreal_ident(name: str) -> str:
+    escaped = name.replace("\\", "\\\\").replace("`", "\\`")
+    return f"`{escaped}`"
+
+
+class _ConnectableSurrealClient(SurrealClient, Protocol):
+    async def connect(self) -> None: ...
+
+
+class _SharedEmbeddedEngine:
+    """The one engine every client on a file-backed embedded URL runs through."""
+
+    def __init__(self, key: str) -> None:
+        self.key = key
+        self.client: SurrealClient | None = None
+        self.leases = 0
+        self.lock = asyncio.Lock()
+
+
+_shared_embedded_engines: dict[str, _SharedEmbeddedEngine] = {}
+
+
+async def _lease_shared_embedded_engine(
+    url: str,
+    authenticate: Callable[[SurrealClient], Awaitable[None]],
+) -> _SharedEmbeddedEngine:
+    key = _embedded_engine_key(url)
+    engine = _shared_embedded_engines.get(key)
+    if engine is None:
+        engine = _SharedEmbeddedEngine(key)
+        _shared_embedded_engines[key] = engine
+    # Counted before the first await so a concurrent last release cannot close
+    # the engine while this lease is still opening it.
+    engine.leases += 1
+    try:
+        async with engine.lock:
+            if engine.client is None:
+                from surrealdb import AsyncSurreal
+
+                client = cast(SurrealClient, AsyncSurreal(url))
+                try:
+                    # Open the store once, here, instead of lazily inside
+                    # whichever scoped query happens to run first.
+                    await cast("_ConnectableSurrealClient", client).connect()
+                    await authenticate(client)
+                except BaseException:
+                    with contextlib.suppress(Exception):
+                        await client.close()
+                    raise
+                engine.client = client
+    except BaseException:
+        await _release_shared_embedded_engine(engine)
+        raise
+    return engine
+
+
+async def _release_shared_embedded_engine(engine: _SharedEmbeddedEngine) -> None:
+    engine.leases -= 1
+    if engine.leases > 0:
+        return
+    async with engine.lock:
+        if engine.leases > 0:
+            return
+        client = engine.client
+        engine.client = None
+        try:
+            if client is not None:
+                await _close_to_completion(client)
+        finally:
+            # Dropped only after the close finishes: a lease that arrives
+            # meanwhile waits on this engine's lock and reopens it, rather than
+            # opening a second engine on files that are still being closed.
+            if engine.leases == 0 and _shared_embedded_engines.get(engine.key) is engine:
+                del _shared_embedded_engines[engine.key]
+
+
+async def _close_to_completion(client: SurrealClient) -> None:
+    """Finish closing an engine even when the releasing task is cancelled.
+
+    The caller holds the engine's lock until this returns, so no new lease can
+    open a second engine on the directory while the old one is still closing.
+    """
+    closing = asyncio.ensure_future(client.close())
+    cancelled = False
+    while not closing.done():
+        try:
+            await asyncio.shield(closing)
+        except asyncio.CancelledError:
+            cancelled = True
+    closing.result()
+    if cancelled:
+        raise asyncio.CancelledError
+
+
+def _without_scope_result(response: object) -> object:
+    """Drop the leading USE statement's envelope from a scoped response."""
+    if not isinstance(response, dict):
+        return response
+    statements = response.get("result")
+    if not isinstance(statements, list) or not statements:
+        return response
+    scope, *rest = statements
+    if isinstance(scope, dict) and scope.get("status") == "ERR":
+        from surrealdb.errors import parse_query_error
+
+        raise parse_query_error(scope)
+    return {**response, "result": rest}
+
+
+class _EmbeddedNamespaceSession:
+    """One namespace's handle on a shared embedded engine.
+
+    The engine has a single session, and a USE on it would move every other
+    client sharing it. Each query instead opens with its own USE statement,
+    which scopes only that execution, so clients in different namespaces run
+    concurrently on the one engine. The session itself never selects a
+    namespace, so a query that somehow skipped the scope fails with "Specify a
+    namespace to use" instead of landing in another tenant's namespace.
+    """
+
+    def __init__(self, engine: _SharedEmbeddedEngine, namespace: str, database: str) -> None:
+        self._engine: _SharedEmbeddedEngine | None = engine
+        self._scope = ""
+        self._set_scope(namespace, database)
+
+    def _set_scope(self, namespace: str, database: str) -> None:
+        self._scope = f"USE NS {_surreal_ident(namespace)} DB {_surreal_ident(database)}; "
+
+    def _client(self) -> SurrealClient:
+        engine = self._engine
+        if engine is None or engine.client is None:
+            raise RuntimeError("SurrealDB embedded session is closed")
+        return engine.client
+
+    async def authenticate(self, token: str) -> None:
+        await self._client().authenticate(token)
+
+    async def signin(self, vars: QueryParams) -> str:
+        return await self._client().signin(vars)
+
+    async def use(self, namespace: str, database: str) -> None:
+        self._set_scope(namespace, database)
+
+    async def query(self, query: str, vars: QueryParams | None = None) -> object:
+        return _checked_query_result(await self.query_raw(query, vars))
+
+    async def query_raw(self, query: str, params: QueryParams | None = None) -> object:
+        response = await self._client().query_raw(self._scope + query, params)
+        return _without_scope_result(response)
+
+    async def live(self, table: str, *, diff: bool = False) -> object:
+        raise RuntimeError("SurrealDB live queries require a WebSocket URL")
+
+    async def subscribe_live(self, query_uuid: object) -> AsyncIterator[object]:
+        raise RuntimeError("SurrealDB live queries require a WebSocket URL")
+
+    async def kill(self, query_uuid: object) -> object:
+        raise RuntimeError("SurrealDB live queries require a WebSocket URL")
+
+    async def close(self) -> None:
+        engine = self._engine
+        self._engine = None
+        if engine is not None:
+            await _release_shared_embedded_engine(engine)
 
 
 def _checked_query_result(response: object, *, all_results: bool = False) -> object:
@@ -179,6 +368,9 @@ class _PooledConnection:
             if self._client is not None:
                 return self._client
 
+            if _shares_embedded_engine(self._url):
+                return await self._connect_shared_embedded()
+
             from surrealdb import AsyncSurreal
 
             started_at = query_start()
@@ -232,13 +424,37 @@ class _PooledConnection:
             self._client = client
             return client
 
+    async def _connect_shared_embedded(self) -> SurrealClient:
+        started_at = query_start()
+        try:
+            engine = await _lease_shared_embedded_engine(self._url, self._authenticate)
+        except Exception as exc:
+            log.warning(
+                "surreal_connect_failed",
+                attempt=1,
+                elapsed_ms=elapsed_ms(started_at),
+                timeout_seconds=None,
+                url_scheme=_url_scheme(self._url),
+                namespace=self._namespace,
+                database=self._database,
+                error_type=type(exc).__name__,
+                error_category="connect_error",
+            )
+            raise
+        session = _EmbeddedNamespaceSession(engine, self._namespace, self._database)
+        self._client = session
+        return session
+
     async def _handshake(self, client: SurrealClient) -> None:
+        await self._authenticate(client)
+        await client.use(self._namespace, self._database)
+
+    async def _authenticate(self, client: SurrealClient) -> None:
         if self._requires_auth():
             if self._token:
                 await client.authenticate(self._token)
             elif self._username and self._password:
                 await client.signin({"username": self._username, "password": self._password})
-        await client.use(self._namespace, self._database)
 
     def _requires_auth(self) -> bool:
         return not self._url.startswith(("memory://", "surrealkv://"))

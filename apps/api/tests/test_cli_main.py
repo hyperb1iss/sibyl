@@ -6,12 +6,29 @@ from importlib import import_module
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
 from typer.testing import CliRunner
 
 from sibyl.cli.main import app
 
 runner = CliRunner()
 cli_main = import_module("sibyl.cli.main")
+
+
+@pytest.fixture
+def restored_global_settings():
+    """Undo an in-place settings reload so later tests keep their own config."""
+    api_settings = import_module("sibyl.config").settings
+    core_settings = import_module("sibyl_core.config").core_config
+    api_snapshot = dict(api_settings.__dict__)
+    core_snapshot = dict(core_settings.__dict__)
+    try:
+        yield
+    finally:
+        api_settings.__dict__.clear()
+        api_settings.__dict__.update(api_snapshot)
+        core_settings.__dict__.clear()
+        core_settings.__dict__.update(core_snapshot)
 
 
 def _clear_embedded_runtime_env(monkeypatch) -> None:
@@ -90,7 +107,7 @@ def test_serve_with_reload_enables_dev_diagnostics(monkeypatch) -> None:
     assert args[args.index("--reload-dir") + 1].endswith("apps/api/src")
 
 
-def test_configure_embedded_environment(monkeypatch, tmp_path) -> None:
+def test_configure_embedded_environment(monkeypatch, tmp_path, restored_global_settings) -> None:
     _clear_embedded_runtime_env(monkeypatch)
 
     data_dir = cli_main._configure_embedded_environment(tmp_path / "surreal")
@@ -103,14 +120,41 @@ def test_configure_embedded_environment(monkeypatch, tmp_path) -> None:
     assert os.environ["SIBYL_SURREAL_URL"] == f"surrealkv://{data_dir}"
 
 
-def test_configure_embedded_environment_refreshes_global_settings(monkeypatch, tmp_path) -> None:
+def test_configure_embedded_environment_refreshes_global_settings(
+    monkeypatch, tmp_path, restored_global_settings
+) -> None:
     _clear_embedded_runtime_env(monkeypatch)
     monkeypatch.setattr("sibyl.config.settings.surreal_url", "")
+    monkeypatch.setattr("sibyl_core.config.core_config.surreal_url", "")
+    monkeypatch.setattr("sibyl_core.config.core_config.surreal_data_dir", "")
 
     data_dir = cli_main._configure_embedded_environment(tmp_path / "surreal")
 
     assert os.environ["SIBYL_SURREAL_URL"] == f"surrealkv://{data_dir}"
     assert f"surrealkv://{data_dir}" == import_module("sibyl.config").settings.resolved_surreal_url
+    # The graph client reads the core config, which was built at import time,
+    # before the embedded environment existed. Left stale, the graph would run
+    # on memory:// and vanish on every daemon restart.
+    assert (
+        f"surrealkv://{data_dir}"
+        == import_module("sibyl_core.config").settings.resolved_surreal_url
+    )
+
+
+def test_embedded_graph_clients_open_the_daemon_store(
+    monkeypatch, tmp_path, restored_global_settings
+) -> None:
+    _clear_embedded_runtime_env(monkeypatch)
+    monkeypatch.setattr("sibyl_core.config.core_config.surreal_url", "")
+    monkeypatch.setattr("sibyl_core.config.core_config.surreal_data_dir", "")
+    graph_client = import_module("sibyl_core.services.graph_client")
+    auth = import_module("sibyl.persistence.surreal.auth")
+
+    data_dir = cli_main._configure_embedded_environment(tmp_path / "surreal")
+
+    expected = f"surrealkv://{data_dir}"
+    assert graph_client._new_graph_client("org-1")._url == expected
+    assert auth.build_surreal_auth_client()._url == expected
 
 
 def test_setup_surreal_services_skips_redis_for_local_coordination(monkeypatch) -> None:

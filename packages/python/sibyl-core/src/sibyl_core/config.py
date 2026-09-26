@@ -425,3 +425,15 @@ core_config = CoreConfig()
 
 # Alias for backwards compatibility with tools that import 'settings'
 settings = core_config
+
+
+def reload_core_config_from_env() -> CoreConfig:
+    """Reload the shared core config in place from current environment variables.
+
+    Modules hold `core_config` by reference, so a caller that sets SIBYL_*
+    variables after import (the embedded daemon does) must refresh this
+    instance too, or core services keep the import-time values.
+    """
+    refreshed = CoreConfig()
+    core_config.__dict__.update(refreshed.__dict__)
+    return core_config
