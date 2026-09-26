@@ -17,7 +17,7 @@ type OnboardingStep = 'welcome' | 'models' | 'connect' | 'project' | 'task' | 'c
 /**
  * Everyone connects their tools. Only an instance admin on a server whose
  * model providers are not ready also sees the keys step: members could not
- * change server settings anyway, and a keyless provider needs no keys at all.
+ * change server settings anyway, and a ready provider (Bedrock included) needs none.
  */
 export function onboardingSteps(
   status: SetupStatus | undefined,

@@ -48,7 +48,7 @@ export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) 
   };
 
   const isNewUser = totalEntities === 0;
-  // Keys are one way to be ready; a server-side provider such as Bedrock needs none.
+  // The server decides readiness for every plane, Bedrock included.
   // Server rendering never has the status, so the pill waits for the client, and
   // "needs setup" is only worth showing to an admin who can act on it.
   const modelsReady = setupStatus?.providers_configured === true;

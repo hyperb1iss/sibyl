@@ -23,20 +23,14 @@ from sibyl.persistence.operations_runtime import (
     get_setup_status as get_runtime_setup_status,
     require_setup_mode_or_admin,
 )
-from sibyl.services.settings import SettingsService, get_settings_service
+from sibyl.services.settings import get_settings_service
 from sibyl_core.ai.bedrock import (
     API_KEY_ENV_VARS as BEDROCK_API_KEY_ENV_VARS,
     bedrock_region_configured,
     resolve_bedrock_credentials,
     resolve_bedrock_settings,
 )
-from sibyl_core.ai.errors import LLMConfigError
-from sibyl_core.ai.llm.config import (
-    LLMProviderName,
-    LLMSurface,
-    get_config_source,
-    resolve_llm_config,
-)
+from sibyl_core.ai.llm.config import LLMProviderName, LLMSurface, get_config_source
 from sibyl_core.ai.validation import KeyValidationResult, check_provider_key
 from sibyl_core.embeddings.providers import sentence_transformers_available
 from sibyl_core.integration import agent_setup_markdown, install_commands, setup_command
@@ -93,50 +87,12 @@ class SetupStatus(BaseModel):
     providers_configured: bool = Field(
         default=False,
         description="True when every model provider this server uses is ready without "
-        "user input: its key is set, or it needs none (cloud IAM or local models)",
+        "user input: keyed providers have their key, Bedrock has a Region, and local "
+        "graph embeddings have their dependency",
     )
     configured_providers: list[str] = Field(
         default_factory=list, description="Names of the ready model providers"
     )
-
-
-# Providers that authenticate with a key someone pastes in. Any other provider
-# (cloud IAM such as Bedrock, or local embeddings) is ready once it is selected.
-_PROVIDER_KEY_SETTINGS = {
-    "anthropic": "anthropic_api_key",
-    "gemini": "gemini_api_key",
-    "openai": "openai_api_key",
-}
-
-
-async def _setting_or_default(service: SettingsService, key: str, default: str) -> str:
-    value = await service.get(key)
-    return value.strip() if isinstance(value, str) and value.strip() else default
-
-
-async def _server_model_providers() -> tuple[bool, list[str]]:
-    """Report whether the server's chosen model providers need nothing from users."""
-    service = get_settings_service()
-    try:
-        # Each surface (memory, synthesis, crawler) can name its own provider.
-        llm_providers = {
-            (await resolve_llm_config(surface)).provider.value for surface in LLMSurface
-        }
-    except LLMConfigError:
-        return False, []
-    providers = {
-        *llm_providers,
-        await _setting_or_default(service, "embedding_provider", settings.embedding_provider),
-        await _setting_or_default(
-            service, "graph_embedding_provider", settings.graph_embedding_provider
-        ),
-    }
-    ready: list[str] = []
-    for provider in sorted(providers):
-        key_setting = _PROVIDER_KEY_SETTINGS.get(provider)
-        if key_setting is None or bool(await service.get(key_setting)):
-            ready.append(provider)
-    return len(ready) == len(providers), ready
 
 
 class ApiKeyValidation(BaseModel):
@@ -276,6 +232,50 @@ def bedrock_configured(environ: Mapping[str, str] | None = None) -> bool:
     return any(env.get(name, "").strip() for name in _AWS_CREDENTIAL_HINTS)
 
 
+# Providers that authenticate with a key someone pastes into Sibyl.
+_PROVIDER_KEY_SETTINGS = {
+    "anthropic": "anthropic_api_key",
+    "gemini": "gemini_api_key",
+    "openai": "openai_api_key",
+}
+
+
+async def _provider_ready(provider: str) -> bool:
+    """One provider's readiness, judged the way `bedrock_selection` judges Bedrock."""
+    key_setting = _PROVIDER_KEY_SETTINGS.get(provider)
+    if key_setting is not None:
+        return bool(await get_settings_service().get(key_setting))
+    if provider == "bedrock":
+        # Credentials may come from an instance role with no hint; validate-keys proves them.
+        return bedrock_region_configured()
+    if provider == "local":
+        return sentence_transformers_available()
+    return False
+
+
+async def model_providers_ready() -> tuple[bool, list[str]]:
+    """Whether every model provider this server uses is ready, and which ones are.
+
+    Every plane counts: each LLM surface (memory, synthesis and the crawler can
+    each name their own provider) plus document and graph embeddings, read the
+    way the runtime reads them. This decides who sees a keys step, so it answers
+    no whenever a plane would fail.
+    """
+    source = get_config_source()
+    try:
+        llm = {(await source.resolve(surface)).provider.value for surface in LLMSurface}
+    except Exception as e:
+        log.warning("Could not resolve the LLM providers", error=str(e))
+        return False, []
+    providers = {
+        *llm,
+        await effective_embedding_setting("embedding_provider") or "",
+        await effective_embedding_setting("graph_embedding_provider") or "",
+    }
+    ready = [provider for provider in sorted(providers) if await _provider_ready(provider)]
+    return len(ready) == len(providers), ready
+
+
 #: Environment variables that point the AWS credential chain at a source: a
 #: Bedrock API key, static keys, a profile, IRSA web identity, EKS Pod Identity
 #: or an ECS task role. Instance roles leave no hint, so validate-keys probes.
@@ -340,7 +340,7 @@ async def get_setup_status(
     anthropic_configured = bool(anthropic_key)
     gemini_configured = bool(gemini_key)
     bedrock_llm, bedrock_embeddings = await bedrock_selection()
-    providers_configured, configured_providers = await _server_model_providers()
+    providers_configured, configured_providers = await model_providers_ready()
 
     return SetupStatus(
         needs_setup=not setup_status.setup_complete,

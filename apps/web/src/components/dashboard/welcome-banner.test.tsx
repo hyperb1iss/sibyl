@@ -58,7 +58,7 @@ describe('WelcomeBanner', () => {
     expect(screen.queryByText(/api keys/i)).not.toBeInTheDocument();
   });
 
-  it('reports models ready when the server configured a keyless provider', () => {
+  it('reports models ready when the server says Bedrock covers every plane', () => {
     hooks.useSetupStatus.mockReturnValue({
       data: {
         openai_configured: false,

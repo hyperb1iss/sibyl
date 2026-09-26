@@ -221,17 +221,55 @@ def _status_service(**keys: str | None) -> AsyncMock:
     return service
 
 
-async def _status_with(
-    monkeypatch: pytest.MonkeyPatch, *, llm_provider: str, **keys: str | None
-) -> setup_routes.SetupStatus:
+class _PerSurfaceSource:
+    """A config source answering each LLM surface from a mapping (default otherwise)."""
+
+    def __init__(self, default: str, **surfaces: str) -> None:
+        self.default = default
+        self.surfaces = surfaces
+
+    async def resolve(self, surface: LLMSurface) -> SimpleNamespace:
+        provider = self.surfaces.get(surface.value, self.default)
+        return SimpleNamespace(provider=SimpleNamespace(value=provider))
+
+
+def _server(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    llm_provider: str,
+    region: str | None = None,
+    local_embeddings_installed: bool = False,
+    surfaces: dict[str, str] | None = None,
+    **keys: str | None,
+) -> None:
+    """Point every readiness input at a fake server: config, settings, region, deps."""
     monkeypatch.setattr(
         setup_routes,
         "get_runtime_setup_status",
         AsyncMock(return_value=SetupStatus(has_users=True, has_orgs=True, setup_complete=True)),
     )
     monkeypatch.setattr(setup_routes, "get_settings_service", lambda: _status_service(**keys))
-    resolved = SimpleNamespace(provider=SimpleNamespace(value=llm_provider))
-    monkeypatch.setattr(setup_routes, "resolve_llm_config", AsyncMock(return_value=resolved))
+    source = _PerSurfaceSource(llm_provider, **(surfaces or {}))
+    monkeypatch.setattr(setup_routes, "get_config_source", lambda: source)
+    monkeypatch.setattr(
+        setup_routes, "sentence_transformers_available", lambda: local_embeddings_installed
+    )
+    for name in (
+        "SIBYL_EMBEDDING_PROVIDER",
+        "SIBYL_GRAPH_EMBEDDING_PROVIDER",
+        "SIBYL_BEDROCK_REGION",
+        "AWS_REGION",
+        "AWS_DEFAULT_REGION",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    if region:
+        monkeypatch.setenv("SIBYL_BEDROCK_REGION", region)
+
+
+async def _status_with(
+    monkeypatch: pytest.MonkeyPatch, *, llm_provider: str, **options: object
+) -> setup_routes.SetupStatus:
+    _server(monkeypatch, llm_provider=llm_provider, **options)  # type: ignore[arg-type]
     return await setup_routes.get_setup_status()
 
 
@@ -261,56 +299,104 @@ async def test_status_reports_keyed_providers_configured_when_keys_are_set(
 
 
 @pytest.mark.asyncio
-async def test_status_treats_a_keyless_provider_as_configured(
+async def test_status_counts_bedrock_as_ready_with_a_region_and_no_keys(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # A cloud-IAM provider (bedrock) and local graph embeddings need no key at all.
+    status = await _status_with(
+        monkeypatch,
+        llm_provider="bedrock",
+        region="us-east-1",
+        embedding_provider="bedrock",
+        graph_embedding_provider="bedrock",
+    )
+
+    assert status.providers_configured is True
+    assert status.configured_providers == ["bedrock"]
+    assert (status.bedrock_llm, status.bedrock_embeddings) == (True, True)
+    assert status.anthropic_configured is False
+    assert status.openai_configured is False
+
+
+@pytest.mark.asyncio
+async def test_status_never_counts_bedrock_without_a_region(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # An AWS profile alone proves nothing: Bedrock needs a Region to be ready.
+    monkeypatch.setenv("AWS_PROFILE", "dev")
     status = await _status_with(
         monkeypatch,
         llm_provider="bedrock",
         embedding_provider="bedrock",
+        graph_embedding_provider="bedrock",
+    )
+
+    assert status.providers_configured is False
+    assert status.configured_providers == []
+    assert (status.bedrock_llm, status.bedrock_embeddings) == (False, False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("installed", [True, False])
+async def test_status_counts_local_graph_embeddings_only_with_their_dependency(
+    monkeypatch: pytest.MonkeyPatch, installed: bool
+) -> None:
+    status = await _status_with(
+        monkeypatch,
+        llm_provider="bedrock",
+        region="us-east-1",
+        local_embeddings_installed=installed,
+        embedding_provider="bedrock",
         graph_embedding_provider="local",
     )
 
-    assert status.providers_configured is True
-    assert status.configured_providers == ["bedrock", "local"]
-    assert status.anthropic_configured is False
-    assert status.openai_configured is False
+    assert status.providers_configured is installed
+    assert status.bedrock_embeddings is installed
+    assert ("local" in status.configured_providers) is installed
 
 
 @pytest.mark.asyncio
 async def test_status_reports_partial_providers_as_unconfigured(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    status = await _status_with(monkeypatch, llm_provider="bedrock")
+    status = await _status_with(monkeypatch, llm_provider="bedrock", region="us-east-1")
 
-    # Bedrock needs no key, but default OpenAI embeddings still do.
+    # Bedrock is ready, but default OpenAI embeddings still need a key.
     assert status.providers_configured is False
     assert status.configured_providers == ["bedrock"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("region", [None, "us-east-1"])
+@pytest.mark.parametrize("graph", ["bedrock", "local"])
+@pytest.mark.parametrize("installed", [True, False])
+async def test_an_all_bedrock_server_agrees_with_bedrock_selection(
+    monkeypatch: pytest.MonkeyPatch, region: str | None, graph: str, installed: bool
+) -> None:
+    # One rule: with Bedrock on every plane, readiness is exactly what the
+    # keys step's Bedrock check says.
+    status = await _status_with(
+        monkeypatch,
+        llm_provider="bedrock",
+        region=region,
+        local_embeddings_installed=installed,
+        embedding_provider="bedrock",
+        graph_embedding_provider=graph,
+    )
+
+    assert status.providers_configured is (status.bedrock_llm and status.bedrock_embeddings)
 
 
 @pytest.mark.asyncio
 async def test_status_checks_the_provider_of_every_model_surface(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        setup_routes,
-        "get_runtime_setup_status",
-        AsyncMock(return_value=SetupStatus(has_users=True, has_orgs=True, setup_complete=True)),
+    status = await _status_with(
+        monkeypatch,
+        llm_provider="anthropic",
+        surfaces={"memory": "gemini"},
+        anthropic_api_key="sk-ant",
+        openai_api_key="sk-openai",
     )
-    monkeypatch.setattr(
-        setup_routes,
-        "get_settings_service",
-        lambda: _status_service(anthropic_api_key="sk-ant", openai_api_key="sk-openai"),
-    )
-
-    async def per_surface(surface: LLMSurface) -> SimpleNamespace:
-        provider = "gemini" if surface is LLMSurface.MEMORY else "anthropic"
-        return SimpleNamespace(provider=SimpleNamespace(value=provider))
-
-    monkeypatch.setattr(setup_routes, "resolve_llm_config", per_surface)
-
-    status = await setup_routes.get_setup_status()
 
     # Memory runs on Gemini, which has no key, so the server is not ready.
     assert status.providers_configured is False
@@ -321,19 +407,13 @@ async def test_status_checks_the_provider_of_every_model_surface(
 async def test_status_reports_unresolvable_llm_config_as_unconfigured(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        setup_routes,
-        "get_runtime_setup_status",
-        AsyncMock(return_value=SetupStatus(has_users=True, has_orgs=True, setup_complete=True)),
-    )
-    monkeypatch.setattr(
-        setup_routes, "get_settings_service", lambda: _status_service(openai_api_key="sk")
-    )
-    monkeypatch.setattr(
-        setup_routes,
-        "resolve_llm_config",
-        AsyncMock(side_effect=LLMConfigError("Unsupported LLM provider: nope")),
-    )
+    _server(monkeypatch, llm_provider="anthropic", openai_api_key="sk")
+
+    class Broken:
+        async def resolve(self, surface: LLMSurface) -> None:
+            raise LLMConfigError("Unsupported LLM provider: nope")
+
+    monkeypatch.setattr(setup_routes, "get_config_source", Broken)
 
     status = await setup_routes.get_setup_status()
 
