@@ -270,13 +270,15 @@ def test_test_suites_use_independent_runners_without_losing_coverage() -> None:
     assert job["if"] == "needs.changes.outputs.run_tests == 'true'"
     assert job["strategy"]["fail-fast"] is False
     suites = job["strategy"]["matrix"]["include"]
-    assert {entry["suite"]: entry["command"] for entry in suites} == {
-        "api": "moon run api:test-cov",
-        "cli": "moon run cli:test-cov",
-        "core": "moon run core:test-cov",
-        "web": "moon run web:test-cov",
-        "eval": "moon run bench-gate && moon run bench-gate-test",
+    assert {(entry["suite"], entry.get("shard")): entry["command"] for entry in suites} == {
+        ("api", None): "moon run api:test-cov",
+        ("cli", None): "moon run cli:test-cov",
+        ("core", "1/2"): "moon run core:test-cov",
+        ("core", "2/2"): "moon run core:test-cov",
+        ("web", None): "moon run web:test-cov",
+        ("eval", None): "moon run bench-gate && moon run bench-gate-test",
     }
+    assert len(suites) == 6  # noqa: PLR2004 - a duplicate entry would hide in the dict
     assert {entry["coverage"] for entry in suites if entry["coverage"]} == {
         "apps/api/coverage.xml",
         "apps/cli/coverage.xml",
@@ -286,6 +288,20 @@ def test_test_suites_use_independent_runners_without_losing_coverage() -> None:
     upload = next(step for step in job["steps"] if step.get("name") == "Upload coverage")
     assert upload["with"]["files"] == "${{ matrix.coverage }}"
     assert upload["if"] == "matrix.coverage != ''"
+
+
+def test_core_shards_cover_every_slice_and_get_distinct_names() -> None:
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/ci.yml").read_text())
+    job = workflow["jobs"]["test-suites"]
+    shards = [entry["shard"] for entry in job["strategy"]["matrix"]["include"] if "shard" in entry]
+    totals = {int(shard.split("/")[1]) for shard in shards}
+    assert len(totals) == 1
+    (total,) = totals
+    assert sorted(int(shard.split("/")[0]) for shard in shards) == list(range(1, total + 1))
+    assert job["name"] == (
+        "Test Suite (${{ matrix.shard && format('{0} {1}', matrix.suite, matrix.shard)"
+        " || matrix.suite }})"
+    )
 
 
 def test_core_diagnostics_preserve_test_policy_and_other_suites() -> None:
@@ -302,8 +318,14 @@ def test_core_diagnostics_preserve_test_policy_and_other_suites() -> None:
     assert setup["if"] == "matrix.suite == 'core'"
     assert setup["run"] == "sudo apt-get install -y procps time"
     assert profile["if"] == "matrix.suite == 'core'"
-    assert profile["env"] == {"MOON_OUTPUT_STYLE": "stream", "PYTHONUNBUFFERED": "1"}
+    assert profile["env"] == {
+        "MOON_OUTPUT_STYLE": "stream",
+        "PYTHONUNBUFFERED": "1",
+        "CORE_SHARD": "${{ matrix.shard }}",
+    }
     assert "/usr/bin/time -v ${{ matrix.command }} --" in profile["run"]
+    assert '-p sibyl_core.pytest_shard --shard "$CORE_SHARD"' in profile["run"]
+    assert "-n logical --dist worksteal" in profile["run"]
     assert "--durations=40 --durations-min=0.05 -o faulthandler_timeout=120" in profile["run"]
 
 

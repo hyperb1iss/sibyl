@@ -498,7 +498,7 @@ jobs:
           if-no-files-found: warn
 
   test-suites:
-    name: Test Suite (${{ matrix.suite }})
+    name: Test Suite (${{ matrix.shard && format('{0} {1}', matrix.suite, matrix.shard) || matrix.suite }})
     needs: changes
     if: needs.changes.outputs.run_tests == 'true'
     runs-on: ubuntu-latest
@@ -513,7 +513,16 @@ jobs:
           - suite: cli
             command: moon run cli:test-cov
             coverage: apps/cli/coverage.xml
+          # Core is CPU-bound, so it runs as hash shards that each use every
+          # runner core through xdist. When it outgrows the budget, add a
+          # shard here rather than raising timeout-minutes. Codecov merges
+          # the per-shard coverage uploads for the commit.
           - suite: core
+            shard: 1/2
+            command: moon run core:test-cov
+            coverage: packages/python/sibyl-core/coverage.xml
+          - suite: core
+            shard: 2/2
             command: moon run core:test-cov
             coverage: packages/python/sibyl-core/coverage.xml
           - suite: web
@@ -590,9 +599,12 @@ jobs:
         env:
           MOON_OUTPUT_STYLE: stream
           PYTHONUNBUFFERED: "1"
+          CORE_SHARD: ${{ matrix.shard }}
         run: |
           command -v vmstat >/dev/null
           test -x /usr/bin/time
+          # Runner speed varies by host CPU, so record which one this was.
+          lscpu | grep -E '^(Model name|CPU\(s\)|Thread|Core)' || true
           vmstat -w -t 15 &
           sampler_pid=$!
           cleanup() {
@@ -603,7 +615,11 @@ jobs:
             exit "$test_status"
           }
           trap cleanup EXIT
+          # -n logical starts one worker per vCPU. Plain auto finds psutil
+          # and counts physical cores only, which undercounts SMT runners.
           /usr/bin/time -v ${{ matrix.command }} -- \
+            -p sibyl_core.pytest_shard --shard "$CORE_SHARD" \
+            -n logical --dist worksteal \
             --durations=40 --durations-min=0.05 -o faulthandler_timeout=120
 
       - name: Upload coverage
