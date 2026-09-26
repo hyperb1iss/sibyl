@@ -7,6 +7,7 @@ of their embeddings. Redirects relationships during merge.
 from __future__ import annotations
 
 import inspect
+import json
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -21,6 +22,7 @@ from sibyl_core.config import settings
 from sibyl_core.embeddings.provenance import (
     UNVERIFIED_EMBEDDING_PROVIDER,
     is_unverified_embedding_metadata,
+    vector_space,
     vector_space_predicate,
 )
 from sibyl_core.models.entities import Entity
@@ -260,12 +262,18 @@ class EntityDeduplicator:
                 log.info("find_duplicates_insufficient_entities", count=entity_count)
                 return []
         else:
-            entities = await self._fetch_entities_with_embeddings(entity_types)
-            if len(entities) < 2:
-                log.info("find_duplicates_insufficient_entities", count=len(entities))
+            groups = await self._fetch_entities_with_embeddings(entity_types)
+            entity_count = sum(len(group) for group in groups)
+            if entity_count < 2:
+                log.info("find_duplicates_insufficient_entities", count=entity_count)
                 return []
-            entity_count = len(entities)
-            pairs = self._find_similar_pairs_vectorized(entities, similarity_threshold)
+            # Vectors from different models are not comparable, so each vector
+            # space is compared only with itself.
+            pairs = [
+                pair
+                for group in groups
+                for pair in self._find_similar_pairs_vectorized(group, similarity_threshold)
+            ]
 
         # Sort by similarity (highest first)
         pairs.sort(key=lambda p: p.similarity, reverse=True)
@@ -307,7 +315,7 @@ class EntityDeduplicator:
                 seed_rows = normalize_records(
                     await execute_query(
                         """
-                        SELECT uuid, name, entity_type, name_embedding,
+                        SELECT uuid, name, entity_type, name_embedding, updated_at, created_at,
                                attributes.embedding_metadata AS embedding_space
                         FROM entity
                         WHERE group_id = $group_id
@@ -487,14 +495,15 @@ class EntityDeduplicator:
             params[seed_type_param] = seed_type
             params[seed_embedding_param] = seed_embedding
             params[limit_param] = candidate_limit
+            # Inside the HNSW bracket, so candidates from another model nearer
+            # the seed cannot crowd out the ones in its own space.
             space = (seed_spaces or {}).get(seed_id)
-            space_clause = ""
             if space is _UNSTAMPED:
-                space_clause = " AND embedding_space = NONE"
+                clauses.append("attributes.embedding_metadata = NONE")
             elif space is not None:
                 params[f"seed_space_{index}"] = space
-                space_clause = " AND " + vector_space_predicate(
-                    "embedding_space", f"seed_space_{index}"
+                clauses.append(
+                    vector_space_predicate("attributes.embedding_metadata", f"seed_space_{index}")
                 )
             statements.append(
                 f"""
@@ -510,7 +519,7 @@ class EntityDeduplicator:
                 + f"""
                       AND name_embedding <|{candidate_limit}, {knn_effort}|> ${seed_embedding_param}
                 )
-                WHERE score >= $threshold{space_clause}
+                WHERE score >= $threshold
                 ORDER BY score DESC, created_at DESC, uuid DESC
                 LIMIT ${limit_param};
                 """
@@ -590,12 +599,11 @@ class EntityDeduplicator:
             param_prefix="scope",
         )
 
-        space_clause = ""
         if seed_space is _UNSTAMPED:
-            space_clause = " AND embedding_space = NONE"
+            clauses.append("attributes.embedding_metadata = NONE")
         elif seed_space is not None:
             params["seed_space"] = seed_space
-            space_clause = " AND " + vector_space_predicate("embedding_space", "seed_space")
+            clauses.append(vector_space_predicate("attributes.embedding_metadata", "seed_space"))
         knn_effort = knn_search_effort(candidate_limit, settings.graph_knn_ef)
         rows = normalize_records(
             await execute_query(
@@ -611,7 +619,7 @@ class EntityDeduplicator:
                 + f"""
                       AND name_embedding <|{candidate_limit}, {knn_effort}|> $seed_embedding
                 )
-                WHERE score >= $threshold{space_clause}
+                WHERE score >= $threshold
                 ORDER BY score DESC, created_at DESC, uuid DESC
                 LIMIT $limit;
                 """,
@@ -827,11 +835,14 @@ class EntityDeduplicator:
     async def _fetch_entities_with_embeddings(
         self,
         entity_types: list[str] | None = None,
-    ) -> list[tuple[str, str, str, list[float]]]:
-        """Fetch all entities that have embeddings.
+    ) -> list[list[tuple[str, str, str, list[float]]]]:
+        """Fetch all entities that have embeddings, grouped by vector space.
+
+        Vectors of unknown origin are left out; unstamped vectors form their
+        own group, as they do on the HNSW path.
 
         Returns:
-            List of (id, name, type, embedding) tuples.
+            Lists of (id, name, type, embedding) tuples, one per vector space.
         """
         try:
             return await self._fetch_entities_with_embeddings_via_manager(entity_types)
@@ -842,9 +853,9 @@ class EntityDeduplicator:
     async def _fetch_entities_with_embeddings_via_manager(
         self,
         entity_types: list[str] | None = None,
-    ) -> list[tuple[str, str, str, list[float]]]:
+    ) -> list[list[tuple[str, str, str, list[float]]]]:
         allowed_types = {entity_type.lower() for entity_type in entity_types or []}
-        entities: list[tuple[str, str, str, list[float]]] = []
+        groups: dict[str, list[tuple[str, str, str, list[float]]]] = {}
         offset = 0
         page_size = max(self.config.batch_size, 100)
 
@@ -864,9 +875,15 @@ class EntityDeduplicator:
                     continue
                 if not entity.id or not isinstance(entity.embedding, list) or not entity.embedding:
                     continue
-                entities.append((entity.id, entity.name, entity_type, entity.embedding))
+                stamp = (entity.metadata or {}).get("embedding_metadata")
+                if is_unverified_embedding_metadata(stamp):
+                    continue
+                space = json.dumps(vector_space(stamp), sort_keys=True, default=str)
+                groups.setdefault(space, []).append(
+                    (entity.id, entity.name, entity_type, entity.embedding)
+                )
 
-        return entities
+        return list(groups.values())
 
     async def _redirect_relationships(self, from_id: str, to_id: str) -> int:
         """Redirect all relationships from one entity to another.

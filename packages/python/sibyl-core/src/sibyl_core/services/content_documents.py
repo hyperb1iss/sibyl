@@ -27,7 +27,9 @@ _DOCUMENT_CHUNK_SELECT = (
 ContentSearchRow = tuple[ContentChunk, ContentDocument, str, str, float]
 
 
-# Vector lanes score only rows embedded in the query's vector space.
+# Vector lanes score only rows embedded in the query's vector space, filtered
+# inside the HNSW bracket so nearer vectors from an older model cannot crowd
+# the candidate pool mid-sweep.
 _CHUNK_IN_QUERY_SPACE = vector_space_predicate("embedding_metadata", "embedding_metadata")
 
 
@@ -399,9 +401,9 @@ async def search_document_chunks(
                         "(1 - vector::distance::knn()) AS score "
                         "FROM document_chunks WHERE organization_id = $organization_id "
                         "AND source_id INSIDE $source_ids"
-                        f"{language_clause} "
+                        f"{language_clause} {space_clause}"
                         f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding"
-                        f") WHERE score >= $similarity_threshold {space_clause}"
+                        ") WHERE score >= $similarity_threshold "
                         "ORDER BY score DESC LIMIT $candidate_limit;",
                         **vector_params,
                     ),

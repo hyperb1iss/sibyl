@@ -707,6 +707,9 @@ def _chunk_space_clause(
 
     Chunks awaiting the embedding sweep after a model change still carry the
     old model's vector; they drop out of the vector lane, not the lexical one.
+    The clause goes inside the HNSW bracket, beside the scope filters: applied
+    after the read, nearer old-model chunks would fill the candidate pool and
+    leave the lane empty until the sweep finished.
     """
     if embedding_metadata is None:
         return "", {}
@@ -2449,9 +2452,9 @@ async def search_rag_chunks(
             "chunk_type, content, context, heading_path, language, has_entities, entity_ids, "
             "embedding_metadata, (1 - vector::distance::knn()) AS score "
             "FROM document_chunks WHERE organization_id = $organization_id "
-            "AND source_id INSIDE $source_ids "
+            f"AND source_id INSIDE $source_ids {space_clause}"
             f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding"
-            f") WHERE score >= $similarity_threshold {space_clause}"
+            ") WHERE score >= $similarity_threshold "
             "ORDER BY score DESC LIMIT $candidate_limit;",
             organization_id=str(organization_id),
             source_ids=source_ids,
@@ -2509,10 +2512,9 @@ async def search_code_example_chunks(
             "embedding_metadata, (1 - vector::distance::knn()) AS score "
             "FROM document_chunks WHERE organization_id = $organization_id "
             "AND source_id INSIDE $source_ids"
-            f"{language_clause} "
+            f"{language_clause} {space_clause}"
             f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding "
             ") "
-            f"{space_clause.replace('AND ', 'WHERE ', 1)}"
             "ORDER BY score DESC LIMIT $candidate_limit;",
             organization_id=str(organization_id),
             source_ids=source_ids,
@@ -2573,9 +2575,9 @@ async def hybrid_search_chunks(
             "chunk_type, content, context, heading_path, language, has_entities, entity_ids, "
             "embedding_metadata, (1 - vector::distance::knn()) AS score "
             "FROM document_chunks WHERE organization_id = $organization_id "
-            "AND source_id INSIDE $source_ids "
+            f"AND source_id INSIDE $source_ids {space_clause}"
             f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding"
-            f") WHERE score >= $similarity_threshold {space_clause}"
+            ") WHERE score >= $similarity_threshold "
             "ORDER BY score DESC LIMIT $candidate_limit;",
             organization_id=str(organization_id),
             source_ids=source_ids,

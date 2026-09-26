@@ -51,7 +51,11 @@ _RAW_MEMORY_CONTEXT_TYPES = {"raw_memory", "session", "episode", "note"}
 log = structlog.get_logger()
 
 
-# Vector lanes score only rows embedded in the query's vector space.
+# Vector lanes score only rows embedded in the query's vector space. The
+# predicate sits inside the HNSW bracket: applied after the read, rows from an
+# older model nearer the query would fill the candidate pool mid-sweep and
+# leave the lane empty. Once a plane is swept it matches every row, so the
+# walk costs what the scope filter alone does.
 _STAMP_IN_QUERY_SPACE = vector_space_predicate(
     "attributes.embedding_metadata", "embedding_metadata"
 )
@@ -649,12 +653,11 @@ async def _node_vector_candidates(
                        (1 - vector::distance::knn()) AS score
                 FROM entity
                 WHERE """
-            + _where_clause(["group_id = $group_id", *overfetch_clauses])
+            + _where_clause(["group_id = $group_id", _STAMP_IN_QUERY_SPACE, *overfetch_clauses])
             + f"""
                   AND name_embedding <|{pool}, {pool_knn_effort}|> $query_embedding
             )
             WHERE score >= $min_score AND entity_type IN $node_types
-              AND {_STAMP_IN_QUERY_SPACE}
             ORDER BY score DESC, created_at DESC, uuid DESC
             LIMIT $limit;
             """,
@@ -684,11 +687,11 @@ async def _node_vector_candidates(
                    (1 - vector::distance::knn()) AS score
             FROM entity
             WHERE """
-        + _where_clause(["group_id = $group_id", *filter_clauses])
+        + _where_clause(["group_id = $group_id", _STAMP_IN_QUERY_SPACE, *filter_clauses])
         + f"""
               AND name_embedding <|{candidate_limit}, {knn_effort}|> $query_embedding
         )
-        WHERE score >= $min_score AND {_STAMP_IN_QUERY_SPACE}
+        WHERE score >= $min_score
         ORDER BY score DESC, created_at DESC, uuid DESC
         LIMIT $limit;
         """,
@@ -736,12 +739,11 @@ async def _edge_vector_candidates(
             "SELECT * FROM ("
             + _edge_select(extra="(1 - vector::distance::knn()) AS score")
             + " WHERE "
-            + _where_clause(["group_id = $group_id", *overfetch_clauses])
+            + _where_clause(["group_id = $group_id", _STAMP_IN_QUERY_SPACE, *overfetch_clauses])
             + f"""
               AND fact_embedding <|{pool}, {pool_knn_effort}|> $query_embedding
             )
             WHERE score >= $min_score AND name IN $edge_types
-              AND {_STAMP_IN_QUERY_SPACE}
             ORDER BY score DESC, created_at DESC, uuid DESC
             LIMIT $limit;
             """,
@@ -767,11 +769,11 @@ async def _edge_vector_candidates(
         "SELECT * FROM ("
         + _edge_select(extra="(1 - vector::distance::knn()) AS score")
         + " WHERE "
-        + _where_clause(["group_id = $group_id", *filter_clauses])
+        + _where_clause(["group_id = $group_id", _STAMP_IN_QUERY_SPACE, *filter_clauses])
         + f"""
           AND fact_embedding <|{candidate_limit}, {knn_effort}|> $query_embedding
         )
-        WHERE score >= $min_score AND {_STAMP_IN_QUERY_SPACE}
+        WHERE score >= $min_score
         ORDER BY score DESC, created_at DESC, uuid DESC
         LIMIT $limit;
         """,

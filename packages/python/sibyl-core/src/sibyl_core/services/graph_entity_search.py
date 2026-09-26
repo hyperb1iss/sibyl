@@ -45,7 +45,9 @@ log = structlog.get_logger()
 _FULLTEXT_FIELDS = ("name", "summary", "description", "content")
 
 
-# Vector lanes score only rows embedded in the query's vector space.
+# Vector lanes score only rows embedded in the query's vector space, filtered
+# inside the HNSW bracket so nearer vectors from an older model cannot crowd
+# the candidate pool mid-sweep.
 _STAMP_IN_QUERY_SPACE = vector_space_predicate(
     "attributes.embedding_metadata", "embedding_metadata"
 )
@@ -384,9 +386,9 @@ class _EntitySearchManager:
             "SELECT * FROM ("
             "SELECT " + _ENTITY_SEARCH_FIELDS + ", (1 - vector::distance::knn()) AS score"
             " FROM entity WHERE group_id = $group_id"
+            f" AND {_STAMP_IN_QUERY_SPACE}"
             f" AND name_embedding <|{pool}, {overfetch_knn_effort}|> $query_embedding"
             ") WHERE entity_type IN $entity_types"
-            f" AND {_STAMP_IN_QUERY_SPACE}"
             " ORDER BY score DESC, created_at DESC, uuid DESC"
             " LIMIT $limit;"
         )
@@ -460,9 +462,9 @@ class _EntitySearchManager:
                     """
                     + type_clause
                     + f"""
+                          AND {_STAMP_IN_QUERY_SPACE}
                           AND name_embedding <|{candidate_limit}, {knn_effort}|> $query_embedding
                     )
-                    WHERE {_STAMP_IN_QUERY_SPACE}
                     ORDER BY score DESC, created_at DESC, uuid DESC
                     LIMIT $limit;
                     """,
