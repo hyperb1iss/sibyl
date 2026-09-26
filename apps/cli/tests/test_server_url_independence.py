@@ -72,6 +72,10 @@ def test_cli_starts_with_a_server_url_it_does_not_open(
         ("wss://surreal.example.com/rpc", "https://surreal.example.com/sql"),
         ("Wss://surreal.example.com/rpc", "https://surreal.example.com/sql"),
         ("http://surreal:8000", "http://surreal:8000/sql"),
+        # Userinfo never reaches the request URL, so an HTTP error quoting it
+        # cannot carry the password; credentials travel only through auth.
+        ("ws://admin:Hunter2@surreal:8000/rpc", "http://surreal:8000/sql"),
+        ("wss://admin:Hunter2@[2001:db8::1]:8443/rpc", "https://[2001:db8::1]:8443/sql"),
     ],
 )
 def test_migrate_reads_the_sql_endpoint_whatever_the_scheme_case(
@@ -96,3 +100,103 @@ def test_migrate_reads_the_sql_endpoint_whatever_the_scheme_case(
     migrate._source_sql(surreal_url=surreal_url, username="u", password="p", statement="RETURN 1;")
 
     assert posted == [sql_url]
+
+
+@pytest.mark.parametrize(
+    "surreal_url",
+    [
+        "ws:///Admin:Hunter2@host:8000/rpc",
+        "surrealkv:///srv/Hunter2",
+        "Admin:Hunter2@h:8000?x=ws://y",
+    ],
+)
+def test_migrate_refuses_a_non_server_source_without_echoing_it(surreal_url: str) -> None:
+    from sibyl_cli import migrate
+
+    with pytest.raises(ValueError, match="must be a server URL") as caught:
+        migrate._source_sql(
+            surreal_url=surreal_url, username="u", password="p", statement="RETURN 1;"
+        )
+
+    assert "hunter2" not in str(caught.value).lower()
+
+
+# The CLI half of apps/api/tests/test_surreal_url_leak_canary.py, which the
+# CLI suite runs because the API suite does not install this package.
+_PASSWORD_CANARY = "PwCanary91"
+_PATH_CANARY = "PathCanary42"
+_CANARY_URLS = [
+    f"wss://admin:{_PASSWORD_CANARY}@127.0.0.1:9/private/{_PATH_CANARY}/rpc?t={_PASSWORD_CANARY}",
+    f"admin:{_PASSWORD_CANARY}@host:8000/{_PATH_CANARY}/rpc?next=http://x",
+    f"ws:///admin:{_PASSWORD_CANARY}@host:8000/{_PATH_CANARY}/rpc",
+    f"ws://admin:{_PASSWORD_CANARY}@host\N{FULLWIDTH SOLIDUS}{_PATH_CANARY}/rpc",
+    f"ws://admin:{_PASSWORD_CANARY}@host:{_PATH_CANARY}/rpc",
+    f"surrealkv:///srv/{_PATH_CANARY}/sibyl",
+]
+
+
+def _assert_no_canary(text: str) -> None:
+    for canary in (_PASSWORD_CANARY, _PATH_CANARY):
+        assert canary.lower() not in text.lower(), text
+
+
+@pytest.mark.parametrize("surreal_url", _CANARY_URLS)
+@pytest.mark.parametrize("failure", ["transport", "status"])
+def test_migrate_errors_never_carry_the_canary(monkeypatch, surreal_url: str, failure: str) -> None:
+    import traceback
+
+    import httpx
+
+    from sibyl_cli import migrate
+
+    def fake_post(url: str, **kwargs: object) -> object:
+        request = httpx.Request("POST", url)
+        if failure == "transport":
+            raise httpx.ConnectError(f"All connection attempts failed for {url}", request=request)
+        return httpx.Response(401, request=request)
+
+    monkeypatch.setattr(migrate.httpx, "post", fake_post)
+    with pytest.raises((ValueError, RuntimeError)) as caught:
+        migrate._source_sql(
+            surreal_url=surreal_url, username=None, password=None, statement="RETURN 1;"
+        )
+
+    _assert_no_canary(str(caught.value))
+    _assert_no_canary("".join(traceback.format_exception(caught.value)))
+
+
+@pytest.mark.parametrize(
+    ("surreal_url", "username", "password", "expected"),
+    [
+        # The URL's userinfo, percent-decoded, when no arguments are given.
+        ("ws://a%40b:p%3Aw@surreal:8000/rpc", None, None, ("a@b", "p:w")),
+        ("ws://admin@surreal:8000/rpc", None, None, ("admin", "")),
+        # Explicit arguments override the URL, one field at a time.
+        ("ws://a%40b:p%3Aw@surreal:8000/rpc", "cli-user", None, ("cli-user", "p:w")),
+        ("ws://a%40b:p%3Aw@surreal:8000/rpc", "cli-user", "cli-pass", ("cli-user", "cli-pass")),
+        # No userinfo and no arguments: the historical root:root default.
+        ("ws://surreal:8000/rpc", None, None, ("root", "root")),
+    ],
+)
+def test_migrate_authenticates_with_url_userinfo_unless_overridden(
+    monkeypatch, surreal_url: str, username, password, expected
+) -> None:
+    import httpx
+
+    from sibyl_cli import migrate
+
+    sent: list[object] = []
+
+    def fake_post(url: str, **kwargs: object) -> httpx.Response:
+        sent.append(kwargs["auth"])
+        assert "@" not in url
+        return httpx.Response(
+            200, json=[{"status": "OK", "result": []}], request=httpx.Request("POST", url)
+        )
+
+    monkeypatch.setattr(migrate.httpx, "post", fake_post)
+    migrate._source_sql(
+        surreal_url=surreal_url, username=username, password=password, statement="RETURN 1;"
+    )
+
+    assert sent == [expected]

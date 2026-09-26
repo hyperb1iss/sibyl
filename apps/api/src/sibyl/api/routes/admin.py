@@ -6,7 +6,6 @@ import json
 from datetime import UTC, datetime
 from time import perf_counter
 from typing import Any, Literal, cast
-from urllib.parse import urlunparse
 from uuid import UUID, uuid4
 
 import httpx
@@ -53,6 +52,12 @@ from sibyl.persistence.content_runtime import (
 )
 from sibyl_core.audit import audit_event_resource
 from sibyl_core.auth import AuthOrganization, AuthUser, OrganizationRole
+from sibyl_core.backends.surreal.url_schemes import (
+    redact_surreal_url,
+    safe_error_detail,
+    surreal_http_base_url,
+    surreal_url_credentials,
+)
 from sibyl_core.models import CrawlStatus, Entity
 from sibyl_core.models.entities import EntityType
 from sibyl_core.utils import fingerprint_text
@@ -175,15 +180,9 @@ def _json_safe_debug_rows(rows: list[dict[str, object]]) -> list[dict[str, Any]]
 
 
 def _surreal_http_base_url() -> str | None:
-    from urllib.parse import urlparse
-
-    resolved = settings.resolved_surreal_url
-    parsed = urlparse(resolved)
-    if parsed.scheme in {"ws", "wss", "http", "https"}:
-        scheme = "https" if parsed.scheme in {"wss", "https"} else "http"
-        path = parsed.path.removesuffix("/rpc")
-        return urlunparse((scheme, parsed.netloc, path, "", "", "")).rstrip("/")
-    return None
+    # A transport value for requests only: it keeps the path prefix, which
+    # can carry a secret, so it is never returned in a response.
+    return surreal_http_base_url(settings.resolved_surreal_url)
 
 
 def _parse_surreal_metric_names(body: str) -> list[str]:
@@ -216,9 +215,11 @@ def _surreal_metrics_sample(metric_names: list[str]) -> dict[str, bool]:
 
 async def get_surreal_observability_status() -> dict[str, object]:
     base_url = _surreal_http_base_url()
+    # What the payload shows: scheme, host, and port only.
+    display_url = redact_surreal_url(base_url) if base_url is not None else None
     status: dict[str, object] = {
         "configured": base_url is not None,
-        "base_url": base_url,
+        "base_url": display_url,
         "health_http_status": None,
         "metrics_http_status": None,
         "metrics_available": False,
@@ -229,14 +230,16 @@ async def get_surreal_observability_status() -> dict[str, object]:
     if base_url is None:
         return status
 
-    auth: tuple[str, str] | None = None
+    auth: tuple[str, str] | None = surreal_url_credentials(settings.resolved_surreal_url)
     password = settings.surreal_password.get_secret_value()
     if settings.surreal_username and password:
         auth = (settings.surreal_username, password)
 
     try:
         async with httpx.AsyncClient(timeout=2.0) as client:
-            health_response = await client.get(f"{base_url}/health")
+            # Credentials go to both requests: once they left the URL, an
+            # authenticated /health would otherwise start answering 401.
+            health_response = await client.get(f"{base_url}/health", auth=auth)
             status["health_http_status"] = health_response.status_code
 
             metrics_response = await client.get(f"{base_url}/metrics", auth=auth)
@@ -247,7 +250,11 @@ async def get_surreal_observability_status() -> dict[str, object]:
                 status["metric_count"] = len(metric_names)
                 status["metrics_sample"] = _surreal_metrics_sample(metric_names)
     except Exception as exc:
-        status["error"] = f"{type(exc).__name__}: {exc}"
+        # An HTTP error message can quote the request URL, path included.
+        detail = safe_error_detail(exc, base_url) and safe_error_detail(
+            exc, settings.resolved_surreal_url
+        )
+        status["error"] = f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__
     return status
 
 

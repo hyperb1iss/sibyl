@@ -21,6 +21,8 @@ from typing import Any, cast
 
 from surrealdb import AsyncSurreal
 
+from sibyl_core.backends.surreal.url_schemes import redact_surreal_url
+
 JsonObject = dict[str, Any]
 
 DEFAULT_ROWS = 2_000
@@ -751,10 +753,7 @@ def _path_size(path: Path | None) -> int | None:
 
 
 def _redact_url(url: str) -> str:
-    if "@" not in url:
-        return url
-    scheme, remainder = url.split("://", 1)
-    return f"{scheme}://<credentials>@{remainder.split('@', 1)[1]}"
+    return redact_surreal_url(url)
 
 
 def _random_unit_vector(rng: random.Random, dimensions: int) -> list[float]:

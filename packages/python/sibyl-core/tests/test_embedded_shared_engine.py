@@ -466,7 +466,9 @@ async def test_a_failed_open_releases_its_lease(monkeypatch, tmp_path) -> None:
 
     monkeypatch.setattr(surrealdb.AsyncSurreal, "connect", refuse)
     client = _client(f"surrealkv://{tmp_path / 'store'}", "sibyl_auth")
-    with pytest.raises(OSError, match="unreadable"):
+    # Surfaced as a redacted connect error: the SDK message quotes a piece of
+    # the store path ("store"), so only the class survives.
+    with pytest.raises(OSError, match=r"failed \(OSError\)"):
         await client.execute_query("RETURN 1")
     await client.close()
     assert [engine.closed for engine in engines] == [True]

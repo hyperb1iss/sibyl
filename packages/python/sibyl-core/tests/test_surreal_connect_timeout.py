@@ -156,3 +156,99 @@ def test_embedded_urls_get_no_connect_budget() -> None:
     assert _connect_timeout_seconds("ws://localhost:8612/rpc") == pytest.approx(
         core_config.surreal_connect_timeout_seconds
     )
+
+
+_LEAKY_URL = "Admin:Hunter2@host:8000/rpc?next=http://x"
+
+
+def test_connect_timeout_names_no_part_of_a_url_without_a_scheme() -> None:
+    failure = SurrealConnectTimeout(url=_LEAKY_URL, attempt=1, timeout_seconds=1.0)
+
+    assert "hunter2" not in str(failure).lower()
+    assert "scheme unknown" in str(failure)
+    assert failure.url_scheme == "unknown"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("url", "scheme"),
+    [(_LEAKY_URL, "unknown"), ("wss://admin:Hunter2@host:8000/rpc?next=http://x", "wss")],
+)
+async def test_connect_failure_logs_carry_only_the_scheme(
+    monkeypatch: pytest.MonkeyPatch, short_connect_budget: float, url: str, scheme: str
+) -> None:
+    _install_stalled_handshake(monkeypatch)
+    client = DedicatedSurrealClient(
+        url=url,
+        username="root",
+        password="root",
+        namespace="org_connect",
+        database="graph",
+        pool_size=1,
+    )
+
+    with capture_logs() as entries, pytest.raises(SurrealConnectTimeout) as caught:
+        await client.connect()
+
+    failures = [entry for entry in entries if entry["event"] == "surreal_connect_failed"]
+    assert [entry["url_scheme"] for entry in failures] == [scheme]
+    assert "hunter2" not in repr(entries).lower()
+    assert "hunter2" not in str(caught.value).lower()
+
+
+@pytest.mark.asyncio
+async def test_redacted_connect_errors_keep_their_retry_classification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ConnectionClosedError(Exception):
+        pass
+
+    attempts = 0
+
+    class FakeAsyncSurreal:
+        def __init__(self, url: str) -> None:
+            self.url = url
+
+        async def signin(self, credentials: dict[str, str]) -> None:
+            return None
+
+        async def use(self, namespace: str, database: str) -> None:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise ConnectionClosedError(f"closed while opening {self.url}")
+
+        async def query_raw(self, query: str, params: object | None = None) -> object:
+            return {"result": [{"status": "OK", "result": 1}]}
+
+        async def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("surrealdb.AsyncSurreal", FakeAsyncSurreal)
+    client = DedicatedSurrealClient(
+        url="ws://admin:Hunter2@localhost:8612/rpc",
+        username="root",
+        password="root",
+        namespace="org_connect",
+        database="graph",
+        pool_size=1,
+    )
+
+    # A connection-closed error during the handshake stays transient once
+    # redacted, so the read is retried and succeeds.
+    assert await client.execute_query("RETURN 1;") == 1
+    assert attempts == 2
+
+
+def test_connect_error_detail_survives_only_without_url_parts() -> None:
+    from sibyl_core.backends.surreal.connection import SurrealConnectError
+
+    url = "wss://admin:Hunter2@surreal:8443/private/proxy/rpc"
+    kept = SurrealConnectError(url=url, cause=OSError("[Errno 61] Connection refused"))
+    assert str(kept) == (
+        "SurrealDB connect to wss://surreal:8443 failed (OSError): [Errno 61] Connection refused"
+    )
+    dropped = SurrealConnectError(url=url, cause=OSError(f"cannot open {url}"))
+    assert str(dropped) == "SurrealDB connect to wss://surreal:8443 failed (OSError)"
+    assert dropped.cause_type == "OSError"
+    assert dropped.transient is False
