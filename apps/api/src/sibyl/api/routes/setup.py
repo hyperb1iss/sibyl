@@ -26,6 +26,7 @@ from sibyl.persistence.operations_runtime import (
 from sibyl.services.settings import get_settings_service
 from sibyl_core.ai.bedrock import (
     API_KEY_ENV_VARS as BEDROCK_API_KEY_ENV_VARS,
+    BedrockConfigError,
     bedrock_region_configured,
     resolve_bedrock_credentials,
     resolve_bedrock_settings,
@@ -87,8 +88,9 @@ class SetupStatus(BaseModel):
     providers_configured: bool = Field(
         default=False,
         description="True when every model provider this server uses is ready without "
-        "user input: keyed providers have their key, Bedrock has a Region, and local "
-        "graph embeddings have their dependency",
+        "user input: keyed providers have their key, Bedrock has a Region and a "
+        "credential source for each plane routed to it, and local graph embeddings "
+        "have their dependency",
     )
     configured_providers: list[str] = Field(
         default_factory=list, description="Names of the ready model providers"
@@ -241,16 +243,32 @@ _PROVIDER_KEY_SETTINGS = {
 
 
 async def _provider_ready(provider: str) -> bool:
-    """One provider's readiness, judged the way `bedrock_selection` judges Bedrock."""
+    """Readiness of a provider that is not Bedrock: its key, or its local dependency."""
     key_setting = _PROVIDER_KEY_SETTINGS.get(provider)
     if key_setting is not None:
         return bool(await get_settings_service().get(key_setting))
-    if provider == "bedrock":
-        # Credentials may come from an instance role with no hint; validate-keys proves them.
-        return bedrock_region_configured()
     if provider == "local":
         return sentence_transformers_available()
     return False
+
+
+def bedrock_credential_paths(environ: Mapping[str, str] | None = None) -> tuple[bool, bool]:
+    """Whether the Claude client and the embedding client each have a credential source.
+
+    Both need a Region. Claude can send a Bedrock API key, the Mantle key when
+    the Mantle API is selected, or sign SigV4. Cohere embeddings on
+    bedrock-runtime never read the Mantle key, so they need a Bedrock API key or
+    SigV4 credentials of their own. SigV4 is judged by the same environment hints
+    as `bedrock_configured`; an instance role leaves none, so such a server reads
+    as not ready here and validate-keys is what proves it.
+    """
+    env = os.environ if environ is None else environ
+    try:
+        bedrock = resolve_bedrock_settings(env)
+    except BedrockConfigError:
+        return False, False
+    sigv4 = any(env.get(name, "").strip() for name in _SIGV4_CREDENTIAL_HINTS)
+    return bool(bedrock.claude_api_key) or sigv4, bool(bedrock.api_key) or sigv4
 
 
 async def model_providers_ready() -> tuple[bool, list[str]]:
@@ -258,8 +276,9 @@ async def model_providers_ready() -> tuple[bool, list[str]]:
 
     Every plane counts: each LLM surface (memory, synthesis and the crawler can
     each name their own provider) plus document and graph embeddings, read the
-    way the runtime reads them. This decides who sees a keys step, so it answers
-    no whenever a plane would fail.
+    way the runtime reads them. Bedrock must satisfy the credential path of each
+    plane routed to it. This decides who sees a keys step, so it answers no
+    whenever a plane would fail.
     """
     source = get_config_source()
     try:
@@ -267,20 +286,26 @@ async def model_providers_ready() -> tuple[bool, list[str]]:
     except Exception as e:
         log.warning("Could not resolve the LLM providers", error=str(e))
         return False, []
-    providers = {
-        *llm,
+    embeddings = {
         await effective_embedding_setting("embedding_provider") or "",
         await effective_embedding_setting("graph_embedding_provider") or "",
     }
-    ready = [provider for provider in sorted(providers) if await _provider_ready(provider)]
-    return len(ready) == len(providers), ready
+    readiness = {
+        provider: await _provider_ready(provider) for provider in (llm | embeddings) - {"bedrock"}
+    }
+    if "bedrock" in llm | embeddings:
+        claude_ok, embeddings_ok = bedrock_credential_paths()
+        readiness["bedrock"] = ("bedrock" not in llm or claude_ok) and (
+            "bedrock" not in embeddings or embeddings_ok
+        )
+    ready = sorted(provider for provider, ok in readiness.items() if ok)
+    return all(readiness.values()), ready
 
 
 #: Environment variables that point the AWS credential chain at a source: a
 #: Bedrock API key, static keys, a profile, IRSA web identity, EKS Pod Identity
 #: or an ECS task role. Instance roles leave no hint, so validate-keys probes.
-_AWS_CREDENTIAL_HINTS = (
-    *BEDROCK_API_KEY_ENV_VARS,
+_SIGV4_CREDENTIAL_HINTS = (
     "SIBYL_BEDROCK_PROFILE",
     "AWS_PROFILE",
     "AWS_ACCESS_KEY_ID",
@@ -288,6 +313,7 @@ _AWS_CREDENTIAL_HINTS = (
     "AWS_CONTAINER_CREDENTIALS_FULL_URI",
     "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
 )
+_AWS_CREDENTIAL_HINTS = (*BEDROCK_API_KEY_ENV_VARS, *_SIGV4_CREDENTIAL_HINTS)
 
 
 async def _check_provider_key(

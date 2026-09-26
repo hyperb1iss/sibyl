@@ -240,9 +240,10 @@ def _server(
     region: str | None = None,
     local_embeddings_installed: bool = False,
     surfaces: dict[str, str] | None = None,
+    aws_env: dict[str, str] | None = None,
     **keys: str | None,
 ) -> None:
-    """Point every readiness input at a fake server: config, settings, region, deps."""
+    """Point every readiness input at a fake server: config, settings, AWS env, deps."""
     monkeypatch.setattr(
         setup_routes,
         "get_runtime_setup_status",
@@ -260,10 +261,22 @@ def _server(
         "SIBYL_BEDROCK_REGION",
         "AWS_REGION",
         "AWS_DEFAULT_REGION",
+        "SIBYL_BEDROCK_API",
+        "SIBYL_BEDROCK_API_KEY",
+        "AWS_BEARER_TOKEN_BEDROCK",
+        "ANTHROPIC_AWS_API_KEY",
+        "SIBYL_BEDROCK_PROFILE",
+        "AWS_PROFILE",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_WEB_IDENTITY_TOKEN_FILE",
+        "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+        "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
     ):
         monkeypatch.delenv(name, raising=False)
     if region:
         monkeypatch.setenv("SIBYL_BEDROCK_REGION", region)
+    for name, value in (aws_env or {}).items():
+        monkeypatch.setenv(name, value)
 
 
 async def _status_with(
@@ -298,23 +311,104 @@ async def test_status_reports_keyed_providers_configured_when_keys_are_set(
     assert status.configured_providers == ["anthropic", "openai"]
 
 
+ALL_BEDROCK = {"embedding_provider": "bedrock", "graph_embedding_provider": "bedrock"}
+SIGV4 = {"AWS_ACCESS_KEY_ID": "AKIDEXAMPLE"}
+
+
 @pytest.mark.asyncio
-async def test_status_counts_bedrock_as_ready_with_a_region_and_no_keys(
+@pytest.mark.parametrize(
+    "aws_env",
+    [
+        {"AWS_ACCESS_KEY_ID": "AKIDEXAMPLE"},
+        {"AWS_PROFILE": "sibyl"},
+        {"AWS_WEB_IDENTITY_TOKEN_FILE": "/var/run/secrets/token"},
+        {"AWS_CONTAINER_CREDENTIALS_FULL_URI": "http://169.254.170.23/v1/credentials"},
+        {"SIBYL_BEDROCK_API_KEY": "bedrock-api-key"},
+    ],
+)
+async def test_bedrock_with_a_region_and_credentials_is_ready_without_keys(
+    monkeypatch: pytest.MonkeyPatch, aws_env: dict[str, str]
+) -> None:
+    status = await _status_with(
+        monkeypatch, llm_provider="bedrock", region="us-east-1", aws_env=aws_env, **ALL_BEDROCK
+    )
+
+    assert status.providers_configured is True
+    assert status.configured_providers == ["bedrock"]
+    assert status.anthropic_configured is False
+    assert status.openai_configured is False
+
+
+@pytest.mark.asyncio
+async def test_a_region_without_credentials_is_not_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+    status = await _status_with(
+        monkeypatch, llm_provider="bedrock", region="us-east-1", **ALL_BEDROCK
+    )
+
+    assert status.providers_configured is False
+    assert status.configured_providers == []
+    # The keys step's routing check still sees Bedrock selected.
+    assert (status.bedrock_llm, status.bedrock_embeddings) == (True, True)
+
+
+@pytest.mark.asyncio
+async def test_a_mantle_key_does_not_cover_bedrock_embeddings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mantle = {"SIBYL_BEDROCK_API": "mantle", "ANTHROPIC_AWS_API_KEY": "mantle-key"}
+    status = await _status_with(
+        monkeypatch, llm_provider="bedrock", region="us-east-1", aws_env=mantle, **ALL_BEDROCK
+    )
+
+    # Claude can use the Mantle key; Cohere on bedrock-runtime cannot.
+    assert status.providers_configured is False
+    assert status.configured_providers == []
+
+
+@pytest.mark.asyncio
+async def test_a_mantle_key_covers_claude_when_embeddings_use_a_keyed_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mantle = {"SIBYL_BEDROCK_API": "mantle", "ANTHROPIC_AWS_API_KEY": "mantle-key"}
+    status = await _status_with(
+        monkeypatch,
+        llm_provider="bedrock",
+        region="us-east-1",
+        aws_env=mantle,
+        openai_api_key="sk-openai",
+    )
+
+    assert status.providers_configured is True
+    assert status.configured_providers == ["bedrock", "openai"]
+
+
+@pytest.mark.asyncio
+async def test_the_mantle_key_is_ignored_outside_the_mantle_api(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     status = await _status_with(
         monkeypatch,
         llm_provider="bedrock",
         region="us-east-1",
-        embedding_provider="bedrock",
-        graph_embedding_provider="bedrock",
+        aws_env={"ANTHROPIC_AWS_API_KEY": "mantle-key"},
+        openai_api_key="sk-openai",
     )
 
-    assert status.providers_configured is True
-    assert status.configured_providers == ["bedrock"]
-    assert (status.bedrock_llm, status.bedrock_embeddings) == (True, True)
-    assert status.anthropic_configured is False
-    assert status.openai_configured is False
+    assert status.providers_configured is False
+    assert status.configured_providers == ["openai"]
+
+
+@pytest.mark.asyncio
+async def test_a_bedrock_key_beside_a_profile_is_not_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The Anthropic SDK refuses both at once, so the runtime would fail.
+    conflict = {"SIBYL_BEDROCK_API_KEY": "bedrock-api-key", "SIBYL_BEDROCK_PROFILE": "sibyl"}
+    status = await _status_with(
+        monkeypatch, llm_provider="bedrock", region="us-east-1", aws_env=conflict, **ALL_BEDROCK
+    )
+
+    assert status.providers_configured is False
 
 
 @pytest.mark.asyncio
@@ -322,12 +416,8 @@ async def test_status_never_counts_bedrock_without_a_region(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # An AWS profile alone proves nothing: Bedrock needs a Region to be ready.
-    monkeypatch.setenv("AWS_PROFILE", "dev")
     status = await _status_with(
-        monkeypatch,
-        llm_provider="bedrock",
-        embedding_provider="bedrock",
-        graph_embedding_provider="bedrock",
+        monkeypatch, llm_provider="bedrock", aws_env={"AWS_PROFILE": "dev"}, **ALL_BEDROCK
     )
 
     assert status.providers_configured is False
@@ -344,6 +434,7 @@ async def test_status_counts_local_graph_embeddings_only_with_their_dependency(
         monkeypatch,
         llm_provider="bedrock",
         region="us-east-1",
+        aws_env=SIGV4,
         local_embeddings_installed=installed,
         embedding_provider="bedrock",
         graph_embedding_provider="local",
@@ -358,7 +449,9 @@ async def test_status_counts_local_graph_embeddings_only_with_their_dependency(
 async def test_status_reports_partial_providers_as_unconfigured(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    status = await _status_with(monkeypatch, llm_provider="bedrock", region="us-east-1")
+    status = await _status_with(
+        monkeypatch, llm_provider="bedrock", region="us-east-1", aws_env=SIGV4
+    )
 
     # Bedrock is ready, but default OpenAI embeddings still need a key.
     assert status.providers_configured is False
@@ -369,21 +462,30 @@ async def test_status_reports_partial_providers_as_unconfigured(
 @pytest.mark.parametrize("region", [None, "us-east-1"])
 @pytest.mark.parametrize("graph", ["bedrock", "local"])
 @pytest.mark.parametrize("installed", [True, False])
-async def test_an_all_bedrock_server_agrees_with_bedrock_selection(
-    monkeypatch: pytest.MonkeyPatch, region: str | None, graph: str, installed: bool
+@pytest.mark.parametrize("aws_env", [None, SIGV4])
+async def test_an_all_bedrock_server_is_ready_only_when_bedrock_selection_agrees(
+    monkeypatch: pytest.MonkeyPatch,
+    region: str | None,
+    graph: str,
+    installed: bool,
+    aws_env: dict[str, str] | None,
 ) -> None:
-    # One rule: with Bedrock on every plane, readiness is exactly what the
-    # keys step's Bedrock check says.
+    # Readiness never exceeds the keys step's Bedrock routing check, and with
+    # credentials present the two agree exactly.
     status = await _status_with(
         monkeypatch,
         llm_provider="bedrock",
         region=region,
+        aws_env=aws_env,
         local_embeddings_installed=installed,
         embedding_provider="bedrock",
         graph_embedding_provider=graph,
     )
 
-    assert status.providers_configured is (status.bedrock_llm and status.bedrock_embeddings)
+    selected = status.bedrock_llm and status.bedrock_embeddings
+    assert status.providers_configured <= selected
+    if aws_env:
+        assert status.providers_configured is selected
 
 
 @pytest.mark.asyncio
