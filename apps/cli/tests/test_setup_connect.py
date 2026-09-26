@@ -504,17 +504,28 @@ def test_normalize_server_url_accepts_what_people_paste(raw: str, expected: str)
         "https://sibyl.example.com/$(printf QUOTING_PROBE)",
         "https://sibyl.example.com/`id`",
         "https://user:secret@sibyl.example.com",
-        "https://sibyl.example.com/a;b",
+        "https://sibyl.example.com:99999",
     ],
 )
-def test_normalize_server_url_rejects_anything_but_a_plain_url(raw: str) -> None:
+def test_normalize_server_url_rejects_anything_but_an_http_url(raw: str) -> None:
     with pytest.raises(typer.BadParameter):
         connect.normalize_server_url(raw)
 
 
-def test_a_shell_metacharacter_url_is_refused_before_any_request(
-    home: Path, server: FakeServer
-) -> None:
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "https://sibyl.example.com/team+blue",
+        "https://sibyl.example.com/team:v1",
+        "https://sibyl.example.com/a;b",
+        "https://[2001:db8::5]:8443/team",
+    ],
+)
+def test_normalize_server_url_keeps_legal_proxy_paths(raw: str) -> None:
+    assert connect.normalize_server_url(raw) == raw
+
+
+def test_an_invalid_url_is_refused_before_any_request(home: Path, server: FakeServer) -> None:
     result = _run("https://sibyl.example.com/$(printf QUOTING_PROBE)", "--yes")
 
     assert result.exit_code != 0

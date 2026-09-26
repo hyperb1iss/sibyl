@@ -86,23 +86,40 @@ time to verify the recommended agent setup is in place.
 
 Shell = Literal["posix", "powershell"]
 
-_HOST = r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*|\[[0-9A-Fa-f:.]+\])"
-_CLEAN_URL = re.compile(rf"^https?://{_HOST}(?::[0-9]{{1,5}})?(?:/[A-Za-z0-9._~%/-]*)?$")
+# RFC 3986 pieces for an http(s) URL with no userinfo, query or fragment.
+_UNRESERVED = r"A-Za-z0-9\-._~"
+_SUB_DELIMS = r"!$&'()*+,;="
+_PCT_ENCODED = r"%[0-9A-Fa-f]{2}"
+_REG_NAME = rf"(?:[{_UNRESERVED}{_SUB_DELIMS}]|{_PCT_ENCODED})+"
+_IP_LITERAL = (
+    r"\[(?:[0-9A-Fa-f:.]+(?:%25(?:[A-Za-z0-9\-._~]|%[0-9A-Fa-f]{2})+)?"
+    r"|[vV][0-9A-Fa-f]+\.[A-Za-z0-9\-._~!$&'()*+,;=:]+)\]"
+)
+_PCHAR = rf"(?:[{_UNRESERVED}{_SUB_DELIMS}:@]|{_PCT_ENCODED})"
+_HTTP_URL = re.compile(
+    rf"^[Hh][Tt][Tt][Pp][Ss]?://(?:{_IP_LITERAL}|{_REG_NAME})(?::[0-9]*)?(?:/{_PCHAR}*)*$"
+)
 # Characters PowerShell reads as plain text inside an unquoted argument.
 _POWERSHELL_SAFE = re.compile(r"^[A-Za-z0-9_./:%+=-]+$")
 
 
 def is_clean_server_url(url: str) -> bool:
-    """True for a plain http(s) URL: host, optional port and path, nothing else.
+    """True for any RFC 3986 http(s) URL without userinfo, query or fragment.
 
-    Server URLs end up in commands people paste into a shell, so anything a
-    shell could read as syntax (quotes, `$`, backticks, spaces), credentials,
-    a query or a fragment is refused.
+    Every legal path character is accepted (a proxy path such as `/team+blue`
+    or `/team:v1` is ordinary). Whitespace, control characters, credentials, a
+    query, a fragment, a bad port, and anything that does not parse are
+    refused. Commands built from the URL stay safe by quoting, not by
+    narrowing what a URL may contain.
     """
-    if not _CLEAN_URL.match(url):
+    if not _HTTP_URL.match(url):
         return False
-    parts = urlsplit(url)
-    return parts.scheme in {"http", "https"} and bool(parts.hostname)
+    try:
+        parts = urlsplit(url)
+        _ = parts.port  # raises for a port outside 0-65535
+    except ValueError:
+        return False
+    return parts.scheme.lower() in {"http", "https"} and bool(parts.hostname)
 
 
 def quote_argument(value: str, shell: Shell = "posix") -> str:

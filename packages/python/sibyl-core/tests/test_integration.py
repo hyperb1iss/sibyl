@@ -1,5 +1,6 @@
 """Tests for the shared connect instructions."""
 
+import re
 import shlex
 import shutil
 import subprocess
@@ -94,11 +95,21 @@ class TestAgentPromptSnippet:
         assert "sibyl doctor" in AGENT_PROMPT_SNIPPET
 
 
+# Legal RFC 3986 URLs whose path holds characters a shell treats as syntax.
+SHELL_SPECIAL_URLS = [
+    "https://sibyl.example.com/$(id)",
+    "https://sibyl.example.com/it's",
+    "https://sibyl.example.com/a;b&c",
+    "https://sibyl.example.com/!$&'()*+,;=",
+    "https://sibyl.example.com/team+blue",
+    "https://sibyl.example.com/team:v1",
+    "https://sibyl.example.com/a@b/~x/%20y",
+]
+# Strings that reach quoting from anywhere, legal URLs or not.
 HOSTILE_URLS = [
+    *SHELL_SPECIAL_URLS,
     "https://sibyl.example.com/$(printf QUOTING_PROBE)",
     "https://sibyl.example.com/`touch /tmp/probe`",
-    "https://sibyl.example.com/a;rm -rf x",
-    "https://sibyl.example.com/it's",
     'https://sibyl.example.com/"x"',
     "https://sibyl.example.com/a&b|c",
 ]
@@ -123,7 +134,12 @@ class TestShellQuoting:
     @pytest.mark.parametrize("url", HOSTILE_URLS)
     def test_powershell_line_single_quotes_and_doubles_quotes(self, url: str) -> None:
         argument = install_commands(url)["windows"].split("; sibyl setup ", 1)[1]
-        assert argument.startswith("'") and argument.endswith("'")
+        if not argument.startswith("'"):
+            # Left bare only when every character is plain text to PowerShell.
+            assert argument == url
+            assert re.fullmatch(r"[A-Za-z0-9_./:%+=-]+", argument)
+            return
+        assert argument.endswith("'")
         inner = argument[1:-1]
         assert "'" not in inner.replace("''", "")
         assert inner.replace("''", "'") == url
@@ -159,23 +175,33 @@ class TestCleanServerUrl:
             "https://sibyl.example.com:8443/team/",
             "http://10.0.0.5:3334",
             "https://[::1]:3334",
+            "http://[fe80::1%25eth0]:3334",
+            "HTTPS://Sibyl.Example.com",
+            *SHELL_SPECIAL_URLS,
         ],
     )
-    def test_accepts_plain_http_urls(self, url: str) -> None:
+    def test_accepts_every_legal_http_url(self, url: str) -> None:
         assert is_clean_server_url(url)
 
     @pytest.mark.parametrize(
         "url",
         [
-            *HOSTILE_URLS,
             "https://user:pass@sibyl.example.com",
             "https://sibyl.example.com?x=1",
+            "https://sibyl.example.com/team?x=1",
             "https://sibyl.example.com#frag",
-            "ftp://sibyl.example.com",
+            "https://sibyl.example.com/a b",
+            "https://sibyl.example.com/a\tb",
+            "https://sibyl.example.com/a\x01b",
+            "https://sibyl.example.com:99999",
+            "https://sibyl.example.com/`id`",
+            'https://sibyl.example.com/"x"',
             "https://<your-sibyl-host>",
+            "ftp://sibyl.example.com",
             "sibyl.example.com",
+            "https://",
             "",
         ],
     )
-    def test_rejects_anything_a_shell_or_browser_could_misread(self, url: str) -> None:
+    def test_rejects_credentials_queries_fragments_whitespace_and_junk(self, url: str) -> None:
         assert not is_clean_server_url(url)
