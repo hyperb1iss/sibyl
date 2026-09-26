@@ -547,10 +547,13 @@ many seconds remain until then.
 An adoption settled that way, with some organization still unpublished, is provisional. Status shows
 `adopted_on_incomplete_evidence` instead of `complete`, and every lifecycle pass weighs it again. If
 an organization later publishes evidence of a switch, the plane is re-embedded, the vectors that
-adoption stamped included; once every organization has published, the adoption becomes final. The
-timeout never re-embeds on its own, so one slow organization does not cost a plain upgrade a full
-re-embed. While the adoption is provisional its vectors count in vector search, which mixes models
-only if the late evidence does show a switch, and the warning makes that window visible.
+adoption stamped included; once every organization has published, the adoption becomes final. A
+vector the provider refused to replace keeps the adoption provisional, and status counts it, so a
+remembered refusal never passes for a replacement; when two processes race to record the verdict,
+the one that loses weighs a provisional winner again on its own evidence. The timeout never
+re-embeds on its own, so one slow organization does not cost a plain upgrade a full re-embed. While
+the adoption is provisional its vectors count in vector search, which mixes models only if the late
+evidence does show a switch, and the warning makes that window visible.
 
 A plane with no evidence anywhere adopts its vectors too, logs a warning, and shows
 `adopted_without_evidence` in `sibyl debug status` instead of `complete`. That state is exactly what
