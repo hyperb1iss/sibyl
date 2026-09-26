@@ -331,7 +331,8 @@ jobs:
   # CI still owns checks the release does not repeat, such as the shipped
   # dependency audit and the Storybook build, so the candidate's own CI run
   # has to be green. Path-skipped CI jobs are fine: the gates above prove
-  # those on the candidate. tools/release/ci_evidence.py holds the rule and
+  # nearly all of those on the candidate, and CI's own path rules cover the
+  # rest (the Storybook build), as they do for every merge. tools/release/ci_evidence.py holds the rule and
   # waits for a CI run that is still in progress.
   ci-evidence:
     name: "◇ CI evidence"
@@ -796,12 +797,17 @@ jobs:
             if [[ "${{ inputs.dry_run }}" == "true" ]]; then
               echo "No version commit, tag, release, or publish was created."
               echo ""
-              echo "After the maintainer approves the version commit, tag and publish, cut this"
-              echo "exact commit with:"
-              echo ""
-              echo '```bash'
-              echo "gh workflow run release.yml --ref main -f version=${{ steps.version.outputs.version }} -f dry_run=false -f expected_sha=${{ steps.base.outputs.sha }}"
-              echo '```'
+              if [[ "$GITHUB_REF" == "refs/heads/main" ]]; then
+                echo "After the maintainer approves the version commit, tag and publish, cut this"
+                echo "exact commit with:"
+                echo ""
+                echo '```bash'
+                echo "gh workflow run release.yml --ref main -f version=${{ steps.version.outputs.version }} -f dry_run=false -f expected_sha=${{ steps.base.outputs.sha }}"
+                echo '```'
+              else
+                echo "This rehearsed \`$GITHUB_REF\`. A real cut runs only on main, so dry-run main"
+                echo "for the command that cuts it."
+              fi
             else
               echo "✓ Released: ${{ steps.version.outputs.previous_tag }} → v${{ steps.version.outputs.version }}"
               echo ""

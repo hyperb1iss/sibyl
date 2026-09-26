@@ -6,12 +6,16 @@ them for changes outside their paths. CI still owns checks the release does
 not repeat, such as the shipped-dependency audit and the Storybook build, so
 the candidate's own CI run has to be green.
 
-A path-skipped job is accepted here, since the release proves those gates on
-the candidate. The jobs in ``ALWAYS_RUN_JOBS`` run on every push and pull
-request, so a skip there means CI never really ran on the commit. The newest
-completed CI verdict on the commit wins: a failure stops the release, and a
-cancelled run is passed over. CI cannot be dispatched, so when no run passes
-the release refuses instead of waiting forever.
+A path-skipped job is accepted here. The release proves nearly all of those
+gates on the candidate itself, and for the rest (the Storybook build) it
+relies on CI's own path rules, as every merge does. The jobs in
+``ALWAYS_RUN_JOBS`` run on every push and pull request, so a skip there means
+CI never really ran on the commit. The newest completed CI verdict on the
+commit wins: a failure stops the release, and a cancelled run is passed over.
+A cancelled run is never read as a failure, even though CI's ``if: always()``
+aggregator (Package Tests) fails whenever a suite is cancelled. CI cannot be
+dispatched, so when no run passes the release refuses instead of waiting
+forever.
 
 Like ``nightly_evidence``, this module is stdlib only.
 """
@@ -123,7 +127,7 @@ def resolve_ci(
                 return Resolution(run=run, jobs=jobs, source="existing")
             judged[run.verdict_key] = failures
             log(f"Not citing {run.url or run.run_id}: {'; '.join(failures)}")
-            if run_failed(run, jobs):
+            if run.conclusion != "cancelled" and run_failed(run, jobs):
                 raise EvidenceError(
                     [
                         f"CI failed on the candidate {candidate_sha}: {run.url or run.run_id}",
@@ -143,7 +147,9 @@ def resolve_ci(
             if not active and clock() - started >= appear_grace_seconds:
                 raise EvidenceError(
                     [
-                        f"no CI run on {candidate_sha} passed, and none is running",
+                        f"no CI run on {candidate_sha} passed, and none is running. A "
+                        "cancelled run usually means a newer push superseded this commit; "
+                        "dispatch the release on the new head.",
                         *(reason for reasons in judged.values() for reason in reasons),
                     ]
                 )

@@ -132,7 +132,30 @@ def test_resolve_refuses_when_ci_never_ran_on_the_candidate() -> None:
     with pytest.raises(EvidenceError) as raised:
         _resolve(github, FakeClock())
 
-    assert raised.value.reasons[0] == f"no CI run on {SHA} passed, and none is running"
+    assert raised.value.reasons[0].startswith(f"no CI run on {SHA} passed, and none is running")
+
+
+def test_a_cancelled_run_is_never_read_as_red_ci() -> None:
+    # Shaped like run 36204364635: a newer push cancelled the suites, and the
+    # always-run Package Tests aggregator then concluded failure.
+    cancelled = _ci_run(10, conclusion="cancelled")
+    github = FakeGitHub(
+        [cancelled],
+        {
+            10: (
+                *DOCS_ONLY[:2],
+                NightlyJob("Test Suite (core)", "completed", "cancelled"),
+                NightlyJob("Package Tests", "completed", "failure"),
+            )
+        },
+    )
+
+    with pytest.raises(EvidenceError) as raised:
+        _resolve(github, FakeClock())
+
+    assert "none is running" in raised.value.reasons[0]
+    assert "dispatch the release on the new head" in raised.value.reasons[0]
+    assert not any("CI failed" in reason for reason in raised.value.reasons)
 
 
 def test_resolve_times_out_while_ci_keeps_running() -> None:

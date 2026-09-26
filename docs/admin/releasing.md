@@ -32,8 +32,9 @@ The RC bundle forces every task because the moon output cache is restored across
 another commit. `:check` holds the root trust gates, every project's lint, typecheck and tests, and
 the Helm contract tests, which run against the pinned Helm the workflow installs.
 
-CI evidence accepts path-skipped CI jobs, because the release proves those gates on the candidate
-itself, but it waits for a CI run that is still in progress and stops on a red one.
+CI evidence accepts path-skipped CI jobs. The release proves nearly all of those gates on the
+candidate itself, and CI's own path rules cover the rest (the Storybook build), as they do for every
+merge. It waits for a CI run that is still in progress and stops on a red one.
 
 The nightly evidence rule is stricter than the run's own conclusion. The daily schedule skips
 Restore To Scratch, and GitHub still reports that run as a success, so it does not count. A run
@@ -227,17 +228,17 @@ Use these only to debug a gate the workflow failed. A local pass is not release 
 fix still has to land on `main` and pass a new dry run. Pass `--force` so moon runs the task instead
 of replaying a cached result.
 
-| Failing gate                | Reproduce with                                                                                         |
-| --------------------------- | ------------------------------------------------------------------------------------------------------ |
-| Run RC gate bundle          | `moon run :check --force`, or the failing project task, such as `moon run core:test --force`           |
-| LongMemEval V2 release CI   | `moon run bench-longmemeval-v2-release-ci-test --force`                                                |
-| Doc claim gate              | `moon run doc-claim-gate --force`                                                                      |
-| Helm contracts              | `moon run helm-test --force`, with Helm 3 on `PATH` (the tests skip without it)                        |
-| Version or pin sync         | `moon run release-version-validate -- X.Y.Z` and `moon run sync-versions-check`                        |
-| Workflow contract           | `moon run release-workflow-test --force`                                                               |
-| E2E gate                    | Start the fixture the `e2e-gate` job starts, then run its two forced `moon run e2e:*` commands         |
-| Nightly Regression evidence | `python3 -m tools.release.nightly_evidence verify --repo hyperb1iss/sibyl --sha <sha> --run-id <id>`   |
-| CI evidence                 | The candidate's own CI run finished green, including the dependency audit, which runs on every commit. |
+| Failing gate                | Reproduce with                                                                                       |
+| --------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Run RC gate bundle          | `moon run :check --force`, or the failing project task, such as `moon run core:test --force`         |
+| LongMemEval V2 release CI   | `moon run bench-longmemeval-v2-release-ci-test --force`                                              |
+| Doc claim gate              | `moon run doc-claim-gate --force`                                                                    |
+| Helm contracts              | `moon run helm-test --force`, with Helm 3 on `PATH` (the tests skip without it)                      |
+| Version or pin sync         | `moon run release-version-validate -- X.Y.Z` and `moon run sync-versions-check`                      |
+| Workflow contract           | `moon run release-workflow-test --force`                                                             |
+| E2E gate                    | Start the fixture the `e2e-gate` job starts, then run its two forced `moon run e2e:*` commands       |
+| Nightly Regression evidence | `python3 -m tools.release.nightly_evidence verify --repo hyperb1iss/sibyl --sha <sha> --run-id <id>` |
+| CI evidence                 | `python3 -m tools.release.ci_evidence --repo hyperb1iss/sibyl --sha <sha>`                           |
 
 The E2E fixture is SurrealDB (the `start-surrealdb` action), `sibyld serve` and `sibyld worker` in
 `apps/api`, `moon run baseline-seed` and `moon run baseline-replay-runtime`, and a production build

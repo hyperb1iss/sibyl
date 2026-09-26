@@ -296,6 +296,8 @@ def test_real_cut_releases_only_the_commit_its_dry_run_proved() -> None:
 
     summary = _steps_by_name(workflow["jobs"]["release"])["► Summary"]["run"]
     assert "-f dry_run=false -f expected_sha=${{ steps.base.outputs.sha }}" in summary
+    # The printed command dispatches on main, so only a dry run of main prints it.
+    assert '[[ "$GITHUB_REF" == "refs/heads/main" ]]' in summary
 
 
 def test_dry_run_never_changes_remote_release_state() -> None:
