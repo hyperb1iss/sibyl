@@ -544,6 +544,14 @@ counts it for everyone else), and the waiting planes are settled on the evidence
 once `SIBYL_EMBEDDING_SWEEP_EVIDENCE_WAIT_SECONDS` have passed. Status and that log line say how
 many seconds remain until then.
 
+An adoption settled that way, with some organization still unpublished, is provisional. Status shows
+`adopted_on_incomplete_evidence` instead of `complete`, and every lifecycle pass weighs it again. If
+an organization later publishes evidence of a switch, the plane is re-embedded, the vectors that
+adoption stamped included; once every organization has published, the adoption becomes final. The
+timeout never re-embeds on its own, so one slow organization does not cost a plain upgrade a full
+re-embed. While the adoption is provisional its vectors count in vector search, which mixes models
+only if the late evidence does show a switch, and the warning makes that window visible.
+
 A plane with no evidence anywhere adopts its vectors too, logs a warning, and shows
 `adopted_without_evidence` in `sibyl debug status` instead of `complete`. That state is exactly what
 an undetected switch would look like, which is why the steps above exist. If the model did change,
