@@ -29,6 +29,12 @@ from sibyl_core.backends.surreal.observability import (
     query_start,
 )
 from sibyl_core.backends.surreal.protocols import QueryParams, SurrealClient
+from sibyl_core.backends.surreal.url_schemes import (
+    is_embedded_surreal_url,
+    is_file_backed_surreal_url,
+    is_websocket_surreal_url,
+    normalize_surreal_url,
+)
 
 if TYPE_CHECKING:
     from sibyl_core.backends.surreal.schema_version import SurrealExecute
@@ -42,26 +48,11 @@ _TRANSACTION_CONFLICT_RETRY_MAX_SECONDS = 1.0
 _DEFAULT_POOL_SIZE = 4
 
 
-_EMBEDDED_URL_SCHEMES = (
-    "memory://",
-    "surrealkv://",
-    "surrealkv+versioned://",
-    "rocksdb://",
-    "file://",
-)
-
-
-def _is_embedded_url(url: str) -> bool:
-    # Embedded stores are single-writer and `memory://` hands out a fresh empty
-    # database per connection, so a pool there would fragment state.
-    return url.startswith(_EMBEDDED_URL_SCHEMES)
-
-
 def _connect_timeout_seconds(url: str) -> float | None:
     # Embedded stores open a local file rather than a socket, and a cold
     # SurrealKV directory can legitimately take longer than a handshake
     # budget, so only remote URLs get one.
-    if _is_embedded_url(url):
+    if is_embedded_surreal_url(url):
         return None
     from sibyl_core.config import core_config
 
@@ -72,13 +63,10 @@ def _connect_timeout_seconds(url: str) -> float | None:
 # disk, so two engines opened on one path in one process append to the same log
 # and read each other's bytes back as corrupt values ("Invalid revision `N` for
 # type `Value`"), and neither sees the other's writes. Every client on such a
-# path therefore shares one engine. memory:// has no files behind it, and each
-# connection there stays its own store.
-_SHARED_EMBEDDED_URL_SCHEMES = ("surrealkv://", "surrealkv+versioned://", "rocksdb://", "file://")
-
-
+# path therefore shares one engine. In-memory stores have no files behind
+# them, and each connection there stays its own store.
 def _shares_embedded_engine(url: str) -> bool:
-    return url.startswith(_SHARED_EMBEDDED_URL_SCHEMES)
+    return is_file_backed_surreal_url(url)
 
 
 def _embedded_engine_key(url: str) -> str:
@@ -407,6 +395,12 @@ class _PooledConnection:
             try:
                 async with asyncio.timeout(budget):
                     await self._handshake(client)
+            except asyncio.CancelledError:
+                # A warm or query cancelled mid-handshake would otherwise strand
+                # the half-open client, since it was never stored on the slot.
+                with contextlib.suppress(Exception):
+                    await _finish_despite_cancellation(client.close())
+                raise
             except TimeoutError as exc:
                 with contextlib.suppress(Exception):
                     await client.close()
@@ -485,7 +479,8 @@ class _PooledConnection:
                 await client.signin({"username": self._username, "password": self._password})
 
     def _requires_auth(self) -> bool:
-        return not self._url.startswith(("memory://", "surrealkv://"))
+        # An in-process engine has no users to sign in as.
+        return not is_embedded_surreal_url(self._url)
 
     async def drop(self) -> None:
         async with self._connect_lock:
@@ -518,6 +513,9 @@ class DedicatedSurrealClient:
         client_kind: str = "dedicated",
         pool_size: int | None = None,
     ) -> None:
+        # The SDK's embedded engine rejects an uppercase scheme, so every URL
+        # is normalized once here, where it enters the client.
+        url = normalize_surreal_url(url)
         self._url = url
         self._username = username
         self._password = password
@@ -528,15 +526,20 @@ class DedicatedSurrealClient:
         # Embedded URLs are hard-clamped to one connection regardless of any
         # configured pool size, and this is a correctness boundary. The engine
         # the Python SDK embeds (surrealdb-core 2.3) misses write-write
-        # conflicts, even inside BEGIN/COMMIT: two connections can both commit
-        # a read-modify-write from the same stale read. The compare-and-set
-        # fences in dream checkpoints, source states, revisions, schema
-        # leases, and write witnesses hold on embedded stores only because
-        # each namespace writes through one connection. (memory:// also hands
-        # every connection a fresh store, so a pool there would fragment it.)
+        # conflicts, even inside BEGIN/COMMIT: two queries in flight can both
+        # commit a read-modify-write from the same stale read. The clamp keeps
+        # this client to one query in flight. It does not make a namespace
+        # single-writer: that comes from the builders handing out one shared
+        # client per namespace (auth, content, and the per-org graph LRU), and
+        # two clients on one namespace still lose updates even at one
+        # connection each. The compare-and-set fences in dream checkpoints,
+        # source states, revisions, schema leases, and write witnesses depend
+        # on both. Sites that build a second client on a namespace are tracked
+        # in Sibyl task 192bf5f7. (In-memory stores also hand every connection
+        # a fresh store, so a pool there would fragment it.)
         # packages/python/sibyl-core/tests/test_embedded_shared_engine.py
         # enforces the clamp and pins the lost updates with a strict xfail.
-        if _is_embedded_url(url):
+        if is_embedded_surreal_url(url):
             self._pool_size = 1
         else:
             requested = pool_size if pool_size is not None else _DEFAULT_POOL_SIZE
@@ -559,7 +562,7 @@ class DedicatedSurrealClient:
 
     @property
     def supports_live_queries(self) -> bool:
-        return self._url.startswith(("ws://", "wss://"))
+        return is_websocket_surreal_url(self._url)
 
     def _new_connection(self) -> _PooledConnection:
         return _PooledConnection(
@@ -574,7 +577,7 @@ class DedicatedSurrealClient:
     @asynccontextmanager
     async def schema_lease_executor(self) -> AsyncIterator[SurrealExecute]:
         """Reserve renewal capacity without competing with graph query sockets."""
-        if _is_embedded_url(self._url):
+        if is_embedded_surreal_url(self._url):
             yield self.execute_query
             return
         control = DedicatedSurrealClient(

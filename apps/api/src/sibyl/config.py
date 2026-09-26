@@ -14,19 +14,18 @@ import structlog
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+from sibyl_core.backends.surreal.url_schemes import (
+    is_embedded_surreal_url,
+    production_surreal_url_problem,
+    unsupported_surreal_url_reason,
+)
+
 _log = structlog.get_logger()
 
 # Persisted auto-generated JWT key (same pattern as settings.key in crypto.py)
 _JWT_KEY_FILE = Path.home() / ".sibyl" / "jwt.key"
 _EXTRA_OIDC_PROVIDER_NAMES = {"github", "google"}
 _EXTRA_OIDC_ISSUER_HOSTS = {"github.com", "accounts.google.com"}
-_EMBEDDED_SURREAL_SCHEMES = (
-    "memory://",
-    "surrealkv://",
-    "surrealkv+versioned://",
-    "rocksdb://",
-    "file://",
-)
 DEFAULT_LOCAL_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_LOCAL_EMBEDDING_DIMENSIONS = 384
 # Matches the HS256 output width, and what `openssl rand -hex 32` produces.
@@ -236,6 +235,9 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="SIBYL_",
         extra="ignore",
+        # A validation error would otherwise print the whole settings input,
+        # API keys and database passwords included.
+        hide_input_in_errors=True,
     )
 
     # Server configuration
@@ -344,21 +346,13 @@ class Settings(BaseSettings):
                     "CRITICAL: disable_auth=True is forbidden in production environment. "
                     "Set SIBYL_ENVIRONMENT=development to use disable_auth for testing."
                 )
-            if self.auth_store == "surreal" and self.resolved_surreal_url.startswith("memory://"):
-                raise ValueError(
-                    "CRITICAL: In-memory SurrealDB is forbidden in production. "
-                    "Set SIBYL_SURREAL_URL or SIBYL_SURREAL_DATA_DIR."
+            if self.auth_store == "surreal" and (
+                problem := production_surreal_url_problem(
+                    self.resolved_surreal_url,
+                    allow_embedded_single_writer=self.allow_embedded_single_writer,
                 )
-            if (
-                self.auth_store == "surreal"
-                and self.resolved_surreal_url.startswith("surrealkv://")
-                and not self.allow_embedded_single_writer
             ):
-                raise ValueError(
-                    "CRITICAL: Embedded SurrealDB requires explicit single-writer opt-in in "
-                    "production. Set SIBYL_ALLOW_EMBEDDED_SINGLE_WRITER=1 only when one "
-                    "daemon owns the database."
-                )
+                raise ValueError(f"CRITICAL: {problem}")
             if self.cookie_secure is False:
                 raise ValueError(
                     "CRITICAL: cookie_secure=False is forbidden in production. "
@@ -698,6 +692,8 @@ class Settings(BaseSettings):
 
         if self.surreal_url and self.surreal_data_dir:
             raise ValueError("Configure only one of surreal_url or surreal_data_dir")
+        if self.surreal_url and (reason := unsupported_surreal_url_reason(self.surreal_url)):
+            raise ValueError(reason)
 
         if self.graph_embedding_provider == "local":
             if (
@@ -941,7 +937,7 @@ class Settings(BaseSettings):
     def effective_surreal_client_pool_size(
         self, client_kind: Literal["auth", "content", "graph"]
     ) -> int:
-        if self.resolved_surreal_url.startswith(_EMBEDDED_SURREAL_SCHEMES):
+        if is_embedded_surreal_url(self.resolved_surreal_url):
             return 1
         return self.surreal_client_pool_size(client_kind)
 

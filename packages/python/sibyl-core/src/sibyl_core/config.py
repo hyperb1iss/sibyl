@@ -11,6 +11,11 @@ from typing import Literal
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from sibyl_core.backends.surreal.url_schemes import (
+    production_surreal_url_problem,
+    unsupported_surreal_url_reason,
+)
+
 DEFAULT_LOCAL_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_LOCAL_EMBEDDING_DIMENSIONS = 384
 _OPENAI_GRAPH_EMBEDDING_MODEL = "text-embedding-3-small"
@@ -33,6 +38,9 @@ class CoreConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="SIBYL_",
         extra="ignore",
+        # A validation error would otherwise print the whole settings input,
+        # API keys included.
+        hide_input_in_errors=True,
     )
 
     # Environment
@@ -238,9 +246,6 @@ class CoreConfig(BaseSettings):
             if fallback:
                 object.__setattr__(self, "jwt_secret", SecretStr(fallback))
 
-        if self.surreal_url and self.surreal_data_dir:
-            raise ValueError("Configure only one of surreal_url or surreal_data_dir")
-
         if self.graph_embedding_provider == "local":
             if (
                 "graph_embedding_model" not in self.model_fields_set
@@ -258,19 +263,11 @@ class CoreConfig(BaseSettings):
 
         _check_bedrock_embedding_dimensions(self)
 
-        if self.environment == "production":
-            resolved = self.resolved_surreal_url
-            if resolved.startswith("memory://"):
-                raise ValueError(
-                    "CRITICAL: In-memory SurrealDB is forbidden in production. "
-                    "Set SIBYL_SURREAL_URL or SIBYL_SURREAL_DATA_DIR."
-                )
-            if resolved.startswith("surrealkv://") and not self.allow_embedded_single_writer:
-                raise ValueError(
-                    "CRITICAL: Embedded SurrealDB requires explicit single-writer opt-in in "
-                    "production. Set SIBYL_ALLOW_EMBEDDED_SINGLE_WRITER=1 only when one "
-                    "daemon owns the database."
-                )
+        # SurrealDB URL checks deliberately stay out of this validator. The
+        # client CLI imports this config, and a server URL it never opens
+        # must not stop `sibyl --help` from running. The server's Settings
+        # refuse a bad URL at startup, and core code that opens a store
+        # checks require_serviceable_surreal_url() at that point.
 
         return self
 
@@ -385,6 +382,27 @@ class CoreConfig(BaseSettings):
         if self.surreal_data_dir:
             return f"surrealkv://{self.surreal_data_dir}"
         return "memory://"
+
+    def surreal_url_problem(self) -> str | None:
+        """Why this config cannot open its SurrealDB store, or None when it can."""
+        if self.surreal_url and self.surreal_data_dir:
+            return "Configure only one of surreal_url or surreal_data_dir"
+        url = self.resolved_surreal_url
+        if reason := unsupported_surreal_url_reason(url):
+            return reason
+        if self.environment == "production" and (
+            problem := production_surreal_url_problem(
+                url, allow_embedded_single_writer=self.allow_embedded_single_writer
+            )
+        ):
+            return f"CRITICAL: {problem}"
+        return None
+
+    def require_serviceable_surreal_url(self) -> str:
+        """Return the SurrealDB URL to open, refusing one this runtime must not use."""
+        if problem := self.surreal_url_problem():
+            raise ValueError(problem)
+        return self.resolved_surreal_url
 
     def surreal_client_pool_size(self, client_kind: Literal["auth", "content", "graph"]) -> int:
         """Return the configured pool size for a SurrealDB client kind."""

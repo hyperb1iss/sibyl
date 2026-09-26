@@ -235,6 +235,7 @@ async def test_same_namespace_writers_survive_commit_conflicts(monkeypatch, tmp_
 
 @pytest.mark.xfail(
     strict=True,
+    raises=AssertionError,
     reason=(
         "The engine the surrealdb Python SDK embeds (surrealdb-core 2.3) misses "
         "write-write conflicts, so concurrent read-modify-writes on one record "
@@ -261,9 +262,13 @@ async def test_embedded_engine_keeps_every_concurrent_increment(tmp_path, store)
                 if response["result"][0]["status"] == "OK":
                     reported += 1
 
-        # A round loses increments reliably today; a few rounds keep a fixed
-        # engine from passing by luck on a slow runner.
-        for _ in range(5):
+        # The first round that loses an increment fails the assertion and ends
+        # the test, so extra rounds cost nothing while the engine is broken.
+        # They keep a lucky run with no loss (seen in up to 3 of 5 rounds on
+        # memory:// under heavy contention) from passing as a fixed engine.
+        # raises=AssertionError keeps an unrelated SDK error from posing as
+        # the expected failure.
+        for _ in range(20):
             await asyncio.gather(*(increment() for _ in range(4)))
             stored = await engine.query("SELECT VALUE n FROM ONLY counter:c;")
             assert stored == reported, f"{reported - stored} increments reported OK were lost"
@@ -273,7 +278,7 @@ async def test_embedded_engine_keeps_every_concurrent_increment(tmp_path, store)
 
 @pytest.mark.parametrize(
     "url",
-    ["memory://", "surrealkv://{dir}", "surrealkv+versioned://{dir}", "rocksdb://{dir}"],
+    ["memory://", "mem://", "surrealkv://{dir}", "surrealkv+versioned://{dir}", "file://{dir}"],
 )
 @pytest.mark.parametrize("pool_size", [None, 1, 4, 64])
 async def test_embedded_clients_hold_one_connection_however_configured(

@@ -56,6 +56,7 @@ async def test_background_pool_saturation_preserves_interactive_capacity(monkeyp
         "settings",
         SimpleNamespace(
             resolved_surreal_url="ws://test.invalid/rpc",
+            require_serviceable_surreal_url=lambda: "ws://test.invalid/rpc",
             surreal_username="synthetic",
             surreal_password=SimpleNamespace(get_secret_value=lambda: "test-only"),
             surreal_token=SimpleNamespace(get_secret_value=lambda: ""),

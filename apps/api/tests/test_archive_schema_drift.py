@@ -20,6 +20,7 @@ from sibyl_core.backends.surreal import (
     bootstrap_content_schema,
 )
 from sibyl_core.backends.surreal.records import normalize_records
+from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
 
 
 @pytest_asyncio.fixture
@@ -62,7 +63,7 @@ async def test_schemafull_conversion_blocks_writes_to_rows_carrying_a_drifted_fi
     only be pinned against a server.
     """
     url = os.environ.get("SIBYL_SURREAL_URL", "")
-    if not url or url.startswith(("memory://", "surrealkv://", "rocksdb://", "file://")):
+    if not url or is_embedded_surreal_url(url):
         pytest.skip("requires SIBYL_SURREAL_URL pointing at a SurrealDB server")
 
     connection = AsyncSurreal(url)

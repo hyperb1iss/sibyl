@@ -10,8 +10,9 @@ from dataclasses import dataclass
 from typing import Any, cast
 from weakref import WeakValueDictionary
 
-from sibyl_core.backends.surreal.dedicated_client import DedicatedSurrealClient, _is_embedded_url
+from sibyl_core.backends.surreal.dedicated_client import DedicatedSurrealClient
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM, bootstrap_schema
+from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
 from sibyl_core.config import settings
 from sibyl_core.embeddings.providers import EmbeddingProvider
 
@@ -68,7 +69,7 @@ _background_lock = asyncio.Lock()
 def _new_graph_client(group_id: str) -> SurrealGraphClient:
     return SurrealGraphClient(
         group_id=group_id,
-        url=settings.resolved_surreal_url,
+        url=settings.require_serviceable_surreal_url(),
         username=settings.surreal_username,
         password=settings.surreal_password.get_secret_value(),
         token=settings.surreal_token.get_secret_value(),
@@ -118,7 +119,7 @@ async def background_graph_client(group_id: str) -> AsyncIterator[SurrealGraphCl
     closes the pool; a new operation waits for any old pool teardown to finish.
     Embedded stores must share their original single writer and memory identity.
     """
-    if _is_embedded_url(settings.resolved_surreal_url):
+    if is_embedded_surreal_url(settings.resolved_surreal_url):
         yield await get_surreal_graph_client(group_id)
         return
     while True:
@@ -184,7 +185,7 @@ async def prepare_graph_schema(client: SurrealGraphClient) -> None:
     group_id = client.group_id
     if group_id in _prepared_groups:
         return
-    scope = ("store", client._url) if _is_embedded_url(client._url) else ("org", group_id)
+    scope = ("store", client._url) if is_embedded_surreal_url(client._url) else ("org", group_id)
     lock = _prepare_locks.setdefault(scope, asyncio.Lock())
     async with lock:
         if group_id in _prepared_groups:
