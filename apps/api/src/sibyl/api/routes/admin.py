@@ -58,6 +58,7 @@ from sibyl_core.backends.surreal.url_schemes import (
     surreal_http_base_url,
     surreal_url_credentials,
 )
+from sibyl_core.config import settings as core_settings
 from sibyl_core.models import CrawlStatus, Entity
 from sibyl_core.models.entities import EntityType
 from sibyl_core.utils import fingerprint_text
@@ -211,6 +212,136 @@ def _surreal_metrics_sample(metric_names: list[str]) -> dict[str, bool]:
         name: name in available or any(metric.startswith(f"{name}_") for metric in available)
         for name in interesting
     }
+
+
+_EMBEDDING_SWEEP_STATUS_FIELDS = (
+    "legacy_decision",
+    "legacy_basis",
+    "legacy_warning",
+    "legacy_notice",
+    "legacy_provisional",
+    "deferred_age_seconds",
+    "active_metadata",
+    "complete_metadata",
+    "complete_at",
+    "lease_until",
+    "last_run",
+)
+_EMBEDDING_SCHEMA_PENDING_STATE = "awaiting_schema_upgrade"
+_EMBEDDING_AWAITING_EVIDENCE_STATE = "awaiting_evidence"
+
+
+def _embedding_plane_state(state: dict[str, Any]) -> str:
+    """Complete only for the model the plane is swept toward now.
+
+    A plane waiting for other organizations to publish their evidence says
+    so. A plane that adopted unstamped vectors with no evidence of their
+    model never reads complete: it reports the warning until an operator
+    re-embeds it, because a provider switch in the same deploy would look
+    identical.
+    """
+    from sibyl_core.embeddings.provenance import same_vector_identity
+
+    last_run = state.get("last_run")
+    last_status = last_run.get("status") if isinstance(last_run, dict) else None
+    if last_status in {"skipped_dimension_mismatch", "provider_failing", "store_failing"}:
+        return str(last_status)
+    if not state.get("legacy_decision") and state.get("legacy_deferred_at"):
+        return _EMBEDDING_AWAITING_EVIDENCE_STATE
+    if state.get("legacy_warning"):
+        return str(state["legacy_warning"])
+    if state.get("legacy_notice"):
+        return str(state["legacy_notice"])
+    if same_vector_identity(state.get("complete_metadata"), state.get("active_metadata")):
+        return "complete"
+    return "sweeping"
+
+
+async def get_embedding_sweep_status(
+    organization_id: str, *, deployment_admin: bool = False
+) -> dict[str, object]:
+    """Each embedding plane's persisted sweep state, for the status dashboard.
+
+    A plane that has not been swept yet reports ``{"state": "not_started"}``,
+    one whose namespace has not run the sweep's migration reports
+    ``awaiting_schema_upgrade``, and one waiting on other organizations'
+    evidence says how many it waits on. Only a deployment admin sees which
+    organizations those are: an organization owner may not learn other
+    tenants' identifiers. A store that cannot be read reports the error type
+    instead of failing the dashboard.
+    """
+    from sibyl.persistence.surreal.content import surreal_content_client
+    from sibyl_core.backends.surreal.schema_embedding_states import embedding_sweep_schema_ready
+    from sibyl_core.services import content_client
+    from sibyl_core.services.document_embedding_sweep import DOCUMENT_CHUNK_EMBEDDING_PLANE
+    from sibyl_core.services.embedding_evidence import read_evidence_wait
+    from sibyl_core.services.embedding_sweep import read_embedding_sweep_state
+    from sibyl_core.services.graph_embedding_sweep import GRAPH_EMBEDDING_PLANE
+    from sibyl_core.services.graph_runtime import get_graph_client
+
+    async def graph_state() -> dict[str, Any] | None:
+        client = await get_graph_client(organization_id)
+        if not await embedding_sweep_schema_ready(client.execute_query, graph=True):
+            return None
+        return await read_embedding_sweep_state(
+            GRAPH_EMBEDDING_PLANE, organization_id, client.execute_query
+        )
+
+    async def chunk_state() -> dict[str, Any] | None:
+        async with surreal_content_client() as client:
+
+            async def execute(query: str, **params: object) -> object:
+                return await content_client.select_many(client, query, **params)
+
+            if not await embedding_sweep_schema_ready(execute, graph=False):
+                return None
+            return await read_embedding_sweep_state(
+                DOCUMENT_CHUNK_EMBEDDING_PLANE, organization_id, execute
+            )
+
+    async def evidence_wait() -> dict[str, Any]:
+        try:
+            async with surreal_content_client() as client:
+                return await read_evidence_wait(
+                    lambda query, **params: content_client.select_many(client, query, **params)
+                )
+        except Exception:
+            return {}
+
+    status: dict[str, object] = {}
+    for plane, read in (
+        (GRAPH_EMBEDDING_PLANE, graph_state),
+        (DOCUMENT_CHUNK_EMBEDDING_PLANE, chunk_state),
+    ):
+        try:
+            state = await read()
+        except Exception as exc:
+            status[plane] = {"state": "unavailable", "error_type": type(exc).__name__}
+            continue
+        if state is None:
+            status[plane] = {"state": _EMBEDDING_SCHEMA_PENDING_STATE}
+            continue
+        if not state:
+            status[plane] = {"state": "not_started"}
+            continue
+        entry: dict[str, Any] = {
+            "state": _embedding_plane_state(state),
+            **{key: state.get(key) for key in _EMBEDDING_SWEEP_STATUS_FIELDS},
+        }
+        if entry["state"] == _EMBEDDING_AWAITING_EVIDENCE_STATE:
+            wait = await evidence_wait()
+            entry["waiting_on_count"] = wait.get("count") or 0
+            if deployment_admin:
+                entry["waiting_on_organizations"] = wait.get("organizations") or []
+            # A plane waits at most the configured bound, then settles on the
+            # evidence published so far.
+            bound = core_settings.embedding_sweep_evidence_wait_seconds
+            age = state.get("deferred_age_seconds")
+            entry["evidence_wait_seconds"] = bound
+            if isinstance(age, int | float):
+                entry["settles_in_seconds"] = max(0, round(bound - age))
+        status[plane] = jsonable_encoder(entry, custom_encoder={SurrealDatetime: str})
+    return status
 
 
 async def get_surreal_observability_status() -> dict[str, object]:
@@ -1098,6 +1229,7 @@ async def debug_query(
 )
 async def dev_status(
     org: AuthOrganization = Depends(get_current_organization),
+    user: AuthUser = Depends(get_current_user),
 ) -> DevStatusResponse:
     """Get comprehensive developer status dashboard.
 
@@ -1141,6 +1273,9 @@ async def dev_status(
     error_entries = buffer.tail(n=10, level="error")
     recent_errors = [e.to_dict() for e in error_entries]
     surreal_observability = await get_surreal_observability_status()
+    embedding_sweep = await get_embedding_sweep_status(
+        str(org.id), deployment_admin=user.is_admin is True
+    )
 
     return DevStatusResponse(
         api_healthy=api_healthy,
@@ -1156,6 +1291,7 @@ async def dev_status(
         queue_depth=queue_depth,
         recent_errors=recent_errors,
         surreal_observability=surreal_observability,
+        embedding_sweep=embedding_sweep,
     )
 
 

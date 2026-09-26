@@ -492,6 +492,26 @@ async def create_backup(*, organization_id: str) -> BackupResult:
         )
 
 
+async def _reopen_graph_embedding_plane(driver: Any, organization_id: str) -> None:
+    """Send the embedding sweep back over a graph a restore just rewrote.
+
+    Restored vectors either name their model or arrive unverified; a plane
+    whose last pass finished would otherwise skip them until the verify
+    interval lapses. A failure only delays the sweep, so it never fails the
+    restore.
+    """
+    from sibyl_core.backends.surreal.schema_embedding_states import REOPEN_EMBEDDING_STATES
+
+    try:
+        await driver.execute_query(REOPEN_EMBEDDING_STATES, organizations=[organization_id])
+    except Exception as exc:
+        log.warning(
+            "graph_restore_embedding_reopen_failed",
+            organization_id=organization_id,
+            error_type=type(exc).__name__,
+        )
+
+
 async def restore_backup(
     backup_data: BackupData,
     *,
@@ -602,6 +622,7 @@ async def restore_backup(
             auxiliary_parameters=companions.parameters,
         )
         restored_ids = restored["restored_source_ids"]
+        await _reopen_graph_embedding_plane(driver, organization_id)
         entities_restored = len(restored_ids)
         entities_skipped = backup_data.entity_count - entities_restored
         integrity_conflicts = restored["conflicts"]

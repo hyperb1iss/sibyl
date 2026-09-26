@@ -270,3 +270,10 @@ class DevStatusResponse(BaseModel):
         default_factory=dict,
         description="SurrealDB HTTP health and metrics scrape availability",
     )
+    embedding_sweep: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Per plane (graph, document_chunks): the model vectors are swept toward, "
+            "the one-time verdict on unstamped vectors, and the last pass's counts"
+        ),
+    )

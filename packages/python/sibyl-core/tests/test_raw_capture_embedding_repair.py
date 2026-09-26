@@ -418,13 +418,17 @@ async def test_walk_leaves_text_and_vectors_on_the_server(content_store, monkeyp
     result = await repair_raw_capture_embeddings(org, embedding_provider=current)
 
     assert (result.checked, result.recovered) == (1, 1)
-    walks = [q for q in queries if "uuid > $cursor" in q]
+    walks = [q for q in queries if "uuid >= $cursor" in q]
     assert walks
     for walk in walks:
         projection = walk.split(" FROM ", 1)[0]
         assert "raw_content" not in projection
         assert "embedding" not in projection
-        assert "embedding = NONE OR metadata.embedding_metadata != $expected_metadata" in walk
+        assert "embedding = NONE OR (metadata.embedding_metadata ?? NONE) = NONE" in walk
+        assert (
+            "(metadata.embedding_metadata.model ?? NONE) != ($expected_metadata.model ?? NONE)"
+            in walk
+        )
     fetches = [q for q in queries if "uuid IN $ids" in q]
     assert len(fetches) == 1
     assert "raw_content" in fetches[0]
@@ -473,3 +477,81 @@ async def test_repair_refuses_a_provider_whose_dimensions_do_not_fit_the_schema(
     assert (result.checked, result.recovered, result.pending, result.failed) == (0, 0, 0, 0)
     forbidden.assert_not_called()
     embed.assert_not_called()
+
+
+async def test_a_legacy_stamp_naming_the_configured_model_is_restamped_without_embedding(
+    content_store, monkeypatch
+):
+    """After the upgrade, a previous-release stamp that already names the model is rewritten
+    in the current format; only a stamp naming another model costs an embedding call."""
+    from tests.embedding_upgrade import previous_release_stamp
+
+    org = str(uuid4())
+    current = provider("steady")
+    memory = await remember(org, "legacy", embedding_provider=current)
+    legacy = previous_release_stamp(raw_memory_embedding_metadata(current.metadata))
+    async with content_client.surreal_content_client() as client:
+        await content_client.select_many(
+            client,
+            "UPDATE raw_captures SET metadata.embedding_metadata = $stamp WHERE uuid = $id;",
+            stamp=legacy,
+            id=memory.id,
+        )
+    before = await stored(memory.id)
+    embed = AsyncMock(side_effect=AssertionError("a matching model needs no embedding call"))
+    monkeypatch.setattr(repair_module, "_raw_memories_with_embeddings", embed)
+
+    result = await repair_raw_capture_embeddings(org, embedding_provider=current)
+
+    after = await stored(memory.id)
+    assert (result.checked, result.recovered) == (1, 1)
+    embed.assert_not_called()
+    assert after["embedding_metadata"] == raw_memory_embedding_metadata(current.metadata)
+    assert after["embedding"] == before["embedding"]
+    # A second pass finds nothing left to do.
+    assert (await repair_raw_capture_embeddings(org, embedding_provider=current)).checked == 0
+
+
+async def test_legacy_stamps_are_restamped_a_page_per_statement(content_store, monkeypatch):
+    """A plain upgrade rewrites every legacy raw stamp; one statement per page, not per row."""
+    from tests.embedding_upgrade import previous_release_stamp
+
+    org = str(uuid4())
+    current = provider("steady")
+    memories = [
+        await remember(org, f"legacy {index}", embedding_provider=current) for index in range(12)
+    ]
+    legacy = previous_release_stamp(raw_memory_embedding_metadata(current.metadata))
+    async with content_client.surreal_content_client() as client:
+        await content_client.select_many(
+            client,
+            "UPDATE raw_captures SET metadata.embedding_metadata = $stamp "
+            "WHERE organization_id = $org;",
+            stamp=legacy,
+            org=org,
+        )
+    statements: list[str] = []
+    original = content_client.select_many
+
+    async def recording(client, query, **params):
+        statements.append(query)
+        return await original(client, query, **params)
+
+    monkeypatch.setattr(content_client, "select_many", recording)
+    monkeypatch.setattr(
+        repair_module,
+        "_raw_memories_with_embeddings",
+        AsyncMock(side_effect=AssertionError("a matching model needs no embedding call")),
+    )
+
+    result = await repair_raw_capture_embeddings(org, embedding_provider=current, page_size=5)
+
+    assert (result.checked, result.recovered, result.pending) == (12, 12, 0)
+    restamps = [query for query in statements if "SET metadata.embedding_metadata" in query]
+    # Twelve rows in pages of five: three statements, each finding rows by uuid.
+    assert len(restamps) == 3
+    assert all("WHERE uuid IN $uuids" in query for query in restamps)
+    for memory in memories:
+        assert (await stored(memory.id))["embedding_metadata"] == raw_memory_embedding_metadata(
+            current.metadata
+        )

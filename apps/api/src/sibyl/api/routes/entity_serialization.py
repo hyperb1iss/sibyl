@@ -18,6 +18,7 @@ from sibyl_core.auth.memory_policy import (
     MEMORY_PROVENANCE_METADATA_KEYS,
     stamp_memory_scope_metadata,
 )
+from sibyl_core.embeddings.provenance import EMBEDDING_STAMP_KEY, without_client_embedding_stamp
 from sibyl_core.memory_pipeline.retrieval_keys import normalize_retrieval_keys
 from sibyl_core.memory_pipeline.source_lifecycle import public_memory_metadata
 from sibyl_core.memory_pipeline.structure import strip_structure_metadata
@@ -39,6 +40,7 @@ _RAW_CAPTURE_METADATA_DENYLIST = MEMORY_PROVENANCE_METADATA_KEYS | frozenset(
         "review_state",
         "source_id",
         "raw_source_id",
+        EMBEDDING_STAMP_KEY,
     }
 )
 _RAW_CAPTURE_REVIEW_STATES = frozenset({"pending", "deferred", "promoted", "archived"})
@@ -110,7 +112,7 @@ def bulk_create_metadata(
     now: datetime,
     principal_id: str | None,
 ) -> dict[str, Any]:
-    request_metadata = strip_structure_metadata(entity.metadata)
+    request_metadata = without_client_embedding_stamp(strip_structure_metadata(entity.metadata))
     project_id = str(request_metadata.get("project_id") or "").strip()
     metadata: dict[str, Any] = {
         "category": entity.category,

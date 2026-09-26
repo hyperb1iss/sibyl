@@ -120,10 +120,11 @@ async def test_reflection_repair_index_upgrade_is_idempotent(indexed_client):
     )
     await client.execute_query("REMOVE INDEX idx_entity_reflection_candidate_uuid ON entity;")
     older = tuple(m for m in GRAPH_SCHEMA_MIGRATIONS if m.version <= 29)
+    through_v30 = tuple(m for m in GRAPH_SCHEMA_MIGRATIONS if m.version <= 30)
     await record_schema_version(client.execute_query, version=29, migrations=older)
     before = await client.execute_query("SELECT * FROM entity;")
     applied = await apply_schema_migrations(
-        client.execute_query, GRAPH_SCHEMA_MIGRATIONS, group_id=client.group_id
+        client.execute_query, through_v30, group_id=client.group_id
     )
     assert [m.version for m in applied] == [30]
     assert await get_schema_version(client.execute_query) == 30
@@ -136,9 +137,6 @@ async def test_reflection_repair_index_upgrade_is_idempotent(indexed_client):
         executed.append(query)
         return await client.execute_query(query, **params)
 
-    assert (
-        await apply_schema_migrations(observe, GRAPH_SCHEMA_MIGRATIONS, group_id=client.group_id)
-        == []
-    )
+    assert await apply_schema_migrations(observe, through_v30, group_id=client.group_id) == []
     assert not any("idx_entity_reflection_candidate_uuid" in query for query in executed)
     assert await client.execute_query("SELECT * FROM entity;") == before

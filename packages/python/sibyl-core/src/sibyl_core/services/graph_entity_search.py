@@ -15,6 +15,7 @@ from sibyl_core.backends.surreal.fulltext import (
 )
 from sibyl_core.backends.surreal.knn import knn_overfetch_pool, knn_search_effort
 from sibyl_core.config import settings
+from sibyl_core.embeddings.provenance import vector_space_predicate
 from sibyl_core.embeddings.providers import EmbeddingProvider
 from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.query_anchors import (
@@ -42,6 +43,15 @@ from sibyl_core.services.graph_search import row_score as _row_score
 log = structlog.get_logger()
 
 _FULLTEXT_FIELDS = ("name", "summary", "description", "content")
+
+
+# Vector lanes score only rows embedded in the query's vector space, filtered
+# inside the HNSW bracket so nearer vectors from an older model cannot crowd
+# the candidate pool mid-sweep.
+def _stamp_in_query_space(*, admit_unstamped: bool = False) -> str:
+    return vector_space_predicate(
+        "attributes.embedding_metadata", "embedding_metadata", admit_unstamped=admit_unstamped
+    )
 
 
 def _build_explicit_anchor_search_query(query: str) -> str:
@@ -368,7 +378,9 @@ class _EntitySearchManager:
         ]
 
     @staticmethod
-    def _typed_overfetch_vector_query(*, candidate_limit: int, overfetch: int) -> str:
+    def _typed_overfetch_vector_query(
+        *, candidate_limit: int, overfetch: int, admit_unstamped: bool = False
+    ) -> str:
         # The inner query walks the HNSW index with only the group predicate;
         # the type filter applies to the materialized pool outside the bracket.
         pool = knn_overfetch_pool(candidate_limit, overfetch)
@@ -377,6 +389,7 @@ class _EntitySearchManager:
             "SELECT * FROM ("
             "SELECT " + _ENTITY_SEARCH_FIELDS + ", (1 - vector::distance::knn()) AS score"
             " FROM entity WHERE group_id = $group_id"
+            f" AND {_stamp_in_query_space(admit_unstamped=admit_unstamped)}"
             f" AND name_embedding <|{pool}, {overfetch_knn_effort}|> $query_embedding"
             ") WHERE entity_type IN $entity_types"
             " ORDER BY score DESC, created_at DESC, uuid DESC"
@@ -392,6 +405,19 @@ class _EntitySearchManager:
         knn_type_overfetch: int = 0,
     ) -> list[tuple[Entity, float]]:
         if self._embedding_provider is None:
+            return []
+        from sibyl_core.backends.surreal.schema_embedding_states import (
+            GRAPH_EMBEDDING_STATE_PLANE,
+        )
+        from sibyl_core.services.embedding_lane_readiness import vector_lane_readiness
+
+        readiness = await vector_lane_readiness(
+            plane=GRAPH_EMBEDDING_STATE_PLANE,
+            organization_id=str(self._group_id),
+            execute=self._client.execute_query,
+            query_stamp=self._embedding_provider.metadata.to_dict(),
+        )
+        if not readiness.run:
             return []
         type_values = [entity_type.value for entity_type in entity_types or ()]
         type_clause = "AND entity_type IN $entity_types" if type_values else ""
@@ -409,6 +435,9 @@ class _EntitySearchManager:
                 embeddings,
                 self._embedding_provider.metadata.dimensions,
             )
+            # Only vectors from the query's model are comparable with it; rows
+            # still awaiting the embedding sweep stay reachable lexically.
+            embedding_metadata = self._embedding_provider.metadata.to_dict()
             rows: list[dict[str, Any]] = []
             if type_values and knn_type_overfetch > 0:
                 rows = normalize_records(
@@ -416,11 +445,13 @@ class _EntitySearchManager:
                         self._typed_overfetch_vector_query(
                             candidate_limit=candidate_limit,
                             overfetch=knn_type_overfetch,
+                            admit_unstamped=readiness.admit_unstamped,
                         ),
                         group_id=self._group_id,
                         query_embedding=query_embedding,
                         entity_types=type_values,
                         limit=candidate_limit,
+                        embedding_metadata=embedding_metadata,
                         _query_label="entity.search.vector.overfetch",
                     )
                 )
@@ -448,6 +479,7 @@ class _EntitySearchManager:
                     """
                     + type_clause
                     + f"""
+                          AND {_stamp_in_query_space(admit_unstamped=readiness.admit_unstamped)}
                           AND name_embedding <|{candidate_limit}, {knn_effort}|> $query_embedding
                     )
                     ORDER BY score DESC, created_at DESC, uuid DESC
@@ -457,6 +489,7 @@ class _EntitySearchManager:
                     query_embedding=query_embedding,
                     entity_types=type_values,
                     limit=candidate_limit,
+                    embedding_metadata=embedding_metadata,
                     _query_label="entity.search.vector",
                 )
             )

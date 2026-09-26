@@ -12,6 +12,12 @@ from typing import TYPE_CHECKING, cast
 import structlog
 
 from sibyl_core.backends.surreal.schema_derivations import DERIVATION_DEFINITIONS
+from sibyl_core.backends.surreal.schema_embedding_states import (
+    EMBEDDING_STATE_DEFINITIONS,
+    EMBEDDING_STATES_TABLE,
+    REOPEN_EMBEDDING_STATES,
+    snapshot_graph_embedding_evidence,
+)
 from sibyl_core.backends.surreal.schema_helpers import (
     execute_schema_statement,
     execute_schema_statements,
@@ -892,11 +898,17 @@ GRAPH_SCHEMA_MIGRATIONS = (
             "FIELDS attributes.reflection_identity.purpose, derivation_required, uuid;",
         ),
     ),
+    SchemaMigration(
+        version=31,
+        name="graph_embedding_sweep_states",
+        statements=tuple(split_statements(EMBEDDING_STATE_DEFINITIONS)),
+        action=snapshot_graph_embedding_evidence,
+    ),
 )
 
 
 def _graph_schema_migrations(
-    *, url: str, ownership: SchemaOwnership | None = None
+    *, url: str, ownership: SchemaOwnership | None = None, group_id: str | None = None
 ) -> tuple[SchemaMigration, ...]:
     return tuple(
         SchemaMigration(
@@ -917,11 +929,20 @@ def _graph_schema_migrations(
                 if migration.action is migrate_graph_source_states
                 else partial(migrate_graph_source_integrity, ownership=ownership)
                 if migration.action is migrate_graph_source_integrity
+                else partial(
+                    snapshot_graph_embedding_evidence, group_id=group_id, ownership=ownership
+                )
+                if migration.action is snapshot_graph_embedding_evidence
                 else migration.action
             ),
         )
         for migration in GRAPH_SCHEMA_MIGRATIONS
     )
+
+
+_REBUILD_UNVERIFIED_STAMP = (
+    "{provider: 'unverified', model: 'unverified', dimensions: 0, origin: 'dimension_rebuild'}"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -939,7 +960,14 @@ class EmbeddingVectorField:
         )
 
     def clear_statement(self) -> str:
-        return f"UPDATE {self.table} SET {self.field} = NONE WHERE {self.field} != NONE;"
+        # A cleared vector keeps a stamp, so the embedding sweep regenerates it.
+        # Rows from before vectors were stamped would otherwise end with neither
+        # vector nor stamp, which the sweep reads as intentionally lexical.
+        return (
+            f"UPDATE {self.table} SET {self.field} = NONE, "
+            "attributes.embedding_metadata = attributes.embedding_metadata ?? "
+            f"{_REBUILD_UNVERIFIED_STAMP} WHERE {self.field} != NONE;"
+        )
 
     def index_definition(self, dimension: int) -> ConcurrentIndexDefinition:
         return ConcurrentIndexDefinition(
@@ -1009,6 +1037,9 @@ async def rebuild_embedding_indexes_for_dimension(
                 f"REMOVE INDEX IF EXISTS {definition.name} ON {definition.table};\n"
                 f"{definition.definition};"
             )
+    # Every vector is gone, so the sweep's finished-pass marker no longer holds.
+    if EMBEDDING_STATES_TABLE in await fetch_table_definitions(ownership.read):
+        await ownership.mutate(REOPEN_EMBEDDING_STATES, organizations=[driver.group_id])
 
     await record_schema_version(
         ownership.mutate,
@@ -1277,6 +1308,7 @@ async def _bootstrap_owned_schema(
         for table in (*GRAPH_EDGES, *GRAPH_TABLES):
             await ownership.mutate(f"REMOVE TABLE IF EXISTS {table};")
         await ownership.mutate(f"REMOVE TABLE IF EXISTS {SCHEMA_VERSION_TABLE};")
+        await ownership.mutate(f"REMOVE TABLE IF EXISTS {EMBEDDING_STATES_TABLE};")
     else:
         await ensure_schema_version_table(ownership.mutate, group_id=driver.group_id)
         current_version = await get_schema_version(ownership.read)
@@ -1290,7 +1322,9 @@ async def _bootstrap_owned_schema(
             )
             await apply_schema_migrations(
                 ownership.read,
-                _graph_schema_migrations(url=driver._url, ownership=ownership),
+                _graph_schema_migrations(
+                    url=driver._url, ownership=ownership, group_id=driver.group_id
+                ),
                 group_id=driver.group_id,
                 ownership=ownership,
             )
@@ -1330,7 +1364,7 @@ async def _bootstrap_owned_schema(
         )
     await apply_schema_migrations(
         ownership.read,
-        _graph_schema_migrations(url=driver._url, ownership=ownership),
+        _graph_schema_migrations(url=driver._url, ownership=ownership, group_id=driver.group_id),
         group_id=driver.group_id,
         ownership=ownership,
     )

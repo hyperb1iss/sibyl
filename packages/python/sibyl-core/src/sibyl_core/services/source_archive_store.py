@@ -7,6 +7,7 @@ from typing import Any
 
 from sibyl_core.backends.surreal.records import normalize_records
 from sibyl_core.backends.surreal.schema_version import SurrealExecute
+from sibyl_core.embeddings.provenance import mark_unverified_vector
 from sibyl_core.memory_pipeline.observations import SourceKind
 from sibyl_core.migrate.source_integrity import (
     ArchiveDatetime,
@@ -168,6 +169,20 @@ def _source_visibility(row: dict[str, Any], kind: SourceKind) -> tuple[bool, tup
     )
 
 
+def _mark_unverified_entity_vector(record: dict[str, Any]) -> None:
+    """An archived vector that does not name its model is not trusted as current.
+
+    Archives written since vectors were stamped carry the stamp in the row's
+    attributes and keep it, so the embedding sweep compares it against the
+    configured provider like any other row. Older archives carry none.
+    """
+    attributes = record.get("attributes")
+    if not isinstance(attributes, dict):
+        attributes = {}
+        record["attributes"] = attributes
+    mark_unverified_vector(attributes, has_vector=bool(record.get("name_embedding")))
+
+
 async def restore_source_integrity(
     execute_query: SurrealExecute,
     payload: object,
@@ -299,6 +314,8 @@ async def restore_source_integrity(
                 or (previous_row or {}).get("derivation_required") is True
             ):
                 record["derivation_required"] = True
+            if kind is SourceKind.GRAPH_ENTITY:
+                _mark_unverified_entity_vector(record)
             writes.append({"key": record_key, "record": record})
             restored.append(key[1])
             if trusted:

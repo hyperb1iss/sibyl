@@ -315,6 +315,77 @@ def schema(
     _run()
 
 
+def _embedding_sweep_lines(sweep: object) -> list[str]:
+    """One line per embedding plane: which model it tracks and what is left."""
+    if not isinstance(sweep, dict) or not sweep:
+        return []
+    lines: list[str] = []
+    for index, (plane, state) in enumerate(sorted(sweep.items())):
+        label = "  Embeddings:   " if index == 0 else "                "
+        if not isinstance(state, dict):
+            continue
+        summary = str(state.get("state") or "unknown")
+        model = state.get("active_metadata") or state.get("complete_metadata")
+        if isinstance(model, dict) and model.get("provider"):
+            summary += (
+                f" [{NEON_CYAN}]{model.get('provider')}/{model.get('model')}"
+                f"/{model.get('dimensions')}[/{NEON_CYAN}]"
+            )
+        last_run = state.get("last_run")
+        if isinstance(last_run, dict) and summary.startswith("sweeping"):
+            summary += (
+                f", [{CORAL}]{last_run.get('recovered', 0):,}[/{CORAL}] re-embedded last pass,"
+                f" [{CORAL}]{last_run.get('pending', 0):,}[/{CORAL}] pending"
+                f" ({last_run.get('status', 'unknown')})"
+            )
+        rejected = last_run.get("rejected") if isinstance(last_run, dict) else None
+        if isinstance(rejected, int) and rejected:
+            summary += f", [{CORAL}]{rejected:,}[/{CORAL}] refused by the provider"
+        if state.get("legacy_basis"):
+            summary += f", legacy {state.get('legacy_decision')} ({state.get('legacy_basis')})"
+        lines.append(f"{label}{plane} {summary}")
+        waiting = state.get("waiting_on_count")
+        if summary.startswith("awaiting_evidence") and isinstance(waiting, int) and waiting:
+            names = ", ".join(str(item) for item in state.get("waiting_on_organizations") or [])
+            settles = state.get("settles_in_seconds")
+            deadline = (
+                f"; settles on the evidence published so far in {settles:,}s"
+                if isinstance(settles, int)
+                else ""
+            )
+            lines.append(
+                f"                [{ELECTRIC_YELLOW}]waiting for {waiting:,} organization(s) to"
+                f" publish their graph evidence{': ' + names if names else ''}"
+                f"{deadline}[/{ELECTRIC_YELLOW}]"
+            )
+        if state.get("legacy_notice") and not state.get("legacy_warning"):
+            lines.append(
+                "                adopted because other organizations' vectors record the"
+                " configured model; this plane had no record of its own"
+            )
+        if state.get("legacy_warning") == "adopted_on_incomplete_evidence":
+            lines.append(
+                f"                [{ELECTRIC_YELLOW}]adopted before every organization published"
+                " its evidence; weighed again each pass, re-embedded on its own if late"
+                f" evidence shows a switch[/{ELECTRIC_YELLOW}]"
+            )
+            held = last_run.get("provisional_rows") if isinstance(last_run, dict) else None
+            if isinstance(held, int) and held:
+                lines.append(
+                    f"                [{ELECTRIC_YELLOW}]{held:,} of its vectors still hold"
+                    " their original embedding (the provider refused a new one); the"
+                    f" adoption stays provisional until they are replaced[/{ELECTRIC_YELLOW}]"
+                )
+        elif state.get("legacy_warning"):
+            target = "graph" if plane == "graph" else "documents"
+            lines.append(
+                f"                [{ELECTRIC_YELLOW}]adopted vectors with no record of their model;"
+                f" if the model changed in this deploy, run"
+                f" `sibyld db reembed --plane {target}`[/{ELECTRIC_YELLOW}]"
+            )
+    return lines
+
+
 @app.command("status")
 def status(
     json_output: Annotated[
@@ -406,6 +477,8 @@ def status(
                         f"  Surreal:      health {surreal_obs.get('health_http_status', 'unknown')}, "
                         f"{metrics_display}"
                     )
+                for line in _embedding_sweep_lines(data.get("embedding_sweep")):
+                    console.print(line)
                 coordination_error = data.get("coordination_error")
                 if coordination_error:
                     console.print(

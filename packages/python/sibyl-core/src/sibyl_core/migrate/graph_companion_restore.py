@@ -7,6 +7,7 @@ from typing import Any
 
 from surrealdb import RecordID
 
+from sibyl_core.embeddings.provenance import mark_unverified_vector
 from sibyl_core.migrate.legacy_graph_archive import (
     _EPISODE_UPSERT_STATEMENTS,
     _MENTION_UPSERT_STATEMENTS,
@@ -91,6 +92,13 @@ async def prepare_companion_restore(
         _relationship_record(row, group_id=organization_id, archive_binding=True)
         for row in selected_relationships
     ]
+    # A vector that does not name its model arrives unverified; stamped ones
+    # keep their stamp. Provenance is not relationship evidence, so an
+    # operational binding's body digest is unchanged either way.
+    for record in relationship_records:
+        attributes = record["attributes"]
+        if isinstance(attributes, dict):
+            mark_unverified_vector(attributes, has_vector=bool(record.get("fact_embedding")))
     relationship_payloads = _relationship_bulk_payloads(relationship_records)
     mention_records = [
         {

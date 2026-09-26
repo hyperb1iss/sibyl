@@ -16,6 +16,7 @@ from pydantic_ai.models import Model
 
 from sibyl_core.ai.llm.extractor import Extractor
 from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
+from sibyl_core.embeddings.provenance import vector_identity
 from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind
 from sibyl_core.services.content_models import RawMemory
 from sibyl_core.services.content_raw_persistence import (
@@ -637,8 +638,9 @@ async def _cohort_affinity(org: str, source_ids: list[str]) -> dict[str, tuple[f
         vector = row.get("embedding") or ()
         norm = math.sqrt(math.fsum(value * value for value in vector))
         if norm:
-            spaces.setdefault(canonical(row.get("space")), {})[row["uuid"]] = tuple(
-                value / norm for value in vector
+            # Bookkeeping fields and the stamp version do not change a vector.
+            spaces.setdefault(canonical(vector_identity(row.get("space"))), {})[row["uuid"]] = (
+                tuple(value / norm for value in vector)
             )
     if not spaces:
         return {}

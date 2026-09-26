@@ -195,6 +195,41 @@ async def test_create_entity_can_defer_embeddings_to_background_backfill() -> No
 
 
 @pytest.mark.asyncio
+async def test_create_entity_never_echoes_a_client_embedding_stamp() -> None:
+    org = _org()
+    ctx = _ctx()
+    entity = EntityCreate(
+        name="Forged stamp",
+        content="A stamp the client has no business sending.",
+        entity_type=EntityType.NOTE,
+        metadata={"embedding_metadata": {"provider": "forged"}, "kept": "yes"},
+    )
+    add_result = SimpleNamespace(success=True, id="note_new", message="queued")
+    runtime = SimpleNamespace(entity_manager=SimpleNamespace(get=AsyncMock()))
+
+    with (
+        patch("sibyl_core.tools.core.add", AsyncMock(return_value=add_result)) as add,
+        patch(
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
+    ):
+        response = await create_entity(
+            request=_request(),
+            entity=entity,
+            org=org,
+            ctx=ctx,
+            content_session=None,
+            sync=False,
+        )
+
+    assert "embedding_metadata" not in (response.metadata or {})
+    assert response.metadata["kept"] == "yes"
+    assert "embedding_metadata" not in add.await_args.kwargs["metadata"]
+
+
+@pytest.mark.asyncio
 async def test_create_entity_forwards_declared_retrieval_keys() -> None:
     org = _org()
     ctx = _ctx()
@@ -2655,3 +2690,30 @@ def test_bulk_create_cannot_have_structure_planted_through_metadata() -> None:
     assert "agent_atomic" not in built.metadata
     assert "memory_probes" not in built.metadata
     assert "probe_rehearsal" not in built.metadata
+
+
+def test_bulk_create_metadata_drops_a_client_supplied_embedding_stamp() -> None:
+    entity = EntityCreate(
+        name="Forged note",
+        content="Body",
+        entity_type=EntityType.NOTE,
+        metadata={"embedding_metadata": {"provider": "forged"}, "kept": "yes"},
+    )
+
+    metadata = bulk_create_metadata(
+        entity,
+        group_id="org-123",
+        now=datetime(2026, 9, 26, tzinfo=UTC),
+        principal_id="user-alice",
+    )
+
+    assert "embedding_metadata" not in metadata
+    assert metadata["kept"] == "yes"
+
+
+def test_raw_capture_metadata_never_carries_a_client_embedding_stamp() -> None:
+    from sibyl.api.routes.entity_serialization import sanitize_raw_capture_metadata
+
+    assert sanitize_raw_capture_metadata(
+        {"embedding_metadata": {"provider": "forged"}, "kept": "yes"}
+    ) == {"kept": "yes"}

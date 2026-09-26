@@ -2362,6 +2362,7 @@ async def test_deterministic_embedding_provider_batches_stably() -> None:
         "text_version": "native-graph-v1",
         "normalize": True,
         "input_kind_sensitive": True,
+        "stamp_version": 2,
     }
 
 
@@ -2749,8 +2750,14 @@ async def test_context_search_pushes_facet_types_into_graph_queries(
     assert client.calls
     assert all("FROM relates_to" not in query for query, _ in client.calls)
     assert all("FROM episode" not in query for query, _ in client.calls)
-    assert all(params["node_types"] == ["task"] for _, params in client.calls)
-    assert all(params["limit"] == 3 for _, params in client.calls)
+    # The vector lane's readiness check reads the sweep state, not entities.
+    search_calls = [
+        (query, params)
+        for query, params in client.calls
+        if not str(params.get("key", "")).startswith("embedding_states:")
+    ]
+    assert all(params["node_types"] == ["task"] for _, params in search_calls)
+    assert all(params["limit"] == 3 for _, params in search_calls)
     assert any("entity_type IN $node_types" in query for query, _ in client.calls)
     assert any("name_embedding <|3, 40|> $query_embedding" in query for query, _ in client.calls)
 

@@ -16,6 +16,7 @@ from sibyl_core.backends.surreal.fulltext import (
 )
 from sibyl_core.backends.surreal.knn import knn_overfetch_pool, knn_search_effort
 from sibyl_core.config import core_config
+from sibyl_core.embeddings.provenance import vector_space_predicate
 from sibyl_core.embeddings.providers import EmbeddingMetadata, EmbeddingProvider
 from sibyl_core.memory_pipeline.retrieval import CandidateSourceFailure, CandidateSourceResult
 from sibyl_core.models.context import ContextFacet
@@ -48,6 +49,17 @@ EDGE_FULLTEXT_MIN_MATCH_LIMIT = 32
 NODE_FULLTEXT_FIELDS = ("name", "summary", "description", "content")
 _RAW_MEMORY_CONTEXT_TYPES = {"raw_memory", "session", "episode", "note"}
 log = structlog.get_logger()
+
+
+# Vector lanes score only rows embedded in the query's vector space. The
+# predicate sits inside the HNSW bracket: applied after the read, rows from an
+# older model nearer the query would fill the candidate pool mid-sweep and
+# leave the lane empty. Once a plane is swept it matches every row, so the
+# walk costs what the scope filter alone does.
+def _stamp_in_query_space(*, admit_unstamped: bool = False) -> str:
+    return vector_space_predicate(
+        "attributes.embedding_metadata", "embedding_metadata", admit_unstamped=admit_unstamped
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -519,6 +531,27 @@ async def _vector_candidate_sources_detailed(
         return empty
     if not vector_requested:
         return empty
+    from sibyl_core.backends.surreal.schema_embedding_states import (
+        GRAPH_EMBEDDING_STATE_PLANE,
+    )
+    from sibyl_core.services.embedding_lane_readiness import vector_lane_readiness
+
+    readiness = await vector_lane_readiness(
+        plane=GRAPH_EMBEDDING_STATE_PLANE,
+        organization_id=plan.organization_id,
+        execute=client.execute_query,
+        query_stamp=embedding_provider.metadata.to_dict(),
+    )
+    if not readiness.run:
+        # Almost no stored vector is in the query's model yet; the lexical
+        # lanes carry the query until the sweep has converted enough.
+        return VectorCandidateFetch(
+            node_candidates=[],
+            edge_candidates=[],
+            requested=True,
+            attempted=False,
+            reason=f"vector_lane_{readiness.reason}",
+        )
     try:
         embeddings = await embedding_provider.embed_texts([plan.query], input_kind="query")
     except Exception as exc:
@@ -568,6 +601,7 @@ async def _vector_candidate_sources_detailed(
                 query_embedding=query_embedding,
                 embedding_metadata=embedding_provider.metadata,
                 limit=plan.candidate_limits.node_vector,
+                admit_unstamped=readiness.admit_unstamped,
             )
         )
         task_signals.append(RetrievalSignal.NODE_VECTOR)
@@ -580,6 +614,7 @@ async def _vector_candidate_sources_detailed(
                 query_embedding=query_embedding,
                 embedding_metadata=embedding_provider.metadata,
                 limit=plan.candidate_limits.edge_vector,
+                admit_unstamped=readiness.admit_unstamped,
             )
         )
         task_signals.append(RetrievalSignal.EDGE_VECTOR)
@@ -616,6 +651,7 @@ async def _node_vector_candidates(
     query_embedding: Sequence[float],
     embedding_metadata: EmbeddingMetadata,
     limit: int,
+    admit_unstamped: bool = False,
 ) -> list[RetrievalCandidate]:
     if limit <= 0:
         return []
@@ -642,7 +678,13 @@ async def _node_vector_candidates(
                        (1 - vector::distance::knn()) AS score
                 FROM entity
                 WHERE """
-            + _where_clause(["group_id = $group_id", *overfetch_clauses])
+            + _where_clause(
+                [
+                    "group_id = $group_id",
+                    _stamp_in_query_space(admit_unstamped=admit_unstamped),
+                    *overfetch_clauses,
+                ]
+            )
             + f"""
                   AND name_embedding <|{pool}, {pool_knn_effort}|> $query_embedding
             )
@@ -654,6 +696,7 @@ async def _node_vector_candidates(
             query_embedding=list(query_embedding),
             min_score=plan.vector_min_score,
             limit=candidate_limit,
+            embedding_metadata=embedding_metadata.to_dict(),
             **filter_params,
         )
         if len(rows) >= candidate_limit:
@@ -675,7 +718,13 @@ async def _node_vector_candidates(
                    (1 - vector::distance::knn()) AS score
             FROM entity
             WHERE """
-        + _where_clause(["group_id = $group_id", *filter_clauses])
+        + _where_clause(
+            [
+                "group_id = $group_id",
+                _stamp_in_query_space(admit_unstamped=admit_unstamped),
+                *filter_clauses,
+            ]
+        )
         + f"""
               AND name_embedding <|{candidate_limit}, {knn_effort}|> $query_embedding
         )
@@ -687,6 +736,7 @@ async def _node_vector_candidates(
         query_embedding=list(query_embedding),
         min_score=plan.vector_min_score,
         limit=candidate_limit,
+        embedding_metadata=embedding_metadata.to_dict(),
         **filter_params,
     )
     return [
@@ -708,6 +758,7 @@ async def _edge_vector_candidates(
     query_embedding: Sequence[float],
     embedding_metadata: EmbeddingMetadata,
     limit: int,
+    admit_unstamped: bool = False,
 ) -> list[RetrievalCandidate]:
     if limit <= 0:
         return []
@@ -726,7 +777,13 @@ async def _edge_vector_candidates(
             "SELECT * FROM ("
             + _edge_select(extra="(1 - vector::distance::knn()) AS score")
             + " WHERE "
-            + _where_clause(["group_id = $group_id", *overfetch_clauses])
+            + _where_clause(
+                [
+                    "group_id = $group_id",
+                    _stamp_in_query_space(admit_unstamped=admit_unstamped),
+                    *overfetch_clauses,
+                ]
+            )
             + f"""
               AND fact_embedding <|{pool}, {pool_knn_effort}|> $query_embedding
             )
@@ -738,6 +795,7 @@ async def _edge_vector_candidates(
             query_embedding=list(query_embedding),
             min_score=plan.vector_min_score,
             limit=candidate_limit,
+            embedding_metadata=embedding_metadata.to_dict(),
             **filter_params,
         )
         if len(rows) >= candidate_limit:
@@ -755,7 +813,13 @@ async def _edge_vector_candidates(
         "SELECT * FROM ("
         + _edge_select(extra="(1 - vector::distance::knn()) AS score")
         + " WHERE "
-        + _where_clause(["group_id = $group_id", *filter_clauses])
+        + _where_clause(
+            [
+                "group_id = $group_id",
+                _stamp_in_query_space(admit_unstamped=admit_unstamped),
+                *filter_clauses,
+            ]
+        )
         + f"""
           AND fact_embedding <|{candidate_limit}, {knn_effort}|> $query_embedding
         )
@@ -767,6 +831,7 @@ async def _edge_vector_candidates(
         query_embedding=list(query_embedding),
         min_score=plan.vector_min_score,
         limit=candidate_limit,
+        embedding_metadata=embedding_metadata.to_dict(),
         **filter_params,
     )
     return [

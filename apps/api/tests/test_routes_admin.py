@@ -778,11 +778,18 @@ async def test_dev_status_reports_coordination_backend() -> None:
             ),
         ),
         patch("sibyl_core.logging.LogBuffer.get", return_value=mock_buffer),
+        patch(
+            "sibyl.api.routes.admin.get_embedding_sweep_status",
+            AsyncMock(return_value={"graph": {"state": "complete"}}),
+        ) as sweep_status,
     ):
-        response = await dev_status(org=org)
+        response = await dev_status(org=org, user=SimpleNamespace(is_admin=False))
 
+    # An organization owner is not a deployment admin.
+    assert sweep_status.await_args.kwargs == {"deployment_admin": False}
     assert response.api_healthy is True
     assert response.graph_healthy is True
+    assert response.embedding_sweep == {"graph": {"state": "complete"}}
     assert response.coordination_backend == "local"
     assert response.coordination_status == "unavailable"
     assert response.coordination_durable is False
@@ -949,3 +956,132 @@ async def test_surreal_observability_shows_no_path_and_authenticates_health(
     assert status["base_url"] == "https://host:8443"
     assert status["health_http_status"] == 200
     assert status["metrics_http_status"] == 200
+
+
+@pytest.mark.asyncio
+async def test_embedding_sweep_status_reads_each_plane_and_survives_a_dead_store(
+    monkeypatch,
+) -> None:
+    from sibyl.api.routes.admin import get_embedding_sweep_status
+
+    states = {
+        "graph": {
+            "legacy_decision": "reembed",
+            "legacy_basis": "prior_stamps_differ",
+            "active_metadata": {"provider": "bedrock"},
+            "complete_metadata": None,
+            "last_run": {"status": "partial", "recovered": 384, "pending": 1200},
+        }
+    }
+
+    async def read_state(plane, _organization_id, _execute):
+        if plane == "document_chunks":
+            raise ConnectionError("content store down")
+        return states[plane]
+
+    monkeypatch.setattr(
+        "sibyl_core.services.graph_runtime.get_graph_client",
+        AsyncMock(return_value=SimpleNamespace(execute_query=AsyncMock())),
+    )
+    monkeypatch.setattr(
+        "sibyl_core.services.embedding_sweep.read_embedding_sweep_state", read_state
+    )
+    monkeypatch.setattr(
+        "sibyl_core.backends.surreal.schema_embedding_states.embedding_sweep_schema_ready",
+        AsyncMock(return_value=True),
+    )
+
+    status = await get_embedding_sweep_status("org")
+
+    assert status["graph"]["state"] == "sweeping"
+    assert status["graph"]["last_run"]["pending"] == 1200
+    assert status["document_chunks"] == {"state": "unavailable", "error_type": "ConnectionError"}
+
+
+async def test_embedding_sweep_status_names_schema_waits_and_evidence_waits(monkeypatch) -> None:
+    from sibyl.api.routes.admin import get_embedding_sweep_status
+
+    async def ready(_execute, *, graph):
+        return graph
+
+    async def read_state(plane, _organization_id, _execute):
+        return {"legacy_deferred_at": "2026-09-26T00:00:00Z", "deferred_age_seconds": 120}
+
+    monkeypatch.setattr(
+        "sibyl_core.services.graph_runtime.get_graph_client",
+        AsyncMock(return_value=SimpleNamespace(execute_query=AsyncMock())),
+    )
+    monkeypatch.setattr(
+        "sibyl_core.backends.surreal.schema_embedding_states.embedding_sweep_schema_ready", ready
+    )
+    monkeypatch.setattr(
+        "sibyl_core.services.embedding_sweep.read_embedding_sweep_state", read_state
+    )
+    monkeypatch.setattr(
+        "sibyl_core.services.embedding_evidence.read_evidence_wait",
+        AsyncMock(return_value={"organizations": ["broken-org"], "count": 1}),
+    )
+
+    owner = await get_embedding_sweep_status("org")
+    admin = await get_embedding_sweep_status("org", deployment_admin=True)
+
+    # The content schema has not upgraded; the graph plane waits on evidence.
+    assert owner["document_chunks"] == {"state": "awaiting_schema_upgrade"}
+    assert owner["graph"]["state"] == "awaiting_evidence"
+    assert owner["graph"]["waiting_on_count"] == 1
+    # Another tenant's identifier reaches only a deployment admin.
+    assert "waiting_on_organizations" not in owner["graph"]
+    assert admin["graph"]["waiting_on_organizations"] == ["broken-org"]
+    # Everyone sees when the plane settles on the evidence published so far.
+    from sibyl_core.config import settings as core_settings
+
+    bound = core_settings.embedding_sweep_evidence_wait_seconds
+    assert owner["graph"]["evidence_wait_seconds"] == bound
+    assert owner["graph"]["settles_in_seconds"] == max(0, round(bound - 120))
+
+
+def test_embedding_plane_state_reports_only_the_current_model_as_complete() -> None:
+    from sibyl.api.routes.admin import _embedding_plane_state
+
+    first = {"provider": "openai", "model": "first"}
+    second = {"provider": "bedrock", "model": "second"}
+
+    assert _embedding_plane_state({"complete_metadata": first, "active_metadata": first}) == (
+        "complete"
+    )
+    assert _embedding_plane_state({"complete_metadata": first, "active_metadata": second}) == (
+        "sweeping"
+    )
+    assert (
+        _embedding_plane_state(
+            {"active_metadata": second, "last_run": {"status": "skipped_dimension_mismatch"}}
+        )
+        == "skipped_dimension_mismatch"
+    )
+
+
+def test_embedding_plane_state_never_calls_an_unproven_adoption_complete() -> None:
+    from sibyl.api.routes.admin import _embedding_plane_state
+
+    stamp = {"provider": "bedrock", "model": "cohere.embed-v4:0", "dimensions": 1024}
+
+    assert (
+        _embedding_plane_state(
+            {
+                "complete_metadata": stamp,
+                "active_metadata": stamp,
+                "legacy_warning": "adopted_without_evidence",
+            }
+        )
+        == "adopted_without_evidence"
+    )
+    # A stamp that differs only in bookkeeping is still the model swept toward.
+    assert (
+        _embedding_plane_state(
+            {
+                "complete_metadata": {**stamp, "cache_namespace": "old"},
+                "active_metadata": {**stamp, "cache_namespace": "new"},
+            }
+        )
+        == "complete"
+    )

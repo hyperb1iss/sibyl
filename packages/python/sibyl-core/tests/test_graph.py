@@ -1884,6 +1884,17 @@ async def test_native_entity_manager_search_projections_omit_embeddings() -> Non
     assert "name_embedding" not in fallback_query
 
 
+def _search_calls(
+    calls: list[tuple[str, dict[str, object]]],
+) -> list[tuple[str, dict[str, object]]]:
+    """The search's own reads, without the vector lane's cached readiness check."""
+    return [
+        (query, params)
+        for query, params in calls
+        if not str(params.get("key", "")).startswith("embedding_states:")
+    ]
+
+
 @pytest.mark.asyncio
 async def test_native_entity_manager_search_overlaps_fulltext_and_vector_branches() -> None:
     fulltext_started = asyncio.Event()
@@ -1907,7 +1918,7 @@ async def test_native_entity_manager_search_overlaps_fulltext_and_vector_branche
     assert [entity.id for entity, _score in results] == ["parallel_search"]
     assert fulltext_started.is_set()
     assert embedding_started.is_set()
-    assert {params.get("_query_label") for _query, params in client.calls} == {
+    assert {params.get("_query_label") for _query, params in _search_calls(client.calls)} == {
         "entity.search.fulltext",
         "entity.search.vector",
     }
@@ -5316,7 +5327,8 @@ async def test_native_entity_manager_present_type_preserves_vector_fusion() -> N
         limit=3,
     )
     expected_calls = [
-        (query, {**params, "entity_types": ["topic"]}) for query, params in client.calls
+        (query, {**params, "entity_types": ["topic"]})
+        for query, params in _search_calls(client.calls)
     ]
     client.calls.clear()
 
@@ -5324,7 +5336,7 @@ async def test_native_entity_manager_present_type_preserves_vector_fusion() -> N
 
     assert actual == expected
     assert "vector-only" in {entity.id for entity, _score in actual}
-    assert client.calls[1:] == expected_calls
+    assert _search_calls(client.calls)[1:] == expected_calls
 
 
 @pytest.mark.asyncio

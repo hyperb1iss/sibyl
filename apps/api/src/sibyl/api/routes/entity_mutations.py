@@ -51,6 +51,7 @@ from sibyl_core.auth import AuthOrganization, ProjectRole
 from sibyl_core.auth.memory_policy import (
     SERVER_OWNED_METADATA_KEYS,
 )
+from sibyl_core.embeddings.provenance import without_client_embedding_stamp
 from sibyl_core.memory_pipeline.structure import strip_structure_metadata
 from sibyl_core.models.entities import EntityType
 from sibyl_core.projection import (
@@ -222,7 +223,9 @@ async def create_entity(
 
     # Use description as content fallback (frontend sends description, add() needs content)
     content = entity.content or entity.description or entity.name
-    request_metadata: dict[str, object] = dict(entity.metadata or {})
+    # The stamp is the server's to write; neither storage nor the response
+    # repeats one the client sent.
+    request_metadata: dict[str, object] = without_client_embedding_stamp(entity.metadata)
     idempotency_payload = {
         "body": entity.model_dump(mode="json"),
         "query": {"sync": sync},

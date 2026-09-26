@@ -56,6 +56,94 @@ def test_clear_uses_graph_tables() -> None:
     )
 
 
+def test_reembed_requires_org_id_and_a_known_plane() -> None:
+    missing = runner.invoke(db_cli.app, ["reembed", "--yes"])
+    unknown = runner.invoke(db_cli.app, ["reembed", "--yes", "--org-id", "org", "--plane", "x"])
+
+    assert missing.exit_code == 1
+    assert "--org-id is required" in missing.output
+    assert unknown.exit_code == 1
+    assert "--plane must be graph, documents, or all" in unknown.output
+
+
+def test_reembed_dry_run_counts_every_organization_and_changes_nothing() -> None:
+    from contextlib import asynccontextmanager
+
+    content = object()
+
+    @asynccontextmanager
+    async def content_session():
+        yield content
+
+    async def graph_client(org_id):
+        return SimpleNamespace(group_id=org_id)
+
+    count_graph = AsyncMock(side_effect=[52, 0])
+    count_chunks = AsyncMock(side_effect=[15, 4])
+    mark_graph = AsyncMock()
+    with (
+        patch.object(db_cli, "_get_graph_client", graph_client),
+        patch(
+            "sibyl.persistence.organization_runtime.list_org_ids",
+            AsyncMock(return_value=["org-a", "org-b"]),
+        ),
+        patch(
+            "sibyl_core.services.graph_embedding_sweep.count_graph_embeddings_for_reembed",
+            count_graph,
+        ),
+        patch(
+            "sibyl_core.services.document_embedding_sweep.count_document_chunk_embeddings_for_reembed",
+            count_chunks,
+        ),
+        patch(
+            "sibyl_core.services.graph_embedding_sweep.mark_graph_embeddings_for_reembed",
+            mark_graph,
+        ),
+        patch("sibyl.persistence.surreal.content.surreal_content_client", content_session),
+    ):
+        result = runner.invoke(db_cli.app, ["reembed", "--dry-run"])
+
+    assert result.exit_code == 0, result.output
+    assert "org-a: graph 52, documents 15 rows would be re-embedded" in result.output
+    assert "org-b: graph 0, documents 4 rows would be re-embedded" in result.output
+    assert "graph 52, documents 19; nothing changed" in result.output
+    count_chunks.assert_any_await("org-a", client=content)
+    mark_graph.assert_not_awaited()
+
+
+def test_reembed_marks_both_planes_for_the_sweep() -> None:
+    from contextlib import asynccontextmanager
+
+    graph_client = SimpleNamespace(group_id="org-123")
+    content = object()
+
+    @asynccontextmanager
+    async def content_session():
+        yield content
+
+    mark_graph = AsyncMock(return_value=7)
+    mark_chunks = AsyncMock(return_value=3)
+    with (
+        patch.object(db_cli, "_get_graph_client", AsyncMock(return_value=graph_client)),
+        patch(
+            "sibyl_core.services.graph_embedding_sweep.mark_graph_embeddings_for_reembed",
+            mark_graph,
+        ),
+        patch(
+            "sibyl_core.services.document_embedding_sweep.mark_document_chunk_embeddings_for_reembed",
+            mark_chunks,
+        ),
+        patch("sibyl.persistence.surreal.content.surreal_content_client", content_session),
+    ):
+        result = runner.invoke(db_cli.app, ["reembed", "--yes", "--org-id", "org-123"])
+
+    assert result.exit_code == 0, result.output
+    mark_graph.assert_awaited_once_with(graph_client)
+    mark_chunks.assert_awaited_once_with("org-123", client=content)
+    assert "Graph: 7 vectors queued" in result.output
+    assert "Documents: 3 chunk vectors queued" in result.output
+
+
 def test_stats_requires_org_id() -> None:
     result = runner.invoke(db_cli.app, ["stats"])
 

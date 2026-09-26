@@ -12,6 +12,13 @@ from sibyl_core.backends.surreal.schema import (
     render_surreal_compatible_sql,
 )
 from sibyl_core.backends.surreal.schema_derivations import DERIVATION_DEFINITIONS
+from sibyl_core.backends.surreal.schema_embedding_states import (
+    EMBEDDING_DEPLOYMENT_DEFINITIONS,
+    EMBEDDING_DEPLOYMENT_TABLE,
+    EMBEDDING_STATE_DEFINITIONS,
+    EMBEDDING_STATES_TABLE,
+    snapshot_content_embedding_evidence,
+)
 from sibyl_core.backends.surreal.schema_helpers import is_missing_table_error, split_statements
 from sibyl_core.backends.surreal.schema_invariants import (
     SchemaInvariantPlan,
@@ -62,6 +69,18 @@ from sibyl_core.models.sources import CrawlStatus, SourceType
 # which differs from the graph node embedder dimension. Keep them as separate
 # constants so a graph dim change can't silently break content search and vice versa.
 EMBEDDING_DIM = core_config.embedding_dimensions
+# Chunk vectors carry the model that produced them, like graph and raw vectors.
+DOCUMENT_CHUNK_EMBEDDING_METADATA_FIELD = (
+    "DEFINE FIELD IF NOT EXISTS embedding_metadata ON document_chunks TYPE option<object> FLEXIBLE;"
+)
+# Raw capture repair walks one organization's captures in uuid order. Through
+# the organization index alone every page re-reads and sorts the whole
+# organization (about a second a page at 20,000 captures); this index keeps
+# pages near the cost of the rows they return.
+RAW_CAPTURE_ORGANIZATION_UUID_INDEX = (
+    "DEFINE INDEX IF NOT EXISTS idx_raw_captures_org_uuid "
+    "ON raw_captures FIELDS organization_id, uuid UNIQUE;"
+)
 
 if TYPE_CHECKING:
     from sibyl_core.backends.surreal.content_client import SurrealContentClient
@@ -100,8 +119,10 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
     "reflection_supersessions",
+    EMBEDDING_STATES_TABLE,
+    EMBEDDING_DEPLOYMENT_TABLE,
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 46
+CONTENT_SCHEMA_CURRENT_VERSION = 47
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -154,6 +175,8 @@ CONTENT_SCHEMA_DEFINITIONS = (
     + CONTENT_DREAM_CHECKPOINT_DEFINITIONS
     + "\n"
     + CONTENT_REFLECTION_SUPERSESSION_DEFINITIONS
+    + EMBEDDING_STATE_DEFINITIONS
+    + EMBEDDING_DEPLOYMENT_DEFINITIONS
     + VALIDATION_EXECUTION_SCHEMA
     + VALIDATION_DEPENDENCY_SCHEMA
 )
@@ -285,6 +308,8 @@ ALTER TABLE IF EXISTS memory_validation_attempts PERMISSIONS NONE;
 ALTER TABLE IF EXISTS dream_source_checkpoints PERMISSIONS NONE;
 ALTER TABLE IF EXISTS dream_source_cursors PERMISSIONS NONE;
 ALTER TABLE IF EXISTS reflection_supersessions PERMISSIONS NONE;
+ALTER TABLE IF EXISTS embedding_states PERMISSIONS NONE;
+ALTER TABLE IF EXISTS embedding_deployment PERMISSIONS NONE;
 ALTER TABLE IF EXISTS eval_consolidations PERMISSIONS NONE;
 ALTER TABLE IF EXISTS eval_attempts PERMISSIONS NONE;
 ALTER TABLE IF EXISTS crawl_sources PERMISSIONS
@@ -1089,6 +1114,17 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             version=46,
             name="content_validation_execution_organization_state",
             statements=tuple(split_statements(VALIDATION_EXECUTION_ORGANIZATION_STATE_INDEX)),
+        ),
+        SchemaMigration(
+            version=47,
+            name="content_embedding_provenance",
+            statements=(
+                DOCUMENT_CHUNK_EMBEDDING_METADATA_FIELD,
+                RAW_CAPTURE_ORGANIZATION_UUID_INDEX,
+                *split_statements(EMBEDDING_STATE_DEFINITIONS),
+                *split_statements(EMBEDDING_DEPLOYMENT_DEFINITIONS),
+            ),
+            action=snapshot_content_embedding_evidence,
         ),
     )
 

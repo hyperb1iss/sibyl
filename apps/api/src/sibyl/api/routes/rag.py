@@ -34,7 +34,7 @@ from sibyl.api.schemas import (
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, require_org_role
 from sibyl.auth.errors import NoOrgContextError
-from sibyl.crawler.embedder import embed_text
+from sibyl.crawler.embedder import embed_query_with_metadata
 from sibyl.persistence.auth_runtime import list_accessible_project_graph_ids
 from sibyl.persistence.content_runtime import (
     get_content_read_session,
@@ -110,7 +110,7 @@ async def rag_search(
 
     # Generate query embedding
     try:
-        query_embedding = await embed_text(request.query)
+        query_embedding, embedding_metadata = await embed_query_with_metadata(request.query)
     except Exception as e:
         log.exception("Failed to generate query embedding", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to generate query embedding") from e
@@ -129,6 +129,7 @@ async def rag_search(
         rows = await search_rag_chunks(
             session,
             query_embedding=query_embedding,
+            embedding_metadata=embedding_metadata,
             organization_id=auth.organization_id,
             source_id=source_uuid,
             source_name=request.source_name if source_uuid is None else None,
@@ -219,7 +220,7 @@ async def search_code_examples(
 
     # Generate query embedding
     try:
-        query_embedding = await embed_text(request.query)
+        query_embedding, embedding_metadata = await embed_query_with_metadata(request.query)
     except Exception as e:
         log.exception("Failed to generate query embedding", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to generate query embedding") from e
@@ -233,6 +234,7 @@ async def search_code_examples(
         rows = await search_code_example_chunks(
             session,
             query_embedding=query_embedding,
+            embedding_metadata=embedding_metadata,
             organization_id=auth.organization_id,
             match_count=request.match_count,
             source_id=source_uuid,
@@ -474,7 +476,7 @@ async def hybrid_search(
 
     # Generate query embedding
     try:
-        query_embedding = await embed_text(request.query)
+        query_embedding, embedding_metadata = await embed_query_with_metadata(request.query)
     except Exception as e:
         log.exception("Failed to generate query embedding", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to generate query embedding") from e
@@ -494,6 +496,7 @@ async def hybrid_search(
             session,
             query_text=request.query,
             query_embedding=query_embedding,
+            embedding_metadata=embedding_metadata,
             organization_id=auth.organization_id,
             similarity_threshold=request.similarity_threshold,
             match_count=request.match_count,

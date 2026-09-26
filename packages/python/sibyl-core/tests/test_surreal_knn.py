@@ -77,8 +77,14 @@ def test_every_core_knn_clause_takes_its_effort_from_the_helper() -> None:
     assert knn_clause_offenders(root, {"knn.py", "query_plan_probes.py"}) == []
 
 
-async def _seed_entities(client: SurrealGraphClient, count: int) -> None:
-    """Insert `count` HNSW-indexed entity rows with distinct embeddings."""
+async def _seed_entities(
+    client: SurrealGraphClient, count: int, *, stamp: dict[str, object] | None = None
+) -> None:
+    """Insert `count` HNSW-indexed entity rows with distinct embeddings.
+
+    Vector lanes score only rows stamped with the query provider's metadata,
+    so a lane under test needs ``stamp`` set to that provider's metadata.
+    """
     rng = random.Random(count)
     rows = [
         {
@@ -87,6 +93,7 @@ async def _seed_entities(client: SurrealGraphClient, count: int) -> None:
             "name": f"Pool member {index}",
             "entity_type": "topic",
             "name_embedding": [rng.random() for _ in range(EMBEDDING_DIM)],
+            "attributes": {"embedding_metadata": stamp} if stamp is not None else {},
             "created_at": datetime.now(UTC),
         }
         for index in range(count)
@@ -174,7 +181,7 @@ async def test_entity_search_vector_lane_reads_the_whole_pool_on_the_embedded_en
     )
     try:
         await prepare_graph_schema(client)
-        await _seed_entities(client, 250)
+        await _seed_entities(client, 250, stamp=provider.metadata.to_dict())
         manager = EntityManager(
             client,
             group_id=client.group_id,
@@ -186,6 +193,52 @@ async def test_entity_search_vector_lane_reads_the_whole_pool_on_the_embedded_en
         await client.close()
 
     assert len(results) == 200
+
+
+@pytest.mark.asyncio
+async def test_entity_vector_lane_ignores_vectors_from_another_model() -> None:
+    client = SurrealGraphClient(group_id="org-knn-entity-space", url="memory://")
+    provider = _overfetch_provider("knn-space-test")
+    other = _overfetch_provider("knn-space-test", model="another-model").metadata.to_dict()
+    try:
+        await prepare_graph_schema(client)
+        await _seed_entities(client, 30, stamp=other)
+        manager = EntityManager(client, group_id=client.group_id, embedding_provider=provider)
+
+        stale = await manager._vector_search(query="pool depth", entity_types=None, limit=5)
+        await client.execute_query(
+            "UPDATE entity SET attributes.embedding_metadata = $stamp WHERE uuid < 'knn_pool_0010';",
+            stamp=provider.metadata.to_dict(),
+        )
+        current = await manager._vector_search(query="pool depth", entity_types=None, limit=5)
+    finally:
+        await client.close()
+
+    # A query is never scored against another model's vectors; once the sweep
+    # restamps them, exactly those rows come back.
+    assert stale == []
+    assert {entity.id for entity, _score in current} == {
+        f"knn_pool_{index:04d}" for index in range(10)
+    }
+
+
+@pytest.mark.asyncio
+async def test_entity_vector_lane_keeps_vectors_whose_stamp_differs_only_in_bookkeeping() -> None:
+    client = SurrealGraphClient(group_id="org-knn-entity-bookkeeping", url="memory://")
+    provider = _overfetch_provider("knn-space-test")
+    # Same provider, model and size; only the cache namespace and the token
+    # estimator moved, neither of which changes a vector.
+    renamed = _overfetch_provider("renamed-cache", tokenizer="another-estimator")
+    try:
+        await prepare_graph_schema(client)
+        await _seed_entities(client, 12, stamp=renamed.metadata.to_dict())
+        manager = EntityManager(client, group_id=client.group_id, embedding_provider=provider)
+        found = await manager._vector_search(query="pool depth", entity_types=None, limit=5)
+    finally:
+        await client.close()
+
+    assert found
+    assert {entity.id for entity, _score in found} <= {f"knn_pool_{i:04d}" for i in range(12)}
 
 
 # --- typed-overfetch arm (knn_type_overfetch) --------------------------------
@@ -240,14 +293,16 @@ def _entity_row(uuid: str, entity_type: str = "topic", score: float = 0.9) -> di
     }
 
 
-def _overfetch_provider(namespace: str) -> DeterministicEmbeddingProvider:
+def _overfetch_provider(
+    namespace: str, *, model: str = "unit-test", tokenizer: str = "utf8-byte-length"
+) -> DeterministicEmbeddingProvider:
     return DeterministicEmbeddingProvider(
         EmbeddingMetadata(
             provider="deterministic",
-            model="unit-test",
+            model=model,
             dimensions=EMBEDDING_DIM,
             cache_namespace=namespace,
-            tokenizer_estimate_method="utf8-byte-length",
+            tokenizer_estimate_method=tokenizer,
         )
     )
 
@@ -429,3 +484,63 @@ async def test_overfetch_head_matches_classic_head_on_the_embedded_engine() -> N
     finally:
         await client.close()
     assert sorted(e.id for e, _ in classic) == sorted(e.id for e, _ in armed)
+
+
+@pytest.mark.asyncio
+async def test_write_time_dedup_compares_only_vectors_in_the_seeds_space() -> None:
+    from sibyl_core.embeddings.provenance import (
+        UNVERIFIED_ORIGIN_ARCHIVE,
+        unverified_embedding_metadata,
+    )
+    from sibyl_core.models.entities import Entity
+
+    client = SurrealGraphClient(group_id="org-knn-dedup-space", url="memory://")
+    space = _overfetch_provider("dedup-space").metadata.to_dict()
+    vector = [1.0, *([0.0] * (EMBEDDING_DIM - 1))]
+    try:
+        await prepare_graph_schema(client)
+        await client.execute_query(
+            "INSERT INTO entity $rows;",
+            rows=[
+                {
+                    "uuid": uuid,
+                    "group_id": client.group_id,
+                    "name": "Twin",
+                    "entity_type": "topic",
+                    "name_embedding": list(vector),
+                    "attributes": {"embedding_metadata": stamp} if stamp else {},
+                    "created_at": datetime.now(UTC),
+                }
+                for uuid, stamp in (("stamped-twin", space), ("unstamped-twin", None))
+            ],
+        )
+        manager = EntityManager(client, group_id=client.group_id)
+        dedup = EntityDeduplicator(
+            client=client,
+            entity_manager=manager,
+            config=DedupConfig(same_type_only=True, min_name_overlap=0.0),
+        )
+
+        def seed(entity_id: str, stamp: dict[str, object] | None) -> Entity:
+            return Entity(
+                id=entity_id,
+                entity_type=EntityType.TOPIC,
+                name="Twin",
+                embedding=list(vector),
+                metadata={"embedding_metadata": stamp} if stamp else {},
+            )
+
+        matches = await dedup.resolve_existing_entities(
+            [
+                seed("new-stamped", space),
+                seed("new-unstamped", None),
+                seed("new-unverified", unverified_embedding_metadata(UNVERIFIED_ORIGIN_ARCHIVE)),
+            ],
+            threshold=0.5,
+        )
+    finally:
+        await client.close()
+
+    assert matches["new-stamped"].entity2_id == "stamped-twin"
+    assert matches["new-unstamped"].entity2_id == "unstamped-twin"
+    assert "new-unverified" not in matches

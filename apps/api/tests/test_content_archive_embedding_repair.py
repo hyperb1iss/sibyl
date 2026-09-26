@@ -134,3 +134,104 @@ def test_restored_organizations_follow_the_archive_scope() -> None:
     assert content_archive._restored_capture_organizations(tables, None) == ["a", "b"]
     assert content_archive._restored_capture_organizations(tables, ["b"]) == ["b"]
     assert content_archive._restored_capture_organizations({}, ["b"]) == []
+
+
+@pytest.mark.asyncio
+async def test_restored_chunk_vectors_keep_their_model_or_arrive_unverified(
+    surreal_content_client: SurrealContentClient,
+) -> None:
+    from sibyl_core.embeddings.provenance import (
+        UNVERIFIED_ORIGIN_ARCHIVE,
+        document_chunk_embedding_metadata,
+        unverified_embedding_metadata,
+    )
+
+    org = str(uuid4())
+    stamp = document_chunk_embedding_metadata(
+        provider="deterministic", model="chunks", dimensions=EMBEDDING_DIM
+    )
+    vector = [1.0, *([0.0] * (EMBEDDING_DIM - 1))]
+    chunks = [
+        {"id": "stamped", "embedding": vector, "embedding_metadata": stamp},
+        {"id": "legacy", "embedding": vector},
+        {"id": "lexical"},
+    ]
+    payload = _payload(org)
+    payload["tables"]["document_chunks"] = [
+        {
+            **chunk,
+            "organization_id": org,
+            "source_id": "source",
+            "document_id": f"doc-{chunk['id']}",
+            "chunk_index": 0,
+            "content": f"body {chunk['id']}",
+        }
+        for chunk in chunks
+    ]
+    await surreal_content_client.execute_query(
+        "CREATE embedding_states:sprior SET organization_id = $org, plane = 'document_chunks', "
+        "complete_metadata = $stamp, complete_at = time::now();",
+        org=org,
+        stamp=stamp,
+    )
+
+    result = await _restore(surreal_content_client, payload)
+
+    assert result.success is True, result.errors
+    rows = _normalize_records(
+        await surreal_content_client.execute_query(
+            "SELECT uuid, embedding_metadata FROM document_chunks WHERE organization_id = $org;",
+            org=org,
+        )
+    )
+    stamps = {row["uuid"]: row.get("embedding_metadata") for row in rows}
+    assert stamps == {
+        "stamped": stamp,
+        "legacy": unverified_embedding_metadata(UNVERIFIED_ORIGIN_ARCHIVE),
+        "lexical": None,
+    }
+    state = _normalize_records(
+        await surreal_content_client.execute_query(
+            "SELECT complete_metadata, generation FROM embedding_states:sprior;"
+        )
+    )
+    # The restore sends the sweep back over a plane that had finished.
+    assert state[0].get("complete_metadata") is None
+    assert state[0]["generation"] == 1
+
+
+@pytest.mark.asyncio
+async def test_restore_repairs_raw_captures_without_settling_any_verdict(
+    surreal_content_client: SurrealContentClient, monkeypatch
+) -> None:
+    """The verdicts weigh stamps photographed at upgrade, so restamping cannot sway them.
+
+    Settling a verdict here would also decide it without the graph plane's
+    evidence, which only lifecycle repair gathers.
+    """
+    from sibyl_core.projection.repair import LifecycleRepairResult
+    from sibyl_core.services.document_embedding_sweep import DOCUMENT_CHUNK_EMBEDDING_PLANE
+    from sibyl_core.services.embedding_sweep import read_embedding_sweep_state
+
+    org = str(uuid4())
+    decide = AsyncMock()
+    repair = AsyncMock(return_value=LifecycleRepairResult())
+    monkeypatch.setattr(
+        "sibyl_core.services.document_embedding_sweep.decide_document_chunk_legacy_vectors",
+        decide,
+    )
+    monkeypatch.setattr(
+        "sibyl_core.services.content_raw_embedding_repair.repair_raw_capture_embeddings", repair
+    )
+
+    result = await _restore(surreal_content_client, _payload(org))
+
+    assert result.success is True
+    decide.assert_not_awaited()
+    repair.assert_awaited_once()
+    state = await read_embedding_sweep_state(
+        DOCUMENT_CHUNK_EMBEDDING_PLANE,
+        org,
+        lambda query, **params: content_client.select_many(surreal_content_client, query, **params),
+    )
+    assert not state.get("legacy_decision")

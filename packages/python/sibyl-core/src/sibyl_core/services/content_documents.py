@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from uuid import uuid4
 
 from sibyl_core.backends.surreal import SurrealContentClient
@@ -10,9 +11,11 @@ from sibyl_core.backends.surreal.fulltext import (
     build_fulltext_query,
 )
 from sibyl_core.backends.surreal.knn import knn_search_effort
+from sibyl_core.embeddings.provenance import vector_space_predicate
 from sibyl_core.services import content_client
 from sibyl_core.services import content_models as models
 from sibyl_core.services.content_models import ContentChunk, ContentDocument, ContentSource
+from sibyl_core.services.embedding_lane_readiness import chunk_vector_lane_readiness
 from sibyl_core.utils.resilience import with_timeout
 
 _TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_]+")
@@ -337,7 +340,14 @@ async def search_document_chunks(
     language: str | None = None,
     limit: int = 10,
     similarity_threshold: float = 0.5,
+    embedding_metadata: Mapping[str, object] | None = None,
 ) -> tuple[list[ContentSearchRow], list[ContentSearchRow]]:
+    """Vector and lexical chunk rows for one query.
+
+    ``embedding_metadata`` names the model ``query_embedding`` came from; only
+    chunk vectors stamped with it are scored, so chunks still awaiting the
+    embedding sweep after a model change are served by the lexical lane alone.
+    """
     if limit <= 0:
         return [], []
 
@@ -362,7 +372,15 @@ async def search_document_chunks(
 
         vector_rows: list[models.SurrealRecord] = []
         vector_errors: list[str] = []
-        if query_embedding is not None:
+        # Vector lanes score only rows embedded in the query's vector space,
+        # filtered inside the HNSW bracket so nearer vectors from an older
+        # model cannot crowd the candidate pool mid-sweep.
+        readiness = (
+            await chunk_vector_lane_readiness(client, organization_id, embedding_metadata)
+            if query_embedding is not None
+            else None
+        )
+        if query_embedding is not None and readiness is not None and readiness.run:
             vector_params: dict[str, object] = {
                 "organization_id": organization_id,
                 "source_ids": source_ids,
@@ -371,6 +389,18 @@ async def search_document_chunks(
                 "candidate_limit": candidate_limit,
                 **language_params,
             }
+            space_clause = ""
+            if embedding_metadata is not None:
+                vector_params["embedding_metadata"] = dict(embedding_metadata)
+                space_clause = (
+                    "AND "
+                    + vector_space_predicate(
+                        "embedding_metadata",
+                        "embedding_metadata",
+                        admit_unstamped=readiness.admit_unstamped,
+                    )
+                    + " "
+                )
             try:
                 vector_rows = await with_timeout(
                     content_client.select_many_raw(
@@ -378,11 +408,13 @@ async def search_document_chunks(
                         "SELECT * FROM ("
                         "SELECT uuid, organization_id, source_id, document_id, chunk_index, "
                         "chunk_type, content, context, heading_path, language, "
-                        "has_entities, entity_ids, "
+                        "has_entities, entity_ids, embedding_metadata, "
                         "(1 - vector::distance::knn()) AS score "
                         "FROM document_chunks WHERE organization_id = $organization_id "
-                        "AND source_id INSIDE $source_ids"
-                        f"{language_clause} "
+                        # CONTAINS, not INSIDE: the embedded engine drops every
+                        # row for an INSIDE predicate inside an HNSW bracket.
+                        "AND $source_ids CONTAINS source_id"
+                        f"{language_clause} {space_clause}"
                         f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding"
                         ") WHERE score >= $similarity_threshold "
                         "ORDER BY score DESC LIMIT $candidate_limit;",

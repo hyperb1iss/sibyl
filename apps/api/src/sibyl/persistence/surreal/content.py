@@ -34,6 +34,7 @@ from sibyl_core.backends.surreal.records import (
     raise_on_error as _raise_on_error,
     utcnow as _utcnow,
 )
+from sibyl_core.embeddings.provenance import vector_space_predicate
 from sibyl_core.memory_pipeline.quality import (
     expand_memory_quality_storage_metadata,
     normalize_memory_quality_metadata,
@@ -45,6 +46,7 @@ from sibyl_core.models.reflection import (
     memory_lifecycle_from_metadata,
     with_memory_lifecycle_metadata,
 )
+from sibyl_core.services.embedding_lane_readiness import chunk_vector_lane_readiness
 from sibyl_core.services.link_graph_status import LinkGraphSourceStatusData, LinkGraphStatusData
 from sibyl_core.utils.query import query_tokens
 
@@ -339,6 +341,12 @@ def _coerce_float_list(value: object | None) -> list[float] | None:
     return out
 
 
+def _coerce_optional_dict(value: object | None) -> dict[str, object] | None:
+    if not isinstance(value, Mapping):
+        return None
+    return {str(key): item for key, item in value.items()}
+
+
 def _coerce_dict(value: object | None) -> dict[str, object]:
     if isinstance(value, dict):
         return {str(key): item for key, item in value.items()}
@@ -506,6 +514,7 @@ def _chunk_from_record(record: Mapping[str, object]) -> DocumentChunk:
         end_char=_coerce_int(record.get("end_char")),
         heading_path=_coerce_str_list(record.get("heading_path")),
         embedding=_coerce_float_list(record.get("embedding")),
+        embedding_metadata=_coerce_optional_dict(record.get("embedding_metadata")),
         language=_coerce_optional_str(record.get("language")),
         is_complete=_coerce_bool(record.get("is_complete"), default=True),
         has_entities=_coerce_bool(record.get("has_entities")),
@@ -531,6 +540,11 @@ def _chunk_record(chunk: DocumentChunk) -> SurrealRecord:
         "end_char": chunk.end_char,
         "heading_path": list(chunk.heading_path or []),
         "embedding": _serialize_value(chunk.embedding),
+        "embedding_metadata": (
+            dict(chunk.embedding_metadata)
+            if chunk.embedding is not None and chunk.embedding_metadata
+            else None
+        ),
         "language": chunk.language,
         "is_complete": chunk.is_complete,
         "has_entities": chunk.has_entities,
@@ -685,6 +699,31 @@ _CONTENT_KNN_EF_FLOOR = 40
 
 def _search_candidate_limit(limit: int) -> int:
     return min(max(limit * 5, limit, 1), 100)
+
+
+def _chunk_space_clause(
+    embedding_metadata: Mapping[str, object] | None,
+    *,
+    admit_unstamped: bool = False,
+) -> tuple[str, dict[str, object]]:
+    """Keep a query's vector lane to chunks embedded in the query's space.
+
+    Chunks awaiting the embedding sweep after a model change still carry the
+    old model's vector; they drop out of the vector lane, not the lexical one.
+    The clause goes inside the HNSW bracket, beside the scope filters: applied
+    after the read, nearer old-model chunks would fill the candidate pool and
+    leave the lane empty until the sweep finished. The source filter beside it
+    is spelled ``$source_ids CONTAINS source_id``, because the embedded engine
+    drops every row for an INSIDE predicate inside the bracket. Unstamped chunks
+    count as the query's model while their plane adopts them (see
+    ``embedding_lane_readiness``).
+    """
+    if embedding_metadata is None:
+        return "", {}
+    predicate = vector_space_predicate(
+        "embedding_metadata", "embedding_metadata", admit_unstamped=admit_unstamped
+    )
+    return f"AND {predicate} ", {"embedding_metadata": dict(embedding_metadata)}
 
 
 def _code_chunk_clause(language: str | None) -> tuple[str, dict[str, object]]:
@@ -1773,8 +1812,11 @@ async def mark_raw_capture_projected(
     async with surreal_content_client() as client:
         rows = await _select_many(
             client,
-            "UPDATE raw_captures SET metadata.projected_capture_id = $projected_capture_id "
-            "WHERE uuid = $raw_capture_id AND organization_id = $organization_id "
+            # Found by uuid alone; with the organization beside it the server
+            # plans the UPDATE through an organization index.
+            "UPDATE (SELECT VALUE id FROM raw_captures WHERE uuid = $raw_capture_id) "
+            "SET metadata.projected_capture_id = $projected_capture_id "
+            "WHERE organization_id = $organization_id "
             "AND principal_id = $principal_id "
             "AND entity_type = 'raw_memory' AND metadata.projected_capture_id IS NONE "
             "RETURN uuid;",
@@ -1862,11 +1904,12 @@ async def update_raw_capture_review_state(
             "BEGIN TRANSACTION; "
             "LET $current = (SELECT * FROM raw_captures WHERE uuid = $capture_id "
             "AND organization_id = $organization_id LIMIT 1)[0]; "
-            "LET $saved = (UPDATE raw_captures MERGE {"
+            "LET $saved = (UPDATE (SELECT VALUE id FROM raw_captures WHERE uuid = $capture_id) "
+            "MERGE {"
             "metadata: object::from_entries(array::concat(object::entries($current.metadata), "
             "object::entries($review_patch))), "
             "review_state: $review_state, revision: $current.revision + 1} "
-            "WHERE uuid = $capture_id AND organization_id = $organization_id RETURN AFTER); "
+            "WHERE organization_id = $organization_id RETURN AFTER); "
             "COMMIT TRANSACTION; RETURN $saved;",
             capture_id=str(capture_id),
             organization_id=str(organization_id),
@@ -2394,6 +2437,7 @@ async def search_rag_chunks(
     match_count: int,
     source_id: UUID | None = None,
     source_name: str | None = None,
+    embedding_metadata: Mapping[str, object] | None = None,
 ) -> list[RagSearchRow]:
     if match_count <= 0:
         return []
@@ -2412,14 +2456,22 @@ async def search_rag_chunks(
 
         source_ids = [str(source.id) for source in sources]
         sources_by_id = {str(source.id): source for source in sources}
+        # A vector-only endpoint has no lexical lane to hand the query to, so
+        # it always runs; readiness only says whether unstamped chunks count.
+        readiness = await chunk_vector_lane_readiness(
+            client, str(organization_id), embedding_metadata
+        )
+        space_clause, space_params = _chunk_space_clause(
+            embedding_metadata, admit_unstamped=readiness.admit_unstamped
+        )
         rows = await _select_many_raw(
             client,
             "SELECT * FROM ("  # noqa: S608
             "SELECT uuid, organization_id, source_id, document_id, chunk_index, "
             "chunk_type, content, context, heading_path, language, has_entities, entity_ids, "
-            "(1 - vector::distance::knn()) AS score "
+            "embedding_metadata, (1 - vector::distance::knn()) AS score "
             "FROM document_chunks WHERE organization_id = $organization_id "
-            "AND source_id INSIDE $source_ids "
+            f"AND $source_ids CONTAINS source_id {space_clause}"
             f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding"
             ") WHERE score >= $similarity_threshold "
             "ORDER BY score DESC LIMIT $candidate_limit;",
@@ -2428,6 +2480,7 @@ async def search_rag_chunks(
             query_embedding=query_embedding,
             similarity_threshold=similarity_threshold,
             candidate_limit=candidate_limit,
+            **space_params,
         )
         documents = await _load_search_documents_by_ids(
             client, _document_ids_from_search_rows(rows)
@@ -2449,6 +2502,7 @@ async def search_code_example_chunks(
     match_count: int,
     source_id: UUID | None = None,
     language: str | None = None,
+    embedding_metadata: Mapping[str, object] | None = None,
 ) -> list[CodeSearchRow]:
     if match_count <= 0:
         return []
@@ -2468,15 +2522,23 @@ async def search_code_example_chunks(
 
         source_ids = [str(source.id) for source in sources]
         sources_by_id = {str(source.id): source for source in sources}
+        # A vector-only endpoint has no lexical lane to hand the query to, so
+        # it always runs; readiness only says whether unstamped chunks count.
+        readiness = await chunk_vector_lane_readiness(
+            client, str(organization_id), embedding_metadata
+        )
+        space_clause, space_params = _chunk_space_clause(
+            embedding_metadata, admit_unstamped=readiness.admit_unstamped
+        )
         rows = await _select_many_raw(
             client,
             "SELECT * FROM ("  # noqa: S608
             "SELECT uuid, organization_id, source_id, document_id, chunk_index, "
             "chunk_type, content, context, heading_path, language, has_entities, entity_ids, "
-            "(1 - vector::distance::knn()) AS score "
+            "embedding_metadata, (1 - vector::distance::knn()) AS score "
             "FROM document_chunks WHERE organization_id = $organization_id "
-            "AND source_id INSIDE $source_ids"
-            f"{language_clause} "
+            "AND $source_ids CONTAINS source_id"
+            f"{language_clause} {space_clause}"
             f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding "
             ") "
             "ORDER BY score DESC LIMIT $candidate_limit;",
@@ -2485,6 +2547,7 @@ async def search_code_example_chunks(
             query_embedding=query_embedding,
             candidate_limit=candidate_limit,
             **language_params,
+            **space_params,
         )
         documents = await _load_search_documents_by_ids(
             client, _document_ids_from_search_rows(rows)
@@ -2511,6 +2574,7 @@ async def hybrid_search_chunks(
     match_count: int,
     source_id: UUID | None = None,
     source_name: str | None = None,
+    embedding_metadata: Mapping[str, object] | None = None,
 ) -> list[HybridSearchRow]:
     if match_count <= 0:
         return []
@@ -2529,23 +2593,34 @@ async def hybrid_search_chunks(
 
         source_ids = [str(source.id) for source in sources]
         sources_by_id = {str(source.id): source for source in sources}
-        vector_rows = await _select_many_raw(
-            client,
-            "SELECT * FROM ("  # noqa: S608
-            "SELECT uuid, organization_id, source_id, document_id, chunk_index, "
-            "chunk_type, content, context, heading_path, language, has_entities, entity_ids, "
-            "(1 - vector::distance::knn()) AS score "
-            "FROM document_chunks WHERE organization_id = $organization_id "
-            "AND source_id INSIDE $source_ids "
-            f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding"
-            ") WHERE score >= $similarity_threshold "
-            "ORDER BY score DESC LIMIT $candidate_limit;",
-            organization_id=str(organization_id),
-            source_ids=source_ids,
-            query_embedding=query_embedding,
-            similarity_threshold=similarity_threshold,
-            candidate_limit=candidate_limit,
+        # The lexical lane below carries the query while the chunk plane has
+        # too few vectors in the query's model for the vector lane to pay off.
+        readiness = await chunk_vector_lane_readiness(
+            client, str(organization_id), embedding_metadata
         )
+        space_clause, space_params = _chunk_space_clause(
+            embedding_metadata, admit_unstamped=readiness.admit_unstamped
+        )
+        vector_rows: list[SurrealRecord] = []
+        if readiness.run:
+            vector_rows = await _select_many_raw(
+                client,
+                "SELECT * FROM ("  # noqa: S608
+                "SELECT uuid, organization_id, source_id, document_id, chunk_index, "
+                "chunk_type, content, context, heading_path, language, has_entities, entity_ids, "
+                "embedding_metadata, (1 - vector::distance::knn()) AS score "
+                "FROM document_chunks WHERE organization_id = $organization_id "
+                f"AND $source_ids CONTAINS source_id {space_clause}"
+                f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding"
+                ") WHERE score >= $similarity_threshold "
+                "ORDER BY score DESC LIMIT $candidate_limit;",
+                organization_id=str(organization_id),
+                source_ids=source_ids,
+                query_embedding=query_embedding,
+                similarity_threshold=similarity_threshold,
+                candidate_limit=candidate_limit,
+                **space_params,
+            )
         lexical_rows = await _select_many_raw(
             client,
             "SELECT uuid, organization_id, source_id, document_id, chunk_index, "

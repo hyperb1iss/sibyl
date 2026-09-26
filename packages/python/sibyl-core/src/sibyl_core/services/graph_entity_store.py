@@ -10,6 +10,10 @@ from typing import TYPE_CHECKING, Any
 from sibyl_core.backends.surreal.connection import _is_transient_connection_error
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM, render_surreal_compatible_sql
 from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
+from sibyl_core.embeddings.provenance import (
+    EMBEDDING_STAMP_KEY,
+    vector_identity_differs_predicate,
+)
 from sibyl_core.embeddings.providers import entity_embedding_text
 from sibyl_core.memory_pipeline.retrieval_keys import coerce_retrieval_keys
 from sibyl_core.models.entities import Entity, EntityType
@@ -702,7 +706,7 @@ async def _complete_embedding_manifest(
                     OR ($embedding_pending = false AND entity_type != 'artifact' AND (
                         name_embedding = NONE OR name_embedding = NULL
                         OR array::len(name_embedding ?? []) != $dimensions
-                        OR embedding_metadata != $embedding_metadata));
+                        OR embedding_metadata = NONE OR __SOURCE_STAMP_DIFFERS__));
                 IF array::len($missing) > 0 { RETURN {state: 'incomplete'}; };
                 IF $manifest.attributes.operational_projection_state = 'complete'
                     { RETURN {state: 'complete'}; };
@@ -718,9 +722,12 @@ async def _complete_embedding_manifest(
                     attributes.updated_at = time::now(), updated_at = time::now();
                 RETURN {state: IF $embedding_pending { 'embedding_pending' } ELSE { 'completed' }};
             };
-            """.replace("__SOURCE_STATE_WRITE_WITNESS__", SOURCE_STATE_WRITE_WITNESS).replace(
-                "__OPERATIONAL_SNAPSHOT__", source_prefix
-            ),
+            """.replace("__SOURCE_STATE_WRITE_WITNESS__", SOURCE_STATE_WRITE_WITNESS)
+            .replace(
+                "__SOURCE_STAMP_DIFFERS__",
+                vector_identity_differs_predicate("embedding_metadata", "embedding_metadata"),
+            )
+            .replace("__OPERATIONAL_SNAPSHOT__", source_prefix),
             group_id=group_id,
             uuid=expected.id,
             expected=expected.metadata,
@@ -1077,6 +1084,10 @@ def _entity_update_metadata_patch(updates: Mapping[str, Any]) -> dict[str, objec
     update_metadata = updates.get("metadata")
     if isinstance(update_metadata, Mapping):
         metadata.update({str(key): _jsonable(value) for key, value in update_metadata.items()})
+    if "embedding" not in updates:
+        # An update that keeps the stored vector cannot relabel it: a stamp
+        # moves only together with the vector it describes.
+        metadata.pop(EMBEDDING_STAMP_KEY, None)
 
     excluded_keys = {
         "content",
@@ -1088,7 +1099,12 @@ def _entity_update_metadata_patch(updates: Mapping[str, Any]) -> dict[str, objec
         "title",
     }
     metadata.update(
-        {str(key): _jsonable(value) for key, value in updates.items() if key not in excluded_keys}
+        {
+            str(key): _jsonable(value)
+            for key, value in updates.items()
+            if key not in excluded_keys
+            and not (key == EMBEDDING_STAMP_KEY and "embedding" not in updates)
+        }
     )
     return metadata
 

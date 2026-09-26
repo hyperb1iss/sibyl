@@ -176,7 +176,7 @@ async def _promote_one(
         if not chunks:
             raise ValueError("raw capture produced no chunks")
 
-        embeddings = await embedder.embed_chunks(chunks)
+        embeddings, embedding_metadata = await embedder.embed_chunks_with_metadata(chunks)
         if len(embeddings) != len(chunks):
             msg = f"embedding count mismatch: {len(embeddings)} for {len(chunks)} chunks"
             raise ValueError(msg)
@@ -197,6 +197,7 @@ async def _promote_one(
                 heading_path=chunk.heading_path,
                 language=chunk.language,
                 embedding=embeddings[index],
+                embedding_metadata=dict(embedding_metadata),
                 is_complete=True,
                 has_entities=False,
                 entity_ids=[],

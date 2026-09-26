@@ -498,6 +498,7 @@ def _merge_entity(
     entity_id: str,
 ) -> None:
     _add_entity_provenance(target, source_org_id=source_org_id, entity_id=entity_id)
+    borrowed_vector = not target.get("embedding") and bool(source.get("embedding"))
     for field in ("description", "content", "source_file", "embedding"):
         if not target.get(field) and source.get(field):
             target[field] = source[field]
@@ -505,7 +506,19 @@ def _merge_entity(
     source_metadata = source.get("metadata")
     if isinstance(target_metadata, dict) and isinstance(source_metadata, dict):
         for key, value in source_metadata.items():
-            target_metadata.setdefault(key, value)
+            # A stamp describes one vector; it never fills in beside another.
+            if key != "embedding_metadata":
+                target_metadata.setdefault(key, value)
+    if borrowed_vector and isinstance(target_metadata, dict):
+        # A borrowed vector brings its own provenance, or none: the target's
+        # stamp described a vector it no longer carries.
+        stamp = (
+            source_metadata.get("embedding_metadata") if isinstance(source_metadata, dict) else None
+        )
+        if stamp is None:
+            target_metadata.pop("embedding_metadata", None)
+        else:
+            target_metadata["embedding_metadata"] = stamp
 
 
 def _append_unique(metadata: dict[str, Any], key: str, value: str) -> None:

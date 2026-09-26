@@ -6,6 +6,7 @@ from dataclasses import replace
 
 import structlog
 
+from sibyl_core.embeddings.provenance import same_vector_identity
 from sibyl_core.embeddings.providers import (
     EmbeddingMetadata,
     EmbeddingProvider,
@@ -22,7 +23,7 @@ log = structlog.get_logger()
 
 
 def _embedding_current(present: bool, metadata: object, provider: EmbeddingMetadata) -> bool:
-    return present and metadata == provider.to_dict()
+    return present and same_vector_identity(metadata, provider.to_dict())
 
 
 async def enqueue_promoted_embedding(

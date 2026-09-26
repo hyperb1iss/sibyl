@@ -149,6 +149,27 @@ async def fetch_table_indexes(execute_query: SurrealExecute, table: str) -> dict
     return {str(name): str(definition) for name, definition in typed.items()}
 
 
+_VECTOR_FIELD_SIZE = re.compile(r"array\s*<\s*float\s*,\s*(\d+)\s*>", re.IGNORECASE)
+
+
+async def fetch_vector_field_dimension(
+    execute_query: SurrealExecute, table: str, field: str
+) -> int | None:
+    """The size a stored vector field's type admits, read from the database.
+
+    The declared type is what a write must satisfy, whatever the process's own
+    configuration says. None when the table or field is missing or untyped.
+    """
+    result = await execute_query(f"INFO FOR TABLE {table};")
+    info = _as_mapping(result)
+    fields = info.get("fields") if info else None
+    if not isinstance(fields, Mapping):
+        return None
+    definition = cast(Mapping[str, object], fields).get(field)
+    match = _VECTOR_FIELD_SIZE.search(str(definition)) if definition is not None else None
+    return int(match.group(1)) if match else None
+
+
 async def fetch_declared_fields(execute_query: SurrealExecute, table: str) -> frozenset[str]:
     """Return the top-level field names a table declares.
 

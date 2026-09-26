@@ -12,6 +12,7 @@ from sibyl_core.auth.memory_policy import (
     server_provenance_metadata,
     stamp_memory_scope_metadata,
 )
+from sibyl_core.embeddings.provenance import without_client_embedding_stamp
 from sibyl_core.embeddings.providers import configured_embedding_provider
 from sibyl_core.memory_pipeline.retrieval_keys import (
     coerce_retrieval_keys,
@@ -820,7 +821,8 @@ async def add(
             "added_at": datetime.now(UTC).isoformat(),
             "organization_id": org_id,
             **stamp_memory_scope_metadata(
-                metadata,
+                # A stamp is attached after embedding, never taken from the caller.
+                without_client_embedding_stamp(metadata),
                 memory_scope=memory_scope,
                 scope_key=scope_key,
                 principal_id=principal_id,
