@@ -99,8 +99,6 @@ _PCHAR = rf"(?:[{_UNRESERVED}{_SUB_DELIMS}:@]|{_PCT_ENCODED})"
 _HTTP_URL = re.compile(
     rf"^[Hh][Tt][Tt][Pp][Ss]?://(?:{_IP_LITERAL}|{_REG_NAME})(?::[0-9]*)?(?:/{_PCHAR}*)*$"
 )
-# Characters PowerShell reads as plain text inside an unquoted argument.
-_POWERSHELL_SAFE = re.compile(r"^[A-Za-z0-9_./:%+=-]+$")
 
 
 def is_clean_server_url(url: str) -> bool:
@@ -123,10 +121,14 @@ def is_clean_server_url(url: str) -> bool:
 
 
 def quote_argument(value: str, shell: Shell = "posix") -> str:
-    """Quote one argument so the shell passes it through as plain text."""
+    """Quote one argument so the shell passes it through as plain text.
+
+    PowerShell always gets single quotes (an embedded quote doubled): a bare
+    URL is read as code in expression context, and the quoted form is literal
+    in both argument and expression context. POSIX shells get shlex quoting,
+    which leaves safe tokens bare.
+    """
     if shell == "powershell":
-        if _POWERSHELL_SAFE.match(value):
-            return value
         return "'" + value.replace("'", "''") + "'"
     return shlex.quote(value)
 

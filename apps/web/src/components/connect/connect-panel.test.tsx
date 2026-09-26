@@ -18,7 +18,7 @@ const CONNECT_INFO = {
   install: {
     macos: `brew install hyperb1iss/tap/sibyl && sibyl setup ${SERVER}`,
     linux: `uv tool install --upgrade sibyl-dev && sibyl setup ${SERVER}`,
-    windows: `uv tool install --upgrade sibyl-dev; sibyl setup ${SERVER}`,
+    windows: `uv tool install --upgrade sibyl-dev; sibyl setup '${SERVER}'`,
   },
 };
 

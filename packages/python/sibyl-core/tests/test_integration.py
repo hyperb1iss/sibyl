@@ -1,6 +1,5 @@
 """Tests for the shared connect instructions."""
 
-import re
 import shlex
 import shutil
 import subprocess
@@ -22,8 +21,9 @@ class TestInstallCommands:
     def test_every_line_ends_with_setup_for_the_server(self) -> None:
         commands = install_commands("https://sibyl.example.com/")
         assert set(commands) == {"macos", "linux", "windows"}
-        for line in commands.values():
-            assert line.endswith("sibyl setup https://sibyl.example.com")
+        assert commands["macos"].endswith("sibyl setup https://sibyl.example.com")
+        assert commands["linux"].endswith("sibyl setup https://sibyl.example.com")
+        assert commands["windows"].endswith("sibyl setup 'https://sibyl.example.com'")
 
     def test_macos_uses_homebrew_and_others_use_an_upgrading_uv_install(self) -> None:
         commands = install_commands("https://sibyl.example.com")
@@ -134,31 +134,59 @@ class TestShellQuoting:
     @pytest.mark.parametrize("url", HOSTILE_URLS)
     def test_powershell_line_single_quotes_and_doubles_quotes(self, url: str) -> None:
         argument = install_commands(url)["windows"].split("; sibyl setup ", 1)[1]
-        if not argument.startswith("'"):
-            # Left bare only when every character is plain text to PowerShell.
-            assert argument == url
-            assert re.fullmatch(r"[A-Za-z0-9_./:%+=-]+", argument)
-            return
-        assert argument.endswith("'")
+        # Always quoted: a bare URL is read as code in expression context.
+        assert argument.startswith("'") and argument.endswith("'")
         inner = argument[1:-1]
         assert "'" not in inner.replace("''", "")
         assert inner.replace("''", "'") == url
 
     @pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell is not installed")
     @pytest.mark.parametrize("url", HOSTILE_URLS)
-    def test_powershell_passes_the_url_through_verbatim(self, url: str) -> None:
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "[Console]::Write({arg})",  # expression context
+            "& {{ param($u) [Console]::Write($u) }} {arg}",  # argument context
+        ],
+    )
+    def test_powershell_passes_the_url_through_verbatim(self, url: str, template: str) -> None:
         argument = install_commands(url)["windows"].split("; sibyl setup ", 1)[1]
         result = subprocess.run(
-            ["pwsh", "-NoProfile", "-Command", f"[Console]::Write({argument})"],
+            ["pwsh", "-NoProfile", "-NonInteractive", "-Command", template.format(arg=argument)],
             capture_output=True,
             text=True,
             check=True,
         )
         assert result.stdout == url
 
-    def test_clean_urls_stay_unquoted_everywhere(self) -> None:
+    @pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell is not installed")
+    @pytest.mark.parametrize("url", ["https://sibyl.example.com", *HOSTILE_URLS])
+    def test_the_whole_windows_line_runs_in_powershell(self, url: str) -> None:
+        # Stand-ins for uv and sibyl record what the real line would run.
+        stubs = (
+            "function uv { [Console]::Write('uv ' + ($args -join ' ') + '|') }; "
+            "function sibyl { [Console]::Write(($args -join ' ')) }; "
+        )
+        result = subprocess.run(
+            [
+                "pwsh",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                stubs + install_commands(url)["windows"],
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert result.stdout == f"uv tool install --upgrade sibyl-dev|setup {url}"
+
+    def test_clean_urls_stay_bare_for_posix_and_quoted_for_powershell(self) -> None:
         url = "https://sibyl.example.com:8443/team"
-        assert all(line.endswith(f"sibyl setup {url}") for line in install_commands(url).values())
+        commands = install_commands(url)
+        assert commands["macos"].endswith(f"sibyl setup {url}")
+        assert commands["linux"].endswith(f"sibyl setup {url}")
+        assert commands["windows"].endswith(f"sibyl setup '{url}'")
 
     def test_the_agent_document_quotes_the_setup_command(self) -> None:
         url = HOSTILE_URLS[0]

@@ -56,7 +56,7 @@ function connectInfo(serverUrl: string, sso: boolean) {
     install: {
       macos: `brew install hyperb1iss/tap/sibyl && ${setup}`,
       linux: `uv tool install --upgrade sibyl-dev && ${setup}`,
-      windows: `uv tool install --upgrade sibyl-dev; ${setup}`,
+      windows: `uv tool install --upgrade sibyl-dev; sibyl setup '${serverUrl}'`,
     },
   };
 }

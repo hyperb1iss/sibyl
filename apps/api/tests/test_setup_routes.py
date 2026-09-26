@@ -572,6 +572,9 @@ async def test_connect_info_for_a_default_local_install(monkeypatch: pytest.Monk
     assert info.install["linux"] == (
         "uv tool install --upgrade sibyl-dev && sibyl setup http://localhost:3334"
     )
+    assert info.install["windows"] == (
+        "uv tool install --upgrade sibyl-dev; sibyl setup 'http://localhost:3334'"
+    )
     assert SECRET_SENTINEL not in info.model_dump_json()
 
 
@@ -591,9 +594,9 @@ async def test_connect_info_for_a_team_sso_server(monkeypatch: pytest.MonkeyPatc
     assert info.minimum_client_version == "1.5.0"
     assert info.sso_enabled is True
     assert info.local_auth_enabled is False
-    assert all(
-        line.endswith("sibyl setup https://sibyl.example.com") for line in info.install.values()
-    )
+    assert info.install["macos"].endswith("sibyl setup https://sibyl.example.com")
+    assert info.install["linux"].endswith("sibyl setup https://sibyl.example.com")
+    assert info.install["windows"].endswith("sibyl setup 'https://sibyl.example.com'")
     assert SECRET_SENTINEL not in info.model_dump_json()
 
 
