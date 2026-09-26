@@ -253,6 +253,32 @@ def test_settings_server_url_uses_public_url_when_explicit() -> None:
     assert s.server_url == "https://public.example.com"
 
 
+@pytest.mark.parametrize("field", ["public_url", "server_url", "frontend_url"])
+@pytest.mark.parametrize(
+    "value",
+    [
+        "https://sibyl.example.com/$(printf QUOTING_PROBE)",
+        "https://sibyl.example.com/`id`",
+        "https://user:secret@sibyl.example.com",
+        "https://sibyl.example.com?next=x",
+        "https://<your-sibyl-host>",
+        "javascript:alert(1)",
+    ],
+)
+def test_settings_refuse_urls_a_shell_could_misread(field: str, value: str) -> None:
+    with pytest.raises(ValidationError, match="plain http"):
+        Settings(_env_file=None, **{field: value})
+
+
+def test_settings_accept_ordinary_deployment_urls() -> None:
+    s = Settings(
+        _env_file=None,
+        public_url="https://sibyl.example.com/team/",
+        frontend_url="https://sibyl.example.com/team/",
+    )
+    assert s.server_url == "https://sibyl.example.com/team"
+
+
 def test_settings_mcp_auth_mode_default() -> None:
     s = Settings(_env_file=None)
     assert s.mcp_auth_mode == "auto"

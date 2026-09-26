@@ -7,6 +7,11 @@ line a person copies and the steps an agent follows never drift apart.
 
 from __future__ import annotations
 
+import re
+import shlex
+from typing import Literal
+from urllib.parse import urlsplit
+
 BREW_FORMULA = "hyperb1iss/tap/sibyl"
 PYPI_PACKAGE = "sibyl-dev"
 # `--upgrade` makes the line idempotent: a plain install leaves an old CLI alone.
@@ -79,19 +84,48 @@ time to verify the recommended agent setup is in place.
 """
 
 
-def setup_command(server_url: str) -> str:
-    """The command that connects a machine to `server_url`."""
-    return f"sibyl setup {server_url.rstrip('/')}"
+Shell = Literal["posix", "powershell"]
+
+_HOST = r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*|\[[0-9A-Fa-f:.]+\])"
+_CLEAN_URL = re.compile(rf"^https?://{_HOST}(?::[0-9]{{1,5}})?(?:/[A-Za-z0-9._~%/-]*)?$")
+# Characters PowerShell reads as plain text inside an unquoted argument.
+_POWERSHELL_SAFE = re.compile(r"^[A-Za-z0-9_./:%+=-]+$")
+
+
+def is_clean_server_url(url: str) -> bool:
+    """True for a plain http(s) URL: host, optional port and path, nothing else.
+
+    Server URLs end up in commands people paste into a shell, so anything a
+    shell could read as syntax (quotes, `$`, backticks, spaces), credentials,
+    a query or a fragment is refused.
+    """
+    if not _CLEAN_URL.match(url):
+        return False
+    parts = urlsplit(url)
+    return parts.scheme in {"http", "https"} and bool(parts.hostname)
+
+
+def quote_argument(value: str, shell: Shell = "posix") -> str:
+    """Quote one argument so the shell passes it through as plain text."""
+    if shell == "powershell":
+        if _POWERSHELL_SAFE.match(value):
+            return value
+        return "'" + value.replace("'", "''") + "'"
+    return shlex.quote(value)
+
+
+def setup_command(server_url: str, shell: Shell = "posix") -> str:
+    """The command that connects a machine to `server_url`, quoted for `shell`."""
+    return f"sibyl setup {quote_argument(server_url.rstrip('/'), shell)}"
 
 
 def install_commands(server_url: str) -> dict[str, str]:
     """One copyable line per OS: install or upgrade the CLI, then run setup."""
-    setup = setup_command(server_url)
     return {
-        "macos": f"{BREW_INSTALL_COMMAND} && {setup}",
-        "linux": f"{UV_INSTALL_COMMAND} && {setup}",
+        "macos": f"{BREW_INSTALL_COMMAND} && {setup_command(server_url)}",
+        "linux": f"{UV_INSTALL_COMMAND} && {setup_command(server_url)}",
         # Windows PowerShell 5.1 has no `&&`.
-        "windows": f"{UV_INSTALL_COMMAND}; {setup}",
+        "windows": f"{UV_INSTALL_COMMAND}; {setup_command(server_url, 'powershell')}",
     }
 
 

@@ -19,6 +19,7 @@ from sibyl_core.backends.surreal.url_schemes import (
     production_surreal_url_problem,
     unsupported_surreal_url_reason,
 )
+from sibyl_core.integration import is_clean_server_url
 
 _log = structlog.get_logger()
 
@@ -438,6 +439,15 @@ class Settings(BaseSettings):
                 object.__setattr__(self, "server_url", f"http://{host}:{self.server_port}")
         if not self.frontend_url:
             object.__setattr__(self, "frontend_url", self.public_url.rstrip("/") + "/")
+        # These URLs are pasted into shells by every connect surface, so anything
+        # a shell could read as syntax is refused at boot rather than quoted later.
+        for field in ("public_url", "server_url", "frontend_url"):
+            value = getattr(self, field)
+            if value and not is_clean_server_url(value):
+                raise ValueError(
+                    f"{field} must be a plain http(s) URL (host, optional port and path, "
+                    f"no credentials, query or shell characters), not {value!r}"
+                )
         return self
 
     cookie_domain: str | None = Field(
