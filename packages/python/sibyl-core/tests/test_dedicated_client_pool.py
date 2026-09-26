@@ -239,6 +239,41 @@ async def test_close_waits_for_in_flight_query(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_close_cancelled_while_draining_keeps_every_connection(monkeypatch) -> None:
+    tracker = _ConcurrencyTracker()
+    clients = _install_overlap_surreal(monkeypatch, tracker)
+    client = DedicatedSurrealClient(
+        url="ws://localhost:8000/rpc",
+        username="root",
+        password="root",
+        namespace="org_close_cancel",
+        database="graph",
+        pool_size=3,
+    )
+
+    query = asyncio.create_task(client.execute_query("SELECT * FROM entity;"))
+    for _ in range(200):
+        if tracker.in_flight >= 1:
+            break
+        await asyncio.sleep(0.005)
+    assert tracker.in_flight >= 1
+
+    # close() drains the idle slots, then waits on the busy one; cancel it there.
+    close_task = asyncio.create_task(client.close())
+    await asyncio.sleep(0.02)
+    close_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await close_task
+
+    tracker.release.set()
+    await query
+    # The slots a cancelled drain had taken are back, so a later close
+    # still finds all three instead of waiting forever for the missing ones.
+    await asyncio.wait_for(client.close(), timeout=1)
+    assert all(fake.closed for fake in clients)
+
+
+@pytest.mark.asyncio
 async def test_embedded_url_hard_clamps_explicit_pool_size(monkeypatch) -> None:
     tracker = _ConcurrencyTracker()
     tracker.release.set()

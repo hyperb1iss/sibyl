@@ -160,22 +160,31 @@ async def _release_shared_embedded_engine(engine: _SharedEmbeddedEngine) -> None
                 del _shared_embedded_engines[engine.key]
 
 
+async def _finish_despite_cancellation(awaitable: Awaitable[object]) -> None:
+    """Run teardown to completion even when the awaiting task is cancelled.
+
+    Cancellation is absorbed until the work finishes and then re-raised, so a
+    caller that is torn down mid-close still releases what it held.
+    """
+    work = asyncio.ensure_future(awaitable)
+    cancelled = False
+    while not work.done():
+        try:
+            await asyncio.shield(work)
+        except asyncio.CancelledError:
+            cancelled = True
+    work.result()
+    if cancelled:
+        raise asyncio.CancelledError
+
+
 async def _close_to_completion(client: SurrealClient) -> None:
     """Finish closing an engine even when the releasing task is cancelled.
 
     The caller holds the engine's lock until this returns, so no new lease can
     open a second engine on the directory while the old one is still closing.
     """
-    closing = asyncio.ensure_future(client.close())
-    cancelled = False
-    while not closing.done():
-        try:
-            await asyncio.shield(closing)
-        except asyncio.CancelledError:
-            cancelled = True
-    closing.result()
-    if cancelled:
-        raise asyncio.CancelledError
+    await _finish_despite_cancellation(client.close())
 
 
 def _without_scope_result(response: object) -> object:
@@ -618,11 +627,18 @@ class DedicatedSurrealClient:
             # closed mid-query: each get() blocks until an in-flight query
             # returns its connection. Closed connections go back in the queue so
             # a later query reconnects them lazily.
-            drained = [await self._available.get() for _ in range(self._pool_size)]
+            drained: list[_PooledConnection] = []
             try:
-                await asyncio.gather(
-                    *(connection.close() for connection in drained),
-                    return_exceptions=True,
+                for _ in range(self._pool_size):
+                    drained.append(await self._available.get())
+                # Shielded so a caller cancelled mid-close cannot cancel a
+                # connection's close before it runs, which would leave that
+                # connection holding its socket or shared-engine lease.
+                await _finish_despite_cancellation(
+                    asyncio.gather(
+                        *(connection.close() for connection in drained),
+                        return_exceptions=True,
+                    )
                 )
             finally:
                 for connection in drained:

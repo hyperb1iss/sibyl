@@ -327,6 +327,21 @@ async def test_a_cancelled_last_close_still_finishes_before_a_reopen(monkeypatch
     await second.close()
 
 
+async def test_a_cancelled_client_close_still_releases_its_lease(monkeypatch, tmp_path) -> None:
+    engines = _install_counting_surreal(monkeypatch)
+    client = _client(f"surrealkv://{tmp_path / 'store'}", "sibyl_auth")
+    await client.execute_query("RETURN 1")
+    closing = asyncio.create_task(client.close())
+    # Let close() schedule the per-connection closes, then cancel it before
+    # they get to run.
+    await asyncio.sleep(0)
+    closing.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await closing
+    assert engines[0].closed
+    assert dedicated_client_module._shared_embedded_engines == {}
+
+
 async def test_memory_urls_keep_one_store_per_connection(monkeypatch) -> None:
     engines = _install_counting_surreal(monkeypatch)
     first = _client("memory://", "one")
