@@ -42,7 +42,13 @@ _TRANSACTION_CONFLICT_RETRY_MAX_SECONDS = 1.0
 _DEFAULT_POOL_SIZE = 4
 
 
-_EMBEDDED_URL_SCHEMES = ("memory://", "surrealkv://", "rocksdb://", "file://")
+_EMBEDDED_URL_SCHEMES = (
+    "memory://",
+    "surrealkv://",
+    "surrealkv+versioned://",
+    "rocksdb://",
+    "file://",
+)
 
 
 def _is_embedded_url(url: str) -> bool:
@@ -519,8 +525,17 @@ class DedicatedSurrealClient:
         self._namespace = namespace
         self._database = database
         self._client_kind = client_kind
-        # Embedded URLs are hard-clamped to one connection regardless of an
-        # explicit pool_size: a pool over memory:// would fragment tenant state.
+        # Embedded URLs are hard-clamped to one connection regardless of any
+        # configured pool size, and this is a correctness boundary. The engine
+        # the Python SDK embeds (surrealdb-core 2.3) misses write-write
+        # conflicts, even inside BEGIN/COMMIT: two connections can both commit
+        # a read-modify-write from the same stale read. The compare-and-set
+        # fences in dream checkpoints, source states, revisions, schema
+        # leases, and write witnesses hold on embedded stores only because
+        # each namespace writes through one connection. (memory:// also hands
+        # every connection a fresh store, so a pool there would fragment it.)
+        # packages/python/sibyl-core/tests/test_embedded_shared_engine.py
+        # enforces the clamp and pins the lost updates with a strict xfail.
         if _is_embedded_url(url):
             self._pool_size = 1
         else:

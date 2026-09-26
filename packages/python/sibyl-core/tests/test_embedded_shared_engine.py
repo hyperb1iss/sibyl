@@ -226,10 +226,107 @@ async def test_same_namespace_writers_survive_commit_conflicts(monkeypatch, tmp_
             "SELECT worker, step, count() AS n FROM probe GROUP BY worker, step;"
         )
         # Every write landed exactly once: none surfaced, none was doubled.
+        # counter:hot.n is not asserted: the engine loses concurrent increments (strict xfail below).
         assert len(rows) == len(writers) * rounds * attempts
         assert {row["n"] for row in rows} == {1}
     finally:
         await asyncio.gather(*(writer.close() for writer in writers))
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "The engine the surrealdb Python SDK embeds (surrealdb-core 2.3) misses "
+        "write-write conflicts, so concurrent read-modify-writes on one record "
+        "lose increments that reported success. If an SDK bump makes this pass, "
+        "revisit the one-connection clamp in DedicatedSurrealClient."
+    ),
+)
+@pytest.mark.parametrize("store", ["surrealkv", "memory"])
+async def test_embedded_engine_keeps_every_concurrent_increment(tmp_path, store) -> None:
+    from surrealdb import AsyncSurreal
+
+    url = f"surrealkv://{tmp_path / 'store'}" if store == "surrealkv" else "memory://"
+    engine = AsyncSurreal(url)
+    await engine.connect()
+    await engine.use("probe", "probe")
+    try:
+        await engine.query("CREATE counter:c SET n = 0;")
+        reported = 0
+
+        async def increment() -> None:
+            nonlocal reported
+            for _ in range(200):
+                response = await engine.query_raw("UPSERT counter:c SET n += 1;")
+                if response["result"][0]["status"] == "OK":
+                    reported += 1
+
+        # A round loses increments reliably today; a few rounds keep a fixed
+        # engine from passing by luck on a slow runner.
+        for _ in range(5):
+            await asyncio.gather(*(increment() for _ in range(4)))
+            stored = await engine.query("SELECT VALUE n FROM ONLY counter:c;")
+            assert stored == reported, f"{reported - stored} increments reported OK were lost"
+    finally:
+        await engine.close()
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["memory://", "surrealkv://{dir}", "surrealkv+versioned://{dir}", "rocksdb://{dir}"],
+)
+@pytest.mark.parametrize("pool_size", [None, 1, 4, 64])
+async def test_embedded_clients_hold_one_connection_however_configured(
+    monkeypatch, tmp_path, url, pool_size
+) -> None:
+    """The single-connection clamp the lost-update fences depend on."""
+    _install_counting_surreal(monkeypatch)
+    in_flight = 0
+    peak = 0
+    import surrealdb
+
+    original_query_raw = surrealdb.AsyncSurreal.query_raw
+
+    async def tracked_query_raw(self, query: str, params: object | None = None):
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        try:
+            await asyncio.sleep(0.01)
+            return await original_query_raw(self, query, params)
+        finally:
+            in_flight -= 1
+
+    monkeypatch.setattr(surrealdb.AsyncSurreal, "query_raw", tracked_query_raw)
+    client = DedicatedSurrealClient(
+        url=url.format(dir=tmp_path / "store"),
+        namespace="org_clamp",
+        database="graph",
+        pool_size=pool_size,
+    )
+    try:
+        assert client.pool_size == 1
+        await asyncio.gather(*(client.execute_query("RETURN 1") for _ in range(8)))
+        assert peak == 1, "an embedded client ran two queries at once"
+    finally:
+        await client.close()
+
+
+async def test_configured_pool_sizes_never_widen_embedded_clients(monkeypatch, tmp_path) -> None:
+    from sibyl_core.config import core_config
+    from sibyl_core.services import content_client, graph_client
+
+    monkeypatch.setattr(core_config, "surreal_url", f"surrealkv://{tmp_path / 'store'}")
+    for field in (
+        "surreal_pool_size",
+        "surreal_auth_pool_size",
+        "surreal_content_pool_size",
+        "surreal_graph_pool_size",
+    ):
+        monkeypatch.setattr(core_config, field, 16)
+
+    assert content_client.build_surreal_content_client().pool_size == 1
+    assert graph_client._new_graph_client("org_clamp").pool_size == 1
 
 
 def _install_counting_surreal(monkeypatch) -> list[Any]:

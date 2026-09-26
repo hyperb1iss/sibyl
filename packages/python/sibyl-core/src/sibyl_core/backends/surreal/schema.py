@@ -89,7 +89,13 @@ EMBEDDING_DIM = core_config.graph_embedding_dimensions
 HNSW_EFC = core_config.graph_hnsw_efc
 HNSW_M = core_config.graph_hnsw_m
 _GRAPH_ENTITY_TYPE_VALUES = tuple(entity_type.value for entity_type in EntityType)
-_EMBEDDED_SURREAL_SCHEMES = ("memory://", "surrealkv://", "rocksdb://", "file://")
+_EMBEDDED_SURREAL_SCHEMES = (
+    "memory://",
+    "surrealkv://",
+    "surrealkv+versioned://",
+    "rocksdb://",
+    "file://",
+)
 
 
 def _surql_string_array(values: tuple[str, ...]) -> str:

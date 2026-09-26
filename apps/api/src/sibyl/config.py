@@ -20,7 +20,13 @@ _log = structlog.get_logger()
 _JWT_KEY_FILE = Path.home() / ".sibyl" / "jwt.key"
 _EXTRA_OIDC_PROVIDER_NAMES = {"github", "google"}
 _EXTRA_OIDC_ISSUER_HOSTS = {"github.com", "accounts.google.com"}
-_EMBEDDED_SURREAL_SCHEMES = ("memory://", "surrealkv://", "rocksdb://", "file://")
+_EMBEDDED_SURREAL_SCHEMES = (
+    "memory://",
+    "surrealkv://",
+    "surrealkv+versioned://",
+    "rocksdb://",
+    "file://",
+)
 DEFAULT_LOCAL_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_LOCAL_EMBEDDING_DIMENSIONS = 384
 # Matches the HS256 output width, and what `openssl rand -hex 32` produces.
