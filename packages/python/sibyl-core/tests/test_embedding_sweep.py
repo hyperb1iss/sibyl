@@ -1124,3 +1124,39 @@ async def test_no_provider_call_starts_once_the_budget_is_spent(runtime) -> None
     assert calls == 1
     assert result.pending == 3
     current.embed_texts = embed  # type: ignore[method-assign]
+
+
+async def test_a_pass_adopts_every_unstamped_vector_whatever_its_budget(runtime) -> None:
+    """Adoption is metadata-only, so one pass finishes it even when its budget is already spent.
+
+    The rows go in 500 at a time: the embedded engine's index range scan for
+    ``uuid > $cursor`` skips the first row of such a batch, which a page that
+    starts inclusively does not.
+    """
+    current = CountingProvider("current")
+    await _entity(runtime, "stamped", stamp=previous_release_stamp(current.metadata.to_dict()))
+    rows = [
+        {
+            "uuid": f"legacy-{index:04d}",
+            "group_id": runtime.client.group_id,
+            "name": f"Entity legacy-{index:04d}",
+            "entity_type": "topic",
+            "name_embedding": _vector(0.5),
+            "attributes": {},
+        }
+        for index in range(510)
+    ]
+    for start in range(0, len(rows), 500):
+        await runtime.client.execute_query(
+            "INSERT INTO entity $rows RETURN NONE;", rows=rows[start : start + 500]
+        )
+    await upgrade_graph_to_sweep(runtime.client)
+
+    result = await sweep_graph_embeddings(
+        runtime, embedding_provider=current, budget_seconds=0.000_001
+    )
+
+    stored = await _rows(runtime, "entity")
+    assert result.adopted == 510
+    assert current.texts == []
+    assert all(row["stamp"] is not None for row in stored.values())

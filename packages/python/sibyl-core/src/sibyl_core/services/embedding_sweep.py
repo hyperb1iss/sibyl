@@ -75,6 +75,8 @@ SWEEP_SKIPPED_SCHEMA_PENDING = "skipped_schema_pending"
 SWEEP_LEASE_LOST = "lease_lost"
 
 _LEASE_MARGIN_SECONDS = 120.0
+# Rows per adoption statement; ``slots`` statements run at once.
+_ADOPT_BATCH_ROWS = 1000
 _BACKOFF_BASE_SECONDS = 1.0
 _BACKOFF_CAP_SECONDS = 20.0
 # How a pass decides the provider itself is down rather than rejecting some
@@ -229,10 +231,13 @@ class SweepTable:
         differs = vector_identity_differs_predicate(self.metadata_path, "stamp")
         return f"{self.metadata_path} != NONE AND ({self.vector_field} = NONE OR {differs})"
 
+    # Pages start at their cursor inclusively and callers drop the cursor
+    # row: the embedded engine's index range scan for ``uuid > $cursor``
+    # skips a row, where ``>=`` returns every one on both engines.
     def walk_query(self) -> str:
         return (
             f"SELECT uuid, {self.projection} FROM {self.name} "
-            f"WHERE {self.scope_field} = $scope AND uuid > $cursor "
+            f"WHERE {self.scope_field} = $scope AND uuid >= $cursor "
             f"AND {self._candidate_predicate()} "
             "ORDER BY uuid ASC LIMIT $limit;"
         )
@@ -266,12 +271,26 @@ class SweepTable:
             f"AND {self.metadata_path} = NONE LIMIT 1;"
         )
 
+    def legacy_page_query(self) -> str:
+        return (
+            f"SELECT uuid FROM {self.name} "
+            f"WHERE {self.scope_field} = $scope AND uuid >= $cursor "
+            f"AND {self.vector_field} != NONE AND {self.metadata_path} = NONE "
+            "ORDER BY uuid ASC LIMIT $limit;"
+        )
+
+    # Row writes find their rows by uuid alone and check the scope and every
+    # fence on the rows found. Given a scope beside the uuid, a 3.x server
+    # plans an UPDATE through the scope's index and walks the whole
+    # organization for each statement; by uuid alone it uses the unique index.
+    def _rows_by_uuid(self) -> str:
+        return f"(SELECT VALUE id FROM {self.name} WHERE uuid IN $uuids)"
+
     def adopt_query(self) -> str:
         return (
-            f"UPDATE (SELECT VALUE id FROM {self.name} "
+            f"UPDATE {self._rows_by_uuid()} SET {self.metadata_path} = $legacy "
             f"WHERE {self.scope_field} = $scope AND {self.vector_field} != NONE "
-            f"AND {self.metadata_path} = NONE LIMIT $limit) "
-            f"SET {self.metadata_path} = $legacy RETURN uuid;"
+            f"AND {self.metadata_path} = NONE RETURN uuid;"
         )
 
     def in_model_count_query(self) -> str:
@@ -291,13 +310,23 @@ class SweepTable:
             f"OR {self.metadata_path} != NONE) GROUP ALL;"
         )
 
+    def _unverify_predicate(self) -> str:
+        return (
+            f"{self.scope_field} = $scope AND ({self.vector_field} != NONE "
+            f"OR {self.metadata_path} != NONE) AND ({self.metadata_path} = NONE "
+            f"OR {self.metadata_path}.provider != $unverified)"
+        )
+
+    def unverify_page_query(self) -> str:
+        return (
+            f"SELECT uuid FROM {self.name} WHERE uuid >= $cursor "
+            f"AND {self._unverify_predicate()} ORDER BY uuid ASC LIMIT $limit;"
+        )
+
     def unverify_query(self) -> str:
         return (
-            f"UPDATE (SELECT VALUE id FROM {self.name} "
-            f"WHERE {self.scope_field} = $scope AND ({self.vector_field} != NONE "
-            f"OR {self.metadata_path} != NONE) AND ({self.metadata_path} = NONE "
-            f"OR {self.metadata_path}.provider != $unverified) LIMIT $limit) "
-            f"SET {self.metadata_path} = $marker RETURN uuid;"
+            f"UPDATE {self._rows_by_uuid()} SET {self.metadata_path} = $marker "
+            f"WHERE {self._unverify_predicate()} RETURN uuid;"
         )
 
     def write_query(self) -> str:
@@ -306,12 +335,12 @@ class SweepTable:
         # Every row write re-reads the plane's lease in the same statement, so
         # a pass that lost its lease to another process writes nothing.
         return (
-            f"UPDATE (SELECT VALUE id FROM {self.name} "
-            f"WHERE {self.scope_field} = $scope AND uuid IN $uuids) SET "
+            f"UPDATE {self._rows_by_uuid()} SET "
             f"{self.vector_field} = <array<float, {self.dimensions}>>"
             "$rows_by_uuid[uuid].embedding, "
             f"{self.metadata_path} = $rows_by_uuid[uuid].embedding_metadata "
-            "WHERE (SELECT VALUE lease_owner FROM type::record($lease_key) "
+            f"WHERE {self.scope_field} = $scope "
+            "AND (SELECT VALUE lease_owner FROM type::record($lease_key) "
             "WHERE lease_until > time::now())[0] = $owner "
             f"AND {self.fence} AND ({self.vector_field} = NONE "
             f"OR {self.metadata_path} != $rows_by_uuid[uuid].embedding_metadata) "
@@ -727,8 +756,10 @@ async def run_embedding_sweep(
         adopted_all = True
         if isinstance(legacy, Mapping):
             adopted_all = await _stamp_legacy_rows(
-                plane, dict(legacy), counts=counts, deadline=deadline, page=page
+                plane, dict(legacy), counts=counts, owner=owner, budget=budget, slots=slots
             )
+            if counts.lease_lost:
+                status = SWEEP_LEASE_LOST
         finished: set[str] = set()
         clean: set[str] = set()
         walkers = {
@@ -839,6 +870,20 @@ class _TableWalk:
         self.started_at_beginning = self.cursor == ""
 
 
+def page_after_cursor(
+    fetched: Sequence[dict[str, Any]], cursor: str, page: int
+) -> tuple[list[dict[str, Any]], bool]:
+    """Up to ``page`` rows after ``cursor`` from a ``uuid >= $cursor`` read of ``page + 1``.
+
+    Returns the rows and whether the table may hold more past them. Pages
+    read inclusively because the embedded engine's index range scan for
+    ``uuid > $cursor`` skips a row; reading one extra keeps a page full when
+    the cursor row itself comes back.
+    """
+    rows = [row for row in fetched if row.get("uuid") and (not cursor or row["uuid"] != cursor)]
+    return rows[:page], len(fetched) > page
+
+
 async def _advance(
     plane: SweepPlane,
     walk: _TableWalk,
@@ -855,18 +900,17 @@ async def _advance(
     nothing left, so a pass that resumed mid-table never declares victory for
     rows behind its cursor.
     """
-    rows = await _rows(
-        plane,
-        walk.table.walk_query(),
-        cursor=walk.cursor,
-        limit=page,
+    rows, more = page_after_cursor(
+        await _rows(plane, walk.table.walk_query(), cursor=walk.cursor, limit=page + 1),
+        walk.cursor,
+        page,
     )
     if rows:
         walk.cursor = str(rows[-1]["uuid"])
         await _process_page(
             plane, walk.table, rows, counts=counts, limiter=limiter, deadline=deadline, batch=batch
         )
-    if len(rows) >= page:
+    if more:
         return None
     if not (walk.started_at_beginning or walk.wrapped):
         walk.cursor = ""
@@ -1170,24 +1214,67 @@ async def _stamp_legacy_rows(
     legacy: EmbeddingStamp,
     *,
     counts: _Counts,
-    deadline: float,
-    page: int,
+    owner: str,
+    budget: float,
+    slots: int,
 ) -> bool:
-    """Stamp unstamped vectors with the plane's persisted legacy verdict.
+    """Stamp every unstamped vector with the plane's persisted legacy verdict.
 
-    Metadata-only writes, so adoption costs no provider calls. Returns
-    whether every table ran out of unstamped vectors inside the budget.
+    Metadata-only writes that cost no provider call, so they are not held to
+    the pass budget: a plane adopts all of its vectors in the pass that first
+    sees the verdict, and until then its vector lanes count unstamped vectors
+    as the adopted model (see ``embedding_lane_readiness``). The server
+    re-validates every field of a row it updates, which keeps one statement
+    near 600 rows a second on the entity table, so disjoint batches run
+    ``slots`` at a time, the concurrency the sweep already uses against the
+    store. The lease is renewed after every round, and a pass that lost it
+    stops. Returns False only then.
     """
+    limit = _ADOPT_BATCH_ROWS * slots
     for table in plane.tables:
+        cursor = ""
         while True:
-            if time.monotonic() >= deadline:
-                return False
-            stamped = await _rows(plane, table.adopt_query(), legacy=legacy, limit=page)
-            if legacy.get("provider") != UNVERIFIED_EMBEDDING_PROVIDER:
-                counts.adopted += len(stamped)
-            if len(stamped) < page:
+            rows, more = page_after_cursor(
+                await _rows(plane, table.legacy_page_query(), cursor=cursor, limit=limit + 1),
+                cursor,
+                limit,
+            )
+            uuids = [str(row["uuid"]) for row in rows]
+            if not uuids:
                 break
+            stamped = await asyncio.gather(
+                *(
+                    _rows(
+                        plane,
+                        table.adopt_query(),
+                        legacy=legacy,
+                        uuids=uuids[start : start + _ADOPT_BATCH_ROWS],
+                    )
+                    for start in range(0, len(uuids), _ADOPT_BATCH_ROWS)
+                )
+            )
+            if legacy.get("provider") != UNVERIFIED_EMBEDDING_PROVIDER:
+                counts.adopted += sum(len(rows) for rows in stamped)
+            if not await _renew_lease(plane, owner=owner, budget=budget):
+                counts.lease_lost = True
+                return False
+            if not more:
+                break
+            cursor = uuids[-1]
     return True
+
+
+async def _renew_lease(plane: SweepPlane, *, owner: str, budget: float) -> bool:
+    rows = await _rows(
+        plane,
+        "UPDATE type::record($key) SET lease_until = time::now() + <duration>$lease, "
+        "updated_at = time::now() WHERE lease_owner = $owner AND lease_until > time::now() "
+        "RETURN lease_owner;",
+        key=plane.state_key,
+        owner=owner,
+        lease=f"{int(budget + _LEASE_MARGIN_SECONDS)}s",
+    )
+    return any(row.get("lease_owner") == owner for row in rows)
 
 
 async def _pending(plane: SweepPlane, counts: _Counts) -> int:
@@ -1382,19 +1469,36 @@ async def mark_plane_for_reembed(
     marker = unverified_embedding_metadata(UNVERIFIED_ORIGIN_OPERATOR)
     marked = 0
     for table in tables:
+        cursor = ""
         while True:
-            rows = normalize_records(
-                await execute(
-                    table.unverify_query(),
-                    scope=organization_id,
-                    unverified=UNVERIFIED_EMBEDDING_PROVIDER,
-                    marker=marker,
-                    limit=page_size,
-                )
+            page, more = page_after_cursor(
+                normalize_records(
+                    await execute(
+                        table.unverify_page_query(),
+                        scope=organization_id,
+                        unverified=UNVERIFIED_EMBEDDING_PROVIDER,
+                        cursor=cursor,
+                        limit=page_size + 1,
+                    )
+                ),
+                cursor,
+                page_size,
             )
-            marked += len(rows)
-            if len(rows) < page_size:
+            uuids = [str(row["uuid"]) for row in page]
+            if uuids:
+                rows = normalize_records(
+                    await execute(
+                        table.unverify_query(),
+                        scope=organization_id,
+                        unverified=UNVERIFIED_EMBEDDING_PROVIDER,
+                        marker=marker,
+                        uuids=uuids,
+                    )
+                )
+                marked += len(rows)
+            if not more or not uuids:
                 break
+            cursor = uuids[-1]
     # The operator has now vouched for nothing in this plane being trusted
     # blindly, so an adoption warning no longer applies.
     await execute(
@@ -1466,6 +1570,7 @@ __all__ = [
     "embedding_state_key",
     "ensure_legacy_decision",
     "mark_plane_for_reembed",
+    "page_after_cursor",
     "read_embedding_sweep_state",
     "run_embedding_sweep",
 ]
