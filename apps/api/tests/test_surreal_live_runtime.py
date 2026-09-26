@@ -34,6 +34,7 @@ from sibyl_core.backends.surreal.schema_version import (
     get_schema_version,
     record_schema_version,
 )
+from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
 from sibyl_core.embeddings.providers import EmbeddingMetadata
 from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.services.graph import (
@@ -58,12 +59,10 @@ pytestmark = pytest.mark.skipif(
     reason="live SurrealDB runtime smoke tests are disabled",
 )
 
-_EMBEDDED_SURREAL_SCHEMES = ("memory://", "surrealkv://", "rocksdb://", "file://")
-
 
 def _live_surreal_url() -> str:
     url = os.environ.get("SIBYL_SURREAL_URL", "")
-    if not url or url.startswith(_EMBEDDED_SURREAL_SCHEMES):
+    if not url or is_embedded_surreal_url(url):
         pytest.skip("live SurrealDB tests require SIBYL_SURREAL_URL to point at a server")
     return url
 

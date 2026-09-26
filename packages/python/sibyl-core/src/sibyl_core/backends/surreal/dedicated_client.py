@@ -29,6 +29,10 @@ from sibyl_core.backends.surreal.observability import (
     query_start,
 )
 from sibyl_core.backends.surreal.protocols import QueryParams, SurrealClient
+from sibyl_core.backends.surreal.url_schemes import (
+    is_embedded_surreal_url,
+    is_file_backed_surreal_url,
+)
 
 if TYPE_CHECKING:
     from sibyl_core.backends.surreal.schema_version import SurrealExecute
@@ -42,26 +46,11 @@ _TRANSACTION_CONFLICT_RETRY_MAX_SECONDS = 1.0
 _DEFAULT_POOL_SIZE = 4
 
 
-_EMBEDDED_URL_SCHEMES = (
-    "memory://",
-    "surrealkv://",
-    "surrealkv+versioned://",
-    "rocksdb://",
-    "file://",
-)
-
-
-def _is_embedded_url(url: str) -> bool:
-    # Embedded stores are single-writer and `memory://` hands out a fresh empty
-    # database per connection, so a pool there would fragment state.
-    return url.startswith(_EMBEDDED_URL_SCHEMES)
-
-
 def _connect_timeout_seconds(url: str) -> float | None:
     # Embedded stores open a local file rather than a socket, and a cold
     # SurrealKV directory can legitimately take longer than a handshake
     # budget, so only remote URLs get one.
-    if _is_embedded_url(url):
+    if is_embedded_surreal_url(url):
         return None
     from sibyl_core.config import core_config
 
@@ -72,13 +61,10 @@ def _connect_timeout_seconds(url: str) -> float | None:
 # disk, so two engines opened on one path in one process append to the same log
 # and read each other's bytes back as corrupt values ("Invalid revision `N` for
 # type `Value`"), and neither sees the other's writes. Every client on such a
-# path therefore shares one engine. memory:// has no files behind it, and each
-# connection there stays its own store.
-_SHARED_EMBEDDED_URL_SCHEMES = ("surrealkv://", "surrealkv+versioned://", "rocksdb://", "file://")
-
-
+# path therefore shares one engine. In-memory stores have no files behind
+# them, and each connection there stays its own store.
 def _shares_embedded_engine(url: str) -> bool:
-    return url.startswith(_SHARED_EMBEDDED_URL_SCHEMES)
+    return is_file_backed_surreal_url(url)
 
 
 def _embedded_engine_key(url: str) -> str:
@@ -485,7 +471,8 @@ class _PooledConnection:
                 await client.signin({"username": self._username, "password": self._password})
 
     def _requires_auth(self) -> bool:
-        return not self._url.startswith(("memory://", "surrealkv://"))
+        # An in-process engine has no users to sign in as.
+        return not is_embedded_surreal_url(self._url)
 
     async def drop(self) -> None:
         async with self._connect_lock:
@@ -536,7 +523,7 @@ class DedicatedSurrealClient:
         # every connection a fresh store, so a pool there would fragment it.)
         # packages/python/sibyl-core/tests/test_embedded_shared_engine.py
         # enforces the clamp and pins the lost updates with a strict xfail.
-        if _is_embedded_url(url):
+        if is_embedded_surreal_url(url):
             self._pool_size = 1
         else:
             requested = pool_size if pool_size is not None else _DEFAULT_POOL_SIZE
@@ -574,7 +561,7 @@ class DedicatedSurrealClient:
     @asynccontextmanager
     async def schema_lease_executor(self) -> AsyncIterator[SurrealExecute]:
         """Reserve renewal capacity without competing with graph query sockets."""
-        if _is_embedded_url(self._url):
+        if is_embedded_surreal_url(self._url):
             yield self.execute_query
             return
         control = DedicatedSurrealClient(

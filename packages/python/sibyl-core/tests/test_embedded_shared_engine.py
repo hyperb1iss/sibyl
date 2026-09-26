@@ -273,7 +273,7 @@ async def test_embedded_engine_keeps_every_concurrent_increment(tmp_path, store)
 
 @pytest.mark.parametrize(
     "url",
-    ["memory://", "surrealkv://{dir}", "surrealkv+versioned://{dir}", "rocksdb://{dir}"],
+    ["memory://", "mem://", "surrealkv://{dir}", "surrealkv+versioned://{dir}", "file://{dir}"],
 )
 @pytest.mark.parametrize("pool_size", [None, 1, 4, 64])
 async def test_embedded_clients_hold_one_connection_however_configured(

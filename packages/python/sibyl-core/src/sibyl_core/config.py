@@ -11,6 +11,11 @@ from typing import Literal
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from sibyl_core.backends.surreal.url_schemes import (
+    production_surreal_url_problem,
+    unsupported_surreal_url_reason,
+)
+
 DEFAULT_LOCAL_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_LOCAL_EMBEDDING_DIMENSIONS = 384
 _OPENAI_GRAPH_EMBEDDING_MODEL = "text-embedding-3-small"
@@ -240,6 +245,8 @@ class CoreConfig(BaseSettings):
 
         if self.surreal_url and self.surreal_data_dir:
             raise ValueError("Configure only one of surreal_url or surreal_data_dir")
+        if self.surreal_url and (reason := unsupported_surreal_url_reason(self.surreal_url)):
+            raise ValueError(reason)
 
         if self.graph_embedding_provider == "local":
             if (
@@ -258,19 +265,13 @@ class CoreConfig(BaseSettings):
 
         _check_bedrock_embedding_dimensions(self)
 
-        if self.environment == "production":
-            resolved = self.resolved_surreal_url
-            if resolved.startswith("memory://"):
-                raise ValueError(
-                    "CRITICAL: In-memory SurrealDB is forbidden in production. "
-                    "Set SIBYL_SURREAL_URL or SIBYL_SURREAL_DATA_DIR."
-                )
-            if resolved.startswith("surrealkv://") and not self.allow_embedded_single_writer:
-                raise ValueError(
-                    "CRITICAL: Embedded SurrealDB requires explicit single-writer opt-in in "
-                    "production. Set SIBYL_ALLOW_EMBEDDED_SINGLE_WRITER=1 only when one "
-                    "daemon owns the database."
-                )
+        if self.environment == "production" and (
+            problem := production_surreal_url_problem(
+                self.resolved_surreal_url,
+                allow_embedded_single_writer=self.allow_embedded_single_writer,
+            )
+        ):
+            raise ValueError(f"CRITICAL: {problem}")
 
         return self
 

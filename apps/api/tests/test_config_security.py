@@ -348,3 +348,59 @@ class TestProductionMcpAuthMode:
         settings = Settings(_env_file=None, environment="development", mcp_auth_mode="off")
 
         assert settings.mcp_auth_mode == "off"
+
+
+_JWT = "test-jwt-secret-0123456789abcdef0123456789abcdef"
+_MEMORY_BAN = "In-memory SurrealDB is forbidden in production"
+_OPT_IN = "single-writer opt-in"
+
+
+@pytest.mark.parametrize(
+    ("url", "embedded", "production", "production_with_opt_in"),
+    [
+        ("memory://", True, _MEMORY_BAN, _MEMORY_BAN),
+        ("mem://", True, _MEMORY_BAN, _MEMORY_BAN),
+        ("surrealkv:///var/lib/sibyl", True, _OPT_IN, None),
+        ("surrealkv+versioned:///var/lib/sibyl", True, _OPT_IN, None),
+        ("file:///var/lib/sibyl", True, _OPT_IN, None),
+        ("ws://surrealdb:8000/rpc", False, None, None),
+        ("https://surreal.example.com", False, None, None),
+    ],
+)
+def test_api_settings_treat_every_surreal_scheme_consistently(
+    url: str, embedded: bool, production: str | None, production_with_opt_in: str | None
+) -> None:
+    development = Settings(
+        _env_file=None,
+        environment="development",
+        surreal_url=url,
+        surreal_pool_size=8,
+        worker_max_jobs=None,
+    )
+    expected_pool = 1 if embedded else 8
+    for kind in ("auth", "content", "graph"):
+        assert development.effective_surreal_client_pool_size(kind) == expected_pool
+    if embedded:
+        # Background jobs share the one embedded connection.
+        assert development.resolved_worker_max_jobs == 1
+
+    for opt_in, verdict in ((False, production), (True, production_with_opt_in)):
+        kwargs = {
+            "_env_file": None,
+            "environment": "production",
+            "auth_store": "surreal",
+            "surreal_url": url,
+            "jwt_secret": _JWT,
+            "allow_embedded_single_writer": opt_in,
+        }
+        if verdict is None:
+            Settings(**kwargs)
+        else:
+            with pytest.raises(ValueError, match=verdict):
+                Settings(**kwargs)
+
+
+@pytest.mark.parametrize("url", ["rocksdb:///var/lib/sibyl", "tikv://pd:2379"])
+def test_api_settings_refuse_urls_the_sdk_cannot_open(url: str) -> None:
+    with pytest.raises(ValueError, match="not"):
+        Settings(_env_file=None, environment="development", surreal_url=url)

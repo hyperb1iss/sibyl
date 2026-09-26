@@ -862,7 +862,13 @@ async def test_auth_permissions_filter_record_users_by_org() -> None:
 
 @pytest.mark.parametrize(
     "url",
-    ("memory://", "surrealkv:///tmp/sibyl", "rocksdb:///tmp/sibyl", "file:///tmp/sibyl"),
+    (
+        "memory://",
+        "mem://",
+        "surrealkv:///tmp/sibyl",
+        "surrealkv+versioned:///tmp/sibyl",
+        "file:///tmp/sibyl",
+    ),
 )
 def test_fulltext_indexes_render_with_embedded_search_syntax(url: str) -> None:
     rendered = render_fulltext_compatible_sql(CONTENT_SCHEMA_DEFINITIONS, url=url)
@@ -1017,7 +1023,13 @@ def test_graph_schema_renders_flat_type_predicates_for_server_runtime() -> None:
 
 @pytest.mark.parametrize(
     "url",
-    ("memory://", "surrealkv:///tmp/sibyl", "rocksdb:///tmp/sibyl", "file:///tmp/sibyl"),
+    (
+        "memory://",
+        "mem://",
+        "surrealkv:///tmp/sibyl",
+        "surrealkv+versioned:///tmp/sibyl",
+        "file:///tmp/sibyl",
+    ),
 )
 def test_graph_schema_keeps_legacy_type_predicates_for_embedded_runtime(url: str) -> None:
     rendered = render_surreal_compatible_sql(

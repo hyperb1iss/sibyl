@@ -20,6 +20,7 @@ from sibyl_core.backends.surreal.fulltext import (
     build_match_disjunction,
 )
 from sibyl_core.backends.surreal.knn import KNN_TYPE_OVERFETCH_CAP, knn_search_effort
+from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
 from sibyl_core.config import settings
 from sibyl_core.embeddings.providers import (
     EmbeddingProvider,
@@ -47,14 +48,6 @@ _REFLECTION_DREAM_EXCLUDED_CAPTURE_SURFACES = frozenset(
 #: after the read, and the exact rerank only orders what the pool holds, so the
 #: pool runs deeper than the page to keep the nearest pending sources inside it.
 DREAM_NEIGHBOUR_POOL_FACTOR = 4
-
-_EMBEDDED_SURREAL_SCHEMES = (
-    "memory://",
-    "surrealkv://",
-    "surrealkv+versioned://",
-    "rocksdb://",
-    "file://",
-)
 
 log = structlog.get_logger()
 
@@ -113,7 +106,7 @@ class _RawMemoryRecallFilters:
 
 
 def _raw_memory_disjunction(*branches: str) -> str:
-    if settings.resolved_surreal_url.startswith(_EMBEDDED_SURREAL_SCHEMES):
+    if is_embedded_surreal_url(settings.resolved_surreal_url):
         # Embedded KNN cannot prefilter grouped subqueries, including boolean
         # parentheses. Function arguments retain the same ungrouped predicates.
         return f"array::any([{', '.join(branches)}])"
@@ -161,13 +154,13 @@ def _memory_scope_where(
 
 
 def _surreal_type_is_string(field: str) -> str:
-    if settings.resolved_surreal_url.startswith(_EMBEDDED_SURREAL_SCHEMES):
+    if is_embedded_surreal_url(settings.resolved_surreal_url):
         return f"type::is::string({field})"
     return f"type::is_string({field})"
 
 
 def _surreal_type_is_datetime(field: str) -> str:
-    if settings.resolved_surreal_url.startswith(_EMBEDDED_SURREAL_SCHEMES):
+    if is_embedded_surreal_url(settings.resolved_surreal_url):
         return f"type::is::datetime({field})"
     return f"type::is_datetime({field})"
 

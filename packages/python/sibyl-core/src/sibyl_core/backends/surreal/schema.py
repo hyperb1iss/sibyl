@@ -57,6 +57,7 @@ from sibyl_core.backends.surreal.schema_version import (
     record_schema_version,
     schema_version_record_id,
 )
+from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
 from sibyl_core.config import core_config
 from sibyl_core.memory_pipeline.observations import SourceKind
 from sibyl_core.models.entities import EntityType
@@ -89,13 +90,6 @@ EMBEDDING_DIM = core_config.graph_embedding_dimensions
 HNSW_EFC = core_config.graph_hnsw_efc
 HNSW_M = core_config.graph_hnsw_m
 _GRAPH_ENTITY_TYPE_VALUES = tuple(entity_type.value for entity_type in EntityType)
-_EMBEDDED_SURREAL_SCHEMES = (
-    "memory://",
-    "surrealkv://",
-    "surrealkv+versioned://",
-    "rocksdb://",
-    "file://",
-)
 
 
 def _surql_string_array(values: tuple[str, ...]) -> str:
@@ -915,7 +909,7 @@ def _graph_schema_migrations(
             action=(
                 partial(
                     migrate_lifecycle_repair,
-                    concurrent=not url.startswith(_EMBEDDED_SURREAL_SCHEMES),
+                    concurrent=not is_embedded_surreal_url(url),
                     ownership=ownership,
                 )
                 if migration.action is migrate_lifecycle_repair
@@ -1030,7 +1024,7 @@ async def rebuild_embedding_indexes_for_dimension(
 
 
 def _store_supports_concurrent_rebuild(url: str) -> bool:
-    return not url.startswith(_EMBEDDED_SURREAL_SCHEMES)
+    return not is_embedded_surreal_url(url)
 
 
 async def _reconcile_embedding_dimension(driver: SchemaDriver, ownership: SchemaOwnership) -> None:
@@ -1146,14 +1140,14 @@ async def _first_invalid_graph_enum_value(
 
 
 def render_fulltext_compatible_sql(sql: str, *, url: str) -> str:
-    if url.startswith(_EMBEDDED_SURREAL_SCHEMES):
+    if is_embedded_surreal_url(url):
         return sql.replace("FULLTEXT ANALYZER", "SEARCH ANALYZER")
     return sql
 
 
 def render_surreal_compatible_sql(sql: str, *, url: str) -> str:
     rendered = render_fulltext_compatible_sql(sql, url=url)
-    if not url.startswith(_EMBEDDED_SURREAL_SCHEMES):
+    if not is_embedded_surreal_url(url):
         rendered = (
             rendered.replace("type::is::string", "type::is_string")
             .replace("type::is::object", "type::is_object")
@@ -1178,7 +1172,7 @@ async def _graph_schema_ownership(driver: SchemaDriver) -> AsyncIterator[SchemaO
         ownership = await try_acquire_schema_ownership(
             lease_execute,
             mutation_execute=driver.execute_query,
-            renew_after_operation=driver._url.startswith(_EMBEDDED_SURREAL_SCHEMES),
+            renew_after_operation=is_embedded_surreal_url(driver._url),
         )
         while ownership is None:
             await asyncio.sleep(0.2)
@@ -1192,7 +1186,7 @@ async def _graph_schema_ownership(driver: SchemaDriver) -> AsyncIterator[SchemaO
                     lease_execute,
                     initialize=False,
                     mutation_execute=driver.execute_query,
-                    renew_after_operation=driver._url.startswith(_EMBEDDED_SURREAL_SCHEMES),
+                    renew_after_operation=is_embedded_surreal_url(driver._url),
                 )
         try:
             try:
@@ -1330,7 +1324,7 @@ async def _bootstrap_owned_schema(
             )
         await migrate_lifecycle_repair(
             ownership.read,
-            concurrent=not driver._url.startswith(_EMBEDDED_SURREAL_SCHEMES),
+            concurrent=not is_embedded_surreal_url(driver._url),
             resume=False,
             ownership=ownership,
         )
