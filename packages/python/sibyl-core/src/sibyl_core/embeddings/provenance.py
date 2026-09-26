@@ -86,6 +86,12 @@ def document_chunk_embedding_metadata(
     from the same content embedding configuration, so both sides derive the
     stamp from those three values and the chunk text contract version.
     """
+    if provider == "bedrock":
+        # The same model routed through us., global. or an inference-profile
+        # ARN produces the same vectors, as the Bedrock provider records it.
+        from sibyl_core.ai.bedrock import arn_model_id, remove_geo_prefix
+
+        model = remove_geo_prefix(arn_model_id(model) or model)
     return {
         "provider": provider,
         "model": model,

@@ -884,3 +884,18 @@ def test_connection_drops_are_transient() -> None:
 
     assert is_transient_provider_error(ConnectionError("reset by peer"))
     assert is_transient_provider_error(ConnectError("connection refused"))
+
+
+def test_bedrock_chunk_stamps_name_the_model_not_the_route() -> None:
+    from sibyl_core.embeddings.provenance import document_chunk_embedding_metadata
+
+    stamps = {
+        document_chunk_embedding_metadata(provider="bedrock", model=model, dimensions=1536)["model"]
+        for model in (
+            "cohere.embed-v4:0",
+            "us.cohere.embed-v4:0",
+            "global.cohere.embed-v4:0",
+            "arn:aws:bedrock:us-west-2:123456789012:inference-profile/us.cohere.embed-v4:0",
+        )
+    }
+    assert stamps == {"cohere.embed-v4:0"}
