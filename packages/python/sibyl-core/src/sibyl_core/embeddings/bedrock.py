@@ -66,11 +66,24 @@ _INPUT_TYPES = {"query": "search_query", "document": "search_document"}
 
 
 class BedrockEmbeddingError(RuntimeError):
-    """Raised when Bedrock refuses or garbles an embedding request."""
+    """Raised when Bedrock refuses or garbles an embedding request.
 
-    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+    ``error_type`` is the AWS error name, such as ``ValidationException`` or
+    ``ServiceQuotaExceededException``. The HTTP status alone cannot tell them
+    apart: Bedrock answers both an unacceptable input and an exhausted quota
+    with 400.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        error_type: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.error_type = error_type
 
 
 def validate_cohere_embedding(model: str, dimensions: int) -> None:
@@ -229,10 +242,12 @@ class BedrockEmbeddingProvider:
             if attempt < self._max_attempts and _retryable(response):
                 await asyncio.sleep(_backoff(attempt))
                 continue
+            error_type = _error_type(response)
             raise BedrockEmbeddingError(
-                f"Bedrock embedding request failed with HTTP {response.status_code}: "
-                f"{_error_message(response)}",
+                f"Bedrock embedding request failed with HTTP {response.status_code}"
+                f"{f' ({error_type})' if error_type else ''}: {_error_message(response)}",
                 status_code=response.status_code,
+                error_type=error_type,
             )
         raise AssertionError("unreachable")
 
@@ -305,6 +320,25 @@ def _retryable(response: httpx.Response) -> bool:
 
 def _backoff(attempt: int) -> float:
     return random.uniform(0.0, min(_BACKOFF_CAP_SECONDS, 2.0 ** (attempt - 1)))
+
+
+def _error_type(response: httpx.Response) -> str | None:
+    """The AWS error name, from ``x-amzn-ErrorType`` or the JSON ``__type``.
+
+    The header reads ``ValidationException:http://internal.amazon.com/...``
+    and ``__type`` may carry a namespace (``com.amazon.bedrock#...``); both
+    reduce to the bare name.
+    """
+    raw = response.headers.get("x-amzn-errortype", "")
+    if not raw:
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+        value = payload.get("__type") if isinstance(payload, dict) else None
+        raw = value if isinstance(value, str) else ""
+    name = raw.split(":", 1)[0].rsplit("#", 1)[-1].strip()
+    return name or None
 
 
 def _error_message(response: httpx.Response) -> str:
