@@ -38,7 +38,7 @@ dependencies = [
     "fastapi>=0.141.1",
     "mcp>=2.2.0,<3",
     "starlette>=1.4.1",
-    "uvicorn[standard]>=0.52.4",
+    "uvicorn[standard]>=0.53.0",
     # Settings (NoDecode needs 2.7)
     "pydantic-settings>=2.7",
     # Database (server-only)
