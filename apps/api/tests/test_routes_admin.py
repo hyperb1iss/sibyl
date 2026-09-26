@@ -1032,6 +1032,12 @@ async def test_embedding_sweep_status_names_schema_waits_and_evidence_waits(monk
     # Another tenant's identifier reaches only a deployment admin.
     assert "waiting_on_organizations" not in owner["graph"]
     assert admin["graph"]["waiting_on_organizations"] == ["broken-org"]
+    # Everyone sees when the plane settles on the evidence published so far.
+    from sibyl_core.config import settings as core_settings
+
+    bound = core_settings.embedding_sweep_evidence_wait_seconds
+    assert owner["graph"]["evidence_wait_seconds"] == bound
+    assert owner["graph"]["settles_in_seconds"] == max(0, round(bound - 120))
 
 
 def test_embedding_plane_state_reports_only_the_current_model_as_complete() -> None:

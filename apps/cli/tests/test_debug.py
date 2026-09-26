@@ -171,12 +171,14 @@ def test_embedding_lines_name_the_organizations_a_plane_waits_on() -> None:
                 "state": "awaiting_evidence",
                 "waiting_on_count": 1,
                 "waiting_on_organizations": ["broken-org"],
+                "settles_in_seconds": 480,
             }
         }
     )
 
     assert "graph awaiting_evidence" in lines[0]
     assert "broken-org" in lines[1]
+    assert "settles on the evidence published so far in 480s" in lines[1]
 
 
 @patch("sibyl_cli.debug.get_client")

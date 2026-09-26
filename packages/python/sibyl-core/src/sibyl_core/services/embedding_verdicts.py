@@ -69,6 +69,18 @@ class LegacyVerdicts:
             for verdict in (self.graph, self.document_chunks)
         )
 
+    @property
+    def deferred_age_seconds(self) -> float | None:
+        """How long the longest-waiting deferred plane has waited, if any is deferred."""
+        ages = [
+            float(age)
+            for verdict in (self.graph, self.document_chunks)
+            if isinstance(verdict, dict)
+            and verdict.get("legacy_deferred")
+            and isinstance(age := verdict.get("deferred_age_seconds"), int | float)
+        ]
+        return max(ages) if ages else None
+
 
 def verdict_settled(verdict: PlaneVerdict) -> bool:
     """Whether a plane may sweep: its verdict is recorded, or it has no provider."""

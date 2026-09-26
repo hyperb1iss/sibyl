@@ -347,9 +347,16 @@ def _embedding_sweep_lines(sweep: object) -> list[str]:
         waiting = state.get("waiting_on_count")
         if summary.startswith("awaiting_evidence") and isinstance(waiting, int) and waiting:
             names = ", ".join(str(item) for item in state.get("waiting_on_organizations") or [])
+            settles = state.get("settles_in_seconds")
+            deadline = (
+                f"; settles on the evidence published so far in {settles:,}s"
+                if isinstance(settles, int)
+                else ""
+            )
             lines.append(
                 f"                [{ELECTRIC_YELLOW}]waiting for {waiting:,} organization(s) to"
-                f" publish their graph evidence{': ' + names if names else ''}[/{ELECTRIC_YELLOW}]"
+                f" publish their graph evidence{': ' + names if names else ''}"
+                f"{deadline}[/{ELECTRIC_YELLOW}]"
             )
         if state.get("legacy_notice") and not state.get("legacy_warning"):
             lines.append(

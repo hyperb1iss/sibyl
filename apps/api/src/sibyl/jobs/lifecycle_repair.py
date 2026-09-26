@@ -334,7 +334,13 @@ def _record_embedding_sweep(
     )
 
 
-async def _settle_deferred(organizations: list[str], deferred: list[str], planes: int) -> None:
+async def _settle_deferred(
+    organizations: list[str],
+    deferred: list[str],
+    planes: int,
+    *,
+    oldest_wait_seconds: float | None = None,
+) -> None:
     """Settle deferred planes once every organization has published, and say who is missing.
 
     Publication is persistent, so an organization counts once it has
@@ -359,12 +365,20 @@ async def _settle_deferred(organizations: list[str], deferred: list[str], planes
     if not deferred:
         return
     if waiting_on:
+        bound = settings.embedding_sweep_evidence_wait_seconds
         log.warning(
             "embedding_evidence_waiting_on_organizations",
             deferred_planes=planes,
             waiting_on=len(waiting_on),
             organizations=waiting_on[:10],
-            wait_seconds=settings.embedding_sweep_evidence_wait_seconds,
+            wait_seconds=bound,
+            # The longest-waiting plane settles on the evidence published so
+            # far within this many seconds.
+            settles_within_seconds=(
+                max(0, round(bound - oldest_wait_seconds))
+                if oldest_wait_seconds is not None
+                else None
+            ),
         )
         return
     for organization_id in deferred:
@@ -386,6 +400,7 @@ async def repair_lifecycle_all_orgs(ctx: dict[str, Any]) -> dict[str, int]:  # n
         log.info("embedding_sweep_waiting_for_content_schema")
     organizations = await list_org_ids()
     deferred: list[str] = []
+    oldest_wait: float | None = None
     exercised = unhealthy = False
     for organization_id in organizations:
         summary["organizations"] += 1
@@ -402,6 +417,9 @@ async def repair_lifecycle_all_orgs(ctx: dict[str, Any]) -> dict[str, int]:  # n
         verdicts = next((item for item in outcomes if isinstance(item, LegacyVerdicts)), None)
         if verdicts is not None and verdicts.deferred:
             deferred.append(organization_id)
+            age = verdicts.deferred_age_seconds
+            if age is not None:
+                oldest_wait = age if oldest_wait is None else max(oldest_wait, age)
             summary["embedding_deferred"] += sum(
                 1
                 for verdict in (verdicts.graph, verdicts.document_chunks)
@@ -441,7 +459,12 @@ async def repair_lifecycle_all_orgs(ctx: dict[str, Any]) -> dict[str, int]:  # n
                         summary[key] += value
     if sweeping:
         try:
-            await _settle_deferred(organizations, deferred, summary["embedding_deferred"])
+            await _settle_deferred(
+                organizations,
+                deferred,
+                summary["embedding_deferred"],
+                oldest_wait_seconds=oldest_wait,
+            )
         except Exception as exc:
             log.warning("embedding_deferred_settle_failed", error_type=type(exc).__name__)
     # The deployment record vouches only for a configuration a pass actually

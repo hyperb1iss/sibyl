@@ -58,6 +58,7 @@ from sibyl_core.backends.surreal.url_schemes import (
     surreal_http_base_url,
     surreal_url_credentials,
 )
+from sibyl_core.config import settings as core_settings
 from sibyl_core.models import CrawlStatus, Entity
 from sibyl_core.models.entities import EntityType
 from sibyl_core.utils import fingerprint_text
@@ -331,6 +332,13 @@ async def get_embedding_sweep_status(
             entry["waiting_on_count"] = wait.get("count") or 0
             if deployment_admin:
                 entry["waiting_on_organizations"] = wait.get("organizations") or []
+            # A plane waits at most the configured bound, then settles on the
+            # evidence published so far.
+            bound = core_settings.embedding_sweep_evidence_wait_seconds
+            age = state.get("deferred_age_seconds")
+            entry["evidence_wait_seconds"] = bound
+            if isinstance(age, int | float):
+                entry["settles_in_seconds"] = max(0, round(bound - age))
         status[plane] = jsonable_encoder(entry, custom_encoder={SurrealDatetime: str})
     return status
 
