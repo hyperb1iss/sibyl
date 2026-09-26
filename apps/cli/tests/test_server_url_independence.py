@@ -119,3 +119,40 @@ def test_migrate_refuses_a_non_server_source_without_echoing_it(surreal_url: str
         )
 
     assert "hunter2" not in str(caught.value).lower()
+
+
+@pytest.mark.parametrize(
+    ("surreal_url", "username", "password", "expected"),
+    [
+        # The URL's userinfo, percent-decoded, when no arguments are given.
+        ("ws://a%40b:p%3Aw@surreal:8000/rpc", None, None, ("a@b", "p:w")),
+        ("ws://admin@surreal:8000/rpc", None, None, ("admin", "")),
+        # Explicit arguments override the URL, one field at a time.
+        ("ws://a%40b:p%3Aw@surreal:8000/rpc", "cli-user", None, ("cli-user", "p:w")),
+        ("ws://a%40b:p%3Aw@surreal:8000/rpc", "cli-user", "cli-pass", ("cli-user", "cli-pass")),
+        # No userinfo and no arguments: the historical root:root default.
+        ("ws://surreal:8000/rpc", None, None, ("root", "root")),
+    ],
+)
+def test_migrate_authenticates_with_url_userinfo_unless_overridden(
+    monkeypatch, surreal_url: str, username, password, expected
+) -> None:
+    import httpx
+
+    from sibyl_cli import migrate
+
+    sent: list[object] = []
+
+    def fake_post(url: str, **kwargs: object) -> httpx.Response:
+        sent.append(kwargs["auth"])
+        assert "@" not in url
+        return httpx.Response(
+            200, json=[{"status": "OK", "result": []}], request=httpx.Request("POST", url)
+        )
+
+    monkeypatch.setattr(migrate.httpx, "post", fake_post)
+    migrate._source_sql(
+        surreal_url=surreal_url, username=username, password=password, statement="RETURN 1;"
+    )
+
+    assert sent == [expected]

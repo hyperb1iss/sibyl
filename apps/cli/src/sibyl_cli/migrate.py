@@ -20,7 +20,12 @@ import typer
 
 from sibyl_cli.client import get_client
 from sibyl_cli.common import error, info, run_async, success
-from sibyl_core.backends.surreal.url_schemes import redact_surreal_url, surreal_http_base_url
+from sibyl_core.backends.surreal.url_schemes import (
+    redact_surreal_url,
+    safe_error_detail,
+    surreal_http_base_url,
+    surreal_url_credentials,
+)
 
 app = typer.Typer(help="Migrate data between Sibyl instances")
 
@@ -69,11 +74,26 @@ def _save_ledger(path: Path, route: dict[str, str], ledger: dict[str, str]) -> N
     tmp.replace(path)
 
 
+_DEFAULT_SOURCE_CREDENTIAL = "root"
+
+
+def _source_credentials(
+    surreal_url: str, username: str | None, password: str | None
+) -> tuple[str, str]:
+    """Explicit arguments first, then the URL's userinfo, then root:root."""
+    from_url = surreal_url_credentials(surreal_url)
+    if username is None:
+        username = from_url[0] if from_url else _DEFAULT_SOURCE_CREDENTIAL
+    if password is None:
+        password = from_url[1] if from_url else _DEFAULT_SOURCE_CREDENTIAL
+    return username, password
+
+
 def _source_sql(
     *,
     surreal_url: str,
-    username: str,
-    password: str,
+    username: str | None,
+    password: str | None,
     statement: str,
 ) -> list[Any]:
     """Run one read-only statement against the local content store."""
@@ -85,19 +105,34 @@ def _source_sql(
             f"Source SurrealDB URL must be a server URL (ws, wss, http, or https), "
             f"not {redact_surreal_url(surreal_url)}"
         )
-    response = httpx.post(
-        f"{base}/sql",
-        content=statement,
-        auth=(username, password),
-        headers={
-            "Accept": "application/json",
-            "Content-Type": "text/plain",
-            "surreal-ns": "sibyl_content",
-            "surreal-db": "content",
-        },
-        timeout=60.0,
-    )
-    response.raise_for_status()
+    failure: RuntimeError | None = None
+    try:
+        response = httpx.post(
+            f"{base}/sql",
+            content=statement,
+            auth=_source_credentials(surreal_url, username, password),
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "text/plain",
+                "surreal-ns": "sibyl_content",
+                "surreal-db": "content",
+            },
+            timeout=60.0,
+        )
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        # httpx quotes the request URL, whose path can carry a secret. The
+        # replacement is raised outside this block so the original is not
+        # chained onto it.
+        if isinstance(exc, httpx.HTTPStatusError):
+            detail = f"HTTP {exc.response.status_code}"
+        else:
+            detail = safe_error_detail(exc, base) or type(exc).__name__
+        failure = RuntimeError(
+            f"Source SurrealDB request to {redact_surreal_url(surreal_url)} failed: {detail}"
+        )
+    if failure is not None:
+        raise failure
     payload = response.json()
     results: list[Any] = []
     for item in payload:
@@ -110,8 +145,8 @@ def _source_sql(
 def _fetch_source_page(
     *,
     surreal_url: str,
-    username: str,
-    password: str,
+    username: str | None,
+    password: str | None,
     organization_id: str,
     scope_key: str,
     start: int,
@@ -197,20 +232,23 @@ def to_team(
         typer.Option("--source-surreal-url", help="Local SurrealDB endpoint"),
     ] = "ws://localhost:8000/rpc",
     source_surreal_user: Annotated[
-        str,
-        typer.Option("--source-surreal-user", help="Local SurrealDB username"),
-    ] = "root",
+        str | None,
+        typer.Option(
+            "--source-surreal-user",
+            help="Local SurrealDB username (defaults to the URL's userinfo, else root)",
+        ),
+    ] = None,
     source_surreal_pass: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--source-surreal-pass",
             envvar="SIBYL_SOURCE_SURREAL_PASS",
             show_default=False,
-            help="Local SurrealDB password (prefer the "
-            "SIBYL_SOURCE_SURREAL_PASS environment variable; a value on "
-            "the command line lands in shell history)",
+            help="Local SurrealDB password (defaults to the URL's userinfo, else "
+            "root; prefer the SIBYL_SOURCE_SURREAL_PASS environment variable, since "
+            "a value on the command line lands in shell history)",
         ),
-    ] = "root",
+    ] = None,
     dry_run: Annotated[
         bool,
         typer.Option("--dry-run", help="Count and preview without writing"),

@@ -14,7 +14,6 @@ import socket
 from importlib.metadata import PackageNotFoundError, version as pkg_version
 from pathlib import Path
 from typing import Annotated, Any
-from urllib.parse import urlparse
 
 import typer
 
@@ -34,7 +33,12 @@ from sibyl.cli.export import app as export_app
 from sibyl.cli.generate import app as generate_app
 from sibyl.cli.migrate import app as migrate_app
 from sibyl.cli.up_cmd import down, status as up_status, up
-from sibyl_core.backends.surreal.url_schemes import redact_surreal_url
+from sibyl_core.backends.surreal.url_schemes import (
+    REMOTE_SCHEMES,
+    redact_surreal_url,
+    surreal_url_host_port,
+    surreal_url_scheme,
+)
 
 # Main app
 app = typer.Typer(
@@ -325,11 +329,17 @@ def _check_surreal_services(settings: Any) -> bool:
 
     all_good = True
     surreal_url = settings.resolved_surreal_url
-    parsed_surreal = urlparse(surreal_url)
+    # Parsed through the guarded helpers: urlparse and .port raise, quoting
+    # the netloc or port text, on some malformed URLs.
+    location = (
+        surreal_url_host_port(surreal_url)
+        if surreal_url_scheme(surreal_url) in REMOTE_SCHEMES
+        else None
+    )
 
-    if parsed_surreal.scheme in {"ws", "wss", "http", "https"} and parsed_surreal.hostname:
-        surreal_host = parsed_surreal.hostname
-        surreal_port = parsed_surreal.port or 8000
+    if location is not None:
+        surreal_host, parsed_port = location
+        surreal_port = parsed_port or 8000
         if _tcp_service_running(surreal_host, surreal_port):
             success(f"SurrealDB running on {surreal_host}:{surreal_port}")
         else:

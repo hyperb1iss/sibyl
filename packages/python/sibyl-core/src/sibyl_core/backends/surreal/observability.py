@@ -107,14 +107,17 @@ def _error_category(message: str) -> str:
 
 
 def _error_log_fields(error: BaseException) -> dict[str, int | str | float]:
-    from sibyl_core.backends.surreal.connection import SurrealConnectTimeout
+    from sibyl_core.backends.surreal.connection import SurrealConnectError, SurrealConnectTimeout
 
     message = _error_message(error)
-    # A connect timeout never reached the server, so it must not read as a
-    # query timeout in the receipt.
-    category = (
-        "connect_timeout" if isinstance(error, SurrealConnectTimeout) else _error_category(message)
-    )
+    # A connect failure never reached the server, so it must not read as a
+    # query failure in the receipt.
+    if isinstance(error, SurrealConnectTimeout):
+        category = "connect_timeout"
+    elif isinstance(error, SurrealConnectError):
+        category = "connect_error"
+    else:
+        category = _error_category(message)
     fields: dict[str, int | str | float] = {
         "error_type": type(error).__name__,
         "error_category": category,

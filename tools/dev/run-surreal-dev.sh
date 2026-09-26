@@ -26,13 +26,47 @@ is_local_service() {
   [[ -z "$value" ]]
 }
 
+# The SurrealDB URL in a form that is safe to print, following the same rules
+# as sibyl_core's redact_surreal_url: the scheme and, for a server, its host and
+# port. Userinfo, path, query, and an embedded store's path are never shown.
+redact_surreal_url() {
+  local url="${1:-}"
+  url="${url#"${url%%[![:space:]]*}"}"
+  url="${url%"${url##*[![:space:]]}"}"
+  local scheme_pattern='^([A-Za-z][A-Za-z0-9+.-]*)://(.*)$'
+  if [[ ! "$url" =~ $scheme_pattern ]]; then
+    printf '%s\n' "(no URL scheme)"
+    return 0
+  fi
+  local scheme rest authority hostport
+  scheme="$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')"
+  rest="${BASH_REMATCH[2]}"
+  case "$scheme" in
+    memory|mem|surrealkv|surrealkv+versioned|file)
+      printf '%s\n' "${scheme}:// (embedded)"
+      return 0
+      ;;
+  esac
+  authority="${rest%%[/?#]*}"
+  hostport="${authority##*@}"
+  local host_pattern='^([A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(:[0-9]+)?$'
+  if [[ -z "$hostport" || ! "$hostport" =~ $host_pattern ]]; then
+    printf '%s\n' "${scheme}:// (host not parsed)"
+    return 0
+  fi
+  printf '%s\n' "${scheme}://$(printf '%s' "$hostport" | tr '[:upper:]' '[:lower:]')"
+}
+
 usage() {
   cat <<'EOF'
 Usage: moon run dev -- [options]
 
 Options:
   --lan             Bind the API for access from other devices on the local network
-  --print-env       Print resolved runtime environment and exit
+  --print-env       Print resolved runtime environment and exit; the SurrealDB
+                    URL is redacted to scheme, host, and port
+  --print-env-raw   Same, but print the SurrealDB URL verbatim so the output
+                    can be sourced; it may contain credentials
   --help            Show this help
 EOF
 }
@@ -413,12 +447,18 @@ resolve_forwarded_allow_ips() {
 
 main() {
   local print_env=false
+  local print_env_raw=false
   local lan_mode=false
 
   while (($# > 0)); do
     case "$1" in
       --print-env)
         print_env=true
+        shift
+        ;;
+      --print-env-raw)
+        print_env=true
+        print_env_raw=true
         shift
         ;;
       --lan)
@@ -568,7 +608,11 @@ main() {
       printf 'SIBYL_ALLOWED_DEV_ORIGINS=%s\n' "$SIBYL_ALLOWED_DEV_ORIGINS"
     fi
     if [[ -n "${SIBYL_SURREAL_URL:-}" ]]; then
-      printf 'SIBYL_SURREAL_URL=%s\n' "$SIBYL_SURREAL_URL"
+      if [[ "$print_env_raw" == true ]]; then
+        printf 'SIBYL_SURREAL_URL=%s\n' "$SIBYL_SURREAL_URL"
+      else
+        printf 'SIBYL_SURREAL_URL=%s\n' "$(redact_surreal_url "$SIBYL_SURREAL_URL")"
+      fi
     fi
     if [[ -n "${SURREAL_DATA_DIR:-}" ]]; then
       printf 'SURREAL_DATA_DIR=%s\n' "$SURREAL_DATA_DIR"
@@ -584,7 +628,7 @@ main() {
   echo "🔮 Store: $SIBYL_STORE"
   echo "🔮 Auth store: $SIBYL_AUTH_STORE"
   if [[ -n "${SIBYL_SURREAL_URL:-}" ]]; then
-    echo "🔮 Surreal URL: $SIBYL_SURREAL_URL"
+    echo "🔮 Surreal URL: $(redact_surreal_url "$SIBYL_SURREAL_URL")"
   fi
   echo "🪄 Coordination: $coordination_backend"
   if [[ -n "${SURREAL_DATA_DIR:-}" ]]; then

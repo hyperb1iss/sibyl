@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Protocol, cast
 import structlog
 
 from sibyl_core.backends.surreal.connection import (
+    SurrealConnectError,
     SurrealConnectTimeout,
     _can_retry_query,
     _can_retry_raw_query,
@@ -393,7 +394,13 @@ class _PooledConnection:
 
             started_at = query_start()
             budget = _connect_timeout_seconds(self._url)
-            client = cast(SurrealClient, AsyncSurreal(self._url))
+            connect_failure: SurrealConnectError | None = None
+            try:
+                client = cast(SurrealClient, AsyncSurreal(self._url))
+            except Exception as exc:
+                connect_failure = self._log_connect_error(exc, attempt, started_at, budget)
+            if connect_failure is not None:
+                raise connect_failure
             try:
                 async with asyncio.timeout(budget):
                     await self._handshake(client)
@@ -433,38 +440,50 @@ class _PooledConnection:
             except Exception as exc:
                 with contextlib.suppress(Exception):
                     await client.close()
-                log.warning(
-                    "surreal_connect_failed",
-                    attempt=attempt,
-                    elapsed_ms=elapsed_ms(started_at),
-                    timeout_seconds=budget,
-                    url_scheme=surreal_url_scheme(self._url) or "unknown",
-                    namespace=self._namespace,
-                    database=self._database,
-                    error_type=type(exc).__name__,
-                    error_category="connect_error",
-                )
-                raise
+                connect_failure = self._log_connect_error(exc, attempt, started_at, budget)
+            if connect_failure is not None:
+                raise connect_failure
             self._client = client
             return client
 
+    def _log_connect_error(
+        self,
+        cause: Exception,
+        attempt: int,
+        started_at: float,
+        budget: float | None,
+    ) -> SurrealConnectError:
+        """Log a failed connect and build the redacted error to raise.
+
+        The caller raises it after leaving its except block, so the SDK error,
+        whose message can quote the full URL, is not chained as its context.
+        """
+        failure = SurrealConnectError(url=self._url, cause=cause)
+        log.warning(
+            "surreal_connect_failed",
+            attempt=attempt,
+            elapsed_ms=elapsed_ms(started_at),
+            timeout_seconds=budget,
+            url_scheme=failure.url_scheme,
+            namespace=self._namespace,
+            database=self._database,
+            # The raised class, so this line joins the query receipt on
+            # error_type; the SDK error's class is the cause.
+            error_type=type(failure).__name__,
+            cause_type=failure.cause_type,
+            error_category="connect_error",
+        )
+        return failure
+
     async def _connect_shared_embedded(self) -> SurrealClient:
         started_at = query_start()
+        connect_failure: SurrealConnectError | None = None
         try:
             engine = await _lease_shared_embedded_engine(self._url, self._authenticate)
         except Exception as exc:
-            log.warning(
-                "surreal_connect_failed",
-                attempt=1,
-                elapsed_ms=elapsed_ms(started_at),
-                timeout_seconds=None,
-                url_scheme=surreal_url_scheme(self._url) or "unknown",
-                namespace=self._namespace,
-                database=self._database,
-                error_type=type(exc).__name__,
-                error_category="connect_error",
-            )
-            raise
+            connect_failure = self._log_connect_error(exc, 1, started_at, None)
+        if connect_failure is not None:
+            raise connect_failure
         session = _EmbeddedNamespaceSession(engine, self._namespace, self._database)
         self._client = session
         return session

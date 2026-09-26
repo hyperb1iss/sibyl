@@ -903,5 +903,49 @@ async def test_surreal_observability_never_returns_or_requests_url_credentials(
         "https://surreal.example.com:8443/health",
         "https://surreal.example.com:8443/metrics",
     ]
-    # The URL's own userinfo still authenticates the metrics read.
-    assert requests[1][1] == ("admin", "Hunter2")
+    # The URL's own userinfo still authenticates both reads, percent-decoded.
+    assert [auth for _url, auth in requests] == [("admin", "Hunter2"), ("admin", "Hunter2")]
+
+
+@pytest.mark.asyncio
+async def test_surreal_observability_shows_no_path_and_authenticates_health(
+    monkeypatch,
+) -> None:
+    requests: list[tuple[str, object]] = []
+
+    class Client:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def __aenter__(self) -> Client:
+            return self
+
+        async def __aexit__(self, *_exc: object) -> None:
+            return None
+
+        async def get(self, url: str, auth: object = None) -> object:
+            requests.append((url, auth))
+            status = 200 if auth == ("a@b", "p:w") else 401
+            return SimpleNamespace(status_code=status, text="")
+
+    monkeypatch.setattr(admin_routes.httpx, "AsyncClient", Client)
+    monkeypatch.setattr(
+        admin_routes,
+        "settings",
+        SimpleNamespace(
+            resolved_surreal_url="wss://a%40b:p%3Aw@host:8443/private/proxy/rpc",
+            surreal_username="",
+            surreal_password=SimpleNamespace(get_secret_value=lambda: ""),
+        ),
+    )
+
+    status = await admin_routes.get_surreal_observability_status()
+
+    # Requests keep the proxy path; the payload shows scheme, host, and port.
+    assert [url for url, _auth in requests] == [
+        "https://host:8443/private/proxy/health",
+        "https://host:8443/private/proxy/metrics",
+    ]
+    assert status["base_url"] == "https://host:8443"
+    assert status["health_http_status"] == 200
+    assert status["metrics_http_status"] == 200

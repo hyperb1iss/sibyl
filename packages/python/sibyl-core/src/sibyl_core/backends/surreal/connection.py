@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import re
 
-from sibyl_core.backends.surreal.url_schemes import surreal_url_scheme
+from sibyl_core.backends.surreal.url_schemes import (
+    redact_surreal_url,
+    safe_error_detail,
+    surreal_url_scheme,
+)
 
 _READ_ONLY_QUERY_TOKENS = {"SELECT", "RETURN", "INFO", "SHOW"}
 _RAW_READ_ONLY_QUERY_TOKENS = {*_READ_ONLY_QUERY_TOKENS, "LET"}
@@ -55,6 +59,8 @@ def _is_connection_closed_error(exc: BaseException) -> bool:
 def _is_transient_connection_error(exc: BaseException) -> bool:
     if isinstance(exc, SurrealConnectTimeout):
         return True
+    if isinstance(exc, SurrealConnectError):
+        return exc.transient
     if _is_connection_closed_error(exc):
         return True
     if isinstance(exc, KeyError) and exc.args:
@@ -105,6 +111,30 @@ class SurrealConnectTimeout(TimeoutError):
 def _log_scheme(url: str) -> str:
     """The URL's scheme for an error or log field; never any other part of it."""
     return surreal_url_scheme(url) or "unknown"
+
+
+class SurrealConnectError(ConnectionError):
+    """Opening a SurrealDB connection failed, described without the URL.
+
+    The SDK's own connect errors can quote the whole URL, credentials
+    included ("ws:///user:pass@host/rpc isn't a valid URI"). This carries the
+    redacted endpoint, the SDK error's class, and its message only when that
+    message quotes no secret part of the URL. Raise it outside the handler
+    that caught the SDK error, so the original is neither the cause nor the
+    context and no traceback can print it.
+    """
+
+    def __init__(self, *, url: str, cause: BaseException) -> None:
+        detail = safe_error_detail(cause, url)
+        suffix = f": {detail}" if detail else ""
+        super().__init__(
+            f"SurrealDB connect to {redact_surreal_url(url)} failed "
+            f"({type(cause).__name__}){suffix}"
+        )
+        self.url_scheme = _log_scheme(url)
+        self.cause_type = type(cause).__name__
+        # Retry decisions keep following the original error.
+        self.transient = _is_transient_connection_error(cause)
 
 
 class SurrealQueryError(RuntimeError):

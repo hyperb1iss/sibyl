@@ -72,8 +72,12 @@ def normalize_surreal_url(url: str) -> str:
     return f"{parts[0]}://{parts[1]}" if parts else url.strip()
 
 
-def _host_and_port(url: str) -> tuple[str, int | None] | None:
-    """The URL's host (bracketed when IPv6) and port, or None if they do not parse."""
+def surreal_url_host_port(url: str) -> tuple[str, int | None] | None:
+    """The URL's host and port, or None when they do not parse.
+
+    urlsplit raises, quoting the netloc, on some malformed hosts and on port
+    text that is not a number; both come back as None here instead.
+    """
     try:
         parsed = urlsplit(normalize_surreal_url(url))
         host, port = parsed.hostname, parsed.port
@@ -81,6 +85,15 @@ def _host_and_port(url: str) -> tuple[str, int | None] | None:
         return None
     if not host:
         return None
+    return host, port
+
+
+def _host_and_port(url: str) -> tuple[str, int | None] | None:
+    """The URL's host (bracketed when IPv6) and port, or None if they do not parse."""
+    location = surreal_url_host_port(url)
+    if location is None:
+        return None
+    host, port = location
     return (f"[{host}]" if ":" in host else host), port
 
 
@@ -104,11 +117,13 @@ def redact_surreal_url(url: str) -> str:
 
 
 def surreal_http_base_url(url: str) -> str | None:
-    """The server's plain-HTTP base URL, without userinfo, query, or /rpc.
+    """The server's plain-HTTP base URL for requests, without userinfo or query.
 
-    None for anything but a ws, wss, http, or https URL with a parseable host.
-    Userinfo is left out so the base URL can appear in a response or error
-    message; pass surreal_url_credentials() to the HTTP client instead.
+    A transport value, not a display one: it keeps the path prefix a proxy may
+    need, and a path can itself carry a secret, so never show or return it.
+    Show redact_surreal_url() instead. None for anything but a ws, wss, http,
+    or https URL with a parseable host. Pass surreal_url_credentials() to the
+    HTTP client for authentication.
     """
     scheme = surreal_url_scheme(url)
     if scheme not in REMOTE_SCHEMES:
@@ -121,6 +136,58 @@ def surreal_http_base_url(url: str) -> str | None:
     netloc = host if port is None else f"{host}:{port}"
     path = urlsplit(normalize_surreal_url(url)).path.rstrip("/").removesuffix("/rpc")
     return f"{http_scheme}://{netloc}{path}".rstrip("/")
+
+
+_FRAGMENT_SEPARATORS = re.compile(r"[@:/?#&=;]+")
+_HARMLESS_FRAGMENTS = frozenset({"rpc", "/rpc", "/rpc/", "sql", "http", "https", "ws", "wss"})
+
+
+def _secret_fragments(url: str) -> list[str]:
+    """Every piece of the URL that must not reach an error message or log.
+
+    Worked out without urlsplit, which itself raises (echoing the netloc) on
+    some malformed hosts. The scheme and a bare host are not secret; the
+    userinfo, path, query, and fragment are, along with anything left over
+    when the authority cannot be told apart from the path.
+    """
+    parts = split_surreal_url(url)
+    if parts is None:
+        secret = [url.strip()]
+    elif parts[0] not in EMBEDDED_SCHEMES and surreal_url_host_port(url) is None:
+        # No clean host and port: everything after the scheme is suspect,
+        # including port text that is not a number.
+        secret = [parts[1]]
+    else:
+        remainder = parts[1]
+        authority_end = len(remainder)
+        for marker in "/?#":
+            index = remainder.find(marker)
+            if index != -1:
+                authority_end = min(authority_end, index)
+        authority, after = remainder[:authority_end], remainder[authority_end:]
+        userinfo = authority.rpartition("@")[0]
+        secret = [userinfo, after] if authority else [remainder]
+    fragments = set(secret)
+    for piece in secret:
+        fragments.update(_FRAGMENT_SEPARATORS.split(piece))
+    return sorted(
+        (
+            fragment
+            for fragment in fragments
+            if len(fragment) >= 3 and fragment.lower() not in _HARMLESS_FRAGMENTS
+        ),
+        key=len,
+        reverse=True,
+    )
+
+
+def safe_error_detail(error: BaseException, url: str) -> str:
+    """The error's message when it quotes no secret part of the URL, else ''."""
+    message = str(error).strip()
+    lowered = message.lower()
+    if any(fragment.lower() in lowered for fragment in _secret_fragments(url)):
+        return ""
+    return message
 
 
 def surreal_url_credentials(url: str) -> tuple[str, str] | None:
@@ -206,9 +273,11 @@ __all__ = [
     "normalize_surreal_url",
     "production_surreal_url_problem",
     "redact_surreal_url",
+    "safe_error_detail",
     "split_surreal_url",
     "surreal_http_base_url",
     "surreal_url_credentials",
+    "surreal_url_host_port",
     "surreal_url_scheme",
     "unsupported_surreal_url_reason",
 ]
