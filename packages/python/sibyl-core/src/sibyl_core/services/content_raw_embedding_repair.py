@@ -175,8 +175,11 @@ async def repair_raw_capture_embeddings(
 
     The walk selects only the columns the candidate decision needs and lets
     the server drop rows whose vector already matches the configured provider,
-    so a fully current organization costs one empty page. Text is fetched only
-    for the rows about to be embedded. A provider whose dimensions differ from
+    so a fully current organization returns one empty page. The server still
+    reads every one of the organization's captures to find that out, because
+    the stamp predicate cannot be served from an index: about 1.3 s per 20,000
+    captures each pass on a native 3.2 server. Text is fetched only for the
+    rows about to be embedded. A provider whose dimensions differ from
     the schema's embedding field is refused up front: every write would fail
     the typed-array check and the paid embedding call would repeat each pass.
     """

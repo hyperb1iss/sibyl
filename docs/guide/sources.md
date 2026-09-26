@@ -140,6 +140,12 @@ sibyl context "find prior project decisions about useState" --intent review
 
 To narrow a search to one crawled source by name, use the MCP `search` tool's `source_name` filter.
 
+Right after an upgrade or an embedding model change, document search answers from lexical matches
+for chunks whose vectors are not yet counted, and the vector-only `/api/rag/search` and
+`/api/rag/code-examples` endpoints return nothing for them until the lifecycle job has classified or
+re-embedded them. See
+[Changing the Embedding Model](../deployment/environment.md#changing-the-embedding-model).
+
 ### Search Result Types
 
 When you search, results come from two places:

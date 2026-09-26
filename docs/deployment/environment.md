@@ -472,6 +472,10 @@ of these:
   `complete`, then switch providers in a second deploy. Every vector then carries a record of its
   model and the switch re-embeds exactly the stale ones.
 
+Either way, restart or replace every API and worker process in the deploy that changes the model:
+pods from the previous release left writing under a different model than the new ones write vectors
+Sibyl cannot tell apart from the old ones.
+
 Without either step Sibyl still decides from what the store held before the upgrade, and in most
 deployments it decides correctly. Vectors written before Sibyl recorded their model are classified
 once per organization and plane, and the verdict is stored. With the default `auto`, a plane is
@@ -537,7 +541,8 @@ its end. A plane whose evidence already shows a switch is re-embedded without wa
 organization counts once it has published in any pass. If one cannot publish, for example because
 its graph namespace is unreachable, the logs name it (status names it to deployment admins and
 counts it for everyone else), and the waiting planes are settled on the evidence published so far
-once `SIBYL_EMBEDDING_SWEEP_EVIDENCE_WAIT_SECONDS` have passed.
+once `SIBYL_EMBEDDING_SWEEP_EVIDENCE_WAIT_SECONDS` have passed. Status and that log line say how
+many seconds remain until then.
 
 A plane with no evidence anywhere adopts its vectors too, logs a warning, and shows
 `adopted_without_evidence` in `sibyl debug status` instead of `complete`. That state is exactly what
@@ -601,7 +606,10 @@ vectors, and is fully back when the plane completes. The threshold comes from la
 native SurrealDB 3.2 server at 20,000 entities: at a fresh switch each lane took 1 to 2 seconds and
 found nothing, with 1% of vectors converted 0.3 to 1 second, from 5% 0.1 to 0.5 seconds, and 13 to
 40 milliseconds once the sweep had finished. The vector-only document endpoints (`/api/rag/search`
-and `/api/rag/code-examples`) have no lexical lane to fall back on, so they always run.
+and `/api/rag/code-examples`) have no lexical lane to fall back on, so they always run, and after an
+upgrade or a switch they return nothing for chunks their plane does not count yet: chunks from
+before stamping until the verdict is recorded, and old-model chunks until the sweep replaces them.
+`/api/rag/hybrid-search` still finds those chunks lexically.
 
 Each pass holds a lease on its plane and checks it in the same statement as every vector write, so a
 pass that loses its lease to another process, for example after a long provider stall, writes
@@ -621,7 +629,7 @@ as refused by the provider rather than pending.
 | `SIBYL_EMBEDDING_SWEEP_BATCH_SIZE`              | `96`    | Texts sent to the provider per request                              |
 | `SIBYL_EMBEDDING_SWEEP_CONCURRENCY`             | `4`     | Most requests in flight; halves on provider throttling, then climbs |
 | `SIBYL_EMBEDDING_SWEEP_VERIFY_INTERVAL_SECONDS` | `3600`  | How long a finished plane skips its table walk                      |
-| `SIBYL_EMBEDDING_SWEEP_EVIDENCE_WAIT_SECONDS`   | `600`   | Longest a plane with no evidence waits for other organizations      |
+| `SIBYL_EMBEDDING_SWEEP_EVIDENCE_WAIT_SECONDS`   | `600`   | Longest a waiting plane waits for other organizations' evidence     |
 
 ## Retrieval Tuning
 
