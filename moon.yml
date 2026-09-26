@@ -851,11 +851,15 @@ tasks:
   release-workflow-test:
     command:
       uv run pytest tools/tests/test_ci_changes.py tools/tests/test_release_workflow.py
+      tools/tests/test_release_nightly_evidence.py tools/tests/test_release_ci_evidence.py
       tools/tests/test_workflow_cache_contract.py tools/tests/test_install_script.py -v
     inputs:
       - tools/tests/conftest.py
       - tools/tests/test_ci_changes.py
       - tools/tests/test_release_workflow.py
+      - tools/tests/test_release_nightly_evidence.py
+      - tools/tests/test_release_ci_evidence.py
+      - tools/tests/release_evidence_support.py
       - tools/tests/test_install_script.py
       - install.sh
       - tools/tests/test_workflow_cache_contract.py
@@ -875,6 +879,9 @@ tasks:
       - apps/cli/pyproject.toml
       - .github/workflows/release.yml
       - .github/workflows/publish.yml
+      # The release cites Nightly Regression runs and mirrors CI's E2E job,
+      # and these tests read both workflows.
+      - .github/workflows/nightly-regression.yml
       # The image CVE gate is shared by release, publish and CI, and this task
       # asserts the three stay in agreement. Without these the cache would
       # report a stale green after the gate itself changed.

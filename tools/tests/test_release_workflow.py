@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from shutil import which
 from typing import Any, cast
@@ -34,13 +35,24 @@ PYTHON_RELEASE_PACKAGES = {
 PUBLISH_ENTRYPOINTS_REQUIRING_RC_GATE = ("python", "docker-build")
 RELEASE_WORKFLOW_REQUIRED_FRAGMENTS = (
     "No version commit, tag, release, or publish was created.",
-    "moon run :check",
+    # Forced, because the moon output cache is restored across runs and the
+    # 1.4.0 and 1.4.1 cuts replayed the dry run's :check from it in seconds.
+    "moon run :check --force",
+    # Neither gate runs in any CI job, so the release is the only place they
+    # are proven on the candidate.
+    "moon run bench-longmemeval-v2-release-ci-test --force",
+    "moon run doc-claim-gate --force",
+    "doc-claim-receipt.json",
     "nightly_run_id",
-    "if: ${{ !inputs.dry_run || inputs.nightly_run_id != '' }}",
-    'gh run view "$NIGHTLY_RUN_ID"',
-    'run.get("workflowName") != "Nightly Regression"',
-    'run.get("headSha") != expected_sha',
-    "No successful Nightly Regression run found",
+    # Same-SHA nightly evidence lives in tools/release/nightly_evidence.py,
+    # whose tests pin the rules. The workflow resolves it in a gate job and
+    # verifies the chosen run again right before the tag.
+    "python3 -m tools.release.nightly_evidence resolve",
+    "python3 -m tools.release.nightly_evidence verify",
+    "python3 -m tools.release.ci_evidence",
+    "NIGHTLY_RUN_ID: ${{ inputs.nightly_run_id }}",
+    "NIGHTLY_RUN_ID: ${{ needs.nightly-evidence.outputs.run_id }}",
+    "CANDIDATE_SHA: ${{ steps.base.outputs.sha }}",
     # The workflow cuts the version itself. What replaced the precommitted-RC
     # rule is a proof rather than a refusal: the bump may only touch the pins
     # sync_versions.py generates, so the code Nightly validated at the base
@@ -72,7 +84,6 @@ RELEASE_WORKFLOW_REQUIRED_FRAGMENTS = (
     "prerelease: true",
     "make_latest: false",
     "uses: ./.github/workflows/image-cve-gate.yml",
-    "needs: image-cve-gate",
     "RELEASE_NOTES_CONTENT",
     "printf '%s\\n' \"$RELEASE_NOTES_CONTENT\"",
 )
@@ -91,6 +102,11 @@ RELEASE_WORKFLOW_FORBIDDEN_FRAGMENTS = (
     "git log --no-merges --pretty=format:'- %s (%h)'",
     "is_prerelease",
     "cat << 'EOF' >> $GITHUB_STEP_SUMMARY",
+    # The inline conclusion-only nightly check accepted a daily scheduled run
+    # whose Restore To Scratch job was skipped.
+    "--status success",
+    'run.get("workflowName")',
+    "if: ${{ !inputs.dry_run || inputs.nightly_run_id != '' }}",
 )
 
 
@@ -144,6 +160,67 @@ def _assert_fragments_absent(content: str, fragments: tuple[str, ...]) -> None:
     assert [fragment for fragment in fragments if fragment in content] == []
 
 
+RELEASE_GATE_JOBS = ("image-cve-gate", "e2e-gate", "nightly-evidence", "ci-evidence")
+DRY_RUN_GUARD = "${{ !inputs.dry_run }}"
+# The steps that stand up and tear down the production-shaped E2E fixture.
+# The release copy must run exactly what CI's E2E job runs.
+E2E_FIXTURE_STEPS = (
+    "Install system dependencies",
+    "Install Node dependencies",
+    "Build frontend for E2E",
+    "Start backend server",
+    "Start background job worker",
+    "Seed deterministic baseline fixture",
+    "Replay committed baseline corpus",
+    "Start frontend server",
+    "Collect diagnostics on failure",
+)
+# Every gate docs/admin/releasing.md once asked a human to run by hand before
+# a cut, and where the Release workflow now proves it on the candidate. Gates
+# inside the :check closure run in the forced RC bundle. The rest run as
+# forced commands in a named release job, because no CI job runs them on
+# every commit: the path classifier skips E2E for docs-only merges, CI on
+# main is cancelled when a newer push lands, and no CI job runs the last two.
+MANUAL_GATES_IN_CHECK = {
+    "root:sync-versions-check",
+    "root:release-workflow-test",
+    "root:bench-gate-test",
+    "root:inventory-lint",
+    "root:inventory-typecheck",
+    "root:doc-claim-gate-test",
+    # Also holds the Helm contract tests (helm-test is its -k helm subset).
+    "root:inventory-test",
+}
+MANUAL_GATES_IN_RELEASE_JOBS = {
+    "moon run bench-longmemeval-v2-release-ci-test --force": "release",
+    "moon run doc-claim-gate --force": "release",
+    "moon run e2e:test --force -- --ignore=tests/browser": "e2e-gate",
+    "moon run e2e:test-browser --force": "e2e-gate",
+}
+
+
+def _load_workflow(name: str) -> dict[str, Any]:
+    path = REPO_ROOT / ".github/workflows" / name
+    return cast(dict[str, Any], yaml.safe_load(path.read_text(encoding="utf-8")))
+
+
+def _release_jobs() -> dict[str, Any]:
+    return cast(dict[str, Any], _load_workflow("release.yml")["jobs"])
+
+
+def _job_needs(job: dict[str, Any]) -> list[str]:
+    needs = job.get("needs", [])
+    return [needs] if isinstance(needs, str) else list(needs)
+
+
+def _steps_by_name(job: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {step["name"]: step for step in job["steps"] if "name" in step}
+
+
+def _step_names(job: dict[str, Any]) -> list[str]:
+    return [step.get("name", "") for step in job["steps"]]
+
+
 def _requirement_by_name(dependencies: list[str], name: str) -> Requirement:
     requirements = [Requirement(dependency) for dependency in dependencies]
     matches = [requirement for requirement in requirements if requirement.name == name]
@@ -179,6 +256,243 @@ def test_release_workflow_validates_before_tag_or_publish() -> None:
     assert nightly_index < workflow.index("gh workflow run publish.yml")
     _assert_fragments_present(workflow, RELEASE_WORKFLOW_REQUIRED_FRAGMENTS)
     _assert_fragments_absent(workflow, RELEASE_WORKFLOW_FORBIDDEN_FRAGMENTS)
+
+
+def test_release_job_waits_for_every_gate_job() -> None:
+    jobs = _release_jobs()
+
+    assert set(_job_needs(jobs["release"])) == set(RELEASE_GATE_JOBS)
+    for name in RELEASE_GATE_JOBS:
+        assert _job_needs(jobs[name]) == ["preflight"], name
+
+
+def test_real_cut_refuses_any_ref_but_main() -> None:
+    # A real cut pushes its version commit to the ref it runs on and tags it,
+    # so a non-dry dispatch from a feature branch would publish that branch.
+    preflight = _release_jobs()["preflight"]
+    guard = _steps_by_name(preflight)["△ Refuse a real cut outside main"]
+
+    assert guard["if"] == "${{ !inputs.dry_run && github.ref != 'refs/heads/main' }}"
+    assert "exit 1" in guard["run"]
+    assert preflight["permissions"] == {}
+
+
+def test_real_cut_releases_only_the_commit_its_dry_run_proved() -> None:
+    # gh workflow run --ref main takes main's head at dispatch time, so the
+    # approval is pinned to a SHA and a moved main is refused, not released.
+    workflow = _load_workflow("release.yml")
+    # PyYAML reads the bare `on:` key as the boolean True.
+    inputs = cast("dict[Any, Any]", workflow)[True]["workflow_dispatch"]["inputs"]
+    pin = _steps_by_name(workflow["jobs"]["preflight"])["△ Pin the approved commit"]
+
+    assert inputs["expected_sha"]["default"] == ""
+    assert pin["env"] == {
+        "DRY_RUN": "${{ inputs.dry_run }}",
+        "EXPECTED_SHA": "${{ inputs.expected_sha }}",
+    }
+    assert '[[ "$DRY_RUN" != "true" && -z "$EXPECTED_SHA" ]]' in pin["run"]
+    assert '[[ -n "$EXPECTED_SHA" && "$EXPECTED_SHA" != "$GITHUB_SHA" ]]' in pin["run"]
+    assert pin["run"].count("exit 1") == len(("missing", "mismatched"))
+
+    summary = _steps_by_name(workflow["jobs"]["release"])["► Summary"]["run"]
+    assert "-f dry_run=false -f expected_sha=${{ steps.base.outputs.sha }}" in summary
+    # The printed command dispatches on main, so only a dry run of main prints it.
+    assert '[[ "$GITHUB_REF" == "refs/heads/main" ]]' in summary
+
+
+def test_dry_run_never_changes_remote_release_state() -> None:
+    jobs = _release_jobs()
+    remote_effects: list[str] = []
+    for step in jobs["release"]["steps"]:
+        script = str(step.get("run", ""))
+        uses = str(step.get("uses", ""))
+        if (
+            "git push" in script
+            or "git tag -a" in script
+            or "gh workflow run publish.yml" in script
+            or uses.startswith("softprops/action-gh-release")
+        ):
+            remote_effects.append(step["name"])
+            assert step.get("if") == DRY_RUN_GUARD, step["name"]
+
+    assert remote_effects == [
+        "◆ Create and push tag",
+        "◆ Create GitHub Release",
+        "◇ Trigger publish",
+    ]
+    for name, job in jobs.items():
+        if name == "release":
+            continue
+        for step in job.get("steps", []):
+            script = str(step.get("run", ""))
+            assert "git push" not in script, name
+            assert "git tag -a" not in script, name
+            assert "gh workflow run publish" not in script, name
+
+
+def test_dry_runs_never_share_the_real_cut_concurrency_group() -> None:
+    # In one shared group a dry run, as the newest pending run, would cancel a
+    # real cut that was waiting its turn.
+    concurrency = _load_workflow("release.yml")["concurrency"]
+
+    assert concurrency["group"] == (
+        "${{ inputs.dry_run && format('release-dry-run-{0}', github.run_id) || 'release' }}"
+    )
+    assert concurrency["cancel-in-progress"] is False
+
+
+def test_only_the_release_job_can_write() -> None:
+    workflow = _load_workflow("release.yml")
+    jobs = workflow["jobs"]
+
+    assert workflow["permissions"] == {"contents": "read"}
+    assert jobs["release"]["permissions"] == {"actions": "write", "contents": "write"}
+    assert jobs["e2e-gate"]["permissions"] == {"contents": "read"}
+    # Dispatching Nightly Regression needs actions: write and nothing more.
+    assert jobs["nightly-evidence"]["permissions"] == {"actions": "write", "contents": "read"}
+    assert jobs["ci-evidence"]["permissions"] == {"actions": "read", "contents": "read"}
+
+
+def test_every_release_checkout_is_the_dispatched_commit() -> None:
+    for name in ("e2e-gate", "nightly-evidence", "ci-evidence", "release"):
+        checkouts = [
+            step
+            for step in _release_jobs()[name]["steps"]
+            if str(step.get("uses", "")).startswith("actions/checkout@")
+        ]
+        assert len(checkouts) == 1, name
+        assert checkouts[0]["with"]["ref"] == "${{ github.sha }}", name
+
+    base = _steps_by_name(_release_jobs()["release"])["△ Record validated base SHA"]["run"]
+    assert '"$base_sha" != "$GITHUB_SHA"' in base
+
+
+def test_release_e2e_gate_mirrors_the_ci_fixture() -> None:
+    ci = _load_workflow("ci.yml")
+    ci_job = ci["jobs"]["e2e"]
+    release_job = _release_jobs()["e2e-gate"]
+    ci_steps = _steps_by_name(ci_job)
+    release_steps = _steps_by_name(release_job)
+
+    assert release_job["env"] == {**ci["env"], **ci_job["env"]}
+    # ci.yml runs steps as bash with pipefail; the copy must fail the same way.
+    assert release_job["defaults"] == ci["defaults"]
+    for name in E2E_FIXTURE_STEPS:
+        assert release_steps[name].get("run") == ci_steps[name].get("run"), name
+        assert release_steps[name].get("if") == ci_steps[name].get("if"), name
+    fixture_order = [name for name in _step_names(release_job) if name in E2E_FIXTURE_STEPS]
+    assert fixture_order == [name for name in _step_names(ci_job) if name in E2E_FIXTURE_STEPS]
+
+    surreal = "./.github/actions/start-surrealdb"
+    assert [step.get("uses") for step in release_job["steps"]].count(surreal) == 1
+    assert [step.get("uses") for step in ci_job["steps"]].count(surreal) == 1
+
+    # The suites are CI's, forced. No moon output cache is restored, so a pass
+    # recorded on another commit can never replay here.
+    release_tests = release_steps["Run e2e tests"]
+    ci_tests = ci_steps["Run e2e tests"]
+    assert release_tests["env"] == ci_tests["env"]
+    assert release_tests["run"].replace(" --force", "") == ci_tests["run"]
+    assert release_tests["run"].count(" --force") == len(("e2e:test", "e2e:test-browser"))
+    assert not [
+        step
+        for step in release_job["steps"]
+        if ".moon/cache" in str(step.get("with", {}).get("path", ""))
+    ]
+
+
+def test_rc_gate_bundle_forces_every_gate_on_pinned_helm() -> None:
+    release = _release_jobs()["release"]
+    steps = _steps_by_name(release)
+    names = _step_names(release)
+
+    bundle = steps["◇ Run RC gate bundle"]["run"]
+    moon_lines = [line.strip() for line in bundle.splitlines() if "moon run " in line]
+    assert moon_lines == [
+        "moon run :check --force",
+        "moon run bench-longmemeval-v2-release-ci-test --force",
+        "moon run doc-claim-gate --force",
+    ]
+    # doc-claim-gate rewrites a tracked receipt, so it must run after the
+    # version commit exists or the pin-only proof would see a smuggled file.
+    assert names.index("◇ Validate the bump changed only pins") < names.index(
+        "◇ Run RC gate bundle"
+    )
+
+    # The Helm contracts inside :check skip themselves without a helm binary.
+    helm = steps["◇ Setup Helm"]
+    ci_helm = next(
+        step
+        for step in _load_workflow("ci.yml")["jobs"]["helm"]["steps"]
+        if str(step.get("uses", "")).startswith("azure/setup-helm@")
+    )
+    assert helm["uses"] == ci_helm["uses"]
+    assert helm["with"]["version"] == ci_helm["with"]["version"]
+    assert names.index("◇ Setup Helm") < names.index("◇ Run RC gate bundle")
+
+
+def test_every_former_manual_release_gate_is_proven_by_the_workflow() -> None:
+    assert _dep_targets("check") >= MANUAL_GATES_IN_CHECK
+
+    inventory = _root_task("inventory-test")
+    helm = _root_task("helm-test")
+    assert "tools/tests/test_runtime_surface.py" in inventory["args"]
+    assert "tools/tests/test_runtime_surface.py" in helm["args"]
+
+    jobs = _release_jobs()
+    for command, job_name in MANUAL_GATES_IN_RELEASE_JOBS.items():
+        scripts = "\n".join(str(step.get("run", "")) for step in jobs[job_name]["steps"])
+        assert command in scripts, (command, job_name)
+
+
+def test_nightly_evidence_job_resolves_on_the_dispatched_commit() -> None:
+    job = _release_jobs()["nightly-evidence"]
+    step = _steps_by_name(job)["◇ Find or dispatch same-SHA Nightly Regression"]
+    script = step["run"]
+
+    assert '--sha "$GITHUB_SHA"' in script
+    assert '--ref "$GITHUB_REF"' in script
+    assert '--run-id "$NIGHTLY_RUN_ID"' in script
+    assert step["env"]["NIGHTLY_RUN_ID"] == "${{ inputs.nightly_run_id }}"
+    assert job["outputs"]["run_id"] == "${{ steps.nightly.outputs.run_id }}"
+    assert job["outputs"]["source"] == "${{ steps.nightly.outputs.source }}"
+
+    # The script outlasts the slowest nightly job and gives up before the job
+    # timeout, so a stuck nightly fails with a message instead of a kill.
+    match = re.search(r"--timeout-minutes (\d+)", script)
+    assert match is not None
+    script_timeout = int(match.group(1))
+    nightly_jobs = _load_workflow("nightly-regression.yml")["jobs"].values()
+    assert script_timeout > max(int(nightly["timeout-minutes"]) for nightly in nightly_jobs)
+    assert script_timeout < int(job["timeout-minutes"])
+
+
+def test_release_receipt_records_every_gate() -> None:
+    steps = _steps_by_name(_release_jobs()["release"])
+    receipt = steps["◇ Record RC gate receipt"]
+
+    assert receipt["if"] == "always()"
+    for key in (
+        "base_sha",
+        "candidate_sha",
+        "dry_run",
+        "image_cve_gate_result",
+        "e2e_gate_result",
+        "ci_run_url",
+        "rc_gate_commands",
+        "rc_gate_conclusion",
+        "nightly_run_id",
+        "nightly_url",
+        "nightly_event",
+        "nightly_source",
+        "nightly_conclusion",
+    ):
+        assert f'"{key}"' in receipt["run"], key
+    assert (
+        "cp benchmarks/results/ai-memory/doc-claim-receipt.json"
+        in (steps["◇ Run RC gate bundle"]["run"])
+    )
+    assert steps["► Upload RC gate receipt"]["with"]["path"] == ".moon/cache/release/*.json"
 
 
 def test_nightly_regression_uploads_candidate_sha_receipts() -> None:
@@ -235,7 +549,7 @@ def test_image_cve_gate_is_shared_by_every_caller() -> None:
     # The release job may not begin until the gate is green, which is the
     # single property that stops a scan verdict from postdating a release.
     assert "uses: ./.github/workflows/image-cve-gate.yml" in release
-    assert "needs: image-cve-gate" in release
+    assert "image-cve-gate" in _job_needs(_release_jobs()["release"])
     # Publish ships both architectures, so the pre-tag gate covers both.
     assert 'platforms: \'["amd64", "arm64"]\'' in release
     assert 'images: \'["api", "web"]\'' in release
