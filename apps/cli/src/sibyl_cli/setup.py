@@ -138,8 +138,13 @@ def managed_hook_command(hooks_dir: Path, script: str) -> str:
 
 
 def _normalize_hook_text(text: str, home: str) -> str:
-    """Trim, collapse whitespace, expand ~ and $HOME, and tidy slashes."""
-    text = " ".join(text.split())
+    """Trim and collapse spaces and tabs, expand ~ and $HOME, and tidy slashes.
+
+    Only ASCII space and tab separate words here. Any other whitespace or
+    control character, such as a no-break space or a carriage return, is part
+    of a filename to the shell, so it is kept and the comparison fails.
+    """
+    text = " ".join(re.split(r"[ \t]+", text.strip(" \t")))
     text = text.replace("${HOME}", home).replace("$HOME", home)
     text = re.sub(r"(^| )~(?=/|$)", lambda match: match.group(1) + home, text)
     text = re.sub(r"/{2,}", "/", text)

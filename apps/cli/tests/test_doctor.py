@@ -584,6 +584,13 @@ MATCHER_CASES = [
     ("python3 $HOME/.claude/hooks/sibyl/session-start.py", True),
     ("python3 ${HOME}/.claude/hooks/sibyl/session-start.py", True),
     (f"python3 {HOME}//.claude/hooks/sibyl/./session-start.py", True),
+    (f"\tpython3\t{MANAGED}/session-start.py \t", True),
+    # Whitespace a shell keeps in a filename names a different file.
+    (f"python3 {MANAGED}/session-start.py\u00a0", False),
+    (f"python3 {MANAGED}/session-start.py\r", False),
+    (f"python3 {MANAGED}/session-start.py\n", False),
+    (f"python3\u00a0{MANAGED}/session-start.py", False),
+    (f"python3 {MANAGED}/session-start.py\x0b", False),
     # Anything else is the user's, however it touches the path.
     ("bash -c 'sha256sum ~/.claude/hooks/sibyl/session-start.py'", False),
     (f"python3 --version {MANAGED}/session-start.py", False),
