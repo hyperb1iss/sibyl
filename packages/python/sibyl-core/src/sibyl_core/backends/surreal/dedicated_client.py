@@ -660,18 +660,24 @@ class DedicatedSurrealClient:
                     self._available.put_nowait(connection)
 
     async def warm_pool(self) -> None:
-        drained = [await self._available.get() for _ in range(self._pool_size)]
+        drained: list[_PooledConnection] = []
         try:
-            await asyncio.gather(*(connection.connect() for connection in drained))
-        except BaseException:
-            # BaseException, not Exception: a cancelled warm would otherwise
-            # leave the sockets it already opened behind on a client nobody
-            # holds.
-            await asyncio.gather(
-                *(connection.drop() for connection in drained),
-                return_exceptions=True,
-            )
-            raise
+            # Drained inside the try, so a warm cancelled while it waits on a
+            # busy slot returns the slots it already took instead of shrinking
+            # the pool for good.
+            for _ in range(self._pool_size):
+                drained.append(await self._available.get())
+            try:
+                await asyncio.gather(*(connection.connect() for connection in drained))
+            except BaseException:
+                # BaseException, not Exception: a cancelled warm would otherwise
+                # leave the sockets it already opened behind on a client nobody
+                # holds.
+                await asyncio.gather(
+                    *(connection.drop() for connection in drained),
+                    return_exceptions=True,
+                )
+                raise
         finally:
             for connection in drained:
                 self._available.put_nowait(connection)
