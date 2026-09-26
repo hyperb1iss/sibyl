@@ -398,6 +398,22 @@ async def test_other_organizations_matching_stamps_adopt_without_a_warning(
         runtime.client.group_id,
     }
 
+    # A switch that replaces every adopted vector retires the notice.
+    from sibyl_core.services.embedding_sweep import read_embedding_sweep_state
+
+    adopted = await sweep_graph_embeddings(runtime, embedding_provider=current)
+    state = await read_embedding_sweep_state(
+        "graph", runtime.client.group_id, runtime.client.execute_query
+    )
+    assert adopted.adopted == 1
+    assert state["legacy_notice"] == "adopted_on_deployment_evidence"
+    switched = await sweep_graph_embeddings(runtime, embedding_provider=CountingProvider("next"))
+    state = await read_embedding_sweep_state(
+        "graph", runtime.client.group_id, runtime.client.execute_query
+    )
+    assert switched.status == "completed"
+    assert state.get("legacy_notice") is None
+
 
 async def _save_setting(key: str, value: str) -> None:
     await _execute(

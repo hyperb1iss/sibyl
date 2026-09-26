@@ -51,6 +51,7 @@ from sibyl_core.embeddings.provenance import (
     UNVERIFIED_ORIGIN_LEGACY,
     UNVERIFIED_ORIGIN_OPERATOR,
     VECTOR_IDENTITY_FIELDS,
+    VECTOR_SPACE_FIELDS,
     is_transient_provider_error,
     same_vector_identity,
     unverified_embedding_metadata,
@@ -1408,6 +1409,13 @@ async def _save_cursors(
     )
 
 
+_REPLACED_ADOPTION = (
+    "$complete != NONE AND (generation ?? 0) = $generation AND legacy_metadata != NONE AND ("
+    + " OR ".join(f"legacy_metadata.{field} != $complete.{field}" for field in VECTOR_SPACE_FIELDS)
+    + ")"
+)
+
+
 async def _release(
     plane: SweepPlane,
     *,
@@ -1430,6 +1438,11 @@ async def _release(
             "THEN $complete ELSE complete_metadata END, "
             "complete_at = IF $complete != NONE AND (generation ?? 0) = $generation "
             "THEN time::now() ELSE complete_at END, "
+            # A full pass for another model than the one legacy vectors were
+            # adopted as has replaced every one of them, so the adoption's
+            # warning or notice no longer describes anything stored.
+            f"legacy_warning = IF {_REPLACED_ADOPTION} THEN NONE ELSE legacy_warning END, "
+            f"legacy_notice = IF {_REPLACED_ADOPTION} THEN NONE ELSE legacy_notice END, "
             "lease_owner = NONE, lease_until = NONE, updated_at = time::now() "
             "WHERE lease_owner = $owner RETURN NONE;",
             key=plane.state_key,

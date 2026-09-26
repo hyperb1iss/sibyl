@@ -2880,6 +2880,11 @@ async def test_live_two_step_upgrade_adopts_without_warnings_then_switches(
                 graph_stamp=target.metadata.to_dict(),
                 chunk_stamp=_TARGET_CHUNK_STAMP,
             )
+            # Every adopted vector was replaced, so the adoption notice is gone.
+            graph_state, chunk_state = await _plane_states(content, clients[orgs[shape]])
+            for state in (graph_state, chunk_state):
+                assert not state.get("legacy_notice"), shape
+                assert not state.get("legacy_warning"), shape
         assert len(target.texts) == 17 * len(shapes)
         assert len(embedded) == 4 * len(shapes)
     finally:
