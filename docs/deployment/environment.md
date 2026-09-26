@@ -622,12 +622,13 @@ upgrade or a switch they return nothing for chunks their plane does not count ye
 before stamping until the verdict is recorded, and old-model chunks until the sweep replaces them.
 `/api/rag/hybrid-search` still finds those chunks lexically.
 
-Each pass holds a lease on its plane and checks it in the same statement as every vector write, so a
-pass that loses its lease to another process, for example after a long provider stall, writes
-nothing and stops. A pass also stops starting provider requests once its time budget is spent. Raw
-capture repair holds no lease; each of its writes lands only if the capture still carries the record
-it read, so two processes configured for different models, as in a rolling deploy, cannot leave one
-model's vector labeled with the other's.
+Each pass holds a lease on its plane, reads it back after taking it, and checks it in the same
+statement as every vector and stamp write, so a pass that loses its lease to another process, for
+example after a long provider stall, or that an engine race granted the lease alongside another,
+writes nothing and stops. A pass also stops starting provider requests once its time budget is
+spent. Raw capture repair holds no lease; each of its writes lands only if the capture still carries
+the record it read, so two processes configured for different models, as in a rolling deploy, cannot
+leave one model's vector labeled with the other's.
 
 A row whose text the provider refuses is remembered and not sent again until its text or the
 configured model changes, an import reopens the plane, or `sibyld db reembed` runs; status counts it
