@@ -393,6 +393,12 @@ class _PooledConnection:
             try:
                 async with asyncio.timeout(budget):
                     await self._handshake(client)
+            except asyncio.CancelledError:
+                # A warm or query cancelled mid-handshake would otherwise strand
+                # the half-open client, since it was never stored on the slot.
+                with contextlib.suppress(Exception):
+                    await _finish_despite_cancellation(client.close())
+                raise
             except TimeoutError as exc:
                 with contextlib.suppress(Exception):
                     await client.close()

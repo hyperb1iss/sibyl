@@ -309,6 +309,55 @@ async def test_warm_pool_cancelled_while_draining_keeps_every_connection(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_cancelled_handshake_closes_the_half_open_client(monkeypatch) -> None:
+    opened: list[Any] = []
+    stalled = asyncio.Event()
+
+    class FakeAsyncSurreal:
+        def __init__(self, _url: str) -> None:
+            self.index = len(opened)
+            self.closed = False
+            opened.append(self)
+
+        async def signin(self, _credentials: dict[str, str]) -> None:
+            if self.index == 2:
+                # The third socket stalls in its handshake.
+                stalled.set()
+                await asyncio.Event().wait()
+
+        async def use(self, _namespace: str, _database: str) -> None:
+            return None
+
+        async def query_raw(self, _query: str, _params: object | None = None) -> object:
+            return {"result": [{"status": "OK", "result": True}]}
+
+        async def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setattr("surrealdb.AsyncSurreal", FakeAsyncSurreal)
+    client = DedicatedSurrealClient(
+        url="ws://localhost:8000/rpc",
+        username="root",
+        password="root",
+        namespace="org_handshake_cancel",
+        database="graph",
+        pool_size=3,
+    )
+
+    warming = asyncio.create_task(client.warm_pool())
+    await asyncio.wait_for(stalled.wait(), timeout=1)
+    warming.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await warming
+
+    # The stalled client never reached its slot, so only the handshake's own
+    # cleanup can close it.
+    assert len(opened) == 3
+    assert [fake.closed for fake in opened] == [True, True, True]
+    await asyncio.wait_for(client.close(), timeout=1)
+
+
+@pytest.mark.asyncio
 async def test_embedded_url_hard_clamps_explicit_pool_size(monkeypatch) -> None:
     tracker = _ConcurrencyTracker()
     tracker.release.set()
