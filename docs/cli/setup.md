@@ -40,6 +40,10 @@ sign-in sends a password or token over the connection. Use the server's https UR
 `--insecure` on a network you trust. A context remembers `--insecure` only when you pass it; it is
 never copied from another context for the same server.
 
+Setup authenticates only with the login stored for the server it is connecting. A `SIBYL_AUTH_TOKEN`
+in the environment is used only when `SIBYL_API_URL` names that same server; otherwise setup leaves
+it out and warns that other commands in the shell still send it.
+
 ## What It Does
 
 1. Checks the server is reachable and that this CLI meets the server's minimum version. When it does
@@ -52,7 +56,9 @@ never copied from another context for the same server.
    succeeds; if it fails, the new context is removed and the previous one stays active.
 4. Installs the skill into `~/.claude/skills`, `~/.codex/skills`, and `~/.agents/skills`.
 5. Adds a SessionStart hook to `~/.claude/settings.json` that loads your active tasks and recent
-   memory when a Claude Code session starts. Codex and other agents have no hook.
+   memory when a Claude Code session starts. Only hooks that run Sibyl's own scripts from
+   `~/.claude/hooks/sibyl/` are replaced; every other hook stays where it was, and the previous file
+   is backed up. Codex and other agents have no hook.
 
 ## Hand It To An Agent
 

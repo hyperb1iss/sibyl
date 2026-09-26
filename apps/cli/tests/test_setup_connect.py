@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import http.server
 import json
+import os
+import threading
 from pathlib import Path
 
 import httpx
@@ -494,9 +497,29 @@ def test_normalize_server_url_accepts_what_people_paste(raw: str, expected: str)
     assert connect.normalize_server_url(raw) == expected
 
 
-def test_normalize_server_url_rejects_other_schemes() -> None:
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "ftp://sibyl.example.com",
+        "https://sibyl.example.com/$(printf QUOTING_PROBE)",
+        "https://sibyl.example.com/`id`",
+        "https://user:secret@sibyl.example.com",
+        "https://sibyl.example.com/a;b",
+    ],
+)
+def test_normalize_server_url_rejects_anything_but_a_plain_url(raw: str) -> None:
     with pytest.raises(typer.BadParameter):
-        connect.normalize_server_url("ftp://sibyl.example.com")
+        connect.normalize_server_url(raw)
+
+
+def test_a_shell_metacharacter_url_is_refused_before_any_request(
+    home: Path, server: FakeServer
+) -> None:
+    result = _run("https://sibyl.example.com/$(printf QUOTING_PROBE)", "--yes")
+
+    assert result.exit_code != 0
+    assert server.probes == []
+    assert config_store.list_contexts() == []
 
 
 def test_setup_without_a_url_honors_the_context_flag(home: Path, server: FakeServer) -> None:
@@ -542,3 +565,132 @@ def test_whoami_treats_a_rejected_login_as_signed_out(
     monkeypatch.setattr(connect.SibylClient, "get", rejected)
 
     assert connect.whoami(ctx) is None
+
+
+class _RecordingServer:
+    """A real Sibyl stand-in on loopback that records every Authorization header."""
+
+    def __init__(self, accepted_token: str | None = None) -> None:
+        self.accepted_token = accepted_token
+        self.requests: list[tuple[str, str, str | None]] = []
+        recorder = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args: object) -> None:
+                return None
+
+            def _record(self) -> None:
+                recorder.requests.append(
+                    (self.command, self.path, self.headers.get("Authorization"))
+                )
+
+            def _json(self, status: int, body: dict) -> None:
+                payload = json.dumps(body).encode()
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("X-Sibyl-Version", "1.4.1")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def do_GET(self) -> None:
+                self._record()
+                if self.path.startswith("/api/health"):
+                    self._json(200, {"status": "healthy", "version": "1.4.1"})
+                elif self.path.startswith("/api/auth/me"):
+                    token = recorder.accepted_token
+                    if token and self.headers.get("Authorization") == f"Bearer {token}":
+                        self._json(200, {"user": {"email": "robot@example.com"}})
+                    else:
+                        self._json(401, {"detail": "Not authenticated"})
+                else:
+                    self._json(404, {"detail": "not found"})
+
+            def do_POST(self) -> None:
+                self._record()
+                length = int(self.headers.get("Content-Length") or 0)
+                self.rfile.read(length)
+                # No device flow here, so sign-in fails without a browser.
+                self._json(501, {"detail": "not implemented"})
+
+        self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.httpd.server_address[1]}"
+        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+
+    def __enter__(self) -> _RecordingServer:
+        self.thread.start()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+    def authorizations(self) -> list[str]:
+        return [auth for _, _, auth in self.requests if auth]
+
+
+@pytest.fixture
+def no_proxies(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy"):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_an_automation_token_for_another_server_never_reaches_the_target(
+    home: Path, monkeypatch: pytest.MonkeyPatch, no_proxies: None
+) -> None:
+    monkeypatch.setenv("SIBYL_AUTH_TOKEN", "prod-token-for-another-server")
+
+    with _RecordingServer() as target:
+        result = _run(target.url, "--yes")
+
+    assert result.exit_code == 1
+    assert target.requests, "setup never talked to the target"
+    assert all("prod-token" not in auth for auth in target.authorizations())
+    assert "was not sent here" in _flat(result.output)
+    # The shell's variable is left as it was.
+    assert os.environ["SIBYL_AUTH_TOKEN"] == "prod-token-for-another-server"
+
+
+def test_a_token_paired_with_another_server_never_reaches_the_target(
+    home: Path, monkeypatch: pytest.MonkeyPatch, no_proxies: None
+) -> None:
+    monkeypatch.setenv("SIBYL_API_URL", "https://prod.example.com/api")
+    monkeypatch.setenv("SIBYL_AUTH_TOKEN", "prod-token-for-another-server")
+
+    with _RecordingServer() as target:
+        _run(target.url, "--yes")
+
+    assert target.requests
+    assert all("prod-token" not in auth for auth in target.authorizations())
+
+
+def test_a_token_paired_with_this_server_is_used(
+    home: Path, monkeypatch: pytest.MonkeyPatch, no_proxies: None
+) -> None:
+    with _RecordingServer(accepted_token="robot-token") as target:
+        monkeypatch.setenv("SIBYL_API_URL", f"{target.url}/api")
+        monkeypatch.setenv("SIBYL_AUTH_TOKEN", "robot-token")
+        result = _run(target.url, "--yes", "--no-hooks")
+
+    assert result.exit_code == 0, result.output
+    assert "robot@example.com" in result.output
+    assert "Bearer robot-token" in target.authorizations()
+    assert not any(method == "POST" for method, _, _ in target.requests)
+
+
+def test_a_stored_login_for_another_context_is_never_sent(
+    home: Path, monkeypatch: pytest.MonkeyPatch, no_proxies: None
+) -> None:
+    from sibyl_cli.auth_store import credential_scope, set_tokens
+
+    config_store.create_context("prod", server_url="https://prod.example.com", set_active=True)
+    set_tokens(
+        "https://prod.example.com/api",
+        "prod-stored",
+        credential_scope=credential_scope("prod", None),
+    )
+
+    with _RecordingServer() as target:
+        _run(target.url, "--yes")
+
+    assert all("prod-stored" not in auth for auth in target.authorizations())

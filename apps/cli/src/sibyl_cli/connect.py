@@ -9,8 +9,12 @@ and verify. Each step checks first and skips work that is already done.
 from __future__ import annotations
 
 import ipaddress
+import os
+import shlex
 import shutil
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
@@ -23,6 +27,7 @@ from sibyl_cli import config_store, doctor, setup
 from sibyl_cli.auth import _login_auto
 from sibyl_cli.auth_store import credential_scope, normalize_api_url
 from sibyl_cli.client import SibylClient, SibylClientError, clear_client_cache
+from sibyl_cli.client_transport import _paired_automation_api_url
 from sibyl_cli.common import ELECTRIC_PURPLE, NEON_CYAN, console, error, run_async, warn
 from sibyl_cli.skill import install_canonical_skill
 from sibyl_cli.version_drift import client_version
@@ -30,6 +35,7 @@ from sibyl_core.integration import (
     BREW_FORMULA,
     LOGIN_TIMEOUT_MINUTES,
     UV_INSTALL_COMMAND,
+    is_clean_server_url,
 )
 from sibyl_core.version_contract import (
     MIN_CLIENT_HEADER,
@@ -63,7 +69,10 @@ def normalize_server_url(raw: str) -> str:
     if parts.scheme not in {"http", "https"} or not parts.netloc:
         raise typer.BadParameter(f"Not a server URL: {raw}")
     path = parts.path.rstrip("/").removesuffix("/api")
-    return urlunsplit((parts.scheme, parts.netloc, path, "", ""))
+    url = urlunsplit((parts.scheme, parts.netloc, path, "", ""))
+    if not is_clean_server_url(url):
+        raise typer.BadParameter(f"Not a plain http(s) server URL: {raw}")
+    return url
 
 
 def is_loopback(server_url: str) -> bool:
@@ -132,7 +141,7 @@ def _new_context_name(server_url: str, name: str | None) -> str:
         if config_store.get_context(candidate) is None:
             return candidate
     error(f"Context '{candidates[-1]}' already points at another server.")
-    console.print(f"  Name a new one: sibyl setup {server_url} --context <name>")
+    console.print(f"  Name a new one: sibyl setup {shlex.quote(server_url)} --context <name>")
     raise typer.Exit(1)
 
 
@@ -157,6 +166,35 @@ def _warn_if_pinned_elsewhere(ctx: config_store.Context) -> None:
             f"This shell selects context '{selected}' (via -C, SIBYL_CONTEXT, or a directory "
             f"pin), so other commands here still use it. Switch with: sibyl -C {ctx.name} ..."
         )
+
+
+@contextmanager
+def only_target_credentials(server_url: str) -> Iterator[None]:
+    """Keep an automation token away from a server it was not issued for.
+
+    SIBYL_AUTH_TOKEN wins over stored logins, and without a paired
+    SIBYL_API_URL the client sends it to whatever server a command targets.
+    For the length of setup it stays in play only when SIBYL_API_URL names
+    this same server, so every request setup makes authenticates with the
+    target's own stored login or with nothing.
+    """
+    token = os.environ.get("SIBYL_AUTH_TOKEN", "").strip()
+    paired = _paired_automation_api_url()
+    target = normalize_api_url(f"{server_url}/api")
+    if not token or (paired and normalize_api_url(paired) == target):
+        yield
+        return
+    warn(
+        "SIBYL_AUTH_TOKEN is set for another server and was not sent here. Other "
+        "commands in this shell still send it; unset it to use this login."
+    )
+    saved = os.environ.pop("SIBYL_AUTH_TOKEN")
+    clear_client_cache()
+    try:
+        yield
+    finally:
+        os.environ["SIBYL_AUTH_TOKEN"] = saved
+        clear_client_cache()
 
 
 def whoami(ctx: config_store.Context) -> str | None:
@@ -274,6 +312,26 @@ def setup_cmd(
     # Without a URL, set up whatever server the CLI already talks to: the
     # selected context, or the local default.
     server_url = normalize_server_url(url or config_store.get_effective_server_url())
+    with only_target_credentials(server_url):
+        _run_setup(
+            server_url,
+            from_url=bool(url),
+            yes=yes,
+            context=context,
+            no_hooks=no_hooks,
+            insecure=insecure,
+        )
+
+
+def _run_setup(
+    server_url: str,
+    *,
+    from_url: bool,
+    yes: bool,
+    context: str | None,
+    no_hooks: bool,
+    insecure: bool,
+) -> None:
 
     console.print()
     console.print(f"[{ELECTRIC_PURPLE}]◈[/{ELECTRIC_PURPLE}] [bold]Sibyl setup[/bold] {server_url}")
@@ -304,7 +362,7 @@ def setup_cmd(
         version, minimum = probe_server(server_url, insecure=skip_verify)
     except (httpx.HTTPError, ValueError) as exc:
         _print_step(Step("Server", False, f"unreachable: {exc}"))
-        if not url:
+        if not from_url:
             console.print("\n  Pass the server to connect to: sibyl setup https://your-sibyl-host")
         raise typer.Exit(1) from exc
     current = client_version()
