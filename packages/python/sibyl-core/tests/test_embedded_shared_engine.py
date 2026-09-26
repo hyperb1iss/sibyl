@@ -111,6 +111,79 @@ async def test_statement_results_exclude_the_namespace_scope(tmp_path) -> None:
         await client.close()
 
 
+async def test_namespaces_stay_isolated_under_concurrent_mixed_traffic(tmp_path) -> None:
+    """The multi-tenant guarantee: on one shared engine, no row crosses namespaces.
+
+    Every row records the namespace its writer believed it was in. Writers run
+    single statements, multi-statement batches, and transactions concurrently,
+    with sleeps inside so the executions interleave on the engine. Each read
+    must see only its own namespace, and a fresh engine must find each
+    namespace holding exactly the rows its writer was told succeeded.
+    """
+    url = f"surrealkv://{tmp_path / 'store'}"
+    namespaces = [f"org_{index:02d}" for index in range(6)] + ["sibyl_auth", "sibyl_content"]
+    clients = {namespace: _client(url, namespace, "graph") for namespace in namespaces}
+    rounds = 20
+
+    async def tenant(namespace: str, client: DedicatedSurrealClient) -> int:
+        written = 0
+        for step in range(rounds):
+            tag = f"{namespace}:{step}"
+            await client.execute_query(
+                "CREATE probe SET ns = $ns, tag = $tag, pad = $pad;",
+                ns=namespace,
+                tag=tag,
+                pad=_PAD,
+            )
+            seen = await client.execute_query("SELECT VALUE ns FROM probe;")
+            assert set(seen) == {namespace}
+            batch = await client.execute_query_batch(
+                "CREATE probe SET ns = $ns, tag = $tag, pad = $pad;"
+                " RETURN sleep(2ms);"
+                " RETURN [session::ns(), session::db()];"
+                " SELECT VALUE ns FROM probe WHERE tag = $tag;",
+                ns=namespace,
+                tag=tag,
+                pad=_PAD,
+            )
+            assert len(batch) == 4
+            assert batch[2] == [namespace, "graph"]
+            assert batch[3] == [namespace, namespace]
+            committed = await client.execute_query(
+                "BEGIN;"
+                " CREATE probe SET ns = $ns, tag = $tag, phase = 'tx1';"
+                " LET $pause = sleep(1ms);"
+                " CREATE probe SET ns = $ns, tag = $tag, phase = 'tx2';"
+                " COMMIT;",
+                ns=namespace,
+                tag=tag,
+            )
+            assert isinstance(committed, list)
+            assert [row["ns"] for row in committed] == [namespace]
+            written += 4
+        return written
+
+    try:
+        written = await asyncio.gather(
+            *(tenant(namespace, client) for namespace, client in clients.items())
+        )
+    finally:
+        await asyncio.gather(*(client.close() for client in clients.values()))
+    assert dedicated_client_module._shared_embedded_engines == {}
+
+    from surrealdb import AsyncSurreal
+
+    reader = AsyncSurreal(url)
+    await reader.connect()
+    try:
+        for namespace, expected in zip(clients, written, strict=True):
+            await reader.use(namespace, "graph")
+            rows = await reader.query("SELECT ns, count() AS n FROM probe GROUP BY ns;")
+            assert rows == [{"ns": namespace, "n": expected}]
+    finally:
+        await reader.close()
+
+
 async def test_same_namespace_writers_survive_commit_conflicts(monkeypatch, tmp_path) -> None:
     """Writers racing on one record retry the engine's conflict instead of failing.
 
