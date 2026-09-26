@@ -515,12 +515,17 @@ class DedicatedSurrealClient:
         # Embedded URLs are hard-clamped to one connection regardless of any
         # configured pool size, and this is a correctness boundary. The engine
         # the Python SDK embeds (surrealdb-core 2.3) misses write-write
-        # conflicts, even inside BEGIN/COMMIT: two connections can both commit
-        # a read-modify-write from the same stale read. The compare-and-set
-        # fences in dream checkpoints, source states, revisions, schema
-        # leases, and write witnesses hold on embedded stores only because
-        # each namespace writes through one connection. (memory:// also hands
-        # every connection a fresh store, so a pool there would fragment it.)
+        # conflicts, even inside BEGIN/COMMIT: two queries in flight can both
+        # commit a read-modify-write from the same stale read. The clamp keeps
+        # this client to one query in flight. It does not make a namespace
+        # single-writer: that comes from the builders handing out one shared
+        # client per namespace (auth, content, and the per-org graph LRU), and
+        # two clients on one namespace still lose updates even at one
+        # connection each. The compare-and-set fences in dream checkpoints,
+        # source states, revisions, schema leases, and write witnesses depend
+        # on both. Sites that build a second client on a namespace are tracked
+        # in Sibyl task 192bf5f7. (In-memory stores also hand every connection
+        # a fresh store, so a pool there would fragment it.)
         # packages/python/sibyl-core/tests/test_embedded_shared_engine.py
         # enforces the clamp and pins the lost updates with a strict xfail.
         if is_embedded_surreal_url(url):
