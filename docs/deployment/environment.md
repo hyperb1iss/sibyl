@@ -449,9 +449,12 @@ A vector is replaced only when a field that shapes it changes: the provider, the
 dimensions, the embedded text format, or whether the provider embeds documents and queries
 differently. Bookkeeping fields such as the embedding cache namespace never trigger a re-embed.
 
-Change embedding settings through the environment and restart every API and worker process. A change
-saved in the settings UI only reaches the process that served the request, and the sweep, which runs
-in the worker, re-embeds toward the worker's configuration.
+Embedding settings take effect when a process starts. Every API and worker process reads the
+environment first and a value saved in the settings UI second. Graph search, document search, the
+crawler, raw captures and the sweep all resolve the model this way, so they never disagree about
+which model is configured. A change saved in the settings UI reaches each process at its next
+restart, and an environment variable always overrides it. After changing either, restart every API
+and worker process.
 
 A graph dimension change rebuilds the graph vector indexes at startup, and the sweep then
 regenerates the cleared vectors. The document chunk vector field is sized once from
@@ -483,26 +486,41 @@ re-embedded when any of these name a model other than the configured one:
 - the other plane's evidence, since a deployment that moved one provider has usually moved both.
 
 Any of these outranks evidence that the model is unchanged: when the evidence conflicts, the plane
-is re-embedded. With no switch in sight, a plane whose own vectors, or another organization's graph
-vectors, record the configured model adopts its vectors in place, with no provider calls and no
-warning.
+is re-embedded. With no switch in sight, a plane whose own vectors record the configured model
+adopts its vectors in place, with no provider calls and no warning.
+
+A plane with no recorded model of its own, such as an organization whose graph vectors all predate
+model records, adopts on another organization's evidence when that evidence names the configured
+model. `sibyl debug status` then shows the notice `adopted_on_deployment_evidence` instead of
+`complete`. This trusts one organization's record for another's unrecorded vectors, which holds
+because one configuration embeds every organization. It is wrong only if that organization's vectors
+came from somewhere else, for example an import of vectors embedded outside this deployment; in that
+case run `sibyld db reembed --org-id <id>`.
 
 Only evidence that existed before this release first touched the store counts. Each schema upgrade
-takes a snapshot of it, so vectors written after the restart are never mistaken for proof, and only
-a recorded model beside an actual vector counts, so a model name supplied with a row that was never
-embedded proves nothing. Nothing that reads or rewrites this evidence runs before its schema has
-upgraded: a worker that starts before the API has migrated the content schema skips the embedding
-sweep and raw capture repair, and `sibyl debug status` shows `awaiting_schema_upgrade`, until the
-migration has run. The model record is written only after a lifecycle pass has swept under a
-configuration without the provider refusing it, so a process that merely started with a wrong
+takes a snapshot of it, so vectors written after the restart are never mistaken for proof. Every
+model record this release writes carries a format version and the snapshots count only records
+without one, so a row the new release wrote before its migration ran is not mistaken for proof
+either. Only a recorded model beside an actual vector counts, so a model name supplied with a row
+that was never embedded proves nothing. Nothing that reads or rewrites this evidence runs before its
+schema has upgraded: a worker that starts before the API has migrated the content schema skips the
+embedding sweep and raw capture repair, and `sibyl debug status` shows `awaiting_schema_upgrade`,
+until the migration has run. The model record is written only after a lifecycle pass has swept under
+a configuration without the provider refusing it, so a process that merely started with a wrong
 configuration leaves no trace.
+
+Sibyl writes model records itself. A record sent with a write through the API or the MCP tools is
+discarded and replaced by the server's own, and only restored archives bring their records in.
+Earlier releases accepted a client-supplied record, and a record forged that way cannot be told from
+a genuine one. If an untrusted client could write to the deployment before this upgrade, set
+`SIBYL_EMBEDDING_LEGACY_VECTORS=reembed` for the upgrade deploy.
 
 A plane with no evidence of its own waits (`awaiting_evidence` in status) until every organization
 has published its graph evidence, so the verdict never depends on which organization the scheduler
 reached first. An organization counts once it has published in any pass. If one cannot publish, for
-example because its graph namespace is unreachable, status and the logs name it, and the waiting
-planes are settled on the evidence published so far once
-`SIBYL_EMBEDDING_SWEEP_EVIDENCE_WAIT_SECONDS` have passed.
+example because its graph namespace is unreachable, the logs name it (status names it to deployment
+admins and counts it for everyone else), and the waiting planes are settled on the evidence
+published so far once `SIBYL_EMBEDDING_SWEEP_EVIDENCE_WAIT_SECONDS` have passed.
 
 A plane with no evidence anywhere adopts its vectors too, logs a warning, and shows
 `adopted_without_evidence` in `sibyl debug status` instead of `complete`. That state is exactly what
@@ -540,6 +558,25 @@ is recorded as the full ARN. Moving between one and a model ID re-embeds every v
 
 Restored archives keep each vector's recorded model. Vectors restored without one are marked
 unverified and re-embedded.
+
+#### Search while vectors are re-embedded
+
+Vector search only compares a query with vectors from the query's model. Right after a switch almost
+none qualify, and a vector lane that has to pass over nearly every stored vector to find a few is
+slow and finds little. So while fewer than 5% of a plane's vectors are in the configured model,
+graph search and document hybrid search skip their vector lane and answer from lexical search.
+Retrieval diagnostics report the vector status as `vector_lane_model_switched` or
+`vector_lane_model_sparse`, and the log records `vector_lane_skipped`. Each process re-reads the
+sweep's progress at most every 30 seconds, so the lane comes back on its own as the sweep converts
+vectors, and is fully back when the plane completes. The threshold comes from lanes measured on a
+native SurrealDB 3.2 server at 20,000 entities: at a fresh switch each lane took 1 to 2 seconds and
+found nothing, with 1% of vectors converted 0.3 to 1 second, from 5% 0.1 to 0.5 seconds, and 13 to
+40 milliseconds once the sweep had finished. The vector-only document endpoints (`/api/rag/search`
+and `/api/rag/code-examples`) have no lexical lane to fall back on, so they always run.
+
+Each pass holds a lease on its plane and checks it in the same statement as every vector write, so a
+pass that loses its lease to another process, for example after a long provider stall, writes
+nothing and stops. A pass also stops starting provider requests once its time budget is spent.
 
 A row whose text the provider refuses is remembered and not sent again until its text or the
 configured model changes, an import reopens the plane, or `sibyld db reembed` runs; status counts it
