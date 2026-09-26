@@ -118,25 +118,6 @@ async def test_live_vector_lane_scores_only_the_query_models_captures(
     assert lane.failure is None
 
 
-async def test_live_nearer_old_model_vectors_cannot_crowd_out_the_current_capture(
-    live_content, monkeypatch
-) -> None:
-    org = str(uuid4())
-    old_model = StaticProvider("openai", "text-embedding-3-small", NEAR)
-    for index in range(64):
-        await capture(org, f"old-{index}", old_model)
-    current = await capture(org, "current", StaticProvider("bedrock", "cohere.embed-v4:0", FAR))
-    query_model = StaticProvider("bedrock", "cohere.embed-v4:0", NEAR)
-    monkeypatch.setattr(
-        content_models, "configured_raw_memory_embedding_provider", lambda: query_model
-    )
-
-    lane = await vector_lane(org, limit=1)
-
-    assert [memory.id for memory in lane.candidates] == [current.id]
-    assert lane.failure is None
-
-
 async def test_live_region_prefixed_bedrock_stamp_matches_the_base_model(
     live_content, monkeypatch
 ) -> None:

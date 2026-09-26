@@ -105,26 +105,6 @@ async def test_vector_lane_returns_only_captures_from_the_query_model(content_st
     assert lanes["raw_vector"].failure is None
 
 
-async def test_nearer_old_model_vectors_cannot_crowd_out_the_current_capture(
-    content_store, monkeypatch
-):
-    """The model filter precedes the neighbour limit, so a switch cannot starve the lane."""
-    org = str(uuid4())
-    old_model = StaticProvider("openai", "text-embedding-3-small", NEAR)
-    for index in range(24):
-        await capture(org, f"old-{index}", old_model)
-    current = await capture(org, "current", StaticProvider("bedrock", "cohere.embed-v4:0", FAR))
-    query_model = StaticProvider("bedrock", "cohere.embed-v4:0", NEAR)
-    monkeypatch.setattr(
-        content_models, "configured_raw_memory_embedding_provider", lambda: query_model
-    )
-
-    lanes = await recall(org, limit=1)
-
-    assert [memory.id for memory in lanes["raw_vector"].candidates] == [current.id]
-    assert lanes["raw_vector"].failure is None
-
-
 async def test_region_prefixed_bedrock_stamps_match_the_base_model(content_store, monkeypatch):
     org = str(uuid4())
     # Stamps naming the model by profile ID and by ARN, one the provider

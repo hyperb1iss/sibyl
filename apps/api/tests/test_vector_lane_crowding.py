@@ -865,3 +865,120 @@ async def test_never_switched_chunks_keep_vector_recall_once_adopted(
         for name, hits in (("core", core), ("rag", rag), ("code", code), ("hybrid", hybrid))
     }
     assert found == dict.fromkeys(found, nearest)
+
+
+class _RawCaptureVectors:
+    """Stamps raw captures as one model and hands out the vectors it is given, in order."""
+
+    def __init__(self, provider: str, model: str, vectors) -> None:
+        from sibyl_core.embeddings.providers import EmbeddingMetadata
+
+        self._vectors = iter(vectors)
+        self.metadata = EmbeddingMetadata(
+            provider=provider,
+            model=model,
+            dimensions=EMBEDDING_DIM,
+            cache_namespace="raw-memory",
+            tokenizer_estimate_method="provider-default",
+        )
+
+    async def embed_texts(self, texts, *, input_kind: str = "document"):
+        return [list(next(self._vectors)) for _text in texts]
+
+
+@asynccontextmanager
+async def _raw_store(engine, monkeypatch: pytest.MonkeyPatch, label: str):
+    from sibyl_core.config import settings as core_settings
+    from sibyl_core.services import content_client
+
+    namespace = f"{label}_{uuid4().hex}"
+    client = _content_client(engine, namespace)
+
+    @asynccontextmanager
+    async def session():
+        yield client
+
+    monkeypatch.setattr(content_client, "surreal_content_client", session)
+    # Raw recall picks its SurrealQL dialect from the configured URL, so it
+    # must name the engine this case runs on.
+    monkeypatch.setattr(core_settings, "surreal_url", str(engine["url"]))
+    try:
+        await bootstrap_content_schema(client, reset=True)
+        yield client
+    finally:
+        await client.close()
+        await _drop_namespace(engine, namespace)
+
+
+async def _raw_captures(organization_id: str, count: int, provider, prefix: str) -> list[str]:
+    from sibyl_core.services.content_models import RawMemoryWrite
+    from sibyl_core.services.surreal_content import remember_raw_memories
+
+    ids: list[str] = []
+    for start in range(0, count, 250):
+        memories = await remember_raw_memories(
+            [
+                RawMemoryWrite(
+                    organization_id=organization_id,
+                    principal_id="owner",
+                    source_id=f"{prefix}-{index}",
+                    raw_content=f"{prefix} observation {index}",
+                )
+                for index in range(start, min(count, start + 250))
+            ],
+            embedding_provider=provider,
+        )
+        ids.extend(memory.id for memory in memories)
+    return ids
+
+
+async def _raw_vector_lane(organization_id: str, query_provider, monkeypatch, *, limit: int = 1):
+    from sibyl_core.services import content_models
+    from sibyl_core.services.surreal_content import recall_raw_memory_with_sources
+
+    monkeypatch.setattr(
+        content_models, "configured_raw_memory_embedding_provider", lambda: query_provider
+    )
+    result = await recall_raw_memory_with_sources(
+        organization_id=organization_id,
+        principal_id="owner",
+        query="zzqx-unmatched-marker",
+        limit=limit,
+    )
+    return {source.source: source for source in result.sources}["raw_vector"]
+
+
+@pytest.mark.asyncio
+async def test_raw_vector_lane_reaches_a_new_capture_behind_far_more_old_ones_than_ef(
+    engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """At limit 1 the lane reads k=4 with an HNSW effort of 40; the crowd is 16x to 64x that."""
+    import math
+    import random
+
+    crowd = 640 if str(engine["url"]).startswith(_EMBEDDED) else 2560
+    rng = random.Random(7)  # noqa: S311 - test vectors, not secrets
+    query = _far(11, EMBEDDING_DIM)
+    norm = math.sqrt(sum(value * value for value in query))
+    query = [value / norm for value in query]
+    _nearest, farther = _crowding_vectors(query, EMBEDDING_DIM)
+
+    def near() -> list[float]:
+        nudged = [value + rng.gauss(0.0, 0.3) / math.sqrt(EMBEDDING_DIM) for value in query]
+        length = math.sqrt(sum(value * value for value in nudged))
+        return [value / length for value in nudged]
+
+    organization_id = str(uuid4())
+    async with _raw_store(engine, monkeypatch, "raw_crowding"):
+        old = _RawCaptureVectors("gemini", "gemini-embedding-001", (near() for _ in range(crowd)))
+        await _raw_captures(organization_id, crowd, old, "old")
+        new = _RawCaptureVectors("openai", "text-embedding-3-small", [farther])
+        [current] = await _raw_captures(organization_id, 1, new, "current")
+        lane = await _raw_vector_lane(
+            organization_id,
+            _RawCaptureVectors("openai", "text-embedding-3-small", [query]),
+            monkeypatch,
+        )
+
+    assert [memory.id for memory in lane.candidates] == [current]
+    assert lane.failure is None
