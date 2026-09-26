@@ -241,3 +241,28 @@ unless you are actively running the break-glass path. Set `expiresAt` no more th
 for an emergency window and keep `allowedIPs` scoped to the operator network. When break-glass is
 enabled, Sibyl denies login if either field is missing, if the expiry has passed, or if the expiry
 is more than four hours out.
+
+## Connect Machines
+
+Once the owner can sign in, each person connects their machine with one line. The web app shows it
+on the Connect card, in the setup wizard's last step, and in each user's onboarding, with your
+server's URL filled in:
+
+```bash
+# macOS
+brew install hyperb1iss/tap/sibyl && sibyl setup https://sibyl.example.com
+
+# Linux, or anywhere with uv
+uv tool install --upgrade sibyl-dev && sibyl setup https://sibyl.example.com
+```
+
+[`sibyl setup`](../cli/setup.md) signs the user in through the browser (with your OIDC provider when
+SSO is on), installs the Sibyl skill, and adds the Claude Code SessionStart hook. People can also
+hand the job to an agent with
+`Set up Sibyl on this machine by following https://sibyl.example.com/agent`. The public `/agent`
+page and the `/api/setup/connect` and `/api/setup/agent.md` routes carry only facts anyone who
+reaches the server can already see: the public URL, the minimum CLI version, and the sign-in
+methods.
+
+Users never enter model provider keys. When the server's providers are ready, onboarding skips the
+API keys step for everyone; when they are not, only an instance admin sees it.

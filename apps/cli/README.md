@@ -7,18 +7,21 @@ external assistants, and scripts. The package is published as `sibyl-dev`; the e
 ## Quick Reference
 
 ```bash
-# Install
-curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --remote
+# Install and connect to a server: sign in, install the skill and the Claude Code hook
+brew install hyperb1iss/tap/sibyl && sibyl setup https://sibyl.example.com         # macOS
+uv tool install --upgrade sibyl-dev && sibyl setup https://sibyl.example.com       # anywhere with uv
+
+# Or tell your agent: "Set up Sibyl on this machine by following https://sibyl.example.com/agent"
 
 # Develop this package
 moon run cli:install-dev
 
-# Connect to a server: sign in, install the skill and hooks
-sibyl setup https://sibyl.example.com
-
 # Link to project (scopes all commands)
 sibyl project link <project_id>
 ```
+
+No uv yet? The shell installer bootstraps it, then runs `sibyl setup`:
+`curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh -s -- --remote https://sibyl.example.com`.
 
 ## The Memory Loop
 
@@ -92,6 +95,7 @@ sibyl task complete <id> --learnings "..."   # Complete with learnings
 
 | Command          | Purpose                                           |
 | ---------------- | ------------------------------------------------- |
+| `setup`          | Connect this machine to a server in one command   |
 | `show`           | Resolve any entity or raw memory by ID            |
 | `health`         | Check API connectivity and health                 |
 | `doctor`         | Diagnose CLI/server/auth/agent setup              |
