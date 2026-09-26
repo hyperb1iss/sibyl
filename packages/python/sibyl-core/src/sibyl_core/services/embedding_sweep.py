@@ -207,6 +207,9 @@ class EmbeddingSweepResult(LifecycleRepairResult):
     # plane's vectors are already in it; vector lanes read both.
     space: dict[str, Any] | None = None
     in_model: int | None = None
+    # Rows a provisional adoption stamped that still hold their original
+    # vector, for instance because the provider refused them.
+    provisional_rows: int | None = None
     provider_dimensions: int | None = None
     schema_dimensions: int | None = None
     elapsed_ms: float = 0.0
@@ -927,6 +930,9 @@ async def run_embedding_sweep(
         await _forget_settled_rejections(plane, counts)
         pending = 0 if complete else await _pending(plane, counts)
         in_model = None if complete else await _in_model(plane)
+        provisional_rows = (
+            await _provisional_rows(plane) if state.get("legacy_provisional") else None
+        )
     except BaseException:
         await _release(
             plane,
@@ -943,6 +949,7 @@ async def run_embedding_sweep(
         warning=warning,
         notice=notice,
         in_model=in_model,
+        provisional_rows=provisional_rows,
         status=status,
         checked=counts.checked,
         recovered=counts.recovered,
@@ -961,6 +968,7 @@ async def run_embedding_sweep(
         complete=dict(plane.stamp) if complete else None,
         generation=generation,
         rejections=counts.rejections,
+        provisional_rows=provisional_rows or 0,
     )
     log.info(
         "embedding_sweep_pass",
@@ -1436,6 +1444,21 @@ async def _in_model(plane: SweepPlane) -> int:
     return total
 
 
+async def _provisional_rows(plane: SweepPlane) -> int:
+    """Rows a provisional adoption stamped that no pass has replaced yet."""
+    total = 0
+    for table in plane.tables:
+        rows = await _rows(
+            plane,
+            f"SELECT count() AS count FROM {table.name} "
+            f"WHERE {table.scope_field} = $scope "
+            f"AND {table.metadata_path}.{PROVISIONAL_ADOPTION_KEY} = true GROUP ALL;",
+        )
+        count = rows[0].get("count") if rows else None
+        total += count if isinstance(count, int) else 0
+    return total
+
+
 async def _forget_settled_rejections(plane: SweepPlane, counts: _Counts) -> None:
     """Drop remembered refusals whose rows were deleted, edited away or embedded."""
     for table in plane.tables:
@@ -1548,8 +1571,13 @@ async def _save_cursors(
     )
 
 
+# A full pass for another model than the one legacy vectors were adopted as,
+# with none of a provisional adoption's rows left holding their original
+# vector: a row the provider refused keeps its marker, and a remembered
+# refusal is no proof the row was replaced.
 _REPLACED_ADOPTION = (
-    "$complete != NONE AND (generation ?? 0) = $generation AND legacy_metadata != NONE AND ("
+    "$complete != NONE AND (generation ?? 0) = $generation AND legacy_metadata != NONE "
+    "AND $provisional_rows = 0 AND ("
     + " OR ".join(f"legacy_metadata.{field} != $complete.{field}" for field in VECTOR_SPACE_FIELDS)
     + ")"
 )
@@ -1564,6 +1592,7 @@ async def _release(
     complete: EmbeddingStamp | None,
     generation: int,
     rejections: Mapping[str, str],
+    provisional_rows: int = 0,
 ) -> None:
     try:
         await plane.execute(
@@ -1577,9 +1606,8 @@ async def _release(
             "THEN $complete ELSE complete_metadata END, "
             "complete_at = IF $complete != NONE AND (generation ?? 0) = $generation "
             "THEN time::now() ELSE complete_at END, "
-            # A full pass for another model than the one legacy vectors were
-            # adopted as has replaced every one of them, so the adoption's
-            # warning or notice no longer describes anything stored.
+            # Once every vector the adoption stamped was replaced, its warning,
+            # notice and provisional flag describe nothing stored.
             f"legacy_warning = IF {_REPLACED_ADOPTION} THEN NONE ELSE legacy_warning END, "
             f"legacy_notice = IF {_REPLACED_ADOPTION} THEN NONE ELSE legacy_notice END, "
             f"legacy_provisional = IF {_REPLACED_ADOPTION} THEN NONE ELSE legacy_provisional END, "
@@ -1594,6 +1622,7 @@ async def _release(
             complete=complete,
             generation=generation,
             rejections={"stamp": _stamp_digest(plane.stamp), "rows": dict(rejections)},
+            provisional_rows=provisional_rows,
         )
     except Exception as exc:
         # The lease expires on its own; a lost release only delays the next pass.

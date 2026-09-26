@@ -3169,3 +3169,172 @@ async def test_live_an_organization_settled_first_still_sees_another_ones_switch
     for row_id in (f"legacy-{index}" for index in range(3)):
         assert stamps[row_id]["stamp"] == stamp, row_id
         assert stamps[row_id]["vector"] != _OLD_GRAPH_VECTOR, row_id
+
+
+class _RefusingTarget(_SweepTargetProvider):
+    """A target provider that refuses one row's text for good, as an input it will not take."""
+
+    def __init__(self, dimensions: int, *, model: str, refuse: str) -> None:
+        super().__init__(dimensions, model=model)
+        self.refuse = refuse
+
+    async def embed_texts(self, texts, *, input_kind: str = "document"):
+        if input_kind == "document" and any(self.refuse in text for text in texts):
+            raise ValueError("input rejected by the provider")
+        return await super().embed_texts(texts, input_kind=input_kind)
+
+
+_SMALL_MODEL = "text-embedding-3-small"
+_LARGE_MODEL = "text-embedding-3-large"
+
+
+async def _provisional_race_orgs(x: str, y: str, large_stamp, small_stamp):
+    """X: a genuine large row and an unstamped small vector. Y: a genuine small row."""
+    seeded = _live_graph_client(x)
+    await prepare_graph_schema(seeded)
+    await seeded.execute_query(
+        "INSERT INTO entity $rows RETURN NONE;",
+        rows=[
+            {
+                "uuid": "a-good",
+                "group_id": x,
+                "name": "a-good",
+                "entity_type": "topic",
+                "name_embedding": [0.0, 1.0, *([0.0] * (GRAPH_EMBEDDING_DIM - 2))],
+                "attributes": {"embedding_metadata": previous_release_stamp(large_stamp)},
+            },
+            {
+                "uuid": "z-reject",
+                "group_id": x,
+                "name": "z-reject",
+                "entity_type": "topic",
+                "name_embedding": list(_OLD_GRAPH_VECTOR),
+                "attributes": {},
+            },
+        ],
+    )
+    await upgrade_graph_to_sweep(seeded)
+    await seeded.close()
+    other = _live_graph_client(y)
+    await prepare_graph_schema(other)
+    await other.execute_query(
+        "INSERT INTO entity $rows RETURN NONE;",
+        rows=[
+            {
+                "uuid": "native-small",
+                "group_id": y,
+                "name": "native-small",
+                "entity_type": "topic",
+                "name_embedding": list(_OLD_GRAPH_VECTOR),
+                "attributes": {"embedding_metadata": previous_release_stamp(small_stamp)},
+            }
+        ],
+    )
+    await upgrade_graph_to_sweep(other)
+    return other
+
+
+def _settler(content, organizations):
+    from sibyl_core.services.embedding_verdicts import settle_legacy_verdicts
+
+    async def no_chunks(_rows: object) -> tuple[list[list[float]], dict[str, object]]:
+        raise AssertionError("no chunk plane is configured here")
+
+    async def settle(client, provider, *, wait: float):
+        return await settle_legacy_verdicts(
+            client.group_id,
+            graph_client=client,
+            graph_provider=provider,
+            chunk_stamp=None,
+            embed_chunks=no_chunks,
+            client=content,
+            deployment_organizations=organizations,
+            defer_limit_seconds=wait,
+        )
+
+    return settle
+
+
+async def _sweep_as(client, provider):
+    from sibyl_core.services.graph import RelationshipManager
+    from sibyl_core.services.graph_embedding_sweep import sweep_graph_embeddings
+    from sibyl_core.services.graph_runtime import GraphRuntime
+
+    return await sweep_graph_embeddings(
+        GraphRuntime(
+            client=client,
+            entity_manager=EntityManager(client, group_id=client.group_id),
+            relationship_manager=RelationshipManager(client, group_id=client.group_id),
+        ),
+        embedding_provider=provider,
+    )
+
+
+@pytest.mark.asyncio
+async def test_live_a_refused_provisional_row_keeps_the_adoption_provisional(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pass for another model completes with a provisionally adopted row refused.
+
+    The adoption stays provisional and flagged, status counts the row, and
+    late evidence still reopens it and re-embeds the row.
+    """
+    from unittest.mock import AsyncMock
+
+    from sibyl.api.routes.admin import get_embedding_sweep_status
+    from sibyl_core.services.embedding_sweep import (
+        PROVISIONAL_ADOPTION_KEY,
+        read_embedding_sweep_state,
+    )
+
+    small = _RefusingTarget(GRAPH_EMBEDDING_DIM, model=_SMALL_MODEL, refuse="z-reject")
+    large = _SweepTargetProvider(GRAPH_EMBEDDING_DIM, model=_LARGE_MODEL)
+    large_stamp = large.metadata.to_dict()
+    namespace = f"refused_provisional_live_{uuid4().hex}"
+    content = _live_content_client(namespace)
+    x, y = str(uuid4()), str(uuid4())
+    other = None
+    client = _live_graph_client(x)
+    try:
+        await bootstrap_content_schema(content, reset=True)
+        other = await _provisional_race_orgs(x, y, large_stamp, small.metadata.to_dict())
+        settle = _settler(content, [x, y])
+        provisional = await settle(client, large, wait=0)
+        adopted = await _sweep_as(client, large)
+        refused = await _sweep_as(client, small)  # a worker still on the old model
+        held = await read_embedding_sweep_state("graph", x, client.execute_query)
+        monkeypatch.setattr(
+            "sibyl_core.services.graph_runtime.get_graph_client",
+            AsyncMock(return_value=client),
+        )
+        status = await get_embedding_sweep_status(x)
+        await settle(other, large, wait=600)
+        reopened = await settle(client, large, wait=600)
+        repaired = await _sweep_as(client, large)
+        stamps = await _live_vector_stamps(client, "entity")
+    finally:
+        await content.close()
+        with suppress(Exception):
+            await _drop_surreal_namespace(namespace)
+        for graph in (client, other):
+            if graph is not None:
+                await graph.close()
+        for group in (x, y):
+            with suppress(Exception):
+                await _drop_surreal_namespace(f"org_{group.replace('-', '')}")
+
+    assert provisional.graph["legacy_provisional"] is True
+    assert adopted.adopted == 1
+    assert (refused.status, refused.failed) == ("completed", 1)
+    assert refused.provisional_rows == 1
+    # A remembered refusal is no replacement: still provisional, still flagged.
+    assert held["legacy_provisional"] is True
+    assert held["legacy_warning"] == "adopted_on_incomplete_evidence"
+    assert status["graph"]["state"] == "adopted_on_incomplete_evidence"
+    assert status["graph"]["last_run"]["provisional_rows"] == 1
+    assert reopened.graph["legacy_decision"] == "reembed"
+    assert repaired.recovered >= 1
+    row = stamps["z-reject"]
+    assert row["stamp"] == large_stamp
+    assert PROVISIONAL_ADOPTION_KEY not in row["stamp"]
+    assert row["vector"] != _OLD_GRAPH_VECTOR

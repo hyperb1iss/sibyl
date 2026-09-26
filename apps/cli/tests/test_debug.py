@@ -235,3 +235,18 @@ def test_embedding_lines_explain_a_provisional_adoption() -> None:
     assert "graph adopted_on_incomplete_evidence" in lines[0]
     assert "re-embedded on its own if late evidence shows a switch" in lines[1]
     assert not any("sibyld db reembed" in line for line in lines)
+
+
+def test_embedding_lines_count_provisional_vectors_still_holding_their_original() -> None:
+    lines = debug._embedding_sweep_lines(
+        {
+            "graph": {
+                "state": "adopted_on_incomplete_evidence",
+                "legacy_warning": "adopted_on_incomplete_evidence",
+                "legacy_provisional": True,
+                "last_run": {"status": "completed", "provisional_rows": 2},
+            }
+        }
+    )
+
+    assert any("2 of its vectors still hold their original embedding" in line for line in lines)

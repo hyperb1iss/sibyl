@@ -369,6 +369,13 @@ def _embedding_sweep_lines(sweep: object) -> list[str]:
                 " its evidence; weighed again each pass, re-embedded on its own if late"
                 f" evidence shows a switch[/{ELECTRIC_YELLOW}]"
             )
+            held = last_run.get("provisional_rows") if isinstance(last_run, dict) else None
+            if isinstance(held, int) and held:
+                lines.append(
+                    f"                [{ELECTRIC_YELLOW}]{held:,} of its vectors still hold"
+                    " their original embedding (the provider refused a new one); the"
+                    f" adoption stays provisional until they are replaced[/{ELECTRIC_YELLOW}]"
+                )
         elif state.get("legacy_warning"):
             target = "graph" if plane == "graph" else "documents"
             lines.append(
