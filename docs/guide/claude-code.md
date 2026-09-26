@@ -13,8 +13,9 @@ personal assistants like OpenClaw.
 ::: tip The CLI is the default agent interface. Most agents use Sibyl by running `sibyl` shell
 commands (taught by the [`sibyl` skill](./skills.md)), which is lighter-weight than MCP and needs no
 per-client config. [`sibyl setup <url>`](../cli/setup.md) signs the CLI in and installs the skill
-and the Claude Code hook in one step, or an agent can do it by following `<server>/agent`. Reach for
-the MCP tools below when a client works better with structured tool calls. See
+and the Claude Code hook in one step, or an agent can do it by following the sentence on the web
+app's Connect card ([details](../cli/setup.md#hand-it-to-an-agent)). Reach for the MCP tools below
+when a client works better with structured tool calls. See
 [Working with Agents](./working-with-agents.md). :::
 
 ## What is MCP?

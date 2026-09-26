@@ -114,6 +114,10 @@ the job to your agent:
 Set up Sibyl on this machine by following https://sibyl.example.com/agent
 ```
 
+Copy the exact sentence from the web app's Connect card: `/agent` is served by the web app, so on a
+deployment where the web app and API have separate origins the card points at `/api/setup/agent.md`
+on the API instead.
+
 ### No Server Yet? Run One Locally
 
 ```bash

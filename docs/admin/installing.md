@@ -261,11 +261,14 @@ uv tool install --upgrade sibyl-dev && sibyl setup https://sibyl.example.com
 
 [`sibyl setup`](../cli/setup.md) signs the user in through the browser (with your OIDC provider when
 SSO is on), installs the Sibyl skill, and adds the Claude Code SessionStart hook. People can also
-hand the job to an agent with
-`Set up Sibyl on this machine by following https://sibyl.example.com/agent`. The public `/agent`
-page and the `/api/setup/connect` and `/api/setup/agent.md` routes carry only facts anyone who
-reaches the server can already see: the public URL, the minimum CLI version, and the sign-in
-methods.
+hand the job to an agent with the sentence on the Connect card, such as
+`Set up Sibyl on this machine by following https://sibyl.example.com/agent`. The web app serves
+`/agent`; the API serves the same document at `/api/setup/agent.md`. When the web app and API have
+separate origins (`SIBYL_FRONTEND_URL` differs from the server URL), the card points agents at the
+API form. The `/agent` page and the `/api/setup/connect` and `/api/setup/agent.md` routes carry only
+facts anyone who reaches the server can already see: the public URL, the minimum CLI version, and
+the sign-in methods.
 
-Users never enter model provider keys. When the server's providers are ready, onboarding skips the
-API keys step for everyone; when they are not, only an instance admin sees it.
+Users never enter model provider keys. When every provider the server uses is ready (each language
+model surface plus both embedding planes), onboarding skips the API keys step for everyone; when any
+one is not, only an instance admin sees it.

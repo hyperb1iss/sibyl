@@ -52,12 +52,12 @@ in your environment, you add them in the setup wizard instead (Step 2). Everythi
 
 The first time the web UI opens at `http://localhost:3337`, a short wizard runs:
 
-1. **Welcome:** names the model providers that are already ready, such as keys `sibyl up` picked up
-   from your environment.
-2. **API keys:** shown only when no provider is ready. Sibyl needs a language model and an embedding
-   provider (see [Environment](../deployment/environment.md#llm-configuration) for every option,
-   including Amazon Bedrock). Keys you enter in the wizard are stored encrypted in your local
-   database.
+1. **Welcome:** names the configured providers once every provider the server uses is ready, for
+   example when `sibyl up` picked up both keys from your environment.
+2. **API keys:** shown unless every model and embedding provider the server uses is ready, so a
+   single missing key still brings it up. Sibyl needs a language model and an embedding provider
+   (see [Environment](../deployment/environment.md#llm-configuration) for every option, including
+   Amazon Bedrock). Keys you enter in the wizard are stored encrypted in your local database.
 3. **Your owner account:** the first account you create holds owner privileges. This is local
    username/password auth; there is no external sign-in to configure. After setup, new accounts are
    invite-only unless you deliberately turn on public signups.

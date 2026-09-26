@@ -38,6 +38,10 @@ To let an agent do it instead, give it this sentence:
 Set up Sibyl on this machine by following https://sibyl.example.com/agent
 ```
 
+Copy the exact sentence from the web app's Connect card: `/agent` is served by the web app, so on a
+deployment where the web app and API have separate origins the card points at `/api/setup/agent.md`
+on the API instead. See [Hand It To An Agent](../cli/setup.md#hand-it-to-an-agent).
+
 ## Run a Server
 
 This covers the ways to run Sibyl yourself:

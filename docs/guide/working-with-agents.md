@@ -36,8 +36,9 @@ sibyl setup https://your-sibyl-host
 sibyl skill get core
 ```
 
-To hand the whole setup to your agent, tell it
-`Set up Sibyl on this machine by following https://your-sibyl-host/agent`. The hook runs once at
+To hand the whole setup to your agent, give it the sentence on the web app's Connect card, such as
+`Set up Sibyl on this machine by following https://your-sibyl-host/agent` (a server whose web app
+and API have separate origins uses `/api/setup/agent.md` on the API instead). The hook runs once at
 session start; pass `--no-hooks` to skip it, or run `sibyl skill install` to install only the skill.
 
 ### 2. Configure Your CLAUDE.md

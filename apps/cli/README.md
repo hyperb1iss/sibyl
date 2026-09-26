@@ -12,6 +12,8 @@ brew install hyperb1iss/tap/sibyl && sibyl setup https://sibyl.example.com      
 uv tool install --upgrade sibyl-dev && sibyl setup https://sibyl.example.com       # anywhere with uv
 
 # Or tell your agent: "Set up Sibyl on this machine by following https://sibyl.example.com/agent"
+# (copy the exact sentence from the web app's Connect card; a server whose web app and API have
+# separate origins uses /api/setup/agent.md on the API instead of /agent)
 
 # Develop this package
 moon run cli:install-dev

@@ -57,17 +57,29 @@ it out and warns that other commands in the shell still send it.
 4. Installs the skill into `~/.claude/skills`, `~/.codex/skills`, and `~/.agents/skills`.
 5. Adds a SessionStart hook to `~/.claude/settings.json` that loads your active tasks and recent
    memory when a Claude Code session starts. Only hooks exactly as Sibyl's installer writes them
-   (`python3 ~/.claude/hooks/sibyl/<script>.py`) are replaced; every other hook stays where it was,
-   and the previous file is backed up. Codex and other agents have no hook.
+   (`python3 ~/.claude/hooks/sibyl/<script>.py`) are replaced; every other hook stays where it was.
+   When the file already has hooks configured, a timestamped backup is written first. Codex and
+   other agents have no hook.
 
 ## Hand It To An Agent
 
-Every server serves the same steps as markdown for an AI coding agent at `/agent` (and
-`/api/setup/agent.md`). Paste this into Claude Code, Codex, or any coding agent:
+The server publishes the same steps as markdown for an AI coding agent. Paste the sentence from the
+web app's Connect card into Claude Code, Codex, or any coding agent. On a server where one origin
+fronts both the web app and the API, it reads:
 
 ```text
 Set up Sibyl on this machine by following https://your-sibyl-host/agent
 ```
+
+The document lives in two places:
+
+| URL                               | Served by                                | Works on                        |
+| --------------------------------- | ---------------------------------------- | ------------------------------- |
+| `<web-origin>/agent`              | The web app, relaying the API's document | The web app's origin            |
+| `<api-origin>/api/setup/agent.md` | The API                                  | The API's origin (always there) |
+
+When the web app and API run on separate origins, the Connect card uses the API form, because the
+`/agent` page does not exist on the API's origin.
 
 The agent installs the CLI, runs `sibyl setup <url> --yes`, relays the sign-in to you, and confirms
 with `sibyl whoami` and `sibyl doctor`.

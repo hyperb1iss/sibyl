@@ -30,6 +30,10 @@ let it run the same steps:
 Set up Sibyl on this machine by following https://sibyl.example.com/agent
 ```
 
+Copy the exact sentence from the web app's Connect card: `/agent` is served by the web app, so on a
+deployment where the web app and API have separate origins the card points at `/api/setup/agent.md`
+on the API instead. See [Hand It To An Agent](../cli/setup.md#hand-it-to-an-agent).
+
 Connected? Skip to [Step 3](#step-3-run-the-memory-loop).
 
 ## Step 2: No server yet? Run one locally
@@ -54,10 +58,11 @@ sibyl up
 
 The first time you open the web UI, a setup wizard runs:
 
-1. **Welcome:** names the model providers the server already has ready, if any.
-2. **API keys:** shown only when no provider is ready. Sibyl needs a language model (Anthropic,
-   OpenAI, Gemini, or Claude through Amazon Bedrock) and an embedding provider (OpenAI, Gemini, or
-   Cohere Embed v4 through Bedrock).
+1. **Welcome:** names the configured providers once every provider the server uses is ready.
+2. **API keys:** shown unless every model and embedding provider the server uses is ready, so a
+   server on the default providers with an Anthropic key but no OpenAI key still shows it. Sibyl
+   needs a language model (Anthropic, OpenAI, Gemini, or Claude through Amazon Bedrock) and an
+   embedding provider (OpenAI, Gemini, or Cohere Embed v4 through Bedrock).
 3. **Admin account:** the first account, which holds owner privileges.
 4. **Connect:** the one line that connects a terminal, and the sentence to hand an agent.
 

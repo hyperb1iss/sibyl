@@ -131,8 +131,9 @@ uv tool install --upgrade sibyl-dev && sibyl setup https://sibyl.example.com
 ```
 
 [`sibyl setup`](./cli/setup) signs you in and installs the Sibyl skill and the Claude Code hook. To
-let your agent do it, tell it
-`Set up Sibyl on this machine by following https://sibyl.example.com/agent`. No server yet?
+let your agent do it, give it the sentence on the web app's Connect card, such as
+`Set up Sibyl on this machine by following https://sibyl.example.com/agent`
+([other deployments](./cli/setup#hand-it-to-an-agent)). No server yet?
 [Installation](./guide/installation) starts one locally with one command.
 
 Then run the loop:

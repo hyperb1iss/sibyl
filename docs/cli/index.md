@@ -24,12 +24,14 @@ moon run cli:install-dev
 ```
 
 [`sibyl setup`](./setup.md) creates the context, signs you in, and installs the skill and the Claude
-Code hook. Agents can do the same by following `<server>/agent`.
+Code hook. Agents can do the same by following the sentence on the web app's Connect card; see
+[Hand It To An Agent](./setup.md#hand-it-to-an-agent).
 
 ## Quick Start
 
 ```bash
-# Connect this machine to a server (no URL: the local server at localhost:3334)
+# Connect this machine to a server (no URL: the current configured server; a fresh install
+# defaults to localhost:3334)
 sibyl setup https://your-sibyl-host
 
 # Link the current directory to a project

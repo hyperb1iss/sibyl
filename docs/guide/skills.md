@@ -67,9 +67,10 @@ the point of the skill. Agents now drive context and capture explicitly via `sib
 ### Installing Hooks
 
 [`sibyl setup`](../cli/setup.md) registers the SessionStart hook when Claude Code is installed. It
-replaces only hooks exactly as Sibyl's installer writes them, keeps every other hook, and backs up
-the previous `~/.claude/settings.json`. From a Sibyl checkout, the moon tasks install and remove the
-repo's hooks:
+replaces only hooks exactly as Sibyl's installer writes them and keeps every other hook. When
+`~/.claude/settings.json` already has hooks configured, it writes a timestamped backup first; a
+settings file with no hooks is updated without one. From a Sibyl checkout, the moon tasks install
+and remove the repo's hooks:
 
 ```bash
 # Install hooks to ~/.claude/hooks/sibyl

@@ -38,6 +38,10 @@ To let your agent do all of this, give it one sentence:
 Set up Sibyl on this machine by following https://your-sibyl-host/agent
 ```
 
+Copy the exact sentence from the web app's Connect card: `/agent` is served by the web app, so on a
+deployment where the web app and API have separate origins the card points at `/api/setup/agent.md`
+on the API instead. See [Hand It To An Agent](../cli/setup.md#hand-it-to-an-agent).
+
 The sign-in opens the browser. On a team server behind corporate SSO, that browser flow uses the
 same OIDC provider as the web app. You never enter provider API keys to connect; the server's
 operator configures models once. To do the steps by hand, run `sibyl init --remote <url>` and then
