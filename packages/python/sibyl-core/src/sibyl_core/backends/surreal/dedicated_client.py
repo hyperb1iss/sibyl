@@ -22,6 +22,7 @@ from sibyl_core.backends.surreal.connection import (
     _can_retry_raw_query,
     _is_transient_connection_error,
     _query_tokens,
+    detach_url_secrets,
 )
 from sibyl_core.backends.surreal.observability import (
     elapsed_ms,
@@ -34,6 +35,7 @@ from sibyl_core.backends.surreal.url_schemes import (
     is_file_backed_surreal_url,
     is_websocket_surreal_url,
     normalize_surreal_url,
+    safe_error_detail,
     split_surreal_url,
     surreal_url_scheme,
 )
@@ -401,6 +403,7 @@ class _PooledConnection:
                 connect_failure = self._log_connect_error(exc, attempt, started_at, budget)
             if connect_failure is not None:
                 raise connect_failure
+            timeout_failure: SurrealConnectTimeout | None = None
             try:
                 async with asyncio.timeout(budget):
                     await self._handshake(client)
@@ -436,11 +439,15 @@ class _PooledConnection:
                     cause_type=type(exc).__name__,
                     error_category="connect_timeout",
                 )
-                raise failure from exc
+                timeout_failure = failure
             except Exception as exc:
                 with contextlib.suppress(Exception):
                     await client.close()
                 connect_failure = self._log_connect_error(exc, attempt, started_at, budget)
+            # Raised here, outside the handlers, so neither failure carries the
+            # SDK error (whose message can quote the URL) as cause or context.
+            if timeout_failure is not None:
+                raise timeout_failure
             if connect_failure is not None:
                 raise connect_failure
             self._client = client
@@ -518,7 +525,9 @@ class _PooledConnection:
             try:
                 await client.close()
             except Exception as exc:
-                logger.debug("SurrealDB pooled connection close failed: %s", exc)
+                logger.debug(
+                    "SurrealDB pooled connection close failed: %s", _loggable(exc, self._url)
+                )
 
 
 class DedicatedSurrealClient:
@@ -617,6 +626,9 @@ class DedicatedSurrealClient:
             await control.close()
 
     async def connect(self) -> SurrealClient:
+        return await _at_boundary(self._url, self._connect_one())
+
+    async def _connect_one(self) -> SurrealClient:
         connection = await self._available.get()
         try:
             return await connection.connect()
@@ -630,37 +642,49 @@ class DedicatedSurrealClient:
 
     async def execute_query(self, query: str, **params: object) -> object:
         query_label = _pop_query_label(params)
-        return await self._execute(
-            query,
-            params=params,
-            raw=False,
-            query_label=query_label,
-            query_origin=_caller_origin(),
+        return await _at_boundary(
+            self._url,
+            self._execute(
+                query,
+                params=params,
+                raw=False,
+                query_label=query_label,
+                query_origin=_caller_origin(),
+            ),
         )
 
     async def execute_query_batch(self, query: str, **params: object) -> object:
         """Return every statement result after checking the complete response."""
         query_label = _pop_query_label(params)
-        return await self._execute(
-            query,
-            params=params,
-            raw=False,
-            all_results=True,
-            query_label=query_label,
-            query_origin=_caller_origin(),
+        return await _at_boundary(
+            self._url,
+            self._execute(
+                query,
+                params=params,
+                raw=False,
+                all_results=True,
+                query_label=query_label,
+                query_origin=_caller_origin(),
+            ),
         )
 
     async def execute_query_raw(self, query: str, **params: object) -> object:
         query_label = _pop_query_label(params)
-        return await self._execute(
-            query,
-            params=params,
-            raw=True,
-            query_label=query_label,
-            query_origin=_caller_origin(),
+        return await _at_boundary(
+            self._url,
+            self._execute(
+                query,
+                params=params,
+                raw=True,
+                query_label=query_label,
+                query_origin=_caller_origin(),
+            ),
         )
 
     async def close(self) -> None:
+        await _at_boundary(self._url, self._close_pool())
+
+    async def _close_pool(self) -> None:
         async with self._close_lock:
             # Drain the pool before closing so a checked-out connection is never
             # closed mid-query: each get() blocks until an in-flight query
@@ -684,6 +708,9 @@ class DedicatedSurrealClient:
                     self._available.put_nowait(connection)
 
     async def warm_pool(self) -> None:
+        await _at_boundary(self._url, self._warm_pool())
+
+    async def _warm_pool(self) -> None:
         drained: list[_PooledConnection] = []
         try:
             # Drained inside the try, so a warm cancelled while it waits on a
@@ -750,10 +777,10 @@ class DedicatedSurrealClient:
             raise RuntimeError("SurrealDB live queries require a WebSocket URL")
 
         connection = self._new_connection()
-        client = await connection.connect()
-        query_uuid = await client.live(table, diff=diff)
+        client = await _at_boundary(self._url, connection.connect())
+        query_uuid = await _at_boundary(self._url, client.live(table, diff=diff))
         try:
-            yield await client.subscribe_live(query_uuid)
+            yield await _at_boundary(self._url, client.subscribe_live(query_uuid))
         finally:
             with contextlib.suppress(Exception):
                 await client.kill(query_uuid)
@@ -803,7 +830,7 @@ class DedicatedSurrealClient:
                                     "SurrealDB dedicated client connection failed during "
                                     "write preflight; retrying attempt=%s error=%s",
                                     connection_retry_count,
-                                    exc,
+                                    _loggable(exc, self._url),
                                 )
                     client = await connection.connect(attempt=connection_retry_count + 1)
                     response = await self._send_query(client, query, params=params, raw=True)
@@ -836,7 +863,7 @@ class DedicatedSurrealClient:
                             "error=%s",
                             transaction_retry_count,
                             delay,
-                            exc,
+                            _loggable(exc, self._url),
                         )
                         await asyncio.sleep(delay)
                         continue
@@ -850,7 +877,7 @@ class DedicatedSurrealClient:
                         "SurrealDB dedicated client connection failed during read; retrying "
                         "attempt=%s error=%s",
                         connection_retry_count,
-                        exc,
+                        _loggable(exc, self._url),
                     )
         except Exception as exc:
             log_query(
@@ -895,6 +922,31 @@ class DedicatedSurrealClient:
         if raw:
             return await client.query_raw(query, bound_params)
         return _checked_query_result(await client.query_raw(query, bound_params))
+
+
+def _loggable(error: BaseException, url: str) -> str:
+    """An error for a log line: its message when it quotes nothing from the URL."""
+    return safe_error_detail(error, url) or type(error).__name__
+
+
+async def _at_boundary[T](url: str, operation: Awaitable[T]) -> T:
+    """Await an operation, replacing any error that quotes the URL on the way out.
+
+    Every exception leaving a DedicatedSurrealClient passes through here. A
+    clean error is re-raised unchanged, so callers keep matching on its type
+    and message. One that quotes a secret piece of the URL, in any spelling,
+    anywhere in its chain, is replaced by detach_url_secrets() and raised
+    after the handler exits, with no cause or context. Cancellation passes
+    straight through.
+    """
+    failure: Exception | None = None
+    try:
+        return await operation
+    except Exception as exc:
+        failure = detach_url_secrets(exc, url)
+        if failure is None:
+            raise
+    raise failure
 
 
 def _caller_origin() -> str | None:

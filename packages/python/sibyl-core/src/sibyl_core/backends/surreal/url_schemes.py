@@ -26,7 +26,7 @@ connect fail.
 from __future__ import annotations
 
 import re
-from urllib.parse import unquote, urlsplit
+from urllib.parse import quote, quote_plus, unquote, unquote_plus, urlsplit
 
 EMBEDDED_MEMORY_SCHEMES = frozenset({"memory", "mem"})
 EMBEDDED_FILE_SCHEMES = frozenset({"surrealkv", "surrealkv+versioned", "file"})
@@ -138,56 +138,148 @@ def surreal_http_base_url(url: str) -> str | None:
     return f"{http_scheme}://{netloc}{path}".rstrip("/")
 
 
-_FRAGMENT_SEPARATORS = re.compile(r"[@:/?#&=;]+")
-_HARMLESS_FRAGMENTS = frozenset({"rpc", "/rpc", "/rpc/", "sql", "http", "https", "ws", "wss"})
+# Path segments that name an endpoint rather than a deployment detail.
+_ENDPOINT_SEGMENTS = frozenset(
+    {"rpc", "sql", "health", "metrics", "status", "version", "signin", "signup", "key"}
+)
+_PIECE_SEPARATORS = re.compile(r"[@:/?#&=;]+")
 
 
-def _secret_fragments(url: str) -> list[str]:
-    """Every piece of the URL that must not reach an error message or log.
+def _url_components(remainder: str) -> tuple[str, str, str, str, str]:
+    """Userinfo, host and port text, path, query, and fragment, without urlsplit."""
+    authority_end = len(remainder)
+    for marker in "/?#":
+        index = remainder.find(marker)
+        if index != -1:
+            authority_end = min(authority_end, index)
+    authority, after = remainder[:authority_end], remainder[authority_end:]
+    userinfo, _, hostport = authority.rpartition("@")
+    after, _, fragment = after.partition("#")
+    path, _, query = after.partition("?")
+    return userinfo, hostport, path, query, fragment
 
-    Worked out without urlsplit, which itself raises (echoing the netloc) on
-    some malformed hosts. The scheme and a bare host are not secret; the
-    userinfo, path, query, and fragment are, along with anything left over
-    when the authority cannot be told apart from the path.
+
+def _secret_parts(url: str) -> set[str]:
+    """Every raw piece of the URL that must not reach an error message or log.
+
+    Worked out without urlsplit, which itself raises (quoting the netloc) on
+    some malformed hosts. The scheme, a clean host, its port, and endpoint path
+    segments such as "rpc" are not secret. The userinfo (whole, user, and
+    password), every other path segment, the query string and each query
+    value, and the fragment are, and so is the URL itself. When the host and
+    port do not parse, everything after the scheme is suspect.
     """
-    parts = split_surreal_url(url)
+    stripped = url.strip()
+    parts = split_surreal_url(stripped)
     if parts is None:
-        secret = [url.strip()]
-    elif parts[0] not in EMBEDDED_SCHEMES and surreal_url_host_port(url) is None:
-        # No clean host and port: everything after the scheme is suspect,
-        # including port text that is not a number.
-        secret = [parts[1]]
-    else:
-        remainder = parts[1]
-        authority_end = len(remainder)
-        for marker in "/?#":
-            index = remainder.find(marker)
-            if index != -1:
-                authority_end = min(authority_end, index)
-        authority, after = remainder[:authority_end], remainder[authority_end:]
-        userinfo = authority.rpartition("@")[0]
-        secret = [userinfo, after] if authority else [remainder]
-    fragments = set(secret)
-    for piece in secret:
-        fragments.update(_FRAGMENT_SEPARATORS.split(piece))
+        pieces = {stripped, *_PIECE_SEPARATORS.split(stripped)}
+        return {piece for piece in pieces if piece}
+    scheme, remainder = parts
+    secret = {stripped, remainder, f"{scheme}://{remainder}"}
+    userinfo, hostport, path, query, fragment = _url_components(remainder)
+    if userinfo:
+        user, _, password = userinfo.partition(":")
+        secret.update({userinfo, user, password})
+    embedded = scheme in EMBEDDED_SCHEMES
+    for segment in path.split("/"):
+        if segment and (embedded or segment.lower() not in _ENDPOINT_SEGMENTS):
+            secret.add(segment)
+    if path and path.strip("/").lower() not in _ENDPOINT_SEGMENTS:
+        secret.add(path)
+    if query:
+        secret.add(query)
+        for pair in query.split("&"):
+            key, _, value = pair.partition("=")
+            secret.update({pair, value} if value else {key})
+    if fragment:
+        secret.add(fragment)
+    if not embedded and surreal_url_host_port(stripped) is None:
+        # No clean host and port: the port text and anything else in the
+        # authority may be secret too.
+        secret.update({hostport, *_PIECE_SEPARATORS.split(remainder)})
+    return {piece for piece in secret if piece}
+
+
+def _spellings(piece: str) -> set[str]:
+    """The piece raw, percent-decoded, percent-encoded, and with "+" and space swapped."""
+    decoded = unquote(piece)
+    decoded_plus = unquote_plus(piece)
+    spellings = {
+        piece,
+        decoded,
+        decoded_plus,
+        quote(decoded, safe=""),
+        quote(decoded, safe="/:@!$&'()*,;="),
+        quote_plus(decoded_plus),
+        piece.replace("+", " "),
+        piece.replace(" ", "+"),
+        piece.replace(" ", "%20"),
+    }
+    return {spelling.lower() for spelling in spellings if spelling}
+
+
+# A piece shorter than this cannot be told apart from ordinary text ("T" in a
+# macOS temp path would match "connect"), so matching it would scrub every
+# error without protecting anything.
+_MIN_SECRET_LENGTH = 3
+
+
+def url_secret_spellings(url: str) -> list[str]:
+    """Every spelling of every secret piece of the URL, lowercased, longest first."""
+    spellings: set[str] = set()
+    for piece in _secret_parts(url):
+        spellings |= _spellings(piece)
     return sorted(
-        (
-            fragment
-            for fragment in fragments
-            if len(fragment) >= 3 and fragment.lower() not in _HARMLESS_FRAGMENTS
-        ),
+        (spelling for spelling in spellings if len(spelling) >= _MIN_SECRET_LENGTH),
         key=len,
         reverse=True,
     )
 
 
+def _chain(error: BaseException) -> list[BaseException]:
+    """The error, then its causes and contexts, each once."""
+    seen: set[int] = set()
+    chain: list[BaseException] = []
+    pending: list[BaseException] = [error]
+    while pending and len(chain) < 32:
+        current = pending.pop(0)
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        chain.append(current)
+        pending.extend(link for link in (current.__cause__, current.__context__) if link)
+    return chain
+
+
+def _error_texts(error: BaseException) -> list[str]:
+    texts: list[str] = []
+    for link in _chain(error):
+        texts.append(str(link))
+        texts.append(repr(link))
+        texts.extend(str(arg) for arg in getattr(link, "args", ()))
+    return texts
+
+
+def error_mentions_url_secret(error: BaseException, url: str) -> bool:
+    """Whether the error or anything chained to it quotes a secret piece of the URL.
+
+    Checks every spelling (raw, percent-decoded, percent-encoded, "+" and space
+    swapped), case-insensitively, since an HTTP stack may echo a normalized
+    form of the URL it requested.
+    """
+    spellings = url_secret_spellings(url)
+    for text in _error_texts(error):
+        lowered = text.lower()
+        if any(spelling in lowered for spelling in spellings):
+            return True
+    return False
+
+
 def safe_error_detail(error: BaseException, url: str) -> str:
-    """The error's message when it quotes no secret part of the URL, else ''."""
-    message = str(error).strip()
-    lowered = message.lower()
-    if any(fragment.lower() in lowered for fragment in _secret_fragments(url)):
+    """The error's message when neither it nor its chain quotes the URL, else ''."""
+    if error_mentions_url_secret(error, url):
         return ""
-    return message
+    return str(error).strip()
 
 
 def surreal_url_credentials(url: str) -> tuple[str, str] | None:
@@ -266,6 +358,7 @@ __all__ = [
     "EMBEDDED_SCHEMES",
     "REMOTE_SCHEMES",
     "SUPPORTED_SCHEMES",
+    "error_mentions_url_secret",
     "is_embedded_surreal_url",
     "is_file_backed_surreal_url",
     "is_memory_surreal_url",
@@ -280,4 +373,5 @@ __all__ = [
     "surreal_url_host_port",
     "surreal_url_scheme",
     "unsupported_surreal_url_reason",
+    "url_secret_spellings",
 ]

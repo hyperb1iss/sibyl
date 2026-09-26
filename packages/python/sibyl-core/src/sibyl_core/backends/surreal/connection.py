@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from sibyl_core.backends.surreal.url_schemes import (
+    error_mentions_url_secret,
     redact_surreal_url,
     safe_error_detail,
     surreal_url_scheme,
@@ -59,7 +60,7 @@ def _is_connection_closed_error(exc: BaseException) -> bool:
 def _is_transient_connection_error(exc: BaseException) -> bool:
     if isinstance(exc, SurrealConnectTimeout):
         return True
-    if isinstance(exc, SurrealConnectError):
+    if isinstance(exc, SurrealConnectError | SurrealTransportError):
         return exc.transient
     if _is_connection_closed_error(exc):
         return True
@@ -135,6 +136,50 @@ class SurrealConnectError(ConnectionError):
         self.cause_type = type(cause).__name__
         # Retry decisions keep following the original error.
         self.transient = _is_transient_connection_error(cause)
+
+
+class SurrealTransportError(RuntimeError):
+    """A SurrealDB request failed with an error that quoted the configured URL.
+
+    Raised by the DedicatedSurrealClient boundary in place of such an error:
+    the SDK's HTTP and WebSocket stacks can echo the URL they requested, path
+    and query included, often normalized. Only the redacted endpoint and the
+    original class survive; the original is not chained.
+    """
+
+    def __init__(self, *, url: str, cause: BaseException) -> None:
+        super().__init__(
+            f"SurrealDB request to {redact_surreal_url(url)} failed ({type(cause).__name__})"
+        )
+        self.url_scheme = _log_scheme(url)
+        self.cause_type = type(cause).__name__
+        # Retry decisions keep following the original error.
+        self.transient = _is_transient_connection_error(cause)
+
+
+def detach_url_secrets(error: Exception, url: str) -> Exception | None:
+    """The exception to raise in place of ``error``, or None when it is clean.
+
+    The one boundary check for everything leaving a DedicatedSurrealClient. An
+    error is clean when neither it nor anything chained to it quotes a secret
+    piece of the URL, in any spelling; it then keeps its type, message, and
+    chain. Otherwise the replacement names only the redacted endpoint and the
+    original class, keeps the retry classification, and must be raised outside
+    the handler so the original is neither its cause nor its context.
+    """
+    unchained = error.__cause__ is None and error.__context__ is None
+    if unchained and isinstance(
+        error, SurrealConnectError | SurrealConnectTimeout | SurrealTransportError
+    ):
+        # Built from the redacted endpoint and raised without a chain.
+        return None
+    if not error_mentions_url_secret(error, url):
+        return None
+    if isinstance(error, SurrealConnectTimeout):
+        return SurrealConnectTimeout(
+            url=url, attempt=error.attempt, timeout_seconds=error.timeout_seconds
+        )
+    return SurrealTransportError(url=url, cause=error)
 
 
 class SurrealQueryError(RuntimeError):

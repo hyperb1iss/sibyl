@@ -282,3 +282,93 @@ def test_http_base_urls_never_carry_userinfo(
     assert url_schemes.surreal_http_base_url(url) == base
     assert "hunter2" not in (url_schemes.surreal_http_base_url(url) or "").lower()
     assert url_schemes.surreal_url_credentials(url) == credentials
+
+
+_SECRET_URL = "https://admin:Pw%2BSecret@host:8443/private/Deploy%20Path/rpc?token=Tok+En#Frag42"
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "admin",
+        "Pw+Secret",  # percent-decoded password
+        "pw%2bsecret",  # raw, other case
+        "/private/Deploy Path/rpc",  # decoded path
+        "Deploy%20Path",  # raw segment
+        "Deploy+Path",  # "+" for a space
+        "token=Tok En",  # query value with "+" decoded to a space
+        "Tok%2BEn",  # query value percent-encoded
+        "Frag42",
+        "url='https://host:8443/private/Deploy%20Path?token=Tok+En/rpc'",
+    ],
+)
+def test_every_spelling_of_a_secret_piece_is_caught(message: str) -> None:
+    assert url_schemes.error_mentions_url_secret(RuntimeError(f"failed: {message}"), _SECRET_URL)
+    assert url_schemes.safe_error_detail(RuntimeError(f"failed: {message}"), _SECRET_URL) == ""
+
+
+def test_secrets_are_caught_anywhere_in_the_exception_chain() -> None:
+    try:
+        try:
+            raise OSError("cannot reach /private/Deploy Path")
+        except OSError as inner:
+            raise RuntimeError("request failed") from inner
+    except RuntimeError as outer:
+        assert url_schemes.error_mentions_url_secret(outer, _SECRET_URL)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Database record `entity:one` already exists",
+        "Failed to commit transaction due to a read or write conflict. This transaction can be retried",
+        "503 at /rpc",  # endpoint segments are not secret
+        "host:8443",  # a clean host and port are not secret
+    ],
+)
+def test_clean_messages_are_left_alone(message: str) -> None:
+    assert not url_schemes.error_mentions_url_secret(RuntimeError(message), _SECRET_URL)
+    assert url_schemes.safe_error_detail(RuntimeError(message), _SECRET_URL) == message
+
+
+async def test_the_client_boundary_keeps_clean_errors_and_replaces_leaky_ones(monkeypatch) -> None:
+    from sibyl_core.backends.surreal.connection import SurrealTransportError
+
+    class Conflict(Exception):
+        pass
+
+    raised: list[Exception] = []
+
+    class FakeAsyncSurreal:
+        def __init__(self, _url: str) -> None:
+            pass
+
+        async def use(self, _namespace: str, _database: str) -> None:
+            return None
+
+        async def query_raw(self, query: str, _params: object | None = None) -> object:
+            if query == "RETURN true;":
+                return {"result": [{"status": "OK", "result": True}]}
+            raise raised.pop(0)
+
+        async def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("surrealdb.AsyncSurreal", FakeAsyncSurreal)
+    client = DedicatedSurrealClient(
+        url="wss://host:8443/private/Deploy%20Path/rpc", namespace="org_b", database="graph"
+    )
+
+    clean = Conflict("Database record `entity:one` already exists")
+    raised.append(clean)
+    with pytest.raises(Conflict) as kept:
+        await client.execute_query("CREATE entity:one;")
+    assert kept.value is clean
+
+    raised.append(Conflict("503 for url='https://host:8443/private/Deploy Path/rpc'"))
+    with pytest.raises(SurrealTransportError) as replaced:
+        await client.execute_query("CREATE entity:two;")
+    assert "Deploy" not in str(replaced.value)
+    assert replaced.value.__cause__ is None
+    assert replaced.value.__context__ is None
+    assert replaced.value.cause_type == "Conflict"
