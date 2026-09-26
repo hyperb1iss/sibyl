@@ -140,6 +140,14 @@ LEGACY_WARNING_ADOPTED_WITHOUT_EVIDENCE = "adopted_without_evidence"
 # evidence is not the plane's own, and a tenant on the previous release could
 # have forged the stamps behind it.
 LEGACY_NOTICE_ADOPTED_ON_DEPLOYMENT_EVIDENCE = "adopted_on_deployment_evidence"
+# A plane that adopted when its evidence wait ran out with some organization
+# still unpublished. Provisional: each settle reweighs it, late evidence of a
+# switch reopens it to re-embed, and it becomes final once every organization
+# has published.
+LEGACY_WARNING_ADOPTED_ON_INCOMPLETE_EVIDENCE = "adopted_on_incomplete_evidence"
+# Marks the stamps a provisional adoption wrote, so a reopen can find exactly
+# those rows. Not a field that shapes the vector, so no comparison sees it.
+PROVISIONAL_ADOPTION_KEY = "provisional_adoption"
 
 
 class EmbeddingSchemaPendingError(RuntimeError):
@@ -279,11 +287,18 @@ class SweepTable:
             f"AND {self._unstamped()} LIMIT 1;"
         )
 
-    def legacy_page_query(self) -> str:
+    def _legacy_rows(self, *, reopened: bool) -> str:
+        """Vectors the plane's verdict stamps: unstamped ones, and after a reopened
+        provisional adoption also the ones that adoption stamped."""
+        if not reopened:
+            return self._unstamped()
+        return f"({self._unstamped()} OR {self.metadata_path}.{PROVISIONAL_ADOPTION_KEY} = true)"
+
+    def legacy_page_query(self, *, reopened: bool = False) -> str:
         return (
             f"SELECT uuid FROM {self.name} "
             f"WHERE {self.scope_field} = $scope AND uuid >= $cursor "
-            f"AND {self.vector_field} != NONE AND {self._unstamped()} "
+            f"AND {self.vector_field} != NONE AND {self._legacy_rows(reopened=reopened)} "
             "ORDER BY uuid ASC LIMIT $limit;"
         )
 
@@ -294,11 +309,11 @@ class SweepTable:
     def _rows_by_uuid(self) -> str:
         return f"(SELECT VALUE id FROM {self.name} WHERE uuid IN $uuids)"
 
-    def adopt_query(self) -> str:
+    def adopt_query(self, *, reopened: bool = False) -> str:
         return (
             f"UPDATE {self._rows_by_uuid()} SET {self.metadata_path} = $legacy "
             f"WHERE {self.scope_field} = $scope AND {self.vector_field} != NONE "
-            f"AND {self._unstamped()} RETURN uuid;"
+            f"AND {self._legacy_rows(reopened=reopened)} RETURN uuid;"
         )
 
     def in_model_count_query(self) -> str:
@@ -602,6 +617,7 @@ async def ensure_legacy_decision(
     defer_unproven: bool = False,
     defer_limit_seconds: float | None = None,
     evidence_complete: bool = True,
+    reweigh_provisional: bool = False,
 ) -> dict[str, Any]:
     """Persist the plane's legacy verdict if no pass has recorded one yet.
 
@@ -615,9 +631,19 @@ async def ensure_legacy_decision(
     deployment has been read. The first deferral is persisted, and once
     ``defer_limit_seconds`` have passed since it the verdict is recorded on
     the evidence at hand.
+
+    An adoption recorded that way, with evidence still incomplete, is
+    provisional: it carries the ``adopted_on_incomplete_evidence`` warning, its
+    stamps carry a marker, and with ``reweigh_provisional`` every later settle
+    weighs it again. Late evidence of a switch reopens it to re-embed, which
+    takes back the rows it stamped; once every organization has published it
+    becomes final. A timeout never forces a re-embed on its own, so one slow
+    organization cannot cost a plain upgrade a full re-embed.
     """
     state = await _ensure_state(plane)
     if state.get("legacy_decision"):
+        if reweigh_provisional and state.get("legacy_provisional"):
+            return await _reweigh_provisional(plane, evidence_complete=evidence_complete)
         return state
     legacy_rows = False
     for table in plane.tables:
@@ -630,17 +656,19 @@ async def ensure_legacy_decision(
         evidence=evidence,
         policy=configured_legacy_vector_policy(),
     )
-    legacy = (
-        dict(plane.stamp)
-        if decision is LegacyVectorDecision.ADOPT
-        else unverified_embedding_metadata(UNVERIFIED_ORIGIN_LEGACY)
-    )
     unproven = basis is LegacyVectorBasis.NO_PRIOR_EVIDENCE
     early = (
         not evidence_complete
         and decision is LegacyVectorDecision.ADOPT
         and basis is not LegacyVectorBasis.OPERATOR_ADOPT
     )
+    legacy = (
+        dict(plane.stamp)
+        if decision is LegacyVectorDecision.ADOPT
+        else unverified_embedding_metadata(UNVERIFIED_ORIGIN_LEGACY)
+    )
+    if early:
+        legacy[PROVISIONAL_ADOPTION_KEY] = True
     if (unproven or early) and defer_unproven:
         deferred = normalize_records(
             await plane.execute(
@@ -663,13 +691,21 @@ async def ensure_legacy_decision(
         await plane.execute(
             "UPDATE type::record($key) SET legacy_decision = $decision, "
             "legacy_basis = $basis, legacy_metadata = $legacy, legacy_warning = $warning, "
-            "legacy_notice = $notice, legacy_deferred_at = NONE, decided_at = time::now(), "
+            "legacy_notice = $notice, legacy_provisional = $provisional, "
+            "legacy_deferred_at = NONE, decided_at = time::now(), "
             "updated_at = time::now() WHERE legacy_decision = NONE RETURN AFTER;",
             key=plane.state_key,
             decision=decision.value,
             basis=basis.value,
             legacy=legacy,
-            warning=LEGACY_WARNING_ADOPTED_WITHOUT_EVIDENCE if unproven else None,
+            provisional=True if early else None,
+            warning=(
+                LEGACY_WARNING_ADOPTED_WITHOUT_EVIDENCE
+                if unproven
+                else LEGACY_WARNING_ADOPTED_ON_INCOMPLETE_EVIDENCE
+                if early
+                else None
+            ),
             notice=(
                 LEGACY_NOTICE_ADOPTED_ON_DEPLOYMENT_EVIDENCE
                 if basis is LegacyVectorBasis.DEPLOYMENT_STAMPS_MATCH
@@ -687,6 +723,15 @@ async def ensure_legacy_decision(
             "model": plane.stamp.get("model"),
             "dimensions": plane.stamp.get("dimensions"),
         }
+        if early:
+            log.warning(
+                "embedding_legacy_vectors_adopted_on_incomplete_evidence",
+                **fields,
+                detail=(
+                    "some organization had not published its graph evidence when the wait "
+                    "ran out; the verdict is provisional and is weighed again every pass"
+                ),
+            )
         if unproven:
             log.warning(
                 "embedding_legacy_vectors_adopted_without_evidence",
@@ -697,8 +742,67 @@ async def ensure_legacy_decision(
                     f"{'graph' if plane.name == 'graph' else 'documents'} --yes`"
                 ),
             )
-        else:
+        elif not early:
             log.info("embedding_legacy_vectors_decided", **fields)
+        return rows[0]
+    return await _read_state(plane)
+
+
+async def _reweigh_provisional(plane: SweepPlane, *, evidence_complete: bool) -> dict[str, Any]:
+    """Weigh a provisional adoption again on the evidence published by now."""
+    evidence = await plane.evidence()
+    decision, basis = decide_legacy_vectors(
+        legacy_rows=True, evidence=evidence, policy=configured_legacy_vector_policy()
+    )
+    fields = {
+        "organization_id": plane.organization_id,
+        "plane": plane.name,
+        "decision": decision.value,
+        "basis": basis.value,
+    }
+    if decision is LegacyVectorDecision.REEMBED:
+        # The rows the adoption stamped are taken back by the next pass, under
+        # the lease (see ``_stamp_legacy_rows``); the generation keeps a pass
+        # already running from recording itself complete.
+        rows = normalize_records(
+            await plane.execute(
+                "UPDATE type::record($key) SET legacy_decision = $decision, "
+                "legacy_basis = $basis, legacy_metadata = $legacy, legacy_warning = NONE, "
+                "legacy_notice = NONE, legacy_provisional = NONE, decided_at = time::now(), "
+                "complete_metadata = NONE, complete_at = NONE, rejections = {}, "
+                "generation = (generation ?? 0) + 1, updated_at = time::now() "
+                "WHERE legacy_provisional = true RETURN AFTER;",
+                key=plane.state_key,
+                decision=decision.value,
+                basis=basis.value,
+                legacy=unverified_embedding_metadata(UNVERIFIED_ORIGIN_LEGACY),
+            )
+        )
+        if rows:
+            log.warning("embedding_legacy_vectors_reopened_for_reembed", **fields)
+            return rows[0]
+        return await _read_state(plane)
+    if not evidence_complete:
+        return await _read_state(plane)
+    unproven = basis is LegacyVectorBasis.NO_PRIOR_EVIDENCE
+    rows = normalize_records(
+        await plane.execute(
+            "UPDATE type::record($key) SET legacy_basis = $basis, legacy_metadata = $legacy, "
+            "legacy_warning = $warning, legacy_notice = $notice, legacy_provisional = NONE, "
+            "updated_at = time::now() WHERE legacy_provisional = true RETURN AFTER;",
+            key=plane.state_key,
+            basis=basis.value,
+            legacy=dict(plane.stamp),
+            warning=LEGACY_WARNING_ADOPTED_WITHOUT_EVIDENCE if unproven else None,
+            notice=(
+                LEGACY_NOTICE_ADOPTED_ON_DEPLOYMENT_EVIDENCE
+                if basis is LegacyVectorBasis.DEPLOYMENT_STAMPS_MATCH
+                else None
+            ),
+        )
+    )
+    if rows:
+        log.info("embedding_legacy_vectors_confirmed", **fields)
         return rows[0]
     return await _read_state(plane)
 
@@ -1252,12 +1356,18 @@ async def _stamp_legacy_rows(
     """
     limit = _ADOPT_BATCH_ROWS * slots
     in_flight = asyncio.Semaphore(slots)
+    # A re-embed verdict also takes back what a reopened provisional adoption
+    # stamped. This runs under the plane's lease, so no pass that read the
+    # adoption before the reopen can stamp more of those rows meanwhile.
+    reopened = legacy.get("provider") == UNVERIFIED_EMBEDDING_PROVIDER
 
     async def adopt(table: SweepTable, uuids: Sequence[str]) -> list[dict[str, Any]]:
         async with in_flight:
             if counts.lease_lost:
                 return []
-            stamped = await _rows(plane, table.adopt_query(), legacy=legacy, uuids=list(uuids))
+            stamped = await _rows(
+                plane, table.adopt_query(reopened=reopened), legacy=legacy, uuids=list(uuids)
+            )
             if not await _renew_lease(plane, owner=owner, budget=budget):
                 counts.lease_lost = True
             return stamped
@@ -1266,7 +1376,12 @@ async def _stamp_legacy_rows(
         cursor = ""
         while True:
             rows, more = page_after_cursor(
-                await _rows(plane, table.legacy_page_query(), cursor=cursor, limit=limit + 1),
+                await _rows(
+                    plane,
+                    table.legacy_page_query(reopened=reopened),
+                    cursor=cursor,
+                    limit=limit + 1,
+                ),
                 cursor,
                 limit,
             )
@@ -1467,6 +1582,7 @@ async def _release(
             # warning or notice no longer describes anything stored.
             f"legacy_warning = IF {_REPLACED_ADOPTION} THEN NONE ELSE legacy_warning END, "
             f"legacy_notice = IF {_REPLACED_ADOPTION} THEN NONE ELSE legacy_notice END, "
+            f"legacy_provisional = IF {_REPLACED_ADOPTION} THEN NONE ELSE legacy_provisional END, "
             "lease_owner = NONE, lease_until = NONE, updated_at = time::now() "
             "WHERE lease_owner = $owner RETURN NONE;",
             key=plane.state_key,
@@ -1541,7 +1657,8 @@ async def mark_plane_for_reembed(
     await execute(
         REOPEN_EMBEDDING_STATES.replace(
             "updated_at = time::now()",
-            "legacy_warning = NONE, legacy_notice = NONE, updated_at = time::now()",
+            "legacy_warning = NONE, legacy_notice = NONE, legacy_provisional = NONE, "
+            "updated_at = time::now()",
         ).replace(
             "WHERE $organizations CONTAINS organization_id",
             "WHERE $organizations CONTAINS organization_id AND plane = $plane",
@@ -1582,7 +1699,9 @@ async def read_embedding_sweep_state(
 
 __all__ = [
     "LEGACY_NOTICE_ADOPTED_ON_DEPLOYMENT_EVIDENCE",
+    "LEGACY_WARNING_ADOPTED_ON_INCOMPLETE_EVIDENCE",
     "LEGACY_WARNING_ADOPTED_WITHOUT_EVIDENCE",
+    "PROVISIONAL_ADOPTION_KEY",
     "SWEEP_BUSY",
     "SWEEP_COMPLETED",
     "SWEEP_CURRENT",

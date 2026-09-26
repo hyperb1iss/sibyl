@@ -219,3 +219,19 @@ def test_debug_query_explain_prefixes_query_and_formats_plan(
     assert "TableScan" in result.stdout
     assert "entity" in result.stdout
     assert "1.25us" in result.stdout
+
+
+def test_embedding_lines_explain_a_provisional_adoption() -> None:
+    lines = debug._embedding_sweep_lines(
+        {
+            "graph": {
+                "state": "adopted_on_incomplete_evidence",
+                "legacy_warning": "adopted_on_incomplete_evidence",
+                "legacy_provisional": True,
+            }
+        }
+    )
+
+    assert "graph adopted_on_incomplete_evidence" in lines[0]
+    assert "re-embedded on its own if late evidence shows a switch" in lines[1]
+    assert not any("sibyld db reembed" in line for line in lines)

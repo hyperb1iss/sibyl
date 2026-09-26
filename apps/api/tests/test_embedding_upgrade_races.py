@@ -517,3 +517,245 @@ async def test_a_stamp_with_a_nested_null_is_repaired_on_the_first_pass(
     assert (first.recovered, first.pending) == (1, 0)
     assert second.checked == 0
     assert stored["stamp"] == raw_memory_embedding_metadata(small.metadata)
+
+
+class _Counting:
+    """A deterministic provider that records every text it embeds."""
+
+    def __init__(self, provider: DeterministicEmbeddingProvider) -> None:
+        self._provider = provider
+        self.metadata = provider.metadata
+        self.texts: list[str] = []
+
+    async def embed_texts(self, texts, *, input_kind: str = "document"):
+        self.texts.extend(texts)
+        return await self._provider.embed_texts(texts, input_kind=input_kind)
+
+
+async def _graph_org(engine, store: str, rows: list[dict[str, object]]) -> SurrealGraphClient:
+    client = SurrealGraphClient(
+        group_id=str(uuid4()),
+        url=_url(engine, store),
+        username=engine["username"],
+        password=engine["password"],
+    )
+    await prepare_graph_schema(client)
+    await client.execute_query(
+        "INSERT INTO entity $rows RETURN NONE;",
+        rows=[
+            {"group_id": client.group_id, "entity_type": "topic", "name": row["uuid"], **row}
+            for row in rows
+        ],
+    )
+    await upgrade_graph_to_sweep(client)
+    return client
+
+
+async def _entity_stamps(client: SurrealGraphClient) -> dict[str, dict[str, object]]:
+    from sibyl_core.backends.surreal.records import normalize_records
+
+    rows = normalize_records(
+        await client.execute_query(
+            "SELECT uuid, name_embedding AS vector, attributes.embedding_metadata AS stamp "
+            "FROM entity WHERE group_id = $group;",
+            group=client.group_id,
+        )
+    )
+    return {str(row["uuid"]): row for row in rows}
+
+
+def _legacy_rows(count: int) -> list[dict[str, object]]:
+    return [
+        {
+            "uuid": f"legacy-{index}",
+            "name_embedding": _unit(index, GRAPH_EMBEDDING_DIM),
+            "attributes": {},
+        }
+        for index in range(count)
+    ]
+
+
+@asynccontextmanager
+async def _settling(engine, monkeypatch, organizations: list[SurrealGraphClient]):
+    """Content namespace, a settle bound to it, and cleanup for every organization."""
+    from sibyl_core.services import content_client
+    from sibyl_core.services.embedding_verdicts import settle_legacy_verdicts
+
+    content = _content(engine)
+    await bootstrap_content_schema(content, reset=True)
+
+    @asynccontextmanager
+    async def session():
+        yield content
+
+    monkeypatch.setattr(content_client, "surreal_content_client", session)
+    names = [client.group_id for client in organizations]
+
+    async def no_chunks(_rows: object) -> tuple[list[list[float]], dict[str, object]]:
+        raise AssertionError("no chunk plane is configured here")
+
+    async def settle(client, provider, *, wait: float):
+        return await settle_legacy_verdicts(
+            client.group_id,
+            graph_client=client,
+            graph_provider=provider,
+            chunk_stamp=None,
+            embed_chunks=no_chunks,
+            client=content,
+            deployment_organizations=names,
+            defer_limit_seconds=wait,
+        )
+
+    try:
+        yield settle
+    finally:
+        await content.close()
+        with suppress(Exception):
+            await _drop_namespace(engine, content.namespace)
+        for client in organizations:
+            await client.close()
+            with suppress(Exception):
+                await _drop_namespace(engine, client.namespace)
+
+
+async def _sweep(client, provider):
+    from sibyl_core.services.graph import RelationshipManager
+    from sibyl_core.services.graph_embedding_sweep import sweep_graph_embeddings
+    from sibyl_core.services.graph_runtime import GraphRuntime
+
+    runtime = GraphRuntime(
+        client=client,
+        entity_manager=EntityManager(client, group_id=client.group_id),
+        relationship_manager=RelationshipManager(client, group_id=client.group_id),
+    )
+    return await sweep_graph_embeddings(runtime, embedding_provider=provider)
+
+
+@pytest.mark.asyncio
+async def test_a_provisional_adoption_reopens_when_late_evidence_shows_a_switch(
+    engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Y stays unpublished past the wait, X adopts provisionally, Y then shows the switch.
+
+    X's unstamped small vectors are adopted as the configured large model,
+    flagged; once Y's small stamps are published X reopens to re-embed and
+    the rows that adoption stamped get large vectors.
+    """
+    from sibyl_core.services.embedding_sweep import PROVISIONAL_ADOPTION_KEY
+
+    small = _provider(_SMALL, GRAPH_EMBEDDING_DIM, "graph")
+    large = _Counting(_provider(_LARGE, GRAPH_EMBEDDING_DIM, "graph"))
+    large_stamp = large.metadata.to_dict()
+    x = await _graph_org(
+        engine,
+        "x",
+        [
+            *_legacy_rows(3),
+            {
+                "uuid": "stamped-large",
+                "name_embedding": _unit(7, GRAPH_EMBEDDING_DIM),
+                "attributes": {"embedding_metadata": previous_release_stamp(large_stamp)},
+            },
+        ],
+    )
+    y = await _graph_org(
+        engine,
+        "y",
+        [
+            {
+                "uuid": "native-small",
+                "name_embedding": _unit(8, GRAPH_EMBEDDING_DIM),
+                "attributes": {
+                    "embedding_metadata": previous_release_stamp(small.metadata.to_dict())
+                },
+            }
+        ],
+    )
+    async with _settling(engine, monkeypatch, [x, y]) as settle:
+        waiting = await settle(x, large, wait=600)
+        provisional = await settle(x, large, wait=0)  # the wait has run out, Y still silent
+        adopted = await _sweep(x, large)
+        after_adoption = await _entity_stamps(x)
+        await settle(y, large, wait=600)
+        reopened = await settle(x, large, wait=600)
+        reembedded = await _sweep(x, large)
+        final = await _entity_stamps(x)
+
+    assert waiting.deferred
+    assert isinstance(provisional.graph, dict)
+    assert provisional.graph["legacy_decision"] == "adopt"
+    assert provisional.graph["legacy_warning"] == "adopted_on_incomplete_evidence"
+    assert provisional.graph["legacy_provisional"] is True
+    assert adopted.adopted == 3
+    assert all(
+        after_adoption[f"legacy-{index}"]["stamp"][PROVISIONAL_ADOPTION_KEY] is True
+        for index in range(3)
+    )
+    assert isinstance(reopened.graph, dict)
+    assert reopened.graph["legacy_decision"] == "reembed"
+    assert reopened.graph["legacy_basis"] == "deployment_stamps_differ"
+    assert reopened.graph.get("legacy_provisional") is None
+    assert reembedded.recovered == 3
+    for index in range(3):
+        row = final[f"legacy-{index}"]
+        assert row["stamp"] == large_stamp, index
+        assert row["vector"] != _unit(index, GRAPH_EMBEDDING_DIM), index
+    assert final["stamped-large"]["vector"] == _unit(7, GRAPH_EMBEDDING_DIM)
+
+
+@pytest.mark.asyncio
+async def test_a_provisional_adoption_becomes_final_without_a_reembed(
+    engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A plain upgrade with one slow organization: flagged while it waits, then final, no re-embed."""
+    small = _Counting(_provider(_SMALL, GRAPH_EMBEDDING_DIM, "graph"))
+    small_stamp = small.metadata.to_dict()
+    x = await _graph_org(
+        engine,
+        "x",
+        [
+            *_legacy_rows(3),
+            {
+                "uuid": "stamped-small",
+                "name_embedding": _unit(7, GRAPH_EMBEDDING_DIM),
+                "attributes": {"embedding_metadata": previous_release_stamp(small_stamp)},
+            },
+        ],
+    )
+    y = await _graph_org(
+        engine,
+        "y",
+        [
+            {
+                "uuid": "native-small",
+                "name_embedding": _unit(8, GRAPH_EMBEDDING_DIM),
+                "attributes": {"embedding_metadata": previous_release_stamp(small_stamp)},
+            }
+        ],
+    )
+    async with _settling(engine, monkeypatch, [x, y]) as settle:
+        await settle(x, small, wait=600)
+        provisional = await settle(x, small, wait=0)
+        adopted = await _sweep(x, small)
+        await settle(y, small, wait=600)
+        confirmed = await settle(x, small, wait=600)
+        again = await _sweep(x, small)
+        final = await _entity_stamps(x)
+
+    assert isinstance(provisional.graph, dict)
+    assert provisional.graph["legacy_warning"] == "adopted_on_incomplete_evidence"
+    assert adopted.adopted == 3
+    assert isinstance(confirmed.graph, dict)
+    assert confirmed.graph["legacy_decision"] == "adopt"
+    assert confirmed.graph["legacy_basis"] == "prior_stamps_match"
+    assert confirmed.graph.get("legacy_warning") is None
+    assert confirmed.graph.get("legacy_provisional") is None
+    assert confirmed.graph["legacy_metadata"] == small_stamp
+    assert again.recovered == 0
+    assert small.texts == []
+    for index in range(3):
+        row = final[f"legacy-{index}"]
+        assert row["vector"] == _unit(index, GRAPH_EMBEDDING_DIM), index
+        assert {key: row["stamp"][key] for key in ("provider", "model", "dimensions")} == {
+            key: small_stamp[key] for key in ("provider", "model", "dimensions")
+        }

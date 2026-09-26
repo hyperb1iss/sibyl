@@ -219,6 +219,7 @@ _EMBEDDING_SWEEP_STATUS_FIELDS = (
     "legacy_basis",
     "legacy_warning",
     "legacy_notice",
+    "legacy_provisional",
     "deferred_age_seconds",
     "active_metadata",
     "complete_metadata",

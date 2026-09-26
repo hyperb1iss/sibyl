@@ -363,7 +363,13 @@ def _embedding_sweep_lines(sweep: object) -> list[str]:
                 "                adopted because other organizations' vectors record the"
                 " configured model; this plane had no record of its own"
             )
-        if state.get("legacy_warning"):
+        if state.get("legacy_warning") == "adopted_on_incomplete_evidence":
+            lines.append(
+                f"                [{ELECTRIC_YELLOW}]adopted before every organization published"
+                " its evidence; weighed again each pass, re-embedded on its own if late"
+                f" evidence shows a switch[/{ELECTRIC_YELLOW}]"
+            )
+        elif state.get("legacy_warning"):
             target = "graph" if plane == "graph" else "documents"
             lines.append(
                 f"                [{ELECTRIC_YELLOW}]adopted vectors with no record of their model;"

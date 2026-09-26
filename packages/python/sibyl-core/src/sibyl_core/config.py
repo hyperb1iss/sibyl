@@ -379,9 +379,10 @@ class CoreConfig(BaseSettings):
         description=(
             "Longest a plane waits for every other organization to publish its "
             "graph evidence (an adoption, or a plane with no evidence of its own) "
-            "before it is settled on the evidence published so far. Organizations "
-            "still unpublished, and the seconds remaining, are logged and shown in "
-            "status."
+            "before it is settled on the evidence published so far; an adoption "
+            "settled that way stays provisional until every organization has "
+            "published. Organizations still unpublished, and the seconds "
+            "remaining, are logged and shown in status."
         ),
     )
     embedding_sweep_verify_interval_seconds: float = Field(

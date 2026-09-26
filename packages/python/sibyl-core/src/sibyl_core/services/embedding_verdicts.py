@@ -195,6 +195,7 @@ async def settle_legacy_verdicts(
                     defer_unproven=not allow_unproven,
                     defer_limit_seconds=defer_limit_seconds,
                     evidence_complete=complete,
+                    reweigh_provisional=True,
                 )
             except Exception as exc:
                 graph = exc
@@ -218,6 +219,7 @@ async def settle_legacy_verdicts(
                     defer_unproven=not allow_unproven,
                     defer_limit_seconds=defer_limit_seconds,
                     evidence_complete=complete,
+                    reweigh_provisional=True,
                 )
             except Exception as exc:
                 chunks = exc
