@@ -13,9 +13,7 @@ import structlog
 from google import genai
 from google.genai import types
 
-from sibyl.config import settings
 from sibyl.services.settings import get_settings_service
-from sibyl_core.ai.bedrock import DEFAULT_BEDROCK_EMBEDDING_MODEL
 from sibyl_core.embeddings.gemini import (
     build_gemini_contents,
     format_gemini_embedding_text,
@@ -75,20 +73,21 @@ class EmbeddingService:
         self._client_identity: tuple[object, ...] | None = None
 
     async def _resolve_config(self) -> ResolvedEmbeddingConfig:
-        service = get_settings_service()
-        raw_provider = await service.get("embedding_provider")
-        provider = self._normalize_provider(raw_provider or settings.embedding_provider)
+        """The content embedding configuration, resolved exactly as core resolves it.
 
-        raw_model = self.model or await service.get("embedding_model")
-        model = raw_model or self._default_model(provider)
+        Chunk provenance is judged by raw capture stamps, which core writes, so
+        the crawler must never pick a different model than core would.
+        """
+        from sibyl_core.embeddings.content import configured_content_embedding
 
-        raw_dimensions = self.dimensions or await service.get("embedding_dimensions")
-        dimensions = int(raw_dimensions or settings.embedding_dimensions)
-
+        try:
+            core = configured_content_embedding()
+        except ValueError as exc:
+            raise ValueError(f"Unsupported embedding provider: {exc}") from exc
         return ResolvedEmbeddingConfig(
-            provider=provider,
-            model=model,
-            dimensions=dimensions,
+            provider=self._normalize_provider(core.provider),
+            model=self.model or core.model,
+            dimensions=self.dimensions or core.dimensions,
         )
 
     @staticmethod
@@ -100,14 +99,6 @@ class EmbeddingService:
         if provider == "bedrock":
             return "bedrock"
         raise ValueError(f"Unsupported embedding provider: {provider}")
-
-    @staticmethod
-    def _default_model(provider: EmbeddingProvider) -> str:
-        if provider == "gemini":
-            return "gemini-embedding-2"
-        if provider == "bedrock":
-            return DEFAULT_BEDROCK_EMBEDDING_MODEL
-        return settings.embedding_model
 
     async def _get_client(self, config: ResolvedEmbeddingConfig) -> object:
         """Lazily initialize the configured provider client."""
@@ -202,15 +193,14 @@ class EmbeddingService:
             config = await self._resolve_config()
         except ValueError:
             # A provider this service does not speak: stamp the configured values.
-            service = get_settings_service()
-            provider = str(await service.get("embedding_provider") or settings.embedding_provider)
-            model = self.model or await service.get("embedding_model") or settings.embedding_model
-            dimensions = self.dimensions or await service.get("embedding_dimensions")
+            from sibyl_core.embeddings.content import configured_content_embedding_identity
+
+            provider, model, dimensions = configured_content_embedding_identity()
             return (
                 document_chunk_embedding_metadata(
-                    provider=provider.strip(),
-                    model=str(model),
-                    dimensions=int(dimensions or settings.embedding_dimensions),
+                    provider=provider,
+                    model=self.model or model,
+                    dimensions=self.dimensions or dimensions,
                 ),
                 False,
             )

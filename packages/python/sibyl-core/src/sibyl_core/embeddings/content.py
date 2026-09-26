@@ -53,8 +53,27 @@ def configured_content_embedding_dimensions() -> int:
     return settings.embedding_dimensions
 
 
+def configured_content_embedding_identity() -> tuple[str, str, int]:
+    """The configured provider, model and size, without validating the provider.
+
+    What a stamp names when no client can be built for the configuration: the
+    same precedence as ``configured_content_embedding``, so every content path
+    agrees on the model even when it cannot embed.
+    """
+    provider = (os.getenv("SIBYL_EMBEDDING_PROVIDER") or settings.embedding_provider).strip()
+    model = os.getenv("SIBYL_EMBEDDING_MODEL", "").strip() or settings.embedding_model
+    return provider, model, configured_content_embedding_dimensions()
+
+
 def configured_content_embedding() -> ContentEmbeddingConfig:
-    """Resolve content embedding settings from the single supported contract."""
+    """Resolve content embedding settings from the single supported contract.
+
+    Raw captures, chunk writes (the crawler, raw promotion and the embedding
+    sweep) and every chunk query resolve through here, so the model a raw
+    capture's stamp names is the model chunks are written and queried with.
+    The environment wins, then the core settings; values saved in the
+    settings UI reach a process through the environment at its start.
+    """
     provider = _configured_provider()
     return ContentEmbeddingConfig(
         provider=provider,
@@ -117,4 +136,5 @@ __all__ = [
     "ContentEmbeddingConfig",
     "configured_content_embedding",
     "configured_content_embedding_dimensions",
+    "configured_content_embedding_identity",
 ]
