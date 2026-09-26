@@ -2956,8 +2956,10 @@ async def test_live_raw_repair_writes_stay_flat_in_a_large_organization() -> Non
             )
 
         started = time.perf_counter()
+        # A budget wide enough for one pass, so the measure is the write shape
+        # rather than where the default budget stops a pass.
         repaired = await repair_raw_capture_embeddings(
-            organization_id, embedding_provider=provider, client=content
+            organization_id, embedding_provider=provider, client=content, budget_seconds=600.0
         )
         elapsed = time.perf_counter() - started
         left = await content_client.select_many(

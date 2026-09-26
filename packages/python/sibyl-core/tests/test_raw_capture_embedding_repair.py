@@ -143,11 +143,13 @@ async def test_repair_leaves_a_row_that_moved_under_it_pending(content_store, mo
     assert (await stored(memory.id))["embedding"] is None
 
 
-async def test_repair_counts_a_provider_failure_without_stopping_the_page_walk(
+async def test_a_failing_provider_ends_the_pass_and_the_next_one_moves_on(
     content_store, monkeypatch
 ):
+    """A provider failure blames no row; the next pass resumes after the page it failed on."""
     org = str(uuid4())
     memories = [await remember(org, f"broken-{index}") for index in range(3)]
+    embed = repair_module._raw_memories_with_embeddings
     monkeypatch.setattr(
         repair_module,
         "_raw_memories_with_embeddings",
@@ -158,9 +160,17 @@ async def test_repair_counts_a_provider_failure_without_stopping_the_page_walk(
         org, page_size=2, embedding_provider=provider("broken")
     )
 
-    assert (result.checked, result.recovered, result.pending, result.failed) == (3, 0, 0, 3)
+    assert result.status == "provider_failing"
+    assert (result.checked, result.recovered, result.pending, result.failed) == (2, 0, 0, 2)
+    assert result.refused == 0
     for memory in memories:
         assert (await stored(memory.id))["embedding"] is None
+
+    monkeypatch.setattr(repair_module, "_raw_memories_with_embeddings", embed)
+    healed = await repair_raw_capture_embeddings(
+        org, page_size=2, embedding_provider=provider("broken")
+    )
+    assert (healed.status, healed.recovered, healed.cursor) == ("completed", 3, "")
 
 
 async def test_vector_lane_reports_an_unembedded_scope_until_repair_runs(

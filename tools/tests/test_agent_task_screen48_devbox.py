@@ -906,7 +906,7 @@ def test_an_unlisted_memory_model_override_is_refused() -> None:
         run_phase.apply_environment(environ, eval_issuers_file=None)
 
 
-def _stub_repair_result(status: str, **counts: int) -> Any:
+def _stub_repair_result(status: str, **counts: Any) -> Any:
     return RawEmbeddingRepairResult(status=status, **counts)
 
 
@@ -968,6 +968,9 @@ def test_repair_raw_embeddings_phase_keeps_the_receipt_and_completes(
         ("skipped_dimension_mismatch", {}),
         (content_raw_embedding_repair.REPAIR_COMPLETED, {"checked": 233, "failed": 233}),
         (content_raw_embedding_repair.REPAIR_COMPLETED, {"checked": 233, "pending": 1}),
+        (content_raw_embedding_repair.REPAIR_COMPLETED, {"checked": 233, "refused": 1}),
+        (content_raw_embedding_repair.REPAIR_COMPLETED, {"checked": 233, "deferred": 1}),
+        ("partial", {"checked": 128, "recovered": 128}),
     ],
 )
 def test_repair_raw_embeddings_phase_fails_when_rows_were_left_behind(
