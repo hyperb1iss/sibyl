@@ -418,3 +418,64 @@ def test_raw_envelopes_withhold_only_url_quoting_error_text() -> None:
     assert "withheld" in scrubbed["result"][1]["result"]
     assert scrubbed["error"]["code"] == -32000
     assert "Deploy" not in str(scrubbed)
+
+
+def test_deeply_nested_escapes_are_fully_decoded() -> None:
+    # Twelve levels of percent-encoding: "%3A" becomes "%25...253A".
+    nesting = "25" * 11
+    url = f"http://host:8000/Path%{nesting}3AToken%{nesting}2FCanary42/rpc"
+    for printed in (
+        url,
+        f"503, url='{url}'",
+        "503, url='http://host:8000/Path:Token/Canary42/rpc'",
+        f"503, url='http://host:8000/Path%3AToken%{nesting[:4]}2FCanary42/rpc'",
+    ):
+        error = RuntimeError(printed)
+        assert url_schemes.error_mentions_url_secret(error, url), printed
+        assert url_schemes.safe_error_detail(error, url) == ""
+    assert url_schemes.canonical_url_text(f"%{nesting}3A") == ":"
+
+    reason = url_schemes.unsupported_surreal_url_reason(f"tikv://h:1/Path%{nesting}3ACanary42")
+    assert reason is not None
+    assert "canary42" not in reason.lower()
+
+
+async def test_deeply_nested_escapes_never_leave_the_client(monkeypatch) -> None:
+    nesting = "25" * 11
+    url = f"http://host:8000/Path%{nesting}3AToken%{nesting}2FCanary42/rpc"
+
+    class FakeAsyncSurreal:
+        def __init__(self, _url: str) -> None:
+            pass
+
+        async def use(self, _namespace: str, _database: str) -> None:
+            return None
+
+        async def query_raw(self, query: str, _params: object | None = None) -> object:
+            if query == "RETURN true;":
+                return {"result": [{"status": "OK", "result": True}]}
+            # Only the fully decoded path, as a stack that decodes every
+            # level would print it; the raw URL never appears.
+            decoded = "http://host:8000/Path:Token/Canary42/rpc"
+            if query.startswith("RAW"):
+                return {"result": [{"status": "ERR", "result": f"cannot serve {decoded}"}]}
+            raise RuntimeError(f"503, url='{decoded}'")
+
+        async def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("surrealdb.AsyncSurreal", FakeAsyncSurreal)
+    client = DedicatedSurrealClient(url=url, namespace="org_nested", database="graph")
+
+    import traceback
+
+    with pytest.raises(Exception) as caught:
+        await client.execute_query("CREATE entity:one;")
+    text = (
+        str(caught.value) + repr(caught.value) + "".join(traceback.format_exception(caught.value))
+    )
+    assert "canary42" not in text.lower()
+
+    raw = await client.execute_query_raw("RAW SELECT * FROM entity;")
+    assert "canary42" not in str(raw).lower()
+    assert raw["result"][0]["status"] == "ERR"

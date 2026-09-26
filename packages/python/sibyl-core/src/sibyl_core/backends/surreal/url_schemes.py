@@ -210,7 +210,10 @@ def canonical_url_text(text: str) -> str:
     enumerating spellings that can never cover every mix.
     """
     current = text
-    for _ in range(8):
+    # No fixed cap: a pass that changes the text turns at least one
+    # three-character escape into a single character, so it always gets
+    # shorter and the loop ends. len(text) passes is only a safety net.
+    for _ in range(len(text) + 1):
         decoded = unquote(current)
         if decoded == current:
             break
