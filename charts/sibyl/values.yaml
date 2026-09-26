@@ -178,6 +178,23 @@ backend:
     MKL_NUM_THREADS: "1"
     NUMEXPR_NUM_THREADS: "1"
 
+  # -- Reverse proxies trusted to report the client address through X-Forwarded-For, as a
+  # comma-separated string or a list of IPs and CIDR ranges (SIBYL_FORWARDED_ALLOW_IPS).
+  # The per-address login rate limit, request and audit logs, session records, and the
+  # break-glass allowlist all use the address this resolves. Empty keeps the backend
+  # default of loopback only, so behind an ingress every user shares the ingress pod's login
+  # bucket. Every address listed must be a proxy and never a possible client: a trusted peer
+  # can name any client address, and so can anything that calls through an ingress that
+  # appends to X-Forwarded-For (Envoy gateways, AWS ALB, nginx's $proxy_add_x_forwarded_for)
+  # from a trusted address. Never list the cluster pod CIDR, node ranges, or the VPC CIDR.
+  # List only the ingress controller pods' addresses or a range dedicated to them, have the
+  # controller replace X-Forwarded-For from untrusted peers rather than append (ingress-nginx
+  # does by default), and pair it with networkPolicy.enabled. For a load balancer in front,
+  # let the controller resolve the client and keep this list to the controller.
+  # "*", or any range broader than an IPv4 /8 or an IPv6 /32, makes the backend log a warning.
+  # On the command line pass a list: --set 'backend.forwardedAllowIps={10.250.0.0/28}'
+  forwardedAllowIps: ""
+
   # -- Reference to existing secret for sensitive env vars
   # Must contain: SIBYL_JWT_SECRET and SIBYL_SETTINGS_KEY.
   # Add provider and LLM API keys as needed. Amazon Bedrock (SIBYL_LLM_PROVIDER=bedrock) needs

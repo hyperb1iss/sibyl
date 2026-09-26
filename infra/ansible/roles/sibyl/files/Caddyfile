@@ -6,6 +6,10 @@
 }
 
 {$SIBYL_DOMAIN} {
+	# reverse_proxy discards any X-Forwarded-For an untrusted client sends and
+	# sets it to the address Caddy saw, which the backend trusts through
+	# SIBYL_FORWARDED_ALLOW_IPS. Adding trusted_proxies here makes Caddy
+	# append instead; list those upstream proxies on the backend too.
 	@backend path /api/* /mcp /mcp/* /_oauth/*
 	handle @backend {
 		reverse_proxy backend:3334

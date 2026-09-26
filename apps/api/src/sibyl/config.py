@@ -1,17 +1,18 @@
 """Configuration management for Sibyl MCP Server."""
 
 import base64
+import contextlib
 import os
 import secrets
 from datetime import UTC, datetime
-from ipaddress import ip_network
+from ipaddress import ip_address, ip_network
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 from urllib.parse import quote, urlsplit, urlunsplit
 
 import structlog
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 _log = structlog.get_logger()
 
@@ -160,6 +161,67 @@ def _redis_url_with_password(url: str, password: str) -> str:
             parsed.fragment,
         )
     )
+
+
+# Peers trusted to report the client address when nothing is configured. Both
+# loopback forms, matching uvicorn 0.53 and later, so a local proxy counts
+# the same whether it reaches the server over IPv4 or IPv6.
+LOOPBACK_FORWARDED_ALLOW_IPS = ("127.0.0.1", "::1")
+TRUST_EVERY_FORWARDING_PEER = "*"
+
+
+def parse_forwarded_allow_ips(value: object) -> list[str]:
+    """Normalize trusted proxy entries: IPs and CIDRs, or `*` alone.
+
+    Returns an empty list for empty input. Uvicorn quietly treats anything it
+    cannot parse as a literal that never matches a peer address, so a typo
+    would silently leave every login on the proxy's bucket. Rejecting it here
+    makes the mistake fail at startup.
+    """
+    if value is None:
+        entries: list[str] = []
+    elif isinstance(value, str):
+        entries = value.split(",")
+    elif isinstance(value, list | tuple):
+        entries = [str(item) for item in value]
+    else:
+        raise ValueError("forwarded_allow_ips must be a comma-separated string or a list")
+
+    cleaned = [entry.strip() for entry in entries if entry.strip()]
+    if TRUST_EVERY_FORWARDING_PEER in cleaned:
+        if len(cleaned) > 1:
+            raise ValueError(
+                "forwarded_allow_ips '*' trusts every peer and cannot be combined with other entries"
+            )
+        return [TRUST_EVERY_FORWARDING_PEER]
+
+    normalized: list[str] = []
+    for entry in cleaned:
+        try:
+            # Strict, like uvicorn: a range with host bits set would parse here but
+            # match nothing there, so both sides must reject it.
+            address = ip_network(entry) if "/" in entry else ip_address(entry)
+        except ValueError as exc:
+            hint = ""
+            if "/" in entry:
+                with contextlib.suppress(ValueError):
+                    hint = f" (did you mean {ip_network(entry, strict=False)}?)"
+            raise ValueError(
+                f"forwarded_allow_ips entry {entry!r} is not an IP address or CIDR range{hint}"
+            ) from exc
+        normalized.append(str(address))
+    return list(dict.fromkeys(normalized))
+
+
+def _default_forwarded_allow_ips() -> list[str]:
+    # Only consulted while SIBYL_FORWARDED_ALLOW_IPS is unset. Sibyl always hands
+    # uvicorn an explicit list, which makes uvicorn ignore its own variable, so
+    # deployments that already set FORWARDED_ALLOW_IPS keep working through here.
+    try:
+        configured = parse_forwarded_allow_ips(os.environ.get("FORWARDED_ALLOW_IPS"))
+    except ValueError as exc:
+        raise ValueError(f"FORWARDED_ALLOW_IPS: {exc}") from exc
+    return configured or list(LOOPBACK_FORWARDED_ALLOW_IPS)
 
 
 class Settings(BaseSettings):
@@ -420,6 +482,24 @@ class Settings(BaseSettings):
         default="memory://",
         description="Rate limit storage backend (memory://, redis://host:port)",
     )
+    forwarded_allow_ips: Annotated[list[str], NoDecode] = Field(
+        default_factory=_default_forwarded_allow_ips,
+        validate_default=True,
+        description=(
+            "Comma-separated IPs and CIDR ranges of reverse proxies trusted to report the "
+            "client address through X-Forwarded-For. Rate limits, audit logs, sessions, and "
+            "the break-glass allowlist all key on the address this resolves. Empty means "
+            "loopback only; while unset, uvicorn's own FORWARDED_ALLOW_IPS applies if set. "
+            "'*' trusts every peer, so any client can choose its address."
+        ),
+    )
+
+    @field_validator("forwarded_allow_ips", mode="before")
+    @classmethod
+    def normalize_forwarded_allow_ips(cls, value: object) -> list[str]:
+        # A set value wins even when it is empty, which means loopback only. The
+        # default factory has already applied FORWARDED_ALLOW_IPS when it is unset.
+        return parse_forwarded_allow_ips(value) or list(LOOPBACK_FORWARDED_ALLOW_IPS)
 
     metrics_scrape_token: SecretStr = Field(
         default=SecretStr(""),

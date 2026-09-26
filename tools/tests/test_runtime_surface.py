@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import ast
+import ipaddress
 import json
+import re
 import shutil
 import subprocess
 
@@ -26,12 +28,15 @@ from tools.inventory.runtime_surface import (
 )
 from tools.trust.enterprise_readiness_evidence import SIBYL_HELM_RENDER_ARGS
 
+from sibyl.config import parse_forwarded_allow_ips
+
 EXPECTED_ROUTER_COUNT = 31
 EXPECTED_HTTP_ROUTE_COUNT = 3
 EXPECTED_WEBSOCKET_ROUTE_COUNT = 1
 EXPECTED_MCP_TOOL_COUNT = 13
 EXPECTED_MCP_RESOURCE_COUNT = 2
 API_SERVICE_GID = 10001
+ANSIBLE_NETWORK_PREFIXLEN = 24
 GRAPHITI_PACKAGE = "graphiti" + "-core"
 GRAPHITI_MODULE = "graphiti" + "_core"
 
@@ -71,6 +76,100 @@ def test_install_surfaces_default_to_local_first_auth() -> None:
     assert "providers: []" in helm_values
     assert "silent_refresh_enabled: false" in helm_values
     assert "extra_providers_enabled: false" in helm_values
+
+
+def _render_role_values(templates: dict[str, str], variables: dict[str, object]) -> dict[str, str]:
+    """Resolve the plain `{{ name }}` references these role files use, recursively."""
+
+    def render(template: str) -> str:
+        return re.sub(
+            r"\{\{\s*(\w+)\s*\}\}", lambda match: render(str(variables[match.group(1)])), template
+        )
+
+    return {key: render(template) for key, template in templates.items()}
+
+
+def _compose_fallback(value: str, variable: str) -> str:
+    """The value a compose `${VAR:-fallback}` or `${VAR-fallback}` substitution falls back to."""
+    match = re.fullmatch(rf"\$\{{{variable}:?-(.*)\}}", value)
+    assert match, value
+    return match.group(1)
+
+
+def test_ansible_stack_trusts_only_caddys_pinned_address() -> None:
+    defaults = yaml.safe_load(
+        (REPO_ROOT / "infra/ansible/roles/sibyl/defaults/main.yml").read_text(encoding="utf-8")
+    )
+    env_lines = (
+        (REPO_ROOT / "infra/ansible/roles/sibyl/templates/env.j2")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    )
+    compose = yaml.safe_load(
+        (REPO_ROOT / "infra/ansible/roles/sibyl/files/docker-compose.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    helm_values = yaml.safe_load((REPO_ROOT / "charts/sibyl/values.yaml").read_text("utf-8"))
+
+    plan_keys = (
+        "SIBYL_FORWARDED_ALLOW_IPS",
+        "SIBYL_NETWORK_SUBNET",
+        "SIBYL_NETWORK_GATEWAY",
+        "SIBYL_NETWORK_DYNAMIC_RANGE",
+        "SIBYL_CADDY_IPV4",
+    )
+    env_templates = dict(line.split("=", 1) for line in env_lines if "=" in line)
+    rendered = _render_role_values({key: env_templates[key] for key in plan_keys}, defaults)
+
+    # The compose fallbacks match what the role renders, so the stack keeps the
+    # same address plan when a variable is missing from the env file. The
+    # trust list uses "-" rather than ":-", so an explicitly empty value
+    # really means loopback only.
+    backend_env = compose["services"]["backend"]["environment"]
+    assert backend_env["SIBYL_FORWARDED_ALLOW_IPS"] == (
+        f"${{SIBYL_FORWARDED_ALLOW_IPS-{rendered['SIBYL_FORWARDED_ALLOW_IPS']}}}"
+    )
+    caddy_network = compose["services"]["caddy"]["networks"]["default"]
+    caddy_fallback = _compose_fallback(caddy_network["ipv4_address"], "SIBYL_CADDY_IPV4")
+    assert caddy_fallback == rendered["SIBYL_CADDY_IPV4"]
+    [ipam] = compose["networks"]["default"]["ipam"]["config"]
+    for field, key in (
+        ("subnet", "SIBYL_NETWORK_SUBNET"),
+        ("gateway", "SIBYL_NETWORK_GATEWAY"),
+        ("ip_range", "SIBYL_NETWORK_DYNAMIC_RANGE"),
+    ):
+        assert _compose_fallback(ipam[field], key) == rendered[key]
+    assert helm_values["backend"]["forwardedAllowIps"] == ""
+
+    subnet = ipaddress.IPv4Network(rendered["SIBYL_NETWORK_SUBNET"])
+    gateway = ipaddress.IPv4Address(rendered["SIBYL_NETWORK_GATEWAY"])
+    dynamic_range = ipaddress.IPv4Network(rendered["SIBYL_NETWORK_DYNAMIC_RANGE"])
+    caddy = ipaddress.IPv4Address(rendered["SIBYL_CADDY_IPV4"])
+    trusted = [
+        ipaddress.ip_network(entry)
+        for entry in parse_forwarded_allow_ips(rendered["SIBYL_FORWARDED_ALLOW_IPS"])
+    ]
+
+    # Exactly Caddy's /32, inside the pinned subnet and outside the range
+    # Docker hands the other containers (the frontend included), so nothing
+    # else on the network can hold the trusted address.
+    assert subnet.prefixlen == ANSIBLE_NETWORK_PREFIXLEN
+    assert subnet.is_private
+    assert trusted == [ipaddress.IPv4Network(f"{caddy}/32")]
+    assert caddy in subnet
+    assert dynamic_range.subnet_of(subnet)
+    assert caddy not in dynamic_range
+
+    # Host processes reach the backend from the bridge gateway, so it must stay untrusted.
+    assert gateway == subnet.network_address + 1
+    assert gateway not in dynamic_range
+    assert not any(gateway in network for network in trusted)
+
+    # Clear of Docker's default address pools, so it never collides with a
+    # network Docker assigned on its own, and of the tailnet's CGNAT range.
+    for reserved in ("172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10"):
+        assert not subnet.overlaps(ipaddress.IPv4Network(reserved)), reserved
 
 
 def test_helm_runtime_secret_requires_stable_settings_key() -> None:
@@ -209,6 +308,58 @@ def test_helm_explicit_frontend_public_api_url_wins_over_public_url() -> None:
     assert "name: NEXT_PUBLIC_API_URL" in result.stdout
     assert 'value: "https://api.sibyl.example.test/v1"' in result.stdout
     assert 'value: "https://sibyl.example.test/api"' not in result.stdout
+
+
+def _rendered_config_data(manifests: str) -> dict[str, str]:
+    for document in yaml.safe_load_all(manifests):
+        if (
+            isinstance(document, dict)
+            and document.get("kind") == "ConfigMap"
+            and document["metadata"]["name"] == "sibyl-config"
+        ):
+            return document["data"]
+    raise AssertionError("sibyl-config ConfigMap was not rendered")
+
+
+@requires_helm
+def test_helm_forwarded_allow_ips_is_unset_by_default() -> None:
+    result = _helm_template("--set", "backend.existingSecret=sibyl-secrets")
+
+    assert result.returncode == 0, result.stderr
+    assert "SIBYL_FORWARDED_ALLOW_IPS" not in _rendered_config_data(result.stdout)
+
+
+@pytest.mark.parametrize(
+    ("override", "expected"),
+    [
+        ("backend.forwardedAllowIps=10.244.0.0/16", "10.244.0.0/16"),
+        ("backend.forwardedAllowIps={10.244.0.0/16,172.31.0.0/16}", "10.244.0.0/16,172.31.0.0/16"),
+        ("backend.env.SIBYL_FORWARDED_ALLOW_IPS=10.9.0.0/16", "10.9.0.0/16"),
+        ("backend.forwardedAllowIps=*", "*"),
+    ],
+)
+@requires_helm
+def test_helm_forwarded_allow_ips_reaches_the_backend_env(override: str, expected: str) -> None:
+    result = _helm_template("--set", "backend.existingSecret=sibyl-secrets", "--set", override)
+
+    assert result.returncode == 0, result.stderr
+    assert _rendered_config_data(result.stdout)["SIBYL_FORWARDED_ALLOW_IPS"] == expected
+
+
+@requires_helm
+def test_helm_forwarded_allow_ips_value_wins_over_backend_env() -> None:
+    result = _helm_template(
+        "--set",
+        "backend.existingSecret=sibyl-secrets",
+        "--set",
+        "backend.env.SIBYL_FORWARDED_ALLOW_IPS=10.9.0.0/16",
+        "--set",
+        "backend.forwardedAllowIps=10.244.0.0/16",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.count("SIBYL_FORWARDED_ALLOW_IPS:") == 1
+    assert _rendered_config_data(result.stdout)["SIBYL_FORWARDED_ALLOW_IPS"] == "10.244.0.0/16"
 
 
 @requires_helm

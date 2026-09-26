@@ -12,6 +12,15 @@
       The sibyl role needs sibyl_surreal_password, sibyl_jwt_secret, sibyl_openai_api_key,
       sibyl_anthropic_api_key and sibyl_cf_api_token. Supply them through vault-backed variables.
 
+- name: Assert the compose network prefix names a /24
+  ansible.builtin.assert:
+    that:
+      - sibyl_network_prefix is match('^[0-9]{1,3}[.][0-9]{1,3}[.][0-9]{1,3}$')
+    quiet: true
+    fail_msg: >-
+      sibyl_network_prefix takes the first three octets of a /24, such as 10.47.213, not a full
+      address or a CIDR range.
+
 # ─── Docker engine ─────────────────────────────────────────────────────────────
 - name: Create the apt keyring directory
   ansible.builtin.file:

@@ -24,6 +24,8 @@ from sibyl_core.observability import telemetry_registry
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
+    import uvicorn
+
 
 def _enable_dev_signal_diagnostics() -> None:
     enabled = os.getenv("SIBYL_DEV_DIAGNOSTICS", "").lower() in {"1", "true", "yes", "on"}
@@ -257,21 +259,34 @@ def run_server(
             docs=f"http://{host}:{port}/api/docs",
         )
 
-        # Configure uvicorn with clean logging
-        config = uvicorn.Config(
-            app,
-            host=host,
-            port=port,
-            log_level="warning",  # Suppress verbose uvicorn logs
-            access_log=False,  # Use our own access logging
-        )
-        server = uvicorn.Server(config)
+        server = uvicorn.Server(uvicorn_config(app, host, port))
         server.run()
+
+
+def uvicorn_config(app: Starlette, host: str, port: int) -> "uvicorn.Config":
+    """Uvicorn settings for the HTTP daemon, including which proxies may name the client."""
+    import uvicorn
+
+    from sibyl.proxy_trust import forwarded_allow_ips
+
+    return uvicorn.Config(
+        app,
+        host=host,
+        port=port,
+        log_level="warning",  # Suppress verbose uvicorn logs
+        access_log=False,  # Use our own access logging
+        forwarded_allow_ips=forwarded_allow_ips(),
+    )
 
 
 def create_dev_app() -> Starlette:
     """Factory for dev mode, with signal diagnostics enabled."""
+    from sibyl.proxy_trust import warn_if_trust_is_too_broad
+
     _enable_dev_signal_diagnostics()
+    # Dev launchers hand uvicorn the list on its command line; warn from here so
+    # every one of them, the moon dev script included, reports a too-broad trust list.
+    warn_if_trust_is_too_broad()
     return create_combined_app()
 
 

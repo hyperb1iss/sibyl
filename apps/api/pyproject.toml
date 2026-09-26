@@ -39,6 +39,8 @@ dependencies = [
     "mcp>=2.2.0,<3",
     "starlette>=1.4.1",
     "uvicorn[standard]>=0.52.4",
+    # Settings (NoDecode needs 2.7)
+    "pydantic-settings>=2.7",
     # Database (server-only)
     "surrealdb>=2.0.0,<3.0",
     # Auth & HTTP (server-specific deps)

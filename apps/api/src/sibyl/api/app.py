@@ -195,6 +195,7 @@ def create_api_app() -> FastAPI:  # noqa: PLR0915
                 request_id=request_id,
                 path=request.url.path,
                 method=request.method,
+                client=request.client.host if request.client else None,
             )
             return JSONResponse(
                 status_code=429,

@@ -249,6 +249,85 @@ backend:
     NUMEXPR_NUM_THREADS: "1"
 ```
 
+### Trusted Proxies
+
+Behind an ingress controller or Gateway, every request reaches the backend from the proxy pod's
+address. The login route allows five attempts per minute per client address, so until the backend
+trusts the proxy, all users share one bucket and the sixth login in a minute from anyone locks
+everyone out. The `backend.forwardedAllowIps` value names the proxies whose `X-Forwarded-For` header
+the backend believes. The chart renders it into `SIBYL_FORWARDED_ALLOW_IPS`.
+
+| Value                       | Default | Description                                            |
+| --------------------------- | ------- | ------------------------------------------------------ |
+| `backend.forwardedAllowIps` | `""`    | IPs and CIDR ranges of trusted proxies, string or list |
+
+```yaml
+backend:
+  # A range only the ingress controller pods draw their addresses from, never the pod CIDR.
+  forwardedAllowIps: "10.250.0.0/28"
+  # A list works too:
+  # forwardedAllowIps:
+  #   - 10.250.0.0/28
+  #   - 10.250.1.0/28
+```
+
+On the command line, pass a list so Helm does not split on the comma:
+`--set 'backend.forwardedAllowIps={10.250.0.0/28,10.250.1.0/28}'`.
+
+Empty (the default) keeps the backend's loopback-only trust. When `backend.forwardedAllowIps` is
+empty, a `SIBYL_FORWARDED_ALLOW_IPS` entry under `backend.env` still works; when both are set, the
+dedicated value wins.
+
+**Every trusted address must be a proxy, never something that could be a client.** A trusted peer
+can name any client address it likes, and an ingress that appends to `X-Forwarded-For` instead of
+replacing it extends that power to everyone who calls through it from a trusted address. Envoy-based
+gateways, AWS ALB, and nginx's `$proxy_add_x_forwarded_for` all append. With the pod CIDR trusted, a
+pod at `10.244.9.9` that sends `X-Forwarded-For: 100.101.102.103` through such an ingress arrives as
+`100.101.102.103, 10.244.9.9`; the backend skips the pod's own address as trusted and resolves the
+forged one. A NetworkPolicy cannot stop this, because the request really does come from the
+controller. So never trust the cluster pod CIDR (it covers every pod, and with
+`networkPolicy.enabled` at its default of `false` any of them can also reach the backend directly),
+node ranges, or the VPC CIDR: each of them holds clients.
+
+What to set:
+
+- **Trust only the ingress controller pods.** Give them addresses nothing else draws from, such as a
+  CNI IP pool selected by the controller's namespace or a node pool reserved for the controller with
+  its own pod range, and list that range. Running
+  `kubectl get pods -n <controller-namespace> -o wide` shows the addresses it has to cover.
+- **Make the controller replace `X-Forwarded-For` from untrusted peers rather than append to it.**
+  ingress-nginx does by default, as long as `use-forwarded-headers` and `compute-full-forwarded-for`
+  stay off. With a controller that can only append, the trust list is all that keeps a forged entry
+  out, so it must hold nothing but the controller.
+- **A load balancer in front of the controller:** resolve the client at the controller rather than
+  widening the backend's list. Have the controller trust only the load balancer's dedicated subnets
+  (in ingress-nginx, `use-forwarded-headers: true` with `proxy-real-ip-cidr` set to them, because
+  its default is `0.0.0.0/0`), so it still hands the backend a single resolved address, and keep the
+  backend trusting the controller alone.
+- **An L4 load balancer or a node hop that SNATs:** do not trust node addresses. The controller then
+  only ever sees node IPs, and trusting them hands the entry the client wrote the final say.
+  Preserve the source address instead (`externalTrafficPolicy: Local` on the controller's Service,
+  or PROXY protocol from the load balancer) and trust only the controller pods.
+- **Enable `networkPolicy`** with `networkPolicy.ingress.from` naming the controller, so nothing can
+  reach the backend directly and write the header itself.
+
+::: warning Trusting a range lets anything inside it choose its client address
+
+Any peer inside `forwardedAllowIps` can claim to be any client, dodge the per-address rate limits,
+and satisfy `breakGlass.allowedIPs`, and so can any caller behind an appending ingress whose own
+address is trusted. List the controller and nothing else. Keep `/api` and `/mcp` routed straight to
+the backend service (the default route table): the Next.js frontend passes a client-supplied
+`X-Forwarded-For` through unchanged, so it must never be the hop the backend trusts. A value of
+`"*"`, or any range broader than an IPv4 `/8` or an IPv6 `/32`, trusts every peer or nearly every
+one and makes the backend log `forwarded_allow_ips_trusts_every_peer` at startup; with every hop
+trusted, the leftmost header entry wins, and a client writes that one unless every proxy in front
+overwrites the header.
+
+:::
+
+To confirm the setting took, sign in through the ingress and check that the backend's `request` log
+lines carry your own address in `client`, not the controller pod's.
+
 ### Secrets
 
 ```yaml
@@ -647,7 +726,10 @@ bootstrap:
 ## Break-Glass
 
 Bounded emergency local-owner login for SSO outages. Keep disabled in normal operation; when
-enabled, both `expiresAt` (no more than four hours out) and `allowedIPs` are required.
+enabled, both `expiresAt` (no more than four hours out) and `allowedIPs` are required. The allowlist
+is matched against the resolved client address, so behind an ingress set `backend.forwardedAllowIps`
+(see [Trusted Proxies](#trusted-proxies)); without it the backend only ever sees the controller
+pod's address.
 
 ```yaml
 breakGlass:
@@ -736,6 +818,9 @@ backend:
     tag: "1.4.1"
     pullPolicy: Always
   existingSecret: sibyl-secrets
+  # Only the ingress controller pods' own range, so each user gets their own login
+  # rate-limit bucket. Never the pod CIDR (see Trusted Proxies).
+  forwardedAllowIps: "10.250.0.0/28"
   validationReceipts:
     existingClaim: sibyl-validation-receipts
   surreal:

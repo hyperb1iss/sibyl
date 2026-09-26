@@ -189,6 +189,85 @@ Fallbacks:
 | `SIBYL_RATE_LIMIT_DEFAULT` | `100/minute` | Default rate limit                      |
 | `SIBYL_RATE_LIMIT_STORAGE` | `memory://`  | Storage backend (memory:// or redis://) |
 
+Anonymous requests are limited per client address, so behind a reverse proxy set
+`SIBYL_FORWARDED_ALLOW_IPS` below. Without it every user shares the proxy's budget.
+
+## Trusted Proxies
+
+| Variable                    | Default         | Description                                      |
+| --------------------------- | --------------- | ------------------------------------------------ |
+| `SIBYL_FORWARDED_ALLOW_IPS` | `127.0.0.1,::1` | Comma-separated IPs and CIDRs of trusted proxies |
+
+Behind a reverse proxy, ingress controller, or load balancer, every request reaches Sibyl from the
+proxy's address. Anything keyed on the client address then treats all users as one client: the login
+route allows five attempts per minute per address, so the sixth sign-in in a minute from anyone
+locks everyone out. List the proxies in `SIBYL_FORWARDED_ALLOW_IPS` and Sibyl takes the client
+address from `X-Forwarded-For` instead.
+
+Set it when a proxy sits between users and the backend: the Helm chart
+(`backend.forwardedAllowIps`), the Ansible stack (`sibyl_forwarded_allow_ips`, which trusts Caddy by
+default), or your own nginx or Caddy in front of `docker-compose.prod.yml`. Leave it unset when
+clients connect to the backend port directly.
+
+With `docker-compose.prod.yml`, run the proxy as a container on the same network, list only its
+address, and stop publishing port 3334 (or bind it to `127.0.0.1`). Docker's userland proxy delivers
+host-loopback and IPv6 connections to a published port from the bridge gateway, so trusting a bridge
+range there would let those clients choose their address.
+
+**How the address resolves.** Uvicorn applies the list before Sibyl sees a request. When the direct
+peer is in the list, it reads `X-Forwarded-For` from right to left and takes the first entry that is
+not itself in the list; when every entry is trusted, it takes the leftmost. When the direct peer is
+not in the list, the header is ignored. For example, with
+`SIBYL_FORWARDED_ALLOW_IPS=10.250.0.0/28,10.0.0.0/28`, a request from ingress pod `10.250.0.7`
+carrying `X-Forwarded-For: 203.0.113.99, 198.51.100.10, 10.0.0.5` resolves to `198.51.100.10`: the
+load balancer at `10.0.0.5` is trusted and skipped, and the client-written `203.0.113.99` is never
+reached. That one resolved address feeds the per-address rate limits, request logs, session and
+audit records, and the break-glass allowlist. Trusted peers also set the request scheme through
+`X-Forwarded-Proto`; Sibyl builds its links from `SIBYL_PUBLIC_URL`, so nothing visible changes.
+
+**Accepted values.**
+
+- Unset keeps the loopback default (`127.0.0.1` and `::1`), unless uvicorn's own
+  `FORWARDED_ALLOW_IPS` variable is set, in which case its list applies.
+- Set but empty (or only commas and spaces) means loopback only. Once the Sibyl variable exists in
+  the environment, even empty, `FORWARDED_ALLOW_IPS` is ignored.
+- A configured list replaces the loopback default rather than adding to it. Include `127.0.0.0/8` if
+  a proxy in the same pod or on the same host also fronts the backend; some sidecar proxies connect
+  from loopback addresses other than `127.0.0.1`.
+- Entries are comma-separated, not a JSON array (unlike `SIBYL_BREAK_GLASS_ALLOWED_IPS`). Each must
+  be an IP address or a CIDR range written with its network address (`10.20.0.0/16`, not
+  `10.20.3.4/16`). Anything else, a hostname included, fails startup, because uvicorn would
+  otherwise ignore the entry and leave every login on the proxy's budget.
+- A lone `*` trusts every peer and cannot be combined with other entries. Uvicorn then takes the
+  leftmost entry, which the client writes unless every proxy in front overwrites the header, so any
+  client can choose its own address. Sibyl logs `forwarded_allow_ips_trusts_every_peer` at startup
+  when it is set. The same warning fires for any range broader than an IPv4 `/8` or an IPv6 `/32`.
+  That covers a `/0` such as `0.0.0.0/0` and split halves such as `0.0.0.0/1,128.0.0.0/1`, either of
+  which trusts a whole address family the way `*` does.
+
+::: warning Security note
+
+Trusting a range lets anything inside it choose its client address. A peer in the list can claim to
+be any client, sidestep the per-address rate limits, and satisfy `SIBYL_BREAK_GLASS_ALLOWED_IPS`.
+Every address in the list must be a proxy, never something that could be a client. Keep the list to
+the proxies that actually front Sibyl, make sure nothing else in those ranges can reach the backend
+port (a NetworkPolicy, no published port), and only trust a hop that writes the address it saw into
+`X-Forwarded-For`. A proxy that appends to the header rather than replacing it (Envoy-based
+gateways, AWS ALB, nginx's `$proxy_add_x_forwarded_for`) also lets any caller whose own address is
+trusted forge an entry through it, so a pod CIDR, node range, or VPC CIDR is never safe to list,
+NetworkPolicy or not. Prefer a proxy that replaces the header from untrusted peers. A hop that only
+forwards packets, such as nodes that SNAT or an L4 load balancer without source preservation, must
+not be trusted: trusting it gives the next entry, which the client wrote, the final say. The Next.js
+frontend keeps a client-supplied `X-Forwarded-For`, so route `/api` and `/mcp` straight to the
+backend (the Helm and Caddy defaults do) and never count the frontend as a trusted hop.
+
+:::
+
+If you allowlisted the proxy's range in `SIBYL_BREAK_GLASS_ALLOWED_IPS` because that was the only
+address the backend saw, replace it with the operators' real addresses when you set this. To confirm
+the setting took, sign in through the proxy and check that the backend's `request` log lines carry
+your own address in `client`.
+
 ## Redis/Valkey Coordination
 
 Redis/Valkey is optional. The default Surreal runtime uses local in-process coordination.
@@ -492,6 +571,10 @@ SIBYL_SETTINGS_KEY=<generate with: openssl rand -base64 32 | tr '+/' '-_'>
 # Public URL (Kong/ingress domain)
 SIBYL_PUBLIC_URL=https://sibyl.example.com
 
+# Reverse proxies allowed to report the client address: the ingress
+# controller pods' own range, never the pod CIDR
+SIBYL_FORWARDED_ALLOW_IPS=10.250.0.0/28
+
 # Storage (fully Surreal)
 SIBYL_STORE=surreal
 SIBYL_AUTH_STORE=surreal
@@ -529,6 +612,7 @@ data:
   SIBYL_SERVER_HOST: "0.0.0.0"
   SIBYL_SERVER_PORT: "3334"
   SIBYL_PUBLIC_URL: "https://sibyl.example.com"
+  SIBYL_FORWARDED_ALLOW_IPS: "10.250.0.0/28"
   SIBYL_LLM_PROVIDER: "anthropic"
   SIBYL_LLM_MODEL: "claude-haiku-4-5"
   SIBYL_EMBEDDING_MODEL: "text-embedding-3-small"

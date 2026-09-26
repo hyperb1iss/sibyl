@@ -229,6 +229,8 @@ def _start_server_foreground(project_root: Path, with_worker: bool, env: dict[st
     api_root = project_root / "apps" / "api"
     reload_root = api_root / "src"
 
+    from sibyl.proxy_trust import forwarded_allow_ips_cli_args
+
     console.print(f"\n[{SUCCESS_GREEN}]Starting API server...[/{SUCCESS_GREEN}]")
     console.print("[dim]Press Ctrl+C to stop[/dim]\n")
 
@@ -247,6 +249,7 @@ def _start_server_foreground(project_root: Path, with_worker: bool, env: dict[st
         str(reload_root),
         "--timeout-graceful-shutdown",
         "5",
+        *forwarded_allow_ips_cli_args(),
     ]
 
     _configure_requested_worker_mode(env, with_worker=with_worker)

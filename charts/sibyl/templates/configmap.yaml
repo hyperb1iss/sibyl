@@ -18,9 +18,12 @@ metadata:
 data:
   # Backend configuration
   {{- range $key, $value := .Values.backend.env }}
-  {{- if ne $key "SIBYL_PUBLIC_URL" }}
+  {{- if and (ne $key "SIBYL_PUBLIC_URL") (ne $key "SIBYL_FORWARDED_ALLOW_IPS") }}
   {{ $key }}: {{ $value | quote }}
   {{- end }}
+  {{- end }}
+  {{- with include "sibyl.forwardedAllowIps" . }}
+  SIBYL_FORWARDED_ALLOW_IPS: {{ . | quote }}
   {{- end }}
   # Storage mode
   SIBYL_STORE: "surreal"
