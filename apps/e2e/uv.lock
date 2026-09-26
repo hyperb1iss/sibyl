@@ -780,6 +780,9 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", marker = "extra == 'llm'", specifier = ">=1.0.0,<2" },
+    { name = "anthropic", extras = ["bedrock"], marker = "extra == 'bedrock'", specifier = ">=1.0.0,<2" },
+    { name = "boto3", marker = "extra == 'bedrock'", specifier = ">=1.28.57,<2" },
+    { name = "botocore", marker = "extra == 'bedrock'", specifier = ">=1.31.57,<2" },
     { name = "cryptography", specifier = ">=50.0.0" },
     { name = "google-genai", marker = "extra == 'embeddings'", specifier = ">=2.23.0" },
     { name = "httpx", specifier = ">=0.27" },
@@ -796,11 +799,11 @@ requires-dist = [
     { name = "structlog", specifier = ">=24.0" },
     { name = "surrealdb", marker = "extra == 'graph'", specifier = ">=2.0.0,<3.0" },
 ]
-provides-extras = ["embeddings", "graph", "graphrag", "llm", "reranking"]
+provides-extras = ["bedrock", "embeddings", "graph", "graphrag", "llm", "reranking"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "anthropic", specifier = ">=1.0.0,<2" },
+    { name = "anthropic", extras = ["bedrock"], specifier = ">=1.0.0,<2" },
     { name = "httpx2", specifier = ">=2.5.0,<3" },
     { name = "numpy", specifier = ">=2.5.1" },
     { name = "pydantic-ai-slim", extras = ["anthropic", "google", "openai"], specifier = ">=2.42.0,<3" },
