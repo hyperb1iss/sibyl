@@ -90,11 +90,21 @@ class NightlyRun:
     url: str
     created_at: str
     attempt: int = 1
+    started_at: str = ""
 
     @property
     def verdict_key(self) -> tuple[int, int]:
         """A re-run keeps its run ID, so a verdict belongs to one attempt."""
         return (self.run_id, self.attempt)
+
+    @property
+    def recency(self) -> tuple[str, int]:
+        """Order verdicts by when the latest attempt started.
+
+        A re-run keeps ``created_at`` but restarts ``run_started_at``, so a
+        passing re-run of an older run is newer than a failure it follows.
+        """
+        return (self.started_at or self.created_at, self.run_id)
 
     @classmethod
     def from_api(cls, payload: Mapping[str, Any]) -> NightlyRun:
@@ -109,6 +119,7 @@ class NightlyRun:
             url=str(payload.get("html_url") or ""),
             created_at=str(payload.get("created_at") or ""),
             attempt=int(payload.get("run_attempt") or 1),
+            started_at=str(payload.get("run_started_at") or ""),
         )
 
 
@@ -158,6 +169,7 @@ class GhCli:
 
     repo: str
     runner: Runner = field(default=_run_gh)
+    workflow_file: str = WORKFLOW_FILE
 
     def _get(self, endpoint: str, **params: str | int) -> Any:
         args = ["api", "-X", "GET", endpoint]
@@ -167,7 +179,7 @@ class GhCli:
 
     def list_runs(self, head_sha: str) -> list[NightlyRun]:
         payload = self._get(
-            f"repos/{self.repo}/actions/workflows/{WORKFLOW_FILE}/runs",
+            f"repos/{self.repo}/actions/workflows/{self.workflow_file}/runs",
             head_sha=head_sha,
             per_page=100,
         )
@@ -194,7 +206,7 @@ class GhCli:
                 "api",
                 "-X",
                 "POST",
-                f"repos/{self.repo}/actions/workflows/{WORKFLOW_FILE}/dispatches",
+                f"repos/{self.repo}/actions/workflows/{self.workflow_file}/dispatches",
                 "-f",
                 f"ref={branch}",
             ]
@@ -230,7 +242,7 @@ def evidence_failures(
     return failures
 
 
-def _run_failed(run: NightlyRun, jobs: Sequence[NightlyJob]) -> bool:
+def run_failed(run: NightlyRun, jobs: Sequence[NightlyJob]) -> bool:
     """True when the run tested the code and the code lost, not merely incomplete."""
     if run.conclusion in _FAILED_CONCLUSIONS:
         return True
@@ -254,12 +266,30 @@ def _log(message: str) -> None:
 
 
 def verify_nightly(github: GitHub, *, run_id: int, candidate_sha: str) -> Resolution:
-    """Validate one named run, with no search and no fallback."""
+    """Validate one named run, with no search and no fallback.
+
+    The run must also still be the latest verdict on the commit: a newer run
+    on the same SHA that failed outranks it, as it does in ``resolve``.
+    """
     run = github.get_run(run_id)
     jobs = tuple(github.list_jobs(run_id))
     failures = evidence_failures(run, jobs, candidate_sha)
     if failures:
         raise EvidenceError([f"Nightly Regression run {run_id} is not release evidence", *failures])
+    for newer in github.list_runs(candidate_sha):
+        if newer.head_sha != candidate_sha or newer.status != "completed":
+            continue
+        if newer.recency <= run.recency:
+            continue
+        newer_jobs = tuple(github.list_jobs(newer.run_id))
+        if run_failed(newer, newer_jobs):
+            raise EvidenceError(
+                [
+                    f"Nightly Regression run {run_id} passed, but a newer run on "
+                    f"{candidate_sha} failed: {newer.url or newer.run_id}",
+                    *evidence_failures(newer, newer_jobs, candidate_sha),
+                ]
+            )
     return Resolution(run=run, jobs=jobs, source="override")
 
 
@@ -270,7 +300,6 @@ class _Search:
     github: GitHub
     candidate_sha: str
     ref: str
-    branch: str
     max_dispatches: int
     log: Callable[[str], None]
     rejected: dict[tuple[int, int], list[str]] = field(default_factory=dict)
@@ -294,7 +323,7 @@ class _Search:
                 for run in runs
                 if run.status == "completed" and run.verdict_key not in self.rejected
             ),
-            key=lambda run: (run.created_at, run.run_id),
+            key=lambda run: run.recency,
             reverse=True,
         )
         return runs, [(run, tuple(self.github.list_jobs(run.run_id))) for run in unjudged]
@@ -309,7 +338,7 @@ class _Search:
                 return Resolution(run=run, jobs=jobs, source=source, dispatches=self.dispatches)
             self.rejected[run.verdict_key] = failures
             self.log(f"Not citing {run.url or run.run_id}: {'; '.join(failures)}")
-            if _run_failed(run, jobs):
+            if run_failed(run, jobs):
                 raise EvidenceError(
                     [
                         f"Nightly Regression failed on the candidate {self.candidate_sha}: "
@@ -339,20 +368,21 @@ class _Search:
                     *self.rejected_reasons(),
                 ]
             )
+        branch = _branch_name(self.ref)
         head = self.github.ref_head(self.ref)
         if head != self.candidate_sha:
             raise EvidenceError(
                 [
-                    f"{self.branch} moved to {head} after this release started on "
+                    f"{branch} moved to {head} after this release started on "
                     f"{self.candidate_sha}. A nightly dispatched now would test {head}, "
                     "so dispatch the release again on the new head."
                 ]
             )
-        self.github.dispatch(self.branch)
+        self.github.dispatch(branch)
         self.dispatches += 1
         self.last_dispatch = now
         self.log(
-            f"Dispatched Nightly Regression on {self.branch} at {self.candidate_sha} "
+            f"Dispatched Nightly Regression on {branch} at {self.candidate_sha} "
             f"({self.dispatches} of {self.max_dispatches})"
         )
 
@@ -390,7 +420,6 @@ def resolve_nightly(
         github=github,
         candidate_sha=candidate_sha,
         ref=ref,
-        branch=_branch_name(ref),
         max_dispatches=max_dispatches,
         log=log,
     )

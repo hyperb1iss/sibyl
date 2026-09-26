@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -15,17 +15,14 @@ from tools.release.nightly_evidence import (
     WORKFLOW_PATH,
     EvidenceError,
     GhCli,
-    GitHubError,
     NightlyJob,
-    NightlyRun,
     evidence_failures,
     main,
     resolve_nightly,
 )
 from tools.tests.conftest import REPO_ROOT
+from tools.tests.release_evidence_support import OTHER_SHA, SHA, FakeClock, FakeGitHub, make_run
 
-SHA = "a" * 40
-OTHER_SHA = "b" * 40
 REF = "refs/heads/main"
 NIGHTLY_JOBS = ("Baseline Parity", "Live Graph Regression", "Restore To Scratch")
 ALL_GREEN = tuple(NightlyJob(name, "completed", "success") for name in NIGHTLY_JOBS)
@@ -33,87 +30,7 @@ ALL_GREEN = tuple(NightlyJob(name, "completed", "success") for name in NIGHTLY_J
 DAILY = (*ALL_GREEN[:2], NightlyJob("Restore To Scratch", "completed", "skipped"))
 
 
-def _run(
-    run_id: int,
-    *,
-    event: str = "workflow_dispatch",
-    status: str = "completed",
-    conclusion: str | None = "success",
-    sha: str = SHA,
-    created: str = "2026-09-26T09:00:00Z",
-    attempt: int = 1,
-) -> NightlyRun:
-    return NightlyRun(
-        run_id=run_id,
-        name=WORKFLOW_NAME,
-        path=WORKFLOW_PATH,
-        event=event,
-        status=status,
-        conclusion=conclusion if status == "completed" else None,
-        head_sha=sha,
-        url=f"https://github.com/o/r/actions/runs/{run_id}",
-        created_at=created,
-        attempt=attempt,
-    )
-
-
-class FakeGitHub:
-    def __init__(
-        self,
-        runs: Sequence[NightlyRun] = (),
-        jobs: dict[int, Sequence[NightlyJob]] | None = None,
-        head: str = SHA,
-    ) -> None:
-        self.runs = list(runs)
-        self.jobs = {run_id: tuple(value) for run_id, value in (jobs or {}).items()}
-        self.head = head
-        self.dispatched: list[str] = []
-        self.on_dispatch: Callable[[FakeGitHub], None] | None = None
-        self.list_failures = 0
-
-    def list_runs(self, head_sha: str) -> list[NightlyRun]:
-        if self.list_failures:
-            self.list_failures -= 1
-            raise GitHubError("HTTP 502")
-        return [run for run in self.runs if run.head_sha == head_sha]
-
-    def get_run(self, run_id: int) -> NightlyRun:
-        return next(run for run in self.runs if run.run_id == run_id)
-
-    def list_jobs(self, run_id: int) -> list[NightlyJob]:
-        return list(self.jobs.get(run_id, ()))
-
-    def ref_head(self, ref: str) -> str:
-        return self.head
-
-    def dispatch(self, branch: str) -> None:
-        self.dispatched.append(branch)
-        if self.on_dispatch is not None:
-            self.on_dispatch(self)
-
-    def add(self, run: NightlyRun, jobs: Sequence[NightlyJob] = ()) -> None:
-        self.runs = [existing for existing in self.runs if existing.run_id != run.run_id]
-        self.runs.append(run)
-        self.jobs[run.run_id] = tuple(jobs)
-
-
-class FakeClock:
-    """Monotonic time that advances only when the code under test sleeps."""
-
-    def __init__(self) -> None:
-        self.now = 0.0
-        self.sleeps = 0
-        self.after_sleep: dict[int, Callable[[], None]] = {}
-
-    def __call__(self) -> float:
-        return self.now
-
-    def sleep(self, seconds: float) -> None:
-        self.now += seconds
-        self.sleeps += 1
-        hook = self.after_sleep.pop(self.sleeps, None)
-        if hook is not None:
-            hook()
+_run = make_run
 
 
 def _resolve(github: FakeGitHub, clock: FakeClock, **kwargs: Any):
@@ -397,6 +314,52 @@ def test_resolve_refuses_to_dispatch_for_a_tag_ref() -> None:
         _resolve(FakeGitHub(), FakeClock(), ref="refs/tags/v1.4.2")
 
 
+def test_resolve_cites_an_existing_green_run_for_a_tag_ref() -> None:
+    green = _run(1)
+    github = FakeGitHub([green], {1: ALL_GREEN})
+
+    resolution = _resolve(github, FakeClock(), ref="refs/tags/v1.4.2")
+
+    assert resolution.run == green
+    assert github.dispatched == []
+
+
+def test_a_passing_rerun_outranks_the_failure_it_follows() -> None:
+    # Run 1 was created first and re-run after run 2 failed. A re-run keeps
+    # created_at, so recency has to come from when the attempt started.
+    rerun = _run(1, created="2026-09-26T09:00:00Z", started="2026-09-26T11:00:00Z", attempt=2)
+    failed = _run(2, conclusion="failure", created="2026-09-26T10:00:00Z")
+    github = FakeGitHub(
+        [rerun, failed],
+        {1: ALL_GREEN, 2: (NightlyJob("Baseline Parity", "completed", "failure"),)},
+    )
+
+    assert _resolve(github, FakeClock()).run == rerun
+
+
+def test_verify_refuses_a_run_that_a_newer_failure_outranks() -> None:
+    cited = _run(1, created="2026-09-26T09:00:00Z")
+    newer = _run(2, conclusion="failure", created="2026-09-26T10:00:00Z")
+    github = FakeGitHub(
+        [cited, newer],
+        {1: ALL_GREEN, 2: (NightlyJob("Live Graph Regression", "completed", "failure"),)},
+    )
+
+    with pytest.raises(EvidenceError) as raised:
+        _resolve(github, FakeClock(), run_id=cited.run_id)
+
+    assert "but a newer run" in raised.value.reasons[0]
+    assert "actions/runs/2" in raised.value.reasons[0]
+
+
+def test_verify_ignores_a_newer_incomplete_run() -> None:
+    cited = _run(1, created="2026-09-26T09:00:00Z")
+    daily = _run(2, event="schedule", created="2026-09-27T09:00:00Z")
+    github = FakeGitHub([cited, daily], {1: ALL_GREEN, 2: DAILY})
+
+    assert _resolve(github, FakeClock(), run_id=cited.run_id).run == cited
+
+
 def test_cli_resolve_writes_outputs_and_summary(tmp_path: Path) -> None:
     github = FakeGitHub([_run(1)], {1: ALL_GREEN})
     output = tmp_path / "output"
@@ -478,6 +441,7 @@ def test_gh_cli_asks_for_the_candidate_runs_and_dispatches_the_branch() -> None:
         return ""
 
     client = GhCli("o/r", runner=runner)
+    assert GhCli("o/r", workflow_file="ci.yml").workflow_file == "ci.yml"
 
     runs = client.list_runs(SHA)
     client.list_jobs(3)
