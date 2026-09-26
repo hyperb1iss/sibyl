@@ -199,12 +199,26 @@ async def snapshot_graph_embedding_evidence(
     )
 
 
-async def snapshot_content_embedding_evidence(execute_query: _Execute) -> None:
-    """Record which models raw captures name across the deployment, as of its upgrade.
+# The persisted settings the previous release's crawler read before the
+# environment, by the field of the content embedding they set.
+CRAWLER_SETTING_KEYS = {
+    "embedding_provider": "provider",
+    "embedding_model": "model",
+    "embedding_dimensions": "dimensions",
+}
 
-    Chunks carried no stamp before this release, and every organization's
-    chunks and raw captures are embedded by one content configuration, so
-    the raw captures of any organization speak for every chunk plane.
+
+async def snapshot_content_embedding_evidence(execute_query: _Execute) -> None:
+    """Record what speaks for the deployment's chunk vectors, as of its upgrade.
+
+    Chunks carried no stamp before this release, and one content
+    configuration embeds every organization's chunks and raw captures, so
+    the raw captures of any organization speak for every chunk plane, with
+    one exception. The previous release's crawler read the content
+    embedding settings saved in the settings UI before the environment,
+    while raw captures read the environment first, so where a saved setting
+    exists it, not the raw captures, names what embedded the chunks. The
+    saved settings are recorded beside the raw capture stamps.
     """
     stamps = await _stamp_groups(
         execute_query,
@@ -215,16 +229,32 @@ async def snapshot_content_embedding_evidence(execute_query: _Execute) -> None:
             scope_field=None,
         ),
     )
+    rows = normalize_records(
+        await execute_query(
+            "SELECT key, value FROM system_settings WHERE $keys CONTAINS key;",
+            keys=list(CRAWLER_SETTING_KEYS),
+        )
+    )
+    crawler_settings = {
+        CRAWLER_SETTING_KEYS[str(row["key"])]: value
+        for row in rows
+        if str(row.get("key")) in CRAWLER_SETTING_KEYS
+        and isinstance(row.get("value"), str)
+        and (value := str(row["value"]).strip())
+    }
     await execute_query(
         f"UPSERT {DEPLOYMENT_EVIDENCE_KEY} SET kind = 'evidence', "
-        "data = IF data.taken_at = NONE THEN {stamps: $stamps, taken_at: time::now()} "
+        "data = IF data.taken_at = NONE THEN "
+        "{stamps: $stamps, crawler_settings: $crawler_settings, taken_at: time::now()} "
         "ELSE data END, updated_at = time::now() RETURN NONE;",
         stamps=stamps,
+        crawler_settings=crawler_settings,
     )
 
 
 __all__ = [
     "CONTENT_SWEEP_SCHEMA_VERSION",
+    "CRAWLER_SETTING_KEYS",
     "DEPLOYMENT_EVIDENCE_KEY",
     "DEPLOYMENT_EVIDENCE_WAIT_KEY",
     "DEPLOYMENT_GRAPH_EVIDENCE_KEY",

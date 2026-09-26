@@ -2882,3 +2882,99 @@ async def test_live_two_step_upgrade_adopts_without_warnings_then_switches(
             await client.close()
             with suppress(Exception):
                 await _drop_surreal_namespace(client.namespace)
+
+
+@pytest.mark.asyncio
+async def test_live_a_saved_crawler_setting_decides_what_embedded_the_chunks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """As the previous release left it: raw captures on the environment's B, chunks on the saved A.
+
+    That release's crawler read the setting saved in the settings UI before
+    the environment and raw captures read the environment first, so the raw
+    capture stamps name B while every chunk vector is A's. After the upgrade
+    one resolver picks B, and the chunks must be re-embedded, not adopted.
+    """
+    from sibyl.jobs import lifecycle_repair
+    from sibyl_core.services import content_client
+
+    graph_target = _SweepTargetProvider(GRAPH_EMBEDDING_DIM, model="text-embedding-3-small")
+    graph_target.metadata = EmbeddingMetadata(**_previous_graph_stamp())
+    namespace = f"crawler_setting_live_{uuid4().hex}"
+    content = _live_content_client(namespace)
+    org = str(uuid4())
+    clients = {org: _live_graph_client(org)}
+    try:
+        await bootstrap_content_schema(content, reset=True)
+        await prepare_graph_schema(clients[org])
+        await _seed_previous_release_org(content, clients[org], graph_stamped=True, raw_captures=0)
+        for index in range(3):
+            await content_client.select_many(
+                content,
+                "CREATE raw_captures CONTENT $record RETURN NONE;",
+                record={
+                    "uuid": str(uuid4()),
+                    "organization_id": org,
+                    "principal_id": "owner",
+                    "source_id": str(uuid4()),
+                    "raw_content": f"captured under the environment's model {index}",
+                    "embedding": list(_NEW_CHUNK_VECTOR),
+                    "metadata": {
+                        "embedding_metadata": {
+                            **_TARGET_CHUNK_STAMP,
+                            "cache_namespace": "raw-memory",
+                            "text_version": "raw-capture-v1",
+                        }
+                    },
+                },
+            )
+        for key, value in (
+            ("embedding_provider", _PREVIOUS_CHUNK_STAMP["provider"]),
+            ("embedding_model", _PREVIOUS_CHUNK_STAMP["model"]),
+        ):
+            await content_client.select_many(
+                content,
+                "CREATE system_settings CONTENT {key: $key, value: $value} RETURN NONE;",
+                key=key,
+                value=value,
+            )
+        await _rewind_content_schema(content)
+        await _rewind_graph_schema(clients[org])
+        embedded: list[object] = []
+        _run_lifecycle_against(
+            monkeypatch,
+            content=content,
+            clients=clients,
+            graph_target=graph_target,
+            chunk_stamp=_TARGET_CHUNK_STAMP,
+            embedded_chunks=embedded,
+            raw_provider=_content_raw_provider(_TARGET_CHUNK_STAMP),
+        )
+        await bootstrap_content_schema(content)
+        for _tick in range(3):
+            summary = await lifecycle_repair.repair_lifecycle_all_orgs({})
+            assert summary["failed_organizations"] == 0, summary
+
+        _graph, chunks = await _plane_states(content, clients[org])
+        stored = await content_client.select_many(
+            content,
+            "SELECT embedding, embedding_metadata FROM document_chunks "
+            "WHERE organization_id = $organization_id;",
+            organization_id=org,
+        )
+    finally:
+        await content.close()
+        with suppress(Exception):
+            await _drop_surreal_namespace(namespace)
+        for client in clients.values():
+            await client.close()
+            with suppress(Exception):
+                await _drop_surreal_namespace(client.namespace)
+
+    assert chunks["legacy_decision"] == "reembed"
+    assert chunks["legacy_basis"] == "prior_stamps_differ"
+    assert len(embedded) == 4
+    assert stored
+    for chunk in stored:
+        assert chunk["embedding_metadata"] == _TARGET_CHUNK_STAMP
+        assert chunk["embedding"][:2] == [0.0, 1.0]

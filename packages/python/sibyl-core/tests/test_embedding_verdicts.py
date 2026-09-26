@@ -397,3 +397,88 @@ async def test_other_organizations_matching_stamps_adopt_without_a_warning(
         native.group_id,
         runtime.client.group_id,
     }
+
+
+async def _save_setting(key: str, value: str) -> None:
+    await _execute(
+        "CREATE system_settings CONTENT {key: $key, value: $value, is_secret: false} RETURN NONE;",
+        key=key,
+        value=value,
+    )
+
+
+def _space(stamp: dict[str, object]) -> dict[str, object]:
+    return {field: stamp[field] for field in ("provider", "model", "dimensions")}
+
+
+def test_historical_chunk_stamps_mirror_the_previous_crawler() -> None:
+    """The previous crawler read the saved setting, then the environment, then its default."""
+    from sibyl_core.services.embedding_evidence import historical_chunk_stamps
+
+    raw_default = {"provider": "openai", "model": "text-embedding-3-small", "dimensions": 1536}
+    raw_env_model = {**raw_default, "model": "text-embedding-3-large"}
+
+    # No saved setting: the crawler read the same environment as raw captures.
+    assert historical_chunk_stamps([raw_env_model], {}) == [raw_env_model]
+    # Saved fields override the raw capture's, field by field.
+    assert historical_chunk_stamps(
+        [raw_env_model], {"provider": "gemini", "model": "gemini-embedding-001"}
+    ) == [{"provider": "gemini", "model": "gemini-embedding-001", "dimensions": 1536}]
+    assert historical_chunk_stamps([raw_default], {"model": "text-embedding-3-large"}) == [
+        {"provider": "openai", "model": "text-embedding-3-large", "dimensions": 1536}
+    ]
+    assert historical_chunk_stamps([raw_default], {"dimensions": "768"}) == [
+        {**raw_default, "dimensions": 768}
+    ]
+    # A saved provider with no saved model: the environment's model if it set
+    # one, otherwise the provider's default.
+    assert historical_chunk_stamps([raw_default], {"provider": "gemini"}) == [
+        {"provider": "gemini", "model": "gemini-embedding-2", "dimensions": 1536}
+    ]
+    assert historical_chunk_stamps([raw_env_model], {"provider": "gemini"}) == [
+        {"provider": "gemini", "model": "text-embedding-3-large", "dimensions": 1536}
+    ]
+    # With no raw capture, what the saved settings leave open stays unknown.
+    assert historical_chunk_stamps([], {"provider": "openai"}) == [
+        {"provider": "openai", "model": None, "dimensions": None}
+    ]
+
+
+async def test_a_saved_crawler_setting_speaks_for_chunks_over_raw_captures(
+    runtime, content_store
+) -> None:
+    """The environment named B for raw captures while the saved setting named A for chunks."""
+    org = runtime.client.group_id
+    current = CountingProvider("current")
+    await _save_setting("embedding_provider", str(PREVIOUS["provider"]))
+    await _save_setting("embedding_model", str(PREVIOUS["model"]))
+    await _chunk(org, "legacy-chunk")
+    await _raw_capture(org, previous_release_stamp({**CURRENT, "cache_namespace": "raw-memory"}))
+    await _upgrade(runtime)
+
+    # After the upgrade one resolver picks the environment's B.
+    verdicts = await _settle(runtime, current, chunk_stamp=CURRENT)
+
+    assert isinstance(verdicts.document_chunks, dict)
+    assert verdicts.document_chunks["legacy_decision"] == "reembed"
+    assert verdicts.document_chunks["legacy_basis"] == LegacyVectorBasis.PRIOR_STAMPS_DIFFER.value
+
+
+async def test_raw_captures_do_not_override_a_matching_saved_crawler_setting(
+    runtime, content_store
+) -> None:
+    org = runtime.client.group_id
+    current = CountingProvider("current")
+    await _save_setting("embedding_provider", str(PREVIOUS["provider"]))
+    await _save_setting("embedding_model", str(PREVIOUS["model"]))
+    await _chunk(org, "legacy-chunk")
+    await _raw_capture(org, previous_release_stamp({**CURRENT, "cache_namespace": "raw-memory"}))
+    await _upgrade(runtime)
+
+    # The operator now configures A everywhere; the chunks were A all along.
+    verdicts = await _settle(runtime, current, chunk_stamp=PREVIOUS)
+
+    assert isinstance(verdicts.document_chunks, dict)
+    assert verdicts.document_chunks["legacy_decision"] == "adopt"
+    assert verdicts.document_chunks["legacy_basis"] == LegacyVectorBasis.PRIOR_STAMPS_MATCH.value
+    assert _space(verdicts.document_chunks["legacy_metadata"]) == _space(PREVIOUS)

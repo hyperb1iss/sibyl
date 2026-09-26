@@ -12,7 +12,9 @@ are fixed before this release writes a single vector:
 - the stamps raw captures carried across the whole deployment when the
   content schema upgraded (``embedding_deployment:evidence``), which speak
   for every organization's chunks because one content configuration embeds
-  them all;
+  them all, overlaid with the content embedding settings saved in the
+  settings UI, which the previous release's crawler read first (see
+  ``historical_chunk_stamps``);
 - the models lifecycle passes of this release have swept under
   (``embedding_deployment:models``), written only after a pass the provider
   did not refuse, which catches a switch made after the first such pass for
@@ -40,11 +42,20 @@ from sibyl_core.backends.surreal.schema_embedding_states import (
     GRAPH_EMBEDDING_STATE_PLANE,
     embedding_state_key,
 )
-from sibyl_core.embeddings.provenance import same_vector_space, vector_space
+from sibyl_core.embeddings.provenance import (
+    VECTOR_SPACE_FIELDS,
+    same_vector_space,
+    vector_space,
+)
 from sibyl_core.services.embedding_sweep import EmbeddingStamp, LegacyEvidence, SweepExecute
 
 GRAPH_MODEL_KIND = "graph"
 CONTENT_MODEL_KIND = "content"
+
+# The previous release's content model defaults, which tell a raw capture
+# stamp whose model came from the environment from one that fell back.
+_PREVIOUS_OPENAI_CONTENT_MODEL = "text-embedding-3-small"
+_PREVIOUS_GEMINI_CONTENT_MODEL = "gemini-embedding-2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,6 +193,90 @@ async def read_content_snapshot(execute: SweepExecute) -> list[dict[str, Any]]:
     return _snapshot_stamps(rows[0].get("data") if rows else None)
 
 
+async def read_chunk_evidence(execute: SweepExecute) -> list[dict[str, Any]]:
+    """The models that embedded the deployment's chunks before the upgrade, as far as known."""
+    rows = await _records(execute, f"SELECT data FROM {DEPLOYMENT_EVIDENCE_KEY};")
+    data = rows[0].get("data") if rows else None
+    saved = data.get("crawler_settings") if isinstance(data, Mapping) else None
+    return historical_chunk_stamps(
+        _snapshot_stamps(data), dict(saved) if isinstance(saved, Mapping) else {}
+    )
+
+
+def historical_chunk_stamps(
+    raw_stamps: Sequence[Mapping[str, Any]], saved: Mapping[str, Any]
+) -> list[dict[str, Any]]:
+    """The vector spaces the previous release's crawler embedded chunks in.
+
+    That crawler resolved each field from the setting saved in the settings
+    UI, then the environment, then its default, and for the model the
+    default followed the provider (``gemini-embedding-2`` for Gemini). Raw
+    captures read the environment first, and the process start copied a
+    saved setting into the environment only where the variable was unset,
+    so with no saved setting both used one source and the raw capture
+    stamps name the chunks' model. A saved field overrides the raw capture
+    stamp's field. The environment behind the others is read back from the
+    raw capture stamps: a model that is not the default means the
+    environment set it. A field neither source determines is None, and
+    ``classify_partial_stamps`` treats it as unknown rather than a match.
+    """
+    if not saved:
+        return [dict(stamp) for stamp in raw_stamps]
+    dimensions: int | None = None
+    if saved.get("dimensions") is not None:
+        try:
+            dimensions = int(str(saved["dimensions"]))
+        except ValueError:
+            dimensions = None
+    bases: Sequence[Mapping[str, Any]] = raw_stamps or [{}]
+    stamps = []
+    for base in bases:
+        provider = saved.get("provider") or base.get("provider")
+        model = saved.get("model")
+        if not model:
+            raw_model = base.get("model")
+            environment_set = raw_model not in {
+                None,
+                _PREVIOUS_OPENAI_CONTENT_MODEL,
+                _PREVIOUS_GEMINI_CONTENT_MODEL,
+            }
+            if environment_set:
+                model = raw_model
+            elif raw_model is not None and provider:
+                model = (
+                    _PREVIOUS_GEMINI_CONTENT_MODEL
+                    if provider == "gemini"
+                    else _PREVIOUS_OPENAI_CONTENT_MODEL
+                )
+        stamps.append(
+            {
+                "provider": provider or None,
+                "model": model or None,
+                "dimensions": dimensions if dimensions is not None else base.get("dimensions"),
+            }
+        )
+    return stamps
+
+
+def classify_partial_stamps(
+    stamps: Sequence[Mapping[str, Any]], configured: EmbeddingStamp
+) -> tuple[bool, bool]:
+    """``classify_stamps`` for stamps that may leave a field unknown (None).
+
+    A known field that differs names another model; a stamp matches only
+    when every field is known and equal.
+    """
+    differs = matches = False
+    current = vector_space(configured) or {}
+    for stamp in stamps:
+        known = {field: stamp.get(field) for field in VECTOR_SPACE_FIELDS}
+        if any(value is not None and value != current.get(field) for field, value in known.items()):
+            differs = True
+        elif all(value is not None for value in known.values()):
+            matches = True
+    return differs, matches
+
+
 async def read_deployment_models(execute: SweepExecute) -> dict[str, Any]:
     rows = await _records(execute, f"SELECT data FROM {DEPLOYMENT_MODELS_KEY};")
     data = rows[0].get("data") if rows else None
@@ -226,7 +321,8 @@ def _plane_evidence(
     current = configured if configured is not None else models.get(kind)
     if not isinstance(current, Mapping):
         return PlaneEvidence()
-    differs, matches = classify_stamps(stamps, dict(current))
+    classify = classify_partial_stamps if kind == CONTENT_MODEL_KIND else classify_stamps
+    differs, matches = classify(stamps, dict(current))
     first = models.get(f"first_{kind}")
     changed = isinstance(first, Mapping) and not same_vector_space(first, current)
     return PlaneEvidence(differs=differs, matches=matches, model_changed=changed)
@@ -260,7 +356,7 @@ async def gather_legacy_evidence(
             await read_deployment_graph_snapshot(content_execute), dict(graph_current)
         )
     content = _plane_evidence(
-        await read_content_snapshot(content_execute), content_stamp, models, CONTENT_MODEL_KIND
+        await read_chunk_evidence(content_execute), content_stamp, models, CONTENT_MODEL_KIND
     )
     return GatheredEvidence(
         graph=LegacyEvidence(
@@ -285,9 +381,12 @@ __all__ = [
     "GRAPH_MODEL_KIND",
     "GatheredEvidence",
     "PlaneEvidence",
+    "classify_partial_stamps",
     "classify_stamps",
     "gather_legacy_evidence",
+    "historical_chunk_stamps",
     "publish_graph_snapshot",
+    "read_chunk_evidence",
     "read_content_snapshot",
     "read_deployment_graph_snapshot",
     "read_deployment_models",
