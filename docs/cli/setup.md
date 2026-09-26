@@ -56,9 +56,9 @@ it out and warns that other commands in the shell still send it.
    succeeds; if it fails, the new context is removed and the previous one stays active.
 4. Installs the skill into `~/.claude/skills`, `~/.codex/skills`, and `~/.agents/skills`.
 5. Adds a SessionStart hook to `~/.claude/settings.json` that loads your active tasks and recent
-   memory when a Claude Code session starts. Only hooks that run Sibyl's own scripts from
-   `~/.claude/hooks/sibyl/` are replaced; every other hook stays where it was, and the previous file
-   is backed up. Codex and other agents have no hook.
+   memory when a Claude Code session starts. Only hooks exactly as Sibyl's installer writes them
+   (`python3 ~/.claude/hooks/sibyl/<script>.py`) are replaced; every other hook stays where it was,
+   and the previous file is backed up. Codex and other agents have no hook.
 
 ## Hand It To An Agent
 

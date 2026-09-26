@@ -191,6 +191,9 @@ def test_check_session_hook_passes_when_registered(
         '/home/user/.claude/hooks/sibyl/session-start.py"}]}]}}',
         encoding="utf-8",
     )
+    from sibyl_cli import setup as setup_module
+
+    monkeypatch.setattr(setup_module, "CLAUDE_HOOKS_DIR", Path("/home/user/.claude/hooks/sibyl"))
     monkeypatch.setattr(doctor_module, "CLAUDE_SETTINGS_PATH", settings_file)
 
     check = doctor_module._check_session_hook()
@@ -293,6 +296,9 @@ def test_check_no_legacy_hook_fails_when_settings_still_have_it(
         '"python3 /home/user/.claude/hooks/sibyl/user-prompt-submit.py"}]}]}}',
         encoding="utf-8",
     )
+    from sibyl_cli import setup as setup_module
+
+    monkeypatch.setattr(setup_module, "CLAUDE_HOOKS_DIR", Path("/home/user/.claude/hooks/sibyl"))
     monkeypatch.setattr(doctor_module, "CLAUDE_SETTINGS_PATH", settings_file)
     monkeypatch.setattr(doctor_module, "LEGACY_USER_PROMPT_HOOK", tmp_path / "missing.py")
 
@@ -456,19 +462,37 @@ def test_hook_registration_prunes_retired_sibyl_hooks_only(
 ) -> None:
     from sibyl_cli import setup as setup_module
 
-    legacy = {
-        "type": "command",
-        "command": "python3 /home/ada/.claude/hooks/sibyl/user-prompt-submit.py",
+    hooks_dir = f"{tmp_path}/.claude/hooks/sibyl"
+
+    def command(script: str, **extra: object) -> dict:
+        return {"type": "command", "command": f"python3 {hooks_dir}/{script}", **extra}
+
+    legacy_prompt = {
+        "type": "prompt",
+        "prompt": setup_module.LEGACY_STOP_HOOK_PROMPT,
+        "timeout": 45,
     }
     settings_file = _hook_settings(
         tmp_path,
         monkeypatch,
-        {"hooks": {"UserPromptSubmit": [{"hooks": [legacy]}, {"hooks": [USER_LINT]}]}},
+        {
+            "hooks": {
+                "UserPromptSubmit": [
+                    {"hooks": [command("user-prompt-submit.py")]},
+                    {"hooks": [USER_LINT]},
+                ],
+                "PostToolUse": [{"hooks": [command("post-tool-use.py")]}],
+                "Stop": [{"hooks": [command("stop.py", timeout=5)]}, {"hooks": [legacy_prompt]}],
+            }
+        },
     )
 
     assert setup_module.configure_claude_hooks() is True
 
     assert _commands(settings_file, "UserPromptSubmit") == [[USER_LINT["command"]]]
+    data = json.loads(settings_file.read_text(encoding="utf-8"))["hooks"]
+    assert data["PostToolUse"] == []
+    assert data["Stop"] == []
 
 
 def test_hook_registration_keeps_a_hook_that_only_reads_a_managed_script(
@@ -502,6 +526,31 @@ def test_the_installed_hook_is_recognized_as_managed(
             assert all(setup_module.is_managed_hook(hook) for hook in group["hooks"])
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "bash -c 'sha256sum ~/.claude/hooks/sibyl/session-start.py'",
+        "python3 --version ~/.claude/hooks/sibyl/session-start.py",
+        "sha256sum ~/.claude/hooks/sibyl/session-start.py",
+        "cat ~/.claude/hooks/sibyl/session-start.py",
+    ],
+)
+def test_hook_registration_keeps_every_command_that_is_not_a_template(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: str
+) -> None:
+    from sibyl_cli import setup as setup_module
+
+    user_hook = {"type": "command", "command": command}
+    settings_file = _hook_settings(
+        tmp_path, monkeypatch, {"hooks": {"PreToolUse": [{"hooks": [user_hook]}]}}
+    )
+
+    assert setup_module.configure_claude_hooks() is True
+
+    assert _commands(settings_file, "PreToolUse") == [[command]]
+    assert list(settings_file.parent.glob("settings.json.*.bak"))
+
+
 def test_hook_registration_is_idempotent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from sibyl_cli import setup as setup_module
 
@@ -519,33 +568,88 @@ def test_hook_registration_is_idempotent(tmp_path: Path, monkeypatch: pytest.Mon
     assert json.loads(first)["model"] == "opus"
 
 
-@pytest.mark.parametrize(
-    ("command", "managed"),
-    [
-        # Every shape the installer has written: python3 <hooks dir>/<script>.
-        ("python3 /Users/ada/.claude/hooks/sibyl/session-start.py", True),
-        ("python3 /home/ada/.claude/hooks/sibyl/user-prompt-submit.py", True),
-        ("python3 /home/ada/.claude/hooks/sibyl/post-tool-use.py", True),
-        ("python3 /home/ada/.claude/hooks/sibyl/stop.py", True),
-        ("python3 '/home/a b/.claude/hooks/sibyl/session-start.py'", True),
-        # The same script run another way is still Sibyl's.
-        ("/Users/ada/.claude/hooks/sibyl/session-start.py", True),
-        ("/usr/bin/env python3 /Users/ada/.claude/hooks/sibyl/session-start.py", True),
-        ("python3.13 -u /Users/ada/.claude/hooks/sibyl/session-start.py", True),
-        ("uv run python /Users/ada/.claude/hooks/sibyl/session-start.py", True),
-        ("bash /Users/ada/.claude/hooks/sibyl/session-start.py", True),
-        # A managed path as an argument to some other program is not.
-        ("sha256sum /home/ada/.claude/hooks/sibyl/session-start.py", False),
-        ("cat /home/ada/.claude/hooks/sibyl/session-start.py", False),
-        ("python3 /opt/audit.py /home/ada/.claude/hooks/sibyl/session-start.py", False),
-        ("/opt/sibyl-policy/check-security", False),
-        ("python3 /Users/ada/.claude/hooks/sibyl/my-own-script.py", False),
-        ("python3 /Users/ada/sibyl/session-start.py", False),
-        ("echo 'unterminated", False),
-        ("", False),
-    ],
-)
-def test_managed_hooks_are_identified_exactly(command: str, managed: bool) -> None:
+HOME = "/Users/ada"
+HOOKS_DIR = Path(HOME) / ".claude" / "hooks" / "sibyl"
+MANAGED = f"{HOME}/.claude/hooks/sibyl"
+
+MATCHER_CASES = [
+    # Every template the installer has written.
+    (f"python3 {MANAGED}/session-start.py", True),
+    (f"python3 {MANAGED}/user-prompt-submit.py", True),
+    (f"python3 {MANAGED}/post-tool-use.py", True),
+    (f"python3 {MANAGED}/stop.py", True),
+    # The same template after light normalization.
+    (f"  python3   {MANAGED}/session-start.py  ", True),
+    ("python3 ~/.claude/hooks/sibyl/session-start.py", True),
+    ("python3 $HOME/.claude/hooks/sibyl/session-start.py", True),
+    ("python3 ${HOME}/.claude/hooks/sibyl/session-start.py", True),
+    (f"python3 {HOME}//.claude/hooks/sibyl/./session-start.py", True),
+    # Anything else is the user's, however it touches the path.
+    ("bash -c 'sha256sum ~/.claude/hooks/sibyl/session-start.py'", False),
+    (f"python3 --version {MANAGED}/session-start.py", False),
+    (f"sha256sum {MANAGED}/session-start.py", False),
+    (f"cat {MANAGED}/session-start.py", False),
+    (f"/usr/bin/env python3 {MANAGED}/session-start.py", False),
+    (f"python3.13 -u {MANAGED}/session-start.py", False),
+    (f"uv run python {MANAGED}/session-start.py", False),
+    (f"bash {MANAGED}/session-start.py", False),
+    (f"{MANAGED}/session-start.py", False),
+    (f"python3 {MANAGED}/session-start.py --verbose", False),
+    ("python3 /home/bob/.claude/hooks/sibyl/session-start.py", False),
+    (f"python3 {MANAGED}/my-own-script.py", False),
+    ("/opt/sibyl-policy/check-security", False),
+    ("echo 'unterminated", False),
+    ("", False),
+]
+
+
+@pytest.mark.parametrize(("command", "managed"), MATCHER_CASES)
+def test_managed_hooks_are_exact_installer_templates(command: str, managed: bool) -> None:
     from sibyl_cli import setup as setup_module
 
-    assert setup_module.is_managed_hook({"type": "command", "command": command}) is managed
+    hook = {"type": "command", "command": command}
+    assert setup_module.is_managed_hook(hook, HOOKS_DIR) is managed
+
+
+def test_the_legacy_stop_prompt_hook_is_managed_and_nothing_else_is() -> None:
+    from sibyl_cli import setup as setup_module
+
+    legacy = setup_module.LEGACY_STOP_HOOK_PROMPT
+    reflowed = "\n".join(line.strip() for line in legacy.splitlines())
+    for prompt, managed in [(legacy, True), (reflowed, True), ("Summarize the session.", False)]:
+        hook = {"type": "prompt", "prompt": prompt, "timeout": 45}
+        assert setup_module.is_managed_hook(hook, HOOKS_DIR) is managed
+
+
+def test_every_template_the_installer_writes_is_managed() -> None:
+    from sibyl_cli import setup as setup_module
+
+    for script in setup_module.MANAGED_HOOK_SCRIPTS:
+        command = setup_module.managed_hook_command(HOOKS_DIR, script)
+        assert setup_module.is_managed_hook({"type": "command", "command": command}, HOOKS_DIR)
+
+
+def _repo_hooks_configure():
+    import importlib.util
+
+    path = Path(__file__).resolve().parents[3] / "hooks" / "configure.py"
+    spec = importlib.util.spec_from_file_location("sibyl_repo_hooks_configure", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_cli_and_the_repo_hooks_script_share_one_template_list() -> None:
+    from sibyl_cli import setup as setup_module
+
+    repo = _repo_hooks_configure()
+    assert repo.MANAGED_HOOK_SCRIPTS == setup_module.MANAGED_HOOK_SCRIPTS
+    assert repo.LEGACY_STOP_HOOK_PROMPT == setup_module.LEGACY_STOP_HOOK_PROMPT
+    for script in setup_module.MANAGED_HOOK_SCRIPTS:
+        assert repo.managed_hook_command(HOOKS_DIR, script) == (
+            setup_module.managed_hook_command(HOOKS_DIR, script)
+        )
+    for command, managed in MATCHER_CASES:
+        hook = {"type": "command", "command": command}
+        assert repo.is_managed_hook(hook, HOOKS_DIR) is managed, command
