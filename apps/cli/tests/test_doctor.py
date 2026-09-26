@@ -471,6 +471,37 @@ def test_hook_registration_prunes_retired_sibyl_hooks_only(
     assert _commands(settings_file, "UserPromptSubmit") == [[USER_LINT["command"]]]
 
 
+def test_hook_registration_keeps_a_hook_that_only_reads_a_managed_script(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sibyl_cli import setup as setup_module
+
+    checksum = {
+        "type": "command",
+        "command": f"sha256sum {tmp_path}/.claude/hooks/sibyl/session-start.py",
+    }
+    settings_file = _hook_settings(
+        tmp_path, monkeypatch, {"hooks": {"PreToolUse": [{"hooks": [checksum]}]}}
+    )
+
+    assert setup_module.configure_claude_hooks() is True
+
+    assert _commands(settings_file, "PreToolUse") == [[checksum["command"]]]
+
+
+def test_the_installed_hook_is_recognized_as_managed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sibyl_cli import setup as setup_module
+
+    _hook_settings(tmp_path, monkeypatch, {})
+    installed = setup_module.get_sibyl_hooks_config()
+
+    for groups in installed.values():
+        for group in groups:
+            assert all(setup_module.is_managed_hook(hook) for hook in group["hooks"])
+
+
 def test_hook_registration_is_idempotent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from sibyl_cli import setup as setup_module
 
@@ -491,12 +522,27 @@ def test_hook_registration_is_idempotent(tmp_path: Path, monkeypatch: pytest.Mon
 @pytest.mark.parametrize(
     ("command", "managed"),
     [
+        # Every shape the installer has written: python3 <hooks dir>/<script>.
         ("python3 /Users/ada/.claude/hooks/sibyl/session-start.py", True),
-        ("python3 '/home/a b/.claude/hooks/sibyl/user-prompt-submit.py'", True),
+        ("python3 /home/ada/.claude/hooks/sibyl/user-prompt-submit.py", True),
+        ("python3 /home/ada/.claude/hooks/sibyl/post-tool-use.py", True),
+        ("python3 /home/ada/.claude/hooks/sibyl/stop.py", True),
+        ("python3 '/home/a b/.claude/hooks/sibyl/session-start.py'", True),
+        # The same script run another way is still Sibyl's.
+        ("/Users/ada/.claude/hooks/sibyl/session-start.py", True),
+        ("/usr/bin/env python3 /Users/ada/.claude/hooks/sibyl/session-start.py", True),
+        ("python3.13 -u /Users/ada/.claude/hooks/sibyl/session-start.py", True),
+        ("uv run python /Users/ada/.claude/hooks/sibyl/session-start.py", True),
+        ("bash /Users/ada/.claude/hooks/sibyl/session-start.py", True),
+        # A managed path as an argument to some other program is not.
+        ("sha256sum /home/ada/.claude/hooks/sibyl/session-start.py", False),
+        ("cat /home/ada/.claude/hooks/sibyl/session-start.py", False),
+        ("python3 /opt/audit.py /home/ada/.claude/hooks/sibyl/session-start.py", False),
         ("/opt/sibyl-policy/check-security", False),
         ("python3 /Users/ada/.claude/hooks/sibyl/my-own-script.py", False),
         ("python3 /Users/ada/sibyl/session-start.py", False),
         ("echo 'unterminated", False),
+        ("", False),
     ],
 )
 def test_managed_hooks_are_identified_exactly(command: str, managed: bool) -> None:

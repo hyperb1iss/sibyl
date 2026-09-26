@@ -8,6 +8,7 @@ Installs the Sibyl skill and optional Claude hooks for assistant tooling:
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import shutil
 from contextlib import suppress
@@ -96,33 +97,49 @@ def valid_hooks_shape(hooks: object) -> bool:
     return True
 
 
-# Scripts Sibyl installs into ~/.claude/hooks/sibyl/, including retired ones so
-# a re-run can prune them.
-MANAGED_HOOK_SCRIPTS = frozenset({"session-start.py", "user-prompt-submit.py"})
+# Scripts Sibyl has installed into ~/.claude/hooks/sibyl/, including retired
+# ones so a re-run can prune them.
+MANAGED_HOOK_SCRIPTS = frozenset(
+    {"session-start.py", "user-prompt-submit.py", "post-tool-use.py", "stop.py"}
+)
+_INTERPRETER = re.compile(r"^(?:python(?:\d+(?:\.\d+)*)?|sh|bash|zsh)$")
+
+
+def _executed_script(words: list[str]) -> str | None:
+    """The program a hook command runs, looking through `env`, `uv run` and interpreters."""
+    rest = list(words)
+    if rest and Path(rest[0]).name == "env":
+        rest = rest[1:]
+    if len(rest) >= 2 and Path(rest[0]).name == "uv" and rest[1] == "run":
+        rest = [word for word in rest[2:] if not word.startswith("-")]
+    if rest and _INTERPRETER.match(Path(rest[0]).name):
+        rest = [word for word in rest[1:] if not word.startswith("-")]
+    return rest[0] if rest else None
 
 
 def is_managed_hook(hook: object) -> bool:
     """True only for a hook object Sibyl installed.
 
-    That is a command hook whose command runs one of Sibyl's scripts from a
-    `.claude/hooks/sibyl/` directory. A user's hook merely mentioning sibyl, such
-    as `/opt/sibyl-policy/check`, is never Sibyl's to remove.
+    That is a command hook that executes one of Sibyl's scripts from a
+    `.claude/hooks/sibyl/` directory, directly or through an interpreter, which
+    is the shape the installer writes (`python3 <dir>/session-start.py`). A hook
+    that only passes such a path as an argument, like `sha256sum <path>`, or
+    that merely mentions sibyl, is never Sibyl's to remove.
     """
     if not isinstance(hook, dict) or hook.get("type", "command") != "command":
         return False
     try:
-        words = shlex.split(str(hook.get("command", "")))
+        script = _executed_script(shlex.split(str(hook.get("command", ""))))
     except ValueError:
         return False
-    for word in words:
-        path = Path(word)
-        if path.name in MANAGED_HOOK_SCRIPTS and path.parent.parts[-3:] == (
-            ".claude",
-            "hooks",
-            "sibyl",
-        ):
-            return True
-    return False
+    if script is None:
+        return False
+    path = Path(script)
+    return path.name in MANAGED_HOOK_SCRIPTS and path.parent.parts[-3:] == (
+        ".claude",
+        "hooks",
+        "sibyl",
+    )
 
 
 def entry_has_managed_hook(entry: object) -> bool:
