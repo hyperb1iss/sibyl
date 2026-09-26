@@ -1160,3 +1160,49 @@ async def test_a_pass_adopts_every_unstamped_vector_whatever_its_budget(runtime)
     assert result.adopted == 510
     assert current.texts == []
     assert all(row["stamp"] is not None for row in stored.values())
+
+
+async def test_adoption_renews_its_lease_after_every_statement(runtime, monkeypatch) -> None:
+    """An embedded engine serves one connection, so a round's statements queue behind each other.
+
+    At about 28 ms a row a round of four 1,000-row statements outlasts the
+    lease there, so the lease must be renewed after each statement, not once
+    per round: four statements, four renewals.
+    """
+    from sibyl_core.services import embedding_sweep as sweep_module
+    from sibyl_core.services.embedding_sweep import SWEEP_LEASE_LOST
+
+    current = CountingProvider("current")
+    await _entity(runtime, "stamped", stamp=previous_release_stamp(current.metadata.to_dict()))
+    await runtime.client.execute_query(
+        "INSERT INTO entity $rows RETURN NONE;",
+        rows=[
+            {
+                "uuid": f"legacy-{index:02d}",
+                "group_id": runtime.client.group_id,
+                "name": f"Entity legacy-{index:02d}",
+                "entity_type": "topic",
+                "name_embedding": _vector(0.5),
+                "attributes": {},
+            }
+            for index in range(20)
+        ],
+    )
+    await upgrade_graph_to_sweep(runtime.client)
+    monkeypatch.setattr(sweep_module, "_ADOPT_BATCH_ROWS", 5)
+    renew = sweep_module._renew_lease
+    renewals: list[bool] = []
+
+    async def counted(plane, *, owner, budget):
+        held = await renew(plane, owner=owner, budget=budget)
+        renewals.append(held)
+        return held
+
+    monkeypatch.setattr(sweep_module, "_renew_lease", counted)
+
+    result = await sweep_graph_embeddings(runtime, embedding_provider=current, concurrency=4)
+
+    assert result.status != SWEEP_LEASE_LOST
+    assert result.adopted == 20
+    # One page of 20 rows in four statements, each followed by a renewal.
+    assert renewals == [True, True, True, True]

@@ -1245,10 +1245,23 @@ async def _stamp_legacy_rows(
     re-validates every field of a row it updates, which keeps one statement
     near 600 rows a second on the entity table, so disjoint batches run
     ``slots`` at a time, the concurrency the sweep already uses against the
-    store. The lease is renewed after every round, and a pass that lost it
-    stops. Returns False only then.
+    store. The lease is renewed after every statement, not every round: an
+    embedded engine serves one connection, so a round's statements queue
+    and a round can outlast the lease. A pass that lost it stops. Returns
+    False only then.
     """
     limit = _ADOPT_BATCH_ROWS * slots
+    in_flight = asyncio.Semaphore(slots)
+
+    async def adopt(table: SweepTable, uuids: Sequence[str]) -> list[dict[str, Any]]:
+        async with in_flight:
+            if counts.lease_lost:
+                return []
+            stamped = await _rows(plane, table.adopt_query(), legacy=legacy, uuids=list(uuids))
+            if not await _renew_lease(plane, owner=owner, budget=budget):
+                counts.lease_lost = True
+            return stamped
+
     for table in plane.tables:
         cursor = ""
         while True:
@@ -1262,19 +1275,13 @@ async def _stamp_legacy_rows(
                 break
             stamped = await asyncio.gather(
                 *(
-                    _rows(
-                        plane,
-                        table.adopt_query(),
-                        legacy=legacy,
-                        uuids=uuids[start : start + _ADOPT_BATCH_ROWS],
-                    )
+                    adopt(table, uuids[start : start + _ADOPT_BATCH_ROWS])
                     for start in range(0, len(uuids), _ADOPT_BATCH_ROWS)
                 )
             )
             if legacy.get("provider") != UNVERIFIED_EMBEDDING_PROVIDER:
                 counts.adopted += sum(len(rows) for rows in stamped)
-            if not await _renew_lease(plane, owner=owner, budget=budget):
-                counts.lease_lost = True
+            if counts.lease_lost:
                 return False
             if not more:
                 break
