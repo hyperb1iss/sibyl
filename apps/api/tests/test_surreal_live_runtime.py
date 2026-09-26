@@ -1792,6 +1792,7 @@ async def test_live_chunk_sweep_reads_raw_evidence_and_filters_the_chunk_lane(
                 "principal_id": "owner",
                 "source_id": "evidence",
                 "raw_content": "captured under the previous model",
+                "embedding": list(old_vector),
                 "metadata": {"embedding_metadata": {**previous, "cache_namespace": "raw-memory"}},
             },
         )
@@ -1993,6 +1994,7 @@ async def _seed_previous_release_org(
                 "principal_id": "owner",
                 "source_id": str(uuid4()),
                 "raw_content": f"captured under the previous model {index}",
+                "embedding": list(_OLD_CHUNK_VECTOR),
                 "metadata": {
                     "embedding_metadata": {
                         **_PREVIOUS_CHUNK_STAMP,
@@ -2025,8 +2027,16 @@ def _run_lifecycle_against(
     graph_target: _SweepTargetProvider,
     chunk_stamp: dict[str, object],
     embedded_chunks: list[object],
+    broken: frozenset[str] = frozenset(),
+    raw_provider: Any = None,
+    record_models: bool = False,
 ) -> None:
-    """Point lifecycle repair at these stores and providers; stub the unrelated repairs."""
+    """Point lifecycle repair at these stores and providers; stub the unrelated repairs.
+
+    ``broken`` organizations fail to open their graph runtime. With
+    ``raw_provider`` the real raw capture repair runs with that provider, and
+    with ``record_models`` the real deployment model recorder runs.
+    """
     from unittest.mock import AsyncMock
 
     from sibyl.jobs import lifecycle_repair
@@ -2041,6 +2051,8 @@ def _run_lifecycle_against(
 
     @asynccontextmanager
     async def background(group_id):
+        if group_id in broken:
+            raise ConnectionError(f"graph namespace for {group_id} is unreachable")
         client = clients[group_id]
         await prepare_graph_schema(client)
         yield GraphRuntime(
@@ -2065,13 +2077,30 @@ def _run_lifecycle_against(
         "document_chunk_sweep_inputs",
         AsyncMock(return_value=(dict(chunk_stamp), True, embed_chunks)),
     )
-    monkeypatch.setattr(lifecycle_repair, "record_configured_embedding_models", AsyncMock())
-    for name in (
+    if record_models:
+        from sibyl.jobs import embedding_sweep as sweep_jobs
+
+        class _Service:
+            async def chunk_embedding_metadata(self):
+                return dict(chunk_stamp), True
+
+        monkeypatch.setattr(sweep_jobs, "configured_embedding_provider", lambda: graph_target)
+        monkeypatch.setattr(sweep_jobs, "EmbeddingService", _Service)
+    else:
+        monkeypatch.setattr(lifecycle_repair, "record_configured_embedding_models", AsyncMock())
+    stubbed = [
         "repair_graph_lifecycle",
         "repair_promoted_embeddings",
         "repair_raw_source_lifecycle",
-        "repair_raw_capture_embeddings",
-    ):
+    ]
+    if raw_provider is None:
+        stubbed.append("repair_raw_capture_embeddings")
+    else:
+        monkeypatch.setattr(
+            "sibyl_core.services.content_models.configured_raw_memory_embedding_provider",
+            lambda: raw_provider,
+        )
+    for name in stubbed:
         monkeypatch.setattr(lifecycle_repair, name, AsyncMock(return_value=LifecycleRepairResult()))
 
 
@@ -2090,11 +2119,35 @@ async def _restart_on_new_models(
     async def execute(query, **params):
         return await content_client.select_many(content, query, **params)
 
-    # The first start of this release already runs the new models, so the
+    # The first pass of this release already runs the new models, so the
     # deployment record has no older model to compare against.
     await record_deployment_models(execute, graph=graph_stamp, content=chunk_stamp)
     for client in clients.values():
         await upgrade_graph_to_sweep(client)
+
+
+async def _rewind_content_schema(content: SurrealContentClient) -> None:
+    """Leave the content schema where the previous release left it."""
+    from sibyl_core.backends.surreal.schema_version import schema_version_record_id
+
+    await content.execute_query("REMOVE TABLE IF EXISTS embedding_states;")
+    await content.execute_query("REMOVE TABLE IF EXISTS embedding_deployment;")
+    await content.execute_query(
+        "UPDATE type::record($record) SET version = 46;",
+        record=schema_version_record_id(CONTENT_SCHEMA_NAME),
+    )
+
+
+async def _rewind_graph_schema(client: SurrealGraphClient) -> None:
+    from sibyl_core.backends.surreal.schema_version import schema_version_record_id
+    from sibyl_core.services.graph_client import mark_graph_schema_dirty
+
+    await client.execute_query("REMOVE TABLE IF EXISTS embedding_states;")
+    await client.execute_query(
+        "UPDATE type::record($record) SET version = 30;",
+        record=schema_version_record_id(GRAPH_SCHEMA_NAME),
+    )
+    mark_graph_schema_dirty(client.group_id)
 
 
 async def _plane_states(
@@ -2263,14 +2316,52 @@ async def test_live_same_restart_switch_repairs_every_organization_shape(
                 await _drop_surreal_namespace(client.namespace)
 
 
+async def _plant_stamps_without_vectors(
+    content: SurrealContentClient, client: SurrealGraphClient, *, graph_stamp, chunk_stamp
+) -> None:
+    """Stamps a client could supply on rows that never had a vector."""
+    from sibyl_core.services import content_client
+
+    await content_client.select_many(
+        content,
+        "CREATE raw_captures CONTENT $record RETURN NONE;",
+        record={
+            "uuid": str(uuid4()),
+            "organization_id": client.group_id,
+            "principal_id": "tenant",
+            "source_id": "planted",
+            "raw_content": "planted",
+            "metadata": {"embedding_metadata": {**chunk_stamp, "cache_namespace": "raw"}},
+        },
+    )
+    await EntityManager(client, group_id=client.group_id).create_direct_bulk(
+        [
+            Entity(
+                id="planted",
+                entity_type=EntityType.TOPIC,
+                name="Planted",
+                organization_id=client.group_id,
+                metadata={"embedding_metadata": graph_stamp},
+            )
+        ]
+    )
+
+
 @asynccontextmanager
 async def _previous_release_deployment(
     shapes: dict[str, bool],
     *,
     graph_stamp: dict[str, object],
     chunk_stamp: dict[str, object],
+    planted: bool = False,
+    upgrade_content: bool = True,
 ) -> AsyncIterator[tuple[SurrealContentClient, dict[str, SurrealGraphClient]]]:
-    """A deployment with no raw captures, restarted onto new models; shapes map to stamped."""
+    """A deployment with no real raw captures, restarted onto new models.
+
+    Shapes map to whether the graph is stamped. ``planted`` adds stamps with no
+    vector, naming the new models; ``upgrade_content=False`` leaves the
+    content schema at the release before the sweep, as a worker would find it.
+    """
     namespace = f"sweep_noraw_live_{uuid4().hex}"
     content = _live_content_client(namespace)
     orgs = {shape: str(uuid4()) for shape in shapes}
@@ -2282,12 +2373,21 @@ async def _previous_release_deployment(
             await _seed_previous_release_org(
                 content, by_shape[shape], graph_stamped=stamped, raw_captures=0
             )
-        await _restart_on_new_models(
-            content,
-            {client.group_id: client for client in by_shape.values()},
-            graph_stamp=graph_stamp,
-            chunk_stamp=chunk_stamp,
-        )
+            if planted:
+                await _plant_stamps_without_vectors(
+                    content, by_shape[shape], graph_stamp=graph_stamp, chunk_stamp=chunk_stamp
+                )
+        if upgrade_content:
+            await _restart_on_new_models(
+                content,
+                {client.group_id: client for client in by_shape.values()},
+                graph_stamp=graph_stamp,
+                chunk_stamp=chunk_stamp,
+            )
+        else:
+            await _rewind_content_schema(content)
+            for client in by_shape.values():
+                await _rewind_graph_schema(client)
         yield content, by_shape
     finally:
         await content.close()
@@ -2353,8 +2453,10 @@ async def test_live_no_evidence_anywhere_warns_until_the_operator_reembeds(
 
     graph_target = _SweepTargetProvider(GRAPH_EMBEDDING_DIM, model="live-restart-target")
     graph_stamp = graph_target.metadata.to_dict()
+    # Stamps naming the new models on rows without a vector must not pass
+    # for evidence that the old vectors are current.
     async with _previous_release_deployment(
-        {"C3": False}, graph_stamp=graph_stamp, chunk_stamp=_TARGET_CHUNK_STAMP
+        {"C3": False}, graph_stamp=graph_stamp, chunk_stamp=_TARGET_CHUNK_STAMP, planted=True
     ) as (content, by_shape):
         client = by_shape["C3"]
         _run_lifecycle_against(
@@ -2372,7 +2474,9 @@ async def test_live_no_evidence_anywhere_warns_until_the_operator_reembeds(
         for state in await _plane_states(content, client):
             assert state["legacy_basis"] == "no_prior_evidence"
             assert _embedding_plane_state(state) == "adopted_without_evidence"
-        assert await count_graph_embeddings_for_reembed(client) == 17
+        # 17 legacy rows plus the planted entity, which the sweep gave a
+        # vector because its stamp had none beside it.
+        assert await count_graph_embeddings_for_reembed(client) == 18
         assert (
             await count_document_chunk_embeddings_for_reembed(client.group_id, client=content) == 4
         )
@@ -2384,3 +2488,288 @@ async def test_live_no_evidence_anywhere_warns_until_the_operator_reembeds(
         await _assert_org_fully_reembedded(
             content, client, graph_stamp=graph_stamp, chunk_stamp=_TARGET_CHUNK_STAMP
         )
+
+
+def _content_raw_provider(chunk_stamp: dict[str, object]) -> Any:
+    """A raw capture embedder writing the same model the chunk plane is configured for."""
+    from sibyl_core.embeddings.providers import DeterministicEmbeddingProvider
+
+    return DeterministicEmbeddingProvider(
+        EmbeddingMetadata(
+            provider=str(chunk_stamp["provider"]),
+            model=str(chunk_stamp["model"]),
+            dimensions=EMBEDDING_DIM,
+            cache_namespace="raw-memory",
+            tokenizer_estimate_method="provider-default",
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_live_a_worker_that_ticks_before_the_content_upgrade_changes_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sibyl.jobs import lifecycle_repair
+    from sibyl_core.services import content_client
+    from sibyl_core.services.embedding_evidence import read_content_snapshot
+
+    graph_target = _SweepTargetProvider(GRAPH_EMBEDDING_DIM, model="live-restart-target")
+    graph_stamp = graph_target.metadata.to_dict()
+    namespace = f"sweep_worker_first_live_{uuid4().hex}"
+    content = _live_content_client(namespace)
+    native, bare = str(uuid4()), str(uuid4())
+    clients = {org: _live_graph_client(org) for org in (native, bare)}
+    try:
+        await bootstrap_content_schema(content, reset=True)
+        await prepare_graph_schema(clients[native])
+        await _seed_previous_release_org(
+            content, clients[native], graph_stamped=True, raw_captures=10
+        )
+        await prepare_graph_schema(clients[bare])
+        await _seed_previous_release_org(
+            content, clients[bare], graph_stamped=False, raw_captures=0
+        )
+        await _rewind_content_schema(content)
+        for client in clients.values():
+            await _rewind_graph_schema(client)
+        _run_lifecycle_against(
+            monkeypatch,
+            content=content,
+            clients=clients,
+            graph_target=graph_target,
+            chunk_stamp=_TARGET_CHUNK_STAMP,
+            embedded_chunks=[],
+            raw_provider=_content_raw_provider(_TARGET_CHUNK_STAMP),
+        )
+
+        # The worker ticks before the API has migrated the content schema.
+        waiting = await lifecycle_repair.repair_lifecycle_all_orgs({})
+
+        assert waiting["embedding_schema_pending"] == 4
+        assert waiting["failed_organizations"] == 0
+        raw = await content_client.select_many(
+            content, "SELECT metadata.embedding_metadata.model AS model FROM raw_captures;"
+        )
+        assert {row["model"] for row in raw} == {_PREVIOUS_CHUNK_STAMP["model"]}
+
+        # The API starts and migrates; the snapshot sees the old raw stamps.
+        await bootstrap_content_schema(content)
+
+        async def execute(query, **params):
+            return await content_client.select_many(content, query, **params)
+
+        assert {stamp["model"] for stamp in await read_content_snapshot(execute)} == {
+            _PREVIOUS_CHUNK_STAMP["model"]
+        }
+        for _tick in range(3):
+            summary = await lifecycle_repair.repair_lifecycle_all_orgs({})
+            assert summary["failed_organizations"] == 0, summary
+        for org in (native, bare):
+            _graph, chunks = await _plane_states(content, clients[org])
+            assert chunks["legacy_decision"] == "reembed", org
+            assert chunks["legacy_basis"] == "prior_stamps_differ", org
+            await _assert_org_fully_reembedded(
+                content, clients[org], graph_stamp=graph_stamp, chunk_stamp=_TARGET_CHUNK_STAMP
+            )
+        raw = await content_client.select_many(
+            content, "SELECT metadata.embedding_metadata.model AS model FROM raw_captures;"
+        )
+        assert {row["model"] for row in raw} == {_TARGET_CHUNK_STAMP["model"]}
+    finally:
+        await content.close()
+        with suppress(Exception):
+            await _drop_surreal_namespace(namespace)
+        for client in clients.values():
+            await client.close()
+            with suppress(Exception):
+                await _drop_surreal_namespace(client.namespace)
+
+
+@pytest.mark.asyncio
+async def test_live_a_broken_organization_holds_unproven_verdicts_only_for_the_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sibyl.api.routes.admin import get_embedding_sweep_status
+    from sibyl.jobs import lifecycle_repair
+    from sibyl_core.config import settings as core_settings
+
+    graph_target = _SweepTargetProvider(GRAPH_EMBEDDING_DIM, model="live-restart-target")
+    graph_stamp = graph_target.metadata.to_dict()
+    monkeypatch.setattr(core_settings, "embedding_sweep_evidence_wait_seconds", 2.0)
+    async with _previous_release_deployment(
+        {"C4": False}, graph_stamp=graph_stamp, chunk_stamp=_TARGET_CHUNK_STAMP
+    ) as (content, by_shape):
+        waiting = by_shape["C4"]
+        broken = str(uuid4())
+        _run_lifecycle_against(
+            monkeypatch,
+            content=content,
+            clients={waiting.group_id: waiting, broken: waiting},
+            graph_target=graph_target,
+            chunk_stamp=_TARGET_CHUNK_STAMP,
+            embedded_chunks=[],
+            broken=frozenset({broken}),
+        )
+
+        @asynccontextmanager
+        async def status_session():
+            yield content
+
+        monkeypatch.setattr(
+            "sibyl.persistence.surreal.content.surreal_content_client", status_session
+        )
+
+        first = await lifecycle_repair.repair_lifecycle_all_orgs({})
+        assert first["embedding_deferred"] == 2
+        status = await get_embedding_sweep_status(waiting.group_id)
+        assert status["graph"]["state"] == "awaiting_evidence"
+        assert status["graph"]["waiting_on_organizations"] == [broken]
+
+        await asyncio.sleep(2.2)
+        bounded = await lifecycle_repair.repair_lifecycle_all_orgs({})
+        settled = await lifecycle_repair.repair_lifecycle_all_orgs({})
+
+        assert bounded["embedding_deferred"] == 0
+        assert settled["embedding_unverified"] == 2
+        for state in await _plane_states(content, waiting):
+            assert state["legacy_basis"] == "no_prior_evidence"
+
+
+@pytest.mark.asyncio
+async def test_live_a_configuration_that_never_swept_cleanly_never_pins_the_model_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sibyl.jobs import lifecycle_repair
+    from sibyl_core.services import content_client
+    from sibyl_core.services.embedding_evidence import read_deployment_models
+
+    class _RefusingProvider(_SweepTargetProvider):
+        async def embed_texts(self, texts, *, input_kind: str = "document"):
+            raise ValueError("model not found for this account")
+
+    correct = _SweepTargetProvider(GRAPH_EMBEDDING_DIM, model="text-embedding-3-small")
+    correct.metadata = EmbeddingMetadata(**_previous_graph_stamp())
+    wrong = _RefusingProvider(GRAPH_EMBEDDING_DIM, model="cohere.embed-v4:0")
+    async with _previous_release_deployment(
+        {"N": True},
+        graph_stamp=correct.metadata.to_dict(),
+        chunk_stamp=_PREVIOUS_CHUNK_STAMP,
+        upgrade_content=True,
+    ) as (content, by_shape):
+        client = by_shape["N"]
+        # Only stamped rows, so no verdict can be taken on the wrong config.
+        await client.execute_query("DELETE entity WHERE attributes.embedding_metadata = NONE;")
+        await content_client.select_many(content, "DELETE document_chunks;")
+
+        async def execute(query, **params):
+            return await content_client.select_many(content, query, **params)
+
+        await content_client.select_many(content, "DELETE embedding_deployment:models;")
+        _run_lifecycle_against(
+            monkeypatch,
+            content=content,
+            clients={client.group_id: client},
+            graph_target=wrong,
+            chunk_stamp=_PREVIOUS_CHUNK_STAMP,
+            embedded_chunks=[],
+            record_models=True,
+        )
+        refused = await lifecycle_repair.repair_lifecycle_all_orgs({})
+        assert refused["embedding_failed"] > 0
+        assert await read_deployment_models(execute) == {}
+
+        _run_lifecycle_against(
+            monkeypatch,
+            content=content,
+            clients={client.group_id: client},
+            graph_target=correct,
+            chunk_stamp=_PREVIOUS_CHUNK_STAMP,
+            embedded_chunks=[],
+            record_models=True,
+        )
+        fixed = await lifecycle_repair.repair_lifecycle_all_orgs({})
+
+        assert fixed["embedding_reembedded"] == 0
+        assert correct.texts == []
+        record = await read_deployment_models(execute)
+        assert record["first_graph"]["model"] == "text-embedding-3-small"
+
+
+@pytest.mark.asyncio
+async def test_live_two_step_upgrade_adopts_without_warnings_then_switches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sibyl.jobs import lifecycle_repair
+
+    previous = _SweepTargetProvider(GRAPH_EMBEDDING_DIM, model="text-embedding-3-small")
+    previous.metadata = EmbeddingMetadata(**_previous_graph_stamp())
+    target = _SweepTargetProvider(GRAPH_EMBEDDING_DIM, model="live-restart-target")
+    namespace = f"sweep_two_step_live_{uuid4().hex}"
+    content = _live_content_client(namespace)
+    shapes = {
+        "A2": {"graph_stamped": True, "raw_captures": 2},
+        "B2": {"graph_stamped": False, "raw_captures": 2},
+        "C2": {"graph_stamped": False, "raw_captures": 0},
+    }
+    orgs = {shape: str(uuid4()) for shape in shapes}
+    clients = {orgs[shape]: _live_graph_client(orgs[shape]) for shape in shapes}
+    try:
+        await bootstrap_content_schema(content, reset=True)
+        for shape, spec in shapes.items():
+            client = clients[orgs[shape]]
+            await prepare_graph_schema(client)
+            await _seed_previous_release_org(content, client, **spec)
+
+        # Step one: upgrade on the unchanged models.
+        await _restart_on_new_models(
+            content,
+            clients,
+            graph_stamp=previous.metadata.to_dict(),
+            chunk_stamp=_PREVIOUS_CHUNK_STAMP,
+        )
+        _run_lifecycle_against(
+            monkeypatch,
+            content=content,
+            clients=clients,
+            graph_target=previous,
+            chunk_stamp=_PREVIOUS_CHUNK_STAMP,
+            embedded_chunks=[],
+        )
+        for _tick in range(3):
+            upgraded = await lifecycle_repair.repair_lifecycle_all_orgs({})
+        assert upgraded["embedding_unverified"] == 0
+        assert previous.texts == []
+        for shape in shapes:
+            for state in await _plane_states(content, clients[orgs[shape]]):
+                assert state.get("legacy_decision") in {"adopt", "none"}, shape
+                assert not state.get("legacy_warning"), shape
+
+        # Step two: switch providers; every vector now names its model.
+        embedded: list[object] = []
+        _run_lifecycle_against(
+            monkeypatch,
+            content=content,
+            clients=clients,
+            graph_target=target,
+            chunk_stamp=_TARGET_CHUNK_STAMP,
+            embedded_chunks=embedded,
+        )
+        for _tick in range(3):
+            await lifecycle_repair.repair_lifecycle_all_orgs({})
+        for shape in shapes:
+            await _assert_org_fully_reembedded(
+                content,
+                clients[orgs[shape]],
+                graph_stamp=target.metadata.to_dict(),
+                chunk_stamp=_TARGET_CHUNK_STAMP,
+            )
+        assert len(target.texts) == 17 * len(shapes)
+        assert len(embedded) == 4 * len(shapes)
+    finally:
+        await content.close()
+        with suppress(Exception):
+            await _drop_surreal_namespace(namespace)
+        for client in clients.values():
+            await client.close()
+            with suppress(Exception):
+                await _drop_surreal_namespace(client.namespace)
