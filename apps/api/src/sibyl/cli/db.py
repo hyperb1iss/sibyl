@@ -1472,7 +1472,10 @@ def backfill_project_ids(
 def reembed_embeddings(
     org_id: Annotated[
         str,
-        typer.Option("--org-id", help="Organization UUID whose vectors to replace"),
+        typer.Option(
+            "--org-id",
+            help="Organization UUID whose vectors to replace (optional with --dry-run)",
+        ),
     ] = "",
     plane: Annotated[
         str,
@@ -1481,6 +1484,13 @@ def reembed_embeddings(
             help="graph (entities and relationships), documents (chunks), or all",
         ),
     ] = "all",
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Print how many rows each organization and plane would re-embed; change nothing",
+        ),
+    ] = False,
     yes: Annotated[
         bool,
         typer.Option("--yes", "-y", help="Skip the confirmation prompt"),
@@ -1491,20 +1501,66 @@ def reembed_embeddings(
     The lifecycle sweep re-embeds on its own when a vector's recorded model
     differs from the configured one. Use this when vectors are recorded as
     the configured model but were produced by another one, for example when
-    SIBYL_EMBEDDING_LEGACY_VECTORS let a deployment adopt unstamped vectors
-    across a provider switch. Only metadata is written here; the sweep does
-    the embedding on its next passes and `sibyl debug status` shows progress.
+    a plane adopted unstamped vectors with no evidence of their model (it
+    shows adopted_without_evidence in `sibyl debug status`) across a provider
+    switch. Only metadata is written here; the sweep does the embedding on
+    its next passes and `sibyl debug status` shows progress. With --dry-run,
+    nothing is written and every organization is counted unless --org-id
+    names one.
     """
-    if not org_id:
+    if not org_id and not dry_run:
         error("--org-id is required")
         raise typer.Exit(code=1)
     if plane not in {"graph", "documents", "all"}:
         error("--plane must be graph, documents, or all")
         raise typer.Exit(code=1)
-    if not yes and not typer.confirm(
-        f"Replace every {plane} vector for organization {org_id}? This spends embedding calls."
+    if (
+        not dry_run
+        and not yes
+        and not typer.confirm(
+            f"Replace every {plane} vector for organization {org_id}? This spends embedding calls."
+        )
     ):
         raise typer.Exit(code=1)
+
+    @run_async
+    async def _count() -> None:
+        from sibyl.persistence.organization_runtime import list_org_ids
+        from sibyl.persistence.surreal.content import surreal_content_client
+        from sibyl_core.services.document_embedding_sweep import (
+            count_document_chunk_embeddings_for_reembed,
+        )
+        from sibyl_core.services.graph_embedding_sweep import count_graph_embeddings_for_reembed
+
+        try:
+            organizations = [org_id] if org_id else [str(item) for item in await list_org_ids()]
+            totals = {"graph": 0, "documents": 0}
+            for organization in organizations:
+                counts: list[str] = []
+                if plane in {"graph", "all"}:
+                    graph = await count_graph_embeddings_for_reembed(
+                        await _get_graph_client(organization)
+                    )
+                    totals["graph"] += graph
+                    counts.append(f"graph {graph:,}")
+                if plane in {"documents", "all"}:
+                    async with surreal_content_client() as content:
+                        chunks = await count_document_chunk_embeddings_for_reembed(
+                            organization, client=content
+                        )
+                    totals["documents"] += chunks
+                    counts.append(f"documents {chunks:,}")
+                info(f"{organization}: {', '.join(counts)} rows would be re-embedded")
+            summary = ", ".join(
+                f"{name} {count:,}" for name, count in totals.items() if plane in {"all", name}
+            )
+            success(
+                f"Dry run over {len(organizations)} organization(s): {summary}; nothing changed"
+            )
+        except Exception as exc:
+            error(f"Re-embed count failed: {exc}")
+            print_db_hint()
+            raise typer.Exit(code=1) from exc
 
     @run_async
     async def _reembed() -> None:
@@ -1531,7 +1587,10 @@ def reembed_embeddings(
             print_db_hint()
             raise typer.Exit(code=1) from exc
 
-    _reembed()
+    if dry_run:
+        _count()
+    else:
+        _reembed()
 
 
 @app.command("backfill-denormalized-fields")
