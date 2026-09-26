@@ -1623,6 +1623,10 @@ async def test_live_embedding_sweep_replaces_another_models_vectors_across_a_cra
         assert all(edge["stamp"] == stamp for edge in edges.values())
         # Every stale row reached the provider exactly once across both passes.
         assert len(target.texts) == len(entities) + len(edges)
+        # A lane reads the sweep's progress every 30 seconds; skip the wait.
+        from sibyl_core.services.embedding_lane_readiness import reset_lane_readiness_cache
+
+        reset_lane_readiness_cache()
         assert (
             len(
                 await searcher._vector_search(query="Live sweep entity", entity_types=None, limit=5)
@@ -1927,6 +1931,10 @@ async def test_live_chunk_sweep_reads_raw_evidence_and_filters_the_chunk_lane(
         )
         assert all(row["embedding_metadata"] == target for row in rows)
         assert all(row["embedding"][:2] == [0.0, 1.0] for row in rows)
+        # A lane reads the sweep's progress every 30 seconds; skip the wait.
+        from sibyl_core.services.embedding_lane_readiness import reset_lane_readiness_cache
+
+        reset_lane_readiness_cache()
         current, _ = await search_document_chunks(
             organization_id=organization_id,
             query_text="",

@@ -48,9 +48,10 @@ _FULLTEXT_FIELDS = ("name", "summary", "description", "content")
 # Vector lanes score only rows embedded in the query's vector space, filtered
 # inside the HNSW bracket so nearer vectors from an older model cannot crowd
 # the candidate pool mid-sweep.
-_STAMP_IN_QUERY_SPACE = vector_space_predicate(
-    "attributes.embedding_metadata", "embedding_metadata"
-)
+def _stamp_in_query_space(*, admit_unstamped: bool = False) -> str:
+    return vector_space_predicate(
+        "attributes.embedding_metadata", "embedding_metadata", admit_unstamped=admit_unstamped
+    )
 
 
 def _build_explicit_anchor_search_query(query: str) -> str:
@@ -377,7 +378,9 @@ class _EntitySearchManager:
         ]
 
     @staticmethod
-    def _typed_overfetch_vector_query(*, candidate_limit: int, overfetch: int) -> str:
+    def _typed_overfetch_vector_query(
+        *, candidate_limit: int, overfetch: int, admit_unstamped: bool = False
+    ) -> str:
         # The inner query walks the HNSW index with only the group predicate;
         # the type filter applies to the materialized pool outside the bracket.
         pool = knn_overfetch_pool(candidate_limit, overfetch)
@@ -386,7 +389,7 @@ class _EntitySearchManager:
             "SELECT * FROM ("
             "SELECT " + _ENTITY_SEARCH_FIELDS + ", (1 - vector::distance::knn()) AS score"
             " FROM entity WHERE group_id = $group_id"
-            f" AND {_STAMP_IN_QUERY_SPACE}"
+            f" AND {_stamp_in_query_space(admit_unstamped=admit_unstamped)}"
             f" AND name_embedding <|{pool}, {overfetch_knn_effort}|> $query_embedding"
             ") WHERE entity_type IN $entity_types"
             " ORDER BY score DESC, created_at DESC, uuid DESC"
@@ -442,6 +445,7 @@ class _EntitySearchManager:
                         self._typed_overfetch_vector_query(
                             candidate_limit=candidate_limit,
                             overfetch=knn_type_overfetch,
+                            admit_unstamped=readiness.admit_unstamped,
                         ),
                         group_id=self._group_id,
                         query_embedding=query_embedding,
@@ -475,7 +479,7 @@ class _EntitySearchManager:
                     """
                     + type_clause
                     + f"""
-                          AND {_STAMP_IN_QUERY_SPACE}
+                          AND {_stamp_in_query_space(admit_unstamped=readiness.admit_unstamped)}
                           AND name_embedding <|{candidate_limit}, {knn_effort}|> $query_embedding
                     )
                     ORDER BY score DESC, created_at DESC, uuid DESC

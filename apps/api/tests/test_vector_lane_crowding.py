@@ -560,3 +560,279 @@ async def test_chunk_vector_lanes_stand_aside_after_a_switch_and_resume(
         {"vector": 0, "lexical": 1, "hybrid": 0},
         {"vector": 1, "lexical": 1, "hybrid": 1},
     ]
+
+
+def _near(query: list[float], index: int) -> list[float]:
+    """A vector close to the query, slightly farther for each index."""
+    import math
+
+    nudged = [
+        value + (0.02 * (index + 1) if position == 1 else 0.0)
+        for position, value in enumerate(query)
+    ]
+    norm = math.sqrt(sum(value * value for value in nudged)) or 1.0
+    return [value / norm for value in nudged]
+
+
+def _far(seed: int, dimensions: int) -> list[float]:
+    import random
+
+    rng = random.Random(seed)  # noqa: S311 - test vectors, not secrets
+    return [rng.uniform(-1.0, 1.0) for _ in range(dimensions)]
+
+
+@pytest.mark.asyncio
+async def test_a_never_switched_graph_keeps_full_vector_recall_through_adoption(
+    engine, lane_clock
+) -> None:
+    """Unstamped vectors from before stamping stay in the lanes from the first query on."""
+    from sibyl_core.retrieval._search_plan import RetrievalPlan, SearchFilter
+    from sibyl_core.retrieval._search_sources import _vector_candidate_sources_detailed
+    from sibyl_core.services.graph import RelationshipManager
+    from sibyl_core.services.graph_embedding_sweep import sweep_graph_embeddings
+    from sibyl_core.services.graph_runtime import GraphRuntime
+    from tests.embedding_upgrade import previous_release_stamp, upgrade_graph_to_sweep
+
+    async with _graph_client(engine) as client:
+        model = _SweepTargetProvider(GRAPH_EMBEDDING_DIM, model="live-never-switched")
+        stamp = model.metadata.to_dict()
+        query = (await model.embed_texts(["unchanged query"], input_kind="query"))[0]
+        nearest = {f"legacy-near-{index}" for index in range(5)}
+        rows = (
+            [
+                {
+                    "uuid": f"legacy-near-{index}",
+                    "group_id": client.group_id,
+                    "name": f"Near {index}",
+                    "entity_type": "topic",
+                    "name_embedding": _near(query, index),
+                    "attributes": {},
+                }
+                for index in range(5)
+            ]
+            + [
+                {
+                    "uuid": f"legacy-far-{index:04d}",
+                    "group_id": client.group_id,
+                    "name": f"Far {index}",
+                    "entity_type": "topic",
+                    "name_embedding": _far(index, GRAPH_EMBEDDING_DIM),
+                    "attributes": {},
+                }
+                for index in range(1_500)
+            ]
+            + [
+                # A few rows the previous release stamped, naming the same model.
+                {
+                    "uuid": f"stamped-{index}",
+                    "group_id": client.group_id,
+                    "name": f"Stamped {index}",
+                    "entity_type": "topic",
+                    "name_embedding": _far(10_000 + index, GRAPH_EMBEDDING_DIM),
+                    "attributes": {"embedding_metadata": previous_release_stamp(stamp)},
+                }
+                for index in range(5)
+            ]
+        )
+        for start in range(0, len(rows), 500):
+            await client.execute_query(
+                "INSERT INTO entity $rows RETURN NONE;", rows=rows[start : start + 500]
+            )
+        await upgrade_graph_to_sweep(client)
+        searcher = EntityManager(client, group_id=client.group_id, embedding_provider=model)
+        plan = RetrievalPlan(
+            query="unchanged query",
+            organization_id=client.group_id,
+            facets=(),
+            facet_types={},
+            scopes=(),
+            denied_scopes=(),
+        )
+
+        async def top_five() -> tuple[set[str], set[str], str]:
+            hits = await searcher._vector_search(
+                query="unchanged query", entity_types=None, limit=5
+            )
+            fetch = await _vector_candidate_sources_detailed(
+                client=client, plan=plan, search_filter=SearchFilter(), embedding_provider=model
+            )
+            ranked = sorted(fetch.node_candidates, key=lambda hit: -hit.score)[:5]
+            return (
+                {entity.id for entity, _ in hits[:5]},
+                {hit.id for hit in ranked},
+                fetch.as_metadata()["vector_status"],
+            )
+
+        # The first query after the upgrade, before any lifecycle pass.
+        first = await top_five()
+        # Part way through adoption, as a pass would leave a large plane: the
+        # verdict is adopt and 1% of vectors carry a stamp.
+        await _write_plane_state(
+            client.execute_query,
+            client.group_id,
+            "graph",
+            {
+                "legacy_decision": "adopt",
+                "legacy_basis": "prior_stamps_match",
+                "legacy_metadata": stamp,
+                "last_run": {
+                    "status": "partial",
+                    "space": {key: stamp[key] for key in ("provider", "model", "dimensions")},
+                    "in_model": 1_000,
+                    "pending": 99_000,
+                },
+            },
+        )
+        lane_clock()
+        adopting = await top_five()
+        runtime = GraphRuntime(
+            client=client,
+            entity_manager=searcher,
+            relationship_manager=RelationshipManager(client, group_id=client.group_id),
+        )
+        # One pass whose budget is spent before it starts still adopts every vector.
+        swept = await sweep_graph_embeddings(
+            runtime, embedding_provider=model, budget_seconds=0.001
+        )
+        lane_clock()
+        adopted = await top_five()
+        unstamped = await client.execute_query(
+            "SELECT count() AS count FROM entity WHERE group_id = $g "
+            "AND name_embedding != NONE AND attributes.embedding_metadata = NONE GROUP ALL;",
+            g=client.group_id,
+        )
+
+    for label, (entities, nodes, status) in (
+        ("first query", first),
+        ("adopting", adopting),
+        ("adopted", adopted),
+    ):
+        assert entities == nearest, label
+        assert nodes == nearest, label
+        assert status == "ok", label
+    assert not unstamped or unstamped[0].get("count", 0) == 0, unstamped
+    assert swept.adopted == 1_505
+
+
+@pytest.mark.asyncio
+async def test_never_switched_chunks_keep_vector_recall_from_the_first_query(
+    engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Chunks carried no stamp before this release; a plain upgrade must not hide them."""
+    from sibyl.persistence.surreal import content as app_content
+    from sibyl_core.services import content_client
+    from sibyl_core.services.content_documents import search_document_chunks
+    from tests.embedding_upgrade import upgrade_content_to_sweep
+
+    namespace = f"chunk_never_switched_{uuid4().hex}"
+    organization_id, source_id = str(uuid4()), str(uuid4())
+    client = _content_client(engine, namespace)
+
+    @asynccontextmanager
+    async def session():
+        yield client
+
+    monkeypatch.setattr(content_client, "surreal_content_client", session)
+    monkeypatch.setattr(app_content, "surreal_content_client", session)
+    query = [1.0 / (EMBEDDING_DIM**0.5)] * EMBEDDING_DIM
+    nearest: set[str] = set()
+    try:
+        await bootstrap_content_schema(client, reset=True)
+        await content_client.select_many(
+            client,
+            "CREATE crawl_sources CONTENT $record RETURN NONE;",
+            record={
+                "uuid": source_id,
+                "organization_id": organization_id,
+                "name": "Unchanged guide",
+                "url": "https://docs.example.test",
+            },
+        )
+        documents, chunks = [], []
+        for index in range(300):
+            document_id, chunk_id = str(uuid4()), str(uuid4())
+            if index < 3:
+                nearest.add(chunk_id)
+            documents.append(
+                {
+                    "uuid": document_id,
+                    "organization_id": organization_id,
+                    "source_id": source_id,
+                    "url": f"https://docs.example.test/{document_id}",
+                    "title": f"Page {index}",
+                    "content": "body",
+                }
+            )
+            chunks.append(
+                {
+                    "uuid": chunk_id,
+                    "organization_id": organization_id,
+                    "source_id": source_id,
+                    "document_id": document_id,
+                    "content": f"chunk body {index}",
+                    "chunk_type": "code",
+                    # As the previous release wrote them: a vector, no stamp.
+                    "embedding": _near(query, index) if index < 3 else _far(index, EMBEDDING_DIM),
+                }
+            )
+        await content_client.select_many(
+            client, "INSERT INTO crawled_documents $rows RETURN NONE;", rows=documents
+        )
+        await content_client.select_many(
+            client, "INSERT INTO document_chunks $rows RETURN NONE;", rows=chunks
+        )
+        await content_client.select_many(
+            client,
+            "CREATE raw_captures CONTENT $record RETURN NONE;",
+            record={
+                "uuid": str(uuid4()),
+                "organization_id": organization_id,
+                "principal_id": "owner",
+                "source_id": str(uuid4()),
+                "raw_content": "captured by the previous release",
+                "embedding": _far(99, EMBEDDING_DIM),
+                "metadata": {"embedding_metadata": dict(_TARGET_CHUNK_STAMP)},
+            },
+        )
+        await upgrade_content_to_sweep(client)
+
+        core, _ = await search_document_chunks(
+            organization_id=organization_id,
+            query_text="",
+            query_embedding=list(query),
+            limit=3,
+            embedding_metadata=_TARGET_CHUNK_STAMP,
+        )
+        rag = await app_content.search_rag_chunks(
+            None,
+            query_embedding=list(query),
+            organization_id=organization_id,
+            similarity_threshold=0.0,
+            match_count=3,
+            embedding_metadata=_TARGET_CHUNK_STAMP,
+        )
+        code = await app_content.search_code_example_chunks(
+            None,
+            query_embedding=list(query),
+            organization_id=organization_id,
+            match_count=3,
+            embedding_metadata=_TARGET_CHUNK_STAMP,
+        )
+        hybrid = await app_content.hybrid_search_chunks(
+            None,
+            query_text="nothing lexical matches",
+            query_embedding=list(query),
+            organization_id=organization_id,
+            similarity_threshold=0.0,
+            match_count=3,
+            embedding_metadata=_TARGET_CHUNK_STAMP,
+        )
+    finally:
+        await client.close()
+        await _drop_namespace(engine, namespace)
+
+    found = {
+        name: {str(hit[0].id) for hit in hits}
+        for name, hits in (("core", core), ("rag", rag), ("code", code), ("hybrid", hybrid))
+    }
+    assert found == dict.fromkeys(found, nearest)

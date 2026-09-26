@@ -15,7 +15,7 @@ from sibyl_core.embeddings.provenance import vector_space_predicate
 from sibyl_core.services import content_client
 from sibyl_core.services import content_models as models
 from sibyl_core.services.content_models import ContentChunk, ContentDocument, ContentSource
-from sibyl_core.services.embedding_lane_readiness import chunk_vector_lane_ready
+from sibyl_core.services.embedding_lane_readiness import chunk_vector_lane_readiness
 from sibyl_core.utils.resilience import with_timeout
 
 _TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_]+")
@@ -26,12 +26,6 @@ _DOCUMENT_CHUNK_SELECT = (
 )
 
 ContentSearchRow = tuple[ContentChunk, ContentDocument, str, str, float]
-
-
-# Vector lanes score only rows embedded in the query's vector space, filtered
-# inside the HNSW bracket so nearer vectors from an older model cannot crowd
-# the candidate pool mid-sweep.
-_CHUNK_IN_QUERY_SPACE = vector_space_predicate("embedding_metadata", "embedding_metadata")
 
 
 async def load_sources_for_org(
@@ -378,9 +372,15 @@ async def search_document_chunks(
 
         vector_rows: list[models.SurrealRecord] = []
         vector_errors: list[str] = []
-        if query_embedding is not None and await chunk_vector_lane_ready(
-            client, organization_id, embedding_metadata
-        ):
+        # Vector lanes score only rows embedded in the query's vector space,
+        # filtered inside the HNSW bracket so nearer vectors from an older
+        # model cannot crowd the candidate pool mid-sweep.
+        readiness = (
+            await chunk_vector_lane_readiness(client, organization_id, embedding_metadata)
+            if query_embedding is not None
+            else None
+        )
+        if query_embedding is not None and readiness is not None and readiness.run:
             vector_params: dict[str, object] = {
                 "organization_id": organization_id,
                 "source_ids": source_ids,
@@ -392,7 +392,15 @@ async def search_document_chunks(
             space_clause = ""
             if embedding_metadata is not None:
                 vector_params["embedding_metadata"] = dict(embedding_metadata)
-                space_clause = f"AND {_CHUNK_IN_QUERY_SPACE} "
+                space_clause = (
+                    "AND "
+                    + vector_space_predicate(
+                        "embedding_metadata",
+                        "embedding_metadata",
+                        admit_unstamped=readiness.admit_unstamped,
+                    )
+                    + " "
+                )
             try:
                 vector_rows = await with_timeout(
                     content_client.select_many_raw(

@@ -162,13 +162,19 @@ def same_vector_identity(left: object, right: object) -> bool:
     return all(left.get(field) == right.get(field) for field in VECTOR_IDENTITY_FIELDS)
 
 
-def vector_space_predicate(path: str, param: str) -> str:
+def vector_space_predicate(path: str, param: str, *, admit_unstamped: bool = False) -> str:
     """SurrealQL: the stamp at ``path`` is in the same vector space as ``$param``.
 
-    A bare AND chain, never parenthesized: callers AND-join it, and the
-    embedded engine silently drops a parenthesized group inside an HNSW
-    bracket, which would empty every vector lane there.
+    With ``admit_unstamped``, a row with no stamp matches too, for a plane
+    whose unstamped vectors count as the configured model while adoption
+    stamps them. A bare AND chain, never parenthesized and never OR: callers
+    AND-join it, and the embedded engine silently drops a parenthesized
+    group inside an HNSW bracket, which would empty every vector lane there.
     """
+    if admit_unstamped:
+        return " AND ".join(
+            f"[${param}.{f}, NONE] CONTAINS {path}.{f}" for f in VECTOR_SPACE_FIELDS
+        )
     return " AND ".join(f"{path}.{f} = ${param}.{f}" for f in VECTOR_SPACE_FIELDS)
 
 

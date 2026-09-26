@@ -56,9 +56,10 @@ log = structlog.get_logger()
 # older model nearer the query would fill the candidate pool mid-sweep and
 # leave the lane empty. Once a plane is swept it matches every row, so the
 # walk costs what the scope filter alone does.
-_STAMP_IN_QUERY_SPACE = vector_space_predicate(
-    "attributes.embedding_metadata", "embedding_metadata"
-)
+def _stamp_in_query_space(*, admit_unstamped: bool = False) -> str:
+    return vector_space_predicate(
+        "attributes.embedding_metadata", "embedding_metadata", admit_unstamped=admit_unstamped
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -600,6 +601,7 @@ async def _vector_candidate_sources_detailed(
                 query_embedding=query_embedding,
                 embedding_metadata=embedding_provider.metadata,
                 limit=plan.candidate_limits.node_vector,
+                admit_unstamped=readiness.admit_unstamped,
             )
         )
         task_signals.append(RetrievalSignal.NODE_VECTOR)
@@ -612,6 +614,7 @@ async def _vector_candidate_sources_detailed(
                 query_embedding=query_embedding,
                 embedding_metadata=embedding_provider.metadata,
                 limit=plan.candidate_limits.edge_vector,
+                admit_unstamped=readiness.admit_unstamped,
             )
         )
         task_signals.append(RetrievalSignal.EDGE_VECTOR)
@@ -648,6 +651,7 @@ async def _node_vector_candidates(
     query_embedding: Sequence[float],
     embedding_metadata: EmbeddingMetadata,
     limit: int,
+    admit_unstamped: bool = False,
 ) -> list[RetrievalCandidate]:
     if limit <= 0:
         return []
@@ -674,7 +678,13 @@ async def _node_vector_candidates(
                        (1 - vector::distance::knn()) AS score
                 FROM entity
                 WHERE """
-            + _where_clause(["group_id = $group_id", _STAMP_IN_QUERY_SPACE, *overfetch_clauses])
+            + _where_clause(
+                [
+                    "group_id = $group_id",
+                    _stamp_in_query_space(admit_unstamped=admit_unstamped),
+                    *overfetch_clauses,
+                ]
+            )
             + f"""
                   AND name_embedding <|{pool}, {pool_knn_effort}|> $query_embedding
             )
@@ -708,7 +718,13 @@ async def _node_vector_candidates(
                    (1 - vector::distance::knn()) AS score
             FROM entity
             WHERE """
-        + _where_clause(["group_id = $group_id", _STAMP_IN_QUERY_SPACE, *filter_clauses])
+        + _where_clause(
+            [
+                "group_id = $group_id",
+                _stamp_in_query_space(admit_unstamped=admit_unstamped),
+                *filter_clauses,
+            ]
+        )
         + f"""
               AND name_embedding <|{candidate_limit}, {knn_effort}|> $query_embedding
         )
@@ -742,6 +758,7 @@ async def _edge_vector_candidates(
     query_embedding: Sequence[float],
     embedding_metadata: EmbeddingMetadata,
     limit: int,
+    admit_unstamped: bool = False,
 ) -> list[RetrievalCandidate]:
     if limit <= 0:
         return []
@@ -760,7 +777,13 @@ async def _edge_vector_candidates(
             "SELECT * FROM ("
             + _edge_select(extra="(1 - vector::distance::knn()) AS score")
             + " WHERE "
-            + _where_clause(["group_id = $group_id", _STAMP_IN_QUERY_SPACE, *overfetch_clauses])
+            + _where_clause(
+                [
+                    "group_id = $group_id",
+                    _stamp_in_query_space(admit_unstamped=admit_unstamped),
+                    *overfetch_clauses,
+                ]
+            )
             + f"""
               AND fact_embedding <|{pool}, {pool_knn_effort}|> $query_embedding
             )
@@ -790,7 +813,13 @@ async def _edge_vector_candidates(
         "SELECT * FROM ("
         + _edge_select(extra="(1 - vector::distance::knn()) AS score")
         + " WHERE "
-        + _where_clause(["group_id = $group_id", _STAMP_IN_QUERY_SPACE, *filter_clauses])
+        + _where_clause(
+            [
+                "group_id = $group_id",
+                _stamp_in_query_space(admit_unstamped=admit_unstamped),
+                *filter_clauses,
+            ]
+        )
         + f"""
           AND fact_embedding <|{candidate_limit}, {knn_effort}|> $query_embedding
         )

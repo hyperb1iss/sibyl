@@ -46,7 +46,7 @@ from sibyl_core.models.reflection import (
     memory_lifecycle_from_metadata,
     with_memory_lifecycle_metadata,
 )
-from sibyl_core.services.embedding_lane_readiness import chunk_vector_lane_ready
+from sibyl_core.services.embedding_lane_readiness import chunk_vector_lane_readiness
 from sibyl_core.services.link_graph_status import LinkGraphSourceStatusData, LinkGraphStatusData
 from sibyl_core.utils.query import query_tokens
 
@@ -703,6 +703,8 @@ def _search_candidate_limit(limit: int) -> int:
 
 def _chunk_space_clause(
     embedding_metadata: Mapping[str, object] | None,
+    *,
+    admit_unstamped: bool = False,
 ) -> tuple[str, dict[str, object]]:
     """Keep a query's vector lane to chunks embedded in the query's space.
 
@@ -712,13 +714,16 @@ def _chunk_space_clause(
     after the read, nearer old-model chunks would fill the candidate pool and
     leave the lane empty until the sweep finished. The source filter beside it
     is spelled ``$source_ids CONTAINS source_id``, because the embedded engine
-    drops every row for an INSIDE predicate inside the bracket.
+    drops every row for an INSIDE predicate inside the bracket. Unstamped chunks
+    count as the query's model while their plane adopts them (see
+    ``embedding_lane_readiness``).
     """
     if embedding_metadata is None:
         return "", {}
-    return f"AND {vector_space_predicate('embedding_metadata', 'embedding_metadata')} ", {
-        "embedding_metadata": dict(embedding_metadata)
-    }
+    predicate = vector_space_predicate(
+        "embedding_metadata", "embedding_metadata", admit_unstamped=admit_unstamped
+    )
+    return f"AND {predicate} ", {"embedding_metadata": dict(embedding_metadata)}
 
 
 def _code_chunk_clause(language: str | None) -> tuple[str, dict[str, object]]:
@@ -2439,7 +2444,6 @@ async def search_rag_chunks(
 
     candidate_limit = _search_candidate_limit(match_count)
     knn_effort = knn_search_effort(candidate_limit, _CONTENT_KNN_EF_FLOOR)
-    space_clause, space_params = _chunk_space_clause(embedding_metadata)
     async with surreal_content_client() as client:
         sources = await _load_sources_for_search_scope(
             client,
@@ -2452,6 +2456,14 @@ async def search_rag_chunks(
 
         source_ids = [str(source.id) for source in sources]
         sources_by_id = {str(source.id): source for source in sources}
+        # A vector-only endpoint has no lexical lane to hand the query to, so
+        # it always runs; readiness only says whether unstamped chunks count.
+        readiness = await chunk_vector_lane_readiness(
+            client, str(organization_id), embedding_metadata
+        )
+        space_clause, space_params = _chunk_space_clause(
+            embedding_metadata, admit_unstamped=readiness.admit_unstamped
+        )
         rows = await _select_many_raw(
             client,
             "SELECT * FROM ("  # noqa: S608
@@ -2497,7 +2509,6 @@ async def search_code_example_chunks(
 
     candidate_limit = _search_candidate_limit(match_count)
     knn_effort = knn_search_effort(candidate_limit, _CONTENT_KNN_EF_FLOOR)
-    space_clause, space_params = _chunk_space_clause(embedding_metadata)
     language_clause, language_params = _code_chunk_clause(language)
     async with surreal_content_client() as client:
         sources = await _load_sources_for_search_scope(
@@ -2511,6 +2522,14 @@ async def search_code_example_chunks(
 
         source_ids = [str(source.id) for source in sources]
         sources_by_id = {str(source.id): source for source in sources}
+        # A vector-only endpoint has no lexical lane to hand the query to, so
+        # it always runs; readiness only says whether unstamped chunks count.
+        readiness = await chunk_vector_lane_readiness(
+            client, str(organization_id), embedding_metadata
+        )
+        space_clause, space_params = _chunk_space_clause(
+            embedding_metadata, admit_unstamped=readiness.admit_unstamped
+        )
         rows = await _select_many_raw(
             client,
             "SELECT * FROM ("  # noqa: S608
@@ -2562,7 +2581,6 @@ async def hybrid_search_chunks(
 
     candidate_limit = _search_candidate_limit(match_count)
     knn_effort = knn_search_effort(candidate_limit, _CONTENT_KNN_EF_FLOOR)
-    space_clause, space_params = _chunk_space_clause(embedding_metadata)
     async with surreal_content_client() as client:
         sources = await _load_sources_for_search_scope(
             client,
@@ -2577,8 +2595,14 @@ async def hybrid_search_chunks(
         sources_by_id = {str(source.id): source for source in sources}
         # The lexical lane below carries the query while the chunk plane has
         # too few vectors in the query's model for the vector lane to pay off.
+        readiness = await chunk_vector_lane_readiness(
+            client, str(organization_id), embedding_metadata
+        )
+        space_clause, space_params = _chunk_space_clause(
+            embedding_metadata, admit_unstamped=readiness.admit_unstamped
+        )
         vector_rows: list[SurrealRecord] = []
-        if await chunk_vector_lane_ready(client, str(organization_id), embedding_metadata):
+        if readiness.run:
             vector_rows = await _select_many_raw(
                 client,
                 "SELECT * FROM ("  # noqa: S608
