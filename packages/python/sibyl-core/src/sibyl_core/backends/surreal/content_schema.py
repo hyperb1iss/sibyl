@@ -13,8 +13,11 @@ from sibyl_core.backends.surreal.schema import (
 )
 from sibyl_core.backends.surreal.schema_derivations import DERIVATION_DEFINITIONS
 from sibyl_core.backends.surreal.schema_embedding_states import (
+    EMBEDDING_DEPLOYMENT_DEFINITIONS,
+    EMBEDDING_DEPLOYMENT_TABLE,
     EMBEDDING_STATE_DEFINITIONS,
     EMBEDDING_STATES_TABLE,
+    snapshot_content_embedding_evidence,
 )
 from sibyl_core.backends.surreal.schema_helpers import is_missing_table_error, split_statements
 from sibyl_core.backends.surreal.schema_invariants import (
@@ -109,6 +112,7 @@ CONTENT_TABLES = (
     "backups",
     "reflection_supersessions",
     EMBEDDING_STATES_TABLE,
+    EMBEDDING_DEPLOYMENT_TABLE,
 )
 CONTENT_SCHEMA_CURRENT_VERSION = 47
 CONTENT_SCHEMA_NAME = "content"
@@ -164,6 +168,7 @@ CONTENT_SCHEMA_DEFINITIONS = (
     + "\n"
     + CONTENT_REFLECTION_SUPERSESSION_DEFINITIONS
     + EMBEDDING_STATE_DEFINITIONS
+    + EMBEDDING_DEPLOYMENT_DEFINITIONS
     + VALIDATION_EXECUTION_SCHEMA
     + VALIDATION_DEPENDENCY_SCHEMA
 )
@@ -296,6 +301,7 @@ ALTER TABLE IF EXISTS dream_source_checkpoints PERMISSIONS NONE;
 ALTER TABLE IF EXISTS dream_source_cursors PERMISSIONS NONE;
 ALTER TABLE IF EXISTS reflection_supersessions PERMISSIONS NONE;
 ALTER TABLE IF EXISTS embedding_states PERMISSIONS NONE;
+ALTER TABLE IF EXISTS embedding_deployment PERMISSIONS NONE;
 ALTER TABLE IF EXISTS eval_consolidations PERMISSIONS NONE;
 ALTER TABLE IF EXISTS eval_attempts PERMISSIONS NONE;
 ALTER TABLE IF EXISTS crawl_sources PERMISSIONS
@@ -1107,7 +1113,9 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             statements=(
                 DOCUMENT_CHUNK_EMBEDDING_METADATA_FIELD,
                 *split_statements(EMBEDDING_STATE_DEFINITIONS),
+                *split_statements(EMBEDDING_DEPLOYMENT_DEFINITIONS),
             ),
+            action=snapshot_content_embedding_evidence,
         ),
     )
 

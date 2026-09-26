@@ -3,23 +3,27 @@
 Both tables are embedded by the configured graph provider and stamp
 ``attributes.embedding_metadata`` with that provider's metadata, so the
 plane's configured stamp is simply ``provider.metadata.to_dict()``.
+
+On its own a graph plane's legacy verdict weighs the stamps its namespace
+carried when it upgraded; lifecycle repair also supplies the deployment's
+model record and the chunk plane's evidence (see ``embedding_verdicts``).
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING, Any, cast
 
-from sibyl_core.backends.surreal.records import normalize_records
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM
+from sibyl_core.backends.surreal.schema_embedding_states import GRAPH_EMBEDDING_STATE_PLANE
 from sibyl_core.backends.surreal.schema_version import get_schema_embedding_dimension
-from sibyl_core.embeddings.provenance import UNVERIFIED_EMBEDDING_PROVIDER
 from sibyl_core.embeddings.providers import (
     EmbeddingProvider,
     configured_embedding_provider,
     entity_embedding_text,
     relationship_embedding_text,
 )
+from sibyl_core.services.embedding_evidence import classify_stamps, read_graph_snapshot
 from sibyl_core.services.embedding_sweep import (
     SWEEP_SKIPPED_NO_PROVIDER,
     EmbeddingStamp,
@@ -28,6 +32,7 @@ from sibyl_core.services.embedding_sweep import (
     SweepPlane,
     SweepRow,
     SweepTable,
+    count_plane_reembed,
     ensure_legacy_decision,
     mark_plane_for_reembed,
     run_embedding_sweep,
@@ -41,8 +46,10 @@ from sibyl_core.services.graph_records import (
 if TYPE_CHECKING:
     from sibyl_core.services.graph_runtime import GraphRuntime
 
-GRAPH_EMBEDDING_PLANE = "graph"
+GRAPH_EMBEDDING_PLANE = GRAPH_EMBEDDING_STATE_PLANE
 _AUTO = object()
+
+type EvidenceSource = Callable[[], Awaitable[LegacyEvidence]]
 
 _ENTITY_FENCE = (
     "entity_type = $rows_by_uuid[uuid].entity_type "
@@ -118,12 +125,15 @@ def relationship_row_embedding_text(row: SweepRow) -> str:
 async def graph_embedding_plane(
     client: Any,
     provider: EmbeddingProvider,
+    *,
+    evidence: EvidenceSource | None = None,
 ) -> SweepPlane:
     """Build the graph plane for one organization's namespace.
 
     The schema dimension is the one the namespace recorded for its vector
     fields, which can lag the configured size on an embedded store that
-    skipped a rebuild.
+    skipped a rebuild. ``evidence`` replaces the default, which weighs only
+    this namespace's pre-upgrade stamps.
     """
     recorded = await get_schema_embedding_dimension(client.execute_query)
     dimensions = recorded or EMBEDDING_DIM
@@ -145,23 +155,10 @@ async def graph_embedding_plane(
         )
         return [[float(value) for value in vector] for vector in vectors], dict(stamp)
 
-    async def evidence() -> LegacyEvidence:
-        differs = matches = False
-        for table in tables:
-            for matching in (False, True):
-                rows = normalize_records(
-                    await client.execute_query(
-                        table.stamp_probe_query(matching=matching),
-                        scope=group_id,
-                        stamp=stamp,
-                        unverified=UNVERIFIED_EMBEDDING_PROVIDER,
-                    )
-                )
-                if rows:
-                    if matching:
-                        matches = True
-                    else:
-                        differs = True
+    async def own_evidence() -> LegacyEvidence:
+        differs, matches = classify_stamps(
+            await read_graph_snapshot(client.execute_query, group_id), stamp
+        )
         return LegacyEvidence(differs=differs, matches=matches)
 
     return SweepPlane(
@@ -173,7 +170,7 @@ async def graph_embedding_plane(
         embed=embed,
         provider_dimensions=provider.metadata.dimensions,
         schema_dimensions=dimensions,
-        evidence=evidence,
+        evidence=evidence or own_evidence,
     )
 
 
@@ -184,13 +181,18 @@ def _resolve_provider(embedding_provider: object) -> EmbeddingProvider | None:
 
 
 async def decide_graph_legacy_vectors(
-    runtime: GraphRuntime, *, embedding_provider: object = _AUTO
+    runtime: GraphRuntime,
+    *,
+    embedding_provider: object = _AUTO,
+    evidence: EvidenceSource | None = None,
 ) -> dict[str, Any] | None:
-    """Record the graph plane's legacy verdict before other repairs run."""
+    """Record the graph plane's legacy verdict if no pass has yet."""
     provider = _resolve_provider(embedding_provider)
     if provider is None:
         return None
-    return await ensure_legacy_decision(await graph_embedding_plane(runtime.client, provider))
+    return await ensure_legacy_decision(
+        await graph_embedding_plane(runtime.client, provider, evidence=evidence)
+    )
 
 
 async def sweep_graph_embeddings(
@@ -211,20 +213,35 @@ async def sweep_graph_embeddings(
     return await run_embedding_sweep(plane, **options)
 
 
-async def mark_graph_embeddings_for_reembed(client: Any) -> int:
-    """Queue every entity and relationship vector for the sweep to replace."""
+async def _graph_tables(client: Any) -> tuple[SweepTable, SweepTable]:
     recorded = await get_schema_embedding_dimension(client.execute_query)
     dimensions = recorded or EMBEDDING_DIM
+    return entity_sweep_table(dimensions), relationship_sweep_table(dimensions)
+
+
+async def mark_graph_embeddings_for_reembed(client: Any) -> int:
+    """Queue every entity and relationship vector for the sweep to replace."""
     return await mark_plane_for_reembed(
         plane=GRAPH_EMBEDDING_PLANE,
         organization_id=str(client.group_id),
         execute=client.execute_query,
-        tables=(entity_sweep_table(dimensions), relationship_sweep_table(dimensions)),
+        tables=await _graph_tables(client),
+    )
+
+
+async def count_graph_embeddings_for_reembed(client: Any) -> int:
+    """How many entity and relationship rows a re-embed would replace."""
+    return await count_plane_reembed(
+        organization_id=str(client.group_id),
+        execute=client.execute_query,
+        tables=await _graph_tables(client),
     )
 
 
 __all__ = [
     "GRAPH_EMBEDDING_PLANE",
+    "EvidenceSource",
+    "count_graph_embeddings_for_reembed",
     "decide_graph_legacy_vectors",
     "entity_row_embedding_text",
     "entity_sweep_table",

@@ -201,26 +201,21 @@ async def test_restored_chunk_vectors_keep_their_model_or_arrive_unverified(
 
 
 @pytest.mark.asyncio
-async def test_restore_settles_the_chunk_verdict_before_restamping_raw_captures(
+async def test_restore_repairs_raw_captures_without_settling_any_verdict(
     surreal_content_client: SurrealContentClient, monkeypatch
 ) -> None:
+    """The verdicts weigh stamps photographed at upgrade, so restamping cannot sway them.
+
+    Settling a verdict here would also decide it without the graph plane's
+    evidence, which only lifecycle repair gathers.
+    """
     from sibyl_core.projection.repair import LifecycleRepairResult
+    from sibyl_core.services.document_embedding_sweep import DOCUMENT_CHUNK_EMBEDDING_PLANE
+    from sibyl_core.services.embedding_sweep import read_embedding_sweep_state
 
     org = str(uuid4())
-    order: list[str] = []
-
-    async def decide(organization_id, **kwargs):
-        assert kwargs["client"] is surreal_content_client
-        order.append(f"verdict:{organization_id}")
-
-    async def repair(organization_id, **kwargs):
-        order.append(f"raw:{organization_id}")
-        return LifecycleRepairResult()
-
-    monkeypatch.setattr(
-        "sibyl.jobs.embedding_sweep.document_chunk_sweep_inputs",
-        AsyncMock(return_value=({"provider": "p"}, True, AsyncMock())),
-    )
+    decide = AsyncMock()
+    repair = AsyncMock(return_value=LifecycleRepairResult())
     monkeypatch.setattr(
         "sibyl_core.services.document_embedding_sweep.decide_document_chunk_legacy_vectors",
         decide,
@@ -232,25 +227,11 @@ async def test_restore_settles_the_chunk_verdict_before_restamping_raw_captures(
     result = await _restore(surreal_content_client, _payload(org))
 
     assert result.success is True
-    assert order == [f"verdict:{org}", f"raw:{org}"]
-
-
-@pytest.mark.asyncio
-async def test_restore_holds_back_raw_restamping_when_the_verdict_fails(
-    surreal_content_client: SurrealContentClient, monkeypatch
-) -> None:
-    org = str(uuid4())
-    repair = AsyncMock()
-    monkeypatch.setattr(
-        "sibyl.jobs.embedding_sweep.document_chunk_sweep_inputs",
-        AsyncMock(side_effect=ConnectionError("settings unavailable")),
+    decide.assert_not_awaited()
+    repair.assert_awaited_once()
+    state = await read_embedding_sweep_state(
+        DOCUMENT_CHUNK_EMBEDDING_PLANE,
+        org,
+        lambda query, **params: content_client.select_many(surreal_content_client, query, **params),
     )
-    monkeypatch.setattr(
-        "sibyl_core.services.content_raw_embedding_repair.repair_raw_capture_embeddings", repair
-    )
-
-    result = await _restore(surreal_content_client, _payload(org))
-
-    assert result.success is True
-    assert result.embedding_repair == {org: {"error": "ConnectionError"}}
-    repair.assert_not_awaited()
+    assert not state.get("legacy_decision")

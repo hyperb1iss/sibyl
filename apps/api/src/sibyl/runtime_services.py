@@ -33,6 +33,7 @@ class RuntimeServices:
         from sibyl.services.surreal_connectivity import initialize_shared_surreal_connectivity
 
         await initialize_shared_surreal_connectivity()
+        await record_configured_embedding_models()
         await self._startup_broker()
         await self._startup_scheduler()
         await self._startup_pubsub()
@@ -218,6 +219,13 @@ async def bootstrap_surreal_runtime_schemas() -> bool:
     from sibyl.surreal_runtime_startup import bootstrap_surreal_runtime_schemas as bootstrap
 
     return await bootstrap()
+
+
+async def record_configured_embedding_models() -> None:
+    """Note this process's embedding models, which the embedding sweep weighs as evidence."""
+    from sibyl.jobs.embedding_sweep import record_configured_embedding_models as record
+
+    await record()
 
 
 async def load_runtime_settings_from_db() -> list[str]:

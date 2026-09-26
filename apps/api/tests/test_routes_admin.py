@@ -1010,3 +1010,30 @@ def test_embedding_plane_state_reports_only_the_current_model_as_complete() -> N
         )
         == "skipped_dimension_mismatch"
     )
+
+
+def test_embedding_plane_state_never_calls_an_unproven_adoption_complete() -> None:
+    from sibyl.api.routes.admin import _embedding_plane_state
+
+    stamp = {"provider": "bedrock", "model": "cohere.embed-v4:0", "dimensions": 1024}
+
+    assert (
+        _embedding_plane_state(
+            {
+                "complete_metadata": stamp,
+                "active_metadata": stamp,
+                "legacy_warning": "adopted_without_evidence",
+            }
+        )
+        == "adopted_without_evidence"
+    )
+    # A stamp that differs only in bookkeeping is still the model swept toward.
+    assert (
+        _embedding_plane_state(
+            {
+                "complete_metadata": {**stamp, "cache_namespace": "old"},
+                "active_metadata": {**stamp, "cache_namespace": "new"},
+            }
+        )
+        == "complete"
+    )

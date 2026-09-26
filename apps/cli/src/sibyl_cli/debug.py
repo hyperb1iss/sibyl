@@ -344,6 +344,13 @@ def _embedding_sweep_lines(sweep: object) -> list[str]:
         if state.get("legacy_basis"):
             summary += f", legacy {state.get('legacy_decision')} ({state.get('legacy_basis')})"
         lines.append(f"{label}{plane} {summary}")
+        if state.get("legacy_warning"):
+            target = "graph" if plane == "graph" else "documents"
+            lines.append(
+                f"                [{ELECTRIC_YELLOW}]adopted vectors with no record of their model;"
+                f" if the model changed in this deploy, run"
+                f" `sibyld db reembed --plane {target}`[/{ELECTRIC_YELLOW}]"
+            )
     return lines
 
 

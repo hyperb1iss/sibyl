@@ -147,6 +147,23 @@ def test_debug_status_shows_embedding_sweep_progress(
     assert "3 refused by the provider" in result.stdout
 
 
+def test_embedding_lines_tell_the_operator_how_to_resolve_an_unproven_adoption() -> None:
+    lines = debug._embedding_sweep_lines(
+        {
+            "document_chunks": {
+                "state": "adopted_without_evidence",
+                "complete_metadata": {"provider": "bedrock", "model": "m", "dimensions": 1536},
+                "legacy_decision": "adopt",
+                "legacy_basis": "no_prior_evidence",
+                "legacy_warning": "adopted_without_evidence",
+            }
+        }
+    )
+
+    assert "document_chunks adopted_without_evidence" in lines[0]
+    assert "sibyld db reembed --plane documents" in lines[1]
+
+
 @patch("sibyl_cli.debug.get_client")
 def test_debug_query_explain_prefixes_query_and_formats_plan(
     mock_get_client: MagicMock,

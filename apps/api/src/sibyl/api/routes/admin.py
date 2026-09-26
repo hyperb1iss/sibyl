@@ -216,6 +216,7 @@ def _surreal_metrics_sample(metric_names: list[str]) -> dict[str, bool]:
 _EMBEDDING_SWEEP_STATUS_FIELDS = (
     "legacy_decision",
     "legacy_basis",
+    "legacy_warning",
     "active_metadata",
     "complete_metadata",
     "complete_at",
@@ -225,13 +226,21 @@ _EMBEDDING_SWEEP_STATUS_FIELDS = (
 
 
 def _embedding_plane_state(state: dict[str, Any]) -> str:
-    """Complete only for the model the plane is swept toward now."""
+    """Complete only for the model the plane is swept toward now.
+
+    A plane that adopted unstamped vectors with no evidence of their model
+    never reads complete: it reports the warning until an operator re-embeds
+    it, because a provider switch in the same deploy would look identical.
+    """
+    from sibyl_core.embeddings.provenance import same_vector_identity
+
     last_run = state.get("last_run")
     last_status = last_run.get("status") if isinstance(last_run, dict) else None
     if last_status in {"skipped_dimension_mismatch", "provider_failing", "store_failing"}:
         return str(last_status)
-    complete = state.get("complete_metadata")
-    if complete and complete == state.get("active_metadata"):
+    if state.get("legacy_warning"):
+        return str(state["legacy_warning"])
+    if same_vector_identity(state.get("complete_metadata"), state.get("active_metadata")):
         return "complete"
     return "sweeping"
 

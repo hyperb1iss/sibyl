@@ -25,6 +25,7 @@ from sibyl_core.services.embedding_sweep import (
     LegacyVectorDecision,
     read_embedding_sweep_state,
 )
+from tests.embedding_upgrade import upgrade_content_to_sweep
 from tests.test_reflection_identity import content_store as content_store
 
 PREVIOUS = document_chunk_embedding_metadata(
@@ -92,6 +93,16 @@ async def _stamps(org: str) -> dict[str, object]:
     return {str(row["uuid"]): row.get("embedding_metadata") for row in rows}
 
 
+async def _upgrade() -> None:
+    async with content_client.surreal_content_client() as client:
+        await upgrade_content_to_sweep(client)
+
+
+async def _execute(query: str, **params: object) -> object:
+    async with content_client.surreal_content_client() as client:
+        return await content_client.select_many(client, query, **params)
+
+
 async def _state(org: str) -> dict[str, object]:
     async with content_client.surreal_content_client() as client:
         return await read_embedding_sweep_state(
@@ -105,10 +116,18 @@ async def test_raw_capture_stamps_prove_a_switch_for_unstamped_chunks(content_st
     org = str(uuid4())
     await _raw_capture(org, {**PREVIOUS, "cache_namespace": "raw-memory"})
     await _chunk(org, "legacy")
+    await _upgrade()
     embed = ChunkEmbedder(CURRENT)
 
+    # The raw repair restamps captures as soon as the upgraded process runs;
+    # the verdict reads the photograph the upgrade took, so it cannot matter.
+    async with content_client.surreal_content_client() as client:
+        await content_client.select_many(
+            client,
+            "UPDATE raw_captures SET metadata.embedding_metadata = $stamp;",
+            stamp={**CURRENT, "cache_namespace": "raw-memory"},
+        )
     await decide_document_chunk_legacy_vectors(org, stamp=CURRENT, embed_chunks=embed)
-    # The raw repair restamps captures right after the verdict; it must not matter.
     async with content_client.surreal_content_client() as client:
         await content_client.select_many(
             client,
@@ -131,6 +150,7 @@ async def test_matching_raw_stamps_adopt_unstamped_chunks_in_place(content_store
     await _raw_capture(org, {**CURRENT, "cache_namespace": "raw-memory"})
     await _chunk(org, "legacy")
     await _chunk(org, "lexical", vector=False)
+    await _upgrade()
     embed = ChunkEmbedder(CURRENT)
 
     result = await sweep_document_chunk_embeddings(org, stamp=CURRENT, embed_chunks=embed)
@@ -182,18 +202,81 @@ async def test_chunk_sweep_without_an_embedder_does_nothing(content_store) -> No
     assert result.status == SWEEP_SKIPPED_NO_PROVIDER
 
 
-async def test_fresh_chunk_stamps_are_not_evidence_about_older_chunks(content_store) -> None:
+async def test_writes_after_the_upgrade_are_not_evidence_about_older_chunks(
+    content_store,
+) -> None:
+    from sibyl_core.services.embedding_sweep import LEGACY_WARNING_ADOPTED_WITHOUT_EVIDENCE
+
     org = str(uuid4())
+    await _chunk(org, "legacy")
+    await _upgrade()
     # Written by the new release with the new model before its first sweep.
     await _chunk(org, "fresh", stamp=CURRENT)
-    await _chunk(org, "legacy")
+    await _raw_capture(org, {**CURRENT, "cache_namespace": "raw-memory"})
 
     result = await sweep_document_chunk_embeddings(
         org, stamp=CURRENT, embed_chunks=ChunkEmbedder(CURRENT)
     )
 
     assert result.legacy_decision == LegacyVectorDecision.ADOPT.value
-    assert (await _state(org))["legacy_basis"] == LegacyVectorBasis.NO_PRIOR_EVIDENCE.value
+    assert result.warning == LEGACY_WARNING_ADOPTED_WITHOUT_EVIDENCE
+    state = await _state(org)
+    assert state["legacy_basis"] == LegacyVectorBasis.NO_PRIOR_EVIDENCE.value
+    assert state["legacy_warning"] == LEGACY_WARNING_ADOPTED_WITHOUT_EVIDENCE
+
+
+async def test_any_organizations_raw_captures_speak_for_every_chunk_plane(
+    content_store,
+) -> None:
+    capturing, crawling = str(uuid4()), str(uuid4())
+    await _raw_capture(capturing, {**PREVIOUS, "cache_namespace": "raw-memory"})
+    await _chunk(crawling, "legacy")
+    await _upgrade()
+    embed = ChunkEmbedder(CURRENT)
+
+    result = await sweep_document_chunk_embeddings(crawling, stamp=CURRENT, embed_chunks=embed)
+
+    assert result.legacy_decision == LegacyVectorDecision.REEMBED.value
+    assert result.recovered == 1
+    assert (await _state(crawling))["legacy_basis"] == LegacyVectorBasis.PRIOR_STAMPS_DIFFER.value
+
+
+async def test_a_start_on_another_model_is_evidence_for_open_verdicts(content_store) -> None:
+    from sibyl_core.services.embedding_evidence import record_deployment_models
+
+    org = str(uuid4())
+    await _chunk(org, "legacy")
+    await _upgrade()
+    # The first start of this release ran the previous model; this one does not.
+    await record_deployment_models(_execute, graph=None, content=PREVIOUS)
+    recorded = await record_deployment_models(_execute, graph=None, content=CURRENT)
+    assert (recorded["first_content"], recorded["content"]) == (PREVIOUS, CURRENT)
+    embed = ChunkEmbedder(CURRENT)
+
+    result = await sweep_document_chunk_embeddings(org, stamp=CURRENT, embed_chunks=embed)
+
+    assert result.legacy_decision == LegacyVectorDecision.REEMBED.value
+    assert result.recovered == 1
+    assert (await _state(org))["legacy_basis"] == LegacyVectorBasis.DEPLOYMENT_MODEL_CHANGED.value
+
+
+async def test_a_dry_run_counts_what_a_reembed_would_replace(content_store) -> None:
+    from sibyl_core.services.document_embedding_sweep import (
+        count_document_chunk_embeddings_for_reembed,
+        mark_document_chunk_embeddings_for_reembed,
+    )
+
+    org = str(uuid4())
+    await _chunk(org, "current", stamp=CURRENT)
+    await _chunk(org, "legacy")
+    await _chunk(org, "lexical", vector=False)
+    await _chunk(str(uuid4()), "elsewhere", stamp=CURRENT)
+
+    counted = await count_document_chunk_embeddings_for_reembed(org)
+
+    assert counted == 2
+    assert await _stamps(org) == {"current": CURRENT, "legacy": None, "lexical": None}
+    assert await mark_document_chunk_embeddings_for_reembed(org) == counted
 
 
 async def test_chunk_sweep_reads_the_size_the_database_declares(content_store, monkeypatch) -> None:

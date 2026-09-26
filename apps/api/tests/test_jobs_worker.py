@@ -33,10 +33,14 @@ async def test_worker_startup_installs_core_runtime_ports(
         "sibyl.core_runtime_ports.install_core_runtime_ports",
         MagicMock(side_effect=lambda: startup_events.append("core_ports")),
     )
+    monkeypatch.setattr(
+        "sibyl.jobs.embedding_sweep.record_configured_embedding_models",
+        AsyncMock(side_effect=lambda: startup_events.append("embedding_models")),
+    )
 
     ctx: dict[str, object] = {}
 
     await worker_module.startup(ctx)
 
     assert "start_time" in ctx
-    assert startup_events == ["settings", "llm", "core_ports"]
+    assert startup_events == ["settings", "llm", "core_ports", "embedding_models"]

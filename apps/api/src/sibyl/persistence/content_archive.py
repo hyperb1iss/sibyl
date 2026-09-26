@@ -283,30 +283,12 @@ async def _repair_restored_capture_embeddings(
     runs on the restore's own client so it reaches the rows that just landed.
     A repair failure is recorded per organization and never fails the restore.
     """
-    from sibyl.jobs.embedding_sweep import document_chunk_sweep_inputs
     from sibyl_core.services.content_raw_embedding_repair import repair_raw_capture_embeddings
-    from sibyl_core.services.document_embedding_sweep import (
-        decide_document_chunk_legacy_vectors,
-    )
 
+    # The chunk plane's verdict weighs raw capture stamps photographed when the
+    # content schema upgraded, so restamping restored captures cannot sway it.
     receipts: dict[str, dict[str, int | str]] = {}
     for organization_id in organizations:
-        try:
-            # The chunk plane's one-time verdict reads these organizations' raw
-            # capture stamps, which the repair below rewrites after a provider
-            # switch, so the verdict is settled first.
-            stamp, _runnable, embed_chunks = await document_chunk_sweep_inputs()
-            await decide_document_chunk_legacy_vectors(
-                organization_id, stamp=stamp, embed_chunks=embed_chunks, client=client
-            )
-        except Exception as exc:
-            log.warning(
-                "content_archive_restore_chunk_verdict_failed",
-                organization_id=organization_id,
-                error_type=type(exc).__name__,
-            )
-            receipts[organization_id] = {"error": type(exc).__name__}
-            continue
         try:
             result = await repair_raw_capture_embeddings(organization_id, client=client)
         except Exception as exc:

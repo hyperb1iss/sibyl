@@ -119,6 +119,12 @@ async def startup(ctx: dict[str, Any]) -> None:
     install_db_config_source()
     install_core_runtime_ports()
 
+    # The embedding sweep weighs the models each start ran with as evidence of
+    # a provider switch; a failed write only logs.
+    from sibyl.jobs.embedding_sweep import record_configured_embedding_models
+
+    await record_configured_embedding_models()
+
 
 async def shutdown(ctx: dict[str, Any]) -> None:  # noqa: ARG001
     """Worker shutdown - cleanup resources."""

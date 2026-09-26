@@ -3,11 +3,35 @@
 One row per organization and plane records how vectors written before Sibyl
 stamped their model were classified, which model the plane was last swept
 for, where the resumable walk stopped, which rows the provider refused, who
-holds the sweep lease, and the last pass's receipt. The graph namespace and the shared content namespace both
-carry the table, keyed the same way.
+holds the sweep lease, and the last pass's receipt. The graph namespace and
+the shared content namespace both carry the table, keyed the same way.
+
+The shared content namespace also carries ``embedding_deployment``: the
+stamps raw captures carried when the content schema upgraded, the models
+every organization's graph stamps named when it upgraded, and the models the
+deployment has been configured with since.
+
+The stamps a plane's verdict weighs are photographed by the migration that
+creates this bookkeeping, before any code from this release can write to
+that namespace. A verdict therefore never mistakes a vector written after
+the upgrade for evidence of the model that preceded it.
 """
 
+from __future__ import annotations
+
+import hashlib
+from collections.abc import Awaitable, Callable
+from typing import Any, Protocol
+
+from sibyl_core.backends.surreal.records import normalize_records
+from sibyl_core.embeddings.provenance import UNVERIFIED_EMBEDDING_PROVIDER
+
 EMBEDDING_STATES_TABLE = "embedding_states"
+EMBEDDING_DEPLOYMENT_TABLE = "embedding_deployment"
+GRAPH_EMBEDDING_STATE_PLANE = "graph"
+DEPLOYMENT_EVIDENCE_KEY = "embedding_deployment:evidence"
+DEPLOYMENT_GRAPH_EVIDENCE_KEY = "embedding_deployment:graph_evidence"
+DEPLOYMENT_MODELS_KEY = "embedding_deployment:models"
 
 EMBEDDING_STATE_DEFINITIONS = """
 DEFINE TABLE IF NOT EXISTS embedding_states SCHEMAFULL;
@@ -15,9 +39,11 @@ ALTER TABLE IF EXISTS embedding_states SCHEMAFULL;
 ALTER TABLE IF EXISTS embedding_states PERMISSIONS NONE;
 DEFINE FIELD IF NOT EXISTS organization_id ON embedding_states TYPE string;
 DEFINE FIELD IF NOT EXISTS plane ON embedding_states TYPE string;
+DEFINE FIELD IF NOT EXISTS legacy_evidence ON embedding_states TYPE option<object> FLEXIBLE;
 DEFINE FIELD IF NOT EXISTS legacy_decision ON embedding_states TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS legacy_basis ON embedding_states TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS legacy_metadata ON embedding_states TYPE option<object> FLEXIBLE;
+DEFINE FIELD IF NOT EXISTS legacy_warning ON embedding_states TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS decided_at ON embedding_states TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS active_metadata ON embedding_states TYPE option<object> FLEXIBLE;
 DEFINE FIELD IF NOT EXISTS complete_metadata ON embedding_states TYPE option<object> FLEXIBLE;
@@ -31,6 +57,15 @@ DEFINE FIELD IF NOT EXISTS last_run ON embedding_states TYPE option<object> FLEX
 DEFINE FIELD IF NOT EXISTS updated_at ON embedding_states TYPE datetime DEFAULT time::now();
 DEFINE INDEX IF NOT EXISTS idx_embedding_states_scope ON embedding_states
     FIELDS organization_id, plane UNIQUE;
+"""
+
+EMBEDDING_DEPLOYMENT_DEFINITIONS = """
+DEFINE TABLE IF NOT EXISTS embedding_deployment SCHEMAFULL;
+ALTER TABLE IF EXISTS embedding_deployment SCHEMAFULL;
+ALTER TABLE IF EXISTS embedding_deployment PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS kind ON embedding_deployment TYPE string;
+DEFINE FIELD IF NOT EXISTS data ON embedding_deployment TYPE option<object> FLEXIBLE;
+DEFINE FIELD IF NOT EXISTS updated_at ON embedding_deployment TYPE datetime DEFAULT time::now();
 """
 
 # Imports and dimension rebuilds can hand a plane rows that need vectors while
@@ -47,8 +82,111 @@ REOPEN_EMBEDDING_STATES = (
     "WHERE $organizations CONTAINS organization_id RETURN NONE;"
 )
 
+type _Execute = Callable[..., Awaitable[object]]
+
+
+class _Ownership(Protocol):
+    mutate: _Execute
+
+
+def embedding_state_key(organization_id: str, plane: str) -> str:
+    """Record id of one organization's state row for one plane."""
+    digest = hashlib.sha256(f"{organization_id}\x1f{plane}".encode()).hexdigest()
+    return f"embedding_states:s{digest[:40]}"
+
+
+def _stamp_groups_query(table: str, metadata_path: str, *, scope_field: str | None) -> str:
+    scope = f"{scope_field} = $scope AND " if scope_field else ""
+    return (
+        f"SELECT {metadata_path}.provider AS provider, {metadata_path}.model AS model, "
+        f"{metadata_path}.dimensions AS dimensions, count() AS rows FROM {table} "
+        f"WHERE {scope}{metadata_path} != NONE AND {metadata_path}.provider != $unverified "
+        "GROUP BY provider, model, dimensions;"
+    )
+
+
+async def _stamp_groups(
+    execute_query: _Execute, query: str, **params: object
+) -> list[dict[str, Any]]:
+    rows = normalize_records(
+        await execute_query(query, unverified=UNVERIFIED_EMBEDDING_PROVIDER, **params)
+    )
+    return [
+        {
+            "provider": row.get("provider"),
+            "model": row.get("model"),
+            "dimensions": row.get("dimensions"),
+            "rows": count if isinstance(count := row.get("rows"), int) else 0,
+        }
+        for row in rows
+    ]
+
+
+async def snapshot_graph_embedding_evidence(
+    execute_query: _Execute,
+    *,
+    group_id: str | None = None,
+    ownership: _Ownership | None = None,
+) -> None:
+    """Record which models this graph namespace's stamped vectors name, as of its upgrade.
+
+    Runs inside the migration that introduces the sweep, before the namespace
+    reports its schema current, so every stamp it counts predates this
+    release. A second run keeps the first photograph.
+    """
+    if not group_id:
+        return
+    stamps: list[dict[str, Any]] = []
+    for table in ("entity", "relates_to"):
+        stamps.extend(
+            await _stamp_groups(
+                execute_query,
+                _stamp_groups_query(table, "attributes.embedding_metadata", scope_field="group_id"),
+                scope=group_id,
+            )
+        )
+    mutate = ownership.mutate if ownership is not None else execute_query
+    await mutate(
+        "UPSERT type::record($key) SET organization_id = $scope, plane = $plane, "
+        "legacy_evidence = legacy_evidence ?? {stamps: $stamps, taken_at: time::now()}, "
+        "updated_at = time::now() RETURN NONE;",
+        key=embedding_state_key(group_id, GRAPH_EMBEDDING_STATE_PLANE),
+        scope=group_id,
+        plane=GRAPH_EMBEDDING_STATE_PLANE,
+        stamps=stamps,
+    )
+
+
+async def snapshot_content_embedding_evidence(execute_query: _Execute) -> None:
+    """Record which models raw captures name across the deployment, as of its upgrade.
+
+    Chunks carried no stamp before this release, and every organization's
+    chunks and raw captures are embedded by one content configuration, so
+    the raw captures of any organization speak for every chunk plane.
+    """
+    stamps = await _stamp_groups(
+        execute_query,
+        _stamp_groups_query("raw_captures", "metadata.embedding_metadata", scope_field=None),
+    )
+    await execute_query(
+        f"UPSERT {DEPLOYMENT_EVIDENCE_KEY} SET kind = 'evidence', "
+        "data = IF data.taken_at = NONE THEN {stamps: $stamps, taken_at: time::now()} "
+        "ELSE data END, updated_at = time::now() RETURN NONE;",
+        stamps=stamps,
+    )
+
+
 __all__ = [
+    "DEPLOYMENT_EVIDENCE_KEY",
+    "DEPLOYMENT_GRAPH_EVIDENCE_KEY",
+    "DEPLOYMENT_MODELS_KEY",
+    "EMBEDDING_DEPLOYMENT_DEFINITIONS",
+    "EMBEDDING_DEPLOYMENT_TABLE",
     "EMBEDDING_STATES_TABLE",
     "EMBEDDING_STATE_DEFINITIONS",
+    "GRAPH_EMBEDDING_STATE_PLANE",
     "REOPEN_EMBEDDING_STATES",
+    "embedding_state_key",
+    "snapshot_content_embedding_evidence",
+    "snapshot_graph_embedding_evidence",
 ]

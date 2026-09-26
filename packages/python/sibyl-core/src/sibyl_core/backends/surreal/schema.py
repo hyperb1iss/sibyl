@@ -16,6 +16,7 @@ from sibyl_core.backends.surreal.schema_embedding_states import (
     EMBEDDING_STATE_DEFINITIONS,
     EMBEDDING_STATES_TABLE,
     REOPEN_EMBEDDING_STATES,
+    snapshot_graph_embedding_evidence,
 )
 from sibyl_core.backends.surreal.schema_helpers import (
     execute_schema_statement,
@@ -901,12 +902,13 @@ GRAPH_SCHEMA_MIGRATIONS = (
         version=31,
         name="graph_embedding_sweep_states",
         statements=tuple(split_statements(EMBEDDING_STATE_DEFINITIONS)),
+        action=snapshot_graph_embedding_evidence,
     ),
 )
 
 
 def _graph_schema_migrations(
-    *, url: str, ownership: SchemaOwnership | None = None
+    *, url: str, ownership: SchemaOwnership | None = None, group_id: str | None = None
 ) -> tuple[SchemaMigration, ...]:
     return tuple(
         SchemaMigration(
@@ -927,6 +929,10 @@ def _graph_schema_migrations(
                 if migration.action is migrate_graph_source_states
                 else partial(migrate_graph_source_integrity, ownership=ownership)
                 if migration.action is migrate_graph_source_integrity
+                else partial(
+                    snapshot_graph_embedding_evidence, group_id=group_id, ownership=ownership
+                )
+                if migration.action is snapshot_graph_embedding_evidence
                 else migration.action
             ),
         )
@@ -1316,7 +1322,9 @@ async def _bootstrap_owned_schema(
             )
             await apply_schema_migrations(
                 ownership.read,
-                _graph_schema_migrations(url=driver._url, ownership=ownership),
+                _graph_schema_migrations(
+                    url=driver._url, ownership=ownership, group_id=driver.group_id
+                ),
                 group_id=driver.group_id,
                 ownership=ownership,
             )
@@ -1356,7 +1364,7 @@ async def _bootstrap_owned_schema(
         )
     await apply_schema_migrations(
         ownership.read,
-        _graph_schema_migrations(url=driver._url, ownership=ownership),
+        _graph_schema_migrations(url=driver._url, ownership=ownership, group_id=driver.group_id),
         group_id=driver.group_id,
         ownership=ownership,
     )

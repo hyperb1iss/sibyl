@@ -11,7 +11,9 @@ vector from the configured provider.
 Rows written before Sibyl stamped vectors carry no stamp. The first pass over
 a plane classifies them once and persists the verdict (see
 ``LegacyVectorDecision``), then stamps them either as the configured model or
-as unverified, after which they follow the ordinary rule.
+as unverified, after which they follow the ordinary rule. The verdict weighs
+only evidence recorded before this release first touched the store (see
+``LegacyEvidence``).
 
 Passes are bounded by a wall-clock budget, hold a lease so overlapping
 lifecycle ticks never double-embed, persist their walk cursor so a restart
@@ -39,7 +41,10 @@ from uuid import uuid4
 import structlog
 
 from sibyl_core.backends.surreal.records import normalize_records
-from sibyl_core.backends.surreal.schema_embedding_states import REOPEN_EMBEDDING_STATES
+from sibyl_core.backends.surreal.schema_embedding_states import (
+    REOPEN_EMBEDDING_STATES,
+    embedding_state_key,
+)
 from sibyl_core.config import settings
 from sibyl_core.embeddings.provenance import (
     UNVERIFIED_EMBEDDING_PROVIDER,
@@ -110,17 +115,43 @@ class LegacyVectorBasis(StrEnum):
     NO_LEGACY_ROWS = "no_legacy_rows"
     PRIOR_STAMPS_MATCH = "prior_stamps_match"
     PRIOR_STAMPS_DIFFER = "prior_stamps_differ"
+    DEPLOYMENT_STAMPS_DIFFER = "deployment_stamps_differ"
+    DEPLOYMENT_MODEL_CHANGED = "deployment_model_changed"
+    OTHER_PLANE_SWITCHED = "other_plane_switched"
     NO_PRIOR_EVIDENCE = "no_prior_evidence"
     OPERATOR_ADOPT = "operator_adopt"
     OPERATOR_REEMBED = "operator_reembed"
 
 
+# A plane that adopted unstamped vectors with nothing to vouch for their model
+# carries this warning until an operator re-embeds it.
+LEGACY_WARNING_ADOPTED_WITHOUT_EVIDENCE = "adopted_without_evidence"
+
+
 @dataclass(frozen=True, slots=True)
 class LegacyEvidence:
-    """What the plane's stamped rows say about the model that preceded stamping."""
+    """What predates this release says about the model behind a plane's unstamped vectors.
 
-    differs: bool
-    matches: bool
+    ``differs`` and ``matches`` come from the stamps the plane's own rows
+    carried when its schema upgraded. ``deployment_differs`` means the same
+    plane in another organization carried stamps from another model: one
+    configuration embeds every organization's graph. ``model_changed`` means
+    the deployment record saw this plane's configured model change since this
+    release first ran. ``other_plane_switched`` means the other plane shows a
+    switch: graph and content are configured separately, but a deployment
+    that moved one provider has usually moved both.
+    """
+
+    differs: bool = False
+    matches: bool = False
+    deployment_differs: bool = False
+    model_changed: bool = False
+    other_plane_switched: bool = False
+
+    @property
+    def switched(self) -> bool:
+        """Whether this plane itself shows a model switch."""
+        return self.differs or self.deployment_differs or self.model_changed
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,6 +168,7 @@ class EmbeddingSweepResult(LifecycleRepairResult):
     skipped: int = 0
     rejected: int = 0
     legacy_decision: str | None = None
+    warning: str | None = None
     provider_dimensions: int | None = None
     schema_dimensions: int | None = None
     elapsed_ms: float = 0.0
@@ -207,21 +239,20 @@ class SweepTable:
             f"AND {self.metadata_path} = NONE LIMIT 1;"
         )
 
-    def stamp_probe_query(self, *, matching: bool) -> str:
-        comparison = "=" if matching else "!="
-        return (
-            f"SELECT uuid FROM {self.name} "
-            f"WHERE {self.scope_field} = $scope AND {self.metadata_path} != NONE "
-            f"AND {self.metadata_path}.provider != $unverified "
-            f"AND {self.metadata_path} {comparison} $stamp LIMIT 1;"
-        )
-
     def adopt_query(self) -> str:
         return (
             f"UPDATE (SELECT VALUE id FROM {self.name} "
             f"WHERE {self.scope_field} = $scope AND {self.vector_field} != NONE "
             f"AND {self.metadata_path} = NONE LIMIT $limit) "
             f"SET {self.metadata_path} = $legacy RETURN uuid;"
+        )
+
+    def reembed_count_query(self) -> str:
+        """Rows an operator re-embed would hand the sweep: every vector or stamp."""
+        return (
+            f"SELECT count() AS count FROM {self.name} "
+            f"WHERE {self.scope_field} = $scope AND ({self.vector_field} != NONE "
+            f"OR {self.metadata_path} != NONE) GROUP ALL;"
         )
 
     def unverify_query(self) -> str:
@@ -275,12 +306,6 @@ class SweepPlane:
     @property
     def state_key(self) -> str:
         return embedding_state_key(self.organization_id, self.name)
-
-
-def embedding_state_key(organization_id: str, plane: str) -> str:
-    """Record id of one organization's state row for one plane."""
-    digest = hashlib.sha256(f"{organization_id}\x1f{plane}".encode()).hexdigest()
-    return f"embedding_states:s{digest[:40]}"
 
 
 @dataclass(slots=True)
@@ -456,11 +481,15 @@ def decide_legacy_vectors(
 ) -> tuple[LegacyVectorDecision, LegacyVectorBasis]:
     """Classify a plane's unstamped vectors.
 
-    An operator policy wins. Otherwise the plane's own stamped rows decide:
-    any stamp from another model proves the deployment has used one, so the
-    unstamped vectors cannot be assumed current and are replaced. When every
-    stamp matches, or nothing is stamped yet, the unstamped vectors are what
-    the unchanged configuration produced and are adopted in place.
+    An operator policy wins. Otherwise the plane's own pre-upgrade stamps
+    decide: any stamp from another model proves the deployment has used one,
+    so the unstamped vectors cannot be assumed current and are replaced, and
+    stamps that all match mean they are what the unchanged configuration
+    produced. Without stamps of its own, a plane is replaced when the
+    deployment record or the other plane shows a switch, because re-embedding
+    a plane that did not change costs provider calls while adopting one that
+    did corrupts search. Only with no evidence anywhere are the vectors
+    adopted, and that verdict carries a warning.
     """
     if not legacy_rows:
         return LegacyVectorDecision.NONE, LegacyVectorBasis.NO_LEGACY_ROWS
@@ -468,19 +497,29 @@ def decide_legacy_vectors(
         return LegacyVectorDecision.ADOPT, LegacyVectorBasis.OPERATOR_ADOPT
     if policy == "reembed":
         return LegacyVectorDecision.REEMBED, LegacyVectorBasis.OPERATOR_REEMBED
-    if evidence is not None and evidence.differs:
+    evidence = evidence or LegacyEvidence()
+    if evidence.differs:
         return LegacyVectorDecision.REEMBED, LegacyVectorBasis.PRIOR_STAMPS_DIFFER
-    if evidence is not None and evidence.matches:
+    if evidence.matches:
         return LegacyVectorDecision.ADOPT, LegacyVectorBasis.PRIOR_STAMPS_MATCH
+    if evidence.deployment_differs:
+        return LegacyVectorDecision.REEMBED, LegacyVectorBasis.DEPLOYMENT_STAMPS_DIFFER
+    if evidence.model_changed:
+        return LegacyVectorDecision.REEMBED, LegacyVectorBasis.DEPLOYMENT_MODEL_CHANGED
+    if evidence.other_plane_switched:
+        return LegacyVectorDecision.REEMBED, LegacyVectorBasis.OTHER_PLANE_SWITCHED
     return LegacyVectorDecision.ADOPT, LegacyVectorBasis.NO_PRIOR_EVIDENCE
 
 
-async def ensure_legacy_decision(plane: SweepPlane) -> dict[str, Any]:
+async def ensure_legacy_decision(
+    plane: SweepPlane, *, defer_unproven: bool = False
+) -> dict[str, Any]:
     """Persist the plane's legacy verdict if no pass has recorded one yet.
 
-    Lifecycle repair calls this before any repair in the same tick can
-    rewrite the stamps the verdict reads. The first writer wins, so a racing
-    pass reads the same verdict back.
+    The first writer wins, so a racing pass reads the same verdict back.
+    With ``defer_unproven``, a verdict that would adopt with no evidence at
+    all is not recorded; the returned state carries ``legacy_deferred`` so
+    the caller can settle it once more of the deployment has been read.
     """
     state = await _ensure_state(plane)
     if state.get("legacy_decision"):
@@ -501,29 +540,44 @@ async def ensure_legacy_decision(plane: SweepPlane) -> dict[str, Any]:
         if decision is LegacyVectorDecision.ADOPT
         else unverified_embedding_metadata(UNVERIFIED_ORIGIN_LEGACY)
     )
+    unproven = basis is LegacyVectorBasis.NO_PRIOR_EVIDENCE
+    if unproven and defer_unproven:
+        return {**state, "legacy_deferred": True}
     rows = normalize_records(
         await plane.execute(
             "UPDATE type::record($key) SET legacy_decision = $decision, "
-            "legacy_basis = $basis, legacy_metadata = $legacy, decided_at = time::now(), "
-            "updated_at = time::now() WHERE legacy_decision = NONE RETURN AFTER;",
+            "legacy_basis = $basis, legacy_metadata = $legacy, legacy_warning = $warning, "
+            "decided_at = time::now(), updated_at = time::now() "
+            "WHERE legacy_decision = NONE RETURN AFTER;",
             key=plane.state_key,
             decision=decision.value,
             basis=basis.value,
             legacy=legacy,
+            warning=LEGACY_WARNING_ADOPTED_WITHOUT_EVIDENCE if unproven else None,
         )
     )
     if rows:
-        log_method = log.warning if basis is LegacyVectorBasis.NO_PRIOR_EVIDENCE else log.info
-        log_method(
-            "embedding_legacy_vectors_decided",
-            organization_id=plane.organization_id,
-            plane=plane.name,
-            decision=decision.value,
-            basis=basis.value,
-            provider=plane.stamp.get("provider"),
-            model=plane.stamp.get("model"),
-            dimensions=plane.stamp.get("dimensions"),
-        )
+        fields = {
+            "organization_id": plane.organization_id,
+            "plane": plane.name,
+            "decision": decision.value,
+            "basis": basis.value,
+            "provider": plane.stamp.get("provider"),
+            "model": plane.stamp.get("model"),
+            "dimensions": plane.stamp.get("dimensions"),
+        }
+        if unproven:
+            log.warning(
+                "embedding_legacy_vectors_adopted_without_evidence",
+                **fields,
+                remediation=(
+                    "if the embedding model changed in this deploy, run "
+                    "`sibyld db reembed --org-id <org> --plane "
+                    f"{'graph' if plane.name == 'graph' else 'documents'} --yes`"
+                ),
+            )
+        else:
+            log.info("embedding_legacy_vectors_decided", **fields)
         return rows[0]
     return await _read_state(plane)
 
@@ -576,10 +630,11 @@ async def run_embedding_sweep(
     state = await ensure_legacy_decision(plane)
     decision = state.get("legacy_decision")
     legacy_decision = str(decision) if decision else None
+    warning = state.get("legacy_warning") or None
     if _plane_current(state, plane.stamp, verify_interval):
-        return result(status=SWEEP_CURRENT, legacy_decision=legacy_decision)
+        return result(status=SWEEP_CURRENT, legacy_decision=legacy_decision, warning=warning)
     if not await _acquire_lease(plane, owner=owner, budget=budget):
-        return result(status=SWEEP_BUSY, legacy_decision=legacy_decision)
+        return result(status=SWEEP_BUSY, legacy_decision=legacy_decision, warning=warning)
 
     counts = _Counts(rejections=_load_rejections(state, plane.stamp))
     limiter = _AdaptiveLimiter(slots)
@@ -648,6 +703,7 @@ async def run_embedding_sweep(
         raise
     outcome = result(
         legacy_decision=legacy_decision,
+        warning=warning,
         status=status,
         checked=counts.checked,
         recovered=counts.recovered,
@@ -680,6 +736,7 @@ async def run_embedding_sweep(
         rejected=counts.rejected,
         failed=counts.failed,
         concurrency=limiter.limit,
+        warning=warning,
         elapsed_ms=outcome.elapsed_ms,
     )
     return outcome
@@ -1207,8 +1264,12 @@ async def mark_plane_for_reembed(
             marked += len(rows)
             if len(rows) < page_size:
                 break
+    # The operator has now vouched for nothing in this plane being trusted
+    # blindly, so an adoption warning no longer applies.
     await execute(
         REOPEN_EMBEDDING_STATES.replace(
+            "updated_at = time::now()", "legacy_warning = NONE, updated_at = time::now()"
+        ).replace(
             "WHERE $organizations CONTAINS organization_id",
             "WHERE $organizations CONTAINS organization_id AND plane = $plane",
         ),
@@ -1216,6 +1277,21 @@ async def mark_plane_for_reembed(
         plane=plane,
     )
     return marked
+
+
+async def count_plane_reembed(
+    *,
+    organization_id: str,
+    execute: SweepExecute,
+    tables: Sequence[SweepTable],
+) -> int:
+    """How many rows ``mark_plane_for_reembed`` would send through the sweep."""
+    total = 0
+    for table in tables:
+        rows = normalize_records(await execute(table.reembed_count_query(), scope=organization_id))
+        count = rows[0].get("count") if rows else None
+        total += count if isinstance(count, int) else 0
+    return total
 
 
 async def read_embedding_sweep_state(
@@ -1232,6 +1308,7 @@ async def read_embedding_sweep_state(
 
 
 __all__ = [
+    "LEGACY_WARNING_ADOPTED_WITHOUT_EVIDENCE",
     "SWEEP_BUSY",
     "SWEEP_COMPLETED",
     "SWEEP_CURRENT",
@@ -1248,6 +1325,7 @@ __all__ = [
     "SweepPlane",
     "SweepTable",
     "configured_legacy_vector_policy",
+    "count_plane_reembed",
     "decide_legacy_vectors",
     "embedding_state_key",
     "ensure_legacy_decision",

@@ -195,8 +195,8 @@ class EmbeddingService:
         The stamp comes from the configured values even when no client can be
         built for them (a missing credential, or a provider this service does
         not speak), because the embedding sweep's one-time verdict on legacy
-        chunk vectors must compare against the configured model before any
-        repair restamps the evidence it reads.
+        chunk vectors and the deployment's model record compare against the
+        configured model whether or not this process can embed.
         """
         try:
             config = await self._resolve_config()

@@ -39,6 +39,7 @@ from sibyl_core.services.graph_embedding_sweep import (
     sweep_graph_embeddings,
 )
 from sibyl_core.services.graph_runtime import GraphRuntime, prepare_graph_schema
+from tests.embedding_upgrade import upgrade_graph_to_sweep
 
 
 class CountingProvider(DeterministicEmbeddingProvider):
@@ -167,6 +168,22 @@ def test_legacy_verdict_prefers_the_operator_then_the_plane_evidence() -> None:
         LegacyVectorDecision.ADOPT,
         LegacyVectorBasis.NO_PRIOR_EVIDENCE,
     )
+    # Without stamps of its own, a plane follows the deployment record, then
+    # the other plane; its own stamps outrank both.
+    assert decide_legacy_vectors(
+        legacy_rows=True, evidence=LegacyEvidence(deployment_differs=True), policy="auto"
+    ) == (LegacyVectorDecision.REEMBED, LegacyVectorBasis.DEPLOYMENT_STAMPS_DIFFER)
+    assert decide_legacy_vectors(
+        legacy_rows=True, evidence=LegacyEvidence(model_changed=True), policy="auto"
+    ) == (LegacyVectorDecision.REEMBED, LegacyVectorBasis.DEPLOYMENT_MODEL_CHANGED)
+    assert decide_legacy_vectors(
+        legacy_rows=True, evidence=LegacyEvidence(other_plane_switched=True), policy="auto"
+    ) == (LegacyVectorDecision.REEMBED, LegacyVectorBasis.OTHER_PLANE_SWITCHED)
+    assert decide_legacy_vectors(
+        legacy_rows=True,
+        evidence=LegacyEvidence(matches=True, model_changed=True, other_plane_switched=True),
+        policy="auto",
+    ) == (LegacyVectorDecision.ADOPT, LegacyVectorBasis.PRIOR_STAMPS_MATCH)
     assert decide_legacy_vectors(legacy_rows=True, evidence=matches, policy="reembed") == (
         LegacyVectorDecision.REEMBED,
         LegacyVectorBasis.OPERATOR_REEMBED,
@@ -212,12 +229,14 @@ async def test_plain_upgrade_adopts_unstamped_vectors_without_embedding(runtime)
     await _entity(runtime, "legacy-b")
     await _entity(runtime, "lexical", vector=False)
     await _relationship(runtime, "edge-legacy", "legacy-a", "legacy-b", stamp=None)
+    await upgrade_graph_to_sweep(runtime.client)
     before = await _rows(runtime, "entity")
 
     result = await sweep_graph_embeddings(runtime, embedding_provider=provider)
 
     assert result.status == SWEEP_COMPLETED
     assert result.legacy_decision == LegacyVectorDecision.ADOPT.value
+    assert result.warning is None
     assert (result.adopted, result.recovered, result.pending, result.failed) == (3, 0, 0, 0)
     assert provider.texts == []
     entities = await _rows(runtime, "entity")
@@ -245,8 +264,10 @@ async def test_switch_during_upgrade_reembeds_old_stamps_and_unstamped_vectors(r
     current = CountingProvider("current")
     await _entity(runtime, "old", stamp=previous.metadata.to_dict())
     await _entity(runtime, "legacy")
-    await _entity(runtime, "fresh", stamp=current.metadata.to_dict())
     await _relationship(runtime, "edge-old", "old", "legacy", stamp=previous.metadata.to_dict())
+    await upgrade_graph_to_sweep(runtime.client)
+    # Written by the upgraded process before its first pass.
+    await _entity(runtime, "fresh", stamp=current.metadata.to_dict())
     await _relationship(runtime, "edge-legacy", "legacy", "fresh", stamp=None)
     before = await _rows(runtime, "entity")
 
@@ -278,6 +299,7 @@ async def test_legacy_verdict_is_decided_once_even_after_the_evidence_is_gone(
     await _entity(runtime, "old", stamp=previous.metadata.to_dict())
     for index in range(4):
         await _entity(runtime, f"legacy-{index}")
+    await upgrade_graph_to_sweep(runtime.client)
 
     first = await sweep_graph_embeddings(runtime, embedding_provider=current, budget_seconds=0.0)
     assert first.status == SWEEP_PARTIAL
@@ -294,6 +316,88 @@ async def test_legacy_verdict_is_decided_once_even_after_the_evidence_is_gone(
     assert finished.recovered == 4
 
 
+async def test_a_new_namespace_records_an_empty_snapshot(runtime) -> None:
+    from sibyl_core.services.embedding_evidence import read_graph_snapshot
+
+    state = await read_embedding_sweep_state(
+        GRAPH_EMBEDDING_PLANE, runtime.client.group_id, runtime.client.execute_query
+    )
+
+    assert state["legacy_evidence"]["stamps"] == []
+    assert await read_graph_snapshot(runtime.client.execute_query, runtime.client.group_id) == []
+
+
+async def test_the_upgrade_photographs_stamps_once_by_model(runtime) -> None:
+    from sibyl_core.backends.surreal.schema_embedding_states import (
+        snapshot_graph_embedding_evidence,
+    )
+    from sibyl_core.services.embedding_evidence import read_graph_snapshot
+
+    previous = CountingProvider("previous").metadata.to_dict()
+    await _entity(runtime, "old-a", stamp=previous)
+    await _entity(runtime, "old-b", stamp=previous)
+    await _entity(
+        runtime, "unknown", stamp=unverified_embedding_metadata(UNVERIFIED_ORIGIN_ARCHIVE)
+    )
+    await _relationship(runtime, "edge-old", "old-a", "old-b", stamp=previous)
+    await upgrade_graph_to_sweep(runtime.client)
+    await _entity(runtime, "after", stamp=CountingProvider("current").metadata.to_dict())
+    # A second run, as after an interrupted bootstrap, keeps the first photograph.
+    await snapshot_graph_embedding_evidence(
+        runtime.client.execute_query, group_id=runtime.client.group_id
+    )
+
+    stamps = await read_graph_snapshot(runtime.client.execute_query, runtime.client.group_id)
+
+    assert sorted((stamp["model"], stamp["rows"]) for stamp in stamps) == [
+        ("previous", 1),
+        ("previous", 2),
+    ]
+
+
+async def test_writes_after_the_upgrade_are_not_evidence(runtime) -> None:
+    current = CountingProvider("current")
+    for index in range(3):
+        await _entity(runtime, f"legacy-{index}")
+    await upgrade_graph_to_sweep(runtime.client)
+    # The upgraded process writes before its first pass; that stamp matches
+    # the configured model but says nothing about the older vectors.
+    await _entity(runtime, "fresh", stamp=current.metadata.to_dict())
+
+    result = await sweep_graph_embeddings(runtime, embedding_provider=current)
+
+    state = await read_embedding_sweep_state(
+        GRAPH_EMBEDDING_PLANE, runtime.client.group_id, runtime.client.execute_query
+    )
+    assert state["legacy_basis"] == LegacyVectorBasis.NO_PRIOR_EVIDENCE.value
+    assert state["legacy_warning"] == sweep_module.LEGACY_WARNING_ADOPTED_WITHOUT_EVIDENCE
+    assert result.warning == sweep_module.LEGACY_WARNING_ADOPTED_WITHOUT_EVIDENCE
+    assert result.adopted == 3
+
+
+async def test_an_operator_reembed_clears_the_adoption_warning(runtime) -> None:
+    from sibyl_core.services.graph_embedding_sweep import (
+        count_graph_embeddings_for_reembed,
+        mark_graph_embeddings_for_reembed,
+    )
+
+    current = CountingProvider("current")
+    for index in range(3):
+        await _entity(runtime, f"legacy-{index}")
+    await _entity(runtime, "lexical", vector=False)
+    await upgrade_graph_to_sweep(runtime.client)
+    adopted = await sweep_graph_embeddings(runtime, embedding_provider=current)
+    assert adopted.warning == sweep_module.LEGACY_WARNING_ADOPTED_WITHOUT_EVIDENCE
+
+    assert await count_graph_embeddings_for_reembed(runtime.client) == 3
+    assert await mark_graph_embeddings_for_reembed(runtime.client) == 3
+    replaced = await sweep_graph_embeddings(runtime, embedding_provider=current)
+
+    assert replaced.warning is None
+    assert (replaced.recovered, replaced.pending) == (3, 0)
+    assert len(current.texts) == 3
+
+
 async def test_only_fields_that_shape_the_vector_trigger_a_reembed(runtime) -> None:
     current = CountingProvider("current")
     stamp = current.metadata.to_dict()
@@ -301,6 +405,7 @@ async def test_only_fields_that_shape_the_vector_trigger_a_reembed(runtime) -> N
     await _entity(runtime, "estimator", stamp={**stamp, "tokenizer_estimate_method": "other"})
     await _entity(runtime, "text", stamp={**stamp, "text_version": "native-graph-v0"})
     await _entity(runtime, "input-kind", stamp={**stamp, "input_kind_sensitive": False})
+    await upgrade_graph_to_sweep(runtime.client)
 
     result = await sweep_graph_embeddings(runtime, embedding_provider=current)
 
