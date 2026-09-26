@@ -145,6 +145,19 @@ backend:
       cpu: 100m
       memory: 256Mi
 
+  # -- Startup probe configuration
+  # The API applies pending schema migrations before it answers HTTP, and an
+  # upgrade that snapshots embedding evidence scans raw captures (about 12s
+  # per 100k rows). Liveness is held off until startup succeeds, so a large
+  # migration is not killed and restarted from scratch. The default allows
+  # 10 minutes; raise failureThreshold for larger stores.
+  startupProbe:
+    httpGet:
+      path: /api/health
+      port: http
+    periodSeconds: 10
+    failureThreshold: 60
+
   # -- Liveness probe configuration
   livenessProbe:
     httpGet:

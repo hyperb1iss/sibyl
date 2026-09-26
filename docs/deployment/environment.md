@@ -479,12 +479,30 @@ re-embedded when any of these name a model other than the configured one:
 - the recorded models on raw captures anywhere in the deployment, for document chunks, which did not
   record a model before this release;
 - another organization's graph vectors, since one configuration embeds every organization;
-- the models the deployment was configured with on earlier starts of this release;
+- the models earlier lifecycle passes of this release ran with;
 - the other plane's evidence, since a deployment that moved one provider has usually moved both.
 
+Any of these outranks evidence that the model is unchanged: when the evidence conflicts, the plane
+is re-embedded. With no switch in sight, a plane whose own vectors, or another organization's graph
+vectors, record the configured model adopts its vectors in place, with no provider calls and no
+warning.
+
 Only evidence that existed before this release first touched the store counts. Each schema upgrade
-takes a snapshot of it, so vectors written after the restart are never mistaken for proof. A plane
-whose snapshot shows only the configured model adopts its vectors in place, with no provider calls.
+takes a snapshot of it, so vectors written after the restart are never mistaken for proof, and only
+a recorded model beside an actual vector counts, so a model name supplied with a row that was never
+embedded proves nothing. Nothing that reads or rewrites this evidence runs before its schema has
+upgraded: a worker that starts before the API has migrated the content schema skips the embedding
+sweep and raw capture repair, and `sibyl debug status` shows `awaiting_schema_upgrade`, until the
+migration has run. The model record is written only after a lifecycle pass has swept under a
+configuration without the provider refusing it, so a process that merely started with a wrong
+configuration leaves no trace.
+
+A plane with no evidence of its own waits (`awaiting_evidence` in status) until every organization
+has published its graph evidence, so the verdict never depends on which organization the scheduler
+reached first. An organization counts once it has published in any pass. If one cannot publish, for
+example because its graph namespace is unreachable, status and the logs name it, and the waiting
+planes are settled on the evidence published so far once
+`SIBYL_EMBEDDING_SWEEP_EVIDENCE_WAIT_SECONDS` have passed.
 
 A plane with no evidence anywhere adopts its vectors too, logs a warning, and shows
 `adopted_without_evidence` in `sibyl debug status` instead of `complete`. That state is exactly what
@@ -498,6 +516,16 @@ sibyld db reembed --org-id <id> --plane graph|documents|all  # mark them; the sw
 
 `sibyld db reembed` only writes metadata; the sweep does the embedding on its next passes, and the
 warning clears.
+
+#### Upgrade time
+
+The migrations that take the evidence snapshot scan existing rows once. The content upgrade scans
+raw captures before the API answers requests, about 12 seconds per 100,000 rows on a native
+SurrealDB 3.2 server, so a million raw captures add about two minutes to that start. Each
+organization's graph upgrade scans its entities and relationships, about 5.4 seconds per 100,000
+entities, the first time the organization is used after the upgrade. The Helm chart's backend
+`startupProbe` allows 10 minutes before liveness checks begin; raise its `failureThreshold` for
+larger stores so a long migration is not killed and restarted.
 
 | `SIBYL_EMBEDDING_LEGACY_VECTORS` | Vectors written before Sibyl recorded their model are                                                      |
 | -------------------------------- | ---------------------------------------------------------------------------------------------------------- |
@@ -524,6 +552,7 @@ as refused by the provider rather than pending.
 | `SIBYL_EMBEDDING_SWEEP_BATCH_SIZE`              | `96`    | Texts sent to the provider per request                              |
 | `SIBYL_EMBEDDING_SWEEP_CONCURRENCY`             | `4`     | Most requests in flight; halves on provider throttling, then climbs |
 | `SIBYL_EMBEDDING_SWEEP_VERIFY_INTERVAL_SECONDS` | `3600`  | How long a finished plane skips its table walk                      |
+| `SIBYL_EMBEDDING_SWEEP_EVIDENCE_WAIT_SECONDS`   | `600`   | Longest a plane with no evidence waits for other organizations      |
 
 ## Retrieval Tuning
 
