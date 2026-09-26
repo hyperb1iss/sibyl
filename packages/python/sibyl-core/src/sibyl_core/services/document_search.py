@@ -1,7 +1,7 @@
 """Document search helpers for unified search."""
 
 from collections.abc import Mapping, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Protocol
 from uuid import UUID
 
@@ -47,25 +47,45 @@ def reset_document_embedding_provider_cache() -> None:
     _document_embedding_fingerprint = None
 
 
-async def _embed_text(text: str) -> list[float]:
-    provider = _get_document_embedding_provider()
+@dataclass(frozen=True, slots=True)
+class DocumentQueryEmbedding:
+    """A query vector and the chunk stamp of the model that produced it."""
+
+    vector: list[float]
+    embedding_metadata: dict[str, str | int]
+
+
+async def _embed_query(text: str) -> DocumentQueryEmbedding:
+    """Embed a query and name its model from the same configuration read.
+
+    Resolving the model again after the embedding call would let a settings
+    change during the call label one model's vector as another's.
+    """
+    config = content_embeddings.configured_content_embedding()
+    provider = _document_embedding_provider_for(config)
     embeddings = await provider.embed_texts([text], input_kind="query")
     if not embeddings:
         raise ValueError("embedding provider returned no vectors")
-    return [float(value) for value in embeddings[0]]
-
-
-def _query_chunk_embedding_metadata() -> dict[str, str | int]:
-    """The chunk stamp a query embedded by this module can be scored against."""
-    config = content_embeddings.configured_content_embedding()
-    return document_chunk_embedding_metadata(
-        provider=config.provider, model=config.model, dimensions=config.dimensions
+    return DocumentQueryEmbedding(
+        vector=[float(value) for value in embeddings[0]],
+        embedding_metadata=document_chunk_embedding_metadata(
+            provider=config.provider, model=config.model, dimensions=config.dimensions
+        ),
     )
 
 
+async def _embed_text(text: str) -> list[float]:
+    return (await _embed_query(text)).vector
+
+
 def _get_document_embedding_provider() -> EmbeddingProvider:
+    return _document_embedding_provider_for(content_embeddings.configured_content_embedding())
+
+
+def _document_embedding_provider_for(
+    config: content_embeddings.ContentEmbeddingConfig,
+) -> EmbeddingProvider:
     global _document_embedding_fingerprint, _document_embedding_provider
-    config = content_embeddings.configured_content_embedding()
     if (
         _document_embedding_provider is None
         or config.fingerprint != _document_embedding_fingerprint
@@ -427,12 +447,14 @@ async def search_documents(
     """Search crawled documentation using vector and lexical matching."""
 
     query_embedding: list[float] | None = None
+    query_metadata: dict[str, str | int] | None = None
     try:
-        query_embedding = await with_timeout(
-            _embed_text(query),
+        embedded = await with_timeout(
+            _embed_query(query),
             timeout_seconds=DOCUMENT_EMBEDDING_TIMEOUT_SECONDS,
             operation_name="document_embedding",
         )
+        query_embedding, query_metadata = embedded.vector, embedded.embedding_metadata
     except Exception as exc:
         log.warning("document_vector_embedding_failed", error_type=type(exc).__name__)
 
@@ -445,7 +467,7 @@ async def search_documents(
             source_name=source_name,
             language=language,
             limit=limit,
-            embedding_metadata=_query_chunk_embedding_metadata() if query_embedding else None,
+            embedding_metadata=query_metadata if query_embedding else None,
         )
     except RuntimeError as exc:
         log.warning(

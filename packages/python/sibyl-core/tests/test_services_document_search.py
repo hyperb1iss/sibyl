@@ -10,8 +10,21 @@ import pytest
 from sibyl_core.embeddings.content import ContentEmbeddingConfig
 from sibyl_core.services import content_models
 from sibyl_core.services import document_search as document_search_service
-from sibyl_core.services.document_search import search_documents
+from sibyl_core.services.document_search import DocumentQueryEmbedding, search_documents
 from sibyl_core.services.surreal_content import ContentChunk, ContentDocument, ContentSource
+
+
+def _query_embedding(vector: list[float]) -> DocumentQueryEmbedding:
+    return DocumentQueryEmbedding(
+        vector=vector,
+        embedding_metadata={
+            "provider": "openai",
+            "model": "text-embedding-3-small",
+            "dimensions": len(vector),
+            "text_version": "document-chunk-v1",
+        },
+    )
+
 
 _CONFIGURED_RAW_MEMORY_EMBEDDING_PROVIDER = content_models.configured_raw_memory_embedding_provider
 
@@ -176,8 +189,8 @@ class TestDocumentSearch:
                 scope_loader,
             ),
             patch(
-                "sibyl_core.services.document_search._embed_text",
-                AsyncMock(return_value=[1.0, 0.0]),
+                "sibyl_core.services.document_search._embed_query",
+                AsyncMock(return_value=_query_embedding([1.0, 0.0])),
             ),
         ):
             results = await search_documents("alpha", organization_id="org-1", limit=5)
@@ -224,8 +237,8 @@ class TestDocumentSearch:
                 AsyncMock(return_value=([(chunk, document, source.name, source.id, 0.91)], [])),
             ),
             patch(
-                "sibyl_core.services.document_search._embed_text",
-                AsyncMock(return_value=[1.0, 0.0]),
+                "sibyl_core.services.document_search._embed_query",
+                AsyncMock(return_value=_query_embedding([1.0, 0.0])),
             ),
         ):
             results = await search_documents(
@@ -252,8 +265,8 @@ class TestDocumentSearch:
                 scope_loader,
             ),
             patch(
-                "sibyl_core.services.document_search._embed_text",
-                AsyncMock(return_value=[1.0, 0.0]),
+                "sibyl_core.services.document_search._embed_query",
+                AsyncMock(return_value=_query_embedding([1.0, 0.0])),
             ),
             pytest.raises(RuntimeError, match="index unavailable"),
         ):
@@ -316,7 +329,7 @@ class TestDocumentSearch:
                 scope_loader,
             ),
             patch(
-                "sibyl_core.services.document_search._embed_text",
+                "sibyl_core.services.document_search._embed_query",
                 AsyncMock(side_effect=RuntimeError("embedding unavailable")),
             ),
         ):
@@ -360,9 +373,9 @@ class TestDocumentSearch:
             heading_path=["Intro"],
         )
 
-        async def slow_embed_text(query: str) -> list[float]:
+        async def slow_embed_text(query: str) -> DocumentQueryEmbedding:
             await asyncio.sleep(1)
-            return [1.0, 0.0]
+            return _query_embedding([1.0, 0.0])
 
         direct_search = AsyncMock(
             return_value=(
@@ -375,7 +388,7 @@ class TestDocumentSearch:
                 "sibyl_core.services.document_search.search_document_chunks",
                 direct_search,
             ),
-            patch("sibyl_core.services.document_search._embed_text", slow_embed_text),
+            patch("sibyl_core.services.document_search._embed_query", slow_embed_text),
         ):
             results = await search_documents("alpha", organization_id="org-1", limit=5)
 
@@ -425,9 +438,9 @@ class TestDocumentSearch:
             ),
         ]
 
-        async def slow_embed_text(query: str) -> list[float]:
+        async def slow_embed_text(query: str) -> DocumentQueryEmbedding:
             await asyncio.sleep(1)
-            return [1.0, 0.0]
+            return _query_embedding([1.0, 0.0])
 
         direct_search = AsyncMock(return_value=([], []))
         scope_loader = AsyncMock(
@@ -447,7 +460,7 @@ class TestDocumentSearch:
                 "sibyl_core.services.document_search.load_search_scope",
                 scope_loader,
             ),
-            patch("sibyl_core.services.document_search._embed_text", slow_embed_text),
+            patch("sibyl_core.services.document_search._embed_query", slow_embed_text),
         ):
             results = await search_documents("alpha", organization_id="org-1", limit=5)
 
@@ -473,8 +486,8 @@ class TestDocumentSearch:
                 scope_loader,
             ),
             patch(
-                "sibyl_core.services.document_search._embed_text",
-                AsyncMock(return_value=[1.0, 0.0]),
+                "sibyl_core.services.document_search._embed_query",
+                AsyncMock(return_value=_query_embedding([1.0, 0.0])),
             ),
         ):
             results = await search_documents("alpha", organization_id="org-1", limit=5)
@@ -539,7 +552,7 @@ class TestDocumentSearch:
                 ),
             ),
             patch(
-                "sibyl_core.services.document_search._embed_text",
+                "sibyl_core.services.document_search._embed_query",
                 AsyncMock(side_effect=RuntimeError("embedding unavailable")),
             ),
         ):
@@ -547,3 +560,40 @@ class TestDocumentSearch:
 
         assert len(results) == 1
         assert document_content_calls == 1
+
+
+async def test_a_query_is_labelled_with_the_model_that_embedded_it(monkeypatch) -> None:
+    """A settings change during the embedding call must not relabel the vector."""
+    configs = iter(
+        [
+            ContentEmbeddingConfig(
+                provider="openai",
+                model="model-a",
+                dimensions=2,
+                api_key="key",
+            ),
+            ContentEmbeddingConfig(
+                provider="openai",
+                model="model-b",
+                dimensions=2,
+                api_key="key",
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        document_search_service.content_embeddings,
+        "configured_content_embedding",
+        lambda: next(configs),
+    )
+
+    class _Provider:
+        async def embed_texts(self, texts, *, input_kind="document"):
+            return [[1.0, 0.0] for _ in texts]
+
+    monkeypatch.setattr(
+        document_search_service, "_document_embedding_provider_for", lambda config: _Provider()
+    )
+
+    embedded = await document_search_service._embed_query("find docs")
+
+    assert embedded.embedding_metadata["model"] == "model-a"
