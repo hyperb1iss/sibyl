@@ -12,6 +12,11 @@ drift apart.
   run in the process over files on disk.
 - Remote URLs (`ws://`, `wss://`, `http://`, `https://`) reach a server.
 
+Schemes are case-insensitive, as URL schemes are. The SDK lowercases them to
+pick a connection class, but its embedded engine then rejects the original
+spelling ("Unsupported URL scheme: SURREALKV://..."), so the client
+normalizes every URL with `normalize_surreal_url` before the SDK sees it.
+
 `rocksdb://` is not on any list. The SDK rejects it ("'rocksdb' is not a
 valid UrlScheme"); it is a storage argument for `surreal start`, not a client
 URL, so configuration rejects it up front instead of letting the first
@@ -31,6 +36,18 @@ def surreal_url_scheme(url: str) -> str:
     """The URL's scheme, lowercased as the SDK's urlparse sees it; '' if none."""
     scheme, separator, _ = url.strip().partition("://")
     return scheme.lower() if separator else ""
+
+
+def normalize_surreal_url(url: str) -> str:
+    """The URL with its scheme lowercased, which every SDK code path accepts."""
+    stripped = url.strip()
+    scheme, separator, rest = stripped.partition("://")
+    return f"{scheme.lower()}://{rest}" if separator else stripped
+
+
+def is_websocket_surreal_url(url: str) -> bool:
+    """Whether this URL reaches a server over a WebSocket (live queries need one)."""
+    return surreal_url_scheme(url) in {"ws", "wss"}
 
 
 def is_embedded_surreal_url(url: str) -> bool:
@@ -96,6 +113,8 @@ __all__ = [
     "is_embedded_surreal_url",
     "is_file_backed_surreal_url",
     "is_memory_surreal_url",
+    "is_websocket_surreal_url",
+    "normalize_surreal_url",
     "production_surreal_url_problem",
     "surreal_url_scheme",
     "unsupported_surreal_url_reason",

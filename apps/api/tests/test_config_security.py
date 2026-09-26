@@ -363,7 +363,9 @@ _OPT_IN = "single-writer opt-in"
         ("surrealkv:///var/lib/sibyl", True, _OPT_IN, None),
         ("surrealkv+versioned:///var/lib/sibyl", True, _OPT_IN, None),
         ("file:///var/lib/sibyl", True, _OPT_IN, None),
+        ("SURREALKV:///var/lib/sibyl", True, _OPT_IN, None),
         ("ws://surrealdb:8000/rpc", False, None, None),
+        ("WS://surrealdb:8000/rpc", False, None, None),
         ("https://surreal.example.com", False, None, None),
     ],
 )

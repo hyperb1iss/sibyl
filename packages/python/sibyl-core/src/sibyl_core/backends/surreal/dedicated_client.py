@@ -32,6 +32,8 @@ from sibyl_core.backends.surreal.protocols import QueryParams, SurrealClient
 from sibyl_core.backends.surreal.url_schemes import (
     is_embedded_surreal_url,
     is_file_backed_surreal_url,
+    is_websocket_surreal_url,
+    normalize_surreal_url,
 )
 
 if TYPE_CHECKING:
@@ -511,6 +513,9 @@ class DedicatedSurrealClient:
         client_kind: str = "dedicated",
         pool_size: int | None = None,
     ) -> None:
+        # The SDK's embedded engine rejects an uppercase scheme, so every URL
+        # is normalized once here, where it enters the client.
+        url = normalize_surreal_url(url)
         self._url = url
         self._username = username
         self._password = password
@@ -557,7 +562,7 @@ class DedicatedSurrealClient:
 
     @property
     def supports_live_queries(self) -> bool:
-        return self._url.startswith(("ws://", "wss://"))
+        return is_websocket_surreal_url(self._url)
 
     def _new_connection(self) -> _PooledConnection:
         return _PooledConnection(

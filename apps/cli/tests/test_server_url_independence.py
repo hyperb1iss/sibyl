@@ -62,3 +62,37 @@ def test_cli_starts_with_a_server_url_it_does_not_open(
     assert result.returncode == 0, result.stdout + result.stderr
     assert "ValidationError" not in result.stderr
     assert _SECRET not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    ("surreal_url", "sql_url"),
+    [
+        ("ws://surreal:8000/rpc", "http://surreal:8000/sql"),
+        ("WS://surreal:8000/rpc", "http://surreal:8000/sql"),
+        ("wss://surreal.example.com/rpc", "https://surreal.example.com/sql"),
+        ("Wss://surreal.example.com/rpc", "https://surreal.example.com/sql"),
+        ("http://surreal:8000", "http://surreal:8000/sql"),
+    ],
+)
+def test_migrate_reads_the_sql_endpoint_whatever_the_scheme_case(
+    monkeypatch, surreal_url: str, sql_url: str
+) -> None:
+    from sibyl_cli import migrate
+
+    posted: list[str] = []
+
+    class Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> list[dict[str, object]]:
+            return [{"status": "OK", "result": []}]
+
+    def fake_post(url: str, **_kwargs: object) -> Response:
+        posted.append(url)
+        return Response()
+
+    monkeypatch.setattr(migrate.httpx, "post", fake_post)
+    migrate._source_sql(surreal_url=surreal_url, username="u", password="p", statement="RETURN 1;")
+
+    assert posted == [sql_url]

@@ -34,6 +34,7 @@ class Scheme:
     embedded: bool
     memory: bool
     file_backed: bool
+    websocket: bool
     # Production verdicts: without and with SIBYL_ALLOW_EMBEDDED_SINGLE_WRITER.
     production: str
     production_with_opt_in: str
@@ -44,17 +45,20 @@ _OPT_IN = "single-writer opt-in"
 _OK = "accepted"
 
 SCHEMES = [
-    Scheme("memory://", True, True, False, _MEMORY_BAN, _MEMORY_BAN),
-    Scheme("mem://", True, True, False, _MEMORY_BAN, _MEMORY_BAN),
-    Scheme("surrealkv:///var/sibyl", True, False, True, _OPT_IN, _OK),
-    Scheme("surrealkv+versioned:///var/sibyl", True, False, True, _OPT_IN, _OK),
-    Scheme("file:///var/sibyl", True, False, True, _OPT_IN, _OK),
-    # The SDK lowercases the scheme, so Sibyl must too.
-    Scheme("SurrealKV:///var/sibyl", True, False, True, _OPT_IN, _OK),
-    Scheme("ws://surreal:8000/rpc", False, False, False, _OK, _OK),
-    Scheme("wss://surreal.example.com/rpc", False, False, False, _OK, _OK),
-    Scheme("http://surreal:8000", False, False, False, _OK, _OK),
-    Scheme("https://surreal.example.com", False, False, False, _OK, _OK),
+    Scheme("memory://", True, True, False, False, _MEMORY_BAN, _MEMORY_BAN),
+    Scheme("mem://", True, True, False, False, _MEMORY_BAN, _MEMORY_BAN),
+    Scheme("surrealkv:///var/sibyl", True, False, True, False, _OPT_IN, _OK),
+    Scheme("surrealkv+versioned:///var/sibyl", True, False, True, False, _OPT_IN, _OK),
+    Scheme("file:///var/sibyl", True, False, True, False, _OPT_IN, _OK),
+    # Schemes are case-insensitive. The SDK's embedded engine rejects an
+    # uppercase one, so the client lowercases it before the SDK sees it.
+    Scheme("SURREALKV:///var/sibyl", True, False, True, False, _OPT_IN, _OK),
+    Scheme("MEMORY://", True, True, False, False, _MEMORY_BAN, _MEMORY_BAN),
+    Scheme("ws://surreal:8000/rpc", False, False, False, True, _OK, _OK),
+    Scheme("WS://surreal:8000/rpc", False, False, False, True, _OK, _OK),
+    Scheme("wss://surreal.example.com/rpc", False, False, False, True, _OK, _OK),
+    Scheme("http://surreal:8000", False, False, False, False, _OK, _OK),
+    Scheme("https://surreal.example.com", False, False, False, False, _OK, _OK),
 ]
 
 
@@ -76,13 +80,19 @@ def test_every_scheme_gets_one_consistent_treatment(scheme: Scheme) -> None:
     assert url_schemes.is_file_backed_surreal_url(url) is scheme.file_backed
     assert url_schemes.unsupported_surreal_url_reason(url) is None
 
+    assert url_schemes.is_websocket_surreal_url(url) is scheme.websocket
+
     client = DedicatedSurrealClient(url=url, namespace="org_scheme", database="graph", pool_size=8)
+    # The client hands the SDK a lowercase scheme and keeps the rest verbatim.
+    scheme_part, _, rest = url.partition("://")
+    assert client._url == f"{scheme_part.lower()}://{rest}"
+    assert client._pool[0]._url == client._url
     # Embedded engines hold one connection and never sign in; servers get the
     # configured pool and authenticate.
     assert client.pool_size == (1 if scheme.embedded else 8)
     assert client._pool[0]._requires_auth() is (not scheme.embedded)
+    assert client.supports_live_queries is scheme.websocket
     # Only file-backed stores share a process-wide engine.
-    assert client._pool[0]._url == url
     from sibyl_core.backends.surreal.dedicated_client import _shares_embedded_engine
 
     assert _shares_embedded_engine(url) is scheme.file_backed
@@ -131,6 +141,15 @@ def test_scheme_errors_never_echo_the_url_beyond_its_scheme() -> None:
         reason = url_schemes.unsupported_surreal_url_reason(url)
         assert reason is not None
         assert "hunter2" not in reason
+
+
+async def test_uppercase_embedded_schemes_open_a_real_store(tmp_path) -> None:
+    for url in (f"SURREALKV://{tmp_path / 'upper'}", "MEMORY://", "Mem://"):
+        client = DedicatedSurrealClient(url=url, namespace="org_case", database="graph")
+        try:
+            assert await client.execute_query("RETURN 1;") == 1
+        finally:
+            await client.close()
 
 
 def test_scheme_sets_match_the_sdk(tmp_path) -> None:
