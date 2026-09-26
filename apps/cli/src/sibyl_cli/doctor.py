@@ -27,7 +27,7 @@ from sibyl_cli.common import (
     print_json,
     run_async,
 )
-from sibyl_cli.setup import valid_hooks_shape
+from sibyl_cli.setup import entry_has_managed_hook, valid_hooks_shape
 from sibyl_cli.skill import canonical_skill_markdown, default_skill_roots
 from sibyl_core.integration import AGENT_PROMPT_SNIPPET
 
@@ -413,14 +413,6 @@ def _unreadable_settings_check(name: str) -> DoctorCheck:
     )
 
 
-def _is_sibyl_hook_entry(entry: dict) -> bool:
-    for hook in entry.get("hooks") or []:
-        cmd = str(hook.get("command", ""))
-        if "sibyl" in cmd or "hooks/sibyl" in cmd:
-            return True
-    return False
-
-
 def _check_session_hook() -> DoctorCheck:
     try:
         settings = _load_claude_settings()
@@ -435,7 +427,7 @@ def _check_session_hook() -> DoctorCheck:
         )
     hooks = settings.get("hooks") or {}
     session_entries = hooks.get("SessionStart") or []
-    if any(_is_sibyl_hook_entry(e) for e in session_entries):
+    if any(entry_has_managed_hook(e) for e in session_entries):
         return DoctorCheck(
             "session-hook",
             "pass",
@@ -456,7 +448,7 @@ def _check_no_legacy_hook() -> DoctorCheck:
         return _unreadable_settings_check("legacy-hook")
     hooks = settings.get("hooks") or {}
     user_prompt_entries = hooks.get("UserPromptSubmit") or []
-    settings_has_legacy = any(_is_sibyl_hook_entry(e) for e in user_prompt_entries)
+    settings_has_legacy = any(entry_has_managed_hook(e) for e in user_prompt_entries)
     file_present = LEGACY_USER_PROMPT_HOOK.exists()
     if not settings_has_legacy and not file_present:
         return DoctorCheck("legacy-hook", "pass", "No legacy UserPromptSubmit hook is installed.")

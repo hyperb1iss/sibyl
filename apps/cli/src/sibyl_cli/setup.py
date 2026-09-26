@@ -8,6 +8,7 @@ Installs the Sibyl skill and optional Claude hooks for assistant tooling:
 from __future__ import annotations
 
 import json
+import shlex
 import shutil
 from contextlib import suppress
 from datetime import datetime
@@ -95,16 +96,60 @@ def valid_hooks_shape(hooks: object) -> bool:
     return True
 
 
-def is_sibyl_hook(hook_entry: dict) -> bool:
-    """Check if a hook entry is a Sibyl hook."""
-    for hook in hook_entry.get("hooks", []):
-        cmd = str(hook.get("command", ""))
-        if "sibyl" in cmd or "hooks/sibyl" in cmd:
-            return True
-        prompt = str(hook.get("prompt", ""))
-        if "Sibyl" in prompt and ("knowledge graph" in prompt or "sibyl add" in prompt.lower()):
+# Scripts Sibyl installs into ~/.claude/hooks/sibyl/, including retired ones so
+# a re-run can prune them.
+MANAGED_HOOK_SCRIPTS = frozenset({"session-start.py", "user-prompt-submit.py"})
+
+
+def is_managed_hook(hook: object) -> bool:
+    """True only for a hook object Sibyl installed.
+
+    That is a command hook whose command runs one of Sibyl's scripts from a
+    `.claude/hooks/sibyl/` directory. A user's hook merely mentioning sibyl, such
+    as `/opt/sibyl-policy/check`, is never Sibyl's to remove.
+    """
+    if not isinstance(hook, dict) or hook.get("type", "command") != "command":
+        return False
+    try:
+        words = shlex.split(str(hook.get("command", "")))
+    except ValueError:
+        return False
+    for word in words:
+        path = Path(word)
+        if path.name in MANAGED_HOOK_SCRIPTS and path.parent.parts[-3:] == (
+            ".claude",
+            "hooks",
+            "sibyl",
+        ):
             return True
     return False
+
+
+def entry_has_managed_hook(entry: object) -> bool:
+    """True when a hook group contains a hook Sibyl installed."""
+    if not isinstance(entry, dict):
+        return False
+    return any(is_managed_hook(hook) for hook in entry.get("hooks") or [])
+
+
+def remove_managed_hooks(hooks: dict) -> dict:
+    """Drop only Sibyl's hook objects, keeping every other hook and its group.
+
+    A group left empty by the removal held nothing but Sibyl's hooks, so it goes
+    too; a group with other hooks keeps them, its matcher and its position.
+    """
+    cleaned: dict = {}
+    for event, entries in hooks.items():
+        kept = []
+        for entry in entries:
+            inner = entry.get("hooks", [])
+            remaining = [hook for hook in inner if not is_managed_hook(hook)]
+            if len(remaining) == len(inner):
+                kept.append(entry)
+            elif remaining:
+                kept.append({**entry, "hooks": remaining})
+        cleaned[event] = kept
+    return cleaned
 
 
 # ============================================================================
@@ -317,10 +362,8 @@ def configure_claude_hooks() -> bool:
         backup = CLAUDE_SETTINGS_FILE.with_suffix(f".json.{datetime.now():%Y%m%d-%H%M%S}.bak")
         shutil.copy2(CLAUDE_SETTINGS_FILE, backup)
 
-    # Remove old Sibyl hooks but preserve others
-    hooks = settings.get("hooks", {})
-    for event in list(hooks.keys()):
-        hooks[event] = [h for h in hooks[event] if not is_sibyl_hook(h)]
+    # Remove Sibyl's own hooks, leaving every other hook where it was.
+    hooks = remove_managed_hooks(settings.get("hooks") or {})
 
     # Add new Sibyl hooks
     sibyl_hooks = get_sibyl_hooks_config()
@@ -507,7 +550,7 @@ def get_installation_status() -> dict:
             for event in ["SessionStart"]:
                 if event in hooks:
                     for h in hooks[event]:
-                        if is_sibyl_hook(h):
+                        if entry_has_managed_hook(h):
                             claude_hooks_configured = True
                             break
         except Exception:

@@ -8,6 +8,7 @@ This script:
 """
 
 import json
+import shlex
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -41,18 +42,42 @@ SIBYL_HOOKS = {
 }
 
 
-def is_sibyl_hook(hook_entry: dict) -> bool:
-    """Check if a hook entry is a Sibyl hook."""
-    for hook in hook_entry.get("hooks", []):
-        # Command-based hooks
-        cmd = str(hook.get("command", ""))
-        if "sibyl" in cmd or "hooks/sibyl" in cmd:
-            return True
-        # Prompt-based hooks (check for Sibyl mention in prompt)
-        prompt = str(hook.get("prompt", ""))
-        if "Sibyl" in prompt and ("knowledge graph" in prompt or "sibyl add" in prompt.lower()):
-            return True
-    return False
+MANAGED_HOOK_SCRIPTS = {"session-start.py", "user-prompt-submit.py"}
+
+
+def is_managed_hook(hook: dict) -> bool:
+    """True only for a command hook that runs one of Sibyl's scripts from HOOKS_DIR's layout.
+
+    Mirrors sibyl_cli.setup.is_managed_hook: a user's hook that merely mentions
+    sibyl, such as /opt/sibyl-policy/check, is never ours to remove.
+    """
+    if not isinstance(hook, dict) or hook.get("type", "command") != "command":
+        return False
+    try:
+        words = shlex.split(str(hook.get("command", "")))
+    except ValueError:
+        return False
+    return any(
+        Path(word).name in MANAGED_HOOK_SCRIPTS
+        and Path(word).parent.parts[-3:] == (".claude", "hooks", "sibyl")
+        for word in words
+    )
+
+
+def remove_managed_hooks(hooks: dict) -> dict:
+    """Drop only Sibyl's hook objects; a group keeps its other hooks and position."""
+    cleaned = {}
+    for event, entries in hooks.items():
+        kept = []
+        for entry in entries:
+            inner = entry.get("hooks", [])
+            remaining = [hook for hook in inner if not is_managed_hook(hook)]
+            if len(remaining) == len(inner):
+                kept.append(entry)
+            elif remaining:
+                kept.append({**entry, "hooks": remaining})
+        cleaned[event] = kept
+    return cleaned
 
 
 def main():
@@ -76,13 +101,9 @@ def main():
         shutil.copy2(SETTINGS_FILE, backup)
         print(f"  Backed up existing settings to {backup.name}")
 
-    # Get existing hooks, remove old sibyl ones but preserve others
-    hooks = settings.get("hooks", {})
-    preserved_count = 0
-
-    for event in list(hooks.keys()):
-        hooks[event] = [h for h in hooks[event] if not is_sibyl_hook(h)]
-        preserved_count += len(hooks[event])
+    # Remove Sibyl's own hooks, leaving every other hook where it was.
+    hooks = remove_managed_hooks(settings.get("hooks", {}))
+    preserved_count = sum(len(entries) for entries in hooks.values())
 
     if preserved_count > 0:
         print(f"  Preserved {preserved_count} existing non-Sibyl hooks")

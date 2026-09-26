@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
-from sibyl_cli import config_store
+from sibyl_cli import config_store, pending_writes
 from sibyl_cli import doctor as doctor_module
-from sibyl_cli import pending_writes
 from sibyl_cli.doctor import DoctorCheck, DoctorContext
 from sibyl_cli.main import app
 
@@ -383,3 +383,123 @@ def test_append_managed_block_updates_existing_block_in_place(tmp_path: Path) ->
     # Markers should appear exactly once each
     assert content.count(doctor_module.AGENT_BLOCK_BEGIN) == 1
     assert content.count(doctor_module.AGENT_BLOCK_END) == 1
+
+
+def _hook_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content: dict) -> Path:
+    from sibyl_cli import setup as setup_module
+
+    settings_file = tmp_path / ".claude" / "settings.json"
+    settings_file.parent.mkdir(parents=True, exist_ok=True)
+    settings_file.write_text(json.dumps(content), encoding="utf-8")
+    monkeypatch.setattr(setup_module, "CLAUDE_SETTINGS_FILE", settings_file)
+    monkeypatch.setattr(setup_module, "CLAUDE_HOOKS_DIR", tmp_path / ".claude" / "hooks" / "sibyl")
+    monkeypatch.setattr(doctor_module, "CLAUDE_SETTINGS_PATH", settings_file)
+    return settings_file
+
+
+def _commands(settings_file: Path, event: str) -> list[list[str]]:
+    data = json.loads(settings_file.read_text(encoding="utf-8"))
+    return [[hook["command"] for hook in group["hooks"]] for group in data["hooks"][event]]
+
+
+USER_POLICY = {"type": "command", "command": "/opt/sibyl-policy/check-security"}
+USER_LINT = {"type": "command", "command": "npx sibyl-lint --fast"}
+
+
+def test_hook_registration_keeps_user_hooks_that_mention_sibyl(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sibyl_cli import setup as setup_module
+
+    settings_file = _hook_settings(
+        tmp_path,
+        monkeypatch,
+        {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [USER_POLICY, USER_LINT]}]}},
+    )
+
+    assert setup_module.configure_claude_hooks() is True
+
+    assert _commands(settings_file, "PreToolUse") == [
+        [USER_POLICY["command"], USER_LINT["command"]]
+    ]
+    managed = str(setup_module.CLAUDE_HOOKS_DIR / "session-start.py")
+    assert _commands(settings_file, "SessionStart") == [[f"python3 {managed}"]] * 2
+    # doctor must not mistake the user's hooks for Sibyl's
+    assert doctor_module._check_session_hook().status == "pass"
+
+
+def test_hook_registration_keeps_the_user_hook_in_a_mixed_group(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sibyl_cli import setup as setup_module
+
+    managed = {
+        "type": "command",
+        "command": f"python3 {tmp_path}/.claude/hooks/sibyl/session-start.py",
+    }
+    settings_file = _hook_settings(
+        tmp_path,
+        monkeypatch,
+        {"hooks": {"SessionStart": [{"matcher": "startup", "hooks": [USER_POLICY, managed]}]}},
+    )
+
+    assert setup_module.configure_claude_hooks() is True
+
+    groups = json.loads(settings_file.read_text(encoding="utf-8"))["hooks"]["SessionStart"]
+    assert groups[0] == {"matcher": "startup", "hooks": [USER_POLICY]}
+    assert [g["matcher"] for g in groups] == ["startup", "startup", "resume"]
+    assert list(settings_file.parent.glob("settings.json.*.bak"))
+
+
+def test_hook_registration_prunes_retired_sibyl_hooks_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sibyl_cli import setup as setup_module
+
+    legacy = {
+        "type": "command",
+        "command": "python3 /home/ada/.claude/hooks/sibyl/user-prompt-submit.py",
+    }
+    settings_file = _hook_settings(
+        tmp_path,
+        monkeypatch,
+        {"hooks": {"UserPromptSubmit": [{"hooks": [legacy]}, {"hooks": [USER_LINT]}]}},
+    )
+
+    assert setup_module.configure_claude_hooks() is True
+
+    assert _commands(settings_file, "UserPromptSubmit") == [[USER_LINT["command"]]]
+
+
+def test_hook_registration_is_idempotent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from sibyl_cli import setup as setup_module
+
+    settings_file = _hook_settings(
+        tmp_path,
+        monkeypatch,
+        {"model": "opus", "hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [USER_POLICY]}]}},
+    )
+
+    assert setup_module.configure_claude_hooks() is True
+    first = settings_file.read_text(encoding="utf-8")
+    assert setup_module.configure_claude_hooks() is True
+
+    assert settings_file.read_text(encoding="utf-8") == first
+    assert json.loads(first)["model"] == "opus"
+
+
+@pytest.mark.parametrize(
+    ("command", "managed"),
+    [
+        ("python3 /Users/ada/.claude/hooks/sibyl/session-start.py", True),
+        ("python3 '/home/a b/.claude/hooks/sibyl/user-prompt-submit.py'", True),
+        ("/opt/sibyl-policy/check-security", False),
+        ("python3 /Users/ada/.claude/hooks/sibyl/my-own-script.py", False),
+        ("python3 /Users/ada/sibyl/session-start.py", False),
+        ("echo 'unterminated", False),
+    ],
+)
+def test_managed_hooks_are_identified_exactly(command: str, managed: bool) -> None:
+    from sibyl_cli import setup as setup_module
+
+    assert setup_module.is_managed_hook({"type": "command", "command": command}) is managed
