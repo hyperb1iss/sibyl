@@ -286,3 +286,29 @@ def test_setup_does_not_create_project_dotenv(monkeypatch, tmp_path) -> None:
 
     assert result.exit_code == 0
     assert not (tmp_path / ".env").exists()
+
+
+@pytest.mark.parametrize(
+    ("url", "shown"),
+    [
+        ("ws:///Admin:Hunter2@host:8000/rpc", "ws:// (host not parsed)"),
+        ("surrealkv:///srv/Hunter2/sibyl", "surrealkv:// (embedded)"),
+        ("Admin:Hunter2@host:8000/rpc?next=http://x", "(no URL scheme)"),
+    ],
+)
+def test_service_check_never_prints_the_configured_url(monkeypatch, url: str, shown: str) -> None:
+    printed: list[str] = []
+    monkeypatch.setattr(cli_main, "info", lambda message: printed.append(str(message)))
+    monkeypatch.setattr(cli_main, "_tcp_service_running", lambda _host, _port: True)
+    runtime_settings = SimpleNamespace(
+        resolved_surreal_url=url,
+        auth_store="surreal",
+        resolved_coordination_backend="local",
+        redis_host="127.0.0.1",
+        redis_port=6381,
+    )
+
+    cli_main._check_surreal_services(runtime_settings)
+
+    assert f"SurrealDB configured via {shown}" in printed
+    assert all("hunter2" not in line.lower() for line in printed)

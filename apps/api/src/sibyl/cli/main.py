@@ -34,6 +34,7 @@ from sibyl.cli.export import app as export_app
 from sibyl.cli.generate import app as generate_app
 from sibyl.cli.migrate import app as migrate_app
 from sibyl.cli.up_cmd import down, status as up_status, up
+from sibyl_core.backends.surreal.url_schemes import redact_surreal_url
 
 # Main app
 app = typer.Typer(
@@ -336,7 +337,8 @@ def _check_surreal_services(settings: Any) -> bool:
             console.print(f"  [{NEON_CYAN}]Start with: sibyld up[/{NEON_CYAN}]")
             all_good = False
     else:
-        info(f"SurrealDB configured via {surreal_url}")
+        # Never the raw URL: its userinfo, path, or query can carry a secret.
+        info(f"SurrealDB configured via {redact_surreal_url(surreal_url)}")
 
     return _check_coordination_services(settings) and all_good
 

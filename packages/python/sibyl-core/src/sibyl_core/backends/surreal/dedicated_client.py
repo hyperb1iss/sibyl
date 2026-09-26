@@ -21,7 +21,6 @@ from sibyl_core.backends.surreal.connection import (
     _can_retry_raw_query,
     _is_transient_connection_error,
     _query_tokens,
-    _url_scheme,
 )
 from sibyl_core.backends.surreal.observability import (
     elapsed_ms,
@@ -34,6 +33,8 @@ from sibyl_core.backends.surreal.url_schemes import (
     is_file_backed_surreal_url,
     is_websocket_surreal_url,
     normalize_surreal_url,
+    split_surreal_url,
+    surreal_url_scheme,
 )
 
 if TYPE_CHECKING:
@@ -72,9 +73,10 @@ def _shares_embedded_engine(url: str) -> bool:
 def _embedded_engine_key(url: str) -> str:
     # Spellings of one directory (a symlinked /tmp, a trailing slash) must map
     # to one engine, or the registry would open the same files twice.
-    scheme, separator, location = url.partition("://")
-    if not separator or not location or "?" in location:
+    parts = split_surreal_url(url)
+    if parts is None or not parts[1] or "?" in parts[1]:
         return url
+    scheme, location = parts
     return f"{scheme}://{os.path.realpath(os.path.expanduser(location))}"
 
 
@@ -418,7 +420,7 @@ class _PooledConnection:
                     attempt=attempt,
                     elapsed_ms=elapsed,
                     timeout_seconds=budget,
-                    url_scheme=_url_scheme(self._url),
+                    url_scheme=surreal_url_scheme(self._url) or "unknown",
                     namespace=self._namespace,
                     database=self._database,
                     # The raised class, so this line joins the query receipt
@@ -436,7 +438,7 @@ class _PooledConnection:
                     attempt=attempt,
                     elapsed_ms=elapsed_ms(started_at),
                     timeout_seconds=budget,
-                    url_scheme=_url_scheme(self._url),
+                    url_scheme=surreal_url_scheme(self._url) or "unknown",
                     namespace=self._namespace,
                     database=self._database,
                     error_type=type(exc).__name__,
@@ -456,7 +458,7 @@ class _PooledConnection:
                 attempt=1,
                 elapsed_ms=elapsed_ms(started_at),
                 timeout_seconds=None,
-                url_scheme=_url_scheme(self._url),
+                url_scheme=surreal_url_scheme(self._url) or "unknown",
                 namespace=self._namespace,
                 database=self._database,
                 error_type=type(exc).__name__,

@@ -72,6 +72,10 @@ def test_cli_starts_with_a_server_url_it_does_not_open(
         ("wss://surreal.example.com/rpc", "https://surreal.example.com/sql"),
         ("Wss://surreal.example.com/rpc", "https://surreal.example.com/sql"),
         ("http://surreal:8000", "http://surreal:8000/sql"),
+        # Userinfo never reaches the request URL, so an HTTP error quoting it
+        # cannot carry the password; credentials travel only through auth.
+        ("ws://admin:Hunter2@surreal:8000/rpc", "http://surreal:8000/sql"),
+        ("wss://admin:Hunter2@[2001:db8::1]:8443/rpc", "https://[2001:db8::1]:8443/sql"),
     ],
 )
 def test_migrate_reads_the_sql_endpoint_whatever_the_scheme_case(
@@ -96,3 +100,22 @@ def test_migrate_reads_the_sql_endpoint_whatever_the_scheme_case(
     migrate._source_sql(surreal_url=surreal_url, username="u", password="p", statement="RETURN 1;")
 
     assert posted == [sql_url]
+
+
+@pytest.mark.parametrize(
+    "surreal_url",
+    [
+        "ws:///Admin:Hunter2@host:8000/rpc",
+        "surrealkv:///srv/Hunter2",
+        "Admin:Hunter2@h:8000?x=ws://y",
+    ],
+)
+def test_migrate_refuses_a_non_server_source_without_echoing_it(surreal_url: str) -> None:
+    from sibyl_cli import migrate
+
+    with pytest.raises(ValueError, match="must be a server URL") as caught:
+        migrate._source_sql(
+            surreal_url=surreal_url, username="u", password="p", statement="RETURN 1;"
+        )
+
+    assert "hunter2" not in str(caught.value).lower()

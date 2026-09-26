@@ -20,10 +20,7 @@ import typer
 
 from sibyl_cli.client import get_client
 from sibyl_cli.common import error, info, run_async, success
-from sibyl_core.backends.surreal.url_schemes import normalize_surreal_url
-
-# The /sql endpoint is plain HTTP on the same host as the RPC WebSocket.
-_HTTP_SCHEME_FOR = {"ws": "http", "wss": "https"}
+from sibyl_core.backends.surreal.url_schemes import redact_surreal_url, surreal_http_base_url
 
 app = typer.Typer(help="Migrate data between Sibyl instances")
 
@@ -80,9 +77,14 @@ def _source_sql(
     statement: str,
 ) -> list[Any]:
     """Run one read-only statement against the local content store."""
-    scheme, _, rest = normalize_surreal_url(surreal_url).partition("://")
-    base = f"{_HTTP_SCHEME_FOR.get(scheme, scheme)}://{rest}"
-    base = base.removesuffix("/rpc").rstrip("/")
+    # Built without userinfo, so an HTTP error that quotes the URL cannot
+    # carry a password; credentials travel only through `auth`.
+    base = surreal_http_base_url(surreal_url)
+    if base is None:
+        raise ValueError(
+            f"Source SurrealDB URL must be a server URL (ws, wss, http, or https), "
+            f"not {redact_surreal_url(surreal_url)}"
+        )
     response = httpx.post(
         f"{base}/sql",
         content=statement,

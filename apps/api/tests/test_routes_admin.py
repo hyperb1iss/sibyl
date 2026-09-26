@@ -858,3 +858,50 @@ class TestDebugDialectBuiltins:
 
         assert not admin._is_supported_debug_dialect("DELETE entity")
         assert not admin._is_supported_debug_dialect("SELECT * FROM entity; DELETE entity")
+
+
+@pytest.mark.asyncio
+async def test_surreal_observability_never_returns_or_requests_url_credentials(
+    monkeypatch,
+) -> None:
+    requests: list[tuple[str, object]] = []
+
+    class Response:
+        status_code = 200
+        text = "surrealdb_up 1\n"
+
+    class Client:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def __aenter__(self) -> Client:
+            return self
+
+        async def __aexit__(self, *_exc: object) -> None:
+            return None
+
+        async def get(self, url: str, auth: object = None) -> Response:
+            requests.append((url, auth))
+            return Response()
+
+    monkeypatch.setattr(admin_routes.httpx, "AsyncClient", Client)
+    monkeypatch.setattr(
+        admin_routes,
+        "settings",
+        SimpleNamespace(
+            resolved_surreal_url="wss://admin:Hunter2@surreal.example.com:8443/rpc?t=Hunter2",
+            surreal_username="",
+            surreal_password=SimpleNamespace(get_secret_value=lambda: ""),
+        ),
+    )
+
+    status = await admin_routes.get_surreal_observability_status()
+
+    assert status["base_url"] == "https://surreal.example.com:8443"
+    assert "hunter2" not in json.dumps(status).lower()
+    assert [url for url, _auth in requests] == [
+        "https://surreal.example.com:8443/health",
+        "https://surreal.example.com:8443/metrics",
+    ]
+    # The URL's own userinfo still authenticates the metrics read.
+    assert requests[1][1] == ("admin", "Hunter2")

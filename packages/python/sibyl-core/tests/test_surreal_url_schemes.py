@@ -228,3 +228,57 @@ def test_scheme_sets_match_the_sdk(tmp_path) -> None:
     # rocksdb:// is refused by the SDK itself, which is why config refuses it.
     with pytest.raises(ValueError, match="rocksdb"):
         AsyncSurreal(f"rocksdb://{tmp_path / 'rocksdb'}")
+
+
+@pytest.mark.parametrize(
+    ("url", "redacted"),
+    [
+        ("ws://surreal:8000/rpc", "ws://surreal:8000"),
+        ("WS://admin:Hunter2@surreal:8000/rpc?token=Hunter2#Hunter2", "ws://surreal:8000"),
+        ("wss://admin:Hunter2@surreal.example.com/rpc", "wss://surreal.example.com"),
+        ("http://admin:Hunter2@10.0.0.5:8000", "http://10.0.0.5:8000"),
+        ("https://admin:Hunter2@[2001:db8::1]:8443/sub/rpc", "https://[2001:db8::1]:8443"),
+        ("ws://admin:Hunter2@[::1]/rpc", "ws://[::1]"),
+        # No host to show: the scheme only.
+        ("ws:///Admin:Hunter2@host:8000/rpc", "ws:// (host not parsed)"),
+        ("http://admin:Hunter2@host:notaport/rpc", "http:// (host not parsed)"),
+        # Embedded stores show no path, which could itself hold a secret.
+        ("surrealkv:///srv/Hunter2/sibyl", "surrealkv:// (embedded)"),
+        ("surrealkv+versioned:///srv/Hunter2", "surrealkv+versioned:// (embedded)"),
+        ("file:///srv/Hunter2", "file:// (embedded)"),
+        ("memory://", "memory:// (embedded)"),
+        ("mem://", "mem:// (embedded)"),
+        # Unsupported or missing schemes.
+        ("tikv://admin:Hunter2@pd:2379", "tikv://pd:2379"),
+        ("Admin:Hunter2@host:8000/rpc?next=http://x", "(no URL scheme)"),
+    ],
+)
+def test_redacted_urls_keep_only_scheme_host_and_port(url: str, redacted: str) -> None:
+    assert url_schemes.redact_surreal_url(url) == redacted
+    assert "hunter2" not in url_schemes.redact_surreal_url(url).lower()
+
+
+@pytest.mark.parametrize(
+    ("url", "base", "credentials"),
+    [
+        ("ws://surreal:8000/rpc", "http://surreal:8000", None),
+        (
+            "wss://admin:Hunter2@surreal.example.com/rpc",
+            "https://surreal.example.com",
+            ("admin", "Hunter2"),
+        ),
+        (
+            "HTTP://a%40b:p%3Aw@[::1]:8000/sub/rpc/?q=Hunter2",
+            "http://[::1]:8000/sub",
+            ("a@b", "p:w"),
+        ),
+        ("ws:///Admin:Hunter2@host:8000/rpc", None, None),
+        ("surrealkv:///var/sibyl", None, None),
+    ],
+)
+def test_http_base_urls_never_carry_userinfo(
+    url: str, base: str | None, credentials: tuple[str, str] | None
+) -> None:
+    assert url_schemes.surreal_http_base_url(url) == base
+    assert "hunter2" not in (url_schemes.surreal_http_base_url(url) or "").lower()
+    assert url_schemes.surreal_url_credentials(url) == credentials

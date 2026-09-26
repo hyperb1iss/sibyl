@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from sibyl_core.backends.surreal.url_schemes import surreal_url_scheme
+
 _READ_ONLY_QUERY_TOKENS = {"SELECT", "RETURN", "INFO", "SHOW"}
 _RAW_READ_ONLY_QUERY_TOKENS = {*_READ_ONLY_QUERY_TOKENS, "LET"}
 _WRITE_QUERY_TOKENS = {
@@ -93,16 +95,16 @@ class SurrealConnectTimeout(TimeoutError):
     def __init__(self, *, url: str, attempt: int, timeout_seconds: float) -> None:
         super().__init__(
             f"SurrealDB connect timed out after {timeout_seconds:.3f}s "
-            f"(attempt {attempt}, scheme {_url_scheme(url)})"
+            f"(attempt {attempt}, scheme {_log_scheme(url)})"
         )
         self.attempt = attempt
         self.timeout_seconds = timeout_seconds
-        self.url_scheme = _url_scheme(url)
+        self.url_scheme = _log_scheme(url)
 
 
-def _url_scheme(url: str) -> str:
-    scheme, separator, _ = url.partition("://")
-    return scheme if separator else "unknown"
+def _log_scheme(url: str) -> str:
+    """The URL's scheme for an error or log field; never any other part of it."""
+    return surreal_url_scheme(url) or "unknown"
 
 
 class SurrealQueryError(RuntimeError):

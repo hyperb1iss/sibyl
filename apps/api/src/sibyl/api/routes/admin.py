@@ -6,7 +6,6 @@ import json
 from datetime import UTC, datetime
 from time import perf_counter
 from typing import Any, Literal, cast
-from urllib.parse import urlunparse
 from uuid import UUID, uuid4
 
 import httpx
@@ -53,6 +52,7 @@ from sibyl.persistence.content_runtime import (
 )
 from sibyl_core.audit import audit_event_resource
 from sibyl_core.auth import AuthOrganization, AuthUser, OrganizationRole
+from sibyl_core.backends.surreal.url_schemes import surreal_http_base_url, surreal_url_credentials
 from sibyl_core.models import CrawlStatus, Entity
 from sibyl_core.models.entities import EntityType
 from sibyl_core.utils import fingerprint_text
@@ -175,15 +175,9 @@ def _json_safe_debug_rows(rows: list[dict[str, object]]) -> list[dict[str, Any]]
 
 
 def _surreal_http_base_url() -> str | None:
-    from urllib.parse import urlparse
-
-    resolved = settings.resolved_surreal_url
-    parsed = urlparse(resolved)
-    if parsed.scheme in {"ws", "wss", "http", "https"}:
-        scheme = "https" if parsed.scheme in {"wss", "https"} else "http"
-        path = parsed.path.removesuffix("/rpc")
-        return urlunparse((scheme, parsed.netloc, path, "", "", "")).rstrip("/")
-    return None
+    # Without userinfo, since this base URL is returned in the health payload
+    # and can appear in an HTTP error message.
+    return surreal_http_base_url(settings.resolved_surreal_url)
 
 
 def _parse_surreal_metric_names(body: str) -> list[str]:
@@ -229,7 +223,7 @@ async def get_surreal_observability_status() -> dict[str, object]:
     if base_url is None:
         return status
 
-    auth: tuple[str, str] | None = None
+    auth: tuple[str, str] | None = surreal_url_credentials(settings.resolved_surreal_url)
     password = settings.surreal_password.get_secret_value()
     if settings.surreal_username and password:
         auth = (settings.surreal_username, password)

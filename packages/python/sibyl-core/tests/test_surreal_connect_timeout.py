@@ -156,3 +156,41 @@ def test_embedded_urls_get_no_connect_budget() -> None:
     assert _connect_timeout_seconds("ws://localhost:8612/rpc") == pytest.approx(
         core_config.surreal_connect_timeout_seconds
     )
+
+
+_LEAKY_URL = "Admin:Hunter2@host:8000/rpc?next=http://x"
+
+
+def test_connect_timeout_names_no_part_of_a_url_without_a_scheme() -> None:
+    failure = SurrealConnectTimeout(url=_LEAKY_URL, attempt=1, timeout_seconds=1.0)
+
+    assert "hunter2" not in str(failure).lower()
+    assert "scheme unknown" in str(failure)
+    assert failure.url_scheme == "unknown"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("url", "scheme"),
+    [(_LEAKY_URL, "unknown"), ("wss://admin:Hunter2@host:8000/rpc?next=http://x", "wss")],
+)
+async def test_connect_failure_logs_carry_only_the_scheme(
+    monkeypatch: pytest.MonkeyPatch, short_connect_budget: float, url: str, scheme: str
+) -> None:
+    _install_stalled_handshake(monkeypatch)
+    client = DedicatedSurrealClient(
+        url=url,
+        username="root",
+        password="root",
+        namespace="org_connect",
+        database="graph",
+        pool_size=1,
+    )
+
+    with capture_logs() as entries, pytest.raises(SurrealConnectTimeout) as caught:
+        await client.connect()
+
+    failures = [entry for entry in entries if entry["event"] == "surreal_connect_failed"]
+    assert [entry["url_scheme"] for entry in failures] == [scheme]
+    assert "hunter2" not in repr(entries).lower()
+    assert "hunter2" not in str(caught.value).lower()

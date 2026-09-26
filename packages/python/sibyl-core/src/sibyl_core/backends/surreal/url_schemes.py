@@ -26,6 +26,7 @@ connect fail.
 from __future__ import annotations
 
 import re
+from urllib.parse import unquote, urlsplit
 
 EMBEDDED_MEMORY_SCHEMES = frozenset({"memory", "mem"})
 EMBEDDED_FILE_SCHEMES = frozenset({"surrealkv", "surrealkv+versioned", "file"})
@@ -41,10 +42,24 @@ SUPPORTED_SCHEMES = EMBEDDED_SCHEMES | REMOTE_SCHEMES
 _SCHEME_PREFIX = re.compile(r"([A-Za-z][A-Za-z0-9+.-]*)://")
 
 
+def split_surreal_url(url: str) -> tuple[str, str] | None:
+    """The lowercased scheme and everything after its "://", or None without one.
+
+    The only place a URL is split into scheme and remainder. The input is
+    trimmed first, deliberately, so a trailing newline from a secret file
+    still parses; the scheme must then open the trimmed string.
+    """
+    stripped = url.strip()  # Trimmed first, deliberately: secret files end in a newline.
+    match = _SCHEME_PREFIX.match(stripped)
+    if match is None:
+        return None
+    return match.group(1).lower(), stripped[match.end() :]
+
+
 def surreal_url_scheme(url: str) -> str:
     """The URL's scheme, lowercased as the SDK's urlparse sees it; '' if none."""
-    match = _SCHEME_PREFIX.match(url.strip())
-    return match.group(1).lower() if match else ""
+    parts = split_surreal_url(url)
+    return parts[0] if parts else ""
 
 
 def normalize_surreal_url(url: str) -> str:
@@ -53,11 +68,70 @@ def normalize_surreal_url(url: str) -> str:
     Only a valid scheme token is touched; anything else is returned stripped
     but otherwise verbatim.
     """
-    stripped = url.strip()
-    match = _SCHEME_PREFIX.match(stripped)
-    if match is None:
-        return stripped
-    return f"{match.group(1).lower()}://{stripped[match.end() :]}"
+    parts = split_surreal_url(url)
+    return f"{parts[0]}://{parts[1]}" if parts else url.strip()
+
+
+def _host_and_port(url: str) -> tuple[str, int | None] | None:
+    """The URL's host (bracketed when IPv6) and port, or None if they do not parse."""
+    try:
+        parsed = urlsplit(normalize_surreal_url(url))
+        host, port = parsed.hostname, parsed.port
+    except ValueError:
+        return None
+    if not host:
+        return None
+    return (f"[{host}]" if ":" in host else host), port
+
+
+def redact_surreal_url(url: str) -> str:
+    """A form of the URL that is safe to print or log.
+
+    Only the scheme and, for a server, its host and port survive. Userinfo,
+    path, query, and fragment are never shown, since any of them can carry a
+    credential; an embedded store's path is dropped for the same reason.
+    """
+    scheme = surreal_url_scheme(url)
+    if not scheme:
+        return "(no URL scheme)"
+    if scheme in EMBEDDED_SCHEMES:
+        return f"{scheme}:// (embedded)"
+    location = _host_and_port(url)
+    if location is None:
+        return f"{scheme}:// (host not parsed)"
+    host, port = location
+    return f"{scheme}://{host}" if port is None else f"{scheme}://{host}:{port}"
+
+
+def surreal_http_base_url(url: str) -> str | None:
+    """The server's plain-HTTP base URL, without userinfo, query, or /rpc.
+
+    None for anything but a ws, wss, http, or https URL with a parseable host.
+    Userinfo is left out so the base URL can appear in a response or error
+    message; pass surreal_url_credentials() to the HTTP client instead.
+    """
+    scheme = surreal_url_scheme(url)
+    if scheme not in REMOTE_SCHEMES:
+        return None
+    location = _host_and_port(url)
+    if location is None:
+        return None
+    host, port = location
+    http_scheme = "https" if scheme in {"wss", "https"} else "http"
+    netloc = host if port is None else f"{host}:{port}"
+    path = urlsplit(normalize_surreal_url(url)).path.rstrip("/").removesuffix("/rpc")
+    return f"{http_scheme}://{netloc}{path}".rstrip("/")
+
+
+def surreal_url_credentials(url: str) -> tuple[str, str] | None:
+    """The username and password embedded in the URL's userinfo, if any."""
+    try:
+        parsed = urlsplit(normalize_surreal_url(url))
+    except ValueError:
+        return None
+    if parsed.username is None:
+        return None
+    return unquote(parsed.username), unquote(parsed.password or "")
 
 
 def is_websocket_surreal_url(url: str) -> bool:
@@ -131,6 +205,10 @@ __all__ = [
     "is_websocket_surreal_url",
     "normalize_surreal_url",
     "production_surreal_url_problem",
+    "redact_surreal_url",
+    "split_surreal_url",
+    "surreal_http_base_url",
+    "surreal_url_credentials",
     "surreal_url_scheme",
     "unsupported_surreal_url_reason",
 ]
