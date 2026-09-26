@@ -143,6 +143,61 @@ def test_scheme_errors_never_echo_the_url_beyond_its_scheme() -> None:
         assert "hunter2" not in reason
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        # No scheme at all, but a later "://" in the query string.
+        "Admin:Hunter2@host:8000/rpc?next=http://x",
+        # Userinfo only, with a later "://" in the path.
+        "admin:Hunter2@surreal:8000/proxy/ws://inner",
+        " admin:Hunter2@surreal:8000?redirect=wss://elsewhere ",
+    ],
+)
+def test_a_later_separator_is_not_mistaken_for_a_scheme(url: str) -> None:
+    # Only an RFC 3986 scheme token at the start counts as a scheme.
+    assert url_schemes.surreal_url_scheme(url) == ""
+    assert not url_schemes.is_embedded_surreal_url(url)
+    reason = url_schemes.unsupported_surreal_url_reason(url)
+    assert reason is not None
+    assert "has no scheme" in reason
+    assert "hunter2" not in reason.lower()
+    # Normalization leaves a URL without a valid scheme alone, beyond trimming.
+    assert url_schemes.normalize_surreal_url(url) == url.strip()
+    config = CoreConfig(environment="development", surreal_url=url, surreal_data_dir="")
+    with pytest.raises(ValueError, match="has no scheme") as caught:
+        config.require_serviceable_surreal_url()
+    assert "hunter2" not in str(caught.value).lower()
+
+
+@pytest.mark.parametrize(
+    ("url", "scheme", "normalized"),
+    [
+        ("ws://admin:Hunter2@surreal:8000/rpc?next=http://x", "ws", None),
+        ("WSS://admin:Hunter2@surreal:8000/rpc", "wss", "wss://admin:Hunter2@surreal:8000/rpc"),
+        ("SurrealKV+Versioned:///var/sibyl", "surrealkv+versioned", None),
+    ],
+)
+def test_a_valid_scheme_still_parses_with_credentials_in_the_url(
+    url: str, scheme: str, normalized: str | None
+) -> None:
+    assert url_schemes.surreal_url_scheme(url) == scheme
+    assert url_schemes.unsupported_surreal_url_reason(url) is None
+    expected = normalized or f"{scheme}://{url.split('://', 1)[1]}"
+    assert url_schemes.normalize_surreal_url(url) == expected
+    # Only the scheme is lowercased; the password keeps its case.
+    if "Hunter2" in url:
+        assert "Hunter2" in url_schemes.normalize_surreal_url(url)
+    config = CoreConfig(environment="development", surreal_url=url, surreal_data_dir="")
+    assert config.surreal_url_problem() is None
+
+
+def test_an_unsupported_scheme_names_only_its_token() -> None:
+    reason = url_schemes.unsupported_surreal_url_reason("tikv://admin:Hunter2@pd:2379?x=ws://y")
+    assert reason is not None
+    assert "tikv:// is not supported" in reason
+    assert "hunter2" not in reason.lower()
+
+
 async def test_uppercase_embedded_schemes_open_a_real_store(tmp_path) -> None:
     for url in (f"SURREALKV://{tmp_path / 'upper'}", "MEMORY://", "Mem://"):
         client = DedicatedSurrealClient(url=url, namespace="org_case", database="graph")

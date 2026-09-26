@@ -25,6 +25,8 @@ connect fail.
 
 from __future__ import annotations
 
+import re
+
 EMBEDDED_MEMORY_SCHEMES = frozenset({"memory", "mem"})
 EMBEDDED_FILE_SCHEMES = frozenset({"surrealkv", "surrealkv+versioned", "file"})
 EMBEDDED_SCHEMES = EMBEDDED_MEMORY_SCHEMES | EMBEDDED_FILE_SCHEMES
@@ -32,17 +34,30 @@ REMOTE_SCHEMES = frozenset({"ws", "wss", "http", "https"})
 SUPPORTED_SCHEMES = EMBEDDED_SCHEMES | REMOTE_SCHEMES
 
 
+# An RFC 3986 scheme token at the very start. Splitting on the first "://"
+# instead would read "admin:secret@host/rpc?next=http://x" as having the
+# scheme "admin:secret@host/rpc?next=http", and echo the password back in the
+# unsupported-scheme error.
+_SCHEME_PREFIX = re.compile(r"([A-Za-z][A-Za-z0-9+.-]*)://")
+
+
 def surreal_url_scheme(url: str) -> str:
     """The URL's scheme, lowercased as the SDK's urlparse sees it; '' if none."""
-    scheme, separator, _ = url.strip().partition("://")
-    return scheme.lower() if separator else ""
+    match = _SCHEME_PREFIX.match(url.strip())
+    return match.group(1).lower() if match else ""
 
 
 def normalize_surreal_url(url: str) -> str:
-    """The URL with its scheme lowercased, which every SDK code path accepts."""
+    """The URL with its scheme lowercased, which every SDK code path accepts.
+
+    Only a valid scheme token is touched; anything else is returned stripped
+    but otherwise verbatim.
+    """
     stripped = url.strip()
-    scheme, separator, rest = stripped.partition("://")
-    return f"{scheme.lower()}://{rest}" if separator else stripped
+    match = _SCHEME_PREFIX.match(stripped)
+    if match is None:
+        return stripped
+    return f"{match.group(1).lower()}://{stripped[match.end() :]}"
 
 
 def is_websocket_surreal_url(url: str) -> bool:
