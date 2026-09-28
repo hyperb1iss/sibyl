@@ -439,12 +439,18 @@ async def create_entity(
 
 
 RAW_MEMORY_REFERENCE_PREFIX = "raw_memory:"
-# The error sanitizer blanks any text naming a write verb, so these hints point
-# at the correction command's help rather than spelling out an action.
-RAW_MEMORY_REMEDIATION = (
-    "Raw memories change through corrections, which keep a reason and a receipt. "
-    "Run 'sibyl correct <id> --help' for the actions."
-)
+
+
+def _correct_hint(template: str, entity_id: str) -> str:
+    """Name the real id in a hint when the error sanitizer will let it through.
+
+    The sanitizer blanks any text naming a write verb or a path, which is also
+    why these hints point at the correction command's help rather than at an
+    action. An id that trips it falls back to the placeholder, so the hint
+    survives either way.
+    """
+    specific = template.format(id=entity_id)
+    return specific if sanitize_error_text(specific) == specific else template.format(id="<id>")
 
 
 def _refuse_raw_memory_reference(entity_id: str) -> None:
@@ -454,11 +460,17 @@ def _refuse_raw_memory_reference(entity_id: str) -> None:
     correction lifecycle. Sent here they used to fall through to a 500, which
     the CLI took for an outage and buffered for replay forever.
     """
-    if entity_id.strip().lower().startswith(RAW_MEMORY_REFERENCE_PREFIX):
+    candidate = entity_id.strip()
+    if candidate.lower().startswith(RAW_MEMORY_REFERENCE_PREFIX):
+        raw_id = candidate[len(RAW_MEMORY_REFERENCE_PREFIX) :]
         raise unprocessable_entity(
             f"{entity_id} is a raw memory, not a graph entity",
             field="entity_id",
-            remediation=RAW_MEMORY_REMEDIATION,
+            remediation=_correct_hint(
+                "Raw memories change through corrections, which keep a reason and a "
+                "receipt. Run 'sibyl correct {id} --help' for the actions.",
+                raw_id,
+            ),
         )
 
 
@@ -478,9 +490,10 @@ async def _existing_entity_or_404(entity_manager: Any, entity_id: str) -> Any:
             detail=safe_error_payload(
                 error="not_found",
                 message=f"Entity not found: {entity_id}",
-                remediation=(
-                    "If this is a raw memory ID, change it with 'sibyl correct', "
-                    "not the entity routes."
+                remediation=_correct_hint(
+                    "If {id} is a raw memory ID, change it with 'sibyl correct {id}', "
+                    "not the entity routes.",
+                    entity_id,
                 ),
             ),
         )

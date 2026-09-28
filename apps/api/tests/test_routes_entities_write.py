@@ -2758,7 +2758,7 @@ async def test_delete_entity_refuses_a_raw_memory_reference_with_a_4xx() -> None
     assert isinstance(detail, dict)
     assert detail["error"] == "validation_error"
     assert "is a raw memory, not a graph entity" in str(detail["message"])
-    assert "sibyl correct" in str(detail["remediation"])
+    assert "sibyl correct 3f1c2a9e-0000-4000-8000-000000000000 --help" in str(detail["remediation"])
     get_mock.assert_not_awaited()
     delete_mock.assert_not_awaited()
 
@@ -2787,7 +2787,10 @@ async def test_delete_entity_answers_a_missing_id_with_404_not_500() -> None:
     detail = excinfo.value.detail
     assert isinstance(detail, dict)
     assert detail["error"] == "not_found"
-    assert "sibyl correct" in str(detail["remediation"])
+    assert (
+        "If 3f1c2a9e-0000-4000-8000-000000000000 is a raw memory ID, change it with "
+        "'sibyl correct 3f1c2a9e-0000-4000-8000-000000000000'" in str(detail["remediation"])
+    )
     delete_mock.assert_not_awaited()
 
 
@@ -2838,3 +2841,38 @@ async def test_update_entity_refuses_a_raw_memory_reference_with_a_4xx() -> None
 
     assert excinfo.value.status_code == 422
     get_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delete_entity_refuses_an_uppercase_raw_memory_prefix() -> None:
+    runtime, get_mock, _delete_mock = _missing_entity_runtime()
+
+    with (
+        patch("sibyl.locks.entity_lock", _locked_entity),
+        patch(
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        pytest.raises(HTTPException) as excinfo,
+    ):
+        await delete_entity(
+            entity_id="RAW_MEMORY:abc",
+            request=_request(),
+            org=_org(),
+            ctx=_ctx(),
+            content_session=None,
+        )
+
+    assert excinfo.value.status_code == 422
+    get_mock.assert_not_awaited()
+
+
+def test_a_hint_whose_id_trips_the_sanitizer_falls_back_to_a_placeholder() -> None:
+    """The sanitizer blanks write verbs, so an id like this one would erase the hint."""
+    from sibyl.api.routes.entity_mutations import _correct_hint
+
+    template = "Run 'sibyl correct {id} --help' for the actions."
+    assert _correct_hint(template, "abc123") == "Run 'sibyl correct abc123 --help' for the actions."
+    assert _correct_hint(template, "drop delete me") == (
+        "Run 'sibyl correct <id> --help' for the actions."
+    )
