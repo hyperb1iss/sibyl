@@ -219,6 +219,7 @@ async def blame_memory_source(
     response_model=MemoryCorrectionResponse,
     dependencies=[Depends(require_org_role(*_WRITE_ROLES))],
 )
+@handle_workflow_errors("preview_memory_correction", id_param="source_id")
 async def preview_memory_correction_route(
     source_id: str,
     request: MemoryCorrectionRequest,

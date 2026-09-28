@@ -3746,3 +3746,32 @@ async def test_remember_raw_forwards_source_memberships_and_credential_grants() 
     assert remember.await_args.kwargs["accessible_projects"] == {"source-project", "other-project"}
     assert remember.await_args.kwargs["accessible_teams"] == {"source-team"}
     assert remember.await_args.kwargs["allowed_memory_scope_keys"] == grants
+
+
+@pytest.mark.asyncio
+async def test_preview_memory_correction_answers_a_revision_conflict_with_409(
+    correction_memberships,
+) -> None:
+    """The preview route shares the apply route's error handling, not a bare 500."""
+    from sibyl_core.errors import RevisionConflictError
+
+    org = _org()
+    memory = _memory(id="memory-1", organization_id=str(org.id), source_id="source-1")
+
+    with (
+        patch("sibyl.api.routes.memory_auth.get_raw_memory", AsyncMock(return_value=memory)),
+        patch(
+            "sibyl.api.routes.memory_sources.preview_memory_correction",
+            AsyncMock(side_effect=RevisionConflictError("memory-1", 2, 3)),
+        ),
+        pytest.raises(HTTPException) as excinfo,
+    ):
+        await preview_memory_correction_route(
+            "memory-1",
+            MemoryCorrectionRequest(action="hide", reason="outdated"),
+            http_request=_http_request(),
+            org=org,
+            ctx=_ctx(org_role=OrganizationRole.OWNER),
+        )
+
+    assert excinfo.value.status_code == 409
