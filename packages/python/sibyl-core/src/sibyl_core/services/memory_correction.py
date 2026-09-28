@@ -454,6 +454,9 @@ async def _preview_loaded_memory_correction(
     )
     metadata = {
         "duplicate_of_source_id": canonical_duplicate_of_source_id,
+        # The revision this plan was drawn against, so an apply can pin itself
+        # to it and refuse if the memory changed after the preview was shown.
+        "observed_revision": memory.observed_revision,
         "policy_allowed": True,
         "policy_reasons": [write_decision.reason],
         "replacement_source_id": canonical_replacement_source_id,
