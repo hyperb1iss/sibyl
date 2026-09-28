@@ -2717,3 +2717,124 @@ def test_raw_capture_metadata_never_carries_a_client_embedding_stamp() -> None:
     assert sanitize_raw_capture_metadata(
         {"embedding_metadata": {"provider": "forged"}, "kept": "yes"}
     ) == {"kept": "yes"}
+
+
+def _missing_entity_runtime() -> tuple[SimpleNamespace, AsyncMock, AsyncMock]:
+    """A graph runtime whose EntityManager.get behaves like the real one on a miss."""
+    get_mock = AsyncMock(side_effect=KeyError("missing"))
+    delete_mock = AsyncMock(return_value=True)
+    runtime = SimpleNamespace(entity_manager=SimpleNamespace(get=get_mock, delete=delete_mock))
+    return runtime, get_mock, delete_mock
+
+
+@pytest.mark.asyncio
+async def test_delete_entity_refuses_a_raw_memory_reference_with_a_4xx() -> None:
+    """A raw memory sent to the graph delete route is refused, not failed.
+
+    It used to reach EntityManager.get, which raises KeyError for an id the
+    entity table lacks, and the route's catch-all turned that into a 500. The
+    CLI reads a 500 as an outage and buffered the delete for replay forever.
+    """
+    runtime, get_mock, delete_mock = _missing_entity_runtime()
+
+    with (
+        patch("sibyl.locks.entity_lock", _locked_entity),
+        patch(
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        pytest.raises(HTTPException) as excinfo,
+    ):
+        await delete_entity(
+            entity_id="raw_memory:3f1c2a9e-0000-4000-8000-000000000000",
+            request=_request(),
+            org=_org(),
+            ctx=_ctx(),
+            content_session=None,
+        )
+
+    assert excinfo.value.status_code == 422
+    detail = excinfo.value.detail
+    assert isinstance(detail, dict)
+    assert detail["error"] == "validation_error"
+    assert "is a raw memory, not a graph entity" in str(detail["message"])
+    assert "sibyl correct" in str(detail["remediation"])
+    get_mock.assert_not_awaited()
+    delete_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delete_entity_answers_a_missing_id_with_404_not_500() -> None:
+    runtime, _get_mock, delete_mock = _missing_entity_runtime()
+
+    with (
+        patch("sibyl.locks.entity_lock", _locked_entity),
+        patch(
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        pytest.raises(HTTPException) as excinfo,
+    ):
+        await delete_entity(
+            entity_id="3f1c2a9e-0000-4000-8000-000000000000",
+            request=_request(),
+            org=_org(),
+            ctx=_ctx(),
+            content_session=None,
+        )
+
+    assert excinfo.value.status_code == 404
+    detail = excinfo.value.detail
+    assert isinstance(detail, dict)
+    assert detail["error"] == "not_found"
+    assert "sibyl correct" in str(detail["remediation"])
+    delete_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_update_entity_answers_a_missing_id_with_404_not_500() -> None:
+    runtime, _get_mock, _delete_mock = _missing_entity_runtime()
+
+    with (
+        patch("sibyl.locks.entity_lock", _locked_entity),
+        patch(
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        pytest.raises(HTTPException) as excinfo,
+    ):
+        await update_entity(
+            entity_id="3f1c2a9e-0000-4000-8000-000000000000",
+            update=EntityUpdate(name="Renamed"),
+            request=_request(),
+            org=_org(),
+            ctx=_ctx(),
+            content_session=None,
+        )
+
+    assert excinfo.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_update_entity_refuses_a_raw_memory_reference_with_a_4xx() -> None:
+    runtime, get_mock, _delete_mock = _missing_entity_runtime()
+
+    with (
+        patch("sibyl.locks.entity_lock", _locked_entity),
+        patch(
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        pytest.raises(HTTPException) as excinfo,
+    ):
+        await update_entity(
+            entity_id="raw_memory:3f1c2a9e-0000-4000-8000-000000000000",
+            update=EntityUpdate(name="Renamed"),
+            request=_request(),
+            org=_org(),
+            ctx=_ctx(),
+            content_session=None,
+        )
+
+    assert excinfo.value.status_code == 422
+    get_mock.assert_not_awaited()
