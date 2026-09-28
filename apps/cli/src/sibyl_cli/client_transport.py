@@ -32,6 +32,7 @@ from sibyl_cli.pending_writes import (
     create_pending_write,
     delete_pending_write,
     increment_attempts,
+    is_buffered_read_like,
     is_corrupt_pending_write,
     is_read_like_post,
     list_pending_writes,
@@ -754,6 +755,9 @@ class ClientTransportMixin:
                 for earlier in list_pending_writes():
                     if (
                         is_corrupt_pending_write(earlier)
+                        # A buffered read (a preview queued by an older client)
+                        # changed nothing, so nothing can depend on it.
+                        or is_buffered_read_like(earlier)
                         or earlier.get("base_url") != self.base_url
                         or not pending_identity_matches(
                             earlier,
@@ -867,6 +871,16 @@ class ClientTransportMixin:
                     remediation=payload.remediation,
                     details=payload.details,
                 )
+                if method.upper() == "DELETE" and response.status_code == 404:
+                    # The resource is already gone, which is all a delete asks
+                    # for, and there is no body worth keeping. A replay of a
+                    # delete that already landed is done; a first attempt at an
+                    # id that never existed still reports the 404 to its caller.
+                    if pending_write_created:
+                        _resolve_pending_write(pending_write_id, "dropped")
+                        raise exc
+                    _resolve_pending_write(pending_write_id, None)
+                    return {}
                 self._record_pending_failure(pending_write_id, exc)
                 raise exc
 

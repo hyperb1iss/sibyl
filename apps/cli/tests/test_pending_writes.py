@@ -733,6 +733,16 @@ def test_classification_and_the_replay_gate_agree_on_a_known_owner(
     assert gate_allows is False
 
 
+def _age_streak(write_id: str, *, minutes: int) -> None:
+    """Move the start of a write's 500 streak into the past, as time would."""
+    path = pending_writes.resolve_pending_write_path(write_id)
+    data = json.loads(path.read_text())
+    data["server_error_streak_started_at"] = (
+        datetime.now(UTC) - timedelta(minutes=minutes)
+    ).isoformat()
+    path.write_text(json.dumps(data))
+
+
 def _raw_delete_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
     monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
     return pending_writes.create_pending_write(
@@ -762,6 +772,7 @@ def test_a_write_the_server_keeps_failing_with_500_parks_for_an_operator(
         )
         assert updated["status"] == "pending", attempt
         assert updated["server_error_streak"] == attempt
+    _age_streak(str(item["id"]), minutes=11)
 
     parked = pending_writes.record_pending_failure(
         str(item["id"]), category="server", status_code=500, error_code="internal_error"
@@ -769,7 +780,7 @@ def test_a_write_the_server_keeps_failing_with_500_parks_for_an_operator(
 
     assert parked["status"] == "attention"
     assert parked["server_error_streak"] == limit
-    assert f"{limit} times in a row" in parked["last_failure"]["message"]
+    assert f"HTTP 500 {limit} times in a row over 11 minutes" in parked["last_failure"]["message"]
     classified = pending_writes.classify_pending_write(
         parked, base_url=CURRENT_BASE_URL, replay_scope=parked.get("replay_scope"), identity=None
     )
@@ -812,13 +823,34 @@ def test_an_interrupting_failure_resets_the_500_streak(
     assert updated["server_error_streak"] == 1
 
 
+def test_a_burst_of_500s_inside_the_time_floor_never_parks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Active use replays a write several times a minute, and a transient fault is often a 500."""
+    item = _raw_delete_write(tmp_path, monkeypatch)
+
+    for _ in range(pending_writes.PENDING_SERVER_ERROR_STREAK_LIMIT * 3):
+        updated = pending_writes.record_pending_failure(
+            str(item["id"]), category="server", status_code=500
+        )
+
+    assert updated["status"] == "pending"
+    assert "message" not in updated["last_failure"]
+
+
 def test_an_explicit_retry_gives_a_parked_write_a_fresh_streak(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     item = _raw_delete_write(tmp_path, monkeypatch)
-    for _ in range(pending_writes.PENDING_SERVER_ERROR_STREAK_LIMIT):
+    for _ in range(pending_writes.PENDING_SERVER_ERROR_STREAK_LIMIT - 1):
         pending_writes.record_pending_failure(str(item["id"]), category="server", status_code=500)
+    _age_streak(str(item["id"]), minutes=11)
+    parked = pending_writes.record_pending_failure(
+        str(item["id"]), category="server", status_code=500
+    )
+    assert parked["status"] == "attention"
 
     retried = pending_writes.retry_pending_write(str(item["id"]))
     after = pending_writes.record_pending_failure(
@@ -827,4 +859,20 @@ def test_an_explicit_retry_gives_a_parked_write_a_fresh_streak(
 
     assert retried["status"] == "pending"
     assert retried["server_error_streak"] == 0
+    assert "server_error_streak_started_at" not in retried
     assert after["status"] == "pending"
+
+
+def test_a_correction_preview_is_a_read_and_never_buffered() -> None:
+    assert pending_writes.is_read_like_post("/memory/inspect/mem-a/corrections/preview")
+    assert pending_writes.is_read_like_post("/memory/inspect/mem-a/corrections/preview/")
+    assert not pending_writes.is_read_like_post("/memory/inspect/mem-a/corrections")
+
+
+def test_corrections_to_different_memories_are_independent_resources() -> None:
+    def resource(path: str) -> str:
+        return pending_writes.pending_write_resource({"id": "w", "method": "POST", "path": path})
+
+    assert resource("/memory/inspect/mem-a/corrections") == "memory:mem-a"
+    assert resource("/memory/inspect/mem-b/corrections") == "memory:mem-b"
+    assert resource("/memory/inspect/mem-a/corrections/preview") == "memory:mem-a"

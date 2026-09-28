@@ -776,3 +776,121 @@ def test_read_pending_metrics_folds_retired_expired_into_discarded(
         metrics["completed"] + metrics["replayed"] + metrics["dropped"] + metrics["discarded"]
     )
     assert outcomes == metrics["attempted"]
+
+
+@pytest.mark.parametrize("status_code", [500, 403, 404, 422])
+@pytest.mark.asyncio
+async def test_a_failed_correction_preview_queues_nothing_and_blocks_nothing(
+    status_code: int,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A preview writes nothing, so a failed one has nothing to replay.
+
+    Buffered, it used to sit under one key for every /memory/inspect write, so
+    each later correction on any memory failed with a pending dependency.
+    """
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    client_module._FAILURE_WINDOWS.clear()
+    sent: list[str] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        sent.append(request.url.path)
+        if request.url.path.endswith("/mem-a/corrections/preview"):
+            return httpx.Response(status_code, json={"error": "x", "message": "boom"})
+        return httpx.Response(200, json={"allowed": True, "applied": False})
+
+    client = _client_with_transport(httpx.MockTransport(respond))
+
+    with pytest.raises(SibylClientError):
+        await client.correct_memory("mem-a", action="hide", reason="r", preview=True)
+    other = await client.correct_memory("mem-b", action="hide", reason="r", preview=True)
+    await client.close()
+
+    assert other["allowed"] is True
+    assert pending_writes.list_pending_writes() == []
+    assert sent == [
+        "/api/memory/inspect/mem-a/corrections/preview",
+        "/api/memory/inspect/mem-b/corrections/preview",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_preview_queued_by_an_older_client_blocks_no_correction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    client_module._FAILURE_WINDOWS.clear()
+    stale = pending_writes.create_pending_write(
+        method="POST",
+        path="/memory/inspect/mem-a/corrections/preview",
+        base_url="http://testserver/api",
+        json_payload={"action": "hide", "reason": "r"},
+        params=None,
+    )
+    pending_writes.record_pending_failure(str(stale["id"]), category="rejected", status_code=404)
+
+    client = _client_with_transport(
+        httpx.MockTransport(lambda _request: httpx.Response(200, json={"applied": True}))
+    )
+    applied = await client.correct_memory("mem-a", action="hide", reason="r")
+    await client.close()
+
+    assert applied["applied"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_first_delete_answered_404_reports_it_and_queues_nothing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    client_module._FAILURE_WINDOWS.clear()
+    client = _client_with_transport(
+        httpx.MockTransport(
+            lambda _request: httpx.Response(
+                404, json={"error": "not_found", "message": "Entity not found: x"}
+            )
+        )
+    )
+
+    with pytest.raises(SibylClientError) as exc:
+        await client.delete_entity("3f1c2a9e-0000-4000-8000-000000000000")
+    await client.close()
+
+    assert exc.value.status_code == 404
+    assert pending_writes.list_pending_writes() == []
+    assert pending_writes.read_pending_metrics()["dropped"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_replayed_delete_answered_404_is_done_not_parked(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A queued delete that already landed replays to a 404; the resource is gone."""
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    client_module._FAILURE_WINDOWS.clear()
+    answers = [
+        httpx.Response(503, json={"error": "service_unavailable", "message": "down"}),
+        httpx.Response(404, json={"error": "not_found", "message": "Entity not found: note_gone"}),
+    ]
+    client = _client_with_transport(httpx.MockTransport(lambda _request: answers.pop(0)))
+
+    with pytest.raises(SibylClientError):
+        await client.delete_entity("note_gone")
+    (queued,) = pending_writes.list_pending_writes()
+    assert queued["status"] == "pending"
+
+    result = await client._request(
+        "DELETE",
+        "/entities/note_gone",
+        _buffer_pending=False,
+        _pending_write_id=str(queued["id"]),
+        _idempotency_key=str(queued["idempotency_key"]),
+    )
+    await client.close()
+
+    assert result == {}
+    assert pending_writes.list_pending_writes() == []
