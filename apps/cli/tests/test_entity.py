@@ -60,3 +60,26 @@ def test_entity_show_renders_raw_memory_reference(mock_get_client: MagicMock) ->
         entity_type="raw_memory",
     )
     mock_client.memory_inspect.assert_awaited_once_with("memory-1")
+
+
+@patch("sibyl_cli.entity.get_client")
+def test_entity_delete_refuses_a_raw_memory_before_sending_anything(
+    mock_get_client: MagicMock,
+) -> None:
+    """A raw memory delete can never succeed on the graph route.
+
+    Sent anyway, it failed with a 500 that the client buffered for replay, and
+    every later command reported the stuck write until it was discarded by hand.
+    """
+    result = CliRunner().invoke(
+        app, ["delete", "raw_memory:3f1c2a9e-0000-4000-8000-000000000000", "-y"]
+    )
+
+    output = " ".join(result.stdout.split())
+    assert result.exit_code == 1
+    assert "is a raw memory, not a graph entity" in output
+    assert (
+        'sibyl correct 3f1c2a9e-0000-4000-8000-000000000000 --action delete --reason "<why>"'
+        in output
+    )
+    mock_get_client.assert_not_called()

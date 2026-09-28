@@ -30,6 +30,7 @@ from sibyl_cli.memory_display import (
     inspect_raw_memory_source,
     is_raw_memory_reference,
     print_memory_source_inspect,
+    raw_memory_lookup_value,
 )
 from sibyl_core.models.entities import EntityType
 
@@ -280,6 +281,16 @@ def delete_entity(
     ] = False,
 ) -> None:
     """Delete an entity. Default: table output."""
+    if is_raw_memory_reference(entity_id):
+        # A raw memory is not a graph entity. Sending it here can only fail, and
+        # a failed write is buffered for replay, so refuse before any request.
+        raw_id = raw_memory_lookup_value(entity_id)
+        error(f"{entity_id} is a raw memory, not a graph entity; entity delete cannot remove it.")
+        info(
+            "Delete it through the correction lifecycle, which records a reason and a receipt: "
+            f'sibyl correct {raw_id} --action delete --reason "<why>"'
+        )
+        raise typer.Exit(code=1)
 
     @run_async
     async def _delete() -> None:
