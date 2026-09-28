@@ -197,12 +197,61 @@ async def _load_memory_blame(client: Any, source_id: str) -> dict[str, Any]:
     return await client.memory_blame(resolved_source_id)
 
 
+# The words an operator types, mapped to the correction actions the API
+# accepts. Every action the API supports has a name here, so reversing a
+# mistaken mark never needs a one-off script.
+CORRECTION_ACTIONS: dict[str, str] = {
+    "wrong": "mark_wrong",
+    "stale": "mark_stale",
+    "duplicate": "mark_duplicate",
+    "superseded": "supersede",
+    "revise": "revise",
+    "restore": "restore",
+    "hide": "hide",
+    "mark_sensitive": "mark_sensitive",
+    "redact": "redact",
+    "delete": "delete",
+}
+CORRECTION_ALIASES: dict[str, str] = {
+    "active": "restore",
+    "undo": "restore",
+    "sensitive": "mark_sensitive",
+}
+# Lifecycle moves are previewed on the server before they apply, so the
+# operator sees the state and flags that will change first.
+PREVIEWED_CORRECTIONS = frozenset({"restore", "hide", "mark_sensitive", "redact", "delete"})
+IRREVERSIBLE_CORRECTIONS = frozenset({"redact", "delete"})
+_CORRECTION_ACTION_HELP = (
+    "Correction: wrong, stale, duplicate, superseded, revise, restore (or active, undo), "
+    "hide, mark_sensitive (or sensitive), redact, or delete"
+)
+
+
+def normalize_correction_action(action: str) -> str | None:
+    """Resolve a typed action or alias to its CLI name, or None when unknown."""
+    typed = action.strip().lower().replace("-", "_")
+    typed = CORRECTION_ALIASES.get(typed, typed)
+    return typed if typed in CORRECTION_ACTIONS else None
+
+
+def correction_preview_line(action: str, planned: dict[str, Any]) -> str:
+    """One line naming what a correction will change, from the server's own preview."""
+    state = str(planned.get("target_lifecycle_state") or "unchanged")
+    flags = [str(flag) for flag in planned.get("target_lifecycle_flags") or []]
+    derived = len(planned.get("affected_derived_ids") or [])
+    reversible = "reversible" if planned.get("reversible") else "irreversible"
+    return (
+        f"{action}: state → {state}, flags → {', '.join(flags) if flags else 'none'}; "
+        f"{derived} derived record{'s' if derived != 1 else ''} affected; {reversible}"
+    )
+
+
 def correct_memory(
     source_id: str = typer.Argument(..., help="Raw memory source ID"),
     action: str | None = typer.Option(
         None,
         "--action",
-        help="Correction: wrong, stale, duplicate, superseded, or revise",
+        help=_CORRECTION_ACTION_HELP,
     ),
     reason: str | None = typer.Option(None, "--reason", help="Why this correction is needed"),
     replacement: str | None = typer.Option(
@@ -239,9 +288,22 @@ def correct_memory(
         help="Apply only if the memory still has this revision",
     ),
     preview: bool = typer.Option(False, "--preview", help="Validate without writing"),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Apply redact or delete without asking; both are irreversible",
+    ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ) -> None:
-    """Inspect, correct, or revise a raw memory with a durable receipt."""
+    """Inspect, correct, or revise a raw memory with a durable receipt.
+
+    Actions: wrong, stale, duplicate, superseded and revise correct what a
+    memory says; restore (or active, undo) reverses a correction; hide,
+    mark_sensitive, redact and delete change who sees it. Lifecycle actions
+    print a server preview first, and redact and delete ask before applying
+    unless --yes is given.
+    """
     if action is None:
         mutation_inputs = (
             reason,
@@ -270,17 +332,20 @@ def correct_memory(
         run_inspect_memory()
         return
 
-    action_map = {
-        "wrong": "mark_wrong",
-        "stale": "mark_stale",
-        "duplicate": "mark_duplicate",
-        "superseded": "supersede",
-        "revise": "revise",
-    }
-    normalized_action = action.strip().lower()
-    api_action = action_map.get(normalized_action)
-    if api_action is None:
-        error("--action must be wrong, stale, duplicate, superseded, or revise")
+    resolved_action = normalize_correction_action(action)
+    if resolved_action is None:
+        error(
+            "--action must be one of: "
+            + ", ".join(CORRECTION_ACTIONS)
+            + " (aliases: "
+            + ", ".join(f"{alias} → {name}" for alias, name in CORRECTION_ALIASES.items())
+            + ")"
+        )
+        raise typer.Exit(code=1)
+    normalized_action = resolved_action
+    api_action = CORRECTION_ACTIONS[normalized_action]
+    if normalized_action in IRREVERSIBLE_CORRECTIONS and json_output and not preview and not yes:
+        error(f"--action {normalized_action} is irreversible; pass --yes to apply it with --json")
         raise typer.Exit(code=1)
     reason_text = (reason or "").strip()
     if not reason_text:
@@ -335,15 +400,35 @@ def correct_memory(
                     if duplicate_of
                     else None
                 )
+                correction = {
+                    "action": api_action,
+                    "reason": reason_text,
+                    "replacement_source_id": resolved_replacement,
+                    "duplicate_of_source_id": resolved_duplicate,
+                    "revised_content": revised_content,
+                    "expected_revision": expected_revision,
+                }
+                if normalized_action in PREVIEWED_CORRECTIONS and not preview:
+                    planned = await client.correct_memory(
+                        resolved_source_id, **correction, preview=True
+                    )
+                    if planned.get("allowed") is not True:
+                        if json_output:
+                            print_json(planned)
+                        else:
+                            error(f"Correction denied: {planned.get('reason') or 'unknown reason'}")
+                        raise typer.Exit(code=1)
+                    if not json_output:
+                        info(correction_preview_line(normalized_action, planned))
+                    if (
+                        normalized_action in IRREVERSIBLE_CORRECTIONS
+                        and not yes
+                        and not typer.confirm(f"Apply {normalized_action}? This cannot be undone.")
+                    ):
+                        error("Correction not applied.")
+                        raise typer.Exit(code=1)
                 data = await client.correct_memory(
-                    resolved_source_id,
-                    action=api_action,
-                    reason=reason_text,
-                    replacement_source_id=resolved_replacement,
-                    duplicate_of_source_id=resolved_duplicate,
-                    revised_content=revised_content,
-                    expected_revision=expected_revision,
-                    preview=preview,
+                    resolved_source_id, **correction, preview=preview
                 )
             applied = data.get("applied") is True
             allowed = data.get("allowed") is True
