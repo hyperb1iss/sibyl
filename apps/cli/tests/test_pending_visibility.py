@@ -174,7 +174,7 @@ def test_the_notice_names_every_parked_class_in_one_line(
     err = capsys.readouterr().err
     # Rich wraps the console line, so compare on collapsed whitespace.
     assert (
-        "Buffered writes need a decision: 2 rejected by the server, "
+        "Buffered writes need a decision: 2 rejected or stuck on the server, "
         "8 with no owner this login can replay, 3 for another server "
         "(http://localhost:3364/api). "
         "Run 'sibyl pending-writes list', then 'adopt' or 'discard'." in " ".join(err.split())

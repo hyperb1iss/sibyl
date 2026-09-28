@@ -731,3 +731,100 @@ def test_classification_and_the_replay_gate_agree_on_a_known_owner(
 
     assert write_class == "unowned"
     assert gate_allows is False
+
+
+def _raw_delete_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    return pending_writes.create_pending_write(
+        method="DELETE",
+        path="/entities/raw_memory:3f1c2a9e-0000-4000-8000-000000000000",
+        base_url=CURRENT_BASE_URL,
+        json_payload=None,
+        params=None,
+    )
+
+
+def test_a_write_the_server_keeps_failing_with_500_parks_for_an_operator(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A 500 on the same payload, over and over, is not an outage that will heal.
+
+    Before the streak limit the write replayed and every command reported it
+    forever, until someone discarded it by hand.
+    """
+    item = _raw_delete_write(tmp_path, monkeypatch)
+    limit = pending_writes.PENDING_SERVER_ERROR_STREAK_LIMIT
+
+    for attempt in range(1, limit):
+        updated = pending_writes.record_pending_failure(
+            str(item["id"]), category="server", status_code=500, error_code="internal_error"
+        )
+        assert updated["status"] == "pending", attempt
+        assert updated["server_error_streak"] == attempt
+
+    parked = pending_writes.record_pending_failure(
+        str(item["id"]), category="server", status_code=500, error_code="internal_error"
+    )
+
+    assert parked["status"] == "attention"
+    assert parked["server_error_streak"] == limit
+    assert f"{limit} times in a row" in parked["last_failure"]["message"]
+    classified = pending_writes.classify_pending_write(
+        parked, base_url=CURRENT_BASE_URL, replay_scope=parked.get("replay_scope"), identity=None
+    )
+    assert classified in {"needs_attention", "unowned"}
+
+
+@pytest.mark.parametrize("status_code", [502, 503, 504])
+def test_an_outage_status_never_parks_a_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    status_code: int,
+) -> None:
+    item = _raw_delete_write(tmp_path, monkeypatch)
+
+    for _ in range(pending_writes.PENDING_SERVER_ERROR_STREAK_LIMIT * 2):
+        updated = pending_writes.record_pending_failure(
+            str(item["id"]), category="server", status_code=status_code
+        )
+
+    assert updated["status"] == "pending"
+    assert updated["server_error_streak"] == 0
+    assert "message" not in updated["last_failure"]
+
+
+def test_an_interrupting_failure_resets_the_500_streak(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    item = _raw_delete_write(tmp_path, monkeypatch)
+    limit = pending_writes.PENDING_SERVER_ERROR_STREAK_LIMIT
+
+    for _ in range(limit - 1):
+        pending_writes.record_pending_failure(str(item["id"]), category="server", status_code=500)
+    pending_writes.record_pending_failure(str(item["id"]), category="transport")
+    updated = pending_writes.record_pending_failure(
+        str(item["id"]), category="server", status_code=500
+    )
+
+    assert updated["status"] == "pending"
+    assert updated["server_error_streak"] == 1
+
+
+def test_an_explicit_retry_gives_a_parked_write_a_fresh_streak(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    item = _raw_delete_write(tmp_path, monkeypatch)
+    for _ in range(pending_writes.PENDING_SERVER_ERROR_STREAK_LIMIT):
+        pending_writes.record_pending_failure(str(item["id"]), category="server", status_code=500)
+
+    retried = pending_writes.retry_pending_write(str(item["id"]))
+    after = pending_writes.record_pending_failure(
+        str(item["id"]), category="server", status_code=500
+    )
+
+    assert retried["status"] == "pending"
+    assert retried["server_error_streak"] == 0
+    assert after["status"] == "pending"

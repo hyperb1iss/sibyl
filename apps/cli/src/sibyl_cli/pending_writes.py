@@ -74,6 +74,15 @@ PENDING_OWNERSHIP_REASON_MAX = 200
 # A write younger than this with no recorded failure is simply in flight, and
 # saying so after every command is noise rather than information.
 PENDING_RETRY_QUIET_SECONDS = 300.0
+# An outage answers with 502, 503 or 504 and heals. A 500 repeated this many
+# times in a row is the server failing on this payload, so the write parks for
+# an operator instead of replaying, and nagging, forever.
+PENDING_SERVER_ERROR_STREAK_LIMIT = 5
+_DETERMINISTIC_SERVER_STATUSES = frozenset({500})
+PARKED_SERVER_ERROR_MESSAGE = (
+    "The server failed this write with the same error {streak} times in a row, so it "
+    "no longer retries on its own. Inspect it, then 'retry' or 'discard' it."
+)
 
 # Read-like POSTs (search, recall, context-pack assembly) carry no durable
 # write, so a failed one is simply re-run, never replayed. Buffering them
@@ -463,7 +472,12 @@ def record_pending_failure(
     if is_corrupt_pending_write(data):
         raise ValueError("Cannot record a failure for a corrupt pending write")
     rejected = category in {"rejected", "conflict"}
-    data["status"] = "attention" if rejected else "pending"
+    deterministic = category == "server" and status_code in _DETERMINISTIC_SERVER_STATUSES
+    prior_streak = data.get("server_error_streak")
+    streak = (prior_streak if type(prior_streak) is int and prior_streak > 0 else 0) + 1
+    data["server_error_streak"] = streak if deterministic else 0
+    parked = deterministic and streak >= PENDING_SERVER_ERROR_STREAK_LIMIT
+    data["status"] = "attention" if rejected or parked else "pending"
     failure: dict[str, Any] = {
         "category": category,
         "status_code": status_code,
@@ -472,6 +486,10 @@ def record_pending_failure(
     }
     if rejected and message:
         failure["message"] = _bounded_diagnostic(message, PENDING_FAILURE_MESSAGE_MAX)
+    elif parked:
+        # The CLI's own words, never the response body, so no server detail
+        # lands in the queue file.
+        failure["message"] = PARKED_SERVER_ERROR_MESSAGE.format(streak=streak)
     data["last_failure"] = failure
     _secure_write_json(path, data)
     return data
@@ -485,6 +503,9 @@ def retry_pending_write(write_id: str) -> dict[str, Any]:
         raise ValueError("Cannot retry a corrupt pending write")
     data["status"] = "pending"
     data.pop("last_attempt_at", None)
+    # An explicit retry is a fresh decision, so a parked write earns a new run
+    # of automatic attempts rather than parking again on its first failure.
+    data["server_error_streak"] = 0
     _secure_write_json(path, data)
     return data
 

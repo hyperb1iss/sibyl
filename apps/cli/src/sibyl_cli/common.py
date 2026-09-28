@@ -228,7 +228,7 @@ def format_write_age(seconds: float) -> str:
 # Each class gets the words an operator needs to recognize it, and the counts
 # are named separately so one line can carry the whole decision.
 _PENDING_CLASS_LABELS: tuple[tuple[str, str], ...] = (
-    ("needs_attention", "rejected by the server"),
+    ("needs_attention", "rejected or stuck on the server"),
     ("unowned", "with no owner this login can replay"),
     ("foreign_server", "for another server"),
     ("read_like", "re-runnable reads"),
