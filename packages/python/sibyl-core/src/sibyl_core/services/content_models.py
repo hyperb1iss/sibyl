@@ -214,6 +214,28 @@ def raw_memory_capture_surface(memory: RawMemory) -> str:
     return str(value or "").strip().lower()
 
 
+REFLECTION_CANDIDATE_SURFACE = "reflection_candidate"
+
+
+def raw_memory_unpublished_reflection_candidate(memory: RawMemory) -> bool:
+    """A dream-cycle proposal the critic has not promoted.
+
+    Its text is model output that no review accepted: a pending draft, a draft
+    a promoted correction retired, or a correction child whose chain stalled.
+    Readers get the promoted memory instead. The candidate pipeline reads these
+    rows through its own lifecycle checks rather than recall, so review,
+    validation and promotion still reach them.
+    """
+    surfaces = {
+        str(memory.capture_surface or "").strip().lower(),
+        str(memory.metadata.get("capture_surface") or "").strip().lower(),
+    }
+    return (
+        REFLECTION_CANDIDATE_SURFACE in surfaces
+        and str(memory.review_state or "pending").strip().lower() != "promoted"
+    )
+
+
 def normalize_raw_temporal_datetime(value: object | None) -> datetime | None:
     if value is None:
         return None
