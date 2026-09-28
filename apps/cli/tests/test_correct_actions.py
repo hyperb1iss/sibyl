@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -29,8 +30,19 @@ class _FakeClientContext:
         return None
 
 
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
 def _flat(text: str) -> str:
-    return " ".join(text.split())
+    """Plain text with whitespace collapsed, so colour and wrapping cannot split a match."""
+    return " ".join(_ANSI_RE.sub("", text).split())
+
+
+@pytest.fixture
+def interactive_stdin():
+    """Let the irreversible-action prompt run, as it would at a terminal."""
+    with patch("sibyl_cli.memory_admin.stdin_is_interactive", return_value=True):
+        yield
 
 
 def _planned(action: str, *, state: str, flags: list[str], reversible: bool) -> dict[str, Any]:
@@ -151,6 +163,7 @@ def test_reversible_lifecycle_actions_preview_then_apply_without_asking(
     )
 
 
+@pytest.mark.usefixtures("interactive_stdin")
 @pytest.mark.parametrize("action", ["delete", "redact"])
 @patch("sibyl_cli.memory_admin.get_client")
 def test_irreversible_actions_ask_first_and_a_no_applies_nothing(
@@ -173,6 +186,7 @@ def test_irreversible_actions_ask_first_and_a_no_applies_nothing(
     assert [call.kwargs["preview"] for call in client.correct_memory.await_args_list] == [True]
 
 
+@pytest.mark.usefixtures("interactive_stdin")
 @pytest.mark.parametrize("action", ["delete", "redact"])
 @patch("sibyl_cli.memory_admin.get_client")
 def test_irreversible_actions_apply_after_a_yes_or_with_yes_flag(
@@ -242,7 +256,8 @@ def test_an_unknown_action_names_every_action_and_alias(mock_get_client: MagicMo
 
 
 def test_correct_help_lists_every_action() -> None:
-    result = CliRunner().invoke(app, ["correct", "--help"], env={"COLUMNS": "200"})
+    # CI forces colour, and Rich splits a flag with escape codes; _flat strips them.
+    result = CliRunner().invoke(app, ["correct", "--help"], env={"COLUMNS": "80"})
 
     output = _flat(result.stdout)
     assert result.exit_code == 0
@@ -251,3 +266,75 @@ def test_correct_help_lists_every_action() -> None:
     for alias in CORRECTION_ALIASES:
         assert alias in output
     assert "--yes" in output
+
+
+@pytest.mark.parametrize("action", ["delete", "redact"])
+@patch("sibyl_cli.memory_admin.stdin_is_interactive", return_value=False)
+@patch("sibyl_cli.memory_admin.get_client")
+def test_irreversible_actions_refuse_up_front_when_nobody_can_confirm(
+    mock_get_client: MagicMock, _interactive: MagicMock, action: str
+) -> None:
+    """A prompt with no terminal behind it aborts unhelpfully or waits on an idle pipe."""
+    result = CliRunner().invoke(
+        app, ["correct", SOURCE_ID, "--action", action, "--reason", "Leaked a secret"]
+    )
+
+    output = _flat(result.stdout)
+    assert result.exit_code == 1
+    assert "stdin is not a terminal; pass --yes" in output
+    mock_get_client.assert_not_called()
+
+
+@pytest.mark.parametrize("action", ["delete", "redact"])
+@patch("sibyl_cli.memory_admin.stdin_is_interactive", return_value=False)
+@patch("sibyl_cli.memory_admin.get_client")
+def test_yes_applies_irreversible_actions_without_a_terminal(
+    mock_get_client: MagicMock, _interactive: MagicMock, action: str
+) -> None:
+    client = _client(_planned(action, state="deleted", flags=[], reversible=False))
+    mock_get_client.return_value = _FakeClientContext(client)
+
+    result = CliRunner().invoke(
+        app, ["correct", SOURCE_ID, "--action", action, "--reason", "Leaked", "--yes"]
+    )
+
+    assert result.exit_code == 0, result.stdout
+    assert f"Memory corrected: {action}" in _flat(result.stdout)
+
+
+@patch("sibyl_cli.memory_admin.get_client")
+def test_the_apply_is_pinned_to_the_revision_the_preview_showed(
+    mock_get_client: MagicMock,
+) -> None:
+    planned = _planned("hide", state="active", flags=["hidden"], reversible=True)
+    planned["metadata"] = {"observed_revision": 7}
+    client = _client(planned)
+    mock_get_client.return_value = _FakeClientContext(client)
+
+    result = CliRunner().invoke(
+        app, ["correct", SOURCE_ID, "--action", "hide", "--reason", "Noise"]
+    )
+
+    assert result.exit_code == 0, result.stdout
+    preview_call, apply_call = client.correct_memory.await_args_list
+    assert preview_call.kwargs["expected_revision"] is None
+    assert apply_call.kwargs["expected_revision"] == 7
+
+
+@patch("sibyl_cli.memory_admin.get_client")
+def test_an_explicit_expected_revision_wins_over_the_preview(mock_get_client: MagicMock) -> None:
+    planned = _planned("hide", state="active", flags=["hidden"], reversible=True)
+    planned["metadata"] = {"observed_revision": 7}
+    client = _client(planned)
+    mock_get_client.return_value = _FakeClientContext(client)
+
+    result = CliRunner().invoke(
+        app,
+        ["correct", SOURCE_ID, "--action", "hide", "--reason", "Noise", "--expected-revision", "5"],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    assert [call.kwargs["expected_revision"] for call in client.correct_memory.await_args_list] == [
+        5,
+        5,
+    ]

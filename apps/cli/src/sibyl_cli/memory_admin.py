@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from typing import Annotated, Any, cast
 
 import typer
@@ -227,6 +228,14 @@ _CORRECTION_ACTION_HELP = (
 )
 
 
+def stdin_is_interactive() -> bool:
+    """Whether a confirmation prompt can be answered by a person."""
+    try:
+        return sys.stdin.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
 def normalize_correction_action(action: str) -> str | None:
     """Resolve a typed action or alias to its CLI name, or None when unknown."""
     typed = action.strip().lower().replace("-", "_")
@@ -344,9 +353,20 @@ def correct_memory(
         raise typer.Exit(code=1)
     normalized_action = resolved_action
     api_action = CORRECTION_ACTIONS[normalized_action]
-    if normalized_action in IRREVERSIBLE_CORRECTIONS and json_output and not preview and not yes:
-        error(f"--action {normalized_action} is irreversible; pass --yes to apply it with --json")
-        raise typer.Exit(code=1)
+    if normalized_action in IRREVERSIBLE_CORRECTIONS and not preview and not yes:
+        if json_output:
+            error(
+                f"--action {normalized_action} is irreversible; pass --yes to apply it with --json"
+            )
+            raise typer.Exit(code=1)
+        if not stdin_is_interactive():
+            # Nobody can answer the confirmation, and an idle open pipe would
+            # wait on it forever, so refuse before sending anything.
+            error(
+                f"--action {normalized_action} is irreversible and needs confirmation, but "
+                "stdin is not a terminal; pass --yes to apply it"
+            )
+            raise typer.Exit(code=1)
     reason_text = (reason or "").strip()
     if not reason_text:
         error("--reason must not be empty")
@@ -420,6 +440,11 @@ def correct_memory(
                         raise typer.Exit(code=1)
                     if not json_output:
                         info(correction_preview_line(normalized_action, planned))
+                    observed = (planned.get("metadata") or {}).get("observed_revision")
+                    if correction["expected_revision"] is None and type(observed) is int:
+                        # Apply exactly the plan that was shown: a change to the
+                        # memory in between is refused instead of applied blind.
+                        correction["expected_revision"] = observed
                     if (
                         normalized_action in IRREVERSIBLE_CORRECTIONS
                         and not yes

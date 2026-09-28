@@ -60,7 +60,9 @@ sibyl correct raw_memory:abc123 --action delete --reason "Captured in the wrong 
 
 `restore` returns a contested or superseded memory to active and clears its wrong, hidden, and
 superseded marks. `redact` and `delete` cannot be undone, so they ask before applying; pass `--yes`
-to skip the question, which `--json` requires.
+to skip the question. `--json` requires `--yes`, and so does any run without a terminal to answer
+the question. The apply is pinned to the revision the preview showed, so a memory that changes in
+between is refused rather than corrected against a different plan.
 
 | Action                         | Effect                                           |
 | ------------------------------ | ------------------------------------------------ |
