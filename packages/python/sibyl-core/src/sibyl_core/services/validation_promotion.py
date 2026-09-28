@@ -7,7 +7,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+import structlog
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from sibyl_core.services.validation_execution import (
     ValidationExecution,
@@ -25,6 +26,8 @@ from sibyl_core.tasks.memory_validation import (
     MemoryValidationResult,
 )
 from sibyl_core.tasks.procedure_review import review_digest
+
+log = structlog.get_logger()
 
 
 def _sha(value: str) -> str:
@@ -105,6 +108,18 @@ async def validation_binding_current(memory, association) -> bool:
         await ValidationExecution(
             binding.execution_id, memory.organization_id, memory.principal_id
         ).result()
+    except ValidationError as exc:
+        # A stored result this build cannot parse, usually one written by a
+        # newer build. It still reads as unavailable, but say so: silently it
+        # looks like a promoted memory that vanished from recall.
+        log.warning(
+            "validation_result_unreadable",
+            organization_id=memory.organization_id,
+            candidate_id=memory.id,
+            execution_id=binding.execution_id,
+            error_count=exc.error_count(),
+        )
+        return False
     except (ValueError, TypeError, KeyError):
         return False
     return True

@@ -1,12 +1,14 @@
 """Raw recall serves promoted dream proposals, never drafts the critic has not accepted."""
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from pydantic import BaseModel, ValidationError
 
-from sibyl_core.services import content_client, content_raw_recall
+from sibyl_core.services import content_client, content_raw_recall, validation_promotion
 from sibyl_core.services.content_models import (
     RawMemory,
     RawMemoryRecallResult,
@@ -127,3 +129,72 @@ async def test_recall_serves_the_promoted_correction_not_its_draft_or_stalled_ch
     assert promoted.id in recalled
     assert draft.id not in recalled
     assert stalled.id not in recalled
+
+
+async def test_an_unreadable_stored_result_reads_unavailable_and_says_so(monkeypatch) -> None:
+    class _Strict(BaseModel):
+        status: int
+
+    try:
+        _Strict.model_validate({"status": "ordinary_cohort_proposal"})
+    except ValidationError as exc:
+        schema_error = exc
+    execution = AsyncMock()
+    execution.load.return_value = {"state": "returned"}
+    execution.result.side_effect = schema_error
+    monkeypatch.setattr(validation_promotion, "ValidationExecution", lambda *_args: execution)
+    monkeypatch.setattr(validation_promotion, "validated_result", lambda *_args: None)
+    monkeypatch.setattr(
+        validation_promotion.ValidationBinding,
+        "model_validate_json",
+        classmethod(lambda _cls, _value: type("Binding", (), {"execution_id": "exec-9"})()),
+    )
+    warnings: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(
+        validation_promotion.log,
+        "warning",
+        lambda event, **fields: warnings.append((event, fields)),
+    )
+    memory = replace(_memory(), organization_id="org-9", id="candidate-9")
+
+    current = await validation_promotion.validation_binding_current(
+        memory, {"validation_binding_json": "{}"}
+    )
+
+    assert current is False
+    assert warnings == [
+        (
+            "validation_result_unreadable",
+            {
+                "organization_id": "org-9",
+                "candidate_id": "candidate-9",
+                "execution_id": "exec-9",
+                "error_count": 1,
+            },
+        )
+    ]
+
+
+async def test_an_ordinary_invalidation_stays_quiet(monkeypatch) -> None:
+    execution = AsyncMock()
+    execution.load.return_value = {"state": "returned"}
+    execution.result.side_effect = ValueError("binding changed")
+    monkeypatch.setattr(validation_promotion, "ValidationExecution", lambda *_args: execution)
+    monkeypatch.setattr(validation_promotion, "validated_result", lambda *_args: None)
+    monkeypatch.setattr(
+        validation_promotion.ValidationBinding,
+        "model_validate_json",
+        classmethod(lambda _cls, _value: type("Binding", (), {"execution_id": "exec-9"})()),
+    )
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        validation_promotion.log, "warning", lambda event, **_fields: warnings.append(event)
+    )
+
+    assert (
+        await validation_promotion.validation_binding_current(
+            _memory(), {"validation_binding_json": "{}"}
+        )
+        is False
+    )
+    assert warnings == []
