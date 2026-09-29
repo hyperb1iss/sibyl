@@ -61,6 +61,14 @@ LET $foreign = (SELECT VALUE uuid FROM raw_captures WHERE uuid IN $ids
 IF array::len($foreign) > 0 {
     THROW 'raw capture organization cannot change';
 };
+LET $legacy_shared = (SELECT VALUE uuid FROM raw_captures
+    WHERE uuid IN $ids AND organization_id = $organizations[uuid]
+        AND memory_scope = 'shared');
+LET $new_shared = $rows.filter(|$row| $row.memory_scope = 'shared'
+    AND $row.uuid NOT IN $legacy_shared);
+IF array::len($new_shared) > 0 {
+    THROW 'shared memory scope is retired; use a verified team scope';
+};
 LET $saved = (INSERT INTO raw_captures $rows ON DUPLICATE KEY UPDATE
     uuid = $input.uuid,
     organization_id = $input.organization_id,
@@ -173,6 +181,8 @@ def _order_raw_memory_records_by_input(
 
 def _raw_memory_from_write(write: RawMemoryWrite, *, captured_at: datetime) -> RawMemory:
     normalized_scope = models.coerce_memory_scope(write.memory_scope)
+    if normalized_scope is MemoryScope.SHARED:
+        raise ValueError("shared memory scope is retired; use a verified team scope")
     models.validate_raw_memory_scope(normalized_scope, write.scope_key)
     metadata = normalize_memory_quality_metadata(write.metadata or {})
     for key in MEMORY_PROVENANCE_METADATA_KEYS:
@@ -956,6 +966,10 @@ async def save_raw_memory(
             organization_id=memory.organization_id,
             uuid=memory.id,
         )
+        if memory.memory_scope is MemoryScope.SHARED and (
+            existing_record is None or existing_record.get("memory_scope") != "shared"
+        ):
+            raise ValueError("shared memory scope is retired; use a verified team scope")
         memory = await _raw_memory_prepared_for_save(
             memory,
             existing=models.raw_memory_from_record(existing_record) if existing_record else None,
@@ -1026,6 +1040,11 @@ async def save_raw_memory(
                             THROW 'publication_source_observation_changed';
                         };
                         __SOURCE_STATE_WRITE_WITNESS__
+                        LET $legacy_scope = (SELECT VALUE memory_scope FROM raw_captures
+                            WHERE organization_id = $organization_id AND uuid = $uuid LIMIT 1)[0];
+                        IF $record.memory_scope = 'shared' AND $legacy_scope != 'shared' {
+                            THROW 'shared memory scope is retired; use a verified team scope';
+                        };
                         LET $current = (SELECT revision FROM raw_captures
                             WHERE organization_id = $organization_id AND uuid = $uuid LIMIT 1)[0];
                         LET $next = object::from_entries(array::concat(
