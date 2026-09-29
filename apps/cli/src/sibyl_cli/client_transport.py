@@ -37,7 +37,8 @@ from sibyl_cli.pending_writes import (
     is_read_like_post,
     list_pending_writes,
     pending_replay_lock,
-    pending_write_resource,
+    pending_resources_overlap,
+    pending_write_resources,
     read_pending_write,
     record_pending_failure,
     record_pending_metric,
@@ -616,15 +617,13 @@ class ClientTransportMixin:
                 blocked: set[str] = set()
                 attempted = 0
                 for item in matching:
-                    resource = pending_write_resource(item)
+                    resources = pending_write_resources(item)
                     if (
-                        "*" in blocked
-                        or resource in blocked
-                        or (resource == "*" and blocked)
+                        pending_resources_overlap(resources, blocked)
                         or item.get("status") == "attention"
                         or (not ignore_backoff and not _ready_for_auto_replay(item))
                     ):
-                        blocked.add(resource)
+                        blocked.update(resources)
                         continue
                     write_id = str(item["id"])
                     attempted += 1
@@ -641,11 +640,11 @@ class ClientTransportMixin:
                         )
                         record_pending_metric("replayed")
                     except SibylClientError as exc:
-                        blocked.add(resource)
+                        blocked.update(resources)
                         if exc.status_code == 401 or exc.error_code == "token_refresh_failed":
                             break
                     except (FileNotFoundError, OSError, ValueError):
-                        blocked.add(resource)
+                        blocked.update(resources)
                     if attempted == AUTO_REPLAY_LIMIT:
                         break
         except Exception:
@@ -750,7 +749,7 @@ class ClientTransportMixin:
                     bind_pending_write_identity(
                         pending_write_id, identity, replay_scope=self._replay_scope
                     )
-                resource = pending_write_resource(pending)
+                resources = pending_write_resources(pending)
                 order = (str(pending.get("created_at", "")), pending_write_id)
                 for earlier in list_pending_writes():
                     if (
@@ -768,8 +767,7 @@ class ClientTransportMixin:
                         or (str(earlier.get("created_at", "")), str(earlier["id"])) >= order
                     ):
                         continue
-                    predecessor = pending_write_resource(earlier)
-                    if resource == "*" or predecessor == "*" or resource == predecessor:
+                    if pending_resources_overlap(resources, pending_write_resources(earlier)):
                         raise SibylClientError(
                             "An earlier related write is unresolved; this write remains "
                             "buffered and no mutation was sent. Inspect pending-writes list.",
@@ -871,16 +869,29 @@ class ClientTransportMixin:
                     remediation=payload.remediation,
                     details=payload.details,
                 )
-                if method.upper() == "DELETE" and response.status_code == 404:
+                if (
+                    pending_write_id is not None
+                    and method.upper() == "DELETE"
+                    and response.status_code == 404
+                ):
                     # The resource is already gone, which is all a delete asks
                     # for, and there is no body worth keeping. A replay of a
                     # delete that already landed is done; a first attempt at an
                     # id that never existed still reports the 404 to its caller.
+                    # An unbuffered delete has no queued write, so its 404 is
+                    # simply the caller's answer.
                     if pending_write_created:
                         _resolve_pending_write(pending_write_id, "dropped")
                         raise exc
                     _resolve_pending_write(pending_write_id, None)
                     return {}
+                if pending_write_created and payload.error == "revision_conflict":
+                    # A write pinned to a revision the resource has left can
+                    # never apply, so queueing it only blocks the rerun that
+                    # would draw a fresh plan. A replay that meets the same
+                    # answer parks with the server's reason instead.
+                    _resolve_pending_write(pending_write_id, "dropped")
+                    raise exc
                 self._record_pending_failure(pending_write_id, exc)
                 raise exc
 

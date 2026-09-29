@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, TypedDict, get_args
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 from uuid import UUID, uuid4
 
 from sibyl_cli.pending_identity import normalize_replay_identity, pending_identity_matches
@@ -46,6 +46,7 @@ _SAFE_FAILURE_CODES = frozenset(
         "replay_identity_mismatch",
         "pending_dependency",
         "response_unconfirmed",
+        "revision_conflict",
     }
 )
 _REQUIRED_STRING_FIELDS = (
@@ -566,11 +567,53 @@ def pending_write_resource(item: dict[str, Any]) -> str:
         return f"entity:{parts[1]}"
     if len(parts) >= 2 and parts[0] == "projects":
         return f"project:{parts[1]}"
-    if len(parts) >= 3 and parts[:2] == ["memory", "inspect"]:
+    if len(parts) >= 3 and parts[0] == "memory" and parts[1] in {"inspect", "sources"}:
         # Corrections to one memory stay ordered; a stuck write on one memory
         # must not hold back corrections to every other.
-        return f"memory:{parts[2]}"
+        return f"memory:{_memory_resource_id(parts[2])}"
     return f"path:{'/'.join(parts[:2])}"
+
+
+def _memory_resource_id(identifier: str) -> str:
+    """Use the same key for encoded and raw-memory-prefixed IDs."""
+    return unquote(identifier).removeprefix("raw_memory:")
+
+
+# Payload fields that name a second memory a correction depends on.
+_CORRECTION_REFERENCE_FIELDS = ("replacement_source_id", "duplicate_of_source_id")
+
+
+def pending_write_resources(item: dict[str, Any]) -> frozenset[str]:
+    """Every resource a write depends on: its own, plus any second memory it names.
+
+    A supersede of A by B, or a duplicate of A onto B, reads B as well as
+    changing A, so it must wait for an earlier queued write to B (a delete,
+    say) instead of overtaking it on A's key alone.
+    """
+    resources = {pending_write_resource(item)}
+    parts = [part for part in str(item.get("path", "")).split("/") if part]
+    payload = item.get("json")
+    if (
+        len(parts) >= 4
+        and parts[0] == "memory"
+        and parts[1] in {"inspect", "sources"}
+        and parts[3] == "corrections"
+        and isinstance(payload, dict)
+    ):
+        for field in _CORRECTION_REFERENCE_FIELDS:
+            referenced = payload.get(field)
+            if isinstance(referenced, str) and referenced:
+                resources.add(f"memory:{_memory_resource_id(referenced)}")
+    return frozenset(resources)
+
+
+def pending_resources_overlap(
+    first: frozenset[str] | set[str], second: frozenset[str] | set[str]
+) -> bool:
+    """Whether two writes, or a write and a set of blocked resources, must stay ordered."""
+    if not first or not second:
+        return False
+    return "*" in first or "*" in second or bool(set(first) & set(second))
 
 
 def bind_pending_write_identity(

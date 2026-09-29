@@ -59,10 +59,12 @@ def test_pending_replay_lock_is_nonblocking(
 ) -> None:
     monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
 
-    with pending_writes.pending_replay_lock() as first:
-        with pending_writes.pending_replay_lock() as second:
-            assert first is True
-            assert second is False
+    with (
+        pending_writes.pending_replay_lock() as first,
+        pending_writes.pending_replay_lock() as second,
+    ):
+        assert first is True
+        assert second is False
 
 
 def test_corrupt_pending_write_remains_counted_as_a_structured_failure(
@@ -876,3 +878,51 @@ def test_corrections_to_different_memories_are_independent_resources() -> None:
     assert resource("/memory/inspect/mem-a/corrections") == "memory:mem-a"
     assert resource("/memory/inspect/mem-b/corrections") == "memory:mem-b"
     assert resource("/memory/inspect/mem-a/corrections/preview") == "memory:mem-a"
+
+
+def test_a_correction_that_names_a_second_memory_depends_on_both() -> None:
+    def resources(payload: dict[str, object]) -> frozenset[str]:
+        return pending_writes.pending_write_resources(
+            {
+                "id": "w",
+                "method": "POST",
+                "path": "/memory/inspect/mem-a/corrections",
+                "json": payload,
+            }
+        )
+
+    assert resources({"action": "hide"}) == {"memory:mem-a"}
+    assert resources({"action": "supersede", "replacement_source_id": "mem-b"}) == {
+        "memory:mem-a",
+        "memory:mem-b",
+    }
+    assert resources({"action": "mark_duplicate", "duplicate_of_source_id": "mem-c"}) == {
+        "memory:mem-a",
+        "memory:mem-c",
+    }
+    assert resources({"action": "supersede", "replacement_source_id": "mem-a"}) == {"memory:mem-a"}
+    assert pending_writes.pending_resources_overlap(
+        {"memory:mem-a", "memory:mem-b"}, {"memory:mem-b"}
+    )
+    assert not pending_writes.pending_resources_overlap({"memory:mem-a"}, {"memory:mem-b"})
+    assert not pending_writes.pending_resources_overlap({"*"}, set())
+    assert pending_writes.pending_resources_overlap({"*"}, {"memory:mem-b"})
+
+
+@pytest.mark.parametrize("route", ["inspect", "sources"])
+def test_legacy_and_encoded_correction_ids_share_dependency_keys(route: str) -> None:
+    resources = pending_writes.pending_write_resources(
+        {
+            "id": "write-a",
+            "method": "POST",
+            "path": f"/memory/{route}/raw_memory%3Amem-a/corrections",
+            "json": {"action": "supersede", "replacement_source_id": "raw_memory:mem-b"},
+        }
+    )
+    assert resources == {"memory:mem-a", "memory:mem-b"}
+    assert pending_writes.pending_resources_overlap(
+        resources,
+        pending_writes.pending_write_resources(
+            {"id": "write-b", "method": "POST", "path": "/memory/inspect/mem-b/corrections"}
+        ),
+    )
