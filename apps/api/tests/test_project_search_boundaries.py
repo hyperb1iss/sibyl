@@ -13,6 +13,7 @@ from sibyl.api.routes.search import search
 from sibyl.api.schemas import SearchRequest
 from sibyl.mcp_tools.context import McpContext
 from sibyl.mcp_tools.retrieval import register_retrieval_tools
+from sibyl_core.auth import OrganizationRole
 from tests.harness.auth import stub_auth_context
 from tests.test_routes_search import _SearchResult
 
@@ -105,6 +106,10 @@ async def test_rest_search_verifies_every_selected_project_and_threads_selection
     with (
         patch("sibyl.api.routes.search.verify_entity_project_access", AsyncMock()) as verify,
         patch(
+            "sibyl.api.routes.search.list_accessible_project_graph_ids",
+            AsyncMock(return_value={"a", "b", "c"}),
+        ),
+        patch(
             "sibyl_core.tools.core.search",
             AsyncMock(return_value=_SearchResult([], 0, "telescope")),
         ) as core,
@@ -145,3 +150,81 @@ async def test_rest_search_refuses_foreign_project_in_selection():
 def test_rest_search_rejects_empty_selection():
     with pytest.raises(ValidationError):
         SearchRequest(query="telescope", project_ids=[])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("selection", "grants"),
+    [(["b"], {"a"}), (["a", "b"], {"a"}), (["a"], set()), (["b"], set()), (["a", "b"], set())],
+)
+async def test_rest_selection_cannot_exceed_owner_api_key_project_grants(selection, grants):
+    ctx = stub_auth_context(
+        org_role=OrganizationRole.OWNER,
+        api_key_project_ids=frozenset(grants),
+    )
+    with (
+        patch("sibyl.api.routes.search.verify_entity_project_access", AsyncMock()) as verify,
+        patch(
+            "sibyl.api.routes.search.list_accessible_project_graph_ids",
+            AsyncMock(return_value=grants),
+        ),
+        patch("sibyl_core.tools.core.search", AsyncMock()) as core,
+        pytest.raises(HTTPException) as denied,
+    ):
+        await search(
+            SearchRequest(query="telescope", project_ids=selection),
+            org=SimpleNamespace(id=uuid4()),
+            ctx=ctx,
+        )
+    assert denied.value.status_code == 403
+    assert denied.value.detail == "project_scope_denied"
+    verify.assert_not_awaited()
+    core.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_rest_single_project_cannot_exceed_owner_api_key_grants():
+    ctx = stub_auth_context(
+        org_role=OrganizationRole.OWNER,
+        api_key_project_ids=frozenset({"a"}),
+    )
+    with (
+        patch("sibyl.api.routes.search.verify_entity_project_access", AsyncMock()) as verify,
+        patch(
+            "sibyl.api.routes.search.list_accessible_project_graph_ids",
+            AsyncMock(return_value={"a"}),
+        ),
+        patch("sibyl_core.tools.core.search", AsyncMock()) as core,
+        pytest.raises(HTTPException) as denied,
+    ):
+        await search(
+            SearchRequest(query="telescope", project="b"),
+            org=SimpleNamespace(id=uuid4()),
+            ctx=ctx,
+        )
+    assert denied.value.status_code == 403
+    verify.assert_not_awaited()
+    core.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_mcp_search_uses_owner_api_key_project_grants_for_explicit_widening():
+    registry = ToolRegistry()
+    register_retrieval_tools(registry)
+    ctx = McpContext(
+        org_id=str(uuid4()), user_id="owner", org_role="owner", api_key_project_ids=["a"]
+    )
+    with (
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
+        patch(
+            "sibyl.mcp_tools.context.resolve_project_graph_grants",
+            AsyncMock(return_value=(frozenset({"a"}), frozenset({"a"}))),
+        ) as grants,
+        patch(
+            "sibyl_core.tools.core.search",
+            AsyncMock(return_value=_SearchResult([], 0, "telescope")),
+        ) as core,
+    ):
+        await registry.tools["search"]("telescope", all_projects=True)
+    assert grants.await_args.kwargs["api_key_project_ids"] == ["a"]
+    assert core.await_args.kwargs["accessible_projects"] == {"a"}

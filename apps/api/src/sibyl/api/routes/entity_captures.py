@@ -104,7 +104,10 @@ async def list_raw_captures(
     project_ids: Annotated[list[str] | None, Query(min_length=1)] = None,
 ) -> RawCaptureListResponse:
     """List archived raw quick captures for the current organization."""
+    accessible_projects = await policy.accessible_project_ids_for_read(ctx)
     if project_ids is not None:
+        if not set(project_ids) <= accessible_projects:
+            raise HTTPException(status_code=403, detail="project_scope_denied")
         for project_id in project_ids:
             await policy.verify_entity_project_access(
                 None,
@@ -113,7 +116,6 @@ async def list_raw_captures(
                 required_role=ProjectRole.VIEWER,
                 require_existing_project=True,
             )
-    accessible_projects = await policy.accessible_project_ids_for_read(ctx)
     accessible_delegations = await policy.accessible_delegation_scope_keys_for_read(ctx)
     captures, has_more = await content_runtime.list_raw_captures(
         session,

@@ -17,6 +17,7 @@ from sibyl.api.routes.entity_captures import (
 from sibyl.api.schemas import RawCaptureReviewUpdate
 from sibyl.persistence.content_common import RawCaptureRecord
 from sibyl_core.auth.models import OrganizationRole
+from tests.harness.auth import stub_auth_context
 
 
 def _org() -> MagicMock:
@@ -376,6 +377,10 @@ async def test_capture_project_selection_narrows_private_rows_without_granting_o
             "sibyl.api.routes.entity_captures.policy.verify_entity_project_access", AsyncMock()
         ) as verify,
         patch(
+            "sibyl.api.routes.entity_captures.policy.accessible_project_ids_for_read",
+            AsyncMock(return_value={"a", "b"}),
+        ),
+        patch(
             "sibyl.api.routes.entity_captures.content_runtime.list_raw_captures",
             AsyncMock(return_value=([selected, foreign_project, foreign_owner], False)),
         ) as storage,
@@ -422,4 +427,39 @@ async def test_capture_project_selection_checks_access_before_storage():
             limit=10,
             offset=0,
         )
+    storage.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selection", [["b"], ["a", "b"]])
+@pytest.mark.parametrize("grants", [{"a"}, set()])
+async def test_capture_selection_cannot_exceed_owner_api_key_project_grants(selection, grants):
+    ctx = stub_auth_context(org_role=OrganizationRole.OWNER, api_key_project_ids=frozenset(grants))
+    with (
+        patch(
+            "sibyl.api.routes.entity_captures.policy.verify_entity_project_access", AsyncMock()
+        ) as verify,
+        patch(
+            "sibyl.api.routes.entity_captures.policy.accessible_project_ids_for_read",
+            AsyncMock(return_value=grants),
+        ),
+        patch(
+            "sibyl.api.routes.entity_captures.content_runtime.list_raw_captures", AsyncMock()
+        ) as storage,
+        pytest.raises(HTTPException) as denied,
+    ):
+        await list_raw_captures(
+            org=_org(),
+            ctx=ctx,
+            session=MagicMock(),
+            entity_type=None,
+            capture_surface=None,
+            review_state=None,
+            project_ids=selection,
+            limit=10,
+            offset=0,
+        )
+    assert denied.value.status_code == 403
+    assert denied.value.detail == "project_scope_denied"
+    verify.assert_not_awaited()
     storage.assert_not_awaited()
