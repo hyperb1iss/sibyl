@@ -249,6 +249,11 @@ def test_runtime_schemafull_tables_pair_define_with_alter() -> None:
             AUTH_SCHEMA_DEFINITIONS,
             AUTH_REPLAY_IDENTITY_MIGRATION_DEFINITIONS,
             CONTENT_SCHEMA_DEFINITIONS,
+            *(
+                statement + ";"
+                for migration in _content_schema_migrations(url="memory://")
+                for statement in migration.statements
+            ),
         )
     )
     content_tables = tuple(

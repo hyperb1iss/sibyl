@@ -11,8 +11,13 @@ from uuid import uuid4
 import pytest
 
 from sibyl_core.backends.surreal import SurrealContentClient
-from sibyl_core.backends.surreal.content_schema import bootstrap_content_schema
+from sibyl_core.backends.surreal.content_schema import (
+    CONTENT_SCHEMA_NAME,
+    bootstrap_content_schema,
+)
+from sibyl_core.backends.surreal.records import normalize_records
 from sibyl_core.backends.surreal.schema_raw_lexical import migrate_raw_lexical
+from sibyl_core.backends.surreal.schema_version import schema_version_record_id
 from sibyl_core.services import content_raw_recall
 from sibyl_core.services.content_models import MemoryScope
 from sibyl_core.services.surreal_content import remember_raw_memory
@@ -283,3 +288,22 @@ async def test_fulltext_reads_leave_capture_and_index_state_unchanged(lexical_st
     assert len(await _recall(client, org)) == 1
     assert await client.execute_query("SELECT * FROM raw_captures ORDER BY id;") == sources
     assert await client.execute_query("SELECT * FROM raw_lexical_states ORDER BY id;") == states
+
+
+async def test_migration_repairs_existing_lexical_permissions(lexical_store):
+    client, org = lexical_store, str(uuid4())
+    await _remember(org, "permission-repair")
+    before = normalize_records(await client.execute_query("SELECT * FROM raw_captures;"))
+    tables = ("raw_lexical_originals", "raw_lexical_reflections", "raw_lexical_states")
+    for table in tables:
+        await client.execute_query(f"ALTER TABLE {table} PERMISSIONS FULL;")
+    await client.execute_query(
+        "UPDATE type::record($record) SET version = 48;",
+        record=schema_version_record_id(CONTENT_SCHEMA_NAME),
+    )
+    await bootstrap_content_schema(client)
+    info = normalize_records(await client.execute_query("INFO FOR DB;"))[0]
+    for table in tables:
+        assert "PERMISSIONS NONE" in info["tables"][table]
+    after = normalize_records(await client.execute_query("SELECT * FROM raw_captures;"))
+    assert after == before

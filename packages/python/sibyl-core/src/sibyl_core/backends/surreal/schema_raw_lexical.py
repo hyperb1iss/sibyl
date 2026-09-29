@@ -91,8 +91,9 @@ def raw_lexical_definitions(raw_schema: str) -> str:
     for table in RAW_LEXICAL_TABLES:
         definitions.extend(
             [
-                f"DEFINE TABLE IF NOT EXISTS {table} SCHEMAFULL PERMISSIONS NONE;",
+                f"DEFINE TABLE IF NOT EXISTS {table} SCHEMAFULL;",
                 f"ALTER TABLE IF EXISTS {table} SCHEMAFULL;",
+                f"ALTER TABLE IF EXISTS {table} PERMISSIONS NONE;",
                 *(field.replace(" ON raw_captures ", f" ON {table} ") for field in fields),
                 f"DEFINE FIELD IF NOT EXISTS record_id ON {table} TYPE record<raw_captures>;",
                 f"DEFINE INDEX IF NOT EXISTS idx_{table}_uuid ON {table} FIELDS uuid UNIQUE;",
@@ -104,8 +105,9 @@ def raw_lexical_definitions(raw_schema: str) -> str:
         )
     definitions.extend(
         [
-            "DEFINE TABLE IF NOT EXISTS raw_lexical_states SCHEMAFULL PERMISSIONS NONE;",
+            "DEFINE TABLE IF NOT EXISTS raw_lexical_states SCHEMAFULL;",
             "ALTER TABLE IF EXISTS raw_lexical_states SCHEMAFULL;",
+            "ALTER TABLE IF EXISTS raw_lexical_states PERMISSIONS NONE;",
             "DEFINE FIELD IF NOT EXISTS organization_id ON raw_lexical_states TYPE string;",
             "DEFINE FIELD IF NOT EXISTS generation ON raw_lexical_states TYPE int;",
             "DEFINE FIELD IF NOT EXISTS deleted ON raw_lexical_states TYPE bool;",
