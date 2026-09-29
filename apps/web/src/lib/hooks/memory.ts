@@ -29,13 +29,18 @@ import { useWebSocketStatus } from './realtime';
 
 export function useRawCaptures(
   params?: Parameters<typeof rawCapturesApi.list>[0],
-  options?: { enabled?: boolean; initialData?: RawCaptureListResponse }
+  options?: {
+    enabled?: boolean;
+    initialData?: RawCaptureListResponse;
+    keepPreviousResults?: boolean;
+  }
 ) {
   return useQuery({
     queryKey: queryKeys.rawCaptures.list(params),
     queryFn: () => rawCapturesApi.list(params),
     enabled: options?.enabled ?? true,
     initialData: options?.initialData,
+    ...(options?.keepPreviousResults === false ? { placeholderData: undefined } : {}),
   });
 }
 

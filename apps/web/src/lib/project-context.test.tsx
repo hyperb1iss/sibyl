@@ -176,20 +176,39 @@ describe('ProjectContextProvider default scope', () => {
     expect(screen.getByTestId('all').textContent).toBe('false');
   });
 
-  it('falls back to every project when projects fail to load, without saving it', async () => {
-    hooks.useProjects.mockReturnValue({ data: undefined, isError: true });
-
-    const first = renderProbe();
-
+  it('replaces an empty-org fallback when a project becomes available', async () => {
+    hooks.useProjects.mockReturnValue({ data: { entities: [] }, isError: false });
+    const view = renderProbe();
     await waitFor(() => expect(screen.getByTestId('all').textContent).toBe('true'));
-    expect(screen.getByTestId('ready').textContent).toBe('true');
+    hooks.useProjects.mockReturnValue({ data: PROJECTS, isError: false });
+    view.rerender(
+      <ProjectContextProvider>
+        <Probe />
+      </ProjectContextProvider>
+    );
+    await waitFor(() => expect(screen.getByTestId('selected').textContent).toBe('project_new'));
+    expect(screen.getByTestId('all').textContent).toBe('false');
+  });
+
+  it('keeps reads blocked when projects fail to load and recovers without widening', async () => {
+    hooks.useProjects.mockReturnValue({ data: undefined, isError: true });
+    const first = renderProbe();
+    expect(screen.getByTestId('all').textContent).toBe('false');
+    expect(screen.getByTestId('ready').textContent).toBe('false');
     expect(localStorage.getItem('sibyl-project-context')).toBeNull();
     first.unmount();
-
-    // A healthy backend on the next visit adopts a project
     hooks.useProjects.mockReturnValue({ data: PROJECTS, isError: false });
     renderProbe();
     await waitFor(() => expect(screen.getByTestId('selected').textContent).toBe('project_new'));
+  });
+
+  it('still permits a deliberate All Projects choice after the project list fails', async () => {
+    hooks.useProjects.mockReturnValue({ data: undefined, isError: true });
+    renderProbe();
+    expect(screen.getByTestId('ready').textContent).toBe('false');
+    act(() => screen.getByRole('button', { name: /every project/i }).click());
+    await waitFor(() => expect(screen.getByTestId('ready').textContent).toBe('true'));
+    expect(screen.getByTestId('all').textContent).toBe('true');
   });
 
   it('drops a stored project that no longer exists and opens on the default', async () => {
@@ -221,6 +240,44 @@ describe('ProjectContextProvider default scope', () => {
     renderProbe();
 
     expect(screen.getByTestId('selected').textContent).toBe('project_old');
+    expect(screen.getByTestId('all').textContent).toBe('false');
+    expect(screen.getByTestId('ready').textContent).toBe('false');
+  });
+
+  it('blocks a stored selection until the authorized project list resolves', async () => {
+    localStorage.setItem('sibyl-project-context', JSON.stringify({ projects: ['project_old'] }));
+    hooks.useProjects.mockReturnValue({ data: undefined, isError: false });
+    const view = renderProbe();
+    expect(screen.getByTestId('selected').textContent).toBe('project_old');
+    expect(screen.getByTestId('ready').textContent).toBe('false');
+
+    hooks.useProjects.mockReturnValue({ data: PROJECTS, isError: false });
+    view.rerender(
+      <ProjectContextProvider>
+        <Probe />
+      </ProjectContextProvider>
+    );
+    await waitFor(() => expect(screen.getByTestId('ready').textContent).toBe('true'));
+    expect(screen.getByTestId('selected').textContent).toBe('project_old');
+  });
+
+  it('chooses one archived project instead of widening an archived-only org', async () => {
+    localStorage.setItem('sibyl-project-context', JSON.stringify({ projects: ['project_gone'] }));
+    hooks.useProjects.mockReturnValue({ data: { entities: [ARCHIVED] }, isError: false });
+    renderProbe();
+    await waitFor(() => expect(screen.getByTestId('ready').textContent).toBe('true'));
+    expect(screen.getByTestId('selected').textContent).toBe('project_archived');
+    expect(screen.getByTestId('all').textContent).toBe('false');
+  });
+
+  it('opens an archived-only first visit on one archived project', async () => {
+    hooks.useProjects.mockReturnValue({ data: { entities: [ARCHIVED] }, isError: false });
+    renderProbe();
+    await waitFor(() => expect(screen.getByTestId('ready').textContent).toBe('true'));
+    expect(hooks.useProjects).toHaveBeenCalledWith(
+      expect.objectContaining({ includeArchived: true })
+    );
+    expect(screen.getByTestId('selected').textContent).toBe('project_archived');
     expect(screen.getByTestId('all').textContent).toBe('false');
   });
 
@@ -380,7 +437,7 @@ describe('useRevealProject', () => {
   });
 
   it('keeps a fallback every-project view intact', async () => {
-    hooks.useProjects.mockReturnValue({ data: undefined, isError: true });
+    hooks.useProjects.mockReturnValue({ data: { entities: [] }, isError: false });
     renderRevealProbe();
     await waitFor(() => expect(screen.getByTestId('reveal-all').textContent).toBe('true'));
 

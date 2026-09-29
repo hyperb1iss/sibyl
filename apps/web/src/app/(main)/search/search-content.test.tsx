@@ -3,7 +3,17 @@ import { render, screen } from '@/test/utils';
 import { SearchContent } from './search-content';
 
 const hooks = vi.hoisted(() => ({
-  useSearch: vi.fn(() => ({ data: undefined, isLoading: false, error: null })),
+  projectContext: { selectedProjects: ['a'], isAll: false, scopeReady: true },
+  useSearch: vi.fn((_params: Record<string, unknown>, _options?: Record<string, unknown>) => ({
+    data: undefined,
+    isLoading: false,
+    error: null,
+  })),
+}));
+
+vi.mock('@/lib/project-context', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/lib/project-context')>()),
+  useProjectContext: () => hooks.projectContext,
 }));
 
 vi.mock('@/lib/hooks', () => ({
@@ -29,6 +39,34 @@ vi.mock('@/lib/hooks', () => ({
 describe('SearchContent', () => {
   beforeEach(() => {
     hooks.useSearch.mockClear();
+    hooks.projectContext = { selectedProjects: ['a'], isAll: false, scopeReady: true };
+  });
+
+  it('scopes every memory search lane to all selected projects', () => {
+    hooks.projectContext.selectedProjects = ['a', 'b'];
+    render(<SearchContent initialQuery="telescope" />);
+    for (const [params, options] of hooks.useSearch.mock.calls) {
+      expect(params).toMatchObject({ project_ids: ['a', 'b'] });
+      expect(options).toMatchObject({ keepPreviousResults: false });
+    }
+    expect(screen.getByText(/2 selected projects/)).toBeInTheDocument();
+  });
+
+  it('labels explicit All Projects and omits selection filters', () => {
+    hooks.projectContext = { selectedProjects: [], isAll: true, scopeReady: true };
+    render(<SearchContent initialQuery="telescope" />);
+    for (const [params] of hooks.useSearch.mock.calls) {
+      expect(params).toMatchObject({ project_ids: undefined });
+    }
+    expect(screen.getByText(/All Projects/)).toBeInTheDocument();
+  });
+
+  it('does not fetch until a project selection is ready', () => {
+    hooks.projectContext = { selectedProjects: [], isAll: false, scopeReady: false };
+    render(<SearchContent initialQuery="telescope" />);
+    for (const [, options] of hooks.useSearch.mock.calls) {
+      expect(options).toMatchObject({ enabled: false });
+    }
   });
 
   it('keeps document search out of knowledge type filters', () => {

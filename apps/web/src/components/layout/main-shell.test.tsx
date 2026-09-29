@@ -70,6 +70,30 @@ describe('MainShell', () => {
     expect(screen.queryByRole('button', { name: /capture memory/i })).not.toBeInTheDocument();
   });
 
+  it('shows a project-load failure without rendering the unscoped page', () => {
+    hooks.useProjectContext.mockReturnValue({
+      selectedProjects: [],
+      isAll: false,
+      toggleProject: vi.fn(),
+      setProjects: vi.fn(),
+      selectProject: vi.fn(),
+      clearProjects: vi.fn(),
+      contextEnabled: true,
+      scopeReady: false,
+      scopeError: true,
+    });
+    render(
+      <MobileNavProvider>
+        <MainShell>
+          <div>Shell content</div>
+        </MainShell>
+      </MobileNavProvider>
+    );
+    expect(screen.queryByText('Shell content')).not.toBeInTheDocument();
+    expect(screen.getByText('Projects unavailable')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument();
+  });
+
   it('holds the page until a project scope exists, then renders it', () => {
     hooks.useProjectContext.mockReturnValue({
       selectedProjects: [],

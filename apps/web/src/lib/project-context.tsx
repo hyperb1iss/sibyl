@@ -31,9 +31,8 @@ type ProjectSelection =
 const UNSET: ProjectSelection = { kind: 'unset' };
 const ALL: ProjectSelection = { kind: 'all' };
 /**
- * Every project because nothing better was available (the project list
- * failed to load, or the org has no projects yet). It is never saved, so the
- * next visit with a healthy backend still opens on a project.
+ * Every project because the verified org has no projects yet. It is never
+ * saved, so the next visit with a healthy backend still opens on a project.
  */
 const FALLBACK_ALL: ProjectSelection = { kind: 'all', transient: true };
 
@@ -79,13 +78,14 @@ function selectionKey(selection: ProjectSelection): string {
   return selection.kind === 'projects' ? `projects:${selection.ids.join(',')}` : selection.kind;
 }
 
-/** The active project with the latest activity, the one a fresh visit opens on. */
+/** The project with the latest activity, preferring active projects by default. */
 export function mostRecentProjectId(
-  projects: Array<{ id: string; metadata?: Record<string, unknown> | null }>
+  projects: Array<{ id: string; metadata?: Record<string, unknown> | null }>,
+  includeArchived = false
 ): string | null {
   let best: { id: string; time: number } | null = null;
   for (const project of projects) {
-    if (project.metadata?.status === 'archived') continue;
+    if (!includeArchived && project.metadata?.status === 'archived') continue;
     const activity = project.metadata?.last_activity_at || project.metadata?.updated_at;
     const time = typeof activity === 'string' ? new Date(activity).getTime() || 0 : 0;
     if (!best || time > best.time) best = { id: project.id, time };
@@ -129,8 +129,10 @@ interface ProjectContextValue {
   clearProjects: () => void;
   /** Whether this page respects project context */
   contextEnabled: boolean;
-  /** False until a selection exists; pages wait rather than read every project */
+  /** False until a selection is validated; pages wait before reading memory */
   scopeReady: boolean;
+  /** A selection cannot be validated because the authorized project list failed */
+  scopeError: boolean;
 }
 
 const ProjectContext = createContext<ProjectContextValue | null>(null);
@@ -163,7 +165,6 @@ export function ProjectContextProvider({ children }: { children: ReactNode }) {
     [selection]
   );
   const isAll = selection.kind === 'all';
-  const scopeReady = !contextEnabled || (hydrated && selection.kind !== 'unset');
 
   // Initial hydration: sync from URL (primary) or localStorage (fallback)
   // This runs once after mount to ensure searchParams is available
@@ -197,23 +198,40 @@ export function ProjectContextProvider({ children }: { children: ReactNode }) {
   // once stays available, but as a choice the viewer makes, not a default.
   // A chosen set of projects is checked against the same list, so an id that
   // was deleted, lost its access, or belongs to another org drops out.
-  const needsDefault = hydrated && contextEnabled && selection.kind === 'unset';
+  const needsDefault =
+    hydrated &&
+    contextEnabled &&
+    (selection.kind === 'unset' || (selection.kind === 'all' && selection.transient === true));
   const needsValidation = hydrated && contextEnabled && selection.kind === 'projects';
-  // Validation reads archived projects too, since links from the Projects
-  // page and task views can open one on purpose; the default never picks one.
+  // Include archived projects so an empty active list cannot imply an empty org.
+  // The default prefers an active project, then chooses one archived project.
   const { data: projectsData, isError: projectsFailed } = useProjects({
-    includeArchived: needsValidation,
+    includeArchived: true,
     enabled: needsDefault || needsValidation,
   });
+  const scopeError = (needsDefault || needsValidation) && projectsFailed;
+  const selectionValidated =
+    selection.kind === 'projects' &&
+    projectsData !== undefined &&
+    !projectsFailed &&
+    (projectsData.has_more ||
+      selection.ids.every(id => projectsData.entities.some(project => project.id === id)));
+  const emptyOrgValidated =
+    projectsData !== undefined &&
+    !projectsFailed &&
+    !projectsData.has_more &&
+    projectsData.entities.length === 0;
+  const allReady = selection.kind === 'all' && (!selection.transient || emptyOrgValidated);
+  const scopeReady = !contextEnabled || (hydrated && (allReady || selectionValidated));
   useEffect(() => {
     if (!needsDefault && !needsValidation) return;
     if (projectsFailed) {
-      // Keep a chosen set as it is; only a missing choice falls back.
-      if (needsDefault) setSelection(FALLBACK_ALL);
+      // Preserve the choice and block reads: an unavailable list cannot widen scope.
       return;
     }
     if (!projectsData) return;
     const entities = projectsData.entities ?? [];
+    if (entities.length === 0 && projectsData.has_more) return;
     let next: ProjectSelection | null = null;
     if (selection.kind === 'projects') {
       // A truncated list cannot prove an id is gone, only that it did not fit
@@ -224,8 +242,8 @@ export function ProjectContextProvider({ children }: { children: ReactNode }) {
       if (kept.length > 0) next = { kind: 'projects', ids: kept };
     }
     if (!next) {
-      const recent = mostRecentProjectId(entities);
-      // Nothing to scope to yet: every project, but not as a saved choice
+      const recent = mostRecentProjectId(entities) ?? mostRecentProjectId(entities, true);
+      // Only a verified empty org can open without a project selection.
       next = recent ? { kind: 'projects', ids: [recent] } : FALLBACK_ALL;
     }
     prevProjectsRef.current = next.kind === 'projects' ? next.ids : [];
@@ -329,6 +347,7 @@ export function ProjectContextProvider({ children }: { children: ReactNode }) {
       clearProjects,
       contextEnabled,
       scopeReady,
+      scopeError,
     }),
     [
       selectedProjects,
@@ -339,6 +358,7 @@ export function ProjectContextProvider({ children }: { children: ReactNode }) {
       clearProjects,
       contextEnabled,
       scopeReady,
+      scopeError,
     ]
   );
 
