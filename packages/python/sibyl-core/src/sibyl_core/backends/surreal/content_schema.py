@@ -26,6 +26,12 @@ from sibyl_core.backends.surreal.schema_invariants import (
     SchemaInvariantPlan,
     expected_unique_indexes,
 )
+from sibyl_core.backends.surreal.schema_raw_lexical import (
+    RAW_LEXICAL_STATE_TABLE,
+    RAW_LEXICAL_TABLES,
+    migrate_raw_lexical,
+    raw_lexical_definitions,
+)
 from sibyl_core.backends.surreal.schema_source_integrity import (
     migrate_source_integrity,
     prepare_source_integrity_upgrade,
@@ -124,8 +130,10 @@ CONTENT_TABLES = (
     EMBEDDING_STATES_TABLE,
     EMBEDDING_DEPLOYMENT_TABLE,
     RAW_EMBEDDING_REFUSALS_TABLE,
+    *RAW_LEXICAL_TABLES,
+    RAW_LEXICAL_STATE_TABLE,
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 48
+CONTENT_SCHEMA_CURRENT_VERSION = 49
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -1135,6 +1143,18 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             version=48,
             name="content_raw_embedding_refusals",
             statements=tuple(split_statements(RAW_EMBEDDING_REFUSAL_DEFINITIONS)),
+        ),
+        SchemaMigration(
+            version=49,
+            name="content_raw_lexical_corpora",
+            statements=tuple(
+                split_statements(
+                    render_surreal_compatible_sql(
+                        raw_lexical_definitions(_load_schema_file("10_tables.surql")), url=url
+                    )
+                )
+            ),
+            action=migrate_raw_lexical,
         ),
     )
 
