@@ -306,11 +306,12 @@ def build_mcp_cases(graph_fixture: dict[str, dict[str, Any]]) -> list[dict[str, 
             "id": "mcp-search",
             "kind": "mcp_tool",
             "tool": "search",
-            "arguments": {"query": REST_SEED_TITLE, "limit": 5},
+            "arguments": {"query": REST_SEED_TITLE, "limit": 5, "all_projects": True},
             "expect": {
                 "equals": {
                     "/isError": False,
                     "/structuredContent/query": REST_SEED_TITLE,
+                    "/structuredContent/filters/scope": "all_projects",
                 },
                 "list_contains": [
                     {"pointer": "/structuredContent/results", "match": {"name": REST_SEED_TITLE}},

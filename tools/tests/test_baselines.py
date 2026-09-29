@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 from mcp import ClientSession
 from mcp_types import CallToolResult, TextContent
+from tools.baselines.capture import build_mcp_cases
 from tools.baselines.common import (
     _raw_memory_matches_seed,
     read_jsonl,
@@ -65,6 +66,21 @@ async def test_mcp_baseline_results_preserve_wire_aliases() -> None:
     assert actual["structuredContent"] == {"query": "memory"}
     assert "is_error" not in actual
     assert "structured_content" not in actual
+
+
+def test_mcp_corpus_search_explicitly_reads_and_labels_all_projects() -> None:
+    manifest = json.loads((REPO_ROOT / "baselines/manifest.json").read_text(encoding="utf-8"))
+    generated_cases = build_mcp_cases(manifest["graph_fixture"])
+    committed_cases = read_jsonl(REPO_ROOT / "baselines/mcp_smoke.jsonl")
+    generated_search = next(case for case in generated_cases if case["id"] == "mcp-search")
+    committed_search = next(case for case in committed_cases if case["id"] == "mcp-search")
+
+    assert generated_search == committed_search
+    assert committed_search["arguments"]["all_projects"] is True
+    assert committed_search["expect"]["equals"]["/isError"] is False
+    assert (
+        committed_search["expect"]["equals"]["/structuredContent/filters/scope"] == "all_projects"
+    )
 
 
 def test_validate_expectations_supports_required_equals_minimums_and_list_contains() -> None:
