@@ -32,6 +32,7 @@ from sibyl_core.models.relations import (
     SUPPRESSING_RELATIONSHIP_TYPES,
     parse_relation_declarations,
 )
+from sibyl_core.services.graph_capture_availability import available_capture_projection_rows
 from sibyl_core.services.memory import declared_suppression_allowed
 
 log = structlog.get_logger()
@@ -283,6 +284,10 @@ async def require_entity_scope_visible(
         reader_user_id=reader_user_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=reader_memory_grants(ctx),
+    ):
+        raise HTTPException(status_code=404, detail="Entity not found")
+    if entity.id not in await available_capture_projection_rows(
+        str(ctx.organization_id), {entity.id: entity}
     ):
         raise HTTPException(status_code=404, detail="Entity not found")
     return accessible_projects
