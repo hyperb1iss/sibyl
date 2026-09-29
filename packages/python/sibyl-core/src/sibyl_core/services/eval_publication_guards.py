@@ -203,10 +203,21 @@ async def unavailable_publication_ids(
                     )
                 )
     if raw_memories:
+        from sibyl_core.services.content_models import (
+            raw_memory_unpublished_reflection_candidate,
+        )
         from sibyl_core.services.memory_derivations import unavailable_raw_derivation_ids
 
         if source_authority is None:
             raise ValueError("source authority is required for raw derivation reads")
+        # A reader gets a dream proposal only once it is promoted. Until then
+        # it is unreviewed model output, and a retired draft or a stalled
+        # correction child would otherwise sit beside the promoted memory.
+        unavailable.update(
+            memory.id
+            for memory in raw_memories
+            if raw_memory_unpublished_reflection_candidate(memory)
+        )
         unavailable.update(
             await unavailable_raw_derivation_ids(organization_id, raw_memories, source_authority)
         )

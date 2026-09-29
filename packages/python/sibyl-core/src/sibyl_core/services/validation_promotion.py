@@ -5,15 +5,18 @@ import hashlib
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+import structlog
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from sibyl_core.services.validation_execution import (
     ValidationExecution,
     ValidationExecutionUnavailable,
 )
 from sibyl_core.services.validation_result_codec import (
+    ValidationResultUnreadable,
     decode_validation_result,
     validate_result_request,
 )
@@ -25,6 +28,8 @@ from sibyl_core.tasks.memory_validation import (
     MemoryValidationResult,
 )
 from sibyl_core.tasks.procedure_review import review_digest
+
+log = structlog.get_logger()
 
 
 def _sha(value: str) -> str:
@@ -90,21 +95,60 @@ def validated_result(
     return result
 
 
+# Recall rereads bindings on every request. Remember recent diagnostics without
+# retaining every candidate a long-running process has ever encountered.
+@lru_cache(maxsize=1024)
+def _report_unreadable_binding(organization_id: str, candidate_id: str) -> None:
+    log.warning(
+        "validation_binding_unreadable",
+        organization_id=organization_id,
+        candidate_id=candidate_id,
+    )
+
+
+@lru_cache(maxsize=1024)
+def _report_unreadable_result(
+    organization_id: str, candidate_id: str, execution_id: str, error_count: int
+) -> None:
+    log.warning(
+        "validation_result_unreadable",
+        organization_id=organization_id,
+        candidate_id=candidate_id,
+        execution_id=execution_id,
+        error_count=error_count,
+    )
+
+
 async def validation_binding_current(memory, association) -> bool:
     value = association.get("validation_binding_json")
     if value is None:
         return True
     try:
         binding = ValidationBinding.model_validate_json(value)
-        row = await ValidationExecution(
-            binding.execution_id, memory.organization_id, memory.principal_id
-        ).load()
+    except (ValueError, TypeError):
+        # A binding this build cannot parse binds nothing it can check.
+        _report_unreadable_binding(memory.organization_id, memory.id)
+        return False
+    execution = ValidationExecution(
+        binding.execution_id, memory.organization_id, memory.principal_id
+    )
+    try:
+        row = await execution.load()
         if row is None:
             return False
         validated_result(row, binding, memory.organization_id, memory.principal_id, memory.id)
-        await ValidationExecution(
-            binding.execution_id, memory.organization_id, memory.principal_id
-        ).result()
+        await execution.result()
+    except ValidationError as exc:
+        # The stored result exists but this build cannot parse it, usually
+        # because a newer build wrote it. It still reads as unavailable, but
+        # say so: silently it looks like a promoted memory that vanished.
+        _report_unreadable_result(
+            memory.organization_id, memory.id, binding.execution_id, exc.error_count()
+        )
+        return False
+    except ValidationResultUnreadable:
+        _report_unreadable_result(memory.organization_id, memory.id, binding.execution_id, 1)
+        return False
     except (ValueError, TypeError, KeyError):
         return False
     return True
