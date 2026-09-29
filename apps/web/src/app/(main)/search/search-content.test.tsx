@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { SearchResponse } from '@/lib/api';
 import { render, screen } from '@/test/utils';
 import { SearchContent } from './search-content';
 
 const hooks = vi.hoisted(() => ({
   projectContext: { selectedProjects: ['a'], isAll: false, scopeReady: true },
   useSearch: vi.fn((_params: Record<string, unknown>, _options?: Record<string, unknown>) => ({
-    data: undefined,
+    data: undefined as SearchResponse | undefined,
     isLoading: false,
     error: null,
   })),
@@ -39,6 +40,7 @@ vi.mock('@/lib/hooks', () => ({
 describe('SearchContent', () => {
   beforeEach(() => {
     hooks.useSearch.mockClear();
+    hooks.useSearch.mockReturnValue({ data: undefined, isLoading: false, error: null });
     hooks.projectContext = { selectedProjects: ['a'], isAll: false, scopeReady: true };
   });
 
@@ -59,6 +61,21 @@ describe('SearchContent', () => {
       expect(params).toMatchObject({ project_ids: undefined });
     }
     expect(screen.getByText(/All Projects/)).toBeInTheDocument();
+  });
+
+  it('labels organization documents when an explicit source adds them to scoped search', () => {
+    hooks.useSearch.mockReturnValue({
+      data: {
+        results: [],
+        total: 0,
+        query: 'telescope',
+        filters: { document_scope: 'organization' },
+      },
+      isLoading: false,
+      error: null,
+    });
+    render(<SearchContent initialQuery="telescope" />);
+    expect(screen.getByText(/1 selected project.*Organization documentation/)).toBeInTheDocument();
   });
 
   it('does not fetch until a project selection is ready', () => {

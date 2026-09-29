@@ -390,6 +390,9 @@ export function SearchContent({ initialQuery, initialStats }: SearchContentProps
             : isAll
               ? 'All Projects'
               : `${selectedProjects.length} selected project${selectedProjects.length === 1 ? '' : 's'}`,
+          isUnifiedMode && unifiedResults?.filters.document_scope === 'organization'
+            ? 'Organization documentation'
+            : undefined,
           pageMeta,
         ]
           .filter(Boolean)
