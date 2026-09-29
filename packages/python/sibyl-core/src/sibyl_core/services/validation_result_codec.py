@@ -4,7 +4,7 @@ import json
 from dataclasses import fields
 from typing import Any
 
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 from sibyl_core.tasks._evidence_json import canonical
 from sibyl_core.tasks.memory_progress import (
@@ -30,7 +30,21 @@ _LEGACY_RESULT_ADAPTER = TypeAdapter(LegacyValidationStageResult)
 _PROGRESS_RESULT_ADAPTER = TypeAdapter(ProgressMemoryValidationResult)
 
 
+class ValidationResultUnreadable(ValueError):
+    """A durable result could not be decoded by this runtime."""
+
+
 def decode_validation_result(value: Any) -> ValidationStageResult:
+    """Distinguish unreadable stored data from an invalid promotion authority."""
+    try:
+        return _decode_validation_result(value)
+    except ValidationError:
+        raise
+    except (ValueError, TypeError, KeyError) as exc:
+        raise ValidationResultUnreadable(str(exc)) from exc
+
+
+def _decode_validation_result(value: Any) -> ValidationStageResult:
     """Select explicit progress before the permissive historical dataclass union."""
     if not isinstance(value, dict):
         raise ValueError("Validation result must be an object")

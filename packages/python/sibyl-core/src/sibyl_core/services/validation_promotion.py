@@ -16,6 +16,7 @@ from sibyl_core.services.validation_execution import (
     ValidationExecutionUnavailable,
 )
 from sibyl_core.services.validation_result_codec import (
+    ValidationResultUnreadable,
     decode_validation_result,
     validate_result_request,
 )
@@ -144,6 +145,9 @@ async def validation_binding_current(memory, association) -> bool:
         _report_unreadable_result(
             memory.organization_id, memory.id, binding.execution_id, exc.error_count()
         )
+        return False
+    except ValidationResultUnreadable:
+        _report_unreadable_result(memory.organization_id, memory.id, binding.execution_id, 1)
         return False
     except (ValueError, TypeError, KeyError):
         return False
