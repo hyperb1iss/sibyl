@@ -575,6 +575,7 @@ def test_search_scope_policy_denies_bands_it_cannot_verify() -> None:
 # file, with why it is not a second copy of the read rule. Authorization goes
 # through memory_metadata_read_allowed; these do something else with the value.
 _SCOPE_READERS_THAT_DO_NOT_AUTHORIZE = {
+    "services/content_raw_persistence.py::save_raw_memory": "Reject creation or reclassification into the retired shared scope.",
     "services/memory_identity.py::reflection_identity": "binds evidence identity to its authorized scope",
     "audit/filters.py::audit_event_matches_resource": "filters an audit log by a recorded value",
     "migrate/scope_backfill.py::_recovered": "write stamp: applies a capture's authoritative scope",

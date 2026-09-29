@@ -431,6 +431,8 @@ def _related_scope_allowed(
     *,
     principal_id: str | None,
     accessible_projects: set[str] | None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
     allowed_memory_scope_keys: set[str] | None,
 ) -> bool:
     """Neighbors are attached after candidate filtering, so they gate here.
@@ -443,6 +445,8 @@ def _related_scope_allowed(
         getattr(entity, "metadata", None),
         principal_id=principal_id,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
         private_scope_granted=private_scope_granted_for(
             allowed_memory_scope_keys, principal_id=principal_id
@@ -460,6 +464,8 @@ async def _default_related_items(
     entity_id: str,
     organization_id: str,
     accessible_projects: set[str] | None = None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
     principal_id: str | None = None,
     allowed_memory_scope_keys: set[str] | None = None,
     limit: int = 3,
@@ -494,6 +500,8 @@ async def _default_related_items(
             entity,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
         ):
             continue
@@ -546,6 +554,8 @@ async def _default_related_items_batch(
     entity_ids: Sequence[str],
     organization_id: str,
     accessible_projects: set[str] | None = None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
     principal_id: str | None = None,
     allowed_memory_scope_keys: set[str] | None = None,
     limit: int = 3,
@@ -600,6 +610,8 @@ async def _default_related_items_batch(
                 entity,
                 principal_id=principal_id,
                 accessible_projects=accessible_projects,
+                accessible_teams=accessible_teams,
+                accessible_delegations=accessible_delegations,
                 allowed_memory_scope_keys=allowed_memory_scope_keys,
             ):
                 continue
@@ -988,6 +1000,8 @@ async def _attach_related_items(
     *,
     organization_id: str,
     accessible_projects: set[str] | None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
     related_limit: int,
     related_fn: RelatedFn,
     principal_id: str | None = None,
@@ -1011,6 +1025,8 @@ async def _attach_related_items(
                 entity_ids=eligible_ids,
                 organization_id=organization_id,
                 accessible_projects=accessible_projects,
+                accessible_teams=accessible_teams,
+                accessible_delegations=accessible_delegations,
                 principal_id=principal_id,
                 allowed_memory_scope_keys=allowed_memory_scope_keys,
                 limit=related_limit,
@@ -1038,6 +1054,8 @@ async def _attach_related_items(
                     entity_id=item.id,
                     organization_id=organization_id,
                     accessible_projects=accessible_projects,
+                    accessible_teams=accessible_teams,
+                    accessible_delegations=accessible_delegations,
                     principal_id=principal_id,
                     allowed_memory_scope_keys=allowed_memory_scope_keys,
                     limit=related_limit,
@@ -1056,6 +1074,8 @@ async def _compile_fallback_sections(
     domain: str | None,
     project: str | None,
     accessible_projects: set[str] | None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
     organization_id: str,
     limit: int,
     search_fn: SearchFn,
@@ -1073,6 +1093,8 @@ async def _compile_fallback_sections(
         "category": domain,
         "project": project,
         "accessible_projects": accessible_projects,
+        "accessible_teams": accessible_teams,
+        "accessible_delegations": accessible_delegations,
         "principal_id": principal_id,
         "allowed_memory_scope_keys": allowed_memory_scope_keys,
         "limit": limit,
@@ -1315,6 +1337,8 @@ async def _default_active_work(
     limit: int,
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
     allowed_memory_scope_keys: set[str] | None = None,
 ) -> list[ContextItem]:
     from sibyl_core.models.entities import EntityType
@@ -1336,6 +1360,8 @@ async def _default_active_work(
             getattr(entity, "metadata", None),
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
             private_scope_granted=private_scope_granted_for(
                 allowed_memory_scope_keys, principal_id=principal_id
@@ -1445,6 +1471,8 @@ async def compile_context(
     domain: str | None = None,
     project: str | None = None,
     accessible_projects: set[str] | None = None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
     principal_id: str | None = None,
     agent_id: str | None = None,
     organization_id: str | None = None,
@@ -1494,6 +1522,8 @@ async def compile_context(
         principal_id=principal_id,
         project=project,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
         agent_id=agent_id,
         limit=limit,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
@@ -1555,6 +1585,8 @@ async def compile_context(
                 limit=min(per_facet_limit, _ACTIVE_WORK_LOOKUP_LIMIT),
                 principal_id=principal_id,
                 accessible_projects=accessible_projects,
+                accessible_teams=accessible_teams,
+                accessible_delegations=accessible_delegations,
                 allowed_memory_scope_keys=allowed_memory_scope_keys,
             )
         except Exception as exc:
@@ -1576,6 +1608,8 @@ async def compile_context(
                     domain=domain,
                     project=project,
                     accessible_projects=accessible_projects,
+                    accessible_teams=accessible_teams,
+                    accessible_delegations=accessible_delegations,
                     organization_id=organization_id,
                     limit=limit,
                     search_fn=search_fn,
@@ -1599,6 +1633,8 @@ async def compile_context(
             sections,
             organization_id=organization_id,
             accessible_projects=related_projects,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
             related_limit=related_limit,
             related_fn=related_fn,
             principal_id=principal_id,

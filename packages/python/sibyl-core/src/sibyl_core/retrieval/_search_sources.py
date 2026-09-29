@@ -132,7 +132,12 @@ async def _recall_raw_candidates(
     candidates: list[RetrievalCandidate] = []
     failures: list[CandidateSourceFailure] = []
     seen_ids: set[str] = set()
-    raw_recall_scopes = {MemoryScope.PRIVATE, MemoryScope.PROJECT, MemoryScope.DELEGATED}
+    raw_recall_scopes = {
+        MemoryScope.PRIVATE,
+        MemoryScope.PROJECT,
+        MemoryScope.TEAM,
+        MemoryScope.DELEGATED,
+    }
     raw_scopes = [scope for scope in plan.scopes if scope.memory_scope in raw_recall_scopes]
     recalled_by_scope = await asyncio.gather(
         *(

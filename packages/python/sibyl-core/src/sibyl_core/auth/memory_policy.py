@@ -649,6 +649,8 @@ def memory_metadata_read_allowed(
     principal_id: str | None,
     private_scope_granted: bool,
     accessible_projects: Iterable[str] | None,
+    accessible_teams: Iterable[str] | None = None,
+    accessible_delegations: Iterable[str] | None = None,
     row_project_id: str | None = None,
     project_id: str | None = None,
     agent_id: str | None = None,
@@ -694,6 +696,8 @@ def memory_metadata_read_allowed(
             project_id=project_id,
             agent_id=agent_id,
             accessible_projects=accessible_projects,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
         ).allowed
     if not allowed:
         return False
