@@ -1742,9 +1742,13 @@ def _raw_capture_filter_clause(
     entity_type: str | None,
     capture_surface: str | None,
     review_state: str | None,
+    project_ids: list[str] | None = None,
 ) -> tuple[str, dict[str, object]]:
     clauses = ["organization_id = $organization_id"]
     params: dict[str, object] = {"organization_id": str(organization_id)}
+    if project_ids is not None:
+        clauses.append("(project_id ?? metadata.project_id) IN $project_ids")
+        params["project_ids"] = project_ids
     if entity_type:
         clauses.append("entity_type = $entity_type")
         params["entity_type"] = entity_type
@@ -1767,6 +1771,7 @@ async def list_raw_captures(
     entity_type: str | None,
     capture_surface: str | None,
     review_state: str | None,
+    project_ids: list[str] | None = None,
     limit: int,
     offset: int,
 ) -> tuple[list[RawCaptureRecord], bool]:
@@ -1775,6 +1780,7 @@ async def list_raw_captures(
         entity_type=entity_type,
         capture_surface=capture_surface,
         review_state=review_state,
+        project_ids=project_ids,
     )
     async with surreal_content_client() as client:
         rows = await _select_many(

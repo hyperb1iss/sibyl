@@ -166,6 +166,7 @@ def _raw_vector_space_mismatch(space: models.RawEmbeddingSpace) -> str:
 
 @dataclass(frozen=True, slots=True)
 class _RawMemoryRecallFilters:
+    project_ids: tuple[str, ...] | None = None
     source_ids: tuple[str, ...] = ()
     capture_ids: tuple[str, ...] | None = None
     participants: tuple[str, ...] = ()
@@ -257,6 +258,9 @@ def _raw_memory_recall_where(
     )
     clauses = [where_clause]
     filters = filters or _RawMemoryRecallFilters()
+    if filters.project_ids is not None:
+        clauses.append("project_id IN $project_ids")
+        params["project_ids"] = list(filters.project_ids)
     if filters.source_ids:
         clauses.append("source_id IN $source_ids")
         params["source_ids"] = list(filters.source_ids)
@@ -698,6 +702,7 @@ def _raw_recall_filters(
     *,
     source_ids: Sequence[str] | None,
     capture_ids: Sequence[str] | None = None,
+    project_ids: Sequence[str] | None = None,
     participants: Sequence[str] | None,
     labels: Sequence[str] | None,
     thread_id: str | None,
@@ -707,6 +712,9 @@ def _raw_recall_filters(
 ) -> _RawMemoryRecallFilters:
     as_of_datetime = _as_of_filter_value(as_of)
     return _RawMemoryRecallFilters(
+        project_ids=tuple(_normalized_filter_values(project_ids))
+        if project_ids is not None
+        else None,
         source_ids=tuple(_normalized_filter_values(source_ids)),
         capture_ids=(
             tuple(dict.fromkeys(_normalized_filter_values(capture_ids)))
@@ -757,6 +765,7 @@ async def _recall_raw_memory_result(
     project_id: str | None = None,
     source_ids: Sequence[str] | None = None,
     capture_ids: Sequence[str] | None = None,
+    project_ids: Sequence[str] | None = None,
     participants: Sequence[str] | None = None,
     labels: Sequence[str] | None = None,
     thread_id: str | None = None,
@@ -776,6 +785,7 @@ async def _recall_raw_memory_result(
     filters = _raw_recall_filters(
         source_ids=source_ids,
         capture_ids=capture_ids,
+        project_ids=project_ids,
         participants=participants,
         labels=labels,
         thread_id=thread_id,
@@ -798,7 +808,7 @@ async def _recall_raw_memory_result(
         project_id=project_id,
         filters=filters,
     )
-    if filters.capture_ids == ():
+    if filters.capture_ids == () or filters.project_ids == ():
         return RawMemoryRecallResult(())
 
     source_results: list[CandidateSourceResult[RawMemory]] = []
@@ -982,6 +992,7 @@ async def recall_raw_memory_with_sources(
     project_id: str | None = None,
     source_ids: Sequence[str] | None = None,
     capture_ids: Sequence[str] | None = None,
+    project_ids: Sequence[str] | None = None,
     participants: Sequence[str] | None = None,
     labels: Sequence[str] | None = None,
     thread_id: str | None = None,
@@ -1005,6 +1016,7 @@ async def recall_raw_memory_with_sources(
         project_id=project_id,
         source_ids=source_ids,
         capture_ids=capture_ids,
+        project_ids=project_ids,
         participants=participants,
         labels=labels,
         thread_id=thread_id,
@@ -1029,6 +1041,7 @@ async def recall_raw_memory(
     project_id: str | None = None,
     source_ids: Sequence[str] | None = None,
     capture_ids: Sequence[str] | None = None,
+    project_ids: Sequence[str] | None = None,
     participants: Sequence[str] | None = None,
     labels: Sequence[str] | None = None,
     thread_id: str | None = None,
@@ -1052,6 +1065,7 @@ async def recall_raw_memory(
         project_id=project_id,
         source_ids=source_ids,
         capture_ids=capture_ids,
+        project_ids=project_ids,
         participants=participants,
         labels=labels,
         thread_id=thread_id,

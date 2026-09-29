@@ -12,7 +12,10 @@ class SearchRequest(BaseModel):
     """Unified search request - searches both knowledge graph AND documentation.
 
     By default, searches both stores and merges results by relevance.
-    Use filters to narrow scope.
+    Use filters to narrow scope. Omitting both project filters preserves the
+    authorized cross-project REST shape for clients predating project selection.
+    Browsing clients resolve a selection before issuing memory requests; the
+    response labels the resulting scope.
     """
 
     query: str = Field(..., min_length=1, description="Natural language search query")
@@ -37,7 +40,20 @@ class SearchRequest(BaseModel):
     language: str | None = Field(default=None, description="Filter by programming language")
     category: str | None = Field(default=None, description="Filter by category")
     status: str | None = Field(default=None, description="Filter tasks by status")
-    project: str | None = Field(default=None, description="Filter tasks by project ID")
+    project: str | None = Field(default=None, description="Filter by project ID")
+    project_ids: list[str] | None = Field(
+        default=None, min_length=1, description="Search only the selected authorized projects"
+    )
+
+    @field_validator("project_ids")
+    @classmethod
+    def validate_project_ids(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        if any(not project.strip() for project in value):
+            raise ValueError("Project IDs must not be blank")
+        return list(dict.fromkeys(project.strip() for project in value))
+
     source: str | None = Field(default=None, description="Alias for source_name")
     source_id: str | None = Field(
         default=None, description="Filter documents/raw memory by source ID"

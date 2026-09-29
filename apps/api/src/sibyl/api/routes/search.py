@@ -127,7 +127,19 @@ async def execute_search_request(
     group_id = str(org.id)
 
     project_filter = request.project
-    if project_filter:
+    if request.project_ids:
+        if project_filter:
+            raise HTTPException(status_code=422, detail="Choose project or project_ids, not both")
+        for project_id in request.project_ids:
+            await verify_entity_project_access(
+                None,
+                ctx,
+                project_id,
+                required_role=ProjectRole.VIEWER,
+                require_existing_project=True,
+            )
+        accessible_projects = set(request.project_ids)
+    elif project_filter:
         await verify_entity_project_access(
             None,
             ctx,
@@ -161,6 +173,7 @@ async def execute_search_request(
             category=request.category,
             status=request.status,
             project=project_filter,
+            **({"project_ids": request.project_ids} if request.project_ids is not None else {}),
             accessible_projects=accessible_projects,
             source=request.source,
             source_id=request.source_id,
@@ -203,6 +216,15 @@ async def execute_search_request(
         result = await run_core_search()
 
     response = SearchResponse(**asdict(result))
+    response.filters["scope"] = (
+        "project_selection"
+        if request.project_ids
+        else "project"
+        if project_filter
+        else "all_projects"
+    )
+    if request.project_ids is not None:
+        response.filters["project_ids"] = request.project_ids
     response.filters["embedding_usage"] = embedding_usage
     return response
 

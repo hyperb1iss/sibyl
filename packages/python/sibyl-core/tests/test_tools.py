@@ -1529,7 +1529,13 @@ class TestSearchTool:
         document_search.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_search_project_filter_skips_implicit_document_search(self) -> None:
+    @pytest.mark.parametrize(
+        "scope",
+        [{"project": "project_123"}, {"project_ids": ["project_123", "project_456"]}],
+    )
+    async def test_search_project_filter_skips_implicit_document_search(
+        self, scope: dict[str, Any]
+    ) -> None:
         """Project-scoped searches should not surface unscoped document results by default."""
         from sibyl_core.retrieval.hybrid import HybridResult
 
@@ -1555,18 +1561,28 @@ class TestSearchTool:
         ):
             response = await search_module.search(
                 query="graph",
-                project="project_123",
                 organization_id="org_123",
                 include_documents=True,
                 include_graph=True,
+                **scope,
             )
 
         assert response.document_count == 0
+        assert "document_scope" not in response.filters
         document_search.assert_not_awaited()
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "scope_request",
+        [
+            {"project": "project_123", "source_name": "docs"},
+            {"project_ids": ["project_123", "project_456"], "source_name": "docs"},
+            {"project_ids": ["project_123"], "types": ["document"]},
+            {},
+        ],
+    )
     async def test_search_explicit_source_name_keeps_document_search_with_project_filter(
-        self,
+        self, scope_request: dict[str, Any]
     ) -> None:
         """Explicit document filters keep document search enabled."""
         from sibyl_core.retrieval.hybrid import HybridResult
@@ -1591,15 +1607,15 @@ class TestSearchTool:
                 ),
             ),
         ):
-            await search_module.search(
+            response = await search_module.search(
                 query="graph",
-                project="project_123",
-                source_name="docs",
                 organization_id="org_123",
                 include_documents=True,
                 include_graph=True,
+                **scope_request,
             )
 
+        assert response.filters["document_scope"] == "organization"
         document_search.assert_awaited_once()
 
     @pytest.mark.asyncio

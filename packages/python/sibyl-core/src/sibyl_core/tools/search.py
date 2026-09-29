@@ -636,6 +636,7 @@ async def _search_raw_memories(
     memory_scope: str,
     scope_key: str | None,
     project_id: str | None,
+    project_ids: Sequence[str] | None = None,
     source_id: str | None,
     participants: Sequence[str] | None,
     labels: Sequence[str] | None,
@@ -655,6 +656,7 @@ async def _search_raw_memories(
         memory_scope=memory_scope,
         scope_key=scope_key,
         project_id=project_id,
+        **({"project_ids": project_ids} if project_ids is not None else {}),
         source_ids=[source_id] if source_id else None,
         participants=participants,
         labels=labels,
@@ -729,6 +731,7 @@ async def search(
     record_exposure: bool = True,
     include_retrieval_diagnostics: bool = False,
     knn_type_overfetch: int = 0,
+    project_ids: Sequence[str] | None = None,
 ) -> SearchResponse:
     """Unified semantic search across knowledge graph AND documentation.
 
@@ -818,6 +821,8 @@ async def search(
     )
 
     filters = {}
+    if project_ids is not None:
+        filters["project_ids"] = list(project_ids)
     if include_content:
         filters["content_max_chars"] = content_max_chars
     source_failures: list[CandidateSourceFailure] = []
@@ -916,16 +921,24 @@ async def search(
         search_documents
         and search_graph
         and not explicit_document_request
-        and _has_graph_only_filters(
-            category=category,
-            status=status,
-            project=project,
-            source=source,
-            assignee=assignee,
-            since=since,
+        and (
+            project_ids is not None
+            or _has_graph_only_filters(
+                category=category,
+                status=status,
+                project=project,
+                source=source,
+                assignee=assignee,
+                since=since,
+            )
         )
     ):
         search_documents = False
+
+    # Crawled documents belong to the organization, not individual projects.
+    # A document/source request deliberately includes that wider source lane.
+    if search_documents:
+        filters["document_scope"] = "organization"
 
     graph_results: list[SearchResult] = []
     doc_results: list[SearchResult] = []
@@ -977,6 +990,7 @@ async def search(
                         memory_scope=memory_scope,
                         scope_key=scope_key,
                         project_id=project,
+                        project_ids=project_ids,
                         source_id=source_id,
                         participants=participants,
                         labels=labels,

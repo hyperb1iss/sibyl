@@ -123,7 +123,8 @@ async def test_capture_membership_precedes_text_candidate_limit(
 
 
 @pytest.mark.parametrize(
-    "nearer_exclusion", ["capture_ids", "future_valid_from", "foreign_owner", "foreign_scope"]
+    "nearer_exclusion",
+    ["capture_ids", "future_valid_from", "foreign_owner", "foreign_scope", "foreign_project"],
 )
 async def test_capture_and_scope_filters_precede_vector_neighbor_limit(
     content_store, monkeypatch, nearer_exclusion
@@ -156,6 +157,8 @@ async def test_capture_and_scope_filters_precede_vector_neighbor_limit(
                 metadata=(
                     {"valid_from": future}
                     if index and nearer_exclusion == "future_valid_from"
+                    else {"project_id": "b" if index else "a"}
+                    if nearer_exclusion == "foreign_project"
                     else None
                 ),
                 source_id=f"observation-{index}",
@@ -184,6 +187,7 @@ async def test_capture_and_scope_filters_precede_vector_neighbor_limit(
             principal_id="owner",
             query="unmatched-query-marker",
             capture_ids=capture_ids,
+            project_ids=["a"] if nearer_exclusion == "foreign_project" else None,
             limit=1,
         )
         lanes = {source.source: source for source in result.sources}
