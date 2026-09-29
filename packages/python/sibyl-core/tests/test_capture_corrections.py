@@ -236,3 +236,36 @@ async def test_preview_discloses_readable_refusal_without_traversing_claimed_lin
     )
     assert set(preview.affected_derived_ids) == {note.id, target.id}
     assert child.id not in preview.affected_derived_ids
+
+
+async def test_preview_retains_readable_declared_ids_when_provenance_lookup_fails(
+    runtime, content_store, monkeypatch
+):
+    memory, note = await captured_note(
+        runtime, monkeypatch, raw_metadata={"derived_ids": ["capture-note", "foreign-note"]}
+    )
+    foreign = Entity(
+        id="foreign-note",
+        name="Foreign note",
+        entity_type=EntityType.NOTE,
+        metadata={"memory_scope": "private", "principal_id": "other-user"},
+    )
+    await runtime.entity_manager.create_direct(foreign, generate_embedding=False)
+    original = await runtime.entity_manager.get(note.id)
+    original_query = runtime.client.execute_query
+
+    async def failing_provenance(query, **params):
+        if "attributes.raw_memory_id" in query:
+            raise RuntimeError("provenance unavailable")
+        return await original_query(query, **params)
+
+    monkeypatch.setattr(runtime.client, "execute_query", failing_provenance)
+    preview = await preview_memory_correction(
+        organization_id=runtime.client.group_id,
+        source_id=memory.id,
+        principal_id="user_a",
+        action="delete",
+    )
+    assert preview.affected_derived_ids == [note.id]
+    assert preview.metadata["derived_lookup_complete"] is False
+    assert (await runtime.entity_manager.get(note.id)).model_dump() == original.model_dump()

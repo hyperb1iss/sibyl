@@ -26,6 +26,7 @@ from sibyl_core.services.memory_lineage import discover_source_correction_descen
 from sibyl_core.services.memory_policy import (
     _authorize_correction_source_write,
     _authorize_share_source_read,
+    _correction_derived_ids,
     _metadata_dict_values,
     _metadata_str,
     _metadata_str_values,
@@ -449,6 +450,18 @@ async def _preview_loaded_memory_correction(
     derived_lookup_complete = False
     try:
         runtime = await memory_lifecycle.get_surreal_graph_runtime(organization_id)
+        lookup_failures: set[str] = set()
+        declared_ids = _correction_derived_ids(memory)
+        affected_derived_ids = await memory_lifecycle._readable_correction_targets(
+            runtime,
+            source_id=memory.id,
+            entity_ids=declared_ids,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+            log_event="memory_correction_preview_declared_unreadable",
+            lookup_failures=lookup_failures,
+        )
         targets = await memory_lifecycle._correction_graph_entity_ids(
             runtime,
             organization_id=organization_id,
@@ -464,11 +477,10 @@ async def _preview_loaded_memory_correction(
             source_id=memory.id,
             entity_ids=[*targets.authorized, *targets.projections],
         )
-        lookup_failures: set[str] = set()
         affected_derived_ids = await memory_lifecycle._readable_correction_targets(
             runtime,
             source_id=memory.id,
-            entity_ids=[*descendants.entity_ids, *targets.refused],
+            entity_ids=[*descendants.entity_ids, *declared_ids],
             principal_id=principal_id,
             accessible_projects=accessible_projects,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
