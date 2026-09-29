@@ -23,11 +23,14 @@ def projection(identifier, parent):
 
 
 @pytest.mark.parametrize("action", ["hide", "revise"])
+@pytest.mark.parametrize("support", ["graph_parent", "declared_capture"])
 async def test_unbound_graph_descendant_keeps_unknown_content_epoch_after_restore(
-    runtime, content_store, monkeypatch, action
+    runtime, content_store, monkeypatch, action, support
 ):
     memory, parent = await captured_note(runtime, monkeypatch)
     child = projection("legacy-child", parent.id)
+    if support == "declared_capture":
+        child.metadata = {"projection_kind": "passage", "raw_source_ids": [memory.id]}
     original = child.model_dump()
     rows = {child.id: child}
     assert set(
@@ -122,10 +125,10 @@ async def test_graph_parent_reads_are_batched_and_never_write(runtime, content_s
             runtime.client.group_id, children, graph_client=runtime.client
         )
     ) == set(children)
-    assert graph_query.await_count == 1
+    assert graph_query.await_count == 2
     assert content_query.await_count == 1
     for call in [*graph_query.await_args_list, *content_query.await_args_list]:
-        assert call.args[0].lstrip().upper().startswith("SELECT ")
+        assert call.args[0].lstrip().upper().startswith(("SELECT ", "RETURN "))
     assert all("source_bindings" not in child.metadata for child in children.values())
 
 
@@ -158,6 +161,15 @@ async def test_authorized_bound_publication_remains_readable_to_project_member(
     from sibyl_core.services.memory_sharing import share_memory
 
     memory, _parent = await captured_note(runtime, monkeypatch)
+
+    async def source_authority(organization_id, principal_id):
+        from sibyl_core.services.memory_source_validation import SourceReadAuthority
+
+        if organization_id != runtime.client.group_id or principal_id != "user_a":
+            return None
+        return SourceReadAuthority(principal_id, projects=frozenset({"project_a"}))
+
+    monkeypatch.setattr("sibyl_core.runtime_ports._source_authority_resolver", source_authority)
     common = dict(
         organization_id=runtime.client.group_id,
         principal_id="user_a",

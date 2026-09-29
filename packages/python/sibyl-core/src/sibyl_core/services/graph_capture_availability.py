@@ -16,6 +16,7 @@ from sibyl_core.memory_pipeline.lifecycle import (
 from sibyl_core.memory_pipeline.source_lifecycle import (
     SOURCE_BINDINGS_KEY,
     correction_event,
+    declared_source_ids,
     merge_source_correction,
 )
 from sibyl_core.services import content_client, content_models
@@ -32,7 +33,11 @@ def _capture_ids(metadata: Mapping[str, object]) -> set[str]:
         bindings = {}
     if not isinstance(bindings, Mapping):
         raise ValueError("source bindings must be a mapping")
-    ids: set[str] = set()
+    ids = {
+        identifier
+        for identifier in declared_source_ids(metadata)
+        if not re.fullmatch(r"reflection:input:[0-9a-f]{16}", identifier)
+    }
     for identifier, revision in bindings.items():
         if not isinstance(identifier, str) or not identifier.strip():
             raise ValueError("source binding id is invalid")
@@ -54,28 +59,63 @@ async def available_capture_projection_rows[T](
     *,
     graph_client=None,
     source_visible: Callable[[Any], bool] | None = None,
+    read=None,
 ) -> dict[str, T]:
     """Apply current source verdicts virtually without updating rows or bindings.
 
     Canonical capture IDs are exact identities, never source grouping keys.
     Batch loads share roots across rows and walk retained capture ancestry.
     Lookup failures exclude dependent rows while unrelated rows remain readable.
-    Unbound legacy projections also retain their ancestors' reader audience.
-    Bound publications retain the authority verified by their derivation ledger.
+    Source bindings describe observed content, never audience authority.
+    Audience expansion requires a verified protected publication association.
     """
-    graph_rows, parents = await _graph_ancestry(organization_id, rows, graph_client)
-    references: dict[str, set[str]] = {}
-    legacy_audiences: set[str] = set()
-    for identifier in rows:
+    candidates: dict[str, T] = {}
+    dependent_ids: set[str] = set()
+    for identifier, row in rows.items():
         try:
-            metadata = getattr(rows[identifier], "metadata", None) or {}
+            metadata = getattr(row, "metadata", None)
+            metadata = {} if metadata is None else metadata
             if not isinstance(metadata, Mapping):
                 raise ValueError("graph metadata must be a mapping")
-            legacy = not metadata.get(SOURCE_BINDINGS_KEY) and bool(
-                _projection_row(rows[identifier]) or parents.get(identifier)
-            )
-            if legacy:
-                legacy_audiences.add(identifier)
+            if (
+                _projection_row(row)
+                or _parent_ids(row)
+                or _capture_ids(metadata)
+                or metadata.get(SOURCE_BINDINGS_KEY)
+                or getattr(row, "derivation_required", False)
+            ):
+                dependent_ids.add(identifier)
+            candidates[identifier] = row
+        except (TypeError, ValueError):
+            continue
+    verdicts = (
+        await _publication_verdicts(
+            organization_id,
+            {identifier: candidates[identifier] for identifier in dependent_ids},
+            graph_client=graph_client,
+            read=read,
+        )
+        if dependent_ids
+        else {}
+    )
+    available: dict[str, T] = {
+        identifier: row
+        for identifier, row in candidates.items()
+        if verdicts.get(identifier) is True
+        and graph_metadata_recallable(getattr(row, "metadata", None))
+        and (source_visible is None or source_visible(row))
+    }
+    # Protected publications use their typed durable observations. Legacy
+    # metadata supplies ancestry only when no protected association exists.
+    legacy_rows = {
+        identifier: row
+        for identifier, row in candidates.items()
+        if verdicts.get(identifier) is None
+    }
+    graph_rows, parents = await _graph_ancestry(organization_id, legacy_rows, graph_client)
+    references: dict[str, set[str]] = {}
+    for identifier in legacy_rows:
+        try:
             ancestry = _ancestry(identifier, parents, graph_rows)
             roots: set[str] = set()
             for ancestor in ancestry:
@@ -83,10 +123,12 @@ async def available_capture_projection_rows[T](
                 if ancestor != identifier and (
                     getattr(row, "organization_id", None) != organization_id
                     or not graph_metadata_recallable(getattr(row, "metadata", None))
-                    or (legacy and source_visible is not None and not source_visible(row))
+                    or (source_visible is not None and not source_visible(row))
                 ):
                     raise ValueError("graph source is unavailable")
                 roots.update(_capture_ids(getattr(row, "metadata", None) or {}))
+            if identifier in dependent_ids and not roots and not parents.get(identifier):
+                raise ValueError("projection ancestry is unavailable")
             references[identifier] = roots
         except (TypeError, ValueError):
             continue
@@ -137,20 +179,15 @@ async def available_capture_projection_rows[T](
                 error_type=type(exc).__name__,
             )
         frontier = set().union(*(dependencies.get(key, set()) for key in requested))
-    available: dict[str, T] = {}
     for identifier, roots in references.items():
-        row = rows[identifier]
+        row = legacy_rows[identifier]
         metadata: dict[str, Any] = dict(getattr(row, "metadata", None) or {})
         try:
             for root in _capture_ancestry(roots, dependencies, captures):
                 memory = captures.get(root)
                 if memory is None:
                     raise ValueError("capture ancestry is unavailable")
-                if (
-                    identifier in legacy_audiences
-                    and source_visible is not None
-                    and not source_visible(_capture_policy_row(memory))
-                ):
+                if source_visible is not None and not source_visible(_capture_policy_row(memory)):
                     raise ValueError("capture source is unreadable")
                 event = correction_event(
                     memory,
@@ -166,6 +203,42 @@ async def available_capture_projection_rows[T](
         except (TypeError, ValueError):
             continue
     return available
+
+
+async def _publication_verdicts(organization_id, rows, *, graph_client, read):
+    from sibyl_core.services.graph_derivations import graph_publication_verdicts
+    from sibyl_core.services.graph_read_validation import GraphReadValidation
+
+    verdicts: dict[str, bool | None] = dict.fromkeys(rows, False)
+    try:
+        if graph_client is None:
+            from sibyl_core.services.graph_runtime import get_surreal_graph_runtime
+
+            graph_client = (await get_surreal_graph_runtime(organization_id)).client
+        read = read or GraphReadValidation(organization_id)
+        for batch in content_client.value_batches(sorted(rows)):
+            try:
+                verdicts.update(
+                    await graph_publication_verdicts(
+                        organization_id,
+                        {identifier: rows[identifier] for identifier in batch},
+                        client=graph_client,
+                        read=read,
+                    )
+                )
+            except Exception as exc:
+                log.warning(
+                    "graph_publication_proof_failed",
+                    dependent_publication_count=len(batch),
+                    error_type=type(exc).__name__,
+                )
+    except Exception as exc:
+        log.warning(
+            "graph_publication_proof_failed",
+            dependent_publication_count=len(rows),
+            error_type=type(exc).__name__,
+        )
+    return verdicts
 
 
 def _projection_row(row: Any) -> bool:
