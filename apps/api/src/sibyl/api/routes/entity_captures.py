@@ -1,6 +1,6 @@
 """Canonical captures ownership for entity routes."""
 
-from typing import Any
+from typing import Annotated, Any
 from uuid import UUID
 
 import structlog
@@ -29,7 +29,7 @@ from sibyl.persistence.content_runtime import (
     get_content_read_session_dependency,
     save_raw_capture_record,
 )
-from sibyl_core.auth import AuthOrganization
+from sibyl_core.auth import AuthOrganization, ProjectRole
 
 log = structlog.get_logger()
 
@@ -101,9 +101,21 @@ async def list_raw_captures(
     review_state: str | None = Query(default=None, description="Filter by review queue state"),
     limit: int = Query(default=50, ge=1, le=200, description="Items per page"),
     offset: int = Query(default=0, ge=0, description="Results to skip"),
+    project_ids: Annotated[list[str] | None, Query(min_length=1)] = None,
 ) -> RawCaptureListResponse:
     """List archived raw quick captures for the current organization."""
     accessible_projects = await policy.accessible_project_ids_for_read(ctx)
+    if project_ids is not None:
+        if not set(project_ids) <= accessible_projects:
+            raise HTTPException(status_code=403, detail="project_scope_denied")
+        for project_id in project_ids:
+            await policy.verify_entity_project_access(
+                None,
+                ctx,
+                project_id,
+                required_role=ProjectRole.VIEWER,
+                require_existing_project=True,
+            )
     accessible_delegations = await policy.accessible_delegation_scope_keys_for_read(ctx)
     captures, has_more = await content_runtime.list_raw_captures(
         session,
@@ -113,11 +125,16 @@ async def list_raw_captures(
         review_state=review_state,
         limit=limit,
         offset=offset,
+        **({"project_ids": project_ids} if project_ids is not None else {}),
     )
     captures = [
         capture
         for capture in captures
-        if policy.raw_capture_visible_to_reader(
+        if (
+            project_ids is None
+            or (capture.project_id or capture.metadata.get("project_id")) in project_ids
+        )
+        and policy.raw_capture_visible_to_reader(
             capture,
             ctx=ctx,
             accessible_projects=accessible_projects,
@@ -130,6 +147,8 @@ async def list_raw_captures(
         limit=limit,
         offset=offset,
         has_more=has_more,
+        scope="project_selection" if project_ids is not None else "all_projects",
+        project_ids=project_ids,
     )
 
 

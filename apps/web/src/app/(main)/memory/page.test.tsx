@@ -6,6 +6,7 @@ const navigationState = vi.hoisted(() => ({
 }));
 
 const hooks = vi.hoisted(() => ({
+  projectContext: { selectedProjects: ['project-a'], isAll: false, scopeReady: true },
   useMemoryAudit: vi.fn(),
   useMemorySpaces: vi.fn(),
   useRawCaptures: vi.fn(),
@@ -14,6 +15,11 @@ const hooks = vi.hoisted(() => ({
 vi.mock('next/navigation', () => ({
   usePathname: () => '/memory',
   useSearchParams: () => navigationState.searchParams,
+}));
+
+vi.mock('@/lib/project-context', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/lib/project-context')>()),
+  useProjectContext: () => hooks.projectContext,
 }));
 
 vi.mock('@/lib/hooks/memory', () => hooks);
@@ -205,6 +211,8 @@ const spaces = {
 describe('MemoryContent', () => {
   beforeEach(() => {
     navigationState.searchParams = new URLSearchParams();
+    hooks.useRawCaptures.mockClear();
+    hooks.projectContext = { selectedProjects: ['project-a'], isAll: false, scopeReady: true };
     hooks.useRawCaptures.mockImplementation((params?: Record<string, unknown>) => {
       if (params?.capture_surface === 'source_import') {
         return { data: importCaptures, isLoading: false, error: null };
@@ -219,6 +227,25 @@ describe('MemoryContent', () => {
     });
     hooks.useMemoryAudit.mockReturnValue({ data: audit, isLoading: false, error: null });
     hooks.useMemorySpaces.mockReturnValue({ data: spaces, isLoading: false, error: null });
+  });
+
+  it('scopes captures, imports and reflection candidates to the selected projects', () => {
+    hooks.projectContext.selectedProjects = ['a', 'b'];
+    render(<MemoryContent />);
+    for (const [params, options] of hooks.useRawCaptures.mock.calls) {
+      expect(params).toMatchObject({ project_ids: ['a', 'b'] });
+      expect(options).toMatchObject({ enabled: true, keepPreviousResults: false });
+    }
+    expect(screen.getByText(/2 selected projects/)).toBeInTheDocument();
+  });
+
+  it('labels an explicit All Projects capture view', () => {
+    hooks.projectContext = { selectedProjects: [], isAll: true, scopeReady: true };
+    render(<MemoryContent />);
+    for (const [params] of hooks.useRawCaptures.mock.calls) {
+      expect(params).toMatchObject({ project_ids: undefined });
+    }
+    expect(screen.getByText('All Projects')).toBeInTheDocument();
   });
 
   it('renders the memory workspace home panels', () => {

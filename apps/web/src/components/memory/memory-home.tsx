@@ -27,6 +27,7 @@ import type {
 } from '@/lib/api/memory';
 import { formatDistanceToNow } from '@/lib/constants/formatting';
 import { useMemoryAudit, useMemorySpaces, useRawCaptures } from '@/lib/hooks/memory';
+import { useProjectContext } from '@/lib/project-context';
 import { MemoryActivityFeed } from './memory-activity-feed';
 import { type MemoryScopeFilter, MemoryScopeSwitcher } from './memory-scope-switcher';
 
@@ -598,13 +599,23 @@ export function MemoryHome() {
     }
   }
 
-  const capturesQuery = useRawCaptures({ limit: 24 });
-  const importsQuery = useRawCaptures({ capture_surface: 'source_import', limit: 8 });
-  const reflectionsQuery = useRawCaptures({
-    capture_surface: 'reflection_candidate',
-    review_state: 'pending',
-    limit: 8,
-  });
+  const { selectedProjects, isAll, scopeReady } = useProjectContext();
+  const projectIds = isAll ? undefined : selectedProjects;
+  const captureOptions = { enabled: scopeReady, keepPreviousResults: false };
+  const capturesQuery = useRawCaptures({ project_ids: projectIds, limit: 24 }, captureOptions);
+  const importsQuery = useRawCaptures(
+    { project_ids: projectIds, capture_surface: 'source_import', limit: 8 },
+    captureOptions
+  );
+  const reflectionsQuery = useRawCaptures(
+    {
+      project_ids: projectIds,
+      capture_surface: 'reflection_candidate',
+      review_state: 'pending',
+      limit: 8,
+    },
+    captureOptions
+  );
   const auditQuery = useMemoryAudit({ limit: 50 });
   const spacesQuery = useMemorySpaces();
 
@@ -625,13 +636,30 @@ export function MemoryHome() {
       ),
     [reflectionsQuery.data?.captures, scope]
   );
+  const projectEvents = useMemo(
+    () =>
+      (auditQuery.data?.events ?? []).filter(
+        event => isAll || !event.project_id || selectedProjects.includes(event.project_id)
+      ),
+    [auditQuery.data?.events, isAll, selectedProjects]
+  );
+  const projectSpaces = useMemo(
+    () =>
+      (spacesQuery.data?.spaces ?? []).filter(
+        space =>
+          isAll ||
+          space.memory_scope !== 'project' ||
+          (space.scope_key !== null && selectedProjects.includes(space.scope_key))
+      ),
+    [spacesQuery.data?.spaces, isAll, selectedProjects]
+  );
   const events = useMemo(
-    () => (auditQuery.data?.events ?? []).filter(event => matchesScope(scope, event.memory_scope)),
-    [auditQuery.data?.events, scope]
+    () => projectEvents.filter(event => matchesScope(scope, event.memory_scope)),
+    [projectEvents, scope]
   );
   const spaces = useMemo(
-    () => (spacesQuery.data?.spaces ?? []).filter(space => matchesScope(scope, space.memory_scope)),
-    [scope, spacesQuery.data?.spaces]
+    () => projectSpaces.filter(space => matchesScope(scope, space.memory_scope)),
+    [projectSpaces, scope]
   );
 
   const recalls = events.filter(eventIsRecall);
@@ -651,7 +679,10 @@ export function MemoryHome() {
   }
 
   const agentReaders = spaces.reduce((acc, space) => acc + space.members.length, 0);
-  const scopeChip = scope === 'all' ? null : scope;
+  const projectChip = isAll
+    ? 'All Projects'
+    : `${selectedProjects.length} selected project${selectedProjects.length === 1 ? '' : 's'}`;
+  const scopeChip = scope === 'all' ? projectChip : `${projectChip} · ${scope}`;
 
   return (
     <div className="space-y-4">
@@ -701,11 +732,7 @@ export function MemoryHome() {
         <MemoryScopeSwitcher
           value={scope}
           onChange={setScope}
-          counts={scopeCounts(
-            capturesQuery.data?.captures ?? [],
-            auditQuery.data?.events ?? [],
-            spacesQuery.data?.spaces ?? []
-          )}
+          counts={scopeCounts(capturesQuery.data?.captures ?? [], projectEvents, projectSpaces)}
         />
       </div>
 

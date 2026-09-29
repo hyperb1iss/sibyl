@@ -127,17 +127,25 @@ async def execute_search_request(
     group_id = str(org.id)
 
     project_filter = request.project
-    if project_filter:
-        await verify_entity_project_access(
-            None,
-            ctx,
-            project_filter,
-            required_role=ProjectRole.VIEWER,
-            require_existing_project=True,
-        )
-        accessible_projects = None
+    if request.project_ids is not None and project_filter:
+        raise HTTPException(status_code=422, detail="Choose project or project_ids, not both")
+    requested_project_ids = request.project_ids or ([project_filter] if project_filter else [])
+    requested_projects = set(requested_project_ids)
+    effective_projects = await list_accessible_project_graph_ids(ctx) or set()
+    if requested_projects:
+        if not requested_projects <= effective_projects:
+            raise HTTPException(status_code=403, detail="project_scope_denied")
+        for project_id in requested_project_ids:
+            await verify_entity_project_access(
+                None,
+                ctx,
+                project_id,
+                required_role=ProjectRole.VIEWER,
+                require_existing_project=True,
+            )
+        accessible_projects = requested_projects & effective_projects
     else:
-        accessible_projects = await list_accessible_project_graph_ids(ctx)
+        accessible_projects = effective_projects
 
     api_key_memory_scope_keys = ctx.api_key_memory_scope_keys
     include_raw_memory = bool(request.include_raw_memory and getattr(ctx, "user_id", None))
@@ -161,6 +169,7 @@ async def execute_search_request(
             category=request.category,
             status=request.status,
             project=project_filter,
+            **({"project_ids": request.project_ids} if request.project_ids is not None else {}),
             accessible_projects=accessible_projects,
             source=request.source,
             source_id=request.source_id,
@@ -203,6 +212,15 @@ async def execute_search_request(
         result = await run_core_search()
 
     response = SearchResponse(**asdict(result))
+    response.filters["scope"] = (
+        "project_selection"
+        if request.project_ids
+        else "project"
+        if project_filter
+        else "all_projects"
+    )
+    if request.project_ids is not None:
+        response.filters["project_ids"] = request.project_ids
     response.filters["embedding_usage"] = embedding_usage
     return response
 

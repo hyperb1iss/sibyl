@@ -1,61 +1,18 @@
-import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@/test/utils';
-
-const apiServer = vi.hoisted(() => ({
-  fetchSearchResults: vi.fn(),
-  fetchStats: vi.fn(),
-}));
-
-const searchContent = vi.hoisted(() => vi.fn(() => <div data-testid="search-content" />));
-
-vi.mock('@/lib/api-server', () => apiServer);
-vi.mock('./search-content', () => ({
-  SearchContent: searchContent,
-}));
-
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import SearchPage from './page';
 
-describe('SearchPage', () => {
-  it('keeps search results when stats fail', async () => {
-    const results = {
-      results: [
-        {
-          id: 'pattern-1',
-          name: 'Retry pattern',
-          type: 'pattern',
-          description: 'Use bounded retries',
-          score: 0.9,
-          metadata: {},
-        },
-      ],
-      total: 1,
-      query: 'retry',
-    };
+const api = vi.hoisted(() => ({
+  fetchSearchResults: vi.fn(),
+  fetchStats: vi.fn(async () => undefined),
+}));
+vi.mock('@/lib/api-server', () => api);
+vi.mock('./search-content', () => ({ SearchContent: () => null }));
 
-    apiServer.fetchSearchResults.mockResolvedValue(results);
-    apiServer.fetchStats.mockRejectedValue(new Error('backend down'));
-
-    render(
-      await SearchPage({
-        searchParams: Promise.resolve({ q: 'retry' }),
-      })
-    );
-
-    expect(screen.getByTestId('search-content')).toBeInTheDocument();
-    expect(apiServer.fetchSearchResults).toHaveBeenCalledWith({
-      query: 'retry',
-      limit: 50,
-      include_documents: true,
-      include_graph: true,
-      include_raw_memory: true,
-    });
-    expect(searchContent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        initialQuery: 'retry',
-        initialResults: results,
-        initialStats: undefined,
-      }),
-      undefined
-    );
+describe('SearchPage project boundary', () => {
+  beforeEach(() => vi.clearAllMocks());
+  it('does not prefetch memory before the browser resolves its project selection', async () => {
+    await SearchPage({ searchParams: Promise.resolve({ q: 'telescope', mode: 'all' }) });
+    expect(api.fetchSearchResults).not.toHaveBeenCalled();
+    expect(api.fetchStats).toHaveBeenCalledOnce();
   });
 });

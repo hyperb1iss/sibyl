@@ -28,7 +28,7 @@ log = structlog.get_logger()
 
 
 PROJECT_SCOPE_REQUIRED = (
-    "A context pack reads one project. Pass project=<id> to scope it, or "
+    "Memory retrieval reads one project. Pass project=<id> to scope it, or "
     "all_projects=True to read every project you can access on purpose."
 )
 
@@ -145,6 +145,7 @@ def register_retrieval_tools(mcp: MCPServer) -> None:
         use_enhanced: bool = True,
         boost_recent: bool = True,
         temporal_decay_days: float | None = None,
+        all_projects: bool = False,
     ) -> dict[str, Any]:
         """Unified semantic search across knowledge graph AND documentation.
 
@@ -166,7 +167,8 @@ def register_retrieval_tools(mcp: MCPServer) -> None:
             language: Filter by programming language (python, typescript, etc.)
             category: Filter by category/domain (authentication, database, etc.)
             status: Filter tasks by status (backlog, todo, doing, blocked, review, done)
-            project: Filter tasks by project ID
+            project: Project ID to search. Required unless all_projects is True.
+            all_projects: Search every authorized project explicitly. Results label the scope.
             source: Alias for source_name (for convenience)
             source_id: Filter documents by source UUID
             source_name: Filter documents by source name (partial match)
@@ -192,21 +194,25 @@ def register_retrieval_tools(mcp: MCPServer) -> None:
             - usage_hint: Instructions for getting full content
 
         Examples:
-            # Search everything
-            search("authentication patterns")
+            # Search the chosen project
+            search("authentication patterns", project="project_abc")
 
             # Search only documentation
-            search("Next.js middleware", include_graph=False)
+            search("Next.js middleware", include_graph=False, all_projects=True)
 
             # Get full content of a result
-            # 1. search("OAuth") -> returns results with IDs
+            # 1. search("OAuth", project="project_abc") -> returns results with IDs
             # 2. sibyl show <id> -> returns full content
         """
         from sibyl_core.tools.core import search as _search
 
         # Get full context from authenticated MCP session
         ctx = await mcp_context.require_context()
-        accessible_projects = await mcp_context.get_accessible_projects(ctx)
+        if not project and not all_projects:
+            raise ValueError(PROJECT_SCOPE_REQUIRED)
+        if project is not None and all_projects:
+            raise ValueError("Choose project or all_projects, not both.")
+        accessible_projects = await mcp_context.resolve_project_scope(ctx, project)
         api_key_memory_scope_keys = ctx.api_key_memory_scope_keys
 
         result = await _search(
@@ -236,7 +242,10 @@ def register_retrieval_tools(mcp: MCPServer) -> None:
                 set(api_key_memory_scope_keys) if api_key_memory_scope_keys is not None else None
             ),
         )
-        return serialization.to_dict(result)
+        payload = serialization.to_dict(result)
+        payload["filters"]["scope"] = "project" if project else "all_projects"
+        payload["filters"]["project"] = project
+        return payload
 
     @mcp.tool()
     async def context(

@@ -147,6 +147,10 @@ class TestSearchRoute:
                 "sibyl.api.routes.search.verify_entity_project_access",
                 AsyncMock(return_value=ProjectRole.VIEWER),
             ) as verify_project,
+            patch(
+                "sibyl.api.routes.search.list_accessible_project_graph_ids",
+                AsyncMock(return_value={"proj_1", "proj_2"}),
+            ),
             patch("sibyl_core.tools.core.search", AsyncMock(return_value=result)) as core_search,
         ):
             response = await search(
@@ -165,13 +169,17 @@ class TestSearchRoute:
         assert response.total == 1
         assert response.results[0].id == "pattern_1"
         assert core_search.await_args.kwargs["project"] == "proj_1"
-        assert core_search.await_args.kwargs["accessible_projects"] is None
+        assert core_search.await_args.kwargs["accessible_projects"] == {"proj_1"}
 
     @pytest.mark.asyncio
     async def test_search_rejects_inaccessible_project(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
 
         with (
+            patch(
+                "sibyl.api.routes.search.list_accessible_project_graph_ids",
+                AsyncMock(return_value={"proj_2"}),
+            ),
             patch(
                 "sibyl.api.routes.search.verify_entity_project_access",
                 AsyncMock(

@@ -20,9 +20,10 @@ import {
 import { LoadingState } from '@/components/ui/spinner';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FilterChip } from '@/components/ui/toggle';
-import type { MemoryScope, SearchResponse, SearchResult, StatsResponse } from '@/lib/api';
+import type { MemoryScope, SearchResult, StatsResponse } from '@/lib/api';
 import { TASK_STATUS_CONFIG, TASK_STATUSES } from '@/lib/constants/tasks';
 import { useCodeExamples, useRAGHybridSearch, useSearch, useSources, useStats } from '@/lib/hooks';
+import { useProjectContext } from '@/lib/project-context';
 
 // Radix Select forbids empty-string item values, so the "All sources" option
 // uses this sentinel and maps back to the empty filter in state.
@@ -94,12 +95,13 @@ function parseDelimited(value: string): string[] {
 
 interface SearchContentProps {
   initialQuery: string;
-  initialResults?: SearchResponse;
   initialStats?: StatsResponse;
 }
 
-export function SearchContent({ initialQuery, initialResults, initialStats }: SearchContentProps) {
+export function SearchContent({ initialQuery, initialStats }: SearchContentProps) {
   const router = useRouter();
+  const { selectedProjects, isAll, scopeReady } = useProjectContext();
+  const projectIds = isAll ? undefined : selectedProjects;
   const searchParams = useSearchParams();
   const urlQuery = searchParams.get('q') || '';
   const urlMode = parseSearchMode(searchParams.get('mode'));
@@ -204,6 +206,7 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
   } = useSearch(
     {
       query: submittedQuery,
+      project_ids: projectIds,
       limit: 50,
       include_documents: true,
       include_graph: true,
@@ -211,8 +214,8 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
       ...rawFacetParams,
     },
     {
-      enabled: mode === 'all' && submittedQuery.length > 0,
-      initialData: submittedQuery === initialQuery && mode === 'all' ? initialResults : undefined,
+      enabled: scopeReady && mode === 'all' && submittedQuery.length > 0,
+      keepPreviousResults: false,
     }
   );
 
@@ -224,6 +227,7 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
   } = useSearch(
     {
       query: submittedQuery,
+      project_ids: projectIds,
       types: ['raw_memory'],
       limit: 50,
       include_documents: false,
@@ -232,7 +236,8 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
       ...rawFacetParams,
     },
     {
-      enabled: mode === 'memory' && submittedQuery.length > 0,
+      enabled: scopeReady && mode === 'memory' && submittedQuery.length > 0,
+      keepPreviousResults: false,
     }
   );
 
@@ -244,6 +249,7 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
   } = useSearch(
     {
       query: submittedQuery,
+      project_ids: projectIds,
       types: selectedTypes.length > 0 ? selectedTypes : undefined,
       status: selectedStatus || undefined,
       since: sinceDate || undefined,
@@ -253,7 +259,8 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
       include_raw_memory: false,
     },
     {
-      enabled: mode === 'knowledge' && submittedQuery.length > 0,
+      enabled: scopeReady && mode === 'knowledge' && submittedQuery.length > 0,
+      keepPreviousResults: false,
     }
   );
 
@@ -375,7 +382,22 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <PageHeader description="Find memory, knowledge, documentation, and code" meta={pageMeta} />
+      <PageHeader
+        description="Find memory, knowledge, documentation, and code"
+        meta={[
+          !isUnifiedMode
+            ? 'Organization documentation'
+            : isAll
+              ? 'All Projects'
+              : `${selectedProjects.length} selected project${selectedProjects.length === 1 ? '' : 's'}`,
+          isUnifiedMode && unifiedResults?.filters.document_scope === 'organization'
+            ? 'Organization documentation'
+            : undefined,
+          pageMeta,
+        ]
+          .filter(Boolean)
+          .join(' · ')}
+      />
 
       {/* Mode Tabs */}
       <Tabs value={mode} onValueChange={v => handleModeChange(v as SearchMode)} variant="pills">

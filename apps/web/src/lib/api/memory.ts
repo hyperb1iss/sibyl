@@ -18,6 +18,8 @@ export interface RawCapture extends RawCaptureSummary {
 }
 
 export interface RawCaptureListResponse {
+  scope?: 'project_selection' | 'all_projects';
+  project_ids?: string[] | null;
   captures: RawCaptureSummary[];
   limit: number;
   offset: number;
@@ -415,6 +417,7 @@ export interface SessionBundleResponse {
 
 export const rawCapturesApi = {
   list: (params?: {
+    project_ids?: string[];
     entity_type?: string;
     capture_surface?: string;
     review_state?: RawCaptureReviewState;
@@ -422,6 +425,9 @@ export const rawCapturesApi = {
     offset?: number;
   }) => {
     const searchParams = new URLSearchParams();
+    for (const projectId of params?.project_ids ?? []) {
+      searchParams.append('project_ids', projectId);
+    }
     if (params?.entity_type) searchParams.set('entity_type', params.entity_type);
     if (params?.capture_surface) searchParams.set('capture_surface', params.capture_surface);
     if (params?.review_state) searchParams.set('review_state', params.review_state);

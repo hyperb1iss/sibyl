@@ -288,6 +288,8 @@ class RawCaptureListResponse(BaseModel):
     """Paginated raw capture list response."""
 
     captures: list[RawCaptureSummary]
+    scope: Literal["project_selection", "all_projects"] = "all_projects"
+    project_ids: list[str] | None = None
     limit: int = Field(default=50, description="Results per page")
     offset: int = Field(default=0, description="Current offset")
     has_more: bool = Field(default=False, description="Whether more results exist")

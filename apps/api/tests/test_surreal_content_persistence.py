@@ -2533,3 +2533,51 @@ async def test_surreal_backup_helpers_round_trip(
     assert setting_rows[0]["include_database_dump"] is False
     assert backup_rows[0]["include_database_dump"] is False
     assert deleted.backup_id == "backup_fixed"
+
+
+@pytest.mark.asyncio
+async def test_capture_project_selection_precedes_pagination(surreal_content_client, monkeypatch):
+    org = uuid4()
+
+    @asynccontextmanager
+    async def client_scope():
+        yield surreal_content_client
+
+    monkeypatch.setattr(surreal_content, "surreal_content_client", client_scope)
+    for index in range(9):
+        await save_raw_capture_record(
+            None,
+            capture=RawCaptureRecord(
+                organization_id=org,
+                principal_id="owner",
+                project_id="a" if index == 0 else "b",
+                entity_id=f"episode_{index}",
+                title=f"Capture {index}",
+                raw_content="Telescope",
+                entity_type="episode",
+                created_at=datetime(2026, 4, 14, 16, index, tzinfo=UTC),
+            ),
+        )
+    selected, has_more = await surreal_content.list_raw_captures(
+        None,
+        organization_id=org,
+        entity_type=None,
+        capture_surface=None,
+        review_state=None,
+        project_ids=["a"],
+        limit=1,
+        offset=0,
+    )
+    assert [capture.title for capture in selected] == ["Capture 0"]
+    assert has_more is False
+    widened, has_more = await surreal_content.list_raw_captures(
+        None,
+        organization_id=org,
+        entity_type=None,
+        capture_surface=None,
+        review_state=None,
+        limit=1,
+        offset=0,
+    )
+    assert [capture.title for capture in widened] == ["Capture 8"]
+    assert has_more is True

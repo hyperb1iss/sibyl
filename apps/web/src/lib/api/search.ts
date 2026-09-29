@@ -159,6 +159,7 @@ export const searchApi = {
     category?: string;
     status?: string;
     project?: string;
+    project_ids?: string[];
     source?: string;
     source_id?: string;
     source_name?: string;
