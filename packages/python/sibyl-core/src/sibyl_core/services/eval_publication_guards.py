@@ -132,7 +132,11 @@ async def available_graph_entity_rows(
     from sibyl_core.services.graph_capture_availability import available_capture_projection_rows
 
     current = await available_capture_projection_rows(
-        organization_id, current, graph_client=graph_client, source_visible=source_visible
+        organization_id,
+        current,
+        graph_client=graph_client,
+        source_visible=source_visible,
+        read=read,
     )
     unavailable = await unavailable_publication_ids(
         organization_id,

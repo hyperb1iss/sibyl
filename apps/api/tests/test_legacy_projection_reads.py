@@ -13,6 +13,7 @@ from fastapi import HTTPException
 from sibyl.api.routes import entity_contracts
 from sibyl.api.routes.entity_reads import get_entity, list_entities
 from sibyl.persistence.graph_runtime import GraphQueryAdapter, GraphReadServiceAdapter
+from sibyl_core.auth.memory_policy import memory_scope_policy_key
 from sibyl_core.backends.surreal import SurrealContentClient
 from sibyl_core.backends.surreal.content_schema import bootstrap_content_schema
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
@@ -49,6 +50,8 @@ async def legacy_store(monkeypatch):
         monkeypatch.setattr(content_client, "surreal_content_client", session)
         for path in (
             "sibyl_core.services.graph_runtime.get_surreal_graph_runtime",
+            "sibyl_core.services.graph.get_surreal_graph_runtime",
+            "sibyl_core.retrieval._search_database.get_surreal_graph_runtime",
             "sibyl_core.services.memory_lifecycle.get_surreal_graph_runtime",
             "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
         ):
@@ -59,6 +62,24 @@ async def legacy_store(monkeypatch):
         )
         monkeypatch.setattr(
             "sibyl.api.routes.entity_policy.verify_entity_project_access", AsyncMock()
+        )
+        authority_state = SimpleNamespace(revoked=False)
+
+        async def source_authority(organization_id, principal_id):
+            from sibyl_core.services.memory_source_validation import SourceReadAuthority
+
+            if (
+                organization_id != str(owner.organization_id)
+                or principal_id != owner.user_id
+                or authority_state.revoked
+            ):
+                return None
+            return SourceReadAuthority(principal_id, projects=frozenset({"project-a"}))
+
+        monkeypatch.setattr("sibyl_core.runtime_ports._source_authority_resolver", source_authority)
+        monkeypatch.setattr(
+            "sibyl_core.services.memory_reflection.get_surreal_graph_runtime",
+            AsyncMock(return_value=runtime),
         )
         root = await remember_raw_memory(
             organization_id=owner.organization_id,
@@ -96,6 +117,10 @@ async def legacy_store(monkeypatch):
         ):
             await runtime.entity_manager.create_direct(entity, generate_embedding=False)
         await runtime.entity_manager.create_direct(
+            Entity(id="project-a", entity_type=EntityType.PROJECT, name="Project A"),
+            generate_embedding=False,
+        )
+        await runtime.entity_manager.create_direct(
             Entity(id="ordinary-org-resource", entity_type=EntityType.NOTE, name="Shared resource"),
             generate_embedding=False,
         )
@@ -115,11 +140,28 @@ async def legacy_store(monkeypatch):
             org=owner.organization,
             runtime=runtime,
             root=root,
+            authority_state=authority_state,
             service=GraphReadServiceAdapter.from_runtime(runtime, owner.organization_id),
         )
     finally:
         await content.close()
         await graph.close()
+
+
+async def list_for(store, reader):
+    return await list_entities(
+        org=store.org,
+        ctx=reader,
+        entity_type=None,
+        language=None,
+        category=None,
+        search=None,
+        project_ids=None,
+        page=1,
+        page_size=50,
+        sort_by=entity_contracts.SortField.UPDATED_AT,
+        sort_order=entity_contracts.SortOrder.DESC,
+    )
 
 
 async def test_legacy_projection_detail_denies_private_parent_to_project_outsider(legacy_store):
@@ -176,7 +218,10 @@ async def test_legacy_related_summary_preserves_private_parent_audience(legacy_s
 
 async def test_private_owner_without_private_credential_grant_cannot_read_projection(legacy_store):
     store = legacy_store
-    restricted = replace(store.owner, api_key_memory_scope_keys=frozenset({"project:project-a"}))
+    restricted = replace(
+        store.owner,
+        api_key_memory_scope_keys=frozenset({memory_scope_policy_key("project", "project-a")}),
+    )
     with pytest.raises(HTTPException) as denied:
         await get_entity("legacy-projection", org=store.org, ctx=restricted, service=store.service)
     assert denied.value.status_code == 404
@@ -328,3 +373,169 @@ async def test_graph_connection_counts_preserve_private_parent_audience(legacy_s
         ),
     )
     assert counts == {"ordinary-org-resource": 1 if reader == "owner" else 0}
+
+
+@pytest.mark.parametrize(
+    "binding_kind", ["anchor_only", "epoch_zero", "capture_epoch", "required_without_receipt"]
+)
+async def test_binding_metadata_does_not_grant_private_parent_audience(legacy_store, binding_kind):
+    store = legacy_store
+    row = await store.runtime.entity_manager.get("legacy-projection")
+    bindings = {
+        "anchor_only": {"reflection:input:0123456789abcdef": 0},
+        "epoch_zero": {store.root.id: 0},
+        "capture_epoch": {store.root.id: store.root.revision},
+        "required_without_receipt": {store.root.id: store.root.revision},
+    }
+    updates = {"metadata": {**row.metadata, "source_bindings": bindings[binding_kind]}}
+    await store.runtime.entity_manager.update(row.id, updates)
+    if binding_kind == "required_without_receipt":
+        await store.runtime.client.execute_query(
+            "UPDATE entity SET derivation_required=true WHERE uuid=$id;",
+            id=row.id,
+        )
+    with pytest.raises(HTTPException) as denied:
+        await get_entity(row.id, org=store.org, ctx=store.outsider, service=store.service)
+    assert denied.value.status_code == 404
+    result = await list_for(store, store.outsider)
+    assert row.id not in {entity.id for entity in result.entities}
+    assert "ordinary-org-resource" in {entity.id for entity in result.entities}
+
+
+@pytest.mark.parametrize("shape", ["orphan", "declared_capture", "missing_capture"])
+async def test_declared_projection_support_must_exist_and_be_readable(legacy_store, shape):
+    store = legacy_store
+    metadata = {
+        "projection_kind": "passage",
+        "memory_scope": "project",
+        "scope_key": "project-a",
+        "project_id": "project-a",
+        "source_bindings": {},
+    }
+    if shape != "orphan":
+        metadata["raw_source_ids"] = [store.root.id if shape == "declared_capture" else "absent"]
+    await store.runtime.entity_manager.update("legacy-projection", {"metadata": metadata})
+    with pytest.raises(HTTPException) as denied:
+        await get_entity(
+            "legacy-projection", org=store.org, ctx=store.outsider, service=store.service
+        )
+    assert denied.value.status_code == 404
+    result = await list_for(store, store.outsider)
+    assert "legacy-projection" not in {entity.id for entity in result.entities}
+    assert "ordinary-org-resource" in {entity.id for entity in result.entities}
+
+
+async def publication_read_ids(store, reader):
+    from sibyl_core.models.context import ContextFacet
+    from sibyl_core.retrieval.search import build_context_retrieval_plan, context_search
+    from sibyl_core.tools.explore import explore
+
+    grants = set(reader.api_key_memory_scope_keys)
+    explored = await explore(
+        mode="list",
+        types=["note", "episode"],
+        organization_id=str(store.org.id),
+        principal_id=reader.user_id,
+        accessible_projects={"project-a"},
+        allowed_memory_scope_keys=grants,
+    )
+    plan = build_context_retrieval_plan(
+        query="Private source words",
+        organization_id=str(store.org.id),
+        facets=(ContextFacet.PRIOR_ART,),
+        facet_types={},
+        principal_id=reader.user_id,
+        project="project-a",
+        accessible_projects={"project-a"},
+        allowed_memory_scope_keys=grants,
+    )
+    searched = await context_search(plan=plan, limit=100, embedding_provider=None)
+    return {row.id for row in explored.entities}, {row.id for row in searched.results}
+
+
+@pytest.mark.parametrize("mode", ["promote", "share"])
+@pytest.mark.parametrize("invalidation", ["publisher", "source_policy", "incarnation"])
+async def test_audited_publication_uses_current_authority_on_public_rest_reads(
+    legacy_store, mode, invalidation
+):
+    from sibyl_core.services.memory_reflection import promote_raw_memory
+    from sibyl_core.services.memory_sharing import share_memory
+
+    store = legacy_store
+    common = {
+        "organization_id": str(store.org.id),
+        "principal_id": store.owner.user_id,
+        "accessible_projects": {"project-a"},
+        "writable_projects": {"project-a"},
+    }
+    if mode == "promote":
+        result = await promote_raw_memory(
+            raw_memory_id=store.root.id,
+            promote_to_scope="project",
+            promote_to_scope_key="project-a",
+            **common,
+        )
+    else:
+        shared = await share_memory(
+            source_ids=[store.root.id],
+            target_scope="project",
+            target_scope_key="project-a",
+            **common,
+        )
+        assert shared.applied
+        result = shared.promotions[0]
+    assert result.success
+    published = await store.runtime.entity_manager.get(result.promoted_id)
+    assert published.derivation_required
+    assert published.metadata["source_bindings"]
+    reader = replace(
+        store.outsider,
+        api_key_memory_scope_keys=frozenset({memory_scope_policy_key("project", "project-a")}),
+    )
+    for include_summary, related_limit in ((False, 0), (True, 0), (True, 10)):
+        readable = await get_entity(
+            published.id,
+            include_summary=include_summary,
+            related_limit=related_limit,
+            org=store.org,
+            ctx=reader,
+            service=store.service,
+        )
+        assert readable.content == "Private source words"
+    result = await list_for(store, reader)
+    assert published.id in {entity.id for entity in result.entities}
+    explored, searched = await publication_read_ids(store, reader)
+    assert published.id in explored
+    assert published.id in searched
+    before = published.model_dump()
+    if invalidation == "publisher":
+        store.authority_state.revoked = True
+    elif invalidation == "source_policy":
+        from sibyl_core.services.surreal_content import get_raw_memory, save_raw_memory
+
+        current = await get_raw_memory(organization_id=str(store.org.id), memory_id=store.root.id)
+        assert current is not None
+        await save_raw_memory(
+            replace(current, principal_id=str(uuid4()), scope_key=str(uuid4())),
+            expected_revision=current.revision,
+            embedding_provider=None,
+        )
+    else:
+        async with content_client.surreal_content_client() as client:
+            await client.execute_query(
+                "UPDATE source_states SET incarnation=$nonce WHERE organization_id=$org "
+                "AND source_kind='raw_capture' AND source_id=$id;",
+                org=str(store.org.id),
+                id=store.root.id,
+                nonce=uuid4().hex,
+            )
+    with pytest.raises(HTTPException) as denied:
+        await get_entity(published.id, org=store.org, ctx=reader, service=store.service)
+    assert denied.value.status_code == 404
+    result = await list_for(store, reader)
+    assert published.id not in {entity.id for entity in result.entities}
+    assert "ordinary-org-resource" in {entity.id for entity in result.entities}
+    explored, searched = await publication_read_ids(store, reader)
+    assert published.id not in explored
+    assert published.id not in searched
+    assert (await store.runtime.entity_manager.get(published.id)).model_dump() == before

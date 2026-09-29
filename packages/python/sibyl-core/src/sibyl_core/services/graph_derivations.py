@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from sibyl_core.services.graph_read_validation import GraphReadValidation
@@ -139,10 +139,50 @@ async def unavailable_graph_derivation_ids(
     client: SurrealGraphClient | None = None,
     read: GraphReadValidation | None = None,
 ) -> set[str]:
+    verdicts = await _graph_derivation_verdicts(
+        organization_id,
+        ids,
+        expected_entities=expected_entities,
+        client=client,
+        read=read,
+    )
+    return {identifier for identifier, current in verdicts.items() if current is False}
+
+
+async def graph_publication_verdicts(
+    organization_id: str,
+    rows: Mapping[str, Any],
+    *,
+    client: SurrealGraphClient,
+    read: GraphReadValidation,
+) -> dict[str, bool | None]:
+    """Distinguish legacy ancestry from current protected publication proof.
+
+    None means no stored association requires authority expansion. A present
+    association must verify even when this reader can read every source.
+    """
+    return await _graph_derivation_verdicts(
+        organization_id,
+        list(rows),
+        client=client,
+        read=read,
+        expected_publications=rows,
+    )
+
+
+async def _graph_derivation_verdicts(
+    organization_id: str,
+    ids: Sequence[str],
+    *,
+    expected_entities: Mapping[str, Entity] | None = None,
+    client: SurrealGraphClient | None = None,
+    read: GraphReadValidation | None = None,
+    expected_publications: Mapping[str, Any] | None = None,
+) -> dict[str, bool | None]:
     from sibyl_core.services.graph_records import entity_from_surreal_row
 
     if not ids:
-        return set()
+        return {}
     from sibyl_core.services.graph_runtime import get_surreal_graph_runtime
 
     if client is None:
@@ -166,16 +206,47 @@ async def unavailable_graph_derivation_ids(
     association_rows = snapshots[0].get("associations")
     if not isinstance(target_rows, list) or not isinstance(association_rows, list):
         raise RuntimeError("graph derivation snapshot unavailable")
-    targets = {row["uuid"]: entity_from_surreal_row(row) for row in target_rows}
+    targets = {}
+    for row in target_rows:
+        try:
+            target = entity_from_surreal_row(row)
+            if target.organization_id == organization_id:
+                targets[target.id] = target
+        except (TypeError, ValueError, KeyError):
+            continue
 
-    associations = {row["target_id"]: row for row in association_rows}
+    associations = {}
+    duplicate_associations = set()
+    for row in association_rows:
+        if not isinstance(row, Mapping) or not isinstance(row.get("target_id"), str):
+            continue
+        target_id = row["target_id"]
+        if target_id in associations:
+            duplicate_associations.add(target_id)
+        associations[target_id] = row
     if read is not None:
-        await read.prepare_graph(list(targets))
+        await read.prepare_graph(
+            list(targets.keys() & associations.keys())
+            if expected_publications is not None
+            else list(targets)
+        )
 
     async def current(target_id):
         association = associations.get(target_id)
         entity = targets.get(target_id)
         identity = SourceIdentity(organization_id, SourceKind.GRAPH_ENTITY, target_id)
+        if expected_publications is not None:
+            if association is None:
+                return False if entity is not None and entity.derivation_required else None
+            if (
+                target_id in duplicate_associations
+                or association.get("organization_id") != organization_id
+                or association.get("target_kind") != "graph_entity"
+                or association.get("target_id") != target_id
+                or entity is None
+                or not _same_publication_row(expected_publications.get(target_id), entity)
+            ):
+                return False
         if expected_entities is not None:
             expected = expected_entities.get(target_id)
             if (
@@ -187,25 +258,60 @@ async def unavailable_graph_derivation_ids(
                     or expected.observed_revision != entity.observed_revision
                 )
             ):
-                return target_id
-        if entity is None or not await graph_association_current(
-            entity, association, ancestors=frozenset({identity}), read=read
-        ):
-            return target_id
-        return None
-
-    return {
-        value
-        for value in await asyncio.gather(
-            *(
-                current(target_id)
-                for target_id in targets.keys()
-                | associations.keys()
-                | (expected_entities.keys() if expected_entities is not None else set())
+                return False
+        if entity is None:
+            return False
+        try:
+            current = await graph_association_current(
+                entity, association, ancestors=frozenset({identity}), read=read
             )
+        except Exception:
+            if expected_publications is None:
+                raise
+            return False
+        return current
+
+    identifiers = sorted(
+        targets.keys()
+        | associations.keys()
+        | (expected_entities.keys() if expected_entities is not None else set())
+        | (expected_publications.keys() if expected_publications is not None else set())
+    )
+    verdicts = await asyncio.gather(*(current(identifier) for identifier in identifiers))
+    return dict(zip(identifiers, verdicts, strict=True))
+
+
+def _same_publication_row(row, entity: Entity) -> bool:
+    if row is None or entity.observed_revision is None:
+        return False
+    revision = getattr(row, "observed_revision", None) or getattr(row, "source_revision", None)
+    organization_id = getattr(row, "organization_id", None) or getattr(
+        getattr(row, "scope", None), "organization_id", None
+    )
+    metadata = getattr(row, "metadata", None)
+    if (
+        row.id != entity.id
+        or organization_id != entity.organization_id
+        or type(revision) is not int
+        or revision != entity.observed_revision
+        or not isinstance(metadata, Mapping)
+    ):
+        return False
+    # List rows may omit prose; the stored revision and proof still bind it.
+    return all(
+        metadata.get(key) == entity.metadata.get(key)
+        for key in (
+            "memory_scope",
+            "scope_key",
+            "principal_id",
+            "project_id",
+            "source_bindings",
+            "raw_memory_id",
+            "raw_source_ids",
+            "parent_entity_id",
+            "source_entity_id",
         )
-        if value is not None
-    }
+    )
 
 
 async def load_graph_projection_source(client, *, organization_id: str, source_id: str):

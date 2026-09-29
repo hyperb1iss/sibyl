@@ -144,8 +144,12 @@ async def test_capture_batch_failure_preserves_other_healthy_batches(
         update={"id": "healthy-note", "metadata": {"raw_memory_id": healthy.id}}
     )
     original_select = content_client.select_many
+    original_batches = content_client.value_batches
 
-    def batches(_values):
+    def batches(values):
+        if set(values) != {memory.id, healthy.id}:
+            yield from original_batches(values)
+            return
         yield [memory.id]
         yield [healthy.id]
 

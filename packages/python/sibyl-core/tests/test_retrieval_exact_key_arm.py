@@ -433,7 +433,10 @@ async def _seeds_for(
 
     from sibyl_core.backends.surreal import SurrealContentClient
     from sibyl_core.backends.surreal.content_schema import bootstrap_content_schema
+    from sibyl_core.models.entities import Entity, EntityType
     from sibyl_core.services import content_client
+    from sibyl_core.services.graph_client import SurrealGraphClient, prepare_graph_schema
+    from sibyl_core.services.graph_entities import EntityManager
     from sibyl_core.services.surreal_content import remember_raw_memory
 
     client = SurrealContentClient(url="memory://")
@@ -453,6 +456,18 @@ async def _seeds_for(
     )
     metadata = await _captured_metadata(principal_id="user-alice", raw_memory_id=memory.id)
     victim = _row(metadata, normalized_keys=[PROBE_KEY.casefold()])
+    graph = SurrealGraphClient(group_id="org-123", url="memory://")
+    await prepare_graph_schema(graph)
+    await EntityManager(graph, group_id="org-123").create_direct(
+        Entity(
+            id=victim["uuid"],
+            entity_type=EntityType.NOTE,
+            name=victim["name"],
+            content=victim["content"],
+            metadata=metadata,
+        ),
+        generate_embedding=False,
+    )
     seeds: list[str] = []
 
     async def fake_exact_key_candidates(**kwargs: Any) -> list[RetrievalCandidate]:
@@ -472,7 +487,7 @@ async def _seeds_for(
         return []
 
     class Runtime:
-        client = _EmptyClient()
+        client = graph
 
     async def fake_runtime(_organization_id: str, **_kwargs: object) -> Runtime:
         return Runtime()
@@ -492,6 +507,7 @@ async def _seeds_for(
         )
         return seeds
     finally:
+        await graph.close()
         await client.close()
 
 
