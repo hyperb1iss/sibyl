@@ -398,6 +398,7 @@ def correct_memory(
 
     @run_async
     async def run_correct_memory() -> None:
+        pinned_to_preview = False
         try:
             async with get_client() as client:
                 resolved_source_id = await resolve_raw_memory_id_prefix(
@@ -441,10 +442,14 @@ def correct_memory(
                     if not json_output:
                         info(correction_preview_line(normalized_action, planned))
                     observed = (planned.get("metadata") or {}).get("observed_revision")
-                    if correction["expected_revision"] is None and type(observed) is int:
+                    if correction["expected_revision"] is None and type(observed) is not int:
+                        error("Preview has no observed revision; no correction was applied.")
+                        raise typer.Exit(code=1)
+                    if correction["expected_revision"] is None:
                         # Apply exactly the plan that was shown: a change to the
                         # memory in between is refused instead of applied blind.
                         correction["expected_revision"] = observed
+                        pinned_to_preview = True
                     if (
                         normalized_action in IRREVERSIBLE_CORRECTIONS
                         and not yes
@@ -455,16 +460,40 @@ def correct_memory(
                 data = await client.correct_memory(
                     resolved_source_id, **correction, preview=preview
                 )
-            applied = data.get("applied") is True
+            receipt = data.get("mutation_receipt")
+            applied = (
+                data.get("applied") is True
+                and isinstance(receipt, dict)
+                and receipt.get("applied") is True
+            )
+            impact = data.get("recall_impact") or {}
+            partial = isinstance(impact, dict) and (
+                impact.get("partially_applied") is True
+                or impact.get("propagation_complete") is False
+            )
             allowed = data.get("allowed") is True
             if json_output:
                 print_json(data)
-                if applied or (preview and allowed):
+                if (applied and not partial) or (preview and allowed):
                     return
                 raise typer.Exit(code=1)
             if preview and allowed:
+                info(correction_preview_line(normalized_action, data))
                 success(f"Correction preview allowed: {normalized_action}")
                 return
+            if applied and partial:
+                error(
+                    "Correction partially applied; derived records may still be readable. "
+                    "Inspect the memory before taking further action."
+                )
+                print_mutation_receipt(data)
+                raise typer.Exit(code=1)
+            if data.get("applied") is True and not applied:
+                error(
+                    "Correction outcome is unconfirmed: no applied mutation receipt was returned."
+                )
+                print_mutation_receipt(data)
+                raise typer.Exit(code=1)
             if applied:
                 success(f"Memory corrected: {normalized_action}")
                 print_mutation_receipt(data)
@@ -473,6 +502,21 @@ def correct_memory(
             print_mutation_receipt(data)
             raise typer.Exit(code=1)
         except SibylClientError as e:
+            if e.error_code == "revision_conflict" and not json_output:
+                details = e.details or {}
+                expected = details.get("expected", "?")
+                actual = details.get("actual", "?")
+                if pinned_to_preview:
+                    error(
+                        f"The memory changed since the preview (revision {expected} → {actual}); "
+                        "rerun to preview the current state."
+                    )
+                else:
+                    error(
+                        f"The memory is at revision {actual}, not the expected {expected}; "
+                        "rerun without --expected-revision to preview the current state."
+                    )
+                raise typer.Exit(code=1) from e
             command_support.handle_client_error(e)
 
     run_correct_memory()

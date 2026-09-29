@@ -55,6 +55,7 @@ def _planned(action: str, *, state: str, flags: list[str], reversible: bool) -> 
         "target_lifecycle_flags": flags,
         "affected_derived_ids": ["decision-1", "decision-2"],
         "reversible": reversible,
+        "metadata": {"observed_revision": 3},
     }
 
 
@@ -338,3 +339,146 @@ def test_an_explicit_expected_revision_wins_over_the_preview(mock_get_client: Ma
         5,
         5,
     ]
+
+
+def test_a_change_between_preview_and_apply_is_refused_and_leaves_the_rerun_free(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Through the real client: preview at 3, the memory moves to 4, the apply conflicts.
+
+    The refusal names both revisions, nothing is queued, and a rerun previews
+    the current state and applies.
+    """
+    import json
+
+    import httpx
+
+    import sibyl_cli.client_transport as client_transport_module
+    from sibyl_cli import pending_writes
+    from sibyl_cli.client import SibylClient
+
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    client_transport_module._FAILURE_WINDOWS.clear()
+    revision = {"current": 3}
+    applied: list[int | None] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/auth/replay-identity":
+            return httpx.Response(404, json={"detail": "Not Found"})
+        body = json.loads(request.content or b"{}")
+        if request.url.path.endswith("/corrections/preview"):
+            preview = _planned("hide", state="active", flags=["hidden"], reversible=True)
+            preview["metadata"] = {"observed_revision": revision["current"]}
+            # Someone else corrects the memory right after this preview.
+            if revision["current"] == 3:
+                revision["current"] = 4
+            return httpx.Response(200, json=preview)
+        if request.url.path.endswith("/corrections"):
+            applied.append(body.get("expected_revision"))
+            if body.get("expected_revision") != revision["current"]:
+                return httpx.Response(
+                    409,
+                    json={
+                        "error": "revision_conflict",
+                        "message": "The memory changed; rerun to see the current state.",
+                        "details": {
+                            "expected": str(body.get("expected_revision")),
+                            "actual": str(revision["current"]),
+                        },
+                    },
+                )
+            return httpx.Response(200, json=_applied())
+        return httpx.Response(200, json={"matches": [{"id": SOURCE_ID}]})
+
+    def real_client() -> SibylClient:
+        client = SibylClient(base_url="http://testserver/api", auth_token="token")
+        client._client = httpx.AsyncClient(
+            base_url=client.base_url,
+            transport=httpx.MockTransport(respond),
+            headers=client._default_headers(),
+        )
+        return client
+
+    args = ["correct", SOURCE_ID, "--action", "hide", "--reason", "Noise"]
+    with patch("sibyl_cli.memory_admin.get_client", side_effect=lambda *_a, **_k: real_client()):
+        first = CliRunner().invoke(app, args)
+        queued_after_first = pending_writes.list_pending_writes()
+        second = CliRunner().invoke(app, args)
+
+    assert first.exit_code == 1
+    assert (
+        "The memory changed since the preview (revision 3 → 4); rerun to preview the current state."
+        in _flat(first.stdout)
+    )
+    assert queued_after_first == []
+    assert second.exit_code == 0, second.stdout
+    assert "Memory corrected: hide" in _flat(second.stdout)
+    assert applied == [3, 4]
+    assert pending_writes.list_pending_writes() == []
+
+
+@patch("sibyl_cli.memory_admin.get_client")
+def test_explicit_preview_displays_the_lifecycle_plan(mock_get_client: MagicMock) -> None:
+    client = _client(_planned("delete", state="deleted", flags=[], reversible=False))
+    mock_get_client.return_value = _FakeClientContext(client)
+    result = CliRunner().invoke(
+        app, ["correct", SOURCE_ID, "--action", "delete", "--reason", "Cleanup", "--preview"]
+    )
+    assert result.exit_code == 0, result.stdout
+    assert "delete: state → deleted" in _flat(result.stdout)
+    assert "2 derived records affected; irreversible" in _flat(result.stdout)
+    assert [call.kwargs["preview"] for call in client.correct_memory.await_args_list] == [True]
+
+
+@patch("sibyl_cli.memory_admin.get_client")
+def test_a_lifecycle_apply_requires_an_observed_revision(mock_get_client: MagicMock) -> None:
+    planned = _planned("delete", state="deleted", flags=[], reversible=False)
+    planned.pop("metadata")
+    client = _client(planned)
+    mock_get_client.return_value = _FakeClientContext(client)
+    result = CliRunner().invoke(
+        app, ["correct", SOURCE_ID, "--action", "delete", "--reason", "Cleanup", "--yes"]
+    )
+    assert result.exit_code == 1
+    assert "no observed revision" in _flat(result.stdout)
+    assert [call.kwargs["preview"] for call in client.correct_memory.await_args_list] == [True]
+
+
+@pytest.mark.parametrize("json_output", [False, True])
+@pytest.mark.parametrize("impact", [{"partially_applied": True}, {"propagation_complete": False}])
+@patch("sibyl_cli.memory_admin.get_client")
+def test_partial_corrections_return_failure_and_preserve_the_receipt(
+    mock_get_client: MagicMock, json_output: bool, impact: dict[str, object]
+) -> None:
+    data = {**_applied(), "recall_impact": impact}
+    client = _client(_planned("delete", state="deleted", flags=[], reversible=False))
+    client.correct_memory = AsyncMock(
+        side_effect=lambda _id, **kw: (
+            _planned("delete", state="deleted", flags=[], reversible=False)
+            if kw["preview"]
+            else data
+        )
+    )
+    mock_get_client.return_value = _FakeClientContext(client)
+    args = ["correct", SOURCE_ID, "--action", "delete", "--reason", "Cleanup", "--yes"]
+    result = CliRunner().invoke(app, args + (["--json"] if json_output else []))
+    assert result.exit_code == 1
+    assert "Memory corrected" not in result.stdout
+    assert "correct-1" in result.stdout
+    if not json_output:
+        assert "partially applied" in _flat(result.stdout)
+
+
+@pytest.mark.parametrize("receipt", [None, {"applied": False}])
+@patch("sibyl_cli.memory_admin.get_client")
+def test_applied_response_requires_an_applied_receipt(
+    mock_get_client: MagicMock, receipt: dict[str, object] | None
+) -> None:
+    client = _client(_planned("mark_wrong", state="contested", flags=[], reversible=True))
+    client.correct_memory = AsyncMock(return_value={**_applied(), "mutation_receipt": receipt})
+    mock_get_client.return_value = _FakeClientContext(client)
+    result = CliRunner().invoke(
+        app, ["correct", SOURCE_ID, "--action", "wrong", "--reason", "Incorrect"]
+    )
+    assert result.exit_code == 1
+    assert "outcome is unconfirmed" in _flat(result.stdout)

@@ -24,6 +24,8 @@ from typing import Any
 import structlog
 from fastapi import HTTPException, Request, status
 
+from sibyl_core.errors import RevisionConflictError
+
 log = structlog.get_logger()
 
 # Generic messages for different error categories
@@ -160,6 +162,28 @@ def entity_locked() -> HTTPException:
             "error": "entity_locked",
             "message": "The resource is being modified by another request. Retry the request.",
         },
+    )
+
+
+def revision_conflict(exc: RevisionConflictError) -> HTTPException:
+    """A 409 that says which revision the caller expected and which one it met.
+
+    The generic conflict answer carries neither, so a client pinned to a stale
+    revision could only retry blind and hit the same wall.
+    """
+    expected = exc.details.get("expected_revision")
+    actual = exc.details.get("actual_revision")
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=safe_error_payload(
+            error="revision_conflict",
+            message=(
+                f"The memory changed since revision {expected} and is now at revision "
+                f"{actual}; rerun to see the current state."
+            ),
+            remediation="Rerun the command to preview the current state, then apply again.",
+            details={"expected": expected, "actual": actual},
+        ),
     )
 
 

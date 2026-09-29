@@ -9,6 +9,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from sibyl.api.decorators import handle_workflow_errors
+from sibyl.api.errors import revision_conflict
 from sibyl.api.idempotency import (
     mutation_receipt,
     replay_idempotent_response,
@@ -31,6 +32,7 @@ from sibyl_core.auth import AuthOrganization, OrganizationRole, ProjectRole
 from sibyl_core.auth.memory_policy import (
     MemoryPolicyAction,
 )
+from sibyl_core.errors import RevisionConflictError
 from sibyl_core.services.memory import (
     apply_memory_correction,
     preview_memory_correction,
@@ -253,20 +255,33 @@ async def preview_memory_correction_route(
         memory_auth.list_accessible_team_scope_keys(ctx),
         memory_auth.list_accessible_project_graph_ids(ctx, required_role=ProjectRole.CONTRIBUTOR),
     )
-    preview = await preview_memory_correction(
-        organization_id=str(org.id),
-        source_id=memory.id,
-        principal_id=principal_id,
-        action=request.action,
-        reason=request.reason,
-        accessible_projects=accessible_projects,
-        writable_projects=writable_projects,
-        accessible_teams=accessible_teams,
-        replacement_source_id=request.replacement_source_id,
-        duplicate_of_source_id=request.duplicate_of_source_id,
-        revised_content=request.revised_content,
-        allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
-    )
+    try:
+        preview = await preview_memory_correction(
+            organization_id=str(org.id),
+            source_id=memory.id,
+            principal_id=principal_id,
+            action=request.action,
+            reason=request.reason,
+            accessible_projects=accessible_projects,
+            writable_projects=writable_projects,
+            accessible_teams=accessible_teams,
+            replacement_source_id=request.replacement_source_id,
+            duplicate_of_source_id=request.duplicate_of_source_id,
+            revised_content=request.revised_content,
+            allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
+        )
+    except RevisionConflictError as exc:
+        raise revision_conflict(exc) from exc
+    observed = (preview.metadata or {}).get("observed_revision")
+    if (
+        preview.allowed
+        and request.expected_revision is not None
+        and type(observed) is int
+        and request.expected_revision != observed
+    ):
+        raise revision_conflict(
+            RevisionConflictError(memory.id, request.expected_revision, observed)
+        )
     response = serialization.correction_response(preview)
     await memory_auth.log_memory_audit(
         action=f"{preview.audit_action}.preview",
@@ -371,9 +386,12 @@ async def apply_memory_correction_route(
     }
     if request.expected_revision is not None:
         correction_kwargs["expected_revision"] = request.expected_revision
-    result = await apply_memory_correction(
-        **correction_kwargs,
-    )
+    try:
+        result = await apply_memory_correction(
+            **correction_kwargs,
+        )
+    except RevisionConflictError as exc:
+        raise revision_conflict(exc) from exc
     updated_revision = result.updated_memory.revision if result.updated_memory else None
     response = serialization.correction_result_response(
         result,
@@ -385,7 +403,9 @@ async def apply_memory_correction_route(
                 [
                     *(
                         f"raw_captures:{affected_id}"
-                        for affected_id in result.preview.affected_source_ids
+                        for affected_id in dict.fromkeys(
+                            [*result.preview.affected_source_ids, *result.affected_raw_memory_ids]
+                        )
                     ),
                     # The graph rows are named too, because they are what
                     # retrieval ranks: a receipt listing only the capture
