@@ -59,6 +59,15 @@ def context_pack_scope_allowed(
     allowed_keys = set(allowed)
     if memory_scope_allowed(ctx, memory_scope=MemoryScope.PRIVATE.value, scope_key=None):
         return True
+    if any(
+        memory_scope_allowed(ctx, memory_scope=scope.value, scope_key=key)
+        for scope, keys in (
+            (MemoryScope.TEAM, ctx.accessible_teams),
+            (MemoryScope.DELEGATED, ctx.accessible_delegations),
+        )
+        for key in keys
+    ):
+        return True
     if accessible_projects is None:
         return False
     return any(

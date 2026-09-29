@@ -26,6 +26,7 @@ from sibyl.mcp_tools.memory import (
     _remember_mcp_memory,
 )
 from sibyl.mcp_tools.synthesis import _synthesis_mcp_draft
+from tests.harness.auth import stub_auth_context
 
 
 def _api_key_ctx(scopes: list[str] | None) -> McpContext:
@@ -385,6 +386,14 @@ async def test_get_mcp_context_marks_api_keys_and_not_user_sessions() -> None:
             return_value=SimpleNamespace(token="sk_live_x"),
         ),
         patch("sibyl.mcp_tools.context.authenticate_api_key", AsyncMock(return_value=auth)),
+        patch(
+            "sibyl.mcp_tools.context.resolve_auth_context",
+            AsyncMock(
+                side_effect=lambda *, claims: stub_auth_context(
+                    user_id=claims["sub"], organization_id=claims["org"]
+                )
+            ),
+        ),
     ):
         key_ctx = await _get_mcp_context()
 
@@ -401,7 +410,14 @@ async def test_get_mcp_context_marks_api_keys_and_not_user_sessions() -> None:
             "sibyl.auth.jwt.verify_access_token",
             return_value={"org": str(uuid4()), "sub": str(uuid4()), "scopes": ["mcp"]},
         ),
-        patch("sibyl.mcp_tools.context.resolve_org_role", AsyncMock(return_value="member")),
+        patch(
+            "sibyl.mcp_tools.context.resolve_auth_context",
+            AsyncMock(
+                side_effect=lambda *, claims: stub_auth_context(
+                    user_id=claims["sub"], organization_id=claims["org"]
+                )
+            ),
+        ),
     ):
         user_ctx = await _get_mcp_context()
 

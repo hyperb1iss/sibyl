@@ -103,6 +103,9 @@ class RetrievalPlan:
     )
     project: str | None = None
     accessible_projects: frozenset[str] | None = None
+    accessible_teams: frozenset[str] = frozenset()
+    accessible_delegations: frozenset[str] = frozenset()
+    allowed_memory_scope_keys: frozenset[str] | None = None
     graph_expansion_depth: int = 1
     vector_min_score: float = 0.0
     filter_selectivity: float | None = None
@@ -154,6 +157,8 @@ def build_context_retrieval_plan(
     principal_id: str | None,
     project: str | None,
     accessible_projects: Iterable[str] | None,
+    accessible_teams: Iterable[str] | None = None,
+    accessible_delegations: Iterable[str] | None = None,
     agent_id: str | None = None,
     limit: int = 24,
     allowed_memory_scope_keys: Iterable[str] | None = None,
@@ -171,6 +176,20 @@ def build_context_retrieval_plan(
         if allowed_memory_scope_keys is not None
         else None
     )
+    normalized_teams = frozenset(str(value) for value in accessible_teams or ())
+    normalized_delegations = frozenset(str(value) for value in accessible_delegations or ())
+    scoped_teams = frozenset(
+        key
+        for key in normalized_teams
+        if normalized_scope_keys is None
+        or memory_scope_policy_key(MemoryScope.TEAM, key) in normalized_scope_keys
+    )
+    scoped_delegations = frozenset(
+        key
+        for key in normalized_delegations
+        if normalized_scope_keys is None
+        or memory_scope_policy_key(MemoryScope.DELEGATED, key) in normalized_scope_keys
+    )
     # accessible_projects gates project graph entities (tasks, epics) that carry
     # no memory_scope metadata. When an API key narrows memory grants, trim it to
     # the projects the key actually holds a project grant for, so a key without a
@@ -187,6 +206,8 @@ def build_context_retrieval_plan(
         principal_id=principal_id,
         project=project,
         accessible_projects=normalized_accessible_projects,
+        accessible_teams=normalized_teams,
+        accessible_delegations=normalized_delegations,
         agent_id=agent_id,
     ):
         if not decision.allowed:
@@ -232,6 +253,9 @@ def build_context_retrieval_plan(
         ),
         project=project,
         accessible_projects=scoped_accessible_projects,
+        accessible_teams=scoped_teams,
+        accessible_delegations=scoped_delegations,
+        allowed_memory_scope_keys=normalized_scope_keys,
         filter_selectivity=_project_filter_selectivity(project, scoped_accessible_projects),
     )
 
@@ -259,6 +283,8 @@ def _scope_decisions(
     principal_id: str | None,
     project: str | None,
     accessible_projects: frozenset[str] | None,
+    accessible_teams: frozenset[str],
+    accessible_delegations: frozenset[str],
     agent_id: str | None,
 ) -> list[tuple[MemoryPolicyDecision, str | None, str | None]]:
     decisions = [
@@ -295,6 +321,24 @@ def _scope_decisions(
                         accessible_projects=accessible_projects,
                     ),
                     accessible_project,
+                    None,
+                )
+            )
+    for memory_scope, keys in (
+        (MemoryScope.TEAM, accessible_teams),
+        (MemoryScope.DELEGATED, accessible_delegations),
+    ):
+        for key in sorted(keys):
+            decisions.append(
+                (
+                    authorize_memory_read(
+                        principal_id=principal_id,
+                        memory_scope=memory_scope,
+                        scope_key=key,
+                        accessible_teams=accessible_teams,
+                        accessible_delegations=accessible_delegations,
+                    ),
+                    None,
                     None,
                 )
             )

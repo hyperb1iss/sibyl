@@ -174,6 +174,8 @@ async def _execute_naive_context_evidence_search(
         principal_id=ctx.user_id,
         project=request.project,
         accessible_projects=accessible_projects,
+        accessible_teams=ctx.accessible_teams,
+        accessible_delegations=ctx.accessible_delegations,
         agent_id=request.agent_id,
         limit=request.evidence.limit,
         allowed_memory_scope_keys=(
@@ -548,6 +550,8 @@ async def context_pack(
                 domain=request.domain,
                 project=request.project,
                 accessible_projects=accessible_projects,
+                accessible_teams=set(ctx.accessible_teams),
+                accessible_delegations=set(ctx.accessible_delegations),
                 principal_id=ctx.user_id,
                 agent_id=request.agent_id,
                 organization_id=str(org.id),

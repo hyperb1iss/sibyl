@@ -744,6 +744,13 @@ class SurrealAuthContextResolver(RepositoryAuthContextResolver):
                         WHERE organization_id = $organization_id AND user_id = $user_id
                         LIMIT 1
                     )[0],
+                    teams: (SELECT uuid FROM teams WHERE organization_id = $organization_id),
+                    team_memberships: (SELECT team_id FROM team_members WHERE user_id = $user_id),
+                    delegations: (SELECT scope_key FROM memory_spaces
+                        WHERE organization_id = $organization_id AND memory_scope = 'delegated'
+                            AND state = 'active' AND uuid IN (SELECT VALUE space_id FROM memory_space_members
+                                WHERE organization_id = $organization_id AND principal_type = 'user'
+                                    AND principal_id = $user_id AND (expires_at = NONE OR expires_at > time::now()))),
                 };
             """
 
@@ -766,6 +773,25 @@ class SurrealAuthContextResolver(RepositoryAuthContextResolver):
         api_key_memory_space_ids = _claim_string_set(claims.get("api_key_memory_space_ids"))
         api_key_memory_scope_keys = _claim_string_set(claims.get("api_key_memory_scope_keys"))
 
+        teams = frozenset(
+            str(record["uuid"]) for record in _normalize_records(payload.get("teams"))
+        )
+        if membership_record is None:
+            teams = frozenset()
+        elif membership_record.get("role") not in {"owner", "admin"}:
+            teams &= frozenset(
+                str(record["team_id"])
+                for record in _normalize_records(payload.get("team_memberships"))
+            )
+        delegations = (
+            frozenset(
+                str(record["scope_key"])
+                for record in _normalize_records(payload.get("delegations"))
+                if record.get("scope_key")
+            )
+            if membership_record is not None
+            else frozenset()
+        )
         return AuthContext(
             user=_user_from_record(user_record),
             organization=_organization_from_record(organization_record)
@@ -779,4 +805,6 @@ class SurrealAuthContextResolver(RepositoryAuthContextResolver):
             api_key_project_ids=api_key_project_ids,
             api_key_memory_space_ids=api_key_memory_space_ids,
             api_key_memory_scope_keys=api_key_memory_scope_keys,
+            accessible_teams=teams,
+            accessible_delegations=delegations,
         )

@@ -313,6 +313,8 @@ async def _list_graph_entities_for_filters(
     since_date: datetime | None,
     as_of: datetime | None,
     accessible_projects: set[str] | None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
     principal_id: str | None,
     allowed_memory_scope_keys: set[str] | None,
 ) -> list[tuple[Any, float]]:
@@ -334,6 +336,8 @@ async def _list_graph_entities_for_filters(
             since_date=since_date,
             as_of=as_of,
             accessible_projects=accessible_projects,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
         )
 
     if entity_types:
@@ -382,6 +386,8 @@ def _matches_graph_filters(
     since_date: datetime | None,
     as_of: datetime | None = None,
     accessible_projects: set[str] | None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
 ) -> bool:
     if not _matches_memory_scope_policy(
         entity,
@@ -389,6 +395,8 @@ def _matches_graph_filters(
         principal_id=principal_id,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
     ):
         return False
 
@@ -451,6 +459,8 @@ def _matches_memory_scope_policy(
     principal_id: str | None,
     allowed_memory_scope_keys: set[str] | None,
     accessible_projects: set[str] | None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
 ) -> bool:
     metadata = getattr(entity, "metadata", {}) or {}
 
@@ -471,6 +481,8 @@ def _matches_memory_scope_policy(
         metadata,
         principal_id=principal_id,
         accessible_projects=effective_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
         private_scope_granted=private_scope_granted_for(
             allowed_memory_scope_keys, principal_id=principal_id
@@ -701,6 +713,8 @@ async def search(
     status: str | None = None,
     project: str | None = None,
     accessible_projects: set[str] | None = None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
     source: str | None = None,
     source_id: str | None = None,
     source_name: str | None = None,
@@ -981,6 +995,8 @@ async def search(
                         source_authority=SourceReadAuthority(
                             principal_id=principal_id,
                             projects=frozenset(accessible_projects or ()),
+                            teams=frozenset(accessible_teams or ()),
+                            delegations=frozenset(accessible_delegations or ()),
                             scope_keys=None
                             if allowed_memory_scope_keys is None
                             else frozenset(allowed_memory_scope_keys),
@@ -1072,6 +1088,8 @@ async def search(
                     since_date=since_date,
                     as_of=resolved_as_of,
                     accessible_projects=accessible_projects,
+                    accessible_teams=accessible_teams,
+                    accessible_delegations=accessible_delegations,
                 )
 
             # Perform search - try enhanced hybrid first, then fall back to
@@ -1217,6 +1235,8 @@ async def search(
                     since_date=since_date,
                     as_of=resolved_as_of,
                     accessible_projects=accessible_projects,
+                    accessible_teams=accessible_teams,
+                    accessible_delegations=accessible_delegations,
                     principal_id=principal_id,
                     allowed_memory_scope_keys=allowed_memory_scope_keys,
                 )

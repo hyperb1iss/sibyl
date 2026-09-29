@@ -14,11 +14,13 @@ from sibyl.auth.mcp_auth import (
     mcp_scopes_allow,
 )
 from sibyl.persistence.auth_runtime import (
+    InvalidAuthClaimsError,
+    UserNotFoundError,
     authenticate_api_key,
-    resolve_org_role,
+    resolve_auth_context,
     resolve_project_graph_grants,
 )
-from sibyl_core.auth.context import MemoryPolicyContext
+from sibyl_core.auth.context import AuthContext, MemoryPolicyContext
 
 log = structlog.get_logger()
 
@@ -41,6 +43,8 @@ class McpContext:
     # an API-key concern on both surfaces: user sessions carry no scope claim,
     # and REST gates scopes only on its own API-key branch.
     is_api_key: bool = False
+    accessible_teams: frozenset[str] = frozenset()
+    accessible_delegations: frozenset[str] = frozenset()
 
     @cached_property
     def project_grants(self) -> asyncio.Task[tuple[frozenset[str], frozenset[str]]]:
@@ -74,10 +78,10 @@ class McpContext:
             else None,
             accessible_teams=frozenset(str(value) for value in accessible_teams)
             if accessible_teams is not None
-            else None,
+            else self.accessible_teams,
             accessible_delegations=frozenset(str(value) for value in accessible_delegations)
             if accessible_delegations is not None
-            else None,
+            else self.accessible_delegations,
             delegated_authority=self.delegated_authority,
             agent_id=self.agent_id,
             project_id=project_id,
@@ -85,6 +89,20 @@ class McpContext:
             scope_key=scope_key,
             source_surface=source_surface,
         )
+
+
+async def _resolve_principal_authority(
+    *, user_id: str, org_id: str, scopes: list[str] | None
+) -> AuthContext | None:
+    try:
+        ctx = await resolve_auth_context(
+            claims={"sub": user_id, "org": org_id, "scopes": scopes or []}
+        )
+    except (InvalidAuthClaimsError, UserNotFoundError):
+        return None
+    if ctx.user_id != user_id or ctx.organization_id != org_id or ctx.org_role is None:
+        return None
+    return ctx
 
 
 async def get_context() -> McpContext | None:
@@ -111,7 +129,12 @@ async def get_context() -> McpContext | None:
             )
             org_id = str(auth.organization_id)
             user_id = str(auth.user_id)
-            org_role = await resolve_org_role(org_id=org_id, user_id=user_id)
+            authority = await _resolve_principal_authority(
+                user_id=user_id, org_id=org_id, scopes=auth.scopes
+            )
+            if authority is None or authority.org_role is None:
+                return None
+            org_role = authority.org_role.value
             return McpContext(
                 org_id=org_id,
                 user_id=user_id,
@@ -130,6 +153,8 @@ async def get_context() -> McpContext | None:
                 if getattr(auth, "memory_spaces", None) is not None
                 else None,
                 org_role=org_role,
+                accessible_teams=authority.accessible_teams,
+                accessible_delegations=authority.accessible_delegations,
                 is_api_key=True,
             )
         return None
@@ -147,15 +172,19 @@ async def get_context() -> McpContext | None:
 
     if org_id:
         log.debug("mcp_context", org_id=org_id, user_id=user_id)
-        org_role = await resolve_org_role(
-            org_id=str(org_id),
-            user_id=str(user_id) if user_id else None,
+        authority = await _resolve_principal_authority(
+            user_id=str(user_id or ""), org_id=str(org_id), scopes=claims.get("scopes")
         )
+        if authority is None or authority.org_role is None:
+            return None
+        org_role = authority.org_role.value
         return McpContext(
             org_id=str(org_id),
             user_id=str(user_id) if user_id else None,
             scopes=claims.get("scopes"),
             org_role=org_role,
+            accessible_teams=authority.accessible_teams,
+            accessible_delegations=authority.accessible_delegations,
         )
     return None
 
