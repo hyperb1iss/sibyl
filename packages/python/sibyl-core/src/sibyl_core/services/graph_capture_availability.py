@@ -69,13 +69,21 @@ async def available_capture_projection_rows[T](
         try:
             async with content_client.surreal_content_client() as client:
                 for batch in content_client.value_batches(sorted(requested)):
-                    records = await content_client.select_many(
-                        client,
-                        "SELECT * FROM raw_captures WHERE organization_id = $organization_id "
-                        "AND uuid IN $source_ids;",
-                        organization_id=organization_id,
-                        source_ids=batch,
-                    )
+                    try:
+                        records = await content_client.select_many(
+                            client,
+                            "SELECT * FROM raw_captures WHERE organization_id = $organization_id "
+                            "AND uuid IN $source_ids;",
+                            organization_id=organization_id,
+                            source_ids=batch,
+                        )
+                    except Exception as exc:
+                        log.warning(
+                            "graph_capture_lifecycle_lookup_failed",
+                            dependent_capture_count=len(batch),
+                            error_type=type(exc).__name__,
+                        )
+                        continue
                     for record in records:
                         try:
                             memory = content_models.raw_memory_from_record(record)

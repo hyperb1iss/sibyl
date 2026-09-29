@@ -7,7 +7,7 @@ from sibyl_core.memory_pipeline.source_lifecycle import SOURCE_BINDINGS_KEY
 from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.services.graph_capture_availability import available_capture_projection_rows
 from sibyl_core.services.memory_correction import apply_memory_correction
-from sibyl_core.services.surreal_content import save_raw_memory
+from sibyl_core.services.surreal_content import remember_raw_memory, save_raw_memory
 from tests.test_capture_corrections import captured_note
 from tests.test_reflection_identity import content_store as content_store
 from tests.test_reflection_identity import runtime as runtime
@@ -125,3 +125,38 @@ async def test_capture_read_checks_transitive_bound_sources_without_copying_stal
         await available_capture_projection_rows(runtime.client.group_id, {derived.id: derived})
         == {}
     )
+
+
+async def test_capture_batch_failure_preserves_other_healthy_batches(
+    runtime, content_store, monkeypatch
+):
+    from sibyl_core.services import content_client
+
+    memory, note = await captured_note(runtime, monkeypatch)
+    healthy = await remember_raw_memory(
+        organization_id=runtime.client.group_id,
+        principal_id="user_a",
+        source_id="healthy-capture",
+        raw_content="Independent healthy text",
+        embedding_provider=None,
+    )
+    healthy_note = note.model_copy(
+        update={"id": "healthy-note", "metadata": {"raw_memory_id": healthy.id}}
+    )
+    original_select = content_client.select_many
+
+    def batches(_values):
+        yield [memory.id]
+        yield [healthy.id]
+
+    async def partly_unavailable(client, query, **params):
+        if params["source_ids"] == [memory.id]:
+            raise RuntimeError("one batch unavailable")
+        return await original_select(client, query, **params)
+
+    monkeypatch.setattr(content_client, "value_batches", batches)
+    monkeypatch.setattr(content_client, "select_many", partly_unavailable)
+    rows = {row.id: row for row in (note, healthy_note)}
+    assert set(await available_capture_projection_rows(runtime.client.group_id, rows)) == {
+        healthy_note.id
+    }
