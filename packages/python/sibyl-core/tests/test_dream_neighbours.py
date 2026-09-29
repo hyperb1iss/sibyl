@@ -87,9 +87,7 @@ async def test_neighbours_share_the_seed_owner_scope_and_embedding_space(store):
     # Each of these is nearer the seed than its sibling but could never join
     # the seed's cohort, so none of them may take a place on its page.
     await _source(store, "other-owner", {0: 1.0}, principal="someone-else")
-    await _source(
-        store, "other-scope", {0: 1.0}, memory_scope=MemoryScope.SHARED, scope_key="team-a"
-    )
+    await _source(store, "other-scope", {0: 1.0}, memory_scope=MemoryScope.TEAM, scope_key="team-a")
     await _source(store, "other-space", {0: 1.0}, space="model-b")
     await _source(store, "unembedded")
     await _source(store, "derived", {0: 1.0}, capture_surface="synthesis_artifact")

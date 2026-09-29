@@ -3186,9 +3186,12 @@ class TestSurrealContentHelpers:
     async def test_remember_raw_memory_requires_scope_key_for_keyed_scopes(
         self, memory_scope: MemoryScope
     ) -> None:
-        with pytest.raises(
-            ValueError, match=f"{memory_scope.value} raw memory requires a scope_key"
-        ):
+        error = (
+            "shared memory scope is retired; use a verified team scope"
+            if memory_scope is MemoryScope.SHARED
+            else f"{memory_scope.value} raw memory requires a scope_key"
+        )
+        with pytest.raises(ValueError, match=error):
             await remember_raw_memory(
                 organization_id="org-1",
                 principal_id="user-a",
