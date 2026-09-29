@@ -355,6 +355,7 @@ async def _readable_correction_targets(
     accessible_projects: Iterable[str] | None,
     log_event: str,
     allowed_memory_scope_keys: Iterable[str] | None = None,
+    lookup_failures: set[str] | None = None,
 ) -> list[str]:
     """Keep the rows a correction found that this principal can still read.
 
@@ -370,8 +371,12 @@ async def _readable_correction_targets(
         try:
             row = await runtime.entity_manager.get(entity_id)
         except Exception:
+            if lookup_failures is not None:
+                lookup_failures.add(entity_id)
             continue
         if row is None:
+            if lookup_failures is not None:
+                lookup_failures.add(entity_id)
             continue
         row_metadata = getattr(row, "metadata", None)
         if not memory_metadata_read_allowed(

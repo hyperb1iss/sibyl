@@ -777,3 +777,88 @@ async def test_get_entity_graph_mode_filters_fetched_related_entities() -> None:
         "project-visible",
         "pattern-unassigned",
     ]
+
+
+@pytest.mark.parametrize(("include_summary", "related_limit"), [(False, 0), (True, 0), (True, 5)])
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"correction_blockers": {"raw-1": {"revision": 2, "blocking": True}}},
+        {"lifecycle_state": "deleted"},
+        {"lifecycle_flags": ["hidden"]},
+    ],
+)
+async def test_entity_detail_refuses_retired_memory_on_every_read_branch(
+    include_summary: bool, related_limit: int, metadata: dict[str, object]
+) -> None:
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    entity = Entity(
+        id="retired-note",
+        entity_type=EntityType.NOTE,
+        name="Withdrawn fact",
+        content="Secret withdrawn text",
+        metadata=metadata,
+    )
+    service = AsyncMock()
+    service.get_entity.return_value = entity
+    service.get_entity_bundle.return_value = EntityBundle(entity=entity)
+    with (
+        patch(
+            "sibyl.api.routes.entity_policy.list_accessible_project_graph_ids",
+            AsyncMock(return_value={"project-1"}),
+        ),
+        pytest.raises(HTTPException) as exc,
+    ):
+        await get_entity(
+            "retired-note",
+            org=org,
+            ctx=_ctx(),
+            service=service,
+            include_summary=include_summary,
+            related_limit=related_limit,
+        )
+    assert exc.value.status_code == 404
+
+
+def test_related_summary_and_entity_policy_hide_corrected_projection() -> None:
+    entity = Entity(
+        id="retired-note",
+        entity_type=EntityType.NOTE,
+        name="Withdrawn fact",
+        metadata={"correction_blockers": {"raw-1": {"revision": 2, "blocking": True}}},
+    )
+    assert not entity_visible_to_reader(
+        entity, reader_user_id="reader-1", accessible_projects=set(), allowed_memory_scope_keys=None
+    )
+    relationship = Relationship(
+        id="retired-link",
+        source_id="parent",
+        target_id=entity.id,
+        relationship_type=RelationshipType.RELATED_TO,
+    )
+    assert (
+        summarize_related_entities(
+            "parent",
+            related_entities=[entity],
+            relationships=[relationship],
+            reader_user_id="reader-1",
+            accessible_projects=set(),
+            allowed_memory_scope_keys=None,
+        )
+        is None
+    )
+
+
+def test_archived_task_stays_readable_when_memory_correction_is_restored() -> None:
+    entity = Entity(
+        id="task-archived",
+        entity_type=EntityType.TASK,
+        name="Closed work",
+        metadata={
+            "status": "archived",
+            "correction_blockers": {"raw-1": {"revision": 3, "blocking": False}},
+        },
+    )
+    assert entity_visible_to_reader(
+        entity, reader_user_id="reader-1", accessible_projects=set(), allowed_memory_scope_keys=None
+    )

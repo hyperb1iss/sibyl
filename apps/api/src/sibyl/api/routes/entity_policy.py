@@ -26,6 +26,7 @@ from sibyl_core.auth.memory_policy import (
     memory_metadata_read_allowed,
     private_scope_granted_for,
 )
+from sibyl_core.memory_pipeline.lifecycle import graph_metadata_recallable
 from sibyl_core.models.entities import EntityType, Relationship, RelationshipType
 from sibyl_core.models.relations import (
     SUPPRESSING_RELATIONSHIP_TYPES,
@@ -177,6 +178,8 @@ def entity_visible_to_reader(
     accessible_projects: set[str],
     allowed_memory_scope_keys: set[str] | None,
 ) -> bool:
+    if not graph_metadata_recallable(getattr(entity, "metadata", None)):
+        return False
     # Reading a row here and finding it through search are the same question,
     # so they answer to one implementation. A local copy handled only project
     # and private and served every other scope to the whole organization.
