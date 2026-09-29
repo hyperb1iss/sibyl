@@ -249,9 +249,16 @@ def correction_preview_line(action: str, planned: dict[str, Any]) -> str:
     flags = [str(flag) for flag in planned.get("target_lifecycle_flags") or []]
     derived = len(planned.get("affected_derived_ids") or [])
     reversible = "reversible" if planned.get("reversible") else "irreversible"
+    impact = f"{derived} derived record{'s' if derived != 1 else ''} affected"
+    if (planned.get("metadata") or {}).get("derived_lookup_complete") is False:
+        impact = (
+            f"at least {derived} derived record{'s' if derived != 1 else ''} found; impact lookup incomplete"
+            if derived
+            else "derived impact unknown; lookup incomplete"
+        )
     return (
         f"{action}: state → {state}, flags → {', '.join(flags) if flags else 'none'}; "
-        f"{derived} derived record{'s' if derived != 1 else ''} affected; {reversible}"
+        f"{impact}; {reversible}"
     )
 
 

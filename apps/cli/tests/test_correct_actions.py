@@ -482,3 +482,27 @@ def test_applied_response_requires_an_applied_receipt(
     )
     assert result.exit_code == 1
     assert "outcome is unconfirmed" in _flat(result.stdout)
+
+
+@pytest.mark.parametrize("derived_ids", [[], ["visible-child"]])
+@patch("sibyl_cli.memory_admin.get_client")
+def test_explicit_preview_reports_incomplete_derived_impact(
+    mock_get_client: MagicMock, derived_ids: list[str]
+) -> None:
+    planned = _planned("delete", state="deleted", flags=[], reversible=False)
+    planned["affected_derived_ids"] = derived_ids
+    planned["metadata"]["derived_lookup_complete"] = False
+    client = _client(planned)
+    mock_get_client.return_value = _FakeClientContext(client)
+    result = CliRunner().invoke(
+        app, ["correct", SOURCE_ID, "--action", "delete", "--preview", "--reason", "Withdraw"]
+    )
+    assert result.exit_code == 0, result.stdout
+    output = _flat(result.stdout)
+    assert "incomplete" in output
+    assert "0 derived records affected" not in output
+    if derived_ids:
+        assert "at least 1 derived record found" in output
+    else:
+        assert "derived impact unknown" in output
+    assert len(client.correct_memory.await_args_list) == 1
