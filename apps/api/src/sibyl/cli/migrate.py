@@ -1878,3 +1878,47 @@ def scope_backfill(
 
     if not _backfill():
         raise typer.Exit(code=1)
+
+
+@app.command("retire-shared")
+def retire_shared(
+    org_id: Annotated[str, typer.Option("--org-id", help="Organization UUID")],
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run/--apply", help="Preview by default; apply verified team mappings"),
+    ] = True,
+) -> None:
+    """Map legacy shared captures to verified teams and tombstone exceptions.
+
+    Scope keys must already be canonical same-organization team UUIDs. The
+    retained capture principal must have current organization and team access
+    (organization owners and admins have team access). Captures without that
+    proof are retained as tombstones; their IDs, raw bytes and provenance stay
+    intact. The JSON receipt records every decision and revision conflict.
+    """
+    from dataclasses import asdict
+    from uuid import UUID
+
+    from sibyl.persistence.shared_scope_retirement import resolve_shared_scope_retirement_authority
+    from sibyl_core.migrate.shared_scope_retirement import retire_shared_captures
+
+    try:
+        organization_id = str(UUID(org_id))
+    except ValueError as exc:
+        raise typer.BadParameter("org-id must be a UUID") from exc
+
+    async def authority():
+        return await resolve_shared_scope_retirement_authority(organization_id)
+
+    @run_async
+    async def _retire() -> bool:
+        receipt = await retire_shared_captures(
+            organization_id=organization_id,
+            authority_provider=authority,
+            dry_run=dry_run,
+        )
+        console.print_json(data={"success": receipt.success, **asdict(receipt)})
+        return receipt.success
+
+    if not _retire():
+        raise typer.Exit(code=1)
