@@ -23,12 +23,14 @@ async def available_graph_entities(
 
     A supplied runtime must be the existing GraphRuntime for this organization.
     Callers retain their principal/project scope filters and render these current
-    rows, rather than cached values with the same IDs.
+    rows, rather than cached values with the same IDs. Each standalone call owns
+    a fresh validation phase unless its caller supplies one.
     """
     ids = list(dict.fromkeys(entity_ids))
     if not ids:
         return {}
     graph = runtime or await get_surreal_graph_runtime(organization_id, ensure_schema=False)
+    validation = read if read is not None else GraphReadValidation(organization_id)
     current: dict[str, Entity] = {}
     for offset in range(0, len(ids), _READ_BATCH_SIZE):
         batch = ids[offset : offset + _READ_BATCH_SIZE]
@@ -37,7 +39,7 @@ async def available_graph_entities(
             if row.id in batch:
                 current[row.id] = row
     return await available_graph_entity_rows(
-        organization_id, current, graph_client=graph.client, read=read
+        organization_id, current, graph_client=graph.client, read=validation
     )
 
 
