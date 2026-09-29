@@ -1,6 +1,7 @@
 """Canonical reads ownership for entity routes."""
 
 from datetime import UTC, datetime
+from functools import partial
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -168,7 +169,14 @@ async def _list_entities_bounded(
             break
 
         current = await available_capture_projection_rows(
-            organization_id, {entity.id: entity for entity in batch}
+            organization_id,
+            {entity.id: entity for entity in batch},
+            source_visible=partial(
+                policy.entity_visible_to_reader,
+                reader_user_id=reader_user_id,
+                accessible_projects=accessible_projects,
+                allowed_memory_scope_keys=allowed_memory_scope_keys,
+            ),
         )
         for entity in batch:
             if entity.id in current and policy.entity_matches_list_filters(
@@ -352,7 +360,14 @@ async def _fetch_related_entity_summaries(
             return None
 
         current = await available_capture_projection_rows(
-            organization_id, {entity.id: entity for entity, _ in related_pairs}
+            organization_id,
+            {entity.id: entity for entity, _ in related_pairs},
+            source_visible=partial(
+                policy.entity_visible_to_reader,
+                reader_user_id=reader_user_id,
+                accessible_projects=accessible_projects,
+                allowed_memory_scope_keys=allowed_memory_scope_keys,
+            ),
         )
         seen_ids: set[str] = set()
         deduped: list[RelatedEntitySummary] = []
@@ -489,7 +504,14 @@ async def list_entities(
         ]
 
         current = await available_capture_projection_rows(
-            group_id, {entity.id: entity for entity in filtered}
+            group_id,
+            {entity.id: entity for entity in filtered},
+            source_visible=partial(
+                policy.entity_visible_to_reader,
+                reader_user_id=reader_user_id,
+                accessible_projects=accessible_projects,
+                allowed_memory_scope_keys=allowed_memory_scope_keys,
+            ),
         )
         filtered = [entity for entity in filtered if entity.id in current]
 
@@ -652,7 +674,14 @@ async def get_entity(
         accessible_projects = await policy.require_entity_read_access(ctx, entity)
         metadata = dict(getattr(entity, "metadata", {}) or {})
         current_related = await available_capture_projection_rows(
-            str(org.id), {row.id: row for row in graph_bundle.related_entities}
+            str(org.id),
+            {row.id: row for row in graph_bundle.related_entities},
+            source_visible=partial(
+                policy.entity_visible_to_reader,
+                reader_user_id=policy.reader_user_id(ctx),
+                accessible_projects=accessible_projects,
+                allowed_memory_scope_keys=policy.reader_memory_grants(ctx),
+            ),
         )
         related = summarize_related_entities(
             entity_id,

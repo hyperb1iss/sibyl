@@ -275,7 +275,16 @@ async def _list_graph_entities(
             break
 
         page_offset += len(batch)
-        current = await available_graph_entities(organization_id, [entity.id for entity in batch])
+        current = await available_graph_entities(
+            organization_id,
+            [entity.id for entity in batch],
+            source_visible=partial(
+                _graph_entity_visible,
+                principal_id=principal_id,
+                accessible_projects=accessible_projects,
+                allowed_memory_scope_keys=allowed_memory_scope_keys,
+            ),
+        )
         for listed in batch:
             entity = current.get(listed.id)
             if entity is None:
@@ -309,7 +318,16 @@ async def _get_graph_entity(
     accessible_projects: set[str],
     allowed_memory_scope_keys: set[str] | None,
 ) -> Entity | None:
-    current = await available_graph_entities(organization_id, [entity_id])
+    current = await available_graph_entities(
+        organization_id,
+        [entity_id],
+        source_visible=partial(
+            _graph_entity_visible,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+        ),
+    )
     entity = current.get(entity_id)
     if entity is None or not _graph_entity_visible(
         entity,
@@ -420,7 +438,16 @@ async def get_all_edges(
     endpoint_ids = {rel.source_id for rel in all_relationships} | {
         rel.target_id for rel in all_relationships
     }
-    endpoints = await available_graph_entities(group_id, sorted(endpoint_ids))
+    endpoints = await available_graph_entities(
+        group_id,
+        sorted(endpoint_ids),
+        source_visible=partial(
+            _graph_entity_visible,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=memory_grants,
+        ),
+    )
     visible_ids = {
         entity.id
         for entity in endpoints.values()
@@ -620,7 +647,14 @@ async def get_subgraph(
         )
 
         current_neighbors = await available_graph_entities(
-            group_id, [entity.id for entity, _relationship in related]
+            group_id,
+            [entity.id for entity, _relationship in related],
+            source_visible=partial(
+                _graph_entity_visible,
+                principal_id=principal_id,
+                accessible_projects=accessible_projects,
+                allowed_memory_scope_keys=memory_grants,
+            ),
         )
         current_edges = {
             r.id: r

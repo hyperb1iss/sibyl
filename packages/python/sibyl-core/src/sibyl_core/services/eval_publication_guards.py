@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from sibyl_core.auth.memory_policy import EVAL_CONSOLIDATION_METADATA_KEY
@@ -119,6 +119,7 @@ async def available_graph_entity_rows(
     *,
     graph_client: SurrealGraphClient,
     read: GraphReadValidation | None = None,
+    source_visible: Callable[[Any], bool] | None = None,
 ) -> dict[str, Entity]:
     """Validate current stored rows through their existing scoped graph client."""
     current = {
@@ -130,7 +131,9 @@ async def available_graph_entity_rows(
     }
     from sibyl_core.services.graph_capture_availability import available_capture_projection_rows
 
-    current = await available_capture_projection_rows(organization_id, current)
+    current = await available_capture_projection_rows(
+        organization_id, current, graph_client=graph_client, source_visible=source_visible
+    )
     unavailable = await unavailable_publication_ids(
         organization_id,
         {key: row.metadata for key, row in current.items()},

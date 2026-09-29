@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from typing import Any
 
 from sibyl_core.models.entities import Entity, Relationship
 from sibyl_core.services.eval_publication_guards import available_graph_entity_rows
@@ -18,6 +19,7 @@ async def available_graph_entities(
     *,
     runtime: GraphRuntime | None = None,
     read: GraphReadValidation | None = None,
+    source_visible: Callable[[Any], bool] | None = None,
 ) -> dict[str, Entity]:
     """Refresh actual rows and reject missing, retired, or unavailable ancestry.
 
@@ -39,7 +41,11 @@ async def available_graph_entities(
             if row.id in batch:
                 current[row.id] = row
     return await available_graph_entity_rows(
-        organization_id, current, graph_client=graph.client, read=validation
+        organization_id,
+        current,
+        graph_client=graph.client,
+        read=validation,
+        source_visible=source_visible,
     )
 
 

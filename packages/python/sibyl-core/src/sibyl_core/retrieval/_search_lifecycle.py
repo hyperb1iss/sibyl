@@ -19,6 +19,7 @@ from sibyl_core.retrieval._search_database import _execute_query_records
 from sibyl_core.retrieval._search_plan import RetrievalPlan, RetrievalSignal
 from sibyl_core.retrieval.candidates import CandidateKind, RetrievalCandidate
 from sibyl_core.services.eval_publication_guards import unavailable_publication_ids
+from sibyl_core.services.graph_capture_availability import available_capture_projection_rows
 from sibyl_core.services.graph_entities import EntityManager
 from sibyl_core.services.graph_read_availability import (
     available_graph_entities,
@@ -275,6 +276,9 @@ async def _available_edge_endpoints(
             EntityManager(client, group_id=group_id),
             RelationshipManager(client, group_id=group_id),
         ),
+        source_visible=(lambda row: _source_candidate_allowed(row, plan))
+        if plan is not None
+        else None,
     )
     allowed = set()
     if plan is not None:
@@ -333,6 +337,20 @@ async def _apply_supersession_gate(
     signal, this is also what makes the newer row win whenever both match.
     """
 
+    source_rows = {
+        candidate.id: candidate
+        for _signal, candidates in source_lists
+        for candidate in candidates
+        if candidate.kind != CandidateKind.EDGE and candidate.type not in {"claim", "relationship"}
+    }
+    available_sources = await available_capture_projection_rows(
+        group_id,
+        source_rows,
+        graph_client=client,
+        source_visible=(lambda row: _source_candidate_allowed(row, plan))
+        if plan is not None
+        else None,
+    )
     unavailable_publications = await unavailable_publication_ids(
         group_id,
         {
@@ -371,6 +389,7 @@ async def _apply_supersession_gate(
             if (
                 graph_metadata_recallable(candidate.metadata)
                 and candidate.id not in unavailable_publications
+                and (candidate.id not in source_rows or candidate.id in available_sources)
             ):
                 kept.append(candidate)
             else:
@@ -467,3 +486,20 @@ def _merged_supersession_metadata(
         uuids.update(str(value) for value in gate.get("superseded_uuids") or ())
     merged["superseded_uuids"] = sorted(uuids)
     return {"supersession_gate": merged}
+
+
+def _source_candidate_allowed(row, plan: RetrievalPlan) -> bool:
+    raw_type = getattr(row, "entity_type", None)
+    row_type = getattr(raw_type, "value", raw_type) or "raw_memory"
+    project_id = row.id if row_type == "project" else getattr(row, "project_id", None)
+    candidate = RetrievalCandidate(
+        id=row.id,
+        type=row_type,
+        name=getattr(row, "name", None) or getattr(row, "title", None) or "",
+        content="",
+        score=0,
+        source=None,
+        metadata=row.metadata,
+        project_id=project_id or row.metadata.get("project_id"),
+    )
+    return _candidate_allowed(candidate, plan=plan, requested_types=set(), facet=None)

@@ -441,7 +441,17 @@ async def get_cluster_nodes(
 
     member_ids = cluster.member_ids[:max_nodes]
     member_id_set = set(member_ids)
-    entity_by_id = await _current_graph_entities(client, organization_id, member_ids)
+    entity_by_id = await _current_graph_entities(
+        client,
+        organization_id,
+        member_ids,
+        source_visible=partial(
+            graph_row_read_allowed,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+        ),
+    )
 
     edges = await _native_relationship_edges_between_ids(
         client,
