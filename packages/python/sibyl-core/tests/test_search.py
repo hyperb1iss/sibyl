@@ -4286,6 +4286,8 @@ def test_scope_decisions_includes_project_less_agent_diary_scope() -> None:
         principal_id="user-1",
         project=None,
         accessible_projects=frozenset({"project-a", "project-b"}),
+        accessible_teams=frozenset(),
+        accessible_delegations=frozenset(),
         agent_id="nova",
     )
 
