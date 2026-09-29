@@ -1,13 +1,14 @@
 """Public readers use current stored entities and their protected ancestry."""
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import ANY, AsyncMock
 
 import pytest
 
 from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.services import eval_publication_guards as guards
 from sibyl_core.services import graph_read_availability as availability
+from sibyl_core.services.graph_read_validation import GraphReadValidation
 
 
 def entity(identifier, **kwargs):
@@ -41,13 +42,17 @@ async def test_graph_availability_refreshes_actual_rows_and_denies_unavailable(m
         {"ordinary": {}, "protected": {}},
         graph_entities={"ordinary": rows[0], "protected": rows[1]},
         graph_client="owned",
-        read=None,
+        read=ANY,
     )
+    first_read = guard.await_args.kwargs["read"]
+    assert isinstance(first_read, GraphReadValidation)
+    assert first_read.organization_id == "org"
     rows[0].name = "current source name"
     again = await availability.available_graph_entities(
         "org", ["ordinary"], runtime=SimpleNamespace(entity_manager=manager, client="owned")
     )
     assert again["ordinary"].name == "current source name"
+    assert guard.await_args.kwargs["read"] is not first_read
 
 
 async def test_graph_availability_batches_deduplicates_and_uses_checked_owner(monkeypatch):
@@ -83,3 +88,19 @@ async def test_graph_availability_propagates_owner_failure(monkeypatch):
         await availability.available_graph_entities(
             "org", ["protected"], runtime=SimpleNamespace(entity_manager=manager, client="owned")
         )
+
+
+async def test_graph_availability_keeps_the_supplied_validation_phase(monkeypatch):
+    rows = [entity("protected")]
+    manager = SimpleNamespace(get_many=AsyncMock(return_value=rows))
+    guard = AsyncMock(return_value=set())
+    monkeypatch.setattr(guards, "unavailable_publication_ids", guard)
+    read = GraphReadValidation("org")
+    result = await availability.available_graph_entities(
+        "org",
+        ["protected"],
+        runtime=SimpleNamespace(entity_manager=manager, client="owned"),
+        read=read,
+    )
+    assert result == {"protected": rows[0]}
+    assert guard.await_args.kwargs["read"] is read
