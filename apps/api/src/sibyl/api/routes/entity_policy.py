@@ -26,11 +26,13 @@ from sibyl_core.auth.memory_policy import (
     memory_metadata_read_allowed,
     private_scope_granted_for,
 )
+from sibyl_core.memory_pipeline.lifecycle import graph_metadata_recallable
 from sibyl_core.models.entities import EntityType, Relationship, RelationshipType
 from sibyl_core.models.relations import (
     SUPPRESSING_RELATIONSHIP_TYPES,
     parse_relation_declarations,
 )
+from sibyl_core.services.graph_capture_availability import available_capture_projection_rows
 from sibyl_core.services.memory import declared_suppression_allowed
 
 log = structlog.get_logger()
@@ -177,6 +179,8 @@ def entity_visible_to_reader(
     accessible_projects: set[str],
     allowed_memory_scope_keys: set[str] | None,
 ) -> bool:
+    if not graph_metadata_recallable(getattr(entity, "metadata", None)):
+        return False
     # Reading a row here and finding it through search are the same question,
     # so they answer to one implementation. A local copy handled only project
     # and private and served every other scope to the whole organization.
@@ -280,6 +284,10 @@ async def require_entity_scope_visible(
         reader_user_id=reader_user_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=reader_memory_grants(ctx),
+    ):
+        raise HTTPException(status_code=404, detail="Entity not found")
+    if entity.id not in await available_capture_projection_rows(
+        str(ctx.organization_id), {entity.id: entity}
     ):
         raise HTTPException(status_code=404, detail="Entity not found")
     return accessible_projects

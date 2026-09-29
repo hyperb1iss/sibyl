@@ -28,6 +28,7 @@ from sibyl.persistence.content_runtime import (
 from sibyl_core.auth import AuthOrganization
 from sibyl_core.models.entities import EntityType
 from sibyl_core.services import KnowledgeReadService
+from sibyl_core.services.graph_capture_availability import available_capture_projection_rows
 
 log = structlog.get_logger()
 
@@ -125,6 +126,7 @@ def _can_use_bounded_entity_list(
 async def _list_entities_bounded(
     entity_manager: Any,
     *,
+    organization_id: str,
     entity_type: EntityType | None,
     page: int,
     page_size: int,
@@ -165,8 +167,11 @@ async def _list_entities_bounded(
             exhausted = True
             break
 
+        current = await available_capture_projection_rows(
+            organization_id, {entity.id: entity for entity in batch}
+        )
         for entity in batch:
-            if policy.entity_matches_list_filters(
+            if entity.id in current and policy.entity_matches_list_filters(
                 entity,
                 project_ids=project_ids,
                 real_project_ids=real_project_ids,
@@ -200,6 +205,7 @@ async def _enrich_entity_with_related(
     relationship_manager: Any,
     preloaded_related: list[RelatedEntitySummary] | None = None,
     *,
+    organization_id: str,
     accessible_projects: set[str],
     reader_user_id: str | None,
     allowed_memory_scope_keys: set[str] | None = None,
@@ -260,6 +266,7 @@ async def _enrich_entity_with_related(
     if related is None and related_limit > 0:
         related = await _fetch_related_entity_summaries(
             relationship_manager,
+            organization_id=organization_id,
             entity_id=entity_id,
             accessible_projects=accessible_projects,
             reader_user_id=reader_user_id,
@@ -330,6 +337,7 @@ def summarize_related_entities(
 async def _fetch_related_entity_summaries(
     relationship_manager: Any,
     *,
+    organization_id: str,
     entity_id: str,
     accessible_projects: set[str],
     reader_user_id: str | None,
@@ -343,10 +351,13 @@ async def _fetch_related_entity_summaries(
         if not related_pairs:
             return None
 
+        current = await available_capture_projection_rows(
+            organization_id, {entity.id: entity for entity, _ in related_pairs}
+        )
         seen_ids: set[str] = set()
         deduped: list[RelatedEntitySummary] = []
         for rel_entity, rel in related_pairs:
-            if not policy.related_entity_visible(
+            if rel_entity.id not in current or not policy.related_entity_visible(
                 rel_entity,
                 reader_user_id=reader_user_id,
                 allowed_memory_scope_keys=allowed_memory_scope_keys,
@@ -438,6 +449,7 @@ async def list_entities(
     ):
         page_entities, total, has_more = await _list_entities_bounded(
             entity_manager,
+            organization_id=group_id,
             entity_type=entity_type,
             page=page,
             page_size=page_size,
@@ -475,6 +487,11 @@ async def list_entities(
                 search=search,
             )
         ]
+
+        current = await available_capture_projection_rows(
+            group_id, {entity.id: entity for entity in filtered}
+        )
+        filtered = [entity for entity in filtered if entity.id in current]
 
         def get_sort_key(e: Any) -> Any:
             if sort_by == contracts.SortField.NAME:
@@ -565,6 +582,7 @@ async def get_entity(
                 runtime = await policy.get_entity_graph_runtime(str(org.id))
                 related = await _fetch_related_entity_summaries(
                     runtime.relationship_manager,
+                    organization_id=str(org.id),
                     entity_id=entity_id,
                     accessible_projects=accessible_projects,
                     reader_user_id=policy.reader_user_id(ctx),
@@ -603,6 +621,7 @@ async def get_entity(
                     runtime.entity_manager,
                     runtime.relationship_manager,
                     preloaded_related=None,
+                    organization_id=str(org.id),
                     accessible_projects=accessible_projects,
                     reader_user_id=policy.reader_user_id(ctx),
                     allowed_memory_scope_keys=policy.reader_memory_grants(ctx),
@@ -632,9 +651,12 @@ async def get_entity(
         entity = graph_bundle.entity
         accessible_projects = await policy.require_entity_read_access(ctx, entity)
         metadata = dict(getattr(entity, "metadata", {}) or {})
+        current_related = await available_capture_projection_rows(
+            str(org.id), {row.id: row for row in graph_bundle.related_entities}
+        )
         related = summarize_related_entities(
             entity_id,
-            related_entities=graph_bundle.related_entities,
+            related_entities=list(current_related.values()),
             relationships=graph_bundle.relationships,
             accessible_projects=accessible_projects,
             reader_user_id=policy.reader_user_id(ctx),
@@ -653,6 +675,7 @@ async def get_entity(
                 runtime.entity_manager,
                 runtime.relationship_manager,
                 preloaded_related=related,
+                organization_id=str(org.id),
                 accessible_projects=accessible_projects,
                 reader_user_id=policy.reader_user_id(ctx),
                 allowed_memory_scope_keys=policy.reader_memory_grants(ctx),

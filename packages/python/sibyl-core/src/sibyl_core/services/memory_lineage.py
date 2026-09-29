@@ -128,6 +128,50 @@ async def _raw_descendant_ids(
         _failed_lookup(lookup_failures, index, exc)
 
 
+async def discover_source_correction_descendants(
+    runtime: GraphRuntime,
+    *,
+    organization_id: str,
+    source_id: str,
+    entity_ids: Sequence[str] = (),
+) -> CorrectionPropagation:
+    """Read the same indexed lineage as propagation without mutating any row."""
+    receipt = CorrectionPropagation()
+    seen_raw = {source_id}
+    seen_graph = set(entity_ids)
+    receipt.entity_ids.extend(dict.fromkeys(entity_ids))
+    raw_frontier = [source_id]
+    graph_frontier = list(dict.fromkeys(entity_ids))
+    failures: set[str] = set()
+    while raw_frontier or graph_frontier:
+        next_raw: list[str] = []
+        next_graph: list[str] = []
+        async for memory_id in _raw_descendant_ids(
+            organization_id=organization_id,
+            source_ids=raw_frontier,
+            lookup_failures=failures,
+        ):
+            if memory_id not in seen_raw:
+                seen_raw.add(memory_id)
+                receipt.raw_memory_ids.append(memory_id)
+                next_raw.append(memory_id)
+        async for entity_id in _graph_descendant_ids(
+            runtime,
+            organization_id=organization_id,
+            raw_ids=raw_frontier,
+            graph_ids=graph_frontier,
+            lookup_failures=failures,
+        ):
+            if entity_id not in seen_graph:
+                seen_graph.add(entity_id)
+                receipt.entity_ids.append(entity_id)
+                next_graph.append(entity_id)
+        raw_frontier = next_raw
+        graph_frontier = next_graph
+    receipt.complete = not failures
+    return receipt
+
+
 async def propagate_source_correction(
     runtime: GraphRuntime | None,
     *,

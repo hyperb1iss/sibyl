@@ -22,6 +22,7 @@ from sibyl_core.models.reflection import (
 from sibyl_core.services import memory_lifecycle
 from sibyl_core.services.memory_contract import MemoryCorrectionPreview, MemoryCorrectionResult
 from sibyl_core.services.memory_lifecycle import _project_correction_to_graph
+from sibyl_core.services.memory_lineage import discover_source_correction_descendants
 from sibyl_core.services.memory_policy import (
     _authorize_correction_source_write,
     _authorize_share_source_read,
@@ -444,14 +445,71 @@ async def _preview_loaded_memory_correction(
         target_lifecycle_state,
         target_lifecycle_flags,
     )
-    affected_derived_ids = await _visible_correction_derived_ids(
-        organization_id=organization_id,
-        source_id=memory.id,
-        entity_ids=_correction_derived_ids(memory),
-        principal_id=principal_id,
-        accessible_projects=accessible_projects,
-        allowed_memory_scope_keys=allowed_memory_scope_keys,
-    )
+    affected_source_ids = [memory.id]
+    affected_derived_ids: list[str] = []
+    derived_lookup_complete = False
+    try:
+        runtime = await memory_lifecycle.get_surreal_graph_runtime(organization_id)
+        lookup_failures: set[str] = set()
+        declared_ids = _correction_derived_ids(memory)
+        affected_derived_ids = await memory_lifecycle._readable_correction_targets(
+            runtime,
+            source_id=memory.id,
+            entity_ids=declared_ids,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+            log_event="memory_correction_preview_declared_unreadable",
+            lookup_failures=lookup_failures,
+        )
+        targets = await memory_lifecycle._correction_graph_entity_ids(
+            runtime,
+            organization_id=organization_id,
+            memory=memory,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            writable_projects=writable_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+        )
+        descendants = await discover_source_correction_descendants(
+            runtime,
+            organization_id=organization_id,
+            source_id=memory.id,
+            entity_ids=[*targets.authorized, *targets.projections],
+        )
+        affected_derived_ids = await memory_lifecycle._readable_correction_targets(
+            runtime,
+            source_id=memory.id,
+            entity_ids=[*descendants.entity_ids, *declared_ids],
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+            log_event="memory_correction_preview_descendant_unreadable",
+            lookup_failures=lookup_failures,
+        )
+        for memory_id in descendants.raw_memory_ids:
+            row = await get_raw_memory(organization_id=organization_id, memory_id=memory_id)
+            if row is None:
+                lookup_failures.add(memory_id)
+                continue
+            if _authorize_share_source_read(
+                memory=row,
+                principal_id=principal_id,
+                accessible_projects=accessible_projects,
+                accessible_teams=accessible_teams,
+                accessible_delegations=accessible_delegations,
+                allowed_memory_scope_keys=allowed_memory_scope_keys,
+            ).allowed:
+                affected_source_ids.append(memory_id)
+        derived_lookup_complete = (
+            descendants.complete and not targets.truncated and not lookup_failures
+        )
+    except Exception as exc:
+        memory_lifecycle.log.warning(
+            "memory_correction_preview_lookup_failed",
+            source_id=memory.id,
+            error_type=type(exc).__name__,
+        )
     metadata = {
         "duplicate_of_source_id": canonical_duplicate_of_source_id,
         # The revision this plan was drawn against, so an apply can pin itself
@@ -462,6 +520,7 @@ async def _preview_loaded_memory_correction(
         "replacement_source_id": canonical_replacement_source_id,
         "requested_source_id": source_id,
         "revises_content": normalized_action == "revise",
+        "derived_lookup_complete": derived_lookup_complete,
     }
     return MemoryCorrectionPreview(
         allowed=True,
@@ -470,7 +529,7 @@ async def _preview_loaded_memory_correction(
         reason=reason or f"{normalized_action}_preview_allowed",
         target_lifecycle_state=target_lifecycle_state,
         target_lifecycle_flags=target_lifecycle_flags,
-        affected_source_ids=[memory.id],
+        affected_source_ids=affected_source_ids,
         affected_derived_ids=affected_derived_ids,
         reversible=normalized_action not in _CORRECTION_IRREVERSIBLE_ACTIONS,
         recall_impact=recall_impact,

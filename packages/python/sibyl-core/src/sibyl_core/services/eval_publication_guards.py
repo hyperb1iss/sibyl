@@ -128,6 +128,9 @@ async def available_graph_entity_rows(
         and row.organization_id == organization_id
         and graph_metadata_recallable(row.metadata)
     }
+    from sibyl_core.services.graph_capture_availability import available_capture_projection_rows
+
+    current = await available_capture_projection_rows(organization_id, current)
     unavailable = await unavailable_publication_ids(
         organization_id,
         {key: row.metadata for key, row in current.items()},

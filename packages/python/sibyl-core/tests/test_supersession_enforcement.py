@@ -521,7 +521,6 @@ async def test_supersede_retires_graph_through_ordered_source_state(
     memory = _raw_capture(id="source-1")
     replacement = _raw_capture(id="replacement-1", title="Deploy to Hetzner")
     runtime = _CorrectionGraphRuntime()
-    seen_uuids = iter(["entity-old", "entity-new"])
 
     async def execute_query(query: str, **_params: object) -> list[dict[str, object]]:
         if "source_ids" in _params:
@@ -531,7 +530,12 @@ async def test_supersede_retires_graph_through_ordered_source_state(
             # nothing. Answering it with a provenance row would hand the test a
             # span that was never cut.
             return []
-        return [{"uuid": next(seen_uuids)}]
+        raw_memory_id = _params.get("raw_memory_id")
+        if raw_memory_id == memory.id:
+            return [{"uuid": "entity-old"}]
+        if raw_memory_id == replacement.id:
+            return [{"uuid": "entity-new"}]
+        raise AssertionError(f"Unexpected query: {query} {_params}")
 
     runtime.execute_query = execute_query  # type: ignore[method-assign]
 
@@ -590,14 +594,18 @@ async def test_a_span_takes_the_stamp_but_never_the_supersession_edge(
     memory = _raw_capture(id="source-1")
     replacement = _raw_capture(id="replacement-1", title="Deploy to Hetzner")
     runtime = _CorrectionGraphRuntime()
-    seen_uuids = iter(["entity-old", "entity-new"])
 
     async def execute_query(query: str, **_params: object) -> list[dict[str, object]]:
         if "source_ids" in _params:
             return []
         if "parent_entity_id" in query:
             return [{"uuid": "passage-of-entity-old"}]
-        return [{"uuid": next(seen_uuids)}]
+        raw_memory_id = _params.get("raw_memory_id")
+        if raw_memory_id == memory.id:
+            return [{"uuid": "entity-old"}]
+        if raw_memory_id == replacement.id:
+            return [{"uuid": "entity-new"}]
+        raise AssertionError(f"Unexpected query: {query} {_params}")
 
     runtime.execute_query = execute_query  # type: ignore[method-assign]
 
