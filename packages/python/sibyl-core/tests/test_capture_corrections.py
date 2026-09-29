@@ -15,7 +15,7 @@ from tests.test_reflection_identity import content_store as content_store
 from tests.test_reflection_identity import runtime as runtime
 
 
-async def captured_note(runtime, monkeypatch):
+async def captured_note(runtime, monkeypatch, *, raw_metadata=None):
     monkeypatch.setattr(
         "sibyl_core.services.memory_lifecycle.get_surreal_graph_runtime",
         AsyncMock(return_value=runtime),
@@ -26,6 +26,7 @@ async def captured_note(runtime, monkeypatch):
         source_id="capture-source",
         raw_content="The deployment requires the violet approval.",
         embedding_provider=None,
+        metadata=raw_metadata,
     )
     note = Entity(
         id="capture-note",
@@ -197,3 +198,41 @@ async def test_preview_reports_failed_descendant_row_load(runtime, content_store
     )
     assert preview.affected_derived_ids == []
     assert preview.metadata["derived_lookup_complete"] is False
+
+
+async def test_preview_discloses_readable_refusal_without_traversing_claimed_lineage(
+    runtime, content_store, monkeypatch
+):
+    memory, note = await captured_note(
+        runtime, monkeypatch, raw_metadata={"derived_ids": ["readonly-target"]}
+    )
+    target = Entity(
+        id="readonly-target",
+        name="Read-only target",
+        entity_type=EntityType.NOTE,
+        metadata={"memory_scope": "project", "scope_key": "project_b", "project_id": "project_b"},
+    )
+    child = Entity(
+        id="unrelated-child",
+        name="Unrelated descendant",
+        entity_type=EntityType.NOTE,
+        metadata={
+            "projection_kind": "fact",
+            "source_entity_id": target.id,
+            "memory_scope": "project",
+            "scope_key": "project_b",
+            "project_id": "project_b",
+        },
+    )
+    for entity in (target, child):
+        await runtime.entity_manager.create_direct(entity, generate_embedding=False)
+    preview = await preview_memory_correction(
+        organization_id=runtime.client.group_id,
+        source_id=memory.id,
+        principal_id="user_a",
+        accessible_projects=["project_b"],
+        writable_projects=[],
+        action="delete",
+    )
+    assert set(preview.affected_derived_ids) == {note.id, target.id}
+    assert child.id not in preview.affected_derived_ids

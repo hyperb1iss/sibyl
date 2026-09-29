@@ -468,7 +468,7 @@ async def _preview_loaded_memory_correction(
         affected_derived_ids = await memory_lifecycle._readable_correction_targets(
             runtime,
             source_id=memory.id,
-            entity_ids=descendants.entity_ids,
+            entity_ids=[*descendants.entity_ids, *targets.refused],
             principal_id=principal_id,
             accessible_projects=accessible_projects,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
