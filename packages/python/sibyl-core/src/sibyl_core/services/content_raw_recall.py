@@ -255,7 +255,19 @@ def _raw_memory_recall_where(
         agent_id=agent_id,
         project_id=project_id,
     )
-    clauses = [where_clause]
+    # Apply the reader's candidate rule before every lane limit. The stored
+    # column wins over legacy metadata, just as raw_memory_capture_surface does.
+    # Use the engine's ungrouped disjunction so embedded KNN can still prefilter
+    # the scope and embedding model inside the HNSW walk.
+    clauses = [
+        where_clause,
+        _raw_memory_disjunction(
+            "string::lowercase(string::trim(type::string("
+            "capture_surface ?? metadata.capture_surface ?? ''))) "
+            "!= 'reflection_candidate'",
+            "review_state = 'promoted'",
+        ),
+    ]
     filters = filters or _RawMemoryRecallFilters()
     if filters.source_ids:
         clauses.append("source_id IN $source_ids")

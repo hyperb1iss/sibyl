@@ -5,6 +5,7 @@ import hashlib
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 
 import structlog
@@ -93,31 +94,55 @@ def validated_result(
     return result
 
 
+# Recall rereads bindings on every request. Remember recent diagnostics without
+# retaining every candidate a long-running process has ever encountered.
+@lru_cache(maxsize=1024)
+def _report_unreadable_binding(organization_id: str, candidate_id: str) -> None:
+    log.warning(
+        "validation_binding_unreadable",
+        organization_id=organization_id,
+        candidate_id=candidate_id,
+    )
+
+
+@lru_cache(maxsize=1024)
+def _report_unreadable_result(
+    organization_id: str, candidate_id: str, execution_id: str, error_count: int
+) -> None:
+    log.warning(
+        "validation_result_unreadable",
+        organization_id=organization_id,
+        candidate_id=candidate_id,
+        execution_id=execution_id,
+        error_count=error_count,
+    )
+
+
 async def validation_binding_current(memory, association) -> bool:
     value = association.get("validation_binding_json")
     if value is None:
         return True
     try:
         binding = ValidationBinding.model_validate_json(value)
-        row = await ValidationExecution(
-            binding.execution_id, memory.organization_id, memory.principal_id
-        ).load()
+    except (ValueError, TypeError):
+        # A binding this build cannot parse binds nothing it can check.
+        _report_unreadable_binding(memory.organization_id, memory.id)
+        return False
+    execution = ValidationExecution(
+        binding.execution_id, memory.organization_id, memory.principal_id
+    )
+    try:
+        row = await execution.load()
         if row is None:
             return False
         validated_result(row, binding, memory.organization_id, memory.principal_id, memory.id)
-        await ValidationExecution(
-            binding.execution_id, memory.organization_id, memory.principal_id
-        ).result()
+        await execution.result()
     except ValidationError as exc:
-        # A stored result this build cannot parse, usually one written by a
-        # newer build. It still reads as unavailable, but say so: silently it
-        # looks like a promoted memory that vanished from recall.
-        log.warning(
-            "validation_result_unreadable",
-            organization_id=memory.organization_id,
-            candidate_id=memory.id,
-            execution_id=binding.execution_id,
-            error_count=exc.error_count(),
+        # The stored result exists but this build cannot parse it, usually
+        # because a newer build wrote it. It still reads as unavailable, but
+        # say so: silently it looks like a promoted memory that vanished.
+        _report_unreadable_result(
+            memory.organization_id, memory.id, binding.execution_id, exc.error_count()
         )
         return False
     except (ValueError, TypeError, KeyError):

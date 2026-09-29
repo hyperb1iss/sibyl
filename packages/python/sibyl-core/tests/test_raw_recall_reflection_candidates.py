@@ -2,7 +2,7 @@
 
 from dataclasses import replace
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
@@ -57,6 +57,20 @@ def _memory(**overrides: object) -> RawMemory:
         ({"capture_surface": None, "metadata": {"capture_surface": "reflection_candidate"}}, True),
         ({"capture_surface": "verified_eval"}, False),
         ({"capture_surface": None}, False),
+        # The stored column wins over caller metadata: an ordinary capture that
+        # sends capture_surface in its metadata, or a migrated row whose column
+        # records the migration, is not a candidate.
+        (
+            {"capture_surface": "api", "metadata": {"capture_surface": "reflection_candidate"}},
+            False,
+        ),
+        (
+            {
+                "capture_surface": "migration",
+                "metadata": {"capture_surface": "reflection_candidate"},
+            },
+            False,
+        ),
     ],
 )
 def test_only_an_unpromoted_reflection_candidate_is_unpublished(overrides, unpublished) -> None:
@@ -131,70 +145,213 @@ async def test_recall_serves_the_promoted_correction_not_its_draft_or_stalled_ch
     assert stalled.id not in recalled
 
 
-async def test_an_unreadable_stored_result_reads_unavailable_and_says_so(monkeypatch) -> None:
-    class _Strict(BaseModel):
-        status: int
+@pytest.mark.parametrize(
+    "binding_json",
+    [
+        "not json",
+        '{"execution_id": "bad"}',
+        '{"execution_id":"%s","request_sha256":"%s","result_sha256":"%s",'
+        '"input_sha256":"%s","newer_field":1}' % (("a" * 64,) * 4),
+    ],
+)
+async def test_a_binding_this_build_cannot_parse_reads_unavailable(
+    binding_json, monkeypatch
+) -> None:
+    """Parsed for real, not patched: invalid JSON, a failed pattern, an extra field.
 
-    try:
-        _Strict.model_validate({"status": "ordinary_cohort_proposal"})
-    except ValidationError as exc:
-        schema_error = exc
-    execution = AsyncMock()
-    execution.load.return_value = {"state": "returned"}
-    execution.result.side_effect = schema_error
-    monkeypatch.setattr(validation_promotion, "ValidationExecution", lambda *_args: execution)
-    monkeypatch.setattr(validation_promotion, "validated_result", lambda *_args: None)
-    monkeypatch.setattr(
-        validation_promotion.ValidationBinding,
-        "model_validate_json",
-        classmethod(lambda _cls, _value: type("Binding", (), {"execution_id": "exec-9"})()),
-    )
+    The model forbids extra fields and pins hex digests, so each raises a
+    pydantic ValidationError. The check must return False rather than let the
+    error escape into recall, where it fails the whole raw lane, and report the
+    candidate once however often recall rereads it.
+    """
+    validation_promotion._report_unreadable_binding.cache_clear()
     warnings: list[tuple[str, dict[str, object]]] = []
     monkeypatch.setattr(
         validation_promotion.log,
         "warning",
         lambda event, **fields: warnings.append((event, fields)),
     )
+    memory = _memory(organization_id="org", id="candidate")
+
+    for _ in range(2):
+        assert (
+            await validation_promotion.validation_binding_current(
+                memory, {"validation_binding_json": binding_json}
+            )
+            is False
+        )
+    assert warnings == [
+        ("validation_binding_unreadable", {"organization_id": "org", "candidate_id": "candidate"})
+    ]
+
+
+def _unreadable_result_rig(monkeypatch, *, error: BaseException, failed_read: str):
+    execution = AsyncMock()
+    execution.load.return_value = {"state": "returned"}
+    if failed_read == "execution_result":
+        execution.result.side_effect = error
+    monkeypatch.setattr(validation_promotion, "ValidationExecution", lambda *_args: execution)
+    monkeypatch.setattr(
+        validation_promotion,
+        "validated_result",
+        Mock(side_effect=error if failed_read == "binding_result" else None),
+    )
+    validation_promotion._report_unreadable_result.cache_clear()
+    warnings: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(
+        validation_promotion.log,
+        "warning",
+        lambda event, **fields: warnings.append((event, fields)),
+    )
+    return warnings
+
+
+_BINDING = (
+    '{"execution_id":"%s","request_sha256":"%s","result_sha256":"%s","input_sha256":"%s"}'
+    % (("e" * 64,) * 4)
+)
+
+
+def _schema_error() -> ValidationError:
+    class _Strict(BaseModel):
+        status: int
+
+    try:
+        _Strict.model_validate({"status": "ordinary_cohort_proposal"})
+    except ValidationError as exc:
+        return exc
+    raise AssertionError("expected a validation error")
+
+
+@pytest.mark.parametrize("failed_read", ["binding_result", "execution_result"])
+async def test_an_unreadable_stored_result_is_reported_once_per_execution(
+    monkeypatch, failed_read
+) -> None:
+    warnings = _unreadable_result_rig(monkeypatch, error=_schema_error(), failed_read=failed_read)
     memory = replace(_memory(), organization_id="org-9", id="candidate-9")
 
-    current = await validation_promotion.validation_binding_current(
-        memory, {"validation_binding_json": "{}"}
-    )
+    for _ in range(3):
+        assert (
+            await validation_promotion.validation_binding_current(
+                memory, {"validation_binding_json": _BINDING}
+            )
+            is False
+        )
 
-    assert current is False
     assert warnings == [
         (
             "validation_result_unreadable",
             {
                 "organization_id": "org-9",
                 "candidate_id": "candidate-9",
-                "execution_id": "exec-9",
+                "execution_id": "e" * 64,
                 "error_count": 1,
             },
         )
     ]
 
 
-async def test_an_ordinary_invalidation_stays_quiet(monkeypatch) -> None:
-    execution = AsyncMock()
-    execution.load.return_value = {"state": "returned"}
-    execution.result.side_effect = ValueError("binding changed")
-    monkeypatch.setattr(validation_promotion, "ValidationExecution", lambda *_args: execution)
-    monkeypatch.setattr(validation_promotion, "validated_result", lambda *_args: None)
-    monkeypatch.setattr(
-        validation_promotion.ValidationBinding,
-        "model_validate_json",
-        classmethod(lambda _cls, _value: type("Binding", (), {"execution_id": "exec-9"})()),
-    )
-    warnings: list[str] = []
-    monkeypatch.setattr(
-        validation_promotion.log, "warning", lambda event, **_fields: warnings.append(event)
+@pytest.mark.parametrize("failed_read", ["binding_result", "execution_result"])
+async def test_an_ordinary_invalidation_stays_quiet(monkeypatch, failed_read) -> None:
+    warnings = _unreadable_result_rig(
+        monkeypatch, error=ValueError("binding changed"), failed_read=failed_read
     )
 
     assert (
         await validation_promotion.validation_binding_current(
-            _memory(), {"validation_binding_json": "{}"}
+            _memory(), {"validation_binding_json": _BINDING}
         )
         is False
     )
     assert warnings == []
+
+
+@pytest.mark.parametrize(
+    ("surface", "review_state", "metadata"),
+    [
+        ("reflection_candidate", "pending", {}),
+        ("reflection_candidate", "deferred", {}),
+        (" Reflection_Candidate ", "pending", {}),
+        (None, "pending", {"capture_surface": "reflection_candidate"}),
+    ],
+)
+async def test_pending_candidates_never_take_the_slots_of_matching_memories(
+    content_store, monkeypatch, surface, review_state, metadata
+):
+    """Eight newer pending drafts and one matching episode, at limit 2.
+
+    Filtered after each lane's limit, the drafts filled every slot and recall
+    returned nothing although the episode matched. Excluded in the query, the
+    episode comes back.
+    """
+    monkeypatch.setattr(
+        content_raw_recall, "raw_memory_query_embedding", AsyncMock(return_value=None)
+    )
+    org = str(uuid4())
+    episode = await remember_raw_memory(
+        organization_id=org,
+        principal_id="owner",
+        source_id="episode",
+        raw_content="telescope routing lesson",
+        embedding_provider=None,
+    )
+    for index in range(8):
+        draft = await remember_raw_memory(
+            organization_id=org,
+            principal_id="owner",
+            source_id=f"draft-{index}",
+            raw_content="telescope routing lesson",
+            capture_surface=surface,
+            metadata=metadata,
+            embedding_provider=None,
+        )
+        await _set_review_state(draft.id, review_state)
+
+    for recall in (recall_raw_memory, recall_raw_memory_with_sources):
+        result = await recall(organization_id=org, principal_id="owner", query="telescope", limit=2)
+        memories = result.memories if isinstance(result, RawMemoryRecallResult) else result
+        assert [memory.id for memory in memories] == [episode.id]
+
+
+@pytest.mark.parametrize("surface", [None, "api"])
+@pytest.mark.parametrize("metadata_surface", [False, 4, [], {"surface": "reflection_candidate"}])
+async def test_non_string_surface_metadata_cannot_break_recall(
+    content_store, monkeypatch, surface, metadata_surface
+):
+    monkeypatch.setattr(
+        content_raw_recall, "raw_memory_query_embedding", AsyncMock(return_value=None)
+    )
+    org = str(uuid4())
+    capture = await remember_raw_memory(
+        organization_id=org,
+        principal_id="owner",
+        source_id="ordinary-capture",
+        raw_content="telescope routing lesson",
+        capture_surface=surface,
+        metadata={"capture_surface": metadata_surface},
+        embedding_provider=None,
+    )
+
+    recalled = await recall_raw_memory(organization_id=org, principal_id="owner", query="telescope")
+
+    assert [memory.id for memory in recalled] == [capture.id]
+
+
+async def test_metadata_cannot_hide_an_ordinary_capture_from_recall(content_store, monkeypatch):
+    monkeypatch.setattr(
+        content_raw_recall, "raw_memory_query_embedding", AsyncMock(return_value=None)
+    )
+    org = str(uuid4())
+    spoofed = await remember_raw_memory(
+        organization_id=org,
+        principal_id="owner",
+        source_id="api-capture",
+        raw_content="telescope routing lesson",
+        capture_surface="api",
+        metadata={"capture_surface": "reflection_candidate"},
+        embedding_provider=None,
+    )
+
+    recalled = await recall_raw_memory(organization_id=org, principal_id="owner", query="telescope")
+
+    assert [memory.id for memory in recalled] == [spoofed.id]

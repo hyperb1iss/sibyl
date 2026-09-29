@@ -910,7 +910,16 @@ async def _raw_store(engine, monkeypatch: pytest.MonkeyPatch, label: str):
         await _drop_namespace(engine, namespace)
 
 
-async def _raw_captures(organization_id: str, count: int, provider, prefix: str) -> list[str]:
+async def _raw_captures(
+    organization_id: str,
+    count: int,
+    provider,
+    prefix: str,
+    *,
+    capture_surface: str | None = None,
+    metadata: dict[str, object] | None = None,
+    review_state: str = "pending",
+) -> list[str]:
     from sibyl_core.services.content_models import RawMemoryWrite
     from sibyl_core.services.surreal_content import remember_raw_memories
 
@@ -923,12 +932,23 @@ async def _raw_captures(organization_id: str, count: int, provider, prefix: str)
                     principal_id="owner",
                     source_id=f"{prefix}-{index}",
                     raw_content=f"{prefix} observation {index}",
+                    capture_surface=capture_surface,
+                    metadata=metadata,
                 )
                 for index in range(start, min(count, start + 250))
             ],
             embedding_provider=provider,
         )
         ids.extend(memory.id for memory in memories)
+    if review_state != "pending":
+        from sibyl_core.services.content_client import surreal_content_client
+
+        async with surreal_content_client() as client:
+            await client.execute_query(
+                "UPDATE raw_captures SET review_state = $review_state WHERE uuid IN $ids;",
+                review_state=review_state,
+                ids=ids,
+            )
     return ids
 
 
@@ -974,6 +994,66 @@ async def test_raw_vector_lane_reaches_a_new_capture_behind_far_more_old_ones_th
         await _raw_captures(organization_id, crowd, old, "old")
         new = _RawCaptureVectors("openai", "text-embedding-3-small", [farther])
         [current] = await _raw_captures(organization_id, 1, new, "current")
+        lane = await _raw_vector_lane(
+            organization_id,
+            _RawCaptureVectors("openai", "text-embedding-3-small", [query]),
+            monkeypatch,
+        )
+
+    assert [memory.id for memory in lane.candidates] == [current]
+    assert lane.failure is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("surface", "review_state", "metadata"),
+    [
+        ("reflection_candidate", "pending", None),
+        (None, "pending", {"capture_surface": "reflection_candidate"}),
+        (" Reflection_Candidate ", "deferred", None),
+    ],
+)
+async def test_raw_vector_lane_reaches_a_capture_behind_far_more_pending_proposals_than_ef(
+    engine, monkeypatch: pytest.MonkeyPatch, surface, review_state, metadata
+) -> None:
+    """Unpromoted dream proposals sit nearer the query than the one real capture.
+
+    All vectors share the query's model, so the model filter excludes nothing
+    and only the reader rule for unpromoted proposals can keep them out of the
+    neighbour pool. Filtered after the pool they fill it, and the lane returns
+    nothing; filtered inside the index walk, the capture comes back.
+    """
+    import math
+    import random
+
+    crowd = 640 if str(engine["url"]).startswith(_EMBEDDED) else 2560
+    rng = random.Random(11)  # noqa: S311 - test vectors, not secrets
+    query = _far(13, EMBEDDING_DIM)
+    norm = math.sqrt(sum(value * value for value in query))
+    query = [value / norm for value in query]
+    _nearest, farther = _crowding_vectors(query, EMBEDDING_DIM)
+
+    def near() -> list[float]:
+        nudged = [value + rng.gauss(0.0, 0.3) / math.sqrt(EMBEDDING_DIM) for value in query]
+        length = math.sqrt(sum(value * value for value in nudged))
+        return [value / length for value in nudged]
+
+    organization_id = str(uuid4())
+    async with _raw_store(engine, monkeypatch, "raw_candidate_crowding"):
+        proposals = _RawCaptureVectors(
+            "openai", "text-embedding-3-small", (near() for _ in range(crowd))
+        )
+        await _raw_captures(
+            organization_id,
+            crowd,
+            proposals,
+            "proposal",
+            capture_surface=surface,
+            metadata=metadata,
+            review_state=review_state,
+        )
+        episode = _RawCaptureVectors("openai", "text-embedding-3-small", [farther])
+        [current] = await _raw_captures(organization_id, 1, episode, "episode")
         lane = await _raw_vector_lane(
             organization_id,
             _RawCaptureVectors("openai", "text-embedding-3-small", [query]),

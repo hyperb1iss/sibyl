@@ -226,12 +226,10 @@ def raw_memory_unpublished_reflection_candidate(memory: RawMemory) -> bool:
     rows through its own lifecycle checks rather than recall, so review,
     validation and promotion still reach them.
     """
-    surfaces = {
-        str(memory.capture_surface or "").strip().lower(),
-        str(memory.metadata.get("capture_surface") or "").strip().lower(),
-    }
+    # The stored column wins. Caller metadata can carry any capture_surface,
+    # so it only decides for legacy rows written before the column existed.
     return (
-        REFLECTION_CANDIDATE_SURFACE in surfaces
+        raw_memory_capture_surface(memory) == REFLECTION_CANDIDATE_SURFACE
         and str(memory.review_state or "pending").strip().lower() != "promoted"
     )
 
