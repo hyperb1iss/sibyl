@@ -6,7 +6,9 @@ import asyncio
 import hashlib
 import inspect
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from typing import Any
 
 import structlog
@@ -219,7 +221,17 @@ async def _get_visible_graph_snapshot(
         max_entities=max_entities,
         max_relationships=max_relationships,
     )
-    snapshot = await _current_graph_snapshot(client, organization_id, snapshot)
+    snapshot = await _current_graph_snapshot(
+        client,
+        organization_id,
+        snapshot,
+        source_visible=partial(
+            graph_row_read_allowed,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+        ),
+    )
     return _reader_visible_snapshot(
         snapshot,
         principal_id=principal_id,
@@ -229,7 +241,11 @@ async def _get_visible_graph_snapshot(
 
 
 async def _current_graph_entities(
-    client: Any, organization_id: str, ids: list[str]
+    client: Any,
+    organization_id: str,
+    ids: list[str],
+    *,
+    source_visible: Callable[[Any], bool] | None = None,
 ) -> dict[str, Entity]:
     """Keep current-row and ancestry reads on the supplied graph owner."""
     from sibyl_core.services.graph_community_managers import (
@@ -244,11 +260,17 @@ async def _current_graph_entities(
         entity_manager=_entity_manager_for_client(client, organization_id),
         relationship_manager=_relationship_manager_for_client(client, organization_id),
     )
-    return await available_graph_entities(organization_id, ids, runtime=runtime)
+    return await available_graph_entities(
+        organization_id, ids, runtime=runtime, source_visible=source_visible
+    )
 
 
 async def _current_graph_snapshot(
-    client: Any, organization_id: str, snapshot: GraphSnapshot
+    client: Any,
+    organization_id: str,
+    snapshot: GraphSnapshot,
+    *,
+    source_visible: Callable[[Any], bool] | None = None,
 ) -> GraphSnapshot:
     """Refresh cached identities before their content enters a reader cache.
 
@@ -263,7 +285,9 @@ async def _current_graph_snapshot(
     from sibyl_core.services.graph_read_availability import available_graph_relationships
     from sibyl_core.services.graph_runtime import GraphRuntime
 
-    entities = await _current_graph_entities(client, organization_id, list(snapshot.entity_by_id))
+    entities = await _current_graph_entities(
+        client, organization_id, list(snapshot.entity_by_id), source_visible=source_visible
+    )
     runtime = GraphRuntime(
         client=client,
         entity_manager=_entity_manager_for_client(client, organization_id),

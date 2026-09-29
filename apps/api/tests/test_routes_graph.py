@@ -37,7 +37,7 @@ def stored_graph_rows(monkeypatch):
     in the graph availability and community source-retirement controls.
     """
 
-    async def available(org, ids):
+    async def available(org, ids, *, source_visible=None):
         runtime = await graph_routes.get_entity_graph_runtime(org)
         manager = runtime.entity_manager
         if hasattr(manager, "get_many"):

@@ -464,6 +464,16 @@ async def _explore_list(
         )
     ]
 
+    from sibyl_core.services.graph_capture_availability import available_capture_projection_rows
+
+    current = await available_capture_projection_rows(
+        group_id,
+        {entity.id: entity for entity in filtered_entities},
+        graph_client=runtime.client,
+        source_visible=scope_guard,
+    )
+    filtered_entities = [entity for entity in filtered_entities if entity.id in current]
+
     # Apply pagination
     actual_total = len(filtered_entities)
     paginated_entities = filtered_entities[offset : offset + limit]
@@ -661,7 +671,9 @@ async def _explore_related(
             accessible_projects is None or project is None or project in accessible_projects
         )
 
-    seeds = await available_graph_entities(group_id, [entity_id], runtime=runtime)
+    seeds = await available_graph_entities(
+        group_id, [entity_id], runtime=runtime, source_visible=allowed
+    )
     if entity_id not in seeds or not allowed(seeds[entity_id]):
         return ExploreResponse(mode=mode, entities=[], total=0, filters=filters)
 
@@ -686,7 +698,9 @@ async def _explore_related(
     endpoint_ids = {entity_id}
     for _entity, relationship in raw_results:
         endpoint_ids.update((relationship.source_id, relationship.target_id))
-    current = await available_graph_entities(group_id, sorted(endpoint_ids), runtime=runtime)
+    current = await available_graph_entities(
+        group_id, sorted(endpoint_ids), runtime=runtime, source_visible=allowed
+    )
     current = {key: entity for key, entity in current.items() if allowed(entity)}
     if entity_id not in current:
         return ExploreResponse(mode=mode, entities=[], total=0, filters=filters)

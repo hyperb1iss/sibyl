@@ -758,7 +758,10 @@ class GraphQueryAdapter:
             for endpoint in (edge.source_id, edge.target_id)
         }
         current = await available_graph_entities(
-            self._group_id, sorted(endpoints), runtime=self._runtime
+            self._group_id,
+            sorted(endpoints),
+            runtime=self._runtime,
+            source_visible=entity_visible,
         )
         visible = {identity for identity, entity in current.items() if entity_visible(entity)}
         for relationship in relationships.values():

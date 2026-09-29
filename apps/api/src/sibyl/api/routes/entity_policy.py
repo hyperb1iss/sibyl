@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime
+from functools import partial
 from typing import Any
 
 import structlog
@@ -287,7 +288,14 @@ async def require_entity_scope_visible(
     ):
         raise HTTPException(status_code=404, detail="Entity not found")
     if entity.id not in await available_capture_projection_rows(
-        str(ctx.organization_id), {entity.id: entity}
+        str(ctx.organization_id),
+        {entity.id: entity},
+        source_visible=partial(
+            entity_visible_to_reader,
+            reader_user_id=reader_user_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=reader_memory_grants(ctx),
+        ),
     ):
         raise HTTPException(status_code=404, detail="Entity not found")
     return accessible_projects
