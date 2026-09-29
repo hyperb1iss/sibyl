@@ -10,6 +10,7 @@ from sibyl.api.decorators import handle_workflow_errors
 from sibyl.api.errors import (
     constraint_violation,
     entity_locked,
+    safe_error_payload,
     sanitize_error_text,
     unprocessable_entity,
 )
@@ -437,6 +438,68 @@ async def create_entity(
     return response
 
 
+RAW_MEMORY_REFERENCE_PREFIX = "raw_memory:"
+
+
+def _correct_hint(template: str, entity_id: str) -> str:
+    """Name the real id in a hint when the error sanitizer will let it through.
+
+    The sanitizer blanks any text naming a write verb or a path, which is also
+    why these hints point at the correction command's help rather than at an
+    action. An id that trips it falls back to the placeholder, so the hint
+    survives either way.
+    """
+    specific = template.format(id=entity_id)
+    return specific if sanitize_error_text(specific) == specific else template.format(id="<id>")
+
+
+def _refuse_raw_memory_reference(entity_id: str) -> None:
+    """Refuse a raw memory reference on a graph route with a 4xx that says where to go.
+
+    Raw memories live in the content store and change only through the
+    correction lifecycle. Sent here they used to fall through to a 500, which
+    the CLI took for an outage and buffered for replay forever.
+    """
+    candidate = entity_id.strip()
+    if candidate.lower().startswith(RAW_MEMORY_REFERENCE_PREFIX):
+        raw_id = candidate[len(RAW_MEMORY_REFERENCE_PREFIX) :]
+        raise unprocessable_entity(
+            f"{entity_id} is a raw memory, not a graph entity",
+            field="entity_id",
+            remediation=_correct_hint(
+                "Raw memories change through corrections, which keep a reason and a "
+                "receipt. Run 'sibyl correct {id} --help' for the actions.",
+                raw_id,
+            ),
+        )
+
+
+async def _existing_entity_or_404(entity_manager: Any, entity_id: str) -> Any:
+    """Load an entity, answering a missing one with a 404 instead of a 500.
+
+    EntityManager.get raises KeyError for an unknown id, so a falsy check alone
+    never fired and the route's catch-all turned every miss into a 500.
+    """
+    try:
+        existing = await entity_manager.get(entity_id)
+    except KeyError:
+        existing = None
+    if not existing:
+        raise HTTPException(
+            status_code=404,
+            detail=safe_error_payload(
+                error="not_found",
+                message=f"Entity not found: {entity_id}",
+                remediation=_correct_hint(
+                    "If {id} is a raw memory ID, change it with 'sibyl correct {id}', "
+                    "not the entity routes.",
+                    entity_id,
+                ),
+            ),
+        )
+    return existing
+
+
 @router.patch(
     "/{entity_id}",
     response_model=EntityResponse,
@@ -453,6 +516,7 @@ async def update_entity(
     """Update an existing entity."""
     from sibyl.locks import LockAcquisitionError, entity_lock
 
+    _refuse_raw_memory_reference(entity_id)
     group_id = str(org.id)
 
     try:
@@ -463,10 +527,7 @@ async def update_entity(
 
             runtime = await policy.get_entity_graph_runtime(group_id)
 
-            # Get existing entity
-            existing = await runtime.entity_manager.get(entity_id)
-            if not existing:
-                raise HTTPException(status_code=404, detail=f"Entity not found: {entity_id}")
+            existing = await _existing_entity_or_404(runtime.entity_manager, entity_id)
 
             # Verify project access for entities with project_id
             project_id = policy.entity_read_project_id(existing)
@@ -655,6 +716,7 @@ async def delete_entity(
     """Delete an entity."""
     from sibyl.locks import LockAcquisitionError, entity_lock
 
+    _refuse_raw_memory_reference(entity_id)
     group_id = str(org.id)
 
     try:
@@ -665,10 +727,7 @@ async def delete_entity(
 
             runtime = await policy.get_entity_graph_runtime(group_id)
 
-            # Check existence
-            existing = await runtime.entity_manager.get(entity_id)
-            if not existing:
-                raise HTTPException(status_code=404, detail=f"Entity not found: {entity_id}")
+            existing = await _existing_entity_or_404(runtime.entity_manager, entity_id)
 
             # Verify project access for entities with project_id (maintainer required to delete)
             project_id = policy.entity_read_project_id(existing)

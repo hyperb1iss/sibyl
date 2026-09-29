@@ -2044,6 +2044,7 @@ async def test_correction_receipt_names_the_graph_rows_it_retired(correction_mem
         preview=preview,
         updated_memory=updated,
         affected_entity_ids=["entity-1", "entity-2"],
+        affected_raw_memory_ids=["memory-2", "memory-1"],
     )
 
     with (
@@ -2065,6 +2066,7 @@ async def test_correction_receipt_names_the_graph_rows_it_retired(correction_mem
     assert response.mutation_receipt is not None
     assert response.mutation_receipt.affected_records == [
         "raw_captures:memory-1",
+        "raw_captures:memory-2",
         "entity:entity-1",
         "entity:entity-2",
     ]
@@ -3746,3 +3748,116 @@ async def test_remember_raw_forwards_source_memberships_and_credential_grants() 
     assert remember.await_args.kwargs["accessible_projects"] == {"source-project", "other-project"}
     assert remember.await_args.kwargs["accessible_teams"] == {"source-team"}
     assert remember.await_args.kwargs["allowed_memory_scope_keys"] == grants
+
+
+@pytest.mark.asyncio
+async def test_preview_memory_correction_answers_a_revision_conflict_with_409(
+    correction_memberships,
+) -> None:
+    """The preview route shares the apply route's error handling, not a bare 500."""
+    from sibyl_core.errors import RevisionConflictError
+
+    org = _org()
+    memory = _memory(id="memory-1", organization_id=str(org.id), source_id="source-1")
+
+    with (
+        patch("sibyl.api.routes.memory_auth.get_raw_memory", AsyncMock(return_value=memory)),
+        patch(
+            "sibyl.api.routes.memory_sources.preview_memory_correction",
+            AsyncMock(side_effect=RevisionConflictError("memory-1", 2, 3)),
+        ),
+        pytest.raises(HTTPException) as excinfo,
+    ):
+        await preview_memory_correction_route(
+            "memory-1",
+            MemoryCorrectionRequest(action="hide", reason="outdated"),
+            http_request=_http_request(),
+            org=org,
+            ctx=_ctx(org_role=OrganizationRole.OWNER),
+        )
+
+    from sibyl.api.errors import http_exception_payload
+
+    assert excinfo.value.status_code == 409
+    payload = http_exception_payload(excinfo.value, "req_test")
+    assert payload["error"] == "revision_conflict"
+    assert payload["details"] == {"expected": "2", "actual": "3"}
+
+
+@pytest.mark.asyncio
+async def test_apply_memory_correction_names_both_revisions_on_a_conflict(
+    correction_memberships,
+) -> None:
+    """A client pinned to a stale revision needs to know it, not retry blind."""
+    from sibyl.api.errors import http_exception_payload
+    from sibyl_core.errors import RevisionConflictError
+
+    org = _org()
+    memory = _memory(id="memory-1", organization_id=str(org.id), source_id="source-1")
+
+    with (
+        patch("sibyl.api.routes.memory_auth.get_raw_memory", AsyncMock(return_value=memory)),
+        patch(
+            "sibyl.api.routes.memory_sources.apply_memory_correction",
+            AsyncMock(side_effect=RevisionConflictError("memory-1", 3, 4)),
+        ),
+        pytest.raises(HTTPException) as excinfo,
+    ):
+        await apply_memory_correction_route(
+            "memory-1",
+            MemoryCorrectionRequest(action="hide", reason="outdated", expected_revision=3),
+            http_request=_http_request(),
+            org=org,
+            ctx=_ctx(org_role=OrganizationRole.OWNER),
+        )
+
+    assert excinfo.value.status_code == 409
+    payload = http_exception_payload(excinfo.value, "req_test")
+    assert payload["error"] == "revision_conflict"
+    assert "revision 3" in str(payload["message"])
+    assert "revision 4" in str(payload["message"])
+    assert payload["details"] == {"expected": "3", "actual": "4"}
+
+
+@pytest.mark.asyncio
+async def test_correction_preview_honors_an_explicit_expected_revision(correction_memberships):
+    """A stale explicit expectation is refused by the read-only preview too."""
+    from sibyl.api.errors import http_exception_payload
+
+    org = _org()
+    memory = _memory(id="memory-1", organization_id=str(org.id), source_id="source-1")
+    preview = MemoryCorrectionPreview(
+        allowed=True,
+        source_id="memory-1",
+        action="hide",
+        reason="same_scope_write_allowed",
+        target_lifecycle_state="active",
+        target_lifecycle_flags=["hidden"],
+        affected_source_ids=["memory-1"],
+        affected_derived_ids=[],
+        reversible=True,
+        recall_impact={},
+        synthesis_impact={},
+        audit_action="memory.correction.hide",
+        metadata={"observed_revision": 4},
+    )
+    with (
+        patch("sibyl.api.routes.memory_auth.get_raw_memory", AsyncMock(return_value=memory)),
+        patch(
+            "sibyl.api.routes.memory_sources.preview_memory_correction",
+            AsyncMock(return_value=preview),
+        ),
+        pytest.raises(HTTPException) as excinfo,
+    ):
+        await preview_memory_correction_route(
+            "memory-1",
+            MemoryCorrectionRequest(action="hide", reason="outdated", expected_revision=3),
+            http_request=_http_request(),
+            org=org,
+            ctx=_ctx(org_role=OrganizationRole.OWNER),
+        )
+    assert excinfo.value.status_code == 409
+    assert http_exception_payload(excinfo.value, "req_test")["details"] == {
+        "expected": "3",
+        "actual": "4",
+    }

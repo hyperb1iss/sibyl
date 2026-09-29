@@ -11,8 +11,7 @@ import typer
 
 import sibyl_cli.client as client_module
 import sibyl_cli.client_transport as client_transport_module
-from sibyl_cli import config_store
-from sibyl_cli import pending_writes
+from sibyl_cli import config_store, pending_writes
 from sibyl_cli.client import SibylClient, SibylClientError
 from sibyl_cli.common import handle_client_error
 
@@ -776,3 +775,251 @@ def test_read_pending_metrics_folds_retired_expired_into_discarded(
         metrics["completed"] + metrics["replayed"] + metrics["dropped"] + metrics["discarded"]
     )
     assert outcomes == metrics["attempted"]
+
+
+@pytest.mark.parametrize("status_code", [500, 403, 404, 422])
+@pytest.mark.asyncio
+async def test_a_failed_correction_preview_queues_nothing_and_blocks_nothing(
+    status_code: int,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A preview writes nothing, so a failed one has nothing to replay.
+
+    Buffered, it used to sit under one key for every /memory/inspect write, so
+    each later correction on any memory failed with a pending dependency.
+    """
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    client_module._FAILURE_WINDOWS.clear()
+    sent: list[str] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        sent.append(request.url.path)
+        if request.url.path.endswith("/mem-a/corrections/preview"):
+            return httpx.Response(status_code, json={"error": "x", "message": "boom"})
+        return httpx.Response(200, json={"allowed": True, "applied": False})
+
+    client = _client_with_transport(httpx.MockTransport(respond))
+
+    with pytest.raises(SibylClientError):
+        await client.correct_memory("mem-a", action="hide", reason="r", preview=True)
+    other = await client.correct_memory("mem-b", action="hide", reason="r", preview=True)
+    await client.close()
+
+    assert other["allowed"] is True
+    assert pending_writes.list_pending_writes() == []
+    assert sent == [
+        "/api/memory/inspect/mem-a/corrections/preview",
+        "/api/memory/inspect/mem-b/corrections/preview",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_preview_queued_by_an_older_client_blocks_no_correction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    client_module._FAILURE_WINDOWS.clear()
+    stale = pending_writes.create_pending_write(
+        method="POST",
+        path="/memory/inspect/mem-a/corrections/preview",
+        base_url="http://testserver/api",
+        json_payload={"action": "hide", "reason": "r"},
+        params=None,
+    )
+    pending_writes.record_pending_failure(str(stale["id"]), category="rejected", status_code=404)
+
+    client = _client_with_transport(
+        httpx.MockTransport(lambda _request: httpx.Response(200, json={"applied": True}))
+    )
+    applied = await client.correct_memory("mem-a", action="hide", reason="r")
+    await client.close()
+
+    assert applied["applied"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_first_delete_answered_404_reports_it_and_queues_nothing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    client_module._FAILURE_WINDOWS.clear()
+    client = _client_with_transport(
+        httpx.MockTransport(
+            lambda _request: httpx.Response(
+                404, json={"error": "not_found", "message": "Entity not found: x"}
+            )
+        )
+    )
+
+    with pytest.raises(SibylClientError) as exc:
+        await client.delete_entity("3f1c2a9e-0000-4000-8000-000000000000")
+    await client.close()
+
+    assert exc.value.status_code == 404
+    assert pending_writes.list_pending_writes() == []
+    assert pending_writes.read_pending_metrics()["dropped"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_replayed_delete_answered_404_is_done_not_parked(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A queued delete that already landed replays to a 404; the resource is gone."""
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    client_module._FAILURE_WINDOWS.clear()
+    answers = [
+        httpx.Response(503, json={"error": "service_unavailable", "message": "down"}),
+        httpx.Response(404, json={"error": "not_found", "message": "Entity not found: note_gone"}),
+    ]
+    client = _client_with_transport(httpx.MockTransport(lambda _request: answers.pop(0)))
+
+    with pytest.raises(SibylClientError):
+        await client.delete_entity("note_gone")
+    (queued,) = pending_writes.list_pending_writes()
+    assert queued["status"] == "pending"
+
+    result = await client._request(
+        "DELETE",
+        "/entities/note_gone",
+        _buffer_pending=False,
+        _pending_write_id=str(queued["id"]),
+        _idempotency_key=str(queued["idempotency_key"]),
+    )
+    await client.close()
+
+    assert result == {}
+    assert pending_writes.list_pending_writes() == []
+
+
+_REVISION_CONFLICT = {
+    "error": "revision_conflict",
+    "message": (
+        "The memory changed since revision 3 and is now at revision 4; "
+        "rerun to see the current state."
+    ),
+    "remediation": "Rerun the command to preview the current state, then apply again.",
+    "details": {"expected": "3", "actual": "4"},
+}
+
+
+@pytest.mark.asyncio
+async def test_a_first_write_that_meets_a_revision_conflict_is_not_queued(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pinned to a revision the memory has left, the write can never apply.
+
+    Queued, it parked under the memory's key and blocked the very rerun that
+    would draw a fresh plan, and the rerun queued a second pinned write.
+    """
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    client_module._FAILURE_WINDOWS.clear()
+    client = _client_with_transport(
+        httpx.MockTransport(lambda _request: httpx.Response(409, json=_REVISION_CONFLICT))
+    )
+
+    with pytest.raises(SibylClientError) as exc:
+        await client.correct_memory("mem-a", action="hide", reason="r", expected_revision=3)
+    await client.close()
+
+    assert exc.value.error_code == "revision_conflict"
+    assert exc.value.details == {"expected": "3", "actual": "4"}
+    assert pending_writes.list_pending_writes() == []
+    assert pending_writes.read_pending_metrics()["dropped"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_replayed_write_that_meets_a_revision_conflict_parks_with_the_reason(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    client_module._FAILURE_WINDOWS.clear()
+    answers = [
+        httpx.Response(503, json={"error": "service_unavailable", "message": "down"}),
+        httpx.Response(409, json=_REVISION_CONFLICT),
+    ]
+    client = _client_with_transport(httpx.MockTransport(lambda _request: answers.pop(0)))
+
+    with pytest.raises(SibylClientError):
+        await client.correct_memory("mem-a", action="hide", reason="r", expected_revision=3)
+    (queued,) = pending_writes.list_pending_writes()
+    with pytest.raises(SibylClientError):
+        await client._request(
+            "POST",
+            str(queued["path"]),
+            json=queued.get("json"),
+            _buffer_pending=False,
+            _pending_write_id=str(queued["id"]),
+            _idempotency_key=str(queued["idempotency_key"]),
+        )
+    await client.close()
+
+    (parked,) = pending_writes.list_pending_writes()
+    assert parked["status"] == "attention"
+    assert parked["last_failure"]["error_code"] == "revision_conflict"
+    assert "revision 3 and is now at revision 4" in parked["last_failure"]["message"]
+
+
+@pytest.mark.parametrize(
+    ("path", "options"),
+    [("/auth/api-keys/k1", {}), ("/entities/e1", {"_buffer_pending": False})],
+)
+@pytest.mark.asyncio
+async def test_an_unbuffered_delete_answered_404_still_raises(
+    path: str,
+    options: dict[str, object],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only a queued delete treats 404 as done; an unbuffered caller needs the answer."""
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    client_module._FAILURE_WINDOWS.clear()
+    client = _client_with_transport(
+        httpx.MockTransport(
+            lambda _request: httpx.Response(404, json={"error": "not_found", "message": "gone"})
+        )
+    )
+
+    with pytest.raises(SibylClientError) as exc:
+        await client._request("DELETE", path, **options)
+    await client.close()
+
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_a_supersede_waits_for_an_earlier_queued_write_to_its_replacement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A supersede of A by B reads B, so it cannot overtake a queued delete of B."""
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    client_module._FAILURE_WINDOWS.clear()
+    sent: list[str] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        sent.append(request.url.path)
+        if request.url.path.endswith("/mem-b/corrections"):
+            return httpx.Response(503, json={"error": "service_unavailable", "message": "down"})
+        return httpx.Response(200, json={"applied": True})
+
+    client = _client_with_transport(httpx.MockTransport(respond))
+    with pytest.raises(SibylClientError):
+        await client.correct_memory("mem-b", action="delete", reason="gone")
+
+    with pytest.raises(SibylClientError) as blocked:
+        await client.correct_memory(
+            "mem-a", action="supersede", reason="replaced", replacement_source_id="mem-b"
+        )
+    unrelated = await client.correct_memory("mem-c", action="hide", reason="noise")
+    await client.close()
+
+    assert blocked.value.error_code == "pending_dependency"
+    # The supersede never left the machine; a memory neither write names is free.
+    assert "/api/memory/inspect/mem-a/corrections" not in sent
+    assert unrelated["applied"] is True

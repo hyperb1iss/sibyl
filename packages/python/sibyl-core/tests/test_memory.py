@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -1967,3 +1968,24 @@ async def test_promote_raw_memory_persists_native_record_and_marks_promoted(
     assert lifecycle.source_id == "raw-1"
     assert lifecycle.derived_ids == ["episode_123"]
     assert findings[-1].target_source_id == "raw-1"
+
+
+@pytest.mark.asyncio
+async def test_memory_correction_preview_returns_the_revision_it_was_drawn_against(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An apply pins itself to this revision, so a change after the preview is refused."""
+    memory = replace(_raw_review_candidate(id="source-1"), observed_revision=7)
+    monkeypatch.setattr(correction_module, "get_raw_memory", AsyncMock(return_value=memory))
+    monkeypatch.setattr(correction_module, "get_raw_memory_by_source_id", AsyncMock())
+
+    result = await preview_memory_correction(
+        organization_id="org-1",
+        source_id="source-1",
+        principal_id="user-1",
+        action="hide",
+    )
+
+    assert result.allowed
+    assert result.metadata is not None
+    assert result.metadata["observed_revision"] == 7

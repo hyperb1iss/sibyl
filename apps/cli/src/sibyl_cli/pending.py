@@ -44,8 +44,9 @@ from sibyl_cli.pending_writes import (
     is_corrupt_pending_write,
     list_pending_writes,
     pending_replay_lock,
+    pending_resources_overlap,
     pending_write_label,
-    pending_write_resource,
+    pending_write_resources,
     pending_write_triage,
     pending_writes_dir,
     read_pending_write,
@@ -590,18 +591,16 @@ def flush_writes(
                 owner = normalize_replay_identity(item.get("replay_identity"))
                 lane = json.dumps([base_url, owner or replay_scope], sort_keys=True)
                 blocked_resources = blocked.setdefault(lane, set())
-                resource = pending_write_resource(item)
+                resources = pending_write_resources(item)
                 if write_id not in selected_ids:
                     if not _is_buffered_read_like(item):
-                        blocked_resources.add(resource)
+                        blocked_resources.update(resources)
                     continue
                 if (
-                    "*" in blocked_resources
-                    or resource in blocked_resources
-                    or (resource == "*" and blocked_resources)
+                    pending_resources_overlap(resources, blocked_resources)
                     or item.get("status") == "attention"
                 ):
-                    blocked_resources.add(resource)
+                    blocked_resources.update(resources)
                     failures += 1
                     warn(f"Skipped {write_id}: needs attention or an earlier related write.")
                     continue
@@ -635,7 +634,7 @@ def flush_writes(
                         break
                 if selected_client is None:
                     failures += 1
-                    blocked_resources.add(resource)
+                    blocked_resources.update(resources)
                     error(f"Skipped {write_id}: no verified matching owner is signed in.")
                     continue
                 try:
@@ -656,7 +655,7 @@ def flush_writes(
                     continue
                 except SibylClientError as exc:
                     failures += 1
-                    blocked_resources.add(resource)
+                    blocked_resources.update(resources)
                     error(f"Failed {write_id}: {exc.detail or exc}")
             if failures:
                 warn(

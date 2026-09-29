@@ -27,6 +27,7 @@ from sibyl_cli.common import (
 )
 from sibyl_cli.id_resolution import resolve_id_prefix
 from sibyl_cli.memory_display import (
+    RAW_MEMORY_REFERENCE_PREFIX,
     inspect_raw_memory_source,
     is_raw_memory_reference,
     print_memory_source_inspect,
@@ -271,6 +272,24 @@ def create_entity(
     _create()
 
 
+def _raw_delete_hint(raw_id: str) -> str:
+    return (
+        "Delete it through the correction lifecycle, which records a reason and a receipt: "
+        f'sibyl correct {raw_id} --action delete --reason "<why>" --yes'
+    )
+
+
+async def _is_raw_memory(client: object, raw_id: str) -> bool:
+    inspect = getattr(client, "memory_inspect", None)
+    if inspect is None:
+        return False
+    try:
+        await inspect(raw_id)
+    except SibylClientError:
+        return False
+    return True
+
+
 @app.command("delete")
 def delete_entity(
     entity_id: Annotated[str, typer.Argument(help="Entity ID to delete")],
@@ -280,13 +299,34 @@ def delete_entity(
     ] = False,
 ) -> None:
     """Delete an entity. Default: table output."""
+    candidate = entity_id.strip()
+    if candidate.lower().startswith(RAW_MEMORY_REFERENCE_PREFIX):
+        # A raw memory is not a graph entity. Sending it here can only fail, and
+        # a failed write is buffered for replay, so refuse before any request.
+        raw_id = candidate[len(RAW_MEMORY_REFERENCE_PREFIX) :]
+        error(f"{entity_id} is a raw memory, not a graph entity; entity delete cannot remove it.")
+        info(_raw_delete_hint(raw_id))
+        raise typer.Exit(code=1)
 
     @run_async
     async def _delete() -> None:
         client = get_client()
 
         try:
-            await client.delete_entity(entity_id)
+            try:
+                await client.delete_entity(entity_id)
+            except SibylClientError as exc:
+                # `sibyl remember` prints a raw memory's id bare, so a bare id
+                # reaches this route too. Only on the miss is it worth one read
+                # to say which command removes it.
+                if exc.status_code == 404 and await _is_raw_memory(client, candidate):
+                    error(
+                        f"{entity_id} is a raw memory, not a graph entity; "
+                        "entity delete cannot remove it."
+                    )
+                    info(_raw_delete_hint(candidate))
+                    raise typer.Exit(code=1) from exc
+                raise
 
             # JSON output (default)
             if json_out:

@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, TypedDict, get_args
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 from uuid import UUID, uuid4
 
 from sibyl_cli.pending_identity import normalize_replay_identity, pending_identity_matches
@@ -46,6 +46,7 @@ _SAFE_FAILURE_CODES = frozenset(
         "replay_identity_mismatch",
         "pending_dependency",
         "response_unconfirmed",
+        "revision_conflict",
     }
 )
 _REQUIRED_STRING_FIELDS = (
@@ -74,6 +75,20 @@ PENDING_OWNERSHIP_REASON_MAX = 200
 # A write younger than this with no recorded failure is simply in flight, and
 # saying so after every command is noise rather than information.
 PENDING_RETRY_QUIET_SECONDS = 300.0
+# An outage answers with 502, 503 or 504 and heals. A 500 that keeps coming
+# back is more likely the server failing on this payload, so once a write has
+# seen this many in a row, spread over at least this long, it parks for an
+# operator instead of replaying, and nagging, forever. The time floor matters
+# because the server's catch-alls also turn transient faults into bare 500s,
+# and active use replays a write several times a minute.
+PENDING_SERVER_ERROR_STREAK_LIMIT = 5
+PENDING_SERVER_ERROR_STREAK_MIN_SECONDS = 600.0
+_DETERMINISTIC_SERVER_STATUSES = frozenset({500})
+PARKED_SERVER_ERROR_MESSAGE = (
+    "The server answered this write with HTTP 500 {streak} times in a row over "
+    "{minutes} minutes, so it no longer retries on its own. Inspect it, then "
+    "'retry' or 'discard' it."
+)
 
 # Read-like POSTs (search, recall, context-pack assembly) carry no durable
 # write, so a failed one is simply re-run, never replayed. Buffering them
@@ -90,8 +105,16 @@ READ_LIKE_POST_PATHS = (
 )
 
 
+# A correction preview validates a change and writes nothing, so it is a read
+# even though it is a POST. Its path carries the memory id, hence a suffix.
+READ_LIKE_POST_SUFFIXES = ("/corrections/preview",)
+
+
 def is_read_like_post(path: str) -> bool:
-    return any(path.startswith(prefix) for prefix in READ_LIKE_POST_PATHS)
+    route = path.split("?", 1)[0].rstrip("/")
+    return any(route.startswith(prefix) for prefix in READ_LIKE_POST_PATHS) or any(
+        route.endswith(suffix) for suffix in READ_LIKE_POST_SUFFIXES
+    )
 
 
 def is_buffered_read_like(item: dict[str, Any]) -> bool:
@@ -463,18 +486,54 @@ def record_pending_failure(
     if is_corrupt_pending_write(data):
         raise ValueError("Cannot record a failure for a corrupt pending write")
     rejected = category in {"rejected", "conflict"}
-    data["status"] = "attention" if rejected else "pending"
+    now = datetime.now(UTC)
+    deterministic = category == "server" and status_code in _DETERMINISTIC_SERVER_STATUSES
+    prior_streak = data.get("server_error_streak")
+    streak = (prior_streak if type(prior_streak) is int and prior_streak > 0 else 0) + 1
+    streak_started = _streak_started_at(data) if streak > 1 else None
+    if not deterministic:
+        data["server_error_streak"] = 0
+        data.pop("server_error_streak_started_at", None)
+        streak_seconds = 0.0
+    else:
+        data["server_error_streak"] = streak
+        started = streak_started or now
+        data["server_error_streak_started_at"] = started.isoformat()
+        streak_seconds = (now - started).total_seconds()
+    parked = (
+        deterministic
+        and streak >= PENDING_SERVER_ERROR_STREAK_LIMIT
+        and streak_seconds >= PENDING_SERVER_ERROR_STREAK_MIN_SECONDS
+    )
+    data["status"] = "attention" if rejected or parked else "pending"
     failure: dict[str, Any] = {
         "category": category,
         "status_code": status_code,
         "error_code": error_code if error_code in _SAFE_FAILURE_CODES else None,
-        "at": datetime.now(UTC).isoformat(),
+        "at": now.isoformat(),
     }
     if rejected and message:
         failure["message"] = _bounded_diagnostic(message, PENDING_FAILURE_MESSAGE_MAX)
+    elif parked:
+        # The CLI's own words, never the response body, so no server detail
+        # lands in the queue file.
+        failure["message"] = PARKED_SERVER_ERROR_MESSAGE.format(
+            streak=streak, minutes=int(streak_seconds // 60)
+        )
     data["last_failure"] = failure
     _secure_write_json(path, data)
     return data
+
+
+def _streak_started_at(data: dict[str, Any]) -> datetime | None:
+    text = data.get("server_error_streak_started_at")
+    if not isinstance(text, str):
+        return None
+    try:
+        started = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return started if started.tzinfo is not None else None
 
 
 def retry_pending_write(write_id: str) -> dict[str, Any]:
@@ -485,6 +544,10 @@ def retry_pending_write(write_id: str) -> dict[str, Any]:
         raise ValueError("Cannot retry a corrupt pending write")
     data["status"] = "pending"
     data.pop("last_attempt_at", None)
+    # An explicit retry is a fresh decision, so a parked write earns a new run
+    # of automatic attempts rather than parking again on its first failure.
+    data["server_error_streak"] = 0
+    data.pop("server_error_streak_started_at", None)
     _secure_write_json(path, data)
     return data
 
@@ -504,7 +567,53 @@ def pending_write_resource(item: dict[str, Any]) -> str:
         return f"entity:{parts[1]}"
     if len(parts) >= 2 and parts[0] == "projects":
         return f"project:{parts[1]}"
+    if len(parts) >= 3 and parts[0] == "memory" and parts[1] in {"inspect", "sources"}:
+        # Corrections to one memory stay ordered; a stuck write on one memory
+        # must not hold back corrections to every other.
+        return f"memory:{_memory_resource_id(parts[2])}"
     return f"path:{'/'.join(parts[:2])}"
+
+
+def _memory_resource_id(identifier: str) -> str:
+    """Use the same key for encoded and raw-memory-prefixed IDs."""
+    return unquote(identifier).removeprefix("raw_memory:")
+
+
+# Payload fields that name a second memory a correction depends on.
+_CORRECTION_REFERENCE_FIELDS = ("replacement_source_id", "duplicate_of_source_id")
+
+
+def pending_write_resources(item: dict[str, Any]) -> frozenset[str]:
+    """Every resource a write depends on: its own, plus any second memory it names.
+
+    A supersede of A by B, or a duplicate of A onto B, reads B as well as
+    changing A, so it must wait for an earlier queued write to B (a delete,
+    say) instead of overtaking it on A's key alone.
+    """
+    resources = {pending_write_resource(item)}
+    parts = [part for part in str(item.get("path", "")).split("/") if part]
+    payload = item.get("json")
+    if (
+        len(parts) >= 4
+        and parts[0] == "memory"
+        and parts[1] in {"inspect", "sources"}
+        and parts[3] == "corrections"
+        and isinstance(payload, dict)
+    ):
+        for field in _CORRECTION_REFERENCE_FIELDS:
+            referenced = payload.get(field)
+            if isinstance(referenced, str) and referenced:
+                resources.add(f"memory:{_memory_resource_id(referenced)}")
+    return frozenset(resources)
+
+
+def pending_resources_overlap(
+    first: frozenset[str] | set[str], second: frozenset[str] | set[str]
+) -> bool:
+    """Whether two writes, or a write and a set of blocked resources, must stay ordered."""
+    if not first or not second:
+        return False
+    return "*" in first or "*" in second or bool(set(first) & set(second))
 
 
 def bind_pending_write_identity(

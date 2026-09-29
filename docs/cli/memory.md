@@ -45,6 +45,40 @@ printf '%s' "Corrected canonical body" | sibyl correct raw_memory:abc123 \
   --action revise --reason "The prior wording was misleading" --expected-revision 3
 ```
 
+Lifecycle actions change who sees a memory rather than what it says. Each prints the server's own
+preview first (the target state and flags, how many derived records follow, and whether the move can
+be undone), then applies:
+
+```bash
+sibyl correct raw_memory:abc123 --action restore \
+  --reason "Marked wrong by mistake"          # also: --action undo, --action active
+sibyl correct raw_memory:abc123 --action hide --reason "Noise in recall"
+sibyl correct raw_memory:abc123 --action mark_sensitive --reason "Names a customer"
+sibyl correct raw_memory:abc123 --action redact --reason "Contains a credential"
+sibyl correct raw_memory:abc123 --action delete --reason "Captured in the wrong org" --yes
+```
+
+`restore` returns a contested or superseded memory to active and clears its wrong, hidden, and
+superseded marks. `redact` and `delete` cannot be undone, so they ask before applying; pass `--yes`
+to skip the question. `--json` requires `--yes`, and so does any run without a terminal to answer
+the question. The apply is pinned to the revision the preview showed, so a memory that changes in
+between is refused rather than corrected against a different plan.
+
+| Action                         | Effect                                           |
+| ------------------------------ | ------------------------------------------------ |
+| `wrong`, `stale`, `duplicate`  | Marks the memory contested and out of recall     |
+| `superseded`                   | Points to the replacement and leaves recall      |
+| `revise`                       | Replaces the canonical body with a new revision  |
+| `restore` (`undo`, `active`)   | Reverses a correction back to active             |
+| `hide`                         | Keeps the memory but takes it out of recall      |
+| `mark_sensitive` (`sensitive`) | Flags it sensitive and takes it out of recall    |
+| `redact`                       | Flags the body redacted everywhere; irreversible |
+| `delete`                       | Deletes the memory; irreversible                 |
+
+Raw memories change only through `correct`. `sibyl entity delete raw_memory:<id>` refuses and prints
+the `correct --action delete` command instead, because a graph delete can never remove a raw memory
+and a failed write would otherwise wait in the pending-write queue.
+
 Every applied correction returns a mutation receipt with its operation ID, affected records, and
 revision. Use `--preview` to validate a mutation without applying it. The hidden `blame` alias
 remains available during migration, but new instructions should use `correct` for inspection.
