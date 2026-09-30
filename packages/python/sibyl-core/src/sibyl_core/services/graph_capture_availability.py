@@ -112,7 +112,9 @@ async def available_capture_projection_rows[T](
         for identifier, row in candidates.items()
         if verdicts.get(identifier) is None
     }
-    graph_rows, parents = await _graph_ancestry(organization_id, legacy_rows, graph_client)
+    graph_rows, parents = await _graph_ancestry(
+        organization_id, legacy_rows, graph_client, refresh_ids=dependent_ids & legacy_rows.keys()
+    )
     references: dict[str, set[str]] = {}
     for identifier in legacy_rows:
         try:
@@ -188,7 +190,7 @@ async def available_capture_projection_rows[T](
         try:
             for root in _capture_ancestry(roots, dependencies, captures):
                 memory = captures.get(root)
-                if memory is None:
+                if memory is None or memory.deleted_at is not None:
                     raise ValueError("capture ancestry is unavailable")
                 if source_visible is not None and not source_visible(_capture_policy_row(memory)):
                     raise ValueError("capture source is unreadable")
@@ -276,7 +278,7 @@ def _parent_ids(row: Any) -> set[str]:
     return ids
 
 
-async def _graph_ancestry(organization_id, rows, graph_client):
+async def _graph_ancestry(organization_id, rows, graph_client, *, refresh_ids):
     from sibyl_core.backends.surreal.records import normalize_records
     from sibyl_core.services.graph_records import entity_from_surreal_row
 
@@ -284,6 +286,7 @@ async def _graph_ancestry(organization_id, rows, graph_client):
     parents: dict[str, set[str] | None] = {}
     loaded: set[str] = set()
     frontier = set(rows)
+    refresh = set(refresh_ids)
     while frontier:
         for identifier in frontier:
             row = current.get(identifier)
@@ -291,11 +294,12 @@ async def _graph_ancestry(organization_id, rows, graph_client):
                 parents[identifier] = _parent_ids(row) if row is not None else None
             except (TypeError, ValueError):
                 parents[identifier] = None
-        requested = set().union(*(parents[key] or set() for key in frontier)) - loaded
+        requested = (set().union(*(parents[key] or set() for key in frontier)) | refresh) - loaded
+        refresh.clear()
         if not requested:
             break
         # Supplied candidates may omit ancestry or predate a policy change.
-        # Referenced parents come from current stored rows, once per batch.
+        # Source-backed rows and their parents use current storage, once per batch.
         loaded.update(requested)
         current.update(dict.fromkeys(requested))
         try:

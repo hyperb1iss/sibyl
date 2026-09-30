@@ -25,10 +25,11 @@ def as_candidate(entity):
     )
 
 
+@pytest.mark.parametrize("include_child", [False, True])
 @pytest.mark.parametrize("row_kind", ["candidate", "entity"])
 @pytest.mark.parametrize("change", ["current", "owner", "hidden", "source"])
-async def test_mixed_batch_uses_current_parent_after_policy_change(
-    runtime, content_store, monkeypatch, row_kind, change
+async def test_candidates_use_current_source_rows_after_policy_change(
+    runtime, content_store, monkeypatch, row_kind, change, include_child
 ):
     memory, parent = await captured_note(runtime, monkeypatch)
     child = Entity(
@@ -40,7 +41,10 @@ async def test_mixed_batch_uses_current_parent_after_policy_change(
     )
     ordinary = Entity(id="candidate-ordinary", entity_type=EntityType.NOTE, name="Resource")
     await runtime.entity_manager.create_direct_bulk([child, ordinary], generate_embeddings=False)
-    stored = await runtime.entity_manager.get_many([parent.id, child.id, ordinary.id])
+    ids = [parent.id, ordinary.id]
+    if include_child:
+        ids.append(child.id)
+    stored = await runtime.entity_manager.get_many(ids)
     rows = {row.id: as_candidate(row) if row_kind == "candidate" else row for row in stored}
     visible = memory_scope_guard(
         principal_id="user_a",

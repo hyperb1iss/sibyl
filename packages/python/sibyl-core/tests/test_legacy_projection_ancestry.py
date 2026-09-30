@@ -31,6 +31,7 @@ async def test_unbound_graph_descendant_keeps_unknown_content_epoch_after_restor
     child = projection("legacy-child", parent.id)
     if support == "declared_capture":
         child.metadata = {"projection_kind": "passage", "raw_source_ids": [memory.id]}
+    await runtime.entity_manager.create_direct(child, generate_embedding=False)
     original = child.model_dump()
     rows = {child.id: child}
     assert set(
@@ -99,7 +100,7 @@ async def test_missing_foreign_and_cyclic_graph_ancestry_fail_closed(runtime, co
     await runtime.client.execute_query("INSERT INTO entity $row;", row=row)
     cycle_a = projection("cycle-a", "cycle-b")
     cycle_b = projection("cycle-b", "cycle-a")
-    for child in (cycle_a, cycle_b):
+    for child in (missing, foreign, cycle_a, cycle_b):
         await runtime.entity_manager.create_direct(child, generate_embedding=False)
     unrelated = Entity(id="ordinary-org-resource", name="Resource", entity_type=EntityType.NOTE)
     rows = {row.id: row for row in (missing, foreign, cycle_a, unrelated)}
@@ -115,6 +116,8 @@ async def test_graph_parent_reads_are_batched_and_never_write(runtime, content_s
 
     _memory, parent = await captured_note(runtime, monkeypatch)
     children = {f"child-{i}": projection(f"child-{i}", parent.id) for i in range(100)}
+    for child in children.values():
+        await runtime.entity_manager.create_direct(child, generate_embedding=False)
     graph_query = AsyncMock(wraps=runtime.client.execute_query)
     monkeypatch.setattr(runtime.client, "execute_query", graph_query)
     async with content_client.surreal_content_client() as client:
@@ -236,6 +239,7 @@ async def test_projection_type_keeps_stored_parent_identity_when_marker_is_absen
     memory, parent = await captured_note(runtime, monkeypatch)
     child = projection("legacy-unmarked", parent.id)
     child.metadata = {"source_entity_id": parent.id}
+    await runtime.entity_manager.create_direct(child, generate_embedding=False)
     assert child.id in await available_capture_projection_rows(
         runtime.client.group_id,
         {child.id: child},
