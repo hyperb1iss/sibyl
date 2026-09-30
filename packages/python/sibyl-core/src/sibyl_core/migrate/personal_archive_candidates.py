@@ -7,6 +7,10 @@ from dataclasses import dataclass, replace
 from typing import Any, Literal
 
 from sibyl_core.auth.memory_policy import MEMORY_PROVENANCE_METADATA_KEYS
+from sibyl_core.memory_pipeline.lifecycle import (
+    graph_metadata_recallable,
+    raw_memory_lifecycle_recallable,
+)
 from sibyl_core.memory_pipeline.observations import SourceKind
 from sibyl_core.migrate.graph_companions import relationship_from_archive
 from sibyl_core.migrate.personal_archive_intake import ArchiveIntakeError, ParsedPersonalArchive
@@ -24,6 +28,7 @@ from sibyl_core.migrate.personal_archive_plan import (
 from sibyl_core.migrate.source_integrity import validate_integrity_archive
 from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.models.memory_scope import MemoryScope
+from sibyl_core.services.content_models import raw_memory_from_record
 from sibyl_core.services.graph_records import entity_from_surreal_row
 
 _CONTENT_KINDS = {
@@ -194,6 +199,22 @@ def _audience(
     return mappings.quarantine, "legacy_audience_quarantined"
 
 
+def _validate_raw_fields(row: dict[str, Any]) -> None:
+    for key in ("raw_content", "title", "source_id", "principal_id", "entity_type", "review_state"):
+        if key in row and not isinstance(row[key], str):
+            raise ArchiveIntakeError("archive raw semantic fields must retain their string types")
+    for key in ("scope_key", "agent_id", "project_id"):
+        if row.get(key) is not None and not isinstance(row[key], str):
+            raise ArchiveIntakeError("archive raw audience fields must be strings or null")
+    metadata, tags = row.get("metadata", {}), row.get("tags", [])
+    if not isinstance(metadata, dict):
+        raise ArchiveIntakeError("archive raw metadata must be an object")
+    if not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags):
+        raise ArchiveIntakeError("archive raw tags must be a string array")
+    if "derivation_required" in row and type(row["derivation_required"]) is not bool:
+        raise ArchiveIntakeError("archive raw protection marker must be a boolean")
+
+
 def _protection(
     row: dict[str, Any],
     *,
@@ -205,6 +226,15 @@ def _protection(
     if (state is not None and state["deleted"]) or row.get("deleted_at") is not None:
         return "retired"
     metadata = row.get("metadata", {})
+    if not isinstance(metadata, dict):
+        raise ArchiveIntakeError("archive source metadata must be an object")
+    recallable = (
+        raw_memory_lifecycle_recallable(raw_memory_from_record(row))
+        if kind is SourceKind.RAW_CAPTURE
+        else graph_metadata_recallable(metadata)
+    )
+    if not recallable:
+        return "retired"
     if (
         row.get("derivation_required") is True
         or has_association
@@ -277,6 +307,7 @@ def normalize_archive_candidates(
     if graph_current and graph_source_ids != {_identity(row) for row in graph_public}:
         raise ArchiveIntakeError("current graph mirrors differ from canonical source inventory")
     graph_bodies: dict[str, str] = {}
+    graph_markers = {_identity(row): row.get("derivation_required", False) for row in graph_sources}
     for native in graph_sources:
         EntityType(native["entity_type"])
         entity = entity_from_surreal_row(native)
@@ -299,6 +330,13 @@ def normalize_archive_candidates(
             if body != graph_bodies[entity.id]:
                 raise ArchiveIntakeError("differing graph mirror body")
             canonical = graph_by_id[entity.id]
+            if "derivation_required" in record and (
+                type(record["derivation_required"]) is not bool
+                or record["derivation_required"] != graph_markers[entity.id]
+            ):
+                raise ArchiveIntakeError("differing graph mirror protection")
+            if record.get("deleted_at") is not None and canonical.protection != "retired":
+                raise ArchiveIntakeError("differing graph mirror protection")
             rows.append(replace(canonical, declarations=1))
             continue
         attributes = dict(entity.metadata)
@@ -353,6 +391,7 @@ def normalize_archive_candidates(
         (row, False) for row in tables.get("raw_captures", [])
     ]:
         _foreign_scope(record, origin)
+        _validate_raw_fields(record)
         identity = _identity(record)
         if not isinstance(record.get("raw_content"), str):
             raise ArchiveIntakeError("archive raw content must be a string")
@@ -368,6 +407,9 @@ def normalize_archive_candidates(
                 state=raw_states.get(identity),
                 has_association=identity in raw_associations,
             )
+            _, mirror_reason = _audience(record, mappings, actor_id=actor_id)
+            if mirror_reason is not None and mirror_protection == "ordinary":
+                mirror_protection = "protected"
             if canonical.protection != mirror_protection:
                 raise ArchiveIntakeError("differing raw capture mirror protection")
             rows.append(replace(canonical, declarations=1))

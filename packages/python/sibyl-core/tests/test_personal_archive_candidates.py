@@ -472,3 +472,94 @@ def test_personal_archive_candidates_reject_relationship_origin_disagreement(tmp
     parsed = _parsed(tmp_path, org, graph=_graph(org, [source, target], relationships=[edge]))
     with pytest.raises(ArchiveIntakeError, match="declared source organization"):
         normalize_archive_candidates(parsed, _mapping(actor, owner), actor_id=actor)
+
+
+@pytest.mark.parametrize("scope", [None, "shared"])
+def test_personal_archive_candidates_coalesce_identical_unresolved_raw_audiences(tmp_path, scope):
+    org, owner, actor = str(uuid4()), str(uuid4()), str(uuid4())
+    record = _raw(org, owner)
+    if scope is None:
+        record.pop("memory_scope")
+    else:
+        record["memory_scope"], record["scope_key"] = scope, "foreign-shared"
+    parsed = _parsed(tmp_path, org, content=_content(org, record))
+    raw = next(
+        row
+        for row in normalize_archive_candidates(parsed, _mapping(actor, owner), actor_id=actor)
+        if row.kind == ArchiveKind.RAW_CAPTURE
+    )
+    assert raw.protection == "protected" and raw.declarations == 2
+    assert (
+        raw.initial_preview(
+            organization_id=str(uuid4()), actor_id=actor, origin=parsed.origin
+        ).disposition
+        == ArchiveDisposition.QUARANTINED
+    )
+
+
+def test_personal_archive_candidates_check_explicit_graph_mirror_protection(tmp_path):
+    org, owner, actor = str(uuid4()), str(uuid4()), str(uuid4())
+    graph = _graph(org, [_entity(org, owner)])
+    graph["entities"][0]["derivation_required"] = True
+    parsed = _parsed(tmp_path, org, graph=graph)
+    with pytest.raises(ArchiveIntakeError, match="differing graph mirror protection"):
+        normalize_archive_candidates(parsed, _mapping(actor, owner), actor_id=actor)
+    graph = _graph(org, [_entity(org, owner, protected=True)])
+    assert "derivation_required" not in graph["entities"][0]
+    parsed = _parsed(tmp_path, org, graph=graph)
+    row = next(
+        row
+        for row in normalize_archive_candidates(parsed, _mapping(actor, owner), actor_id=actor)
+        if row.kind == ArchiveKind.GRAPH_ENTITY
+    )
+    assert row.protection == "protected" and row.declarations == 2
+
+
+@pytest.mark.parametrize("kind", ["raw", "graph"])
+@pytest.mark.parametrize("lifecycle", ["archived", "superseded", "hidden", "replacement"])
+def test_personal_archive_candidates_preserve_actual_lifecycle_exclusions(
+    tmp_path, kind, lifecycle
+):
+    org, owner, actor = str(uuid4()), str(uuid4()), str(uuid4())
+    record = _raw(org, owner) if kind == "raw" else _entity(org, owner)
+    metadata = record["metadata"] if kind == "raw" else record["attributes"]
+    if lifecycle == "archived":
+        if kind == "raw":
+            record["review_state"] = "archived"
+        else:
+            metadata["review_state"] = "archived"
+    elif lifecycle == "superseded":
+        metadata["lifecycle_state"] = "superseded"
+    elif lifecycle == "hidden":
+        metadata["lifecycle_flags"] = ["hidden"]
+    else:
+        metadata["superseded_by_source_id"] = str(uuid4())
+    parsed = _parsed(
+        tmp_path,
+        org,
+        content=_content(org, record) if kind == "raw" else None,
+        graph=_graph(org, [record]) if kind == "graph" else None,
+    )
+    wanted = ArchiveKind.RAW_CAPTURE if kind == "raw" else ArchiveKind.GRAPH_ENTITY
+    row = next(
+        row
+        for row in normalize_archive_candidates(parsed, _mapping(actor, owner), actor_id=actor)
+        if row.kind == wanted
+    )
+    assert row.protection == "retired"
+    assert (
+        row.initial_preview(
+            organization_id=str(uuid4()), actor_id=actor, origin=parsed.origin
+        ).disposition
+        == ArchiveDisposition.QUARANTINED
+    )
+
+
+@pytest.mark.parametrize("field", ["title", "tags", "metadata"])
+def test_personal_archive_candidates_reject_malformed_raw_semantic_types(tmp_path, field):
+    org, owner, actor = str(uuid4()), str(uuid4()), str(uuid4())
+    record = _raw(org, owner)
+    record[field] = [] if field == "metadata" else {"unexpected": "object"}
+    parsed = _parsed(tmp_path, org, content=_content(org, record))
+    with pytest.raises(ArchiveIntakeError):
+        normalize_archive_candidates(parsed, _mapping(actor, owner), actor_id=actor)
