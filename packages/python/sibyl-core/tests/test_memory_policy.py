@@ -578,6 +578,10 @@ _SCOPE_READERS_THAT_DO_NOT_AUTHORIZE = {
     "services/content_raw_persistence.py::save_raw_memory": "Reject creation or reclassification into the retired shared scope.",
     "services/memory_identity.py::reflection_identity": "binds evidence identity to its authorized scope",
     "audit/filters.py::audit_event_matches_resource": "filters an audit log by a recorded value",
+    "migrate/personal_archive_candidates.py::_audience": (
+        "classifies untrusted source scopes into mapped or quarantine candidates; "
+        "does not authorize destination visibility"
+    ),
     "migrate/scope_backfill.py::_recovered": "write stamp: applies a capture's authoritative scope",
     "migrate/scope_backfill.py::_reverse_in_org": "write stamp: names the clear the upsert requires",
     "migrate/scope_backfill.py::_stamped_entity": "write stamp: derives a scope for a row that has none",
