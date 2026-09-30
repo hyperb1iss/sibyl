@@ -264,20 +264,14 @@ async def _current_graph_entities(
     source_visible: Callable[[Any], bool] | None = None,
 ) -> dict[str, Entity]:
     """Keep current-row and ancestry reads on the supplied graph owner."""
-    from sibyl_core.services.graph_community_managers import (
-        _entity_manager_for_client,
-        _relationship_manager_for_client,
-    )
+    from sibyl_core.services.graph_community_managers import _runtime_for_client
     from sibyl_core.services.graph_read_availability import available_graph_entities
-    from sibyl_core.services.graph_runtime import GraphRuntime
 
-    runtime = GraphRuntime(
-        client=client,
-        entity_manager=_entity_manager_for_client(client, organization_id),
-        relationship_manager=_relationship_manager_for_client(client, organization_id),
-    )
     return await available_graph_entities(
-        organization_id, ids, runtime=runtime, source_visible=source_visible
+        organization_id,
+        ids,
+        runtime=_runtime_for_client(client, organization_id),
+        source_visible=source_visible,
     )
 
 
@@ -285,21 +279,13 @@ async def _current_graph_relationships(
     client: Any, organization_id: str, ids: list[str]
 ) -> dict[str, Relationship]:
     """Validate current edge bodies and generations on the supplied graph."""
-    from sibyl_core.services.graph_community_managers import (
-        _entity_manager_for_client,
-        _relationship_manager_for_client,
-    )
+    from sibyl_core.services.graph_community_managers import _runtime_for_client
     from sibyl_core.services.graph_read_availability import available_graph_relationships
-    from sibyl_core.services.graph_runtime import GraphRuntime
 
     return await available_graph_relationships(
         organization_id,
         ids,
-        runtime=GraphRuntime(
-            client=client,
-            entity_manager=_entity_manager_for_client(client, organization_id),
-            relationship_manager=_relationship_manager_for_client(client, organization_id),
-        ),
+        runtime=_runtime_for_client(client, organization_id),
     )
 
 
@@ -316,15 +302,23 @@ async def _current_graph_snapshot(
     what can be rendered; a replacement using the same ID cannot revive an
     older cached label or relationship fact.
     """
+    from sibyl_core.services.graph_community_managers import _runtime_for_client
+    from sibyl_core.services.graph_read_availability import unchanged_graph_relationships
+
     current_relationships = await _current_graph_relationships(
         client, organization_id, [r.id for r in snapshot.relationships]
+    )
+    entities = await _current_graph_entities(
+        client, organization_id, list(snapshot.entity_by_id), source_visible=source_visible
+    )
+    current_relationships = await unchanged_graph_relationships(
+        organization_id,
+        current_relationships,
+        runtime=_runtime_for_client(client, organization_id),
     )
     relationships = [
         current_relationships[r.id] for r in snapshot.relationships if r.id in current_relationships
     ]
-    entities = await _current_graph_entities(
-        client, organization_id, list(snapshot.entity_by_id), source_visible=source_visible
-    )
     return GraphSnapshot(
         entities=list(entities.values()),
         relationships=[

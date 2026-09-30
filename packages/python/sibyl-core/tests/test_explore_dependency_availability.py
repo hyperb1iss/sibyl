@@ -2,6 +2,7 @@
 
 from contextlib import asynccontextmanager
 from importlib import import_module
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -343,3 +344,50 @@ async def test_related_rechecks_source_backed_neighbor_after_edge_validation(
     )
     assert corrected
     assert result.entities == []
+
+
+@pytest.mark.parametrize("mode", ["dependencies", "related"])
+@pytest.mark.parametrize("change", ["delete", "type", "retire"])
+async def test_graph_reader_drops_edge_changed_during_final_node_loading(monkeypatch, mode, change):
+    async with dependency_graph() as runtime:
+        kind = (
+            RelationshipType.DEPENDS_ON if mode == "dependencies" else RelationshipType.RELATED_TO
+        )
+        edges = await store_dependency_graph(
+            runtime, [task("root"), task("leaf")], [("root", "leaf")], kind=kind
+        )
+        monkeypatch.setattr(exploration, "get_graph_runtime", AsyncMock(return_value=runtime))
+        kwargs = dict(mode=mode, entity_id="root", organization_id=runtime.client.group_id)
+        baseline = await exploration.explore(**kwargs)
+        assert "leaf" in {row.id for row in baseline.entities}
+        available = exploration.available_graph_entities
+        changed = False
+
+        async def change_during_nodes(org, ids, **options):
+            nonlocal changed
+            if set(ids) == {"root", "leaf"} and not changed:
+                if mode == "dependencies":
+                    import sys
+
+                    if sys._getframe(1).f_code.co_name != "_explore_dependencies":
+                        return await available(org, ids, **options)
+                changed = True
+                if change == "delete":
+                    assert await runtime.relationship_manager.delete(edges[0].id)
+                else:
+                    replacement = edges[0].model_copy(
+                        update={"relationship_type": RelationshipType.BLOCKS}
+                        if change == "type"
+                        else {"metadata": {"expired_at": "2026-01-01T00:00:00+00:00"}}
+                    )
+                    await runtime.relationship_manager.create_direct_bulk([replacement])
+            return await available(org, ids, **options)
+
+        monkeypatch.setattr(exploration, "available_graph_entities", change_during_nodes)
+        result = await exploration.explore(**kwargs)
+        assert changed
+        assert {row.id for row in await runtime.entity_manager.get_many(["root", "leaf"])} == {
+            "root",
+            "leaf",
+        }
+        assert [row.id for row in result.entities] == (["root"] if mode == "dependencies" else [])

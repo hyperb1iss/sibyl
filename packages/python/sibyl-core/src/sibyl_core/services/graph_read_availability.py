@@ -164,3 +164,67 @@ async def available_graph_relationships(
         ]
         final_snapshots.append(fresh)
     return await validate(final_snapshots, GraphReadValidation(organization_id))
+
+
+async def unchanged_graph_relationships(
+    organization_id: str,
+    relationships: dict[str, Relationship],
+    *,
+    runtime: GraphRuntime | None = None,
+) -> dict[str, Relationship]:
+    """Keep previously validated edges only while their stored evidence matches.
+
+    Node availability can await source reads after edge validation. Compare the
+    stored edge bodies once more before using them to select or render paths.
+    This read neither repairs graph rows nor reuses a source proof for new facts.
+    """
+    from sibyl_core.backends.surreal.records import normalize_records
+    from sibyl_core.services.graph_records import relationship_from_surreal_row
+
+    def evidence(relationship: Relationship):
+        body = relationship.model_dump(mode="json", exclude={"created_at", "metadata"})
+        body["metadata"] = {
+            key: value
+            for key, value in relationship.metadata.items()
+            if key
+            not in {
+                "record_id",
+                "embedding",
+                "fact_embedding",
+                "embedding_metadata",
+                "operational_write_witness",
+            }
+        }
+        return body
+
+    if not relationships:
+        return {}
+    graph = runtime or await get_surreal_graph_runtime(organization_id, ensure_schema=False)
+    ids = list(relationships)
+    unchanged: dict[str, Relationship] = {}
+    for start in range(0, len(ids), _READ_BATCH_SIZE):
+        batch = ids[start : start + _READ_BATCH_SIZE]
+        rows = normalize_records(
+            await graph.client.execute_query(
+                "RETURN { LET $edges=SELECT *,in.uuid AS source_uuid,out.uuid AS target_uuid "
+                "FROM relates_to WHERE group_id=$org AND uuid IN $ids; "
+                "LET $evidence=SELECT * OMIT fact_embedding,attributes.embedding,"
+                "attributes.fact_embedding,attributes.embedding_metadata,"
+                "attributes.operational_write_witness FROM $edges; RETURN $evidence; };",
+                org=organization_id,
+                ids=batch,
+            )
+        )
+        for row in rows:
+            expected = relationships.get(row.get("uuid"))
+            if expected is None or row.get("group_id") != organization_id:
+                continue
+            current = relationship_from_surreal_row(row)
+            if (
+                evidence(current) == evidence(expected)
+                and current.operational_source_binding == expected.operational_source_binding
+                and current.operational_derivation_required
+                == expected.operational_derivation_required
+            ):
+                unchanged[expected.id] = expected
+    return unchanged

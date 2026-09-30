@@ -19,6 +19,7 @@ from sibyl_core.models.entities import Entity, EntityType, Relationship, Relatio
 from sibyl_core.services.graph_read_availability import (
     available_graph_entities,
     available_graph_relationships,
+    unchanged_graph_relationships,
 )
 from sibyl_core.services.graph_runtime import GraphRuntime
 from sibyl_core.services.graph_visibility import graph_row_read_allowed as _graph_entity_visible
@@ -146,6 +147,21 @@ async def _current_relationships(runtime, organization_id, relationships):
     return [current[r.id] for r in relationships if r.id in current]
 
 
+async def _unchanged_relationships(runtime, organization_id, relationships):
+    current = await unchanged_graph_relationships(
+        organization_id,
+        {relationship.id: relationship for relationship in relationships},
+        runtime=GraphRuntime(
+            client=runtime.client,
+            entity_manager=runtime.entity_manager,
+            relationship_manager=runtime.relationship_manager,
+        ),
+    )
+    return [
+        current[relationship.id] for relationship in relationships if relationship.id in current
+    ]
+
+
 async def _current_entities(
     runtime,
     organization_id,
@@ -220,6 +236,7 @@ async def debug_graph(
         accessible_delegations=accessible_delegations,
     )
     nodes = [current[entity.id] for entity in nodes if entity.id in current]
+    relationships = await _unchanged_relationships(runtime, group_id, relationships)
     node_ids = {entity.id for entity in nodes}
 
     relationships = [
@@ -544,18 +561,17 @@ async def get_all_edges(
     endpoint_ids = {rel.source_id for rel in all_relationships} | {
         rel.target_id for rel in all_relationships
     }
-    endpoints = await available_graph_entities(
+    endpoints = await _current_entities(
+        runtime,
         group_id,
         sorted(endpoint_ids),
-        source_visible=partial(
-            _graph_entity_visible,
-            principal_id=principal_id,
-            accessible_projects=accessible_projects,
-            allowed_memory_scope_keys=memory_grants,
-            accessible_teams=accessible_teams,
-            accessible_delegations=accessible_delegations,
-        ),
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=memory_grants,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
     )
+    all_relationships = await _unchanged_relationships(runtime, group_id, all_relationships)
     visible_ids = {
         entity.id
         for entity in endpoints.values()
@@ -677,6 +693,7 @@ async def get_full_graph(
         accessible_delegations=accessible_delegations,
     )
     entities = [current[entity.id] for entity in entities if entity.id in current]
+    relationships = await _unchanged_relationships(runtime, group_id, relationships)
     if isinstance(types, list) and types:
         entities = [entity for entity in entities if entity.entity_type in types]
     nodes = []
@@ -855,6 +872,19 @@ async def get_subgraph(
     await traverse(payload.entity_id, 0)
 
     relationships = await _current_relationships(runtime, group_id, relationships)
+    current = await _current_entities(
+        runtime,
+        group_id,
+        list(visited_nodes),
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=memory_grants,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
+    )
+    if payload.entity_id not in current:
+        raise HTTPException(status_code=404, detail=f"Entity not found: {payload.entity_id}")
+    relationships = await _unchanged_relationships(runtime, group_id, relationships)
     edges = [
         GraphEdge(
             id=relationship.id,
@@ -874,18 +904,6 @@ async def get_subgraph(
             accessible_delegations=accessible_delegations,
         )
     ]
-    current = await _current_entities(
-        runtime,
-        group_id,
-        list(visited_nodes),
-        principal_id=principal_id,
-        accessible_projects=accessible_projects,
-        allowed_memory_scope_keys=memory_grants,
-        accessible_teams=accessible_teams,
-        accessible_delegations=accessible_delegations,
-    )
-    if payload.entity_id not in current:
-        raise HTTPException(status_code=404, detail=f"Entity not found: {payload.entity_id}")
     edges = [edge for edge in edges if edge.source in current and edge.target in current]
     reachable = {payload.entity_id}
     frontier = {payload.entity_id}

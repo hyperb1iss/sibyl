@@ -9,6 +9,7 @@ from sibyl_core.models.entities import Entity, EntityType, RelationshipType
 from sibyl_core.services.graph_read_availability import (
     available_graph_entities,
     available_graph_relationships,
+    unchanged_graph_relationships,
 )
 from sibyl_core.tools.helpers import (
     VALID_ENTITY_TYPES,
@@ -625,6 +626,7 @@ async def _explore_dependencies(
     current = {key: row for key, row in current.items() if entity_is_visible(row)}
     if entity_id not in current:
         return ExploreResponse(mode="dependencies", entities=[], total=0, filters=filters)
+    edges = await unchanged_graph_relationships(group_id, edges, runtime=runtime)
 
     visited: set[str] = set()
     in_stack: set[str] = set()
@@ -760,6 +762,9 @@ async def _explore_related(
     current = {key: entity for key, entity in current.items() if allowed(entity)}
     if entity_id not in current:
         return ExploreResponse(mode=mode, entities=[], total=0, filters=filters)
+    current_relationships = await unchanged_graph_relationships(
+        group_id, current_relationships, runtime=runtime
+    )
     results = []
     for entity, relationship in raw_results:
         if relationship.id not in current_relationships:

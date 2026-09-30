@@ -17,7 +17,7 @@ from sibyl_core.auth.memory_policy import (
 )
 from sibyl_core.models.entities import Entity, Relationship
 from sibyl_core.services.graph_community_detection import _detect_communities_from_graph
-from sibyl_core.services.graph_community_managers import _entity_summary
+from sibyl_core.services.graph_community_managers import _entity_summary, _runtime_for_client
 from sibyl_core.services.graph_community_models import (
     ClusterSummary,
     CommunityConfig,
@@ -181,9 +181,9 @@ async def _native_relationship_edges_between_ids(
     *,
     max_edges: int,
     relationship_visible: Callable[[Relationship], bool],
-) -> list[dict[str, Any]] | None:
+) -> dict[str, Relationship] | None:
     if not member_ids:
-        return []
+        return {}
 
     rows = await _native_rows(
         client,
@@ -205,19 +205,11 @@ async def _native_relationship_edges_between_ids(
     current = await _current_graph_relationships(
         client, organization_id, [str(row["uuid"]) for row in rows if row.get("uuid")]
     )
-    edges: list[dict[str, Any]] = []
-    for row in rows:
-        relationship = current.get(str(row.get("uuid") or ""))
-        if relationship is None or not relationship_visible(relationship):
-            continue
-        edges.append(
-            {
-                "source": relationship.source_id,
-                "target": relationship.target_id,
-                "type": relationship.relationship_type.value,
-            }
-        )
-    return edges
+    return {
+        identity: relationship
+        for identity, relationship in current.items()
+        if relationship_visible(relationship)
+    }
 
 
 async def get_clusters_for_visualization(
@@ -453,7 +445,7 @@ async def get_cluster_nodes(
 
     member_ids = cluster.member_ids[:max_nodes]
     member_id_set = set(member_ids)
-    edges = await _native_relationship_edges_between_ids(
+    relationships = await _native_relationship_edges_between_ids(
         client,
         organization_id,
         member_ids,
@@ -468,7 +460,7 @@ async def get_cluster_nodes(
         ),
     )
 
-    if edges is None:
+    if relationships is None:
         snapshot = await _get_visible_graph_snapshot(
             client,
             organization_id,
@@ -480,16 +472,11 @@ async def get_cluster_nodes(
             max_entities=DETECTION_MAX_ENTITIES,
             max_relationships=DETECTION_MAX_RELATIONSHIPS,
         )
-        edges = _build_graph_edges_from_snapshot(
-            [
-                relationship
-                for relationship in snapshot.relationships
-                if relationship.source_id in member_id_set
-                and relationship.target_id in member_id_set
-            ],
-            member_id_set,
-            max_edges=max_edges,
-        )
+        relationships = {
+            relationship.id: relationship
+            for relationship in snapshot.relationships
+            if relationship.source_id in member_id_set and relationship.target_id in member_id_set
+        }
 
     entity_by_id = await _current_graph_entities(
         client,
@@ -503,6 +490,12 @@ async def get_cluster_nodes(
             accessible_teams=accessible_teams,
             accessible_delegations=accessible_delegations,
         ),
+    )
+
+    from sibyl_core.services.graph_read_availability import unchanged_graph_relationships
+
+    relationships = await unchanged_graph_relationships(
+        organization_id, relationships, runtime=_runtime_for_client(client, organization_id)
     )
 
     # This is the surface that emits an entity's name and description text, so
@@ -535,12 +528,9 @@ async def get_cluster_nodes(
         )
     ]
     visible_ids = {node["id"] for node in nodes}
-    if edges is not None:
-        edges = [
-            edge
-            for edge in edges
-            if edge["source"] in visible_ids and edge["target"] in visible_ids
-        ]
+    edges = _build_graph_edges_from_snapshot(
+        list(relationships.values()), visible_ids, max_edges=max_edges
+    )
 
     return {
         "nodes": nodes,

@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.services.graph_community_models import DetectedCommunity
+
+if TYPE_CHECKING:
+    from sibyl_core.services.graph_runtime import GraphRuntime
+
 
 type _ManagerFactory = Callable[[Any, str], Any]
 
@@ -132,6 +136,16 @@ def _relationship_manager_for_client(client: Any, organization_id: str) -> Any:
 
     raise RuntimeError(
         "Community graph operations require a native graph client or attached relationship_manager"
+    )
+
+
+def _runtime_for_client(client: Any, organization_id: str) -> GraphRuntime:
+    from sibyl_core.services.graph_runtime import GraphRuntime
+
+    return GraphRuntime(
+        client=client,
+        entity_manager=_entity_manager_for_client(client, organization_id),
+        relationship_manager=_relationship_manager_for_client(client, organization_id),
     )
 
 

@@ -64,6 +64,7 @@ def stored_graph_rows(monkeypatch):
 
     original_current_relationships = graph_routes._current_relationships
     monkeypatch.setattr(graph_routes, "_current_relationships", current_relationships)
+    monkeypatch.setattr(graph_routes, "_unchanged_relationships", current_relationships)
     return original_current_relationships
 
 
