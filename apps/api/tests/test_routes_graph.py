@@ -64,7 +64,12 @@ def stored_graph_rows(monkeypatch):
 
     original_current_relationships = graph_routes._current_relationships
     monkeypatch.setattr(graph_routes, "_current_relationships", current_relationships)
-    monkeypatch.setattr(graph_routes, "_unchanged_relationships", current_relationships)
+
+    async def current_view(runtime, org, ids, relationships, **reader):
+        current = await current_entities(runtime, org, ids, **reader)
+        return current, relationships
+
+    monkeypatch.setattr(graph_routes, "_current_view", current_view)
     return original_current_relationships
 
 
