@@ -15,9 +15,9 @@ from sibyl_core.auth.memory_policy import (
     memory_row_project_id,
     private_scope_granted_for,
 )
-from sibyl_core.models.entities import Entity, Relationship, RelationshipType
+from sibyl_core.models.entities import Entity, Relationship
 from sibyl_core.services.graph_community_detection import _detect_communities_from_graph
-from sibyl_core.services.graph_community_managers import _entity_summary
+from sibyl_core.services.graph_community_managers import _entity_summary, _runtime_for_client
 from sibyl_core.services.graph_community_models import (
     ClusterSummary,
     CommunityConfig,
@@ -34,11 +34,12 @@ from sibyl_core.services.graph_community_selection import (
 )
 from sibyl_core.services.graph_community_snapshot import (
     _count_int,
-    _current_graph_entities,
+    _current_graph_relationships,
     _get_graph_snapshot,
     _get_visible_graph_snapshot,
     _native_rows,
     _reader_cache_key,
+    _ReaderCacheKey,
     _snapshot_fingerprint,
 )
 from sibyl_core.services.graph_visibility import graph_row_read_allowed
@@ -46,7 +47,7 @@ from sibyl_core.services.graph_visibility import graph_row_read_allowed
 log = structlog.get_logger()
 
 CLUSTER_CACHE: dict[
-    tuple[str, tuple[str, tuple[str, ...], tuple[str, ...] | None]],
+    tuple[str, _ReaderCacheKey],
     tuple[datetime, str, list[ClusterSummary]],
 ] = {}
 CLUSTER_CACHE_TTL = timedelta(minutes=5)
@@ -179,9 +180,9 @@ async def _native_relationship_edges_between_ids(
     *,
     max_edges: int,
     relationship_visible: Callable[[Relationship], bool],
-) -> list[dict[str, Any]] | None:
+) -> dict[str, Relationship] | None:
     if not member_ids:
-        return []
+        return {}
 
     rows = await _native_rows(
         client,
@@ -200,26 +201,14 @@ async def _native_relationship_edges_between_ids(
     if rows is None:
         return None
 
-    from sibyl_core.services.graph_records import relationship_from_surreal_row
-
-    edges: list[dict[str, Any]] = []
-    for row in rows:
-        source_id = str(row.get("source_id") or "")
-        target_id = str(row.get("target_id") or "")
-        if (
-            not source_id
-            or not target_id
-            or not relationship_visible(relationship_from_surreal_row(row))
-        ):
-            continue
-        edges.append(
-            {
-                "source": source_id,
-                "target": target_id,
-                "type": str(row.get("name") or RelationshipType.RELATED_TO.value),
-            }
-        )
-    return edges
+    current = await _current_graph_relationships(
+        client, organization_id, [str(row["uuid"]) for row in rows if row.get("uuid")]
+    )
+    return {
+        identity: relationship
+        for identity, relationship in current.items()
+        if relationship_visible(relationship)
+    }
 
 
 async def get_clusters_for_visualization(
@@ -230,6 +219,8 @@ async def get_clusters_for_visualization(
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
     allowed_memory_scope_keys: set[str] | None = None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
 ) -> list[ClusterSummary]:
     """Get clusters optimized for bubble visualization.
 
@@ -247,7 +238,13 @@ async def get_clusters_for_visualization(
     """
     cache_key = (
         organization_id,
-        _reader_cache_key(principal_id, accessible_projects, allowed_memory_scope_keys),
+        _reader_cache_key(
+            principal_id,
+            accessible_projects,
+            allowed_memory_scope_keys,
+            accessible_teams,
+            accessible_delegations,
+        ),
     )
 
     snapshot = await _get_visible_graph_snapshot(
@@ -256,6 +253,8 @@ async def get_clusters_for_visualization(
         principal_id=principal_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
         max_entities=DETECTION_MAX_ENTITIES,
         max_relationships=DETECTION_MAX_RELATIONSHIPS,
     )
@@ -413,6 +412,8 @@ async def get_cluster_nodes(
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
     allowed_memory_scope_keys: set[str] | None = None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
 ) -> dict[str, Any]:
     """Get nodes and edges for a specific cluster.
 
@@ -433,6 +434,8 @@ async def get_cluster_nodes(
         principal_id=principal_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
     )
     cluster = next((c for c in clusters if c.id == cluster_id), None)
 
@@ -441,9 +444,7 @@ async def get_cluster_nodes(
 
     member_ids = cluster.member_ids[:max_nodes]
     member_id_set = set(member_ids)
-    entity_by_id = await _current_graph_entities(client, organization_id, member_ids)
-
-    edges = await _native_relationship_edges_between_ids(
+    relationships = await _native_relationship_edges_between_ids(
         client,
         organization_id,
         member_ids,
@@ -453,6 +454,43 @@ async def get_cluster_nodes(
             principal_id=principal_id,
             accessible_projects=accessible_projects,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
+        ),
+    )
+
+    if relationships is None:
+        snapshot = await _get_visible_graph_snapshot(
+            client,
+            organization_id,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
+            max_entities=DETECTION_MAX_ENTITIES,
+            max_relationships=DETECTION_MAX_RELATIONSHIPS,
+        )
+        relationships = {
+            relationship.id: relationship
+            for relationship in snapshot.relationships
+            if relationship.source_id in member_id_set and relationship.target_id in member_id_set
+        }
+
+    from sibyl_core.services.graph_view_availability import available_graph_view
+
+    entity_by_id, relationships = await available_graph_view(
+        organization_id,
+        member_ids,
+        relationships,
+        runtime=_runtime_for_client(client, organization_id),
+        source_visible=partial(
+            graph_row_read_allowed,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
         ),
     )
 
@@ -473,6 +511,8 @@ async def get_cluster_nodes(
             principal_id=principal_id,
             accessible_projects=accessible_projects,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
             private_scope_granted=private_scope_granted_for(
                 allowed_memory_scope_keys, principal_id=principal_id
             ),
@@ -484,34 +524,9 @@ async def get_cluster_nodes(
         )
     ]
     visible_ids = {node["id"] for node in nodes}
-    member_id_set &= visible_ids
-    if edges is not None:
-        edges = [
-            edge
-            for edge in edges
-            if edge["source"] in visible_ids and edge["target"] in visible_ids
-        ]
-
-    if edges is None:
-        snapshot = await _get_visible_graph_snapshot(
-            client,
-            organization_id,
-            principal_id=principal_id,
-            accessible_projects=accessible_projects,
-            allowed_memory_scope_keys=allowed_memory_scope_keys,
-            max_entities=DETECTION_MAX_ENTITIES,
-            max_relationships=DETECTION_MAX_RELATIONSHIPS,
-        )
-        edges = _build_graph_edges_from_snapshot(
-            [
-                relationship
-                for relationship in snapshot.relationships
-                if relationship.source_id in member_id_set
-                and relationship.target_id in member_id_set
-            ],
-            member_id_set,
-            max_edges=max_edges,
-        )
+    edges = _build_graph_edges_from_snapshot(
+        list(relationships.values()), visible_ids, max_edges=max_edges
+    )
 
     return {
         "nodes": nodes,

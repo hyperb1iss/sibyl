@@ -6,12 +6,14 @@ import asyncio
 import hashlib
 import inspect
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from typing import Any
 
 import structlog
 
-from sibyl_core.models.entities import Entity
+from sibyl_core.models.entities import Entity, Relationship
 from sibyl_core.services.graph_community_managers import (
     _list_all_entities,
     _list_all_relationships,
@@ -21,7 +23,9 @@ from sibyl_core.services.graph_visibility import graph_row_read_allowed
 
 log = structlog.get_logger()
 
-type _ReaderCacheKey = tuple[str, tuple[str, ...], tuple[str, ...] | None]
+type _ReaderCacheKey = tuple[
+    str, tuple[str, ...], tuple[str, ...] | None, tuple[str, ...], tuple[str, ...]
+]
 
 GRAPH_SNAPSHOT_CACHE: dict[tuple[str, int | None, int | None], tuple[datetime, GraphSnapshot]] = {}
 GRAPH_SNAPSHOT_CACHE_TTL = timedelta(minutes=5)
@@ -145,7 +149,9 @@ def _reader_cache_key(
     principal_id: str | None,
     accessible_projects: set[str] | None,
     allowed_memory_scope_keys: set[str] | None = None,
-) -> tuple[str, tuple[str, ...], tuple[str, ...] | None]:
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
+) -> _ReaderCacheKey:
     """Identity component for every cache holding reader-visible graph rows.
 
     Detection input, cluster summaries and rendered levels of detail are all
@@ -158,6 +164,8 @@ def _reader_cache_key(
         None
         if allowed_memory_scope_keys is None
         else tuple(sorted(str(key) for key in allowed_memory_scope_keys)),
+        tuple(sorted(str(key) for key in accessible_teams or ())),
+        tuple(sorted(str(key) for key in accessible_delegations or ())),
     )
 
 
@@ -167,13 +175,15 @@ def _reader_visible_snapshot(
     principal_id: str | None,
     accessible_projects: set[str] | None,
     allowed_memory_scope_keys: set[str] | None = None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
 ) -> GraphSnapshot:
     """Reduce a snapshot to the rows this reader is authorized to see.
 
     The scope predicate is expressible in SurrealQL against the flexible
     attributes object, but pushing it down would restate a policy whose
     branches (owner as principal_id or scope_key, unrecognized scopes denied,
-    team and delegated scopes closed pending their membership threads) already
+    team and delegated scopes require persisted reader grants) already
     live in memory_metadata_read_allowed. Two implementations in two languages
     is the drift this filter exists to prevent, so the snapshot loads whole and
     is narrowed here, once, through the shared rule.
@@ -185,6 +195,8 @@ def _reader_visible_snapshot(
             principal_id=principal_id,
             accessible_projects=accessible_projects,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
         )
 
     entities = [entity for entity in snapshot.entities if allowed(entity)]
@@ -210,6 +222,8 @@ async def _get_visible_graph_snapshot(
     principal_id: str | None,
     accessible_projects: set[str] | None,
     allowed_memory_scope_keys: set[str] | None = None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
     max_entities: int | None = None,
     max_relationships: int | None = None,
 ) -> GraphSnapshot:
@@ -219,36 +233,68 @@ async def _get_visible_graph_snapshot(
         max_entities=max_entities,
         max_relationships=max_relationships,
     )
-    snapshot = await _current_graph_snapshot(client, organization_id, snapshot)
+    snapshot = await _current_graph_snapshot(
+        client,
+        organization_id,
+        snapshot,
+        source_visible=partial(
+            graph_row_read_allowed,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
+        ),
+    )
     return _reader_visible_snapshot(
         snapshot,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
     )
 
 
 async def _current_graph_entities(
-    client: Any, organization_id: str, ids: list[str]
+    client: Any,
+    organization_id: str,
+    ids: list[str],
+    *,
+    source_visible: Callable[[Any], bool] | None = None,
 ) -> dict[str, Entity]:
     """Keep current-row and ancestry reads on the supplied graph owner."""
-    from sibyl_core.services.graph_community_managers import (
-        _entity_manager_for_client,
-        _relationship_manager_for_client,
-    )
+    from sibyl_core.services.graph_community_managers import _runtime_for_client
     from sibyl_core.services.graph_read_availability import available_graph_entities
-    from sibyl_core.services.graph_runtime import GraphRuntime
 
-    runtime = GraphRuntime(
-        client=client,
-        entity_manager=_entity_manager_for_client(client, organization_id),
-        relationship_manager=_relationship_manager_for_client(client, organization_id),
+    return await available_graph_entities(
+        organization_id,
+        ids,
+        runtime=_runtime_for_client(client, organization_id),
+        source_visible=source_visible,
     )
-    return await available_graph_entities(organization_id, ids, runtime=runtime)
+
+
+async def _current_graph_relationships(
+    client: Any, organization_id: str, ids: list[str]
+) -> dict[str, Relationship]:
+    """Validate current edge bodies and generations on the supplied graph."""
+    from sibyl_core.services.graph_community_managers import _runtime_for_client
+    from sibyl_core.services.graph_read_availability import available_graph_relationships
+
+    return await available_graph_relationships(
+        organization_id,
+        ids,
+        runtime=_runtime_for_client(client, organization_id),
+    )
 
 
 async def _current_graph_snapshot(
-    client: Any, organization_id: str, snapshot: GraphSnapshot
+    client: Any,
+    organization_id: str,
+    snapshot: GraphSnapshot,
+    *,
+    source_visible: Callable[[Any], bool] | None = None,
 ) -> GraphSnapshot:
     """Refresh cached identities before their content enters a reader cache.
 
@@ -256,23 +302,18 @@ async def _current_graph_snapshot(
     what can be rendered; a replacement using the same ID cannot revive an
     older cached label or relationship fact.
     """
-    from sibyl_core.services.graph_community_managers import (
-        _entity_manager_for_client,
-        _relationship_manager_for_client,
-    )
-    from sibyl_core.services.graph_read_availability import available_graph_relationships
-    from sibyl_core.services.graph_runtime import GraphRuntime
+    from sibyl_core.services.graph_community_managers import _runtime_for_client
+    from sibyl_core.services.graph_view_availability import available_graph_view
 
-    entities = await _current_graph_entities(client, organization_id, list(snapshot.entity_by_id))
-    runtime = GraphRuntime(
-        client=client,
-        entity_manager=_entity_manager_for_client(client, organization_id),
-        relationship_manager=_relationship_manager_for_client(client, organization_id),
+    discovered_relationships = await _current_graph_relationships(
+        client, organization_id, [relationship.id for relationship in snapshot.relationships]
     )
-    current_relationships = await available_graph_relationships(
+    entities, current_relationships = await available_graph_view(
         organization_id,
-        [r.id for r in snapshot.relationships],
-        runtime=runtime,
+        list(snapshot.entity_by_id),
+        discovered_relationships,
+        runtime=_runtime_for_client(client, organization_id),
+        source_visible=source_visible,
     )
     relationships = [
         current_relationships[r.id] for r in snapshot.relationships if r.id in current_relationships

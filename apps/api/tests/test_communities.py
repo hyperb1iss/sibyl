@@ -1,6 +1,7 @@
 """Tests for community detection module."""
 
 import contextlib
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -38,20 +39,26 @@ def current_rendering_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
     graph community ancestry and source-retirement integration suites.
     """
 
-    async def current(_client, _organization_id, snapshot):
+    async def current(_client, _organization_id, snapshot, *, source_visible=None):
         return snapshot
 
-    async def current_entities(client, organization_id, ids):
+    async def current_view(organization_id, ids, relationships, *, runtime, source_visible=None):
         from sibyl_core.services.graph_community_snapshot import _get_graph_snapshot
 
-        snapshot = await _get_graph_snapshot(client, organization_id)
-        return {entity.id: entity for entity in snapshot.entities if entity.id in ids}
+        snapshot = await _get_graph_snapshot(runtime.client, organization_id)
+        entities = {entity.id: entity for entity in snapshot.entities if entity.id in ids}
+        return entities, relationships
 
     monkeypatch.setattr(
         "sibyl_core.services.graph_community_snapshot._current_graph_snapshot", current
     )
     monkeypatch.setattr(
-        "sibyl_core.services.graph_community_clusters._current_graph_entities", current_entities
+        "sibyl_core.services.graph_view_availability.available_graph_view", current_view
+    )
+    monkeypatch.setattr(
+        community_clusters,
+        "_runtime_for_client",
+        lambda client, _organization_id: SimpleNamespace(client=client),
     )
 
 

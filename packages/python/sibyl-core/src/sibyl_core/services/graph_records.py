@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
+import structlog
+from pydantic import ValidationError
+
+from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
 from sibyl_core.memory_pipeline.audit import decode_audit_metadata, encode_audit_metadata
 from sibyl_core.memory_pipeline.quality import (
     expand_memory_quality_storage_metadata,
@@ -27,7 +32,43 @@ from sibyl_core.models.tasks import (
     TaskPriority,
     TaskStatus,
 )
-from sibyl_core.services.graph_common import SurrealRecord
+from sibyl_core.services.graph_common import SurrealRecord, normalize_graph_records
+
+if TYPE_CHECKING:
+    from sibyl_core.services.graph_client import SurrealGraphClient
+
+log = structlog.get_logger()
+
+# Flat attributes override legacy snapshots even when their value is null.
+# Only Python int/float weights are validated; other values decode as 1.
+_RELATIONSHIP_WEIGHT_PREDICATE = """
+AND NOT (
+    NOT(type::is::none(attributes.weight))
+    AND (type::is::int(attributes.weight) OR type::is::float(attributes.weight))
+    AND NOT (attributes.weight >= 0 AND attributes.weight != $nan_relationship_weight)
+)
+AND NOT (
+    type::is::none(attributes.weight) AND type::is::object(attributes.metadata)
+    AND (type::is::int(attributes.metadata.weight) OR type::is::float(attributes.metadata.weight))
+    AND NOT (attributes.metadata.weight >= 0 AND attributes.metadata.weight != $nan_relationship_weight)
+)
+AND NOT (
+    type::is::none(attributes.weight) AND type::is::string(attributes.metadata)
+    AND attributes.metadata NOT IN $readable_relationship_metadata
+)
+"""
+
+
+def _relationship_read_sql(client: SurrealGraphClient, sql: str) -> str:
+    if is_embedded_surreal_url(client._url):
+        return sql
+    return sql.replace("type::is::", "type::is_")
+
+
+def relationship_weight_predicate(client: SurrealGraphClient) -> str:
+    """Match current native weights without replacing indexed query clauses."""
+    return _relationship_read_sql(client, _RELATIONSHIP_WEIGHT_PREDICATE)
+
 
 _ENTITY_LIST_FIELDS = "* OMIT content, embedding, name_embedding, attributes.content"
 _RELATED_ENTITY_PROJECTION_FIELDS = (
@@ -487,11 +528,10 @@ def _surreal_indexed_field_in_or_missing(field: str, param: str) -> str:
     return f"({field} IN ${param} OR {_surreal_indexed_field_missing(field)})"
 
 
-def relationship_from_surreal_row(row: Mapping[str, object]) -> Relationship:
-    normalized_row = {str(key): value for key, value in row.items()}
-    attributes = _row_attributes(normalized_row)
+def _relationship_metadata(row: Mapping[str, object]) -> dict[str, object]:
+    attributes = _row_attributes(row)
     metadata = dict(attributes)
-    raw_metadata = metadata.get("metadata", normalized_row.get("metadata"))
+    raw_metadata = metadata.get("metadata", row.get("metadata"))
     if isinstance(raw_metadata, str):
         try:
             parsed = json.loads(raw_metadata)
@@ -504,6 +544,13 @@ def relationship_from_surreal_row(row: Mapping[str, object]) -> Relationship:
     elif isinstance(raw_metadata, Mapping):
         metadata.pop("metadata", None)
         metadata = {str(key): value for key, value in raw_metadata.items()} | metadata
+
+    return metadata
+
+
+def relationship_from_surreal_row(row: Mapping[str, object]) -> Relationship:
+    normalized_row = {str(key): value for key, value in row.items()}
+    metadata = _relationship_metadata(normalized_row)
 
     source_id, source_key = _relationship_endpoint(normalized_row, "source")
     target_id, _target_key = _relationship_endpoint(normalized_row, "target")
@@ -557,6 +604,57 @@ def relationship_from_surreal_row(row: Mapping[str, object]) -> Relationship:
         metadata=metadata,
         created_at=_row_datetime(normalized_row.get("created_at")) or datetime.now(UTC),
     )
+
+
+def readable_relationship_from_surreal_row(row: Mapping[str, object]) -> Relationship | None:
+    """Decode one edge without discarding independent graph facts on failure."""
+    try:
+        return relationship_from_surreal_row(row)
+    except ValidationError:
+        log.warning(
+            "graph_relationship_invalid",
+            organization_id=row.get("group_id"),
+            relationship_id=_relationship_id_from_row(row),
+        )
+        return None
+
+
+async def readable_legacy_relationship_metadata(
+    client: SurrealGraphClient, predicate: str, **parameters: Any
+) -> list[str]:
+    """Capture readable legacy weight encodings before native pagination.
+
+    Project distinct string carriers only. Decoding JSON in the native WHERE
+    would abort the whole query on malformed strings that the row reader
+    intentionally ignores. Reuse that reader's metadata merge instead.
+    Requiring an observed encoding also denies a carrier changed after this
+    capture before it can consume a slot in the paginated query.
+    """
+    rows = normalize_graph_records(
+        await client.execute_query(
+            _relationship_read_sql(
+                client,
+                f"""
+            SELECT attributes.metadata AS metadata
+            FROM relates_to
+            WHERE {predicate}
+              AND type::is::none(attributes.weight)
+              AND type::is::string(attributes.metadata)
+            GROUP BY metadata;
+            """,
+            ),
+            **parameters,
+        )
+    )
+    readable: set[str] = set()
+    for row in rows:
+        encoded = row.get("metadata")
+        if not isinstance(encoded, str):
+            continue
+        weight = _metadata_weight(_relationship_metadata({"attributes": {"metadata": encoded}}))
+        if weight >= 0 and not math.isnan(weight):
+            readable.add(encoded)
+    return sorted(readable)
 
 
 def _relationship_from_row(row: SurrealRecord) -> Relationship:

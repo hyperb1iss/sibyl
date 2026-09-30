@@ -37,7 +37,7 @@ def stored_graph_rows(monkeypatch):
     in the graph availability and community source-retirement controls.
     """
 
-    async def available(org, ids):
+    async def available(org, ids, *, source_visible=None):
         runtime = await graph_routes.get_entity_graph_runtime(org)
         manager = runtime.entity_manager
         if hasattr(manager, "get_many"):
@@ -50,11 +50,26 @@ def stored_graph_rows(monkeypatch):
 
     monkeypatch.setattr(graph_routes, "available_graph_entities", available)
 
+    async def current_entities(runtime, org, ids, **reader):
+        from functools import partial
+
+        visible = partial(graph_routes._graph_entity_visible, **reader)
+        current = await available(org, ids, source_visible=visible)
+        return {identifier: row for identifier, row in current.items() if visible(row)}
+
+    monkeypatch.setattr(graph_routes, "_current_entities", current_entities)
+
     async def current_relationships(runtime, org, rows):
         return rows
 
     original_current_relationships = graph_routes._current_relationships
     monkeypatch.setattr(graph_routes, "_current_relationships", current_relationships)
+
+    async def current_view(runtime, org, ids, relationships, **reader):
+        current = await current_entities(runtime, org, ids, **reader)
+        return current, relationships
+
+    monkeypatch.setattr(graph_routes, "_current_view", current_view)
     return original_current_relationships
 
 
@@ -329,6 +344,8 @@ class TestGraphRoutes:
             principal_id=str(_ctx().user.id),
             accessible_projects=set(),
             allowed_memory_scope_keys=None,
+            accessible_teams=set(),
+            accessible_delegations=set(),
         )
 
     @pytest.mark.asyncio
@@ -432,7 +449,13 @@ class TestGraphRoutes:
         adapter = SimpleNamespace(
             list_relationships_for_entities=AsyncMock(side_effect=[[stale, hidden], live])
         )
-        current = AsyncMock(side_effect=[{"hidden": hidden}, {row.id: row for row in live}])
+        current = AsyncMock(
+            side_effect=[
+                {"hidden": hidden},
+                {row.id: row for row in live},
+                {row.id: row for row in live},
+            ]
+        )
         monkeypatch.setattr(graph_routes, "_current_relationships", stored_graph_rows)
         monkeypatch.setattr(graph_routes, "available_graph_relationships", current)
         monkeypatch.setattr(
@@ -451,7 +474,9 @@ class TestGraphRoutes:
             call.kwargs.get("offset", 0)
             for call in adapter.list_relationships_for_entities.await_args_list
         ] == [0, 2]
-        assert current.await_count == (2 if live_count else 1)
+        assert current.await_count == (3 if live_count else 1)
+        if live_count:
+            assert current.await_args.args[1] == [row.id for row in live]
 
     @pytest.mark.asyncio
     async def test_get_hierarchical_graph_data_uses_runtime_client(self) -> None:
@@ -510,6 +535,8 @@ class TestGraphRoutes:
             principal_id=str(_ctx().user.id),
             accessible_projects={"proj-1"},
             allowed_memory_scope_keys=None,
+            accessible_teams=set(),
+            accessible_delegations=set(),
         )
 
     @pytest.mark.asyncio

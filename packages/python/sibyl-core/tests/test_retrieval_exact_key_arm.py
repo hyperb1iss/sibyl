@@ -78,13 +78,14 @@ async def _captured_metadata(
     retrieval_keys: list[str] | None = None,
     memory_scope: str = "private",
     scope_key: str | None = None,
+    raw_memory_id: str = "raw_1",
 ) -> dict[str, object]:
     """Run a real capture and hand back the metadata the graph row would carry."""
 
     captured: dict[str, object] = {}
 
     async def remember_raw_memory(_request: MemoryCaptureRequest) -> Mapping[str, object]:
-        return {"id": "raw_1"}
+        return {"id": raw_memory_id}
 
     async def create_graph_entity(
         _request: MemoryCaptureRequest,
@@ -428,8 +429,45 @@ async def _seeds_for(
 ) -> list[str]:
     """Run a real context_search and report which uuids seeded graph expansion."""
 
-    metadata = await _captured_metadata(principal_id="user-alice")
+    from contextlib import asynccontextmanager
+
+    from sibyl_core.backends.surreal import SurrealContentClient
+    from sibyl_core.backends.surreal.content_schema import bootstrap_content_schema
+    from sibyl_core.models.entities import Entity, EntityType
+    from sibyl_core.services import content_client
+    from sibyl_core.services.graph_client import SurrealGraphClient, prepare_graph_schema
+    from sibyl_core.services.graph_entities import EntityManager
+    from sibyl_core.services.surreal_content import remember_raw_memory
+
+    client = SurrealContentClient(url="memory://")
+    await bootstrap_content_schema(client, reset=True)
+
+    @asynccontextmanager
+    async def session():
+        yield client
+
+    monkeypatch.setattr(content_client, "surreal_content_client", session)
+    memory = await remember_raw_memory(
+        organization_id="org-123",
+        principal_id="user-alice",
+        source_id="exact-key-source",
+        raw_content=BODY_WITHOUT_THE_KEY,
+        embedding_provider=None,
+    )
+    metadata = await _captured_metadata(principal_id="user-alice", raw_memory_id=memory.id)
     victim = _row(metadata, normalized_keys=[PROBE_KEY.casefold()])
+    graph = SurrealGraphClient(group_id="org-123", url="memory://")
+    await prepare_graph_schema(graph)
+    await EntityManager(graph, group_id="org-123").create_direct(
+        Entity(
+            id=victim["uuid"],
+            entity_type=EntityType.NOTE,
+            name=victim["name"],
+            content=victim["content"],
+            metadata=metadata,
+        ),
+        generate_embedding=False,
+    )
     seeds: list[str] = []
 
     async def fake_exact_key_candidates(**kwargs: Any) -> list[RetrievalCandidate]:
@@ -449,7 +487,7 @@ async def _seeds_for(
         return []
 
     class Runtime:
-        client = _EmptyClient()
+        client = graph
 
     async def fake_runtime(_organization_id: str, **_kwargs: object) -> Runtime:
         return Runtime()
@@ -461,12 +499,16 @@ async def _seeds_for(
     monkeypatch.setattr(source_module, "_exact_key_candidates", fake_exact_key_candidates)
     monkeypatch.setattr(expansion_module, "_graph_expansion_candidates", fake_graph_expansion)
 
-    await search_module.context_search(
-        plan=_plan(principal_id=reader, query=f"why does {probe_key} fire"),
-        limit=10,
-        raw_memory_recall_fn=no_raw_recall,
-    )
-    return seeds
+    try:
+        await search_module.context_search(
+            plan=_plan(principal_id=reader, query=f"why does {probe_key} fire"),
+            limit=10,
+            raw_memory_recall_fn=no_raw_recall,
+        )
+        return seeds
+    finally:
+        await graph.close()
+        await client.close()
 
 
 @pytest.mark.asyncio

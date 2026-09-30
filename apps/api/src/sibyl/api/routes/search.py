@@ -97,6 +97,8 @@ def _authorize_raw_memory_search(
         scope_key=request.scope_key,
         project_id=request.project,
         accessible_projects=accessible_projects,
+        accessible_teams=ctx.accessible_teams,
+        accessible_delegations=ctx.accessible_delegations,
         source_surface="search",
     )
     decision = authorize_memory_read(policy_context=policy_context)
@@ -171,6 +173,8 @@ async def execute_search_request(
             project=project_filter,
             **({"project_ids": request.project_ids} if request.project_ids is not None else {}),
             accessible_projects=accessible_projects,
+            accessible_teams=set(ctx.accessible_teams),
+            accessible_delegations=set(ctx.accessible_delegations),
             source=request.source,
             source_id=request.source_id,
             source_name=request.source_name,

@@ -87,6 +87,8 @@ class AuthContext:
     api_key_project_ids: frozenset[str] | None = None
     api_key_memory_space_ids: frozenset[str] | None = None
     api_key_memory_scope_keys: frozenset[str] | None = None
+    accessible_teams: frozenset[str] = frozenset()
+    accessible_delegations: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "user", coerce_auth_user(self.user))
@@ -108,6 +110,15 @@ class AuthContext:
             self,
             "api_key_memory_scope_keys",
             _frozen_string_set(self.api_key_memory_scope_keys),
+        )
+
+        object.__setattr__(
+            self, "accessible_teams", _frozen_string_set(self.accessible_teams) or frozenset()
+        )
+        object.__setattr__(
+            self,
+            "accessible_delegations",
+            _frozen_string_set(self.accessible_delegations) or frozenset(),
         )
 
     @property
@@ -147,8 +158,12 @@ class AuthContext:
             organization_role=self.org_role,
             is_global_admin=self.user.is_admin,
             accessible_projects=_frozen_string_set(accessible_projects),
-            accessible_teams=_frozen_string_set(accessible_teams),
-            accessible_delegations=_frozen_string_set(accessible_delegations),
+            accessible_teams=self.accessible_teams
+            if accessible_teams is None
+            else _frozen_string_set(accessible_teams),
+            accessible_delegations=self.accessible_delegations
+            if accessible_delegations is None
+            else _frozen_string_set(accessible_delegations),
             delegated_authority=delegated_authority,
             agent_id=agent_id,
             project_id=project_id,

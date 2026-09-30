@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime
+from functools import partial
 from typing import Any
 
 import structlog
@@ -16,7 +17,6 @@ from sibyl.auth.memory_targets import (
     validate_relationship_targets,
 )
 from sibyl.persistence.auth_runtime import (
-    list_accessible_delegated_scope_keys,
     list_accessible_project_graph_ids,
 )
 from sibyl.persistence.content_common import RawCaptureRecord
@@ -93,25 +93,11 @@ def _raw_capture_api_key_scope_allowed(
     }
 
 
-def _api_key_delegated_scope_keys(ctx: AuthContext) -> set[str]:
-    allowed_scope_keys = ctx.api_key_memory_scope_keys
-    if not isinstance(allowed_scope_keys, list | tuple | set | frozenset):
-        return set()
-
-    prefix = api_key_memory_scope_key("delegated", "")
-    return {
-        scope_key[len(prefix) :]
-        for scope_key in (str(value) for value in allowed_scope_keys)
-        if scope_key.startswith(prefix) and scope_key != prefix
-    }
-
-
 def raw_capture_visible_to_reader(
     capture: RawCaptureRecord,
     *,
     ctx: AuthContext,
     accessible_projects: set[str],
-    accessible_delegations: set[str],
 ) -> bool:
     reader_user_id = getattr(ctx, "user_id", None)
     memory_scope = _capture_memory_scope(capture)
@@ -136,7 +122,8 @@ def raw_capture_visible_to_reader(
         project_id=scope_key if memory_scope == "project" else capture.project_id,
         agent_id=capture.agent_id,
         accessible_projects=accessible_projects,
-        accessible_delegations=accessible_delegations,
+        accessible_teams=ctx.accessible_teams,
+        accessible_delegations=ctx.accessible_delegations,
         source_surface="entities_raw_capture",
     )
     return authorize_memory_read(policy_context=policy_context).allowed
@@ -178,6 +165,8 @@ def entity_visible_to_reader(
     reader_user_id: str | None,
     accessible_projects: set[str],
     allowed_memory_scope_keys: set[str] | None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
 ) -> bool:
     if not graph_metadata_recallable(getattr(entity, "metadata", None)):
         return False
@@ -189,6 +178,8 @@ def entity_visible_to_reader(
         principal_id=reader_user_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
         private_scope_granted=private_scope_granted_for(
             allowed_memory_scope_keys, principal_id=reader_user_id
         ),
@@ -202,6 +193,8 @@ def related_entity_visible(
     reader_user_id: str | None,
     accessible_projects: set[str],
     allowed_memory_scope_keys: set[str] | None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
 ) -> bool:
     """Both constraints a neighbour has to clear before its name is returned.
 
@@ -215,6 +208,8 @@ def related_entity_visible(
         reader_user_id=reader_user_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
     )
 
 
@@ -230,13 +225,6 @@ def reader_user_id(ctx: AuthContext) -> str | None:
 async def accessible_project_ids_for_read(ctx: AuthContext) -> set[str]:
     accessible_projects = await list_accessible_project_graph_ids(ctx)
     return {str(project_id) for project_id in accessible_projects or set()}
-
-
-async def accessible_delegation_scope_keys_for_read(ctx: AuthContext) -> set[str]:
-    accessible_delegations = await list_accessible_delegated_scope_keys(ctx)
-    return {
-        str(scope_key) for scope_key in accessible_delegations or set()
-    } | _api_key_delegated_scope_keys(ctx)
 
 
 async def resolve_entity_list_project_filter(
@@ -284,10 +272,21 @@ async def require_entity_scope_visible(
         reader_user_id=reader_user_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=reader_memory_grants(ctx),
+        accessible_teams=set(ctx.accessible_teams),
+        accessible_delegations=set(ctx.accessible_delegations),
     ):
         raise HTTPException(status_code=404, detail="Entity not found")
     if entity.id not in await available_capture_projection_rows(
-        str(ctx.organization_id), {entity.id: entity}
+        str(ctx.organization_id),
+        {entity.id: entity},
+        source_visible=partial(
+            entity_visible_to_reader,
+            reader_user_id=reader_user_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=reader_memory_grants(ctx),
+            accessible_teams=set(ctx.accessible_teams),
+            accessible_delegations=set(ctx.accessible_delegations),
+        ),
     ):
         raise HTTPException(status_code=404, detail="Entity not found")
     return accessible_projects
@@ -433,6 +432,8 @@ def entity_matches_list_filters(
     reader_user_id: str | None,
     accessible_projects: set[str],
     allowed_memory_scope_keys: set[str] | None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
     language: str | None,
     category: str | None,
     search: str | None,
@@ -452,6 +453,8 @@ def entity_matches_list_filters(
         entity,
         reader_user_id=reader_user_id,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
         accessible_projects=accessible_projects,
     ):
         return False

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -25,6 +25,9 @@ _GRAPH_EXPANSION_RELATIONSHIP_WEIGHTS = PREDICATE_EXPANSION_PATH_SCORES
 _SUPERSEDES_PREDICATE = "SUPERSEDES"
 _GRAPH_EXPANSION_DEPTH_DECAY = 0.72
 _GRAPH_EXPANSION_FETCH_HEADROOM = 4
+
+type _RelationshipBatchGuard = Callable[[Sequence[str]], Awaitable[set[str]]]
+type _RowBatchFilter = Callable[[list[dict[str, object]]], Awaitable[list[dict[str, object]]]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +96,7 @@ async def _node_bfs_records(
     relationship_names: Sequence[str] = (),
     include_incoming: bool = False,
     include_community_hops: bool = True,
+    relationship_ids_available: _RelationshipBatchGuard | None = None,
 ) -> list[dict[str, object]]:
     if (not origin_uuids and not episode_origin_uuids) or max_depth < 1:
         return []
@@ -129,6 +133,7 @@ async def _node_bfs_records(
                 depth=depth,
                 limit=fetch_limit,
                 relationship_names=sorted(wanted),
+                relationship_ids_available=relationship_ids_available,
                 exclude_relationship_names=(
                     () if _SUPERSEDES_PREDICATE in wanted else (_SUPERSEDES_PREDICATE,)
                 ),
@@ -143,6 +148,7 @@ async def _node_bfs_records(
                     depth=depth,
                     limit=fetch_limit,
                     relationship_names=sorted(wanted),
+                    relationship_ids_available=relationship_ids_available,
                 )
             )
         if (
@@ -157,6 +163,7 @@ async def _node_bfs_records(
                     group_id=group_id,
                     depth=depth,
                     limit=fetch_limit,
+                    relationship_ids_available=relationship_ids_available,
                 )
             )
         next_entities.extend(hop.uuid for hop in next_hops)
@@ -240,6 +247,19 @@ def _hop_relationship_wanted(relationship: str, wanted: set[str]) -> bool:
     return not wanted or relationship in wanted
 
 
+async def _available_relationship_rows(
+    rows: list[dict[str, object]],
+    relationship_ids_available: _RelationshipBatchGuard | None,
+) -> list[dict[str, object]]:
+    if relationship_ids_available is None or not rows:
+        return rows
+    ids = _dedupe_strings(
+        value for row in rows if (value := _string_value(row.get("relationship_id"))) is not None
+    )
+    current = await relationship_ids_available(ids)
+    return [row for row in rows if _string_value(row.get("relationship_id")) in current]
+
+
 async def _relation_target_hops(
     *,
     client: Any,
@@ -249,6 +269,7 @@ async def _relation_target_hops(
     limit: int,
     relationship_names: Sequence[str] = (),
     exclude_relationship_names: Sequence[str] = (),
+    relationship_ids_available: _RelationshipBatchGuard | None = None,
 ) -> list[_GraphExpansionHop]:
     """Walk edges that point away from the frontier.
 
@@ -267,7 +288,7 @@ async def _relation_target_hops(
     rows = await _execute_query_records(
         client,
         f"""
-        SELECT target_id AS uuid, name AS relationship
+        SELECT target_id AS uuid, name AS relationship, uuid AS relationship_id
         FROM relates_to
         WHERE source_id IN $source_uuids
           AND group_id = $group_id
@@ -286,6 +307,7 @@ async def _relation_target_hops(
             else {}
         ),
     )
+    rows = await _available_relationship_rows(rows, relationship_ids_available)
     hops: list[_GraphExpansionHop] = []
     for row in rows:
         uuid = _string_value(row.get("uuid"))
@@ -313,6 +335,7 @@ async def _relation_source_hops(
     depth: int,
     limit: int,
     relationship_names: Sequence[str] = (),
+    relationship_ids_available: _RelationshipBatchGuard | None = None,
 ) -> list[_GraphExpansionHop]:
     """Walk edges that point AT the frontier rather than away from it.
 
@@ -328,7 +351,7 @@ async def _relation_source_hops(
     rows = await _execute_query_records(
         client,
         f"""
-        SELECT source_id AS uuid, name AS relationship
+        SELECT source_id AS uuid, name AS relationship, uuid AS relationship_id
         FROM relates_to
         WHERE target_id IN $target_uuids
           AND group_id = $group_id
@@ -341,6 +364,7 @@ async def _relation_source_hops(
         limit=max(int(limit), 1),
         **({"relationship_names": list(relationship_names)} if relationship_names else {}),
     )
+    rows = await _available_relationship_rows(rows, relationship_ids_available)
     hops: list[_GraphExpansionHop] = []
     for row in rows:
         uuid = _string_value(row.get("uuid"))
@@ -368,6 +392,7 @@ async def _community_member_hops(
     group_id: str,
     depth: int,
     limit: int,
+    relationship_ids_available: _RelationshipBatchGuard | None = None,
 ) -> list[_GraphExpansionHop]:
     if not source_uuids:
         return []
@@ -376,13 +401,14 @@ async def _community_member_hops(
         source_uuids=source_uuids,
         group_id=group_id,
         limit=limit,
+        relationship_ids_available=relationship_ids_available,
     )
     if not community_ids:
         return []
     rows = await _execute_query_records(
         client,
         """
-        SELECT source_id AS uuid, target_id AS community_id
+        SELECT source_id AS uuid, target_id AS community_id, uuid AS relationship_id
         FROM relates_to
         WHERE target_id IN $community_uuids
           AND source_id NOT IN $source_uuids
@@ -398,6 +424,7 @@ async def _community_member_hops(
         group_id=group_id,
         limit=max(int(limit), 1),
     )
+    rows = await _available_relationship_rows(rows, relationship_ids_available)
     hops: list[_GraphExpansionHop] = []
     for row in rows:
         uuid = _string_value(row.get("uuid"))
@@ -421,11 +448,12 @@ async def _community_ids_for_entities(
     source_uuids: Sequence[str],
     group_id: str,
     limit: int,
+    relationship_ids_available: _RelationshipBatchGuard | None = None,
 ) -> list[str]:
     rows = await _execute_query_records(
         client,
         """
-        SELECT target_id AS uuid
+        SELECT target_id AS uuid, uuid AS relationship_id
         FROM relates_to
         WHERE source_id IN $source_uuids
           AND name = "BELONGS_TO"
@@ -438,6 +466,7 @@ async def _community_ids_for_entities(
         group_id=group_id,
         limit=max(int(limit), 1),
     )
+    rows = await _available_relationship_rows(rows, relationship_ids_available)
     return _dedupe_strings(_record_uuids(rows))
 
 
@@ -491,6 +520,8 @@ async def expand_neighbor_records(
     search_filter: SearchFilter | None = None,
     row_allowed: Callable[[Mapping[str, object]], bool] | None = None,
     row_included: Callable[[Mapping[str, object]], bool] | None = None,
+    available_rows: _RowBatchFilter | None = None,
+    relationship_ids_available: _RelationshipBatchGuard | None = None,
 ) -> list[dict[str, object]]:
     """Walk one bounded neighborhood for a caller that steers its own retrieval.
 
@@ -543,7 +574,10 @@ async def expand_neighbor_records(
             # the first-hop-only community lane would otherwise re-fire on each
             # one and widen the neighborhood in a way the scored lane never does.
             include_community_hops=depth == 1,
+            relationship_ids_available=relationship_ids_available,
         )
+        if available_rows is not None:
+            hop_rows = await available_rows(hop_rows)
         next_frontier: list[str] = []
         for row in hop_rows:
             uuid = _string_value(row.get("uuid"))

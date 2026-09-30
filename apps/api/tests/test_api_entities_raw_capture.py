@@ -283,12 +283,15 @@ def _reader_ctx(
     *,
     user_id: str = "reader-1",
     api_key_memory_scope_keys: set[str] | None = None,
+    accessible_delegations: frozenset[str] = frozenset(),
 ) -> SimpleNamespace:
     return SimpleNamespace(
         user_id=user_id,
         organization_id="org-1",
         org_role=None,
         api_key_memory_scope_keys=api_key_memory_scope_keys,
+        accessible_teams=frozenset(),
+        accessible_delegations=accessible_delegations,
     )
 
 
@@ -308,7 +311,6 @@ def test_raw_capture_visibility_denies_delegated_without_membership() -> None:
             capture,
             ctx=_reader_ctx(),
             accessible_projects=set(),
-            accessible_delegations=set(),
         )
         is False
     )
@@ -328,9 +330,8 @@ def test_raw_capture_visibility_allows_delegated_membership() -> None:
     assert (
         raw_capture_visible_to_reader(
             capture,
-            ctx=_reader_ctx(),
+            ctx=_reader_ctx(accessible_delegations=frozenset({"agent:nova"})),
             accessible_projects=set(),
-            accessible_delegations={"agent:nova"},
         )
         is True
     )
@@ -351,7 +352,6 @@ def test_raw_capture_visibility_denies_unknown_scope() -> None:
             capture,
             ctx=_reader_ctx(),
             accessible_projects=set(),
-            accessible_delegations=set(),
         )
         is False
     )

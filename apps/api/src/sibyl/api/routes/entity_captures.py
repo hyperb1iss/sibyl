@@ -116,7 +116,6 @@ async def list_raw_captures(
                 required_role=ProjectRole.VIEWER,
                 require_existing_project=True,
             )
-    accessible_delegations = await policy.accessible_delegation_scope_keys_for_read(ctx)
     captures, has_more = await content_runtime.list_raw_captures(
         session,
         organization_id=org.id,
@@ -138,7 +137,6 @@ async def list_raw_captures(
             capture,
             ctx=ctx,
             accessible_projects=accessible_projects,
-            accessible_delegations=accessible_delegations,
         )
     ]
 
@@ -162,7 +160,6 @@ async def get_raw_capture(
 ) -> RawCaptureResponse:
     """Get a single archived raw quick capture."""
     accessible_projects = await policy.accessible_project_ids_for_read(ctx)
-    accessible_delegations = await policy.accessible_delegation_scope_keys_for_read(ctx)
     capture = await content_runtime.get_raw_capture(
         session,
         organization_id=org.id,
@@ -172,7 +169,6 @@ async def get_raw_capture(
         capture,
         ctx=ctx,
         accessible_projects=accessible_projects,
-        accessible_delegations=accessible_delegations,
     ):
         raise HTTPException(status_code=404, detail=f"Raw capture not found: {capture_id}")
 
@@ -194,7 +190,6 @@ async def update_raw_capture_review_state(
 ) -> RawCaptureResponse:
     """Update review-state metadata for a raw capture."""
     accessible_projects = await policy.accessible_project_ids_for_read(ctx)
-    accessible_delegations = await policy.accessible_delegation_scope_keys_for_read(ctx)
     existing = await content_runtime.get_raw_capture(
         session,
         organization_id=org.id,
@@ -204,7 +199,6 @@ async def update_raw_capture_review_state(
         existing,
         ctx=ctx,
         accessible_projects=accessible_projects,
-        accessible_delegations=accessible_delegations,
     ):
         raise HTTPException(status_code=404, detail=f"Raw capture not found: {capture_id}")
 

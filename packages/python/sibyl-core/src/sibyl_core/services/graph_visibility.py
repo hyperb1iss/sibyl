@@ -15,6 +15,8 @@ def graph_row_read_allowed(
     principal_id: str | None,
     accessible_projects: set[str] | None,
     allowed_memory_scope_keys: set[str] | None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
 ) -> bool:
     # A visualization node carries the entity's label and metadata bag, so a
     # private memory reaches the picture as a readable title unless the same
@@ -27,6 +29,8 @@ def graph_row_read_allowed(
         principal_id=principal_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
         private_scope_granted=private_scope_granted_for(
             allowed_memory_scope_keys, principal_id=principal_id
         ),

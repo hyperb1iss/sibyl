@@ -133,7 +133,12 @@ def _pack_with_usage() -> ContextPack:
 
 
 def _ctx() -> SimpleNamespace:
-    return SimpleNamespace(user_id="user-123", api_key_memory_scope_keys=None)
+    return SimpleNamespace(
+        user_id="user-123",
+        api_key_memory_scope_keys=None,
+        accessible_teams=frozenset(),
+        accessible_delegations=frozenset(),
+    )
 
 
 def _http_request() -> SimpleNamespace:
@@ -711,6 +716,8 @@ class TestContextPackRoute:
         ctx = SimpleNamespace(
             user_id="user-123",
             api_key_memory_scope_keys=frozenset({"private\x1fuser-123"}),
+            accessible_teams=frozenset(),
+            accessible_delegations=frozenset(),
         )
 
         with (

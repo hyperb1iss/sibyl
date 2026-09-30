@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from typing import Any
+
+from pydantic import ValidationError
 
 from sibyl_core.models.entities import Entity, Relationship
 from sibyl_core.services.eval_publication_guards import available_graph_entity_rows
@@ -18,6 +21,7 @@ async def available_graph_entities(
     *,
     runtime: GraphRuntime | None = None,
     read: GraphReadValidation | None = None,
+    source_visible: Callable[[Any], bool] | None = None,
 ) -> dict[str, Entity]:
     """Refresh actual rows and reject missing, retired, or unavailable ancestry.
 
@@ -39,7 +43,11 @@ async def available_graph_entities(
             if row.id in batch:
                 current[row.id] = row
     return await available_graph_entity_rows(
-        organization_id, current, graph_client=graph.client, read=validation
+        organization_id,
+        current,
+        graph_client=graph.client,
+        read=validation,
+        source_visible=source_visible,
     )
 
 
@@ -48,12 +56,17 @@ async def available_graph_relationships(
     relationship_ids: Sequence[str],
     *,
     runtime: GraphRuntime | None = None,
+    read: GraphReadValidation | None = None,
 ) -> dict[str, Relationship]:
-    """Refresh stored edges and require their protected operational generation."""
+    """Refresh stored edges and require their protected operational generation.
+
+    The first validation phase is private. The final phase can share its source
+    proof with a caller that records the complete response read footprint.
+    """
     from sibyl_core.backends.surreal.records import normalize_records
     from sibyl_core.services.graph_records import (
         entity_from_surreal_row,
-        relationship_from_surreal_row,
+        readable_relationship_from_surreal_row,
     )
     from sibyl_core.services.operational_relationships import (
         _snapshot,
@@ -115,6 +128,9 @@ async def available_graph_relationships(
                     for endpoint in (row["source_uuid"], row["target_uuid"])
                 ):
                     continue
+                relationship = readable_relationship_from_surreal_row(row)
+                if relationship is None:
+                    continue
                 if await operational_relationship_current(
                     row,
                     targets=targets,
@@ -123,7 +139,7 @@ async def available_graph_relationships(
                     organization_id=organization_id,
                     read=read,
                 ):
-                    result[row["uuid"]] = relationship_from_surreal_row(row)
+                    result[row["uuid"]] = relationship
         return result
 
     first = await validate(
@@ -145,16 +161,104 @@ async def available_graph_relationships(
             original_associations.keys() - {row["target_id"] for row in fresh["associations"]}
         )
         # Compare semantic bodies and protected bindings, not write witnesses.
-        fresh["relationships"] = [
-            row
-            for row in fresh["relationships"]
-            if row["uuid"] in first
-            and not {row.get("source_uuid"), row.get("target_uuid")} & changed_associations
-            and relationship_body_digest(row) == relationship_body_digest(originals[row["uuid"]])
-            and row.get("operational_source_binding")
-            == originals[row["uuid"]].get("operational_source_binding")
-            and row.get("operational_derivation_required")
-            == originals[row["uuid"]].get("operational_derivation_required")
-        ]
+        unchanged_rows = []
+        for row in fresh["relationships"]:
+            if (
+                row["uuid"] not in first
+                or {row.get("source_uuid"), row.get("target_uuid")} & changed_associations
+            ):
+                continue
+            original = originals[row["uuid"]]
+            try:
+                same_body = relationship_body_digest(row) == relationship_body_digest(original)
+            except ValidationError:
+                continue
+            if (
+                same_body
+                and row.get("operational_source_binding")
+                == original.get("operational_source_binding")
+                and row.get("operational_derivation_required")
+                == original.get("operational_derivation_required")
+            ):
+                unchanged_rows.append(row)
+        fresh["relationships"] = unchanged_rows
         final_snapshots.append(fresh)
-    return await validate(final_snapshots, GraphReadValidation(organization_id))
+    return await validate(
+        final_snapshots, read if read is not None else GraphReadValidation(organization_id)
+    )
+
+
+async def unchanged_graph_relationships(
+    organization_id: str,
+    relationships: dict[str, Relationship],
+    *,
+    runtime: GraphRuntime | None = None,
+) -> dict[str, Relationship]:
+    """Keep previously validated edges only while their stored evidence matches.
+
+    Node availability can await source reads after edge validation. Re-prove
+    source and endpoint generations before comparing stored edge bodies once
+    more to select or render paths. This read neither repairs graph rows nor
+    reuses a source proof for new facts.
+    """
+    from sibyl_core.backends.surreal.records import normalize_records
+    from sibyl_core.services.graph_records import readable_relationship_from_surreal_row
+
+    def evidence(relationship: Relationship):
+        body = relationship.model_dump(mode="json", exclude={"created_at", "metadata"})
+        body["metadata"] = {
+            key: value
+            for key, value in relationship.metadata.items()
+            if key
+            not in {
+                "record_id",
+                "embedding",
+                "fact_embedding",
+                "embedding_metadata",
+                "operational_write_witness",
+            }
+        }
+        return body
+
+    if not relationships:
+        return {}
+    graph = runtime or await get_surreal_graph_runtime(organization_id, ensure_schema=False)
+    fresh = await available_graph_relationships(organization_id, list(relationships), runtime=graph)
+    proven = {
+        identifier: expected
+        for identifier, expected in relationships.items()
+        if (current := fresh.get(identifier)) is not None
+        and evidence(current) == evidence(expected)
+        and current.operational_source_binding == expected.operational_source_binding
+        and current.operational_derivation_required == expected.operational_derivation_required
+    }
+    ids = list(proven)
+    unchanged: dict[str, Relationship] = {}
+    for start in range(0, len(ids), _READ_BATCH_SIZE):
+        batch = ids[start : start + _READ_BATCH_SIZE]
+        rows = normalize_records(
+            await graph.client.execute_query(
+                "RETURN { LET $edges=SELECT *,in.uuid AS source_uuid,out.uuid AS target_uuid "
+                "FROM relates_to WHERE group_id=$org AND uuid IN $ids; "
+                "LET $evidence=SELECT * OMIT fact_embedding,attributes.embedding,"
+                "attributes.fact_embedding,attributes.embedding_metadata,"
+                "attributes.operational_write_witness FROM $edges; RETURN $evidence; };",
+                org=organization_id,
+                ids=batch,
+            )
+        )
+        for row in rows:
+            expected = proven.get(row.get("uuid"))
+            if expected is None or row.get("group_id") != organization_id:
+                continue
+            current = readable_relationship_from_surreal_row(row)
+            if current is None:
+                continue
+            if (
+                evidence(current) == evidence(expected)
+                and current.operational_source_binding == expected.operational_source_binding
+                and current.operational_derivation_required
+                == expected.operational_derivation_required
+            ):
+                unchanged[expected.id] = expected
+    return unchanged

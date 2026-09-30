@@ -1,13 +1,14 @@
 """Canonical capture lifecycle stays authoritative when propagation fails."""
 
 from dataclasses import replace
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 from sibyl_core.memory_pipeline.source_lifecycle import SOURCE_BINDINGS_KEY
 from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.services.graph_capture_availability import available_capture_projection_rows
 from sibyl_core.services.memory_correction import apply_memory_correction
-from sibyl_core.services.surreal_content import remember_raw_memory, save_raw_memory
+from sibyl_core.services.surreal_content import get_raw_memory, remember_raw_memory, save_raw_memory
 from tests.test_capture_corrections import captured_note
 from tests.test_reflection_identity import content_store as content_store
 from tests.test_reflection_identity import runtime as runtime
@@ -111,6 +112,7 @@ async def test_capture_read_checks_transitive_bound_sources_without_copying_stal
             },
         }
     )
+    await runtime.entity_manager.create_direct(derived, generate_embedding=False)
     monkeypatch.setattr(
         runtime.entity_manager, "update", AsyncMock(side_effect=RuntimeError("stamp unavailable"))
     )
@@ -143,9 +145,14 @@ async def test_capture_batch_failure_preserves_other_healthy_batches(
     healthy_note = note.model_copy(
         update={"id": "healthy-note", "metadata": {"raw_memory_id": healthy.id}}
     )
+    await runtime.entity_manager.create_direct(healthy_note, generate_embedding=False)
     original_select = content_client.select_many
+    original_batches = content_client.value_batches
 
-    def batches(_values):
+    def batches(values):
+        if set(values) != {memory.id, healthy.id}:
+            yield from original_batches(values)
+            return
         yield [memory.id]
         yield [healthy.id]
 
@@ -160,3 +167,29 @@ async def test_capture_batch_failure_preserves_other_healthy_batches(
     assert set(await available_capture_projection_rows(runtime.client.group_id, rows)) == {
         healthy_note.id
     }
+
+
+async def test_capture_tombstone_denies_legacy_graph_without_discarding_raw_archive(
+    runtime, content_store, monkeypatch
+):
+    memory, note = await captured_note(runtime, monkeypatch)
+    ordinary = Entity(id="tombstone-ordinary", name="Independent", entity_type=EntityType.NOTE)
+    await runtime.entity_manager.create_direct(ordinary, generate_embedding=False)
+    rows = {row.id: row for row in await runtime.entity_manager.get_many([note.id, ordinary.id])}
+    assert set(
+        await available_capture_projection_rows(
+            runtime.client.group_id, rows, graph_client=runtime.client
+        )
+    ) == set(rows)
+    tombstone = await save_raw_memory(
+        replace(memory, deleted_at=datetime.now(UTC), revision=memory.revision + 1)
+    )
+    assert tombstone.deleted_at is not None and tombstone.revision > memory.revision
+    assert set(
+        await available_capture_projection_rows(
+            runtime.client.group_id, rows, graph_client=runtime.client
+        )
+    ) == {ordinary.id}
+    retained = await get_raw_memory(memory_id=memory.id, organization_id=runtime.client.group_id)
+    assert retained is not None and retained.raw_content == memory.raw_content
+    assert (await runtime.entity_manager.get(note.id)).model_dump() == rows[note.id].model_dump()

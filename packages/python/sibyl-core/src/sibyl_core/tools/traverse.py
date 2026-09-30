@@ -37,6 +37,9 @@ from sibyl_core.projection.passages import (
 from sibyl_core.retrieval._search_expansion import expand_neighbor_records
 from sibyl_core.retrieval._search_plan import DEFAULT_CANDIDATES_PER_SIGNAL
 from sibyl_core.retrieval.operational_sources import PASSAGE_WINDOW_UNITS
+from sibyl_core.services.eval_publication_guards import available_graph_entity_rows
+from sibyl_core.services.graph_read_availability import available_graph_relationships
+from sibyl_core.services.graph_read_validation import GraphReadValidation
 from sibyl_core.tools.helpers import ScopeGuard, memory_scope_guard
 from sibyl_core.tools.responses import (
     ExpandNeighborsResponse,
@@ -184,6 +187,8 @@ async def expand_neighbors(
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
     allowed_memory_scope_keys: set[str] | None = None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
     enforce_memory_scope: bool = True,
 ) -> ExpandNeighborsResponse:
     """Widen a set of known memories into their bounded graph neighborhood.
@@ -264,12 +269,23 @@ async def expand_neighbors(
         principal_id=principal_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
         enforce_memory_scope=enforce_memory_scope,
         surface="expand_neighbors",
     )
 
     runtime = await get_graph_runtime(organization_id)
+    read = GraphReadValidation(organization_id)
     seeds = await runtime.entity_manager.get_many(seed_ids)
+    current = await available_graph_entity_rows(
+        organization_id,
+        {seed.id: seed for seed in seeds},
+        graph_client=runtime.client,
+        read=read,
+        source_visible=scope_guard,
+    )
+    seeds = list(current.values())
     authorized_seeds = [seed for seed in seeds if _seed_visible(seed, scope_guard)]
     origins = [seed.id for seed in authorized_seeds]
     # A seed the reader may not see and a seed that does not exist are reported
@@ -293,8 +309,28 @@ async def expand_neighbors(
     # row is never read as two slightly different entities.
     parsed: dict[int, Entity] = {}
 
+    async def available_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+        entities = {str(row["uuid"]): _row_scope_entity(row) for row in rows}
+        current = await available_graph_entity_rows(
+            organization_id,
+            entities,
+            graph_client=runtime.client,
+            read=GraphReadValidation(organization_id),
+            source_visible=scope_guard,
+        )
+        admitted = []
+        for row in rows:
+            entity = current.get(str(row["uuid"]))
+            if entity is not None:
+                parsed[id(row)] = entity
+                admitted.append(row)
+        return admitted
+
+    async def relationship_ids_available(ids: Sequence[str]) -> set[str]:
+        return set(await available_graph_relationships(organization_id, ids, runtime=runtime))
+
     def row_allowed(row: Mapping[str, object]) -> bool:
-        entity = _row_scope_entity(row)
+        entity = parsed.get(id(row)) or _row_scope_entity(row)
         if not scope_guard(entity):
             return False
         parsed[id(row)] = entity
@@ -322,7 +358,12 @@ async def expand_neighbors(
         # reachable through a task.
         row_allowed=row_allowed,
         row_included=row_included,
+        available_rows=available_rows,
+        relationship_ids_available=relationship_ids_available,
     )
+    # Earlier frontiers awaited later discovery. Recheck the returned row
+    # batch in a fresh phase so none carries a retired source snapshot home.
+    rows = await available_rows(rows)
     truncated = len(rows) > limit
     neighbors = [
         _neighbor_from_row(row, parsed[id(row)], content_max_chars=content_max_chars)
@@ -399,6 +440,8 @@ async def fetch_slice(
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
     allowed_memory_scope_keys: set[str] | None = None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
     enforce_memory_scope: bool = True,
 ) -> FetchSliceResponse:
     """Read one memory at span granularity, centered on the span you name.
@@ -450,12 +493,15 @@ async def fetch_slice(
         principal_id=principal_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
         enforce_memory_scope=enforce_memory_scope,
         surface="fetch_slice",
     )
 
     runtime = await get_graph_runtime(organization_id)
-    requested = await _load_authorized(runtime.entity_manager, entity_id, scope_guard)
+    read = GraphReadValidation(organization_id)
+    requested = await _load_authorized(runtime, entity_id, scope_guard, organization_id, read)
     if requested is None:
         # Same answer for absent and unauthorized, for the same reason the
         # expansion verb conflates them.
@@ -467,7 +513,7 @@ async def fetch_slice(
         anchor_index = _int_metadata(requested.metadata, "passage_index")
         parent_id = str(requested.metadata.get("parent_entity_id") or "")
         resolved_parent = (
-            await _load_authorized(runtime.entity_manager, parent_id, scope_guard)
+            await _load_authorized(runtime, parent_id, scope_guard, organization_id, read)
             if parent_id
             else None
         )
@@ -486,7 +532,37 @@ async def fetch_slice(
             raise KeyError(entity_id)
         parent = resolved_parent
 
-    spans = await _authorized_spans(runtime, parent_id=parent.id, scope_guard=scope_guard)
+    spans = await _authorized_spans(
+        runtime,
+        parent_id=parent.id,
+        scope_guard=scope_guard,
+        organization_id=organization_id,
+        read=read,
+    )
+    # Discovery awaits other reads, so the returned bodies need a new proof
+    # phase. Reusing the initial source cache could outlive a canonical purge.
+    ids = list(dict.fromkeys([parent.id, requested.id, *(span.id for span in spans)]))
+    refreshed = await runtime.entity_manager.get_many(ids)
+    current = await available_graph_entity_rows(
+        organization_id,
+        {row.id: row for row in refreshed},
+        graph_client=runtime.client,
+        read=GraphReadValidation(organization_id),
+        source_visible=scope_guard,
+    )
+    if parent.id not in current or requested.id not in current:
+        raise KeyError(entity_id)
+    parent = current[parent.id]
+    requested = current[requested.id]
+    if not scope_guard(parent) or not scope_guard(requested):
+        raise KeyError(entity_id)
+    if requested.entity_type.value == PASSAGE_ENTITY_TYPE:
+        if requested.metadata.get("parent_entity_id") != parent.id:
+            raise KeyError(entity_id)
+        anchor_index = _int_metadata(requested.metadata, "passage_index")
+    spans = [
+        current[span.id] for span in spans if span.id in current and scope_guard(current[span.id])
+    ]
     if not spans:
         return _unsliced_response(
             parent,
@@ -573,19 +649,28 @@ async def fetch_slice(
 
 
 async def _load_authorized(
-    entity_manager: Any,
+    runtime: Any,
     entity_id: str,
     scope_guard: ScopeGuard,
+    organization_id: str,
+    read: GraphReadValidation,
 ) -> Entity | None:
     if not entity_id:
         return None
     try:
-        entity = await entity_manager.get(entity_id)
+        entity = await runtime.entity_manager.get(entity_id)
     except Exception:
         return None
     if entity is None or not scope_guard(entity):
         return None
-    return entity
+    current = await available_graph_entity_rows(
+        organization_id,
+        {entity.id: entity},
+        graph_client=runtime.client,
+        read=read,
+        source_visible=scope_guard,
+    )
+    return current.get(entity_id)
 
 
 async def _authorized_spans(
@@ -593,6 +678,8 @@ async def _authorized_spans(
     *,
     parent_id: str,
     scope_guard: ScopeGuard,
+    organization_id: str,
+    read: GraphReadValidation,
 ) -> list[Entity]:
     """The spans cut from one memory, ordered by position, reader-authorized.
 
@@ -605,8 +692,14 @@ async def _authorized_spans(
         relationship_types=list(_PASSAGE_PARENT_RELATIONSHIPS),
         limit=MAX_PASSAGES_PER_SOURCE,
     )
+    current_edges = await available_graph_relationships(
+        organization_id, [relationship.id for _, relationship in related], runtime=runtime
+    )
     span_ids: list[str] = []
     for entity, relationship in related:
+        relationship = current_edges.get(relationship.id)
+        if relationship is None:
+            continue
         if relationship.target_id != parent_id or entity.entity_type.value != PASSAGE_ENTITY_TYPE:
             continue
         if _int_metadata(entity.metadata, "passage_index") is None:
@@ -618,7 +711,14 @@ async def _authorized_spans(
     # The related-entity projection omits content, so the spans are re-read whole
     # once their ids are known.
     spans = await runtime.entity_manager.get_many(span_ids)
-    authorized = [span for span in spans if scope_guard(span)]
+    current = await available_graph_entity_rows(
+        organization_id,
+        {span.id: span for span in spans},
+        graph_client=runtime.client,
+        read=read,
+        source_visible=scope_guard,
+    )
+    authorized = [span for span in current.values() if scope_guard(span)]
     authorized.sort(key=lambda span: _int_metadata(span.metadata, "passage_index") or 0)
     return authorized
 

@@ -386,6 +386,9 @@ def _candidate_scope_allowed(candidate: RetrievalCandidate, plan: RetrievalPlan)
         principal_id=plan.scopes[0].principal_id if plan.scopes else None,
         project_id=plan.project,
         accessible_projects=plan.accessible_projects,
+        accessible_teams=plan.accessible_teams,
+        accessible_delegations=plan.accessible_delegations,
+        allowed_memory_scope_keys=plan.allowed_memory_scope_keys,
         agent_id=next((scope.agent_id for scope in plan.scopes if scope.agent_id), None),
         # A private candidate is only authorized if a private scope survived
         # plan filtering; otherwise an API key without a private memory grant

@@ -214,11 +214,19 @@ async def test_adjacency_batch_retains_native_index_access(
 @pytest.mark.asyncio
 async def test_adjacency_partitions_keep_existing_pool_capacity_active() -> None:
     class Client:
+        _url = "memory://"
         pool_size = 3
 
         def __init__(self) -> None:
             self.calls: list[dict[str, object]] = []
+            self.carrier_calls: list[dict[str, object]] = []
             self.started = asyncio.Event()
+
+        async def execute_query(self, query: str, **params: object) -> object:
+            assert "SELECT attributes.metadata AS metadata" in query
+            assert "GROUP BY metadata" in query
+            self.carrier_calls.append(params)
+            return []
 
         async def execute_query_batch(self, query: str, **params: object) -> object:
             self.calls.append(params)
@@ -232,6 +240,8 @@ async def test_adjacency_partitions_keep_existing_pool_capacity_active() -> None
     manager = RelationshipManager(client, group_id="org-capacity")
     seeds = [f"seed-{index}" for index in range(6)]
     assert await manager.get_related_entities_batch(seeds) == {seed: [] for seed in seeds}
+    assert len(client.carrier_calls) == 2
+    assert all(params["seed_ids"] == seeds for params in client.carrier_calls)
     assert len(client.calls) == 6
     assert [(params["seed_0"], params["seed_1"]) for params in client.calls] == [
         ("seed-0", "seed-1"),

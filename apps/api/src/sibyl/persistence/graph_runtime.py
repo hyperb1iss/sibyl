@@ -17,7 +17,11 @@ from sibyl_core.services.graph import (
     entity_from_surreal_row,
     get_surreal_graph_runtime,
     normalize_records,
-    relationship_from_surreal_row,
+)
+from sibyl_core.services.graph_records import (
+    readable_legacy_relationship_metadata,
+    readable_relationship_from_surreal_row,
+    relationship_weight_predicate,
 )
 from sibyl_core.storage import (
     EntityBundle,
@@ -680,6 +684,14 @@ class GraphQueryAdapter:
             return []
 
         type_clause = "AND name IN $relationship_types" if relationship_types else ""
+        readable_metadata = await readable_legacy_relationship_metadata(
+            self._client,
+            "group_id = $group_id AND source_id IN $entity_ids "
+            f"AND target_id IN $entity_ids {type_clause}",
+            group_id=self._group_id,
+            entity_ids=sorted(scoped_entity_ids),
+            relationship_types=[rel.value for rel in relationship_types or []],
+        )
         rows = _normalize_result(
             await self._client.execute_query(
                 f"""
@@ -702,6 +714,7 @@ class GraphQueryAdapter:
                   AND source_id IN $entity_ids
                   AND target_id IN $entity_ids
                   {type_clause}
+                  {relationship_weight_predicate(self._client)}
                 ORDER BY uuid DESC
                 LIMIT $limit
                 START $offset;
@@ -711,9 +724,15 @@ class GraphQueryAdapter:
                 relationship_types=[rel.value for rel in relationship_types or []],
                 limit=limit,
                 offset=max(offset, 0),
+                readable_relationship_metadata=readable_metadata,
+                nan_relationship_weight=float("nan"),
             )
         )
-        return [relationship_from_surreal_row(row) for row in rows]
+        return [
+            relationship
+            for row in rows
+            if (relationship := readable_relationship_from_surreal_row(row)) is not None
+        ]
 
     async def get_connection_counts(
         self,
@@ -758,7 +777,10 @@ class GraphQueryAdapter:
             for endpoint in (edge.source_id, edge.target_id)
         }
         current = await available_graph_entities(
-            self._group_id, sorted(endpoints), runtime=self._runtime
+            self._group_id,
+            sorted(endpoints),
+            runtime=self._runtime,
+            source_visible=entity_visible,
         )
         visible = {identity for identity, entity in current.items() if entity_visible(entity)}
         for relationship in relationships.values():
@@ -812,6 +834,8 @@ class GraphQueryAdapter:
         principal_id: str | None = None,
         accessible_projects: set[str] | None = None,
         allowed_memory_scope_keys: set[str] | None = None,
+        accessible_teams: set[str] | None = None,
+        accessible_delegations: set[str] | None = None,
     ) -> list[Any]:
         from sibyl_core.services.graph_communities import get_clusters_for_visualization
 
@@ -822,6 +846,8 @@ class GraphQueryAdapter:
             principal_id=principal_id,
             accessible_projects=accessible_projects,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
         )
 
     async def get_cluster_nodes(
@@ -831,6 +857,8 @@ class GraphQueryAdapter:
         principal_id: str | None = None,
         accessible_projects: set[str] | None = None,
         allowed_memory_scope_keys: set[str] | None = None,
+        accessible_teams: set[str] | None = None,
+        accessible_delegations: set[str] | None = None,
     ) -> dict[str, Any]:
         from sibyl_core.services.graph_communities import get_cluster_nodes
 
@@ -841,6 +869,8 @@ class GraphQueryAdapter:
             principal_id=principal_id,
             accessible_projects=accessible_projects,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
         )
 
     async def get_hierarchical_graph(
@@ -855,6 +885,8 @@ class GraphQueryAdapter:
         principal_id: str | None = None,
         accessible_projects: set[str] | None = None,
         allowed_memory_scope_keys: set[str] | None = None,
+        accessible_teams: set[str] | None = None,
+        accessible_delegations: set[str] | None = None,
     ) -> Any:
         from sibyl_core.services.graph_communities import get_hierarchical_graph
 
@@ -870,6 +902,8 @@ class GraphQueryAdapter:
             principal_id=principal_id,
             accessible_projects=accessible_projects,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
         )
 
 

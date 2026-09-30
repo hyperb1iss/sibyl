@@ -292,6 +292,7 @@ tasks:
     options:
       cache: false
       runInCI: true
+      outputStyle: stream
 
   # Server
   serve:

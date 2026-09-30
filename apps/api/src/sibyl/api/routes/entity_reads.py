@@ -1,6 +1,7 @@
 """Canonical reads ownership for entity routes."""
 
 from datetime import UTC, datetime
+from functools import partial
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -137,6 +138,8 @@ async def _list_entities_bounded(
     reader_user_id: str | None,
     accessible_projects: set[str],
     allowed_memory_scope_keys: set[str] | None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
 ) -> tuple[list[Any], int, bool]:
     start = (page - 1) * page_size
     target = start + page_size + 1
@@ -168,7 +171,16 @@ async def _list_entities_bounded(
             break
 
         current = await available_capture_projection_rows(
-            organization_id, {entity.id: entity for entity in batch}
+            organization_id,
+            {entity.id: entity for entity in batch},
+            source_visible=partial(
+                policy.entity_visible_to_reader,
+                reader_user_id=reader_user_id,
+                accessible_projects=accessible_projects,
+                allowed_memory_scope_keys=allowed_memory_scope_keys,
+                accessible_teams=accessible_teams,
+                accessible_delegations=accessible_delegations,
+            ),
         )
         for entity in batch:
             if entity.id in current and policy.entity_matches_list_filters(
@@ -178,6 +190,8 @@ async def _list_entities_bounded(
                 has_unassigned=has_unassigned,
                 reader_user_id=reader_user_id,
                 allowed_memory_scope_keys=allowed_memory_scope_keys,
+                accessible_teams=accessible_teams,
+                accessible_delegations=accessible_delegations,
                 accessible_projects=accessible_projects,
                 language=None,
                 category=None,
@@ -209,6 +223,8 @@ async def _enrich_entity_with_related(
     accessible_projects: set[str],
     reader_user_id: str | None,
     allowed_memory_scope_keys: set[str] | None = None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
     related_limit: int = 5,
 ) -> tuple[dict[str, Any], list[RelatedEntitySummary] | None]:
     """Enrich entity metadata and fetch related entities based on entity type.
@@ -271,6 +287,8 @@ async def _enrich_entity_with_related(
             accessible_projects=accessible_projects,
             reader_user_id=reader_user_id,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
             limit=related_limit,
         )
 
@@ -285,6 +303,8 @@ def summarize_related_entities(
     accessible_projects: set[str],
     reader_user_id: str | None,
     allowed_memory_scope_keys: set[str] | None = None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
     limit: int | None = None,
 ) -> list[RelatedEntitySummary] | None:
     if not related_entities or not relationships:
@@ -309,6 +329,8 @@ def summarize_related_entities(
             related_entity,
             reader_user_id=reader_user_id,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
             accessible_projects=accessible_projects,
         ):
             continue
@@ -342,6 +364,8 @@ async def _fetch_related_entity_summaries(
     accessible_projects: set[str],
     reader_user_id: str | None,
     allowed_memory_scope_keys: set[str] | None = None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
     limit: int,
 ) -> list[RelatedEntitySummary] | None:
     try:
@@ -352,7 +376,16 @@ async def _fetch_related_entity_summaries(
             return None
 
         current = await available_capture_projection_rows(
-            organization_id, {entity.id: entity for entity, _ in related_pairs}
+            organization_id,
+            {entity.id: entity for entity, _ in related_pairs},
+            source_visible=partial(
+                policy.entity_visible_to_reader,
+                reader_user_id=reader_user_id,
+                accessible_projects=accessible_projects,
+                allowed_memory_scope_keys=allowed_memory_scope_keys,
+                accessible_teams=accessible_teams,
+                accessible_delegations=accessible_delegations,
+            ),
         )
         seen_ids: set[str] = set()
         deduped: list[RelatedEntitySummary] = []
@@ -361,6 +394,8 @@ async def _fetch_related_entity_summaries(
                 rel_entity,
                 reader_user_id=reader_user_id,
                 allowed_memory_scope_keys=allowed_memory_scope_keys,
+                accessible_teams=accessible_teams,
+                accessible_delegations=accessible_delegations,
                 accessible_projects=accessible_projects,
             ):
                 continue
@@ -416,6 +451,8 @@ async def list_entities(
 
     reader_user_id = str(getattr(getattr(ctx, "user", None), "id", None) or "") or None
     allowed_memory_scope_keys = policy.reader_memory_grants(ctx)
+    accessible_teams = set(ctx.accessible_teams)
+    accessible_delegations = set(ctx.accessible_delegations)
     project_ids, real_project_ids, has_unassigned = await policy.resolve_entity_list_project_filter(
         ctx=ctx,
         project_ids=project_ids,
@@ -459,6 +496,8 @@ async def list_entities(
             single_project_id=single_project_id,
             reader_user_id=reader_user_id,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
             accessible_projects=accessible_projects,
         )
     else:
@@ -481,6 +520,8 @@ async def list_entities(
                 has_unassigned=bool(has_unassigned),
                 reader_user_id=reader_user_id,
                 allowed_memory_scope_keys=allowed_memory_scope_keys,
+                accessible_teams=accessible_teams,
+                accessible_delegations=accessible_delegations,
                 accessible_projects=accessible_projects,
                 language=language,
                 category=category,
@@ -489,7 +530,16 @@ async def list_entities(
         ]
 
         current = await available_capture_projection_rows(
-            group_id, {entity.id: entity for entity in filtered}
+            group_id,
+            {entity.id: entity for entity in filtered},
+            source_visible=partial(
+                policy.entity_visible_to_reader,
+                reader_user_id=reader_user_id,
+                accessible_projects=accessible_projects,
+                allowed_memory_scope_keys=allowed_memory_scope_keys,
+                accessible_teams=accessible_teams,
+                accessible_delegations=accessible_delegations,
+            ),
         )
         filtered = [entity for entity in filtered if entity.id in current]
 
@@ -587,6 +637,8 @@ async def get_entity(
                     accessible_projects=accessible_projects,
                     reader_user_id=policy.reader_user_id(ctx),
                     allowed_memory_scope_keys=policy.reader_memory_grants(ctx),
+                    accessible_teams=set(ctx.accessible_teams),
+                    accessible_delegations=set(ctx.accessible_delegations),
                     limit=related_limit,
                 )
 
@@ -625,6 +677,8 @@ async def get_entity(
                     accessible_projects=accessible_projects,
                     reader_user_id=policy.reader_user_id(ctx),
                     allowed_memory_scope_keys=policy.reader_memory_grants(ctx),
+                    accessible_teams=set(ctx.accessible_teams),
+                    accessible_delegations=set(ctx.accessible_delegations),
                     related_limit=0,
                 )
 
@@ -652,7 +706,16 @@ async def get_entity(
         accessible_projects = await policy.require_entity_read_access(ctx, entity)
         metadata = dict(getattr(entity, "metadata", {}) or {})
         current_related = await available_capture_projection_rows(
-            str(org.id), {row.id: row for row in graph_bundle.related_entities}
+            str(org.id),
+            {row.id: row for row in graph_bundle.related_entities},
+            source_visible=partial(
+                policy.entity_visible_to_reader,
+                reader_user_id=policy.reader_user_id(ctx),
+                accessible_projects=accessible_projects,
+                allowed_memory_scope_keys=policy.reader_memory_grants(ctx),
+                accessible_teams=set(ctx.accessible_teams),
+                accessible_delegations=set(ctx.accessible_delegations),
+            ),
         )
         related = summarize_related_entities(
             entity_id,
@@ -661,6 +724,8 @@ async def get_entity(
             accessible_projects=accessible_projects,
             reader_user_id=policy.reader_user_id(ctx),
             allowed_memory_scope_keys=policy.reader_memory_grants(ctx),
+            accessible_teams=set(ctx.accessible_teams),
+            accessible_delegations=set(ctx.accessible_delegations),
             limit=related_limit,
         )
 
@@ -679,6 +744,8 @@ async def get_entity(
                 accessible_projects=accessible_projects,
                 reader_user_id=policy.reader_user_id(ctx),
                 allowed_memory_scope_keys=policy.reader_memory_grants(ctx),
+                accessible_teams=set(ctx.accessible_teams),
+                accessible_delegations=set(ctx.accessible_delegations),
                 related_limit=related_limit,
             )
 

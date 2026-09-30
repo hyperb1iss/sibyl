@@ -49,6 +49,7 @@ from sibyl_core.models.context import (
 )
 from sibyl_core.models.reflection import ReflectionCandidate, ReflectionPack
 from sibyl_core.services.surreal_content import MemoryScope
+from tests.harness.auth import stub_auth_context
 
 
 def _context_pack() -> ContextPack:
@@ -1083,7 +1084,7 @@ async def test_manage_mcp_complete_task_routes_through_workflow_service(monkeypa
         "organization_id": ctx.org_id,
         "organization_role": None,
         "accessible_projects": ["project-a"],
-        "accessible_delegations": None,
+        "accessible_delegations": [],
         "delegated_authority": None,
         "agent_id": None,
         "project_id": "project-a",
@@ -1730,7 +1731,12 @@ async def test_get_mcp_context_uses_legacy_api_key_auth() -> None:
             "sibyl.mcp_tools.context.authenticate_api_key", AsyncMock(return_value=auth)
         ) as authenticate,
         patch(
-            "sibyl.mcp_tools.context.resolve_org_role", AsyncMock(return_value="member")
+            "sibyl.mcp_tools.context.resolve_auth_context",
+            AsyncMock(
+                side_effect=lambda *, claims: stub_auth_context(
+                    user_id=claims["sub"], organization_id=claims["org"]
+                )
+            ),
         ) as resolve_role,
     ):
         result = await _get_mcp_context()
@@ -1745,8 +1751,7 @@ async def test_get_mcp_context_uses_legacy_api_key_auth() -> None:
     )
     authenticate.assert_awaited_once_with(raw)
     resolve_role.assert_awaited_once_with(
-        org_id=str(auth.organization_id),
-        user_id=str(auth.user_id),
+        claims={"org": str(auth.organization_id), "sub": str(auth.user_id), "scopes": ["mcp"]}
     )
 
 
@@ -1854,8 +1859,12 @@ async def test_get_mcp_context_resolves_org_role_live_ignoring_stale_claim() -> 
             },
         ),
         patch(
-            "sibyl.mcp_tools.context.resolve_org_role",
-            AsyncMock(return_value="member"),
+            "sibyl.mcp_tools.context.resolve_auth_context",
+            AsyncMock(
+                side_effect=lambda *, claims: stub_auth_context(
+                    user_id=claims["sub"], organization_id=claims["org"]
+                )
+            ),
         ) as resolve_role,
     ):
         result = await _get_mcp_context()
@@ -1864,7 +1873,7 @@ async def test_get_mcp_context_resolves_org_role_live_ignoring_stale_claim() -> 
     assert result.org_id == org_id
     assert result.user_id == user_id
     assert result.org_role == "member"
-    resolve_role.assert_awaited_once_with(org_id=org_id, user_id=user_id)
+    resolve_role.assert_awaited_once_with(claims={"org": org_id, "sub": user_id, "scopes": ["mcp"]})
 
 
 @pytest.mark.asyncio
@@ -1885,16 +1894,18 @@ async def test_get_mcp_context_drops_role_when_membership_revoked() -> None:
             },
         ),
         patch(
-            "sibyl.mcp_tools.context.resolve_org_role",
-            AsyncMock(return_value=None),
+            "sibyl.mcp_tools.context.resolve_auth_context",
+            AsyncMock(
+                side_effect=lambda *, claims: stub_auth_context(
+                    user_id=claims["sub"], organization_id=claims["org"], org_role=None
+                )
+            ),
         ) as resolve_role,
     ):
         result = await _get_mcp_context()
 
-    assert result is not None
-    assert result.org_id == org_id
-    assert result.org_role is None
-    resolve_role.assert_awaited_once_with(org_id=org_id, user_id=user_id)
+    assert result is None
+    resolve_role.assert_awaited_once_with(claims={"org": org_id, "sub": user_id, "scopes": ["mcp"]})
 
 
 @pytest.mark.asyncio

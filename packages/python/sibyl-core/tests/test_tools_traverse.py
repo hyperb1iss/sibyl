@@ -8,9 +8,11 @@ testing only the allow direction is how a leak ships as a feature.
 
 from __future__ import annotations
 
+from contextlib import ExitStack, asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 import pytest
 
@@ -241,6 +243,143 @@ def _runtime_patch(runtime: _FakeRuntime) -> Any:
         "sibyl_core.tools.traverse.get_graph_runtime",
         AsyncMock(return_value=runtime),
     )
+
+
+@pytest.fixture(autouse=True)
+async def traversal_proof_store(monkeypatch):
+    """Keep shape-test adjacency synthetic while proof gates use real stores.
+
+    The fixtures contain ordinary rows and retained legacy spans only. No
+    protected association or publication verdict is invented for these tests.
+    """
+    from sibyl_core.backends.surreal import SurrealContentClient
+    from sibyl_core.backends.surreal.content_schema import bootstrap_content_schema
+    from sibyl_core.services import content_client
+    from sibyl_core.services.eval_publication_guards import available_graph_entity_rows
+    from sibyl_core.services.graph_client import (
+        SurrealGraphClient,
+        mark_graph_schema_dirty,
+        prepare_graph_schema,
+    )
+    from sibyl_core.services.graph_entities import EntityManager
+    from sibyl_core.services.graph_read_availability import available_graph_relationships
+    from sibyl_core.services.graph_records import entity_from_surreal_row
+    from sibyl_core.services.graph_relationships import RelationshipManager
+    from sibyl_core.services.graph_runtime import GraphRuntime
+
+    namespace = f"traverse_shape_{uuid4().hex}"
+    graph = None
+    content = None
+    native = None
+
+    async def initialize():
+        nonlocal graph, content, native
+        if native is None:
+            graph = SurrealGraphClient(
+                group_id=ORG, url="memory://", namespace_prefix=f"{namespace}_"
+            )
+            content = SurrealContentClient(url="memory://", namespace=namespace)
+            mark_graph_schema_dirty(ORG)
+            await prepare_graph_schema(graph)
+            await bootstrap_content_schema(content)
+            native = GraphRuntime(
+                graph,
+                EntityManager(graph, group_id=ORG),
+                RelationshipManager(graph, group_id=ORG),
+            )
+        return native
+
+    @asynccontextmanager
+    async def content_scope():
+        await initialize()
+        yield content
+
+    monkeypatch.setattr(content_client, "surreal_content_client", content_scope)
+
+    def runtime_patch(fake):
+        async def resolve(_group):
+            store = await initialize()
+            entities = dict(getattr(fake.entity_manager, "entities", {}))
+            for row in getattr(fake.client, "rows", {}).values():
+                entity = entity_from_surreal_row(row)
+                entities[entity.id] = entity
+            await store.entity_manager.create_direct_bulk(list(entities.values()))
+            pairs = getattr(fake.relationship_manager, "pairs", ())
+            await store.relationship_manager.create_direct_bulk([edge for _, edge in pairs])
+            return fake
+
+        async def entity_rows(organization_id, rows, *, graph_client, read, source_visible):
+            store = await initialize()
+            await store.entity_manager.create_direct_bulk(list(rows.values()))
+            stored = await store.entity_manager.get_many(list(rows))
+            valid = await available_graph_entity_rows(
+                organization_id,
+                {row.id: row for row in stored},
+                graph_client=store.client,
+                read=read,
+                source_visible=source_visible,
+            )
+            return {identifier: rows[identifier] for identifier in valid}
+
+        async def relationships(organization_id, ids, *, runtime):
+            return await available_graph_relationships(
+                organization_id, ids, runtime=await initialize()
+            )
+
+        stack = ExitStack()
+        stack.enter_context(patch("sibyl_core.tools.traverse.get_graph_runtime", resolve))
+        stack.enter_context(
+            patch("sibyl_core.tools.traverse.available_graph_entity_rows", entity_rows)
+        )
+        stack.enter_context(
+            patch("sibyl_core.tools.traverse.available_graph_relationships", relationships)
+        )
+        if isinstance(fake.client, _FakeClient | _GraphClient):
+            original = fake.client.execute_query
+
+            async def adjacency(query, **params):
+                rows = await original(query, **params)
+                if "FROM relates_to" not in query or not rows:
+                    return rows
+                origin = next(
+                    iter(params.get("source_uuids") or params.get("target_uuids") or ()), None
+                )
+                if origin is None:
+                    return rows
+                edges = []
+                for row in rows:
+                    other = row.get("uuid")
+                    if not other:
+                        continue
+                    incoming = "target_id IN $target_uuids" in query
+                    source, target = (other, origin) if incoming else (origin, other)
+                    name = row.get("relationship") or "RELATED_TO"
+                    edge_id = f"shape_{source}_{target}_{name}"
+                    row["relationship_id"] = edge_id
+                    edges.append(
+                        Relationship(
+                            id=edge_id,
+                            source_id=source,
+                            target_id=target,
+                            relationship_type=RelationshipType(name),
+                        )
+                    )
+                store = await initialize()
+                await store.relationship_manager.create_direct_bulk(edges)
+                return rows
+
+            stack.enter_context(patch.object(fake.client, "execute_query", adjacency))
+        return stack
+
+    monkeypatch.setattr(f"{__name__}._runtime_patch", runtime_patch)
+    try:
+        yield
+    finally:
+        if graph is not None:
+            mark_graph_schema_dirty(ORG)
+            await graph.close()
+        if content is not None:
+            await content.close()
 
 
 def _span(
@@ -716,7 +855,9 @@ class TestExpandNeighborsBudget:
                     )
                 ],
             ),
-            entity_manager=_FakeEntityManager({"seed": _entity("seed")}),
+            entity_manager=_FakeEntityManager(
+                {"seed": _entity("seed"), "decision_parent": _entity("decision_parent")}
+            ),
         )
 
         with _runtime_patch(runtime):
