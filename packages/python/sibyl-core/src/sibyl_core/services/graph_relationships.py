@@ -43,7 +43,9 @@ from sibyl_core.services.graph_records import (
     _related_entity_from_row,
     _related_entity_projection,
     _relationship_fact,
-    _relationship_from_row,
+    readable_legacy_relationship_metadata,
+    readable_relationship_from_surreal_row,
+    relationship_weight_predicate,
 )
 
 if TYPE_CHECKING:
@@ -248,9 +250,10 @@ class RelationshipManager:
             group_id=self._group_id,
             uuid=relationship_id,
         )
-        if row is None:
+        relationship = readable_relationship_from_surreal_row(row) if row is not None else None
+        if relationship is None:
             raise KeyError(relationship_id)
-        return _relationship_from_row(row)
+        return relationship
 
     async def get_for_entity(
         self,
@@ -306,7 +309,11 @@ class RelationshipManager:
                 row["direction"] = "outgoing"
             elif row.get("target_uuid") == entity_id:
                 row["direction"] = "incoming"
-        return [_relationship_from_row(row) for row in rows]
+        return [
+            relationship
+            for row in rows
+            if (relationship := readable_relationship_from_surreal_row(row)) is not None
+        ]
 
     async def get_related_entities(
         self,
@@ -357,7 +364,9 @@ class RelationshipManager:
             entity = _related_entity_from_row(row)
             if entity is None:
                 continue
-            relationship = _relationship_from_row(row)
+            relationship = readable_relationship_from_surreal_row(row)
+            if relationship is None:
+                continue
             key = (relationship.id, row.get("direction"))
             if key in seen_by_seed[seed_id]:
                 continue
@@ -425,6 +434,14 @@ class RelationshipManager:
         type_values: Sequence[str],
         limit: int,
     ) -> list[SurrealRecord]:
+        readable_metadata = await readable_legacy_relationship_metadata(
+            self._client,
+            f"group_id = $group_id AND {endpoint_field} IN $seed_ids "
+            f"AND {related_side}.group_id = $group_id {type_clause}",
+            group_id=self._group_id,
+            seed_ids=list(seed_ids),
+            relationship_types=list(type_values),
+        )
         # Keep each SELECT top-level so SurrealDB can push ORDER/LIMIT into
         # the composite endpoint index instead of sorting inside a closure.
         statement = (
@@ -450,6 +467,7 @@ class RelationshipManager:
               AND {related_side}.group_id = $group_id
             """
             + type_clause
+            + relationship_weight_predicate(self._client)
             + """
             ORDER BY created_at DESC, uuid DESC
             LIMIT $limit;
@@ -466,6 +484,8 @@ class RelationshipManager:
                     group_id=self._group_id,
                     relationship_types=type_values,
                     limit=limit,
+                    readable_relationship_metadata=readable_metadata,
+                    nan_relationship_weight=float("nan"),
                     **{f"seed_{index}": seed_id for index, seed_id in enumerate(batch)},
                 )
             )
@@ -497,6 +517,12 @@ class RelationshipManager:
             return []
         type_values = [rel_type.value for rel_type in relationship_types or ()]
         type_clause = "AND name IN $relationship_types" if type_values else ""
+        readable_metadata = await readable_legacy_relationship_metadata(
+            self._client,
+            f"group_id = $group_id {type_clause}",
+            group_id=self._group_id,
+            relationship_types=type_values,
+        )
         rows = normalize_records(
             await self._client.execute_query(
                 """
@@ -517,6 +543,7 @@ class RelationshipManager:
                 WHERE group_id = $group_id
                 """
                 + type_clause
+                + relationship_weight_predicate(self._client)
                 + """
                 ORDER BY created_at DESC, uuid DESC
                 LIMIT $limit START $offset;
@@ -525,9 +552,15 @@ class RelationshipManager:
                 relationship_types=type_values,
                 limit=max(int(limit), 1),
                 offset=max(int(offset), 0),
+                readable_relationship_metadata=readable_metadata,
+                nan_relationship_weight=float("nan"),
             )
         )
-        return [_relationship_from_row(row) for row in rows]
+        return [
+            relationship
+            for row in rows
+            if (relationship := readable_relationship_from_surreal_row(row)) is not None
+        ]
 
     async def find_between(
         self,
@@ -570,7 +603,11 @@ class RelationshipManager:
                 relationship_type=relationship_type.value if relationship_type else None,
             )
         )
-        return [_relationship_from_row(row) for row in rows]
+        return [
+            relationship
+            for row in rows
+            if (relationship := readable_relationship_from_surreal_row(row)) is not None
+        ]
 
     async def delete_between(
         self,

@@ -17,7 +17,11 @@ from sibyl_core.services.graph import (
     entity_from_surreal_row,
     get_surreal_graph_runtime,
     normalize_records,
-    relationship_from_surreal_row,
+)
+from sibyl_core.services.graph_records import (
+    readable_legacy_relationship_metadata,
+    readable_relationship_from_surreal_row,
+    relationship_weight_predicate,
 )
 from sibyl_core.storage import (
     EntityBundle,
@@ -680,6 +684,14 @@ class GraphQueryAdapter:
             return []
 
         type_clause = "AND name IN $relationship_types" if relationship_types else ""
+        readable_metadata = await readable_legacy_relationship_metadata(
+            self._client,
+            "group_id = $group_id AND source_id IN $entity_ids "
+            f"AND target_id IN $entity_ids {type_clause}",
+            group_id=self._group_id,
+            entity_ids=sorted(scoped_entity_ids),
+            relationship_types=[rel.value for rel in relationship_types or []],
+        )
         rows = _normalize_result(
             await self._client.execute_query(
                 f"""
@@ -702,6 +714,7 @@ class GraphQueryAdapter:
                   AND source_id IN $entity_ids
                   AND target_id IN $entity_ids
                   {type_clause}
+                  {relationship_weight_predicate(self._client)}
                 ORDER BY uuid DESC
                 LIMIT $limit
                 START $offset;
@@ -711,9 +724,15 @@ class GraphQueryAdapter:
                 relationship_types=[rel.value for rel in relationship_types or []],
                 limit=limit,
                 offset=max(offset, 0),
+                readable_relationship_metadata=readable_metadata,
+                nan_relationship_weight=float("nan"),
             )
         )
-        return [relationship_from_surreal_row(row) for row in rows]
+        return [
+            relationship
+            for row in rows
+            if (relationship := readable_relationship_from_surreal_row(row)) is not None
+        ]
 
     async def get_connection_counts(
         self,

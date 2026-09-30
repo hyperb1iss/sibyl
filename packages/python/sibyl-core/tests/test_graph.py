@@ -205,6 +205,7 @@ class _TransactionDeleteClient:
 
 
 class _RelatedBatchClient:
+    _url = "memory://"
     pool_size = 1
     group_id = "org-native"
 
@@ -341,6 +342,7 @@ def _related_entity_row(
 
 
 class _CappedRelatedBatchClient:
+    _url = "memory://"
     pool_size = 1
     group_id = "org-native"
 
@@ -3998,7 +4000,14 @@ async def test_native_relationship_batch_uses_native_traversal_projection() -> N
         limit_per_entity=3,
     )
 
-    relates_queries = [call for call in client.calls if "FROM relates_to" in call[0]]
+    relates_queries = [
+        call for call in client.calls if "FROM relates_to" in call[0] and "AS record_id" in call[0]
+    ]
+    carriers = [call for call in client.calls if "GROUP BY metadata" in call[0]]
+    assert len(carriers) == 2
+    assert all("SELECT attributes.metadata AS metadata" in query for query, _ in carriers)
+    assert all(params["seed_ids"] == ["seed-a", "seed-b"] for _, params in carriers)
+    assert all("LIMIT" not in query and "fact," not in query for query, _ in carriers)
     entity_queries = [call for call in client.calls if "FROM entity" in call[0]]
     assert len(relates_queries) == 2
     assert entity_queries == []
@@ -4064,7 +4073,14 @@ async def test_native_relationship_batch_applies_limit_per_seed_with_indexed_que
         limit_per_entity=2,
     )
 
-    relates_queries = [call for call in client.calls if "FROM relates_to" in call[0]]
+    relates_queries = [
+        call for call in client.calls if "FROM relates_to" in call[0] and "AS record_id" in call[0]
+    ]
+    carriers = [call for call in client.calls if "GROUP BY metadata" in call[0]]
+    assert len(carriers) == 2
+    assert all("SELECT attributes.metadata AS metadata" in query for query, _ in carriers)
+    assert all(params["seed_ids"] == ["seed-a", "seed-b"] for _, params in carriers)
+    assert all("LIMIT" not in query and "fact," not in query for query, _ in carriers)
     entity_queries = [call for call in client.calls if "FROM entity" in call[0]]
     assert len(relates_queries) == 2
     assert entity_queries == []
