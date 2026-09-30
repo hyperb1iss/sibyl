@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import BinaryIO
 
 from anyio import CancelScope, to_thread
+from anyio.lowlevel import checkpoint
 from fastapi import Request
 from pydantic import ValidationError
 from python_multipart import MultipartParser
@@ -135,6 +137,18 @@ def _remove_owned_spool(path: Path) -> None:
     path.unlink(missing_ok=True)
 
 
+async def _owned_worker_result[T](worker: asyncio.Task[T]) -> tuple[T, bool]:
+    """Finish an owned worker before propagating direct task cancellation."""
+    cancelled = False
+    with CancelScope(shield=True):
+        while not worker.done():
+            try:
+                await asyncio.shield(worker)
+            except asyncio.CancelledError:
+                cancelled = True
+    return worker.result(), cancelled
+
+
 async def stage_archive_upload(
     request: Request,
     *,
@@ -163,10 +177,16 @@ async def stage_archive_upload(
         raise ArchiveIntakeError("archive upload requires a valid multipart boundary")
 
     created = False
+    closed = False
     try:
-        destination = await to_thread.run_sync(_open_spool, spool)
+        destination, cancelled = await _owned_worker_result(
+            asyncio.create_task(to_thread.run_sync(_open_spool, spool))
+        )
         created = True
+        if cancelled:
+            raise asyncio.CancelledError
         try:
+            await checkpoint()
             parts = _UploadParts(destination, budget, intake_budget)
             parser = MultipartParser(boundary, parts.callbacks())
             request_bytes = 0
@@ -179,7 +199,13 @@ async def stage_archive_upload(
                         )
                     # Multipart callbacks write the spool on this worker, keeping
                     # filesystem latency out of the request event loop.
-                    if await to_thread.run_sync(parser.write, chunk) != len(chunk):
+                    consumed, cancelled = await _owned_worker_result(
+                        asyncio.create_task(to_thread.run_sync(parser.write, chunk))
+                    )
+                    if cancelled:
+                        raise asyncio.CancelledError
+                    await checkpoint()
+                    if consumed != len(chunk):
                         raise ArchiveIntakeError("archive multipart request was not fully consumed")
                 parser.finalize()
             except MultipartParseError as exc:
@@ -203,10 +229,19 @@ async def stage_archive_upload(
                 compressed_bytes=parts.compressed_bytes,
             )
         finally:
-            with CancelScope(shield=True):
-                await to_thread.run_sync(destination.close)
+            _, cancelled = await _owned_worker_result(
+                asyncio.create_task(to_thread.run_sync(destination.close))
+            )
+            closed = True
+            if cancelled:
+                raise asyncio.CancelledError
     except BaseException:
         if created:
-            with CancelScope(shield=True):
-                await to_thread.run_sync(_remove_owned_spool, spool)
+            if not closed:
+                await _owned_worker_result(
+                    asyncio.create_task(to_thread.run_sync(destination.close))
+                )
+            await _owned_worker_result(
+                asyncio.create_task(to_thread.run_sync(_remove_owned_spool, spool))
+            )
         raise

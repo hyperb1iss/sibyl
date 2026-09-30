@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import threading
 from dataclasses import replace
 from uuid import uuid4
 
@@ -213,3 +215,91 @@ async def test_archive_upload_never_removes_or_overwrites_an_existing_spool(tmp_
             intake_budget=intake_budget(),
         )
     assert spool.read_bytes() == b"other owner's bytes"
+
+
+async def test_archive_upload_owns_open_worker_before_direct_task_cancellation(
+    tmp_path, monkeypatch
+):
+    from sibyl.api.routes import archive_import_upload as module
+
+    opened, release = threading.Event(), threading.Event()
+    original_open = module._open_spool
+    handles = []
+
+    def paused_open(path):
+        handle = original_open(path)
+        handles.append(handle)
+        opened.set()
+        assert release.wait(10)
+        return handle
+
+    monkeypatch.setattr(module, "_open_spool", paused_open)
+    spool = tmp_path / "owned.spool"
+    task = asyncio.create_task(
+        stage_archive_upload(
+            request(multipart(b"archive", options())),
+            spool=spool,
+            budget=ArchiveUploadBudget(100_000, 10_000, 1000),
+            intake_budget=intake_budget(),
+        )
+    )
+    try:
+        await asyncio.to_thread(opened.wait, 10)
+        assert opened.is_set()
+        assert spool.exists()
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert handles[0].closed
+        assert not spool.exists()
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_archive_upload_waits_for_actual_write_worker_before_cleanup(tmp_path, monkeypatch):
+    from sibyl.api.routes import archive_import_upload as module
+
+    written, release = threading.Event(), threading.Event()
+    original_data = module._UploadParts.part_data
+    handles = []
+
+    def paused_data(self, data, start, end):
+        original_data(self, data, start, end)
+        if self.part == b"archive" and not written.is_set():
+            handles.append(self.spool)
+            written.set()
+            assert release.wait(10)
+
+    monkeypatch.setattr(module._UploadParts, "part_data", paused_data)
+    spool = tmp_path / "owned.spool"
+    task = asyncio.create_task(
+        stage_archive_upload(
+            request(multipart(b"archive", options()), chunk=100_000),
+            spool=spool,
+            budget=ArchiveUploadBudget(100_000, 10_000, 1000),
+            intake_budget=intake_budget(),
+        )
+    )
+    try:
+        await asyncio.to_thread(written.wait, 10)
+        assert written.is_set()
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        assert not handles[0].closed
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert handles[0].closed
+        assert not spool.exists()
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
