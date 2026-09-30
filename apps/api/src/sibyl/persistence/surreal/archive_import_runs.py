@@ -83,6 +83,71 @@ class SavedArchiveCheck:
         )
 
 
+def _validated_archive_plan(
+    plan: CheckedArchivePlan, artifact: CheckedArchiveArtifact
+) -> CheckedArchivePlan:
+    # Frozen models contain mutable maps. Isolate and validate them before
+    # native I/O, then retain only this snapshot across subsequent awaits.
+    snapshot = CheckedArchivePlan.model_validate(plan.model_dump(mode="python"))
+    if (
+        artifact.archive_sha256 != snapshot.archive_sha256
+        or artifact.artifact_sha256 != snapshot.artifact_sha256
+    ):
+        raise ValueError("archive artifact and plan binding mismatch")
+    return snapshot
+
+
+def _checked_archive_metadata(
+    plan: CheckedArchivePlan,
+    artifact: CheckedArchiveArtifact,
+    intake_identity: str,
+    request_sha256: str,
+) -> tuple[dict[str, object], dict[str, object]]:
+    run_id, artifact_id = str(uuid4()), str(uuid4())
+    now = datetime.now(UTC)
+    record = {
+        "uuid": run_id,
+        "organization_id": plan.organization_id,
+        "actor_id": plan.actor_id,
+        "intake_identity": intake_identity,
+        "request_sha256": request_sha256,
+        "contract_version": plan.contract_version,
+        "archive_sha256": plan.archive_sha256,
+        "artifact_id": artifact_id,
+        "artifact_sha256": plan.artifact_sha256,
+        "origin_json": canonical_json(plan.origin),
+        "mappings_json": canonical_json(plan.mappings),
+        "mappings_sha256": archive_digest("sibyl-archive-mappings-v1", plan.mappings),
+        "conflict_policy": plan.conflict_policy,
+        "credential_kind": plan.credential.credential_kind,
+        "original_api_key_id": plan.credential.api_key_id,
+        "original_ceiling_json": canonical_json(plan.credential),
+        "checked_plan_json": checked_plan_bytes(plan),
+        "checked_plan_sha256": checked_plan_digest(plan),
+        "preview_counts_json": canonical_json(
+            {kind: counts.model_dump(mode="json") for kind, counts in plan.counts.items()}
+        ),
+        "created_at": now,
+        "status": "checked",
+        "revision": 0,
+        "updated_at": now,
+    }
+    artifact_record = {
+        "uuid": artifact_id,
+        "organization_id": plan.organization_id,
+        "actor_id": plan.actor_id,
+        "run_id": run_id,
+        "archive_sha256": artifact.archive_sha256,
+        "artifact_sha256": artifact.artifact_sha256,
+        "contract_version": plan.contract_version,
+        "member_inventory_json": artifact.member_inventory_json,
+        "staged_payload_json": artifact.staged_payload_json,
+        "measured_sizes_json": artifact.measured_sizes_json,
+        "created_at": now,
+    }
+    return record, artifact_record
+
+
 class SurrealArchiveImportRunRepository:
     """Create artifact and run in one native transaction, without a detached claim."""
 
@@ -147,64 +212,19 @@ class SurrealArchiveImportRunRepository:
             type(metadata_transaction_bytes) is not int or metadata_transaction_bytes <= 0
         ):
             raise ValueError("archive metadata byte budget must be a positive integer")
-        # Frozen models still contain mutable maps. Validate an isolated snapshot
-        # before native I/O, then serialize only that snapshot across awaits.
-        plan = CheckedArchivePlan.model_validate(plan.model_dump(mode="python"))
-        if (
-            artifact.archive_sha256 != plan.archive_sha256
-            or artifact.artifact_sha256 != plan.artifact_sha256
-        ):
-            raise ValueError("archive artifact and plan binding mismatch")
+        plan = await to_thread.run_sync(_validated_archive_plan, plan, artifact)
         existing = await self.load_operation(
             intake_identity,
             organization_id=plan.organization_id,
             actor_id=plan.actor_id,
         )
         if existing is not None:
-            return self._replay(existing, request_sha256)
+            return await to_thread.run_sync(self._replay, existing, request_sha256)
 
-        run_id, artifact_id = str(uuid4()), str(uuid4())
-        now = datetime.now(UTC)
-        record = {
-            "uuid": run_id,
-            "organization_id": plan.organization_id,
-            "actor_id": plan.actor_id,
-            "intake_identity": intake_identity,
-            "request_sha256": request_sha256,
-            "contract_version": plan.contract_version,
-            "archive_sha256": plan.archive_sha256,
-            "artifact_id": artifact_id,
-            "artifact_sha256": plan.artifact_sha256,
-            "origin_json": canonical_json(plan.origin),
-            "mappings_json": canonical_json(plan.mappings),
-            "mappings_sha256": archive_digest("sibyl-archive-mappings-v1", plan.mappings),
-            "conflict_policy": plan.conflict_policy,
-            "credential_kind": plan.credential.credential_kind,
-            "original_api_key_id": plan.credential.api_key_id,
-            "original_ceiling_json": canonical_json(plan.credential),
-            "checked_plan_json": checked_plan_bytes(plan),
-            "checked_plan_sha256": checked_plan_digest(plan),
-            "preview_counts_json": canonical_json(
-                {kind: counts.model_dump(mode="json") for kind, counts in plan.counts.items()}
-            ),
-            "created_at": now,
-            "status": "checked",
-            "revision": 0,
-            "updated_at": now,
-        }
-        artifact_record = {
-            "uuid": artifact_id,
-            "organization_id": plan.organization_id,
-            "actor_id": plan.actor_id,
-            "run_id": run_id,
-            "archive_sha256": artifact.archive_sha256,
-            "artifact_sha256": artifact.artifact_sha256,
-            "contract_version": plan.contract_version,
-            "member_inventory_json": artifact.member_inventory_json,
-            "staged_payload_json": artifact.staged_payload_json,
-            "measured_sizes_json": artifact.measured_sizes_json,
-            "created_at": now,
-        }
+        record, artifact_record = await to_thread.run_sync(
+            _checked_archive_metadata, plan, artifact, intake_identity, request_sha256
+        )
+        run_id = str(record["uuid"])
         query = _CREATE_CHECKED_QUERY
 
         if metadata_transaction_bytes is not None:
@@ -246,7 +266,7 @@ class SurrealArchiveImportRunRepository:
             )
             if winner is None:
                 raise
-            return self._replay(winner, request_sha256)
+            return await to_thread.run_sync(self._replay, winner, request_sha256)
         saved = await self.load(
             run_id, organization_id=plan.organization_id, actor_id=plan.actor_id
         )

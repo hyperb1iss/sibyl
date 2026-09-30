@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import threading
 from uuid import uuid4
 
 import pytest
@@ -326,3 +327,54 @@ async def test_archive_repository_measures_full_native_envelope_before_mutation(
     assert len(writes) == 2
     assert len(await metadata_client.execute_query("SELECT * FROM archive_import_runs;")) == 2
     assert len(await metadata_client.execute_query("SELECT * FROM archive_import_artifacts;")) == 2
+
+
+async def test_archive_repository_preparation_and_replay_run_on_workers(
+    metadata_client, monkeypatch
+):
+    from sibyl.persistence.surreal import archive_import_runs as module
+
+    loop_thread = threading.get_ident()
+    observed = []
+
+    def forwarding(name, actual):
+        def call(*args, **kwargs):
+            observed.append((name, threading.get_ident()))
+            return actual(*args, **kwargs)
+
+        return call
+
+    for name in (
+        "_validated_archive_plan",
+        "_checked_archive_metadata",
+        "verify_checked_plan",
+    ):
+        monkeypatch.setattr(module, name, forwarding(name, getattr(module, name)))
+
+    plan, artifact = _intake()
+    plan = _nonempty_plan(plan)
+    repository = SurrealArchiveImportRunRepository(metadata_client)
+    first = await repository.create_checked(
+        plan=plan,
+        artifact=artifact,
+        intake_identity="worker-check",
+        request_sha256="c" * 64,
+    )
+    repeated = await repository.create_checked(
+        plan=plan,
+        artifact=artifact,
+        intake_identity="worker-check",
+        request_sha256="c" * 64,
+    )
+    assert not first.replayed
+    assert repeated.replayed
+    assert first.record["uuid"] == repeated.record["uuid"]
+    assert {name for name, _ in observed} == {
+        "_validated_archive_plan",
+        "_checked_archive_metadata",
+        "verify_checked_plan",
+    }
+    assert all(thread != loop_thread for _, thread in observed)
+    assert repeated.plan == plan
+    assert len(await metadata_client.execute_query("SELECT * FROM archive_import_runs;")) == 1
+    assert len(await metadata_client.execute_query("SELECT * FROM archive_import_artifacts;")) == 1
