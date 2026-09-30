@@ -167,6 +167,11 @@ def _strict_json(
     return payload, nodes
 
 
+def decode_personal_archive_json(encoded: bytes, budget: ArchiveIntakeBudget) -> dict[str, object]:
+    """Decode one bounded, finite, duplicate-free request options object."""
+    return _strict_json(encoded, budget)[0]
+
+
 _LOGICAL_MEMBERS = frozenset({"manifest.json", "metadata.json", "graph.json", "content.json"})
 _CONTENT_TABLES = frozenset(
     {
