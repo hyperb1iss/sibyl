@@ -9,6 +9,7 @@ import json
 import math
 import tarfile
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
@@ -222,7 +223,11 @@ def _logical_envelopes(
             "lineage_validation",
             "metadata",
         }
-        if graph.keys() - allowed or graph.get("version") not in {"2.0", "3.0"}:
+        if (
+            graph.keys() - allowed
+            or not isinstance(graph.get("version"), str)
+            or graph.get("version") not in {"2.0", "3.0"}
+        ):
             raise ArchiveIntakeError("unsupported graph archive contract")
         for field, count in (
             ("entities", "entity_count"),
@@ -249,13 +254,18 @@ def _logical_envelopes(
             "row_counts",
             "total_rows",
         }
-        if content.keys() - allowed or content.get("version") not in {
-            "1.0",
-            "2.0",
-            "2.1",
-            "2.2",
-            "2.3",
-        }:
+        if (
+            content.keys() - allowed
+            or not isinstance(content.get("version"), str)
+            or content.get("version")
+            not in {
+                "1.0",
+                "2.0",
+                "2.1",
+                "2.2",
+                "2.3",
+            }
+        ):
             raise ArchiveIntakeError("unsupported content archive contract")
         tables, counts = content.get("tables"), content.get("row_counts", {})
         if not isinstance(tables, dict) or tables.keys() - _CONTENT_TABLES:
@@ -322,6 +332,10 @@ def _guard_embedded_json(
             for row in section.get("source_rows", []):
                 if isinstance(row, dict) and isinstance(row.get("record"), dict):
                     records.append(row["record"])
+            for field in ("source_states", "derivations"):
+                collection = section.get(field, [])
+                if isinstance(collection, list):
+                    records.extend(collection)
 
     for row in records:
         if not isinstance(row, dict):
@@ -330,7 +344,8 @@ def _guard_embedded_json(
             value
             for key, value in row.items()
             if isinstance(value, str)
-            and key in {"request_json", "result_json", "usage_json", "metadata"}
+            and key
+            in {"request_json", "result_json", "usage_json", "metadata", "validation_binding_json"}
         ]
         attributes = row.get("attributes")
         if isinstance(attributes, dict) and isinstance(attributes.get("metadata"), str):
@@ -451,6 +466,54 @@ def _read_members(
             raise ArchiveIntakeError("archive member padding is invalid")
 
 
+def _personal_manifest(payload: dict[str, object]) -> ArchiveManifest:
+    required = {"version", "created_at", "organization_id", "source_store", "files"}
+    if (
+        not required <= payload.keys()
+        or payload.keys() - required - {"metadata"}
+        or payload["version"] != "1.0"
+        or any(
+            not isinstance(value := payload[key], str) or not value.strip()
+            for key in ("created_at", "organization_id", "source_store")
+        )
+        or not isinstance(payload.get("metadata", {}), dict)
+    ):
+        raise ArchiveIntakeError("unsupported typed archive manifest")
+    created = payload["created_at"]
+    assert isinstance(created, str)
+    try:
+        if datetime.fromisoformat(created).tzinfo is None:
+            raise ValueError("archive time has no timezone")
+        organization, store = payload["organization_id"], payload["source_store"]
+        assert isinstance(organization, str) and isinstance(store, str)
+        ArchiveSourceOrigin(organization_id=organization, source_store=store)
+    except ValueError as exc:
+        raise ArchiveIntakeError("archive manifest origin or timestamp is invalid") from exc
+    files = payload["files"]
+    if not isinstance(files, dict) or not files or files.keys() - {"graph.json", "content.json"}:
+        raise ArchiveIntakeError("unsupported archive logical member inventory")
+    for name, entry in files.items():
+        if (
+            not isinstance(entry, dict)
+            or not {"path", "sha256", "size_bytes"} <= entry.keys()
+            or entry.keys() - {"path", "sha256", "size_bytes", "kind", "metadata"}
+            or entry["path"] != name
+            or type(entry["size_bytes"]) is not int
+            or entry["size_bytes"] < 0
+            or not isinstance(entry["sha256"], str)
+            or len(entry["sha256"]) != 64
+            or any(char not in "0123456789abcdef" for char in entry["sha256"])
+            or not isinstance(entry.get("metadata", {}), dict)
+        ):
+            raise ArchiveIntakeError("unsupported typed archive member inventory")
+        # The published generic builder defaults to 'other'. The logical name
+        # still fixes its interpretation; explicit kinds must match that name.
+        kind = entry.get("kind", "other")
+        if kind != "other" and kind != name.removesuffix(".json"):
+            raise ArchiveIntakeError("unsupported archive logical member kind")
+    return ArchiveManifest.from_dict(payload)
+
+
 def parse_personal_archive(source: Path, budget: ArchiveIntakeBudget) -> ParsedPersonalArchive:
     """Validate and stage only inert logical members from an owned upload spool."""
     digest = hashlib.sha256()
@@ -476,29 +539,7 @@ def parse_personal_archive(source: Path, budget: ArchiveIntakeBudget) -> ParsedP
         raise ArchiveIntakeCapacityError("archive parsed-row budget exceeded")
     nodes = _guard_embedded_json(payloads, budget, nodes)
     if "manifest.json" in members:
-        manifest = payloads["manifest.json"]
-        if (
-            manifest.keys()
-            - {"version", "created_at", "organization_id", "source_store", "files", "metadata"}
-            or manifest.get("version") != "1.0"
-            or not isinstance(manifest.get("files"), dict)
-        ):
-            raise ArchiveIntakeError("unsupported archive manifest")
-        manifest_files = manifest["files"]
-        assert isinstance(manifest_files, dict)
-        for name, entry in manifest_files.items():
-            if (
-                not isinstance(entry, dict)
-                or entry.keys() - {"path", "sha256", "size_bytes", "kind", "metadata"}
-                or entry.get("path") != name
-                or type(entry.get("size_bytes")) is not int
-                or not isinstance(entry.get("sha256"), str)
-                or not isinstance(entry.get("metadata", {}), dict)
-            ):
-                raise ArchiveIntakeError("unsupported archive member inventory")
-        if not isinstance(manifest.get("metadata", {}), dict):
-            raise ArchiveIntakeError("archive manifest metadata must be an object")
-        archive = LoadedArchive(source, ArchiveManifest.from_dict(manifest), files)
+        archive = LoadedArchive(source, _personal_manifest(payloads["manifest.json"]), files)
     else:
         try:
             archive = load_backup_archive(source, dict(members))

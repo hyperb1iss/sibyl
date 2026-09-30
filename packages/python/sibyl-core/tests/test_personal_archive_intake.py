@@ -20,6 +20,7 @@ from sibyl_core.migrate.personal_archive_intake import (
     parse_personal_archive,
 )
 from sibyl_core.migrate.source_integrity import build_integrity_archive
+from sibyl_core.services.validation_promotion import ValidationBinding
 
 
 @pytest.fixture
@@ -362,4 +363,167 @@ def test_personal_archive_staging_bounds_encoded_artifact_before_base64_expansio
     )
     with pytest.raises(ArchiveIntakeCapacityError, match="encoded-artifact"):
         parse_personal_archive(path, replace(budget, encoded_artifact_bytes=1))
+    assert calls == 0
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "source-store-object",
+        "timestamp-object",
+        "timestamp-naive",
+        "unknown-kind",
+        "mismatched-kind",
+        "size-boolean",
+        "invalid-origin",
+    ],
+)
+def test_personal_archive_staging_rejects_typed_manifest_before_legacy_coercion(
+    tmp_path, budget, monkeypatch, mutation
+):
+    org = str(uuid4())
+    graph = json.dumps(_graph(org)).encode()
+    manifest = build_manifest(
+        organization_id=org, source_store="surreal", files={"graph.json": graph}
+    ).to_dict()
+    if mutation == "source-store-object":
+        manifest["source_store"] = {"untrusted": "label"}
+    elif mutation == "timestamp-object":
+        manifest["created_at"] = {"untrusted": "time"}
+    elif mutation == "timestamp-naive":
+        manifest["created_at"] = "2026-09-30T00:00:00"
+    elif mutation == "unknown-kind":
+        manifest["files"]["graph.json"]["kind"] = "unknown-kind"
+    elif mutation == "mismatched-kind":
+        manifest["files"]["graph.json"]["kind"] = "content"
+    elif mutation == "size-boolean":
+        manifest["files"]["graph.json"]["size_bytes"] = True
+    else:
+        manifest["organization_id"] = "untrusted-invalid-organization"
+    encoded = json.dumps(manifest).encode()
+    path = _manual_archive(
+        tmp_path,
+        [
+            (_info("manifest.json", encoded), encoded),
+            (_info("graph.json", graph), graph),
+        ],
+    )
+    calls = 0
+
+    def forbidden_adapter(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("legacy manifest coercion ran before typed admission")
+
+    monkeypatch.setattr(
+        "sibyl_core.migrate.personal_archive_intake.ArchiveManifest.from_dict", forbidden_adapter
+    )
+    with pytest.raises(ArchiveIntakeError):
+        parse_personal_archive(path, budget)
+    assert calls == 0
+
+
+@pytest.mark.parametrize("mutation", ["depth", "duplicate"])
+def test_personal_archive_staging_admits_derivation_binding_before_actual_typed_decoder(
+    tmp_path, budget, monkeypatch, mutation
+):
+    org, identity = str(uuid4()), str(uuid4())
+    record = {
+        "uuid": identity,
+        "organization_id": org,
+        "raw_content": "Synthetic protected capture",
+        "revision": 1,
+        "derivation_required": True,
+    }
+    binding = ValidationBinding(
+        execution_id="a" * 64,
+        request_sha256="a" * 64,
+        result_sha256="b" * 64,
+        input_sha256="c" * 64,
+    ).model_dump_json()
+    section = build_integrity_archive(
+        kind=SourceKind.RAW_CAPTURE,
+        organizations=[org],
+        source_rows=[record],
+        source_states=[
+            {
+                "organization_id": org,
+                "source_kind": "raw_capture",
+                "source_id": identity,
+                "generation": 1,
+                "revision": 1,
+                "deleted": False,
+                "incarnation": str(uuid4()),
+            }
+        ],
+        derivations=[
+            {
+                "organization_id": org,
+                "target_kind": "raw_capture",
+                "target_id": identity,
+                "body_sha256": hashlib.sha256(record["raw_content"].encode()).hexdigest(),
+                "principal_id": str(uuid4()),
+                "authority_ceiling": {},
+                "active": True,
+                "observations": [
+                    {
+                        "source": {
+                            "organization_id": org,
+                            "kind": "graph_entity",
+                            "id": str(uuid4()),
+                        },
+                        "generation": 1,
+                        "revision": 1,
+                        "incarnation": str(uuid4()),
+                        "content_sha256": "d" * 64,
+                        "durable": True,
+                    }
+                ],
+                "validation_binding_json": binding,
+            }
+        ],
+    )
+    content = {
+        "version": "2.0",
+        "organization_id": org,
+        "tables": {"raw_captures": [record]},
+        "row_counts": {"raw_captures": 1},
+        "total_rows": 1,
+        "source_integrity": section,
+    }
+    constrained = replace(budget, json_depth=12)
+    path = _archive(tmp_path, {"content.json": json.dumps(content).encode()}, org)
+    healthy = parse_personal_archive(path, constrained)
+    assert healthy.content["source_integrity"]["source_rows"][0]["record"]["derivation_required"]
+    if mutation == "depth":
+        value = json.loads(binding)
+        nested = []
+        for _ in range(20):
+            nested = [nested]
+        value["oversized"] = nested
+        encoded = json.dumps(value)
+    else:
+        encoded = binding.replace("{", '{"execution_id":"' + "f" * 64 + '",', 1)
+    section["derivations"][0]["validation_binding_json"] = encoded
+    section["sha256"] = hashlib.sha256(
+        json.dumps(
+            {key: value for key, value in section.items() if key != "sha256"},
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode()
+    ).hexdigest()
+    path = _archive(tmp_path, {"content.json": json.dumps(content).encode()}, org)
+    calls = 0
+    actual_decoder = ValidationBinding.model_validate_json
+
+    def tracked_decoder(cls, encoded, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return actual_decoder(encoded, *args, **kwargs)
+
+    monkeypatch.setattr(ValidationBinding, "model_validate_json", classmethod(tracked_decoder))
+    expected = ArchiveIntakeCapacityError if mutation == "depth" else ArchiveIntakeError
+    with pytest.raises(expected):
+        parse_personal_archive(path, constrained)
     assert calls == 0
