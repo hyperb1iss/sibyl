@@ -12,7 +12,11 @@ import pytest
 from tools.trust import team_scope_gate
 
 MISSING_SURFACE_EXIT_CODE = 2
-GRAPH_TEAM_DENIAL_SURFACE_COUNT = 3
+MEMBERSHIP_READ_CONTROL_COUNT = 8
+MATCHING_CEILING_CONTROL_COUNT = 16
+MATCHING_CEILING_ALLOW_COUNT = 8
+PROJECT_CEILING_AUDIENCE_DENIAL_COUNT = 4
+REVOKED_READ_CONTROL_COUNT = 8
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMMITTED_RECEIPT = team_scope_gate.DEFAULT_RECEIPT_PATH
 MANIFEST_PATH = REPO_ROOT / "benchmarks" / "results" / "ai-memory" / "manifest.json"
@@ -240,7 +244,8 @@ class TestValidationCatchesRegressions:
         observed_receipt: dict[str, Any],
     ) -> None:
         receipt = _full_receipt(observed_receipt)
-        receipt["probes"][0] = {**receipt["probes"][0], "status": "FAIL", "observed": "allow"}
+        probe = next(probe for probe in receipt["probes"] if probe["expected"] == "deny")
+        probe.update(status="FAIL", observed="allow")
 
         failures = team_scope_gate.validate_team_scope_receipt(receipt)
 
@@ -371,7 +376,7 @@ class TestValidationCatchesRegressions:
     ) -> None:
         """Fixing the graph read helper must force the boundary to be retired."""
         receipt = _full_receipt(observed_receipt)
-        receipt["metrics"]["graph_team_membership_forwarded"] = 1
+        receipt["boundaries"] = [team_scope_gate.GRAPH_MEMBERSHIP_BOUNDARY]
 
         failures = team_scope_gate.validate_team_scope_receipt(receipt)
 
@@ -385,50 +390,136 @@ class TestValidationCatchesRegressions:
         assert any("promotion_attribution_coverage" in failure for failure in failures)
 
 
-class TestBoundaryProbe:
-    def test_reports_the_current_read_helper_signature(self) -> None:
-        assert team_scope_gate.graph_team_membership_forwarded() is False
+class TestMembershipProbes:
+    def test_requires_both_membership_inputs(self) -> None:
+        assert team_scope_gate.graph_team_membership_forwarded() is True
 
-    def test_declares_the_boundary_on_entitled_team_denials(
+    def test_current_members_are_allowed_and_outsiders_denied(
         self,
         observed_receipt: dict[str, Any],
     ) -> None:
-        entitled_team_denials = [
+        probes = [
             probe
             for probe in observed_receipt["probes"]
-            if probe["memory"] == "team-alpha"
-            and probe["reader"] == "member"
-            and probe["surface"]
+            if probe["memory"] in {"team-alpha", "delegated-oncall"}
+            and probe["membership_stage"] == "provisioned"
+            and probe["surface"] in {"graph_metadata_read", "retrieval_candidate_filter"}
+        ]
+        assert len(probes) == MEMBERSHIP_READ_CONTROL_COUNT
+        for probe in probes:
+            expected = (
+                team_scope_gate.ALLOW if probe["reader"] == "member" else team_scope_gate.DENY
+            )
+            assert probe["expected"] == probe["observed"] == expected
+            assert "boundary" not in probe
+
+    def test_records_no_retired_boundary(self, observed_receipt: dict[str, Any]) -> None:
+        assert observed_receipt["boundaries"] == []
+
+    def test_matching_ceiling_does_not_supply_membership(
+        self,
+        observed_receipt: dict[str, Any],
+    ) -> None:
+        probes = [
+            probe
+            for probe in observed_receipt["probes"]
+            if probe["surface"]
             in {
-                "graph_metadata_read",
-                "graph_metadata_read_narrowed",
-                "retrieval_candidate_filter",
+                "graph_metadata_read_matching_ceiling",
+                "retrieval_candidate_matching_ceiling",
             }
         ]
+        assert len(probes) == MATCHING_CEILING_CONTROL_COUNT
+        assert (
+            sum(probe["expected"] == team_scope_gate.ALLOW for probe in probes)
+            == MATCHING_CEILING_ALLOW_COUNT
+        )
+        assert all(probe["expected"] == probe["observed"] for probe in probes)
+        assert all(
+            probe["observed"] == team_scope_gate.DENY
+            for probe in probes
+            if probe["reader"] == "outsider"
+        )
 
-        assert len(entitled_team_denials) == GRAPH_TEAM_DENIAL_SURFACE_COUNT
-        for probe in entitled_team_denials:
-            assert probe["expected"] == team_scope_gate.DENY
-            assert probe["boundary"] == team_scope_gate.GRAPH_MEMBERSHIP_BOUNDARY
-
-    def test_records_only_the_graph_membership_boundary(
+    def test_project_ceiling_excludes_other_granted_audiences(
         self,
         observed_receipt: dict[str, Any],
     ) -> None:
-        assert observed_receipt["boundaries"] == [team_scope_gate.GRAPH_MEMBERSHIP_BOUNDARY]
-
-    def test_delegated_scope_is_probed_in_both_directions(
-        self,
-        observed_receipt: dict[str, Any],
-    ) -> None:
-        """A boundary asserting nobody can hold a delegation would be unfalsifiable."""
-        directions = {
-            probe["expected"]
+        probes = [
+            probe
             for probe in observed_receipt["probes"]
-            if probe["memory"] == "delegated-oncall"
-        }
+            if probe["memory"] in {"team-alpha", "delegated-oncall"}
+            and probe["reader"] == "member"
+            and probe["surface"] in {"graph_metadata_read_narrowed", "retrieval_candidate_narrowed"}
+        ]
+        assert len(probes) == PROJECT_CEILING_AUDIENCE_DENIAL_COUNT
+        assert all(
+            probe["expected"] == probe["observed"] == team_scope_gate.DENY for probe in probes
+        )
 
-        assert directions == {team_scope_gate.ALLOW, team_scope_gate.DENY}
+    def test_deleted_memberships_deny_fresh_reads(
+        self,
+        observed_receipt: dict[str, Any],
+    ) -> None:
+        revoked = [
+            probe for probe in observed_receipt["probes"] if probe["membership_stage"] == "revoked"
+        ]
+        assert len(revoked) == REVOKED_READ_CONTROL_COUNT
+        assert {probe["memory"] for probe in revoked} == {"team-alpha", "delegated-oncall"}
+        assert {probe["surface"] for probe in revoked} == {
+            "raw_targeted_read",
+            "scope_authorization",
+            "graph_metadata_read",
+            "retrieval_candidate_filter",
+        }
+        assert all(
+            probe["expected"] == probe["observed"] == team_scope_gate.DENY for probe in revoked
+        )
+
+    def test_missing_forwarding_produces_allow_failures(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        original = team_scope_gate.memory_metadata_read_allowed
+
+        def drop_memberships(metadata, **kwargs):
+            kwargs.pop("accessible_teams", None)
+            kwargs.pop("accessible_delegations", None)
+            return original(metadata, **kwargs)
+
+        monkeypatch.setattr(team_scope_gate, "memory_metadata_read_allowed", drop_memberships)
+        receipt = team_scope_gate.build_observed_team_scope_receipt()
+        assert receipt["metrics"]["allow_failure_count"] > 0
+        assert team_scope_gate.validate_team_scope_receipt(_full_receipt(receipt))
+
+    def test_ignored_ceiling_produces_leaks(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        original = team_scope_gate.memory_metadata_read_allowed
+
+        def drop_ceiling(metadata, **kwargs):
+            kwargs.pop("allowed_memory_scope_keys", None)
+            return original(metadata, **kwargs)
+
+        monkeypatch.setattr(team_scope_gate, "memory_metadata_read_allowed", drop_ceiling)
+        receipt = team_scope_gate.build_observed_team_scope_receipt()
+        assert receipt["metrics"]["leak_count"] > 0
+        assert team_scope_gate.validate_team_scope_receipt(_full_receipt(receipt))
+
+    def test_stale_resolver_facts_produce_revocation_leaks(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        original = team_scope_gate._resolve_principals
+        first = None
+
+        async def retain_first_resolution(client):
+            nonlocal first
+            current = await original(client)
+            if first is None:
+                first = current
+            return first
+
+        monkeypatch.setattr(team_scope_gate, "_resolve_principals", retain_first_resolution)
+        receipt = team_scope_gate.build_observed_team_scope_receipt()
+        assert receipt["metrics"]["leak_count"] == REVOKED_READ_CONTROL_COUNT
+        assert team_scope_gate.validate_team_scope_receipt(_full_receipt(receipt))
 
 
 class TestPromotionCoverage:
