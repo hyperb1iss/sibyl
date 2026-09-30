@@ -13,12 +13,14 @@ from sibyl_core.memory_pipeline.lifecycle import (
     graph_metadata_recallable,
     raw_memory_lifecycle_recallable,
 )
+from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind
 from sibyl_core.memory_pipeline.source_lifecycle import (
     SOURCE_BINDINGS_KEY,
     correction_event,
     declared_source_ids,
     merge_source_correction,
 )
+from sibyl_core.models.entities import Entity
 from sibyl_core.services import content_client, content_models
 from sibyl_core.services.memory_source_validation import _stored_source_ids
 
@@ -69,6 +71,10 @@ async def available_capture_projection_rows[T](
     Source bindings describe observed content, never audience authority.
     Audience expansion requires a verified protected publication association.
     """
+    if read is not None:
+        for row in rows.values():
+            if isinstance(row, Entity):
+                read.record_entity(row)
     candidates: dict[str, T] = {}
     dependent_ids: set[str] = set()
     for identifier, row in rows.items():
@@ -113,7 +119,11 @@ async def available_capture_projection_rows[T](
         if verdicts.get(identifier) is None
     }
     graph_rows, parents = await _graph_ancestry(
-        organization_id, legacy_rows, graph_client, refresh_ids=dependent_ids & legacy_rows.keys()
+        organization_id,
+        legacy_rows,
+        graph_client,
+        refresh_ids=dependent_ids & legacy_rows.keys(),
+        read=read,
     )
     references: dict[str, set[str]] = {}
     for identifier in legacy_rows:
@@ -135,6 +145,14 @@ async def available_capture_projection_rows[T](
             if identifier in dependent_ids and not roots and not parents.get(identifier):
                 raise ValueError("projection ancestry is unavailable")
             references[identifier] = roots
+            if read is not None:
+                read.depend_on(
+                    SourceIdentity(organization_id, SourceKind.GRAPH_ENTITY, identifier),
+                    [
+                        SourceIdentity(organization_id, SourceKind.RAW_CAPTURE, root)
+                        for root in roots
+                    ],
+                )
         except (TypeError, ValueError):
             continue
     frontier = set().union(*references.values()) if references else set()
@@ -175,6 +193,19 @@ async def available_capture_projection_rows[T](
                                 continue
                             dependencies[memory.id] = _stored_source_ids(memory)
                             captures[memory.id] = memory
+                            if read is not None:
+                                read.record_capture(memory)
+                                read.depend_on(
+                                    SourceIdentity(
+                                        organization_id, SourceKind.RAW_CAPTURE, memory.id
+                                    ),
+                                    [
+                                        SourceIdentity(
+                                            organization_id, SourceKind.RAW_CAPTURE, source_id
+                                        )
+                                        for source_id in dependencies[memory.id]
+                                    ],
+                                )
                         except (TypeError, ValueError):
                             continue
         except Exception as exc:
@@ -278,7 +309,7 @@ def _parent_ids(row: Any) -> set[str]:
     return ids
 
 
-async def _graph_ancestry(organization_id, rows, graph_client, *, refresh_ids):
+async def _graph_ancestry(organization_id, rows, graph_client, *, refresh_ids, read=None):
     from sibyl_core.backends.surreal.records import normalize_records
     from sibyl_core.services.graph_records import entity_from_surreal_row
 
@@ -341,6 +372,17 @@ async def _graph_ancestry(organization_id, rows, graph_client, *, refresh_ids):
                 error_type=type(exc).__name__,
             )
         frontier = requested
+    if read is not None:
+        for identifier, row in current.items():
+            if isinstance(row, Entity):
+                read.record_entity(row, ancestry=True)
+                read.depend_on(
+                    SourceIdentity(organization_id, SourceKind.GRAPH_ENTITY, identifier),
+                    [
+                        SourceIdentity(organization_id, SourceKind.GRAPH_ENTITY, parent)
+                        for parent in parents.get(identifier) or ()
+                    ],
+                )
     return current, parents
 
 
