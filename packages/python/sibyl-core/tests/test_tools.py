@@ -3416,68 +3416,31 @@ class TestExploreTool:
     @pytest.mark.asyncio
     async def test_explore_dependencies_filters_inaccessible_projects(self) -> None:
         from sibyl_core.tools.explore import explore
-
-        def relationship(target_id: str) -> SimpleNamespace:
-            return SimpleNamespace(
-                source_id="task_root",
-                target_id=target_id,
-                relationship_type=RelationshipType.DEPENDS_ON,
-            )
-
-        root = MockEntity(
-            id="task_root",
-            entity_type=EntityType.TASK,
-            name="Root",
-            project_id="project_visible",
-        )
-        visible_dep = MockEntity(
-            id="task_visible_dep",
-            entity_type=EntityType.TASK,
-            name="Visible dependency",
-            project_id="project_visible",
-        )
-        hidden_dep = MockEntity(
-            id="task_hidden_dep",
-            entity_type=EntityType.TASK,
-            name="Hidden dependency",
-            project_id="project_hidden",
-        )
-        entity_manager = SimpleNamespace(
-            get=AsyncMock(
-                side_effect=lambda entity_id: {
-                    "task_root": root,
-                    "task_visible_dep": visible_dep,
-                    "task_hidden_dep": hidden_dep,
-                }.get(entity_id)
-            )
-        )
-        relationship_manager = SimpleNamespace(
-            get_related_entities=AsyncMock(
-                side_effect=[
-                    [
-                        (hidden_dep, relationship("task_hidden_dep")),
-                        (visible_dep, relationship("task_visible_dep")),
-                    ],
-                    [],
-                ]
-            )
+        from tests.test_explore_dependency_availability import (
+            dependency_graph,
+            store_dependency_graph,
+            task,
         )
 
-        with patch(
-            "sibyl_core.tools.explore.get_graph_runtime",
-            AsyncMock(
-                return_value=make_graph_runtime(
-                    entity_manager=entity_manager,
-                    relationship_manager=relationship_manager,
+        async with dependency_graph() as runtime:
+            await store_dependency_graph(
+                runtime,
+                [
+                    task("task_root", metadata={"project_id": "project_visible"}),
+                    task("task_visible_dep", metadata={"project_id": "project_visible"}),
+                    task("task_hidden_dep", metadata={"project_id": "project_hidden"}),
+                ],
+                [("task_root", "task_hidden_dep"), ("task_root", "task_visible_dep")],
+            )
+            with patch(
+                "sibyl_core.tools.explore.get_graph_runtime", AsyncMock(return_value=runtime)
+            ):
+                response = await explore(
+                    mode="dependencies",
+                    entity_id="task_root",
+                    accessible_projects={"project_visible"},
+                    organization_id=runtime.client.group_id,
                 )
-            ),
-        ):
-            response = await explore(
-                mode="dependencies",
-                entity_id="task_root",
-                accessible_projects={"project_visible"},
-                organization_id="org_123",
-            )
 
         assert {entity.id for entity in response.entities} == {
             "task_root",
@@ -5062,62 +5025,38 @@ class TestExploreMemoryScope:
     @pytest.mark.asyncio
     async def test_dependencies_hides_a_private_task_from_a_co_member(self) -> None:
         from sibyl_core.tools.explore import explore
-
-        root = MockEntity(
-            id="task_root",
-            entity_type=EntityType.TASK,
-            name="Root",
-            project_id="project_shared",
-        )
-        private_dep = MockEntity(
-            id="task_private_dep",
-            entity_type=EntityType.TASK,
-            name="Private dependency",
-            project_id="project_shared",
-            metadata={"memory_scope": "private", "principal_id": "victim"},
-        )
-        entity_manager = SimpleNamespace(
-            get=AsyncMock(
-                side_effect=lambda entity_id: {
-                    "task_root": root,
-                    "task_private_dep": private_dep,
-                }.get(entity_id)
-            )
-        )
-        relationship_manager = SimpleNamespace(
-            get_related_entities=AsyncMock(
-                side_effect=[
-                    [
-                        (
-                            private_dep,
-                            SimpleNamespace(
-                                source_id="task_root",
-                                target_id="task_private_dep",
-                                relationship_type=RelationshipType.DEPENDS_ON,
-                            ),
-                        )
-                    ],
-                    [],
-                ]
-            )
+        from tests.test_explore_dependency_availability import (
+            dependency_graph,
+            store_dependency_graph,
+            task,
         )
 
-        with patch(
-            "sibyl_core.tools.explore.get_graph_runtime",
-            AsyncMock(
-                return_value=make_graph_runtime(
-                    entity_manager=entity_manager,
-                    relationship_manager=relationship_manager,
+        async with dependency_graph() as runtime:
+            await store_dependency_graph(
+                runtime,
+                [
+                    task("task_root", metadata={"project_id": "project_shared"}),
+                    task(
+                        "task_private_dep",
+                        metadata={
+                            "project_id": "project_shared",
+                            "memory_scope": "private",
+                            "principal_id": "victim",
+                        },
+                    ),
+                ],
+                [("task_root", "task_private_dep")],
+            )
+            with patch(
+                "sibyl_core.tools.explore.get_graph_runtime", AsyncMock(return_value=runtime)
+            ):
+                response = await explore(
+                    mode="dependencies",
+                    entity_id="task_root",
+                    accessible_projects={"project_shared"},
+                    organization_id=runtime.client.group_id,
+                    principal_id="attacker",
                 )
-            ),
-        ):
-            response = await explore(
-                mode="dependencies",
-                entity_id="task_root",
-                accessible_projects={"project_shared"},
-                organization_id="org_123",
-                principal_id="attacker",
-            )
 
         assert [entity.id for entity in response.entities] == ["task_root"]
 

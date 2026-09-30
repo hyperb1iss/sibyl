@@ -518,7 +518,7 @@ async def _explore_dependencies(
 ) -> ExploreResponse:
     """Traverse task dependency chains with topological sorting.
 
-    Returns tasks in dependency order (dependencies before dependents).
+    Preserves the root-first response order, with dependency depths.
     Detects and reports circular dependencies.
     """
     if not entity_id:
@@ -531,104 +531,153 @@ async def _explore_dependencies(
 
     runtime = await get_graph_runtime(group_id)
     relationship_manager = runtime.relationship_manager
-    entity_manager = runtime.entity_manager
 
-    def entity_is_visible(entity: Any) -> bool:
+    def source_is_visible(entity: Any) -> bool:
         if scope_guard is not None and not scope_guard(entity):
             return False
         entity_project = _project_id_for_policy(entity)
-        if project and entity_project != project:
-            return False
         return not (
             accessible_projects is not None
             and entity_project is not None
             and entity_project not in accessible_projects
         )
 
-    try:
-        root_entity = await entity_manager.get(entity_id)
-    except Exception:
-        root_entity = None
-    if root_entity is not None and not entity_is_visible(root_entity):
-        return ExploreResponse(
-            mode="dependencies",
-            entities=[],
-            total=0,
-            filters=filters,
+    def entity_is_visible(entity: Any) -> bool:
+        return source_is_visible(entity) and (
+            not project or _project_id_for_policy(entity) == project
         )
 
-    # Track visited nodes and detect cycles
-    visited: set[str] = set()
-    in_stack: set[str] = set()  # For cycle detection
-    dependency_order: list[tuple[str, int]] = []  # (entity_id, depth)
-    circular_deps: list[tuple[str, str]] = []  # Detected cycles
+    seeds = await available_graph_entities(
+        group_id, [entity_id], runtime=runtime, source_visible=source_is_visible
+    )
+    if entity_id not in seeds or not entity_is_visible(seeds[entity_id]):
+        return ExploreResponse(mode="dependencies", entities=[], total=0, filters=filters)
 
-    async def traverse_dependencies(task_id: str, depth: int = 0) -> None:
-        """DFS traversal to build dependency order."""
-        if task_id in in_stack:
-            # Cycle detected
-            circular_deps.append((entity_id or "", task_id))
+    def relationship_is_visible(relationship: Any) -> bool:
+        if not graph_metadata_recallable(getattr(relationship, "metadata", None)):
+            return False
+        if scope_guard is not None and not scope_guard(relationship):
+            return False
+        edge_project = _project_id_for_policy(relationship)
+        return edge_project is None or (
+            (not project or edge_project == project)
+            and (accessible_projects is None or edge_project in accessible_projects)
+        )
+
+    # Retain the discovered paths so a later retirement can remove descendants
+    # that are still available individually but no longer reachable from root.
+    discovered: set[str] = set()
+    followed: dict[str, list[tuple[str, str]]] = {}
+
+    async def discover_dependencies(task_id: str) -> None:
+        if task_id in discovered:
             return
-
-        if task_id in visited:
-            return
-
-        visited.add(task_id)
-        in_stack.add(task_id)
-
-        # Get DEPENDS_ON relationships (tasks this task depends on)
+        if task_id != entity_id:
+            frontier = await available_graph_entities(
+                group_id, [task_id], runtime=runtime, source_visible=source_is_visible
+            )
+            if task_id not in frontier or not entity_is_visible(frontier[task_id]):
+                return
+        discovered.add(task_id)
         deps = await relationship_manager.get_related_entities(
             entity_id=task_id,
             relationship_types=[RelationshipType.DEPENDS_ON],
             max_depth=1,
             limit=100,
         )
+        edges = await available_graph_relationships(
+            group_id, [edge.id for _, edge in deps], runtime=runtime
+        )
+        endpoints = {task_id}
+        for edge in edges.values():
+            endpoints.update((edge.source_id, edge.target_id))
+        current = await available_graph_entities(
+            group_id, sorted(endpoints), runtime=runtime, source_visible=source_is_visible
+        )
+        current = {key: row for key, row in current.items() if entity_is_visible(row)}
+        if task_id not in current:
+            return
+        followed[task_id] = []
+        for candidate, original in deps:
+            edge = edges.get(original.id)
+            if (
+                edge is None
+                or edge.source_id != task_id
+                or edge.target_id != candidate.id
+                or edge.relationship_type != RelationshipType.DEPENDS_ON
+                or not relationship_is_visible(edge)
+                or edge.target_id not in current
+            ):
+                continue
+            followed[task_id].append((edge.id, edge.target_id))
+            await discover_dependencies(edge.target_id)
 
-        for dep_entity, rel in deps:
-            # Only follow outgoing DEPENDS_ON (this task depends on dep_entity)
-            if rel.source_id == task_id:
-                if not entity_is_visible(dep_entity):
-                    continue
-                await traverse_dependencies(dep_entity.id, depth + 1)
+    await discover_dependencies(entity_id)
 
+    edges = await available_graph_relationships(
+        group_id,
+        [edge_id for paths in followed.values() for edge_id, _ in paths],
+        runtime=runtime,
+    )
+    current = await available_graph_entities(
+        group_id, sorted(discovered), runtime=runtime, source_visible=source_is_visible
+    )
+    current = {key: row for key, row in current.items() if entity_is_visible(row)}
+    if entity_id not in current:
+        return ExploreResponse(mode="dependencies", entities=[], total=0, filters=filters)
+
+    visited: set[str] = set()
+    in_stack: set[str] = set()
+    dependency_order: list[tuple[str, int]] = []
+    circular_deps: list[tuple[str, str]] = []
+
+    def order_dependencies(task_id: str, depth: int = 0) -> None:
+        if task_id in in_stack:
+            circular_deps.append((entity_id or "", task_id))
+            return
+        if task_id in visited:
+            return
+        visited.add(task_id)
+        in_stack.add(task_id)
+        for edge_id, target_id in followed.get(task_id, []):
+            edge = edges.get(edge_id)
+            if (
+                edge is not None
+                and edge.source_id == task_id
+                and edge.target_id == target_id
+                and edge.relationship_type == RelationshipType.DEPENDS_ON
+                and relationship_is_visible(edge)
+                and target_id in current
+            ):
+                order_dependencies(target_id, depth + 1)
         in_stack.remove(task_id)
         dependency_order.append((task_id, depth))
 
-    # Start traversal from the given entity
-    await traverse_dependencies(entity_id)
-
-    # dependency_order is in reverse topological order (dependencies first)
-    # Reverse it so dependencies come first
+    order_dependencies(entity_id)
     dependency_order.reverse()
 
-    # Build result entities
     results: list[EntitySummary] = []
     for task_id, depth in dependency_order[:limit]:
-        try:
-            entity = await entity_manager.get(task_id)
-            if entity and entity_is_visible(entity):
-                raw_status = getattr(entity, "status", None) or entity.metadata.get("status")
-                status_value = (
-                    raw_status.value if raw_status and hasattr(raw_status, "value") else raw_status
-                )
-
-                results.append(
-                    EntitySummary(
-                        id=entity.id,
-                        type=entity.entity_type.value,
-                        name=entity.name,
-                        description=entity.description[:200] if entity.description else "",
-                        metadata={
-                            "status": status_value,
-                            "depth": depth,
-                            "is_root": entity.id == entity_id,
-                            "project_id": getattr(entity, "project_id", None)
-                            or entity.metadata.get("project_id"),
-                        },
-                    )
-                )
-        except Exception:
-            log.warning("dependency_entity_fetch_failed", task_id=task_id)
+        entity = current[task_id]
+        raw_status = getattr(entity, "status", None) or entity.metadata.get("status")
+        status_value = (
+            raw_status.value if raw_status and hasattr(raw_status, "value") else raw_status
+        )
+        results.append(
+            EntitySummary(
+                id=entity.id,
+                type=entity.entity_type.value,
+                name=entity.name,
+                description=entity.description[:200] if entity.description else "",
+                metadata={
+                    "status": status_value,
+                    "depth": depth,
+                    "is_root": entity.id == entity_id,
+                    "project_id": getattr(entity, "project_id", None)
+                    or entity.metadata.get("project_id"),
+                },
+            )
+        )
 
     # Add circular dependency warning to filters if detected
     result_filters = {**filters}
@@ -702,15 +751,15 @@ async def _explore_related(
     endpoint_ids = {entity_id}
     for _entity, relationship in raw_results:
         endpoint_ids.update((relationship.source_id, relationship.target_id))
+    current_relationships = await available_graph_relationships(
+        group_id, [relationship.id for _, relationship in raw_results], runtime=runtime
+    )
     current = await available_graph_entities(
         group_id, sorted(endpoint_ids), runtime=runtime, source_visible=allowed
     )
     current = {key: entity for key, entity in current.items() if allowed(entity)}
     if entity_id not in current:
         return ExploreResponse(mode=mode, entities=[], total=0, filters=filters)
-    current_relationships = await available_graph_relationships(
-        group_id, [relationship.id for _, relationship in raw_results], runtime=runtime
-    )
     results = []
     for entity, relationship in raw_results:
         if relationship.id not in current_relationships:
