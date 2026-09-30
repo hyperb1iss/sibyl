@@ -33,7 +33,11 @@ async def legacy_store(monkeypatch):
     url = os.environ.get("SIBYL_LEGACY_SURREAL_URL", "memory://")
     credentials = {"username": "root", "password": "root"} if url != "memory://" else {}
     graph = SurrealGraphClient(group_id=owner.organization_id, url=url, **credentials)
-    content = SurrealContentClient(url=url, namespace="sibyl_legacy_test", **credentials)
+    content = SurrealContentClient(
+        url=url,
+        namespace=f"sibyl_legacy_{str(owner.organization_id).replace('-', '')}",
+        **credentials,
+    )
     try:
         await prepare_graph_schema(graph)
         await bootstrap_content_schema(content, reset=True)
