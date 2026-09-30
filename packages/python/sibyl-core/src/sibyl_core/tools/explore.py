@@ -81,6 +81,8 @@ async def explore(
     organization_id: str | None = None,
     principal_id: str | None = None,
     allowed_memory_scope_keys: set[str] | None = None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
     enforce_memory_scope: bool = True,
 ) -> ExploreResponse:
     """Navigate and browse the Sibyl knowledge graph structure.
@@ -204,6 +206,8 @@ async def explore(
         principal_id=principal_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
         enforce_memory_scope=enforce_memory_scope,
     )
 

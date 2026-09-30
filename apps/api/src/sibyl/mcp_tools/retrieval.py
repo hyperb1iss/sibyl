@@ -375,6 +375,8 @@ def register_retrieval_tools(mcp: MCPServer) -> None:
             category=category,
             project=project,
             accessible_projects=accessible_projects,
+            accessible_teams=set(ctx.accessible_teams),
+            accessible_delegations=set(ctx.accessible_delegations),
             status=status,
             limit=limit,
             organization_id=ctx.org_id,
@@ -463,6 +465,8 @@ def register_retrieval_tools(mcp: MCPServer) -> None:
             include_incoming=include_incoming,
             principal_id=getattr(ctx, "user_id", None),
             accessible_projects=accessible_projects,
+            accessible_teams=set(ctx.accessible_teams),
+            accessible_delegations=set(ctx.accessible_delegations),
             allowed_memory_scope_keys=(
                 set(api_key_memory_scope_keys) if api_key_memory_scope_keys is not None else None
             ),
@@ -533,6 +537,8 @@ def register_retrieval_tools(mcp: MCPServer) -> None:
             content_max_chars=content_max_chars,
             principal_id=getattr(ctx, "user_id", None),
             accessible_projects=accessible_projects,
+            accessible_teams=set(ctx.accessible_teams),
+            accessible_delegations=set(ctx.accessible_delegations),
             allowed_memory_scope_keys=(
                 set(api_key_memory_scope_keys) if api_key_memory_scope_keys is not None else None
             ),

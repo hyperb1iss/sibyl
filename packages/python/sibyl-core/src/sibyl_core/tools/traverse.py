@@ -184,6 +184,8 @@ async def expand_neighbors(
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
     allowed_memory_scope_keys: set[str] | None = None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
     enforce_memory_scope: bool = True,
 ) -> ExpandNeighborsResponse:
     """Widen a set of known memories into their bounded graph neighborhood.
@@ -264,6 +266,8 @@ async def expand_neighbors(
         principal_id=principal_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
         enforce_memory_scope=enforce_memory_scope,
         surface="expand_neighbors",
     )
@@ -399,6 +403,8 @@ async def fetch_slice(
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
     allowed_memory_scope_keys: set[str] | None = None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
     enforce_memory_scope: bool = True,
 ) -> FetchSliceResponse:
     """Read one memory at span granularity, centered on the span you name.
@@ -450,6 +456,8 @@ async def fetch_slice(
         principal_id=principal_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
         enforce_memory_scope=enforce_memory_scope,
         surface="fetch_slice",
     )

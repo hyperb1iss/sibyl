@@ -261,6 +261,7 @@ async def public_membership_runtime(monkeypatch, tmp_path):
         mcp_context, "get_access_token", lambda: SimpleNamespace(token=active_token["value"])
     )
     runtime = SimpleNamespace(
+        app=app,
         auth=auth,
         content=content,
         resolver=resolver,
