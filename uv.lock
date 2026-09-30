@@ -3560,6 +3560,7 @@ dev = [
     { name = "pytest-cov" },
     { name = "ruff" },
     { name = "sibyl-dev" },
+    { name = "ty" },
 ]
 
 [package.metadata]
@@ -3598,6 +3599,7 @@ dev = [
     { name = "pytest-cov" },
     { name = "ruff" },
     { name = "sibyl-dev", editable = "apps/cli" },
+    { name = "ty", specifier = ">=0.0.80" },
 ]
 
 [[package]]
