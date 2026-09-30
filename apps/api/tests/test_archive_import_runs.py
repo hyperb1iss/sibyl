@@ -5,6 +5,7 @@ import os
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from sibyl.persistence.surreal.archive_import_runs import (
     ArchiveCheckConflictError,
@@ -16,9 +17,13 @@ from sibyl_core.backends.surreal.schema_archive_imports import ARCHIVE_IMPORT_DE
 from sibyl_core.migrate.personal_archive_plan import (
     ArchiveAudience,
     ArchiveCredentialCeiling,
+    ArchiveDisposition,
+    ArchiveKind,
     ArchiveMappings,
     ArchiveSourceOrigin,
     CheckedArchivePlan,
+    PlannedArchiveRow,
+    preview_counts,
 )
 
 
@@ -147,3 +152,77 @@ async def test_archive_repository_rejects_artifact_binding_before_metadata(metad
         )
     assert not await metadata_client.execute_query("SELECT * FROM archive_import_runs;")
     assert not await metadata_client.execute_query("SELECT * FROM archive_import_artifacts;")
+
+
+def _nonempty_plan(plan):
+    row = PlannedArchiveRow(
+        kind=ArchiveKind.SOURCE_STATE,
+        original_id="foreign-state",
+        audience=plan.mappings.quarantine,
+        disposition=ArchiveDisposition.QUARANTINED,
+        reason="foreign source authority stays inert",
+        semantic_sha256="e" * 64,
+        protection="inert",
+    )
+    payload = plan.model_dump(mode="python")
+    payload["mappings"]["projects"] = {"foreign-project": "destination-project"}
+    payload["rows"] = (row.model_dump(mode="python"),)
+    payload["counts"] = {
+        kind: counts.model_dump(mode="python") for kind, counts in preview_counts((row,)).items()
+    }
+    return CheckedArchivePlan.model_validate(payload)
+
+
+@pytest.mark.parametrize("mutation", ["counts", "project"])
+async def test_archive_repository_revalidates_mutated_plan_before_native_io(
+    metadata_client, mutation
+):
+    valid, artifact = _intake()
+    valid = _nonempty_plan(valid)
+    mutated = CheckedArchivePlan.model_validate(valid.model_dump(mode="python"))
+    if mutation == "counts":
+        mutated.counts.clear()
+    else:
+        mutated.mappings.projects["foreign-project"] = ""
+    calls = 0
+
+    class ObservingClient:
+        async def execute_query(self, query: str, **params: object):
+            nonlocal calls
+            calls += 1
+            return await metadata_client.execute_query(query, **params)
+
+    repo = SurrealArchiveImportRunRepository(ObservingClient())
+    with pytest.raises(ValidationError):
+        await repo.create_checked(
+            plan=mutated, artifact=artifact, intake_identity="mutation", request_sha256="c" * 64
+        )
+    assert calls == 0
+    assert not await metadata_client.execute_query("SELECT * FROM archive_import_runs;")
+    assert not await metadata_client.execute_query("SELECT * FROM archive_import_artifacts;")
+    saved = await repo.create_checked(
+        plan=valid, artifact=artifact, intake_identity="healthy", request_sha256="c" * 64
+    )
+    assert saved.plan == valid
+    assert len(await metadata_client.execute_query("SELECT * FROM archive_import_runs;")) == 1
+    assert len(await metadata_client.execute_query("SELECT * FROM archive_import_artifacts;")) == 1
+
+
+async def test_archive_repository_serializes_validated_snapshot_across_native_await(
+    metadata_client,
+):
+    plan, artifact = _intake()
+    plan = _nonempty_plan(plan)
+    expected = CheckedArchivePlan.model_validate(plan.model_dump(mode="python"))
+
+    class MutatingClient:
+        async def execute_query(self, query: str, **params: object):
+            if query.startswith("SELECT"):
+                plan.counts.clear()
+                plan.mappings.projects["foreign-project"] = ""
+            return await metadata_client.execute_query(query, **params)
+
+    saved = await SurrealArchiveImportRunRepository(MutatingClient()).create_checked(
+        plan=plan, artifact=artifact, intake_identity="snapshot", request_sha256="c" * 64
+    )
+    assert saved.plan == expected

@@ -108,6 +108,9 @@ class SurrealArchiveImportRunRepository:
         intake_identity: str,
         request_sha256: str,
     ) -> SavedArchiveCheck:
+        # Frozen models still contain mutable maps. Validate an isolated snapshot
+        # before native I/O, then serialize only that snapshot across awaits.
+        plan = CheckedArchivePlan.model_validate(plan.model_dump(mode="python"))
         if (
             artifact.archive_sha256 != plan.archive_sha256
             or artifact.artifact_sha256 != plan.artifact_sha256
