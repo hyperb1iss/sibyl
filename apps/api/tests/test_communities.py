@@ -1,6 +1,7 @@
 """Tests for community detection module."""
 
 import contextlib
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -52,6 +53,18 @@ def current_rendering_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(
         "sibyl_core.services.graph_community_clusters._current_graph_entities", current_entities
+    )
+
+    async def unchanged(_organization_id, relationships, *, runtime=None):
+        return relationships
+
+    monkeypatch.setattr(
+        "sibyl_core.services.graph_read_availability.unchanged_graph_relationships", unchanged
+    )
+    monkeypatch.setattr(
+        community_clusters,
+        "_runtime_for_client",
+        lambda client, _organization_id: SimpleNamespace(client=client),
     )
 
 
