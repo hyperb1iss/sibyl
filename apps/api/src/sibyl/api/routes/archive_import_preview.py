@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from functools import partial
 from typing import Any
@@ -114,6 +115,7 @@ _PHYSICAL_METADATA = frozenset(
 )
 _PRIVATE = "private"
 _WORK_ITEMS = frozenset({"task", "epic", "milestone"})
+_INLINE_REFERENCES = ("epic_id", "parent_task_id", "task_id", "milestone_id")
 
 
 def _unavailable() -> HTTPException:
@@ -289,6 +291,14 @@ def _metadata(value: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _graph_metadata(value: dict[str, Any]) -> dict[str, Any]:
+    metadata = _metadata(value)
+    # The ordinary graph writer mirrors its storage update clock into attributes.
+    # User timestamps under other metadata keys remain semantic.
+    metadata.pop("updated_at", None)
+    return metadata
+
+
 def _scope_fields(
     fields: dict[str, Any], *, actor_id: str, identity: str, entity_type: str | None = None
 ) -> ArchiveAudience:
@@ -351,7 +361,7 @@ def _existing_bodies(
                     entity = entity_from_surreal_row(row)
                     public = entity.model_dump(mode="json")
                     body = {key: public[key] for key in _GRAPH_FIELDS}
-                    body["metadata"] = _metadata(entity.metadata)
+                    body["metadata"] = _graph_metadata(public["metadata"])
                     audience = _scope_fields(
                         body["metadata"],
                         actor_id=actor_id,
@@ -375,7 +385,7 @@ def _existing_bodies(
         except (ValidationError, ValueError, TypeError) as exc:
             raise _unavailable() from exc
         body = relationship.model_dump(mode="json", exclude={"created_at"})
-        body["metadata"] = _metadata(relationship.metadata)
+        body["metadata"] = _metadata(body["metadata"])
         if body["metadata"].get("memory_scope") is not None:
             audiences.append(_scope_fields(body["metadata"], actor_id=actor_id, identity=identity))
         edge_bodies[identity] = body
@@ -411,7 +421,9 @@ def _prepared_body(
     if candidate.kind is ArchiveKind.GRAPH_RELATIONSHIP:
         body["metadata"] = _edge_semantic_metadata(body)
     metadata = stamp_memory_scope_metadata(
-        _metadata(body.get("metadata", {})),
+        (_graph_metadata if candidate.kind is ArchiveKind.GRAPH_ENTITY else _metadata)(
+            body.get("metadata", {})
+        ),
         memory_scope=candidate.audience.memory_scope,
         scope_key=candidate.audience.scope_key,
         principal_id=actor_id,
@@ -420,7 +432,7 @@ def _prepared_body(
     metadata.pop("project_id", None)
     if candidate.audience.memory_scope == "project":
         metadata["project_id"] = candidate.audience.scope_key
-    for key in ("epic_id", "parent_task_id", "task_id", "milestone_id"):
+    for key in _INLINE_REFERENCES:
         if key in metadata:
             original = metadata[key]
             if isinstance(original, str) and original in node_ids:
@@ -446,7 +458,7 @@ def _prepared_body(
     else:
         body["id"] = preview.destination_id
     if candidate.kind is ArchiveKind.GRAPH_RELATIONSHIP:
-        body["source_id"], body["target_id"] = preview.endpoint_ids
+        body["source_id"], body["target_id"] = preview.endpoint_ids[:2]
     return body
 
 
@@ -481,6 +493,7 @@ def _normalize_preview_inputs(
     tuple[ArchiveCandidate, ...],
     dict[tuple[ArchiveKind, str], PlannedArchiveRow],
     dict[str, str],
+    dict[tuple[ArchiveKind, str], tuple[str, ...]],
 ]:
     candidates = normalize_archive_candidates(parsed, mappings, actor_id=actor_id)
     previews = {
@@ -496,14 +509,35 @@ def _normalize_preview_inputs(
         for row in previews.values()
         if row.kind is ArchiveKind.GRAPH_ENTITY and row.destination_id is not None
     }
+    graph_original_ids = {
+        row.original_id for row in candidates if row.kind is ArchiveKind.GRAPH_ENTITY
+    }
+    dependencies: dict[tuple[ArchiveKind, str], tuple[str, ...]] = {}
     for candidate in candidates:
-        if candidate.kind is ArchiveKind.GRAPH_RELATIONSHIP and candidate.protection == "ordinary":
-            row = previews[candidate.kind, candidate.original_id]
-            endpoints = tuple(node_ids[identity] for identity in candidate.original_endpoint_ids)
-            previews[candidate.kind, candidate.original_id] = row.model_copy(
-                update={"endpoint_ids": endpoints}
-            )
-    return candidates, previews, node_ids
+        if candidate.protection != "ordinary":
+            continue
+        key = candidate.kind, candidate.original_id
+        metadata = json.loads(candidate.semantic_json).get("metadata", {})
+        inline = [
+            value
+            for field in _INLINE_REFERENCES
+            if isinstance(value := metadata.get(field), str) and value in graph_original_ids
+        ]
+        originals = candidate.original_endpoint_ids + tuple(inline)
+        dependencies[key] = tuple(dict.fromkeys(originals))
+        # Preserve relationship source/target order (including a self-edge).
+        endpoints = tuple(
+            node_ids[identity]
+            for identity in candidate.original_endpoint_ids
+            if identity in node_ids
+        )
+        endpoints += tuple(
+            node_ids[identity]
+            for identity in dict.fromkeys(inline)
+            if identity in node_ids and node_ids[identity] not in endpoints
+        )
+        previews[key] = previews[key].model_copy(update={"endpoint_ids": endpoints})
+    return candidates, previews, node_ids, dependencies
 
 
 async def build_archive_preview(
@@ -518,7 +552,7 @@ async def build_archive_preview(
     mappings = ArchiveMappings.model_validate(mappings.model_dump(mode="python"))
     gate = _PolicyGate(context, request)
     await gate.mappings(mappings)
-    candidates, previews, node_ids = await to_thread.run_sync(
+    candidates, previews, node_ids, dependencies = await to_thread.run_sync(
         partial(
             _normalize_preview_inputs,
             parsed,
@@ -552,6 +586,7 @@ async def build_archive_preview(
             previews,
             actor_id=actor_id,
             node_ids=node_ids,
+            dependencies=dependencies,
             content=content,
             graph=graph,
             raw_bodies=raw_bodies,
@@ -567,6 +602,7 @@ def _resolve_previews(
     *,
     actor_id: str,
     node_ids: dict[str, str],
+    dependencies: dict[tuple[ArchiveKind, str], tuple[str, ...]],
     content: _StoreCut,
     graph: _StoreCut,
     raw_bodies: dict[str, dict[str, Any]],
@@ -585,8 +621,11 @@ def _resolve_previews(
         ).get(identity)
         native = (cut.edges if edge else cut.rows).get(identity)
         witnesses = (cut.witness(identity, edge=edge),)
-        if edge:
-            witnesses += tuple(graph.witness(endpoint) for endpoint in row.endpoint_ids)
+        witnesses += tuple(
+            graph.witness(endpoint)
+            for endpoint in dict.fromkeys(row.endpoint_ids)
+            if edge or cut.store != "graph" or endpoint != identity
+        )
         updated: dict[str, Any] = {"witnesses": witnesses}
         if candidate.fixed_destination_id is not None:
             expected_kind = json.loads(candidate.semantic_json)["entity_type"]
@@ -639,27 +678,28 @@ def _resolve_previews(
         previews[candidate.kind, candidate.original_id] = PlannedArchiveRow.model_validate(
             {**row.model_dump(mode="python"), **updated}
         )
-    for candidate in candidates:
-        if (
-            candidate.kind is not ArchiveKind.GRAPH_RELATIONSHIP
-            or candidate.protection != "ordinary"
-        ):
-            continue
-        dependencies = [
-            previews[ArchiveKind.GRAPH_ENTITY, identity]
-            for identity in candidate.original_endpoint_ids
-        ]
-        if any(
-            node.disposition not in {ArchiveDisposition.CREATED, ArchiveDisposition.SKIPPED}
-            for node in dependencies
-        ):
-            row = previews[candidate.kind, candidate.original_id]
-            previews[candidate.kind, candidate.original_id] = row.model_copy(
+    reverse: dict[tuple[ArchiveKind, str], list[tuple[ArchiveKind, str]]] = defaultdict(list)
+    for dependent, originals in dependencies.items():
+        for original in originals:
+            reverse[ArchiveKind.GRAPH_ENTITY, original].append(dependent)
+    blocked = {
+        key
+        for key, row in previews.items()
+        if row.disposition not in {ArchiveDisposition.CREATED, ArchiveDisposition.SKIPPED}
+    }
+    pending = deque(blocked)
+    while pending:
+        for dependent in reverse.get(pending.popleft(), ()):
+            row = previews[dependent]
+            previews[dependent] = row.model_copy(
                 update={
                     "disposition": ArchiveDisposition.QUARANTINED,
                     "reason": "dependent_destination_conflict",
                 }
             )
+            if dependent not in blocked:
+                blocked.add(dependent)
+                pending.append(dependent)
     return tuple(previews.values())
 
 
@@ -685,10 +725,9 @@ async def authorize_archive_plan(
         if row.kind is ArchiveKind.GRAPH_ENTITY and row.destination_id is not None
     }
     for row in plan.rows:
-        if row.kind is ArchiveKind.GRAPH_RELATIONSHIP:
-            for endpoint in row.endpoint_ids:
-                if endpoint not in nodes:
-                    raise _unavailable()
+        for endpoint in row.endpoint_ids:
+            if endpoint not in nodes:
+                raise _unavailable()
     content, graph = await _read_cuts(
         organization_id=organization_id,
         raw_ids=[
@@ -705,5 +744,8 @@ async def authorize_archive_plan(
     )
     await _authorize_existing(content, graph, gate)
     for identity, row in nodes.items():
-        if identity not in graph.rows and row.disposition is not ArchiveDisposition.CREATED:
+        if identity not in graph.rows and row.disposition not in {
+            ArchiveDisposition.CREATED,
+            ArchiveDisposition.QUARANTINED,
+        }:
             raise _unavailable()
