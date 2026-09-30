@@ -120,8 +120,11 @@ async def available_capture_projection_rows[T](
             roots: set[str] = set()
             for ancestor in ancestry:
                 row = graph_rows[ancestor]
-                if ancestor != identifier and (
-                    getattr(row, "organization_id", None) != organization_id
+                if (
+                    (
+                        ancestor != identifier
+                        and getattr(row, "organization_id", None) != organization_id
+                    )
                     or not graph_metadata_recallable(getattr(row, "metadata", None))
                     or (source_visible is not None and not source_visible(row))
                 ):
@@ -279,6 +282,7 @@ async def _graph_ancestry(organization_id, rows, graph_client):
 
     current = dict(rows)
     parents: dict[str, set[str] | None] = {}
+    loaded: set[str] = set()
     frontier = set(rows)
     while frontier:
         for identifier in frontier:
@@ -287,9 +291,12 @@ async def _graph_ancestry(organization_id, rows, graph_client):
                 parents[identifier] = _parent_ids(row) if row is not None else None
             except (TypeError, ValueError):
                 parents[identifier] = None
-        requested = set().union(*(parents[key] or set() for key in frontier)) - current.keys()
+        requested = set().union(*(parents[key] or set() for key in frontier)) - loaded
         if not requested:
             break
+        # Supplied candidates may omit ancestry or predate a policy change.
+        # Referenced parents come from current stored rows, once per batch.
+        loaded.update(requested)
         current.update(dict.fromkeys(requested))
         try:
             if graph_client is None:
