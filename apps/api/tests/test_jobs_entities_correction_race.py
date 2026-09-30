@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import uuid as uuid_module
 from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -23,13 +24,17 @@ import pytest_asyncio
 
 import sibyl_core.tools.add as add_module
 from sibyl.jobs.entities import create_entity
+from sibyl_core.backends.surreal import SurrealContentClient
+from sibyl_core.backends.surreal.content_schema import bootstrap_content_schema
+from sibyl_core.services import content_client
+from sibyl_core.services.content_raw_persistence import save_raw_memory
 from sibyl_core.services.graph import (
     EntityManager,
     RelationshipManager,
     SurrealGraphClient,
     prepare_graph_schema,
 )
-from sibyl_core.services.surreal_content import RawMemory
+from sibyl_core.services.surreal_content import MemoryScope, RawMemory
 from sibyl_core.tools import context as context_module
 
 PROJECT_ID = "proj-correction-race"
@@ -51,6 +56,26 @@ async def graph(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[_Runtime]:
     client = SurrealGraphClient(group_id=group_id, url="memory://")
     await client.connect()
     await prepare_graph_schema(client)
+    content = SurrealContentClient(
+        url="memory://", namespace=f"correction_race_{uuid_module.uuid4().hex}"
+    )
+    await bootstrap_content_schema(content, reset=True)
+
+    @asynccontextmanager
+    async def content_session():
+        yield content
+
+    monkeypatch.setattr(content_client, "surreal_content_client", content_session)
+    await save_raw_memory(
+        _corrected_capture(
+            organization_id=group_id,
+            memory_scope=MemoryScope.PROJECT,
+            scope_key=PROJECT_ID,
+            project_id=PROJECT_ID,
+            metadata={},
+        ),
+        embedding_provider=None,
+    )
     runtime = _Runtime(
         client,
         EntityManager(client, group_id=group_id),
@@ -72,14 +97,19 @@ async def graph(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[_Runtime]:
     monkeypatch.setattr(context_module, "configured_embedding_provider", lambda: None)
     yield runtime
     await client.close()
+    await content.close()
 
 
-def _corrected_capture(**overrides: Any) -> RawMemory:
+def _corrected_capture(*, organization_id: str, **overrides: Any) -> RawMemory:
     """The capture as `raw_captures` holds it after `sibyl correct` ran."""
 
     values: dict[str, Any] = {
         "id": RAW_MEMORY_ID,
-        "organization_id": "org-correction-race",
+        "observed_revision": 1,
+        "organization_id": organization_id,
+        "memory_scope": MemoryScope.PROJECT,
+        "scope_key": PROJECT_ID,
+        "project_id": PROJECT_ID,
         "source_id": "source-corrected-capture",
         "principal_id": PRINCIPAL,
         "review_state": "pending",
@@ -250,7 +280,7 @@ async def test_a_row_projected_after_its_capture_was_corrected_is_born_retired(
     monkeypatch.setattr(
         memory_lifecycle,
         "get_raw_memory",
-        AsyncMock(return_value=_corrected_capture()),
+        AsyncMock(return_value=_corrected_capture(organization_id=graph.group_id)),
     )
 
     result = await _run_create_entity(graph, monkeypatch)
@@ -259,7 +289,7 @@ async def test_a_row_projected_after_its_capture_was_corrected_is_born_retired(
     stored = await graph.entity_manager.get(result["entity_id"])
     assert stored is not None, "the row is still written; it is written retired"
     assert stored.metadata["correction_blockers"][RAW_MEMORY_ID] == {
-        "revision": _corrected_capture().revision,
+        "revision": _corrected_capture(organization_id=graph.group_id).revision,
         "blocking": True,
     }
     assert "excluded_from_recall" not in stored.metadata
@@ -279,14 +309,6 @@ async def test_an_uncorrected_capture_still_projects_a_recallable_row(
     Without this, a projection boundary that retired everything, or one that
     silently failed to project at all, would pass the test above.
     """
-
-    from sibyl_core.services import memory_lifecycle
-
-    monkeypatch.setattr(
-        memory_lifecycle,
-        "get_raw_memory",
-        AsyncMock(return_value=_corrected_capture(metadata={})),
-    )
 
     await _run_create_entity(graph, monkeypatch)
 
@@ -316,7 +338,7 @@ async def test_a_correction_landing_inside_the_write_still_retires_the_row(
 
     from sibyl_core.services import memory_lifecycle
 
-    capture = _corrected_capture(metadata={})
+    capture = _corrected_capture(organization_id=graph.group_id, metadata={})
     monkeypatch.setattr(memory_lifecycle, "get_raw_memory", AsyncMock(return_value=capture))
 
     original_create = graph.entity_manager.create_direct
@@ -331,7 +353,7 @@ async def test_a_correction_landing_inside_the_write_still_retires_the_row(
             monkeypatch.setattr(
                 memory_lifecycle,
                 "get_raw_memory",
-                AsyncMock(return_value=_corrected_capture()),
+                AsyncMock(return_value=_corrected_capture(organization_id=graph.group_id)),
             )
         return created
 
@@ -346,7 +368,7 @@ async def test_a_correction_landing_inside_the_write_still_retires_the_row(
     stored = await graph.entity_manager.get(parent_id)
     assert stored is not None
     assert stored.metadata["correction_blockers"][RAW_MEMORY_ID] == {
-        "revision": _corrected_capture().revision,
+        "revision": _corrected_capture(organization_id=graph.group_id).revision,
         "blocking": True,
     }
     assert "excluded_from_recall" not in stored.metadata

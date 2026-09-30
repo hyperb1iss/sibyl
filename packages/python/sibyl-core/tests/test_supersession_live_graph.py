@@ -21,14 +21,12 @@ import uuid as uuid_module
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
 
 import sibyl_core.retrieval.search as search_module
 import sibyl_core.services.memory as memory_module
-import sibyl_core.services.memory_correction as memory_correction_module
 import sibyl_core.services.memory_lifecycle as memory_lifecycle_module
 import sibyl_core.tools.context as context_module
 from sibyl_core.auth.memory_policy import stamp_memory_scope_metadata
@@ -64,7 +62,7 @@ class _Runtime:
 
 
 @pytest_asyncio.fixture
-async def graph(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[_Runtime]:
+async def graph(monkeypatch: pytest.MonkeyPatch, content_store) -> AsyncIterator[_Runtime]:
     # Each test gets its own namespace. The embedded store is process-wide, so
     # a shared group id leaks rows and edges between tests and turns a
     # supersession assertion into a function of test ordering.
@@ -496,6 +494,27 @@ def _passage_body(topic: str) -> str:
     )
 
 
+async def _persist_parent(graph: _Runtime, parent: Entity) -> None:
+    """Persist the canonical capture named by each legacy projection fixture."""
+    raw_memory_id = parent.metadata["raw_memory_id"]
+    await save_raw_memory(
+        RawMemory(
+            id=raw_memory_id,
+            organization_id=graph.group_id,
+            source_id=f"source-{raw_memory_id}",
+            principal_id=PRINCIPAL,
+            memory_scope=MemoryScope.PROJECT,
+            scope_key=PROJECT_ID,
+            project_id=PROJECT_ID,
+            entity_type=parent.entity_type.value,
+            title=parent.name,
+            raw_content=parent.content,
+        ),
+        embedding_provider=None,
+    )
+    await graph.entity_manager.create_direct(parent)
+
+
 async def _correct(
     graph: _Runtime,
     monkeypatch: pytest.MonkeyPatch,
@@ -503,40 +522,10 @@ async def _correct(
     raw_memory_id: str,
     action: str = "mark_wrong",
 ) -> Any:
-    """Run the production correction with only the raw-capture store stubbed.
-
-    The graph half is entirely live: target resolution, the lineage cascade and
-    the metadata stamp all run against real rows through the real managers,
-    which is where the passage hole was.
-    """
-
-    memory = RawMemory(
-        observed_revision=1,
-        id=raw_memory_id,
-        organization_id=graph.group_id,
-        source_id=f"source-{raw_memory_id}",
-        principal_id=PRINCIPAL,
-        memory_scope=MemoryScope.PRIVATE,
-        scope_key=None,
-        review_state="pending",
-        entity_type="decision",
-        title="Deploy to Fly",
-        raw_content="We decided to deploy to fly.io.",
-        tags=["decision"],
-        metadata={},
-        provenance={},
-        capture_surface="reflection_candidate",
-    )
-    monkeypatch.setattr(memory_correction_module, "get_raw_memory", AsyncMock(return_value=memory))
-    monkeypatch.setattr(memory_correction_module, "get_raw_memory_by_source_id", AsyncMock())
-    monkeypatch.setattr(
-        memory_correction_module,
-        "save_raw_memory",
-        AsyncMock(side_effect=lambda updated, **_kwargs: updated),
-    )
+    """Correct the actual capture and exercise its graph lineage cascade."""
     return await memory_module.apply_memory_correction(
         organization_id=graph.group_id,
-        source_id=memory.source_id,
+        source_id=raw_memory_id,
         principal_id=PRINCIPAL,
         action=action,
         accessible_projects=[PROJECT_ID],
@@ -563,7 +552,7 @@ async def test_correcting_a_memory_takes_its_passages_out_of_the_pack(
         _passage_body("hetzner"),
         raw_memory_id="raw-passage-parent",
     )
-    await graph.entity_manager.create_direct(parent)
+    await _persist_parent(graph, parent)
     projection = await project_entity_passages(
         entity_manager=graph.entity_manager,
         relationship_manager=graph.relationship_manager,
@@ -608,7 +597,7 @@ async def test_spans_cut_after_the_correction_are_born_retired(
         _passage_body("interleaved"),
         raw_memory_id="raw-raced-parent",
     )
-    await graph.entity_manager.create_direct(parent)
+    await _persist_parent(graph, parent)
 
     result = await _correct(graph, monkeypatch, raw_memory_id="raw-raced-parent")
     assert result.applied
@@ -688,7 +677,7 @@ async def test_correcting_a_memory_retires_the_entities_and_facts_projected_from
     """
 
     parent = _projection_parent(graph, "projection-parent", "raw-projection-parent")
-    await graph.entity_manager.create_direct(parent)
+    await _persist_parent(graph, parent)
     projected = await _project(graph, parent)
     assert projected, "the projection has to produce rows for this to mean anything"
 
@@ -716,7 +705,7 @@ async def test_rows_projected_after_the_correction_are_born_retired(
     """The same window the spans have, for the rows the other projection mints."""
 
     parent = _projection_parent(graph, "late-projection-parent", "raw-late-projection")
-    await graph.entity_manager.create_direct(parent)
+    await _persist_parent(graph, parent)
 
     result = await _correct(graph, monkeypatch, raw_memory_id="raw-late-projection")
     assert result.affected_entity_ids == ["late-projection-parent"], (
@@ -1185,7 +1174,7 @@ async def test_a_correction_clears_the_pending_marker_it_finds(
         "marked parent hosting body",
         raw_memory_id="raw-marked-parent",
     )
-    await graph.entity_manager.create_direct(row)
+    await _persist_parent(graph, row)
     await graph.entity_manager.update(
         "marked-parent",
         {"metadata": {RECONCILE_PENDING_KEY: {"capture:raw-marked-parent": True}}},

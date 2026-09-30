@@ -38,10 +38,10 @@ def current_rendering_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
     graph community ancestry and source-retirement integration suites.
     """
 
-    async def current(_client, _organization_id, snapshot):
+    async def current(_client, _organization_id, snapshot, *, source_visible=None):
         return snapshot
 
-    async def current_entities(client, organization_id, ids):
+    async def current_entities(client, organization_id, ids, *, source_visible=None):
         from sibyl_core.services.graph_community_snapshot import _get_graph_snapshot
 
         snapshot = await _get_graph_snapshot(client, organization_id)

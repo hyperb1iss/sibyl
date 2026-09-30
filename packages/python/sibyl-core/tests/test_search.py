@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import ast
 import asyncio
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
 from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 
@@ -15,6 +18,8 @@ import sibyl_core.retrieval.hybrid as hybrid_module
 import sibyl_core.retrieval.query_ranking as query_ranking_module
 import sibyl_core.retrieval.search as search_module
 from sibyl_core.auth.memory_policy import memory_scope_policy_key
+from sibyl_core.backends.surreal import SurrealContentClient
+from sibyl_core.backends.surreal.content_schema import bootstrap_content_schema
 from sibyl_core.embeddings.providers import (
     CachedEmbeddingProvider,
     DeterministicEmbeddingProvider,
@@ -29,6 +34,7 @@ from sibyl_core.embeddings.providers import (
 from sibyl_core.memory_pipeline.capture import MemoryCaptureRequest, MemoryCaptureService
 from sibyl_core.memory_pipeline.retrieval import CandidateSourceResult
 from sibyl_core.models.context import ContextFacet
+from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.retrieval import _search_candidates as candidate_module
 from sibyl_core.retrieval import _search_database as database_module
 from sibyl_core.retrieval import _search_expansion as expansion_module
@@ -53,6 +59,15 @@ from sibyl_core.retrieval.search import (
     fusion_backend_from_env,
     seed_candidates_per_signal,
 )
+from sibyl_core.services import content_client
+from sibyl_core.services.content_raw_persistence import remember_raw_memory
+from sibyl_core.services.graph import (
+    EntityManager,
+    RelationshipManager,
+    SurrealGraphClient,
+    prepare_graph_schema,
+)
+from sibyl_core.services.graph_runtime import GraphRuntime
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory, RawMemoryRecallResult
 
 
@@ -1252,14 +1267,132 @@ async def _captured_native_episode(
     return candidate
 
 
+@pytest.fixture
+async def native_episode_runtime(monkeypatch) -> AsyncIterator[SimpleNamespace]:
+    """Use stored captures and graph rows for the final publication read gate."""
+    group_id = f"native-episode-{uuid4().hex}"
+    client = SurrealGraphClient(group_id=group_id, url="memory://")
+    content = SurrealContentClient(url="memory://", namespace=f"episode_{uuid4().hex}")
+    try:
+        await prepare_graph_schema(client)
+        await bootstrap_content_schema(content, reset=True)
+        runtime = GraphRuntime(
+            client,
+            EntityManager(client, group_id=group_id),
+            RelationshipManager(client, group_id=group_id),
+        )
+        calls = []
+        execute = client.execute_query
+
+        async def recorded_query(query, **params):
+            calls.append((query, params))
+            return await execute(query, **params)
+
+        @asynccontextmanager
+        async def content_session():
+            yield content
+
+        monkeypatch.setattr(client, "execute_query", recorded_query)
+        monkeypatch.setattr(content_client, "surreal_content_client", content_session)
+        monkeypatch.setattr(
+            database_module, "get_surreal_graph_runtime", AsyncMock(return_value=runtime)
+        )
+        yield SimpleNamespace(runtime=runtime, calls=calls, group_id=group_id)
+    finally:
+        await client.close()
+        await content.close()
+
+
+async def _persisted_native_row(
+    store,
+    identifier,
+    *,
+    entity_type="episode",
+    project_id="project_p",
+    scope=("project", "project_p", "user-alice"),
+):
+    """Write the capture and graph row through the real capture service."""
+    content = f"connection pool exhaustion {identifier}"
+    if scope is None:
+        await store.runtime.entity_manager.create_direct(
+            Entity(
+                id=identifier,
+                entity_type=EntityType(entity_type),
+                name=identifier,
+                content=content,
+                metadata={"project_id": project_id},
+                project_id=project_id,
+            ),
+            generate_embedding=False,
+        )
+    else:
+        memory_scope, scope_key, principal_id = scope
+
+        async def remember(request):
+            memory = await remember_raw_memory(
+                organization_id=store.group_id,
+                principal_id=request.principal_id,
+                source_id=f"source-{identifier}",
+                raw_content=request.content,
+                memory_scope=request.memory_scope,
+                scope_key=request.scope_key,
+                metadata={"project_id": project_id},
+                embedding_provider=None,
+            )
+            return {"id": memory.id, "source_id": memory.source_id}
+
+        async def publish(request, metadata):
+            await store.runtime.entity_manager.create_direct(
+                Entity(
+                    id=identifier,
+                    entity_type=EntityType(entity_type),
+                    name=request.title,
+                    content=request.content,
+                    metadata=dict(metadata),
+                    project_id=project_id,
+                ),
+                generate_embedding=False,
+            )
+            return {"id": identifier}
+
+        await MemoryCaptureService(
+            remember_raw_memory=remember, create_graph_entity=publish
+        ).capture(
+            MemoryCaptureRequest(
+                title=identifier,
+                content=content,
+                entity_type=entity_type,
+                memory_scope=memory_scope,
+                scope_key=scope_key,
+                principal_id=principal_id,
+                metadata={"project_id": project_id},
+            )
+        )
+    entity = await store.runtime.entity_manager.get(identifier)
+    assert entity is not None and entity.observed_revision is not None
+    return {
+        "uuid": entity.id,
+        "name": entity.name,
+        "entity_type": entity.entity_type.value,
+        "content": entity.content,
+        "group_id": entity.organization_id,
+        "project_id": entity.metadata.get("project_id"),
+        "attributes": entity.metadata,
+        "revision": entity.observed_revision,
+        "created_at": entity.created_at,
+    }
+
+
 def _episode_plan(
     principal_id: str,
     project_id: str | None,
     accessible_projects: set[str] | None,
+    *,
+    organization_id: str = "org-123",
 ) -> search_module.RetrievalPlan:
     return build_context_retrieval_plan(
         query="connection pool exhaustion",
-        organization_id="org-123",
+        organization_id=organization_id,
         facets=[ContextFacet.RECENT_MEMORY],
         facet_types={ContextFacet.RECENT_MEMORY: ["episode"]},
         principal_id=principal_id,
@@ -1313,18 +1446,14 @@ def test_archived_episode_stays_out_of_project_scoped_plans() -> None:
 @pytest.mark.asyncio
 async def test_project_search_serves_native_episodes_from_that_project_only(
     monkeypatch: pytest.MonkeyPatch,
+    native_episode_runtime,
 ) -> None:
-    episode = await _captured_native_episode(memory_scope="project", scope_key="project_p")
-    client = _EpisodeMentionsGraphClient()
-
-    class Runtime:
-        pass
-
-    runtime = Runtime()
-    runtime.client = client
-
-    async def fake_runtime(_organization_id: str, **_kwargs: object) -> Runtime:
-        return runtime
+    store = native_episode_runtime
+    episode = candidate_module._candidate_from_node_record(
+        await _persisted_native_row(store, "episode-in-p"),
+        signal=RetrievalSignal.NODE_FULLTEXT,
+        score=1.0,
+    )
 
     async def fake_node_fulltext(**_kwargs: object) -> list[RetrievalCandidate]:
         # Returned whatever the filter says, so the admission check is what
@@ -1334,7 +1463,6 @@ async def test_project_search_serves_native_episodes_from_that_project_only(
     async def no_raw_memories(**_kwargs: object) -> list[RawMemory]:
         return []
 
-    monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_runtime)
     monkeypatch.setattr(source_module, "_node_fulltext_candidates", fake_node_fulltext)
     provider = DeterministicEmbeddingProvider(
         EmbeddingMetadata(
@@ -1358,17 +1486,27 @@ async def test_project_search_serves_native_episodes_from_that_project_only(
         assert response.filters["candidate_source_degraded"] is False
         return [result.id for result in response.results]
 
-    assert await result_ids(_episode_plan("user-bob", "project_p", {"project_p"})) == [
-        "episode-in-p"
-    ]
+    assert await result_ids(
+        _episode_plan("user-bob", "project_p", {"project_p"}, organization_id=store.group_id)
+    ) == ["episode-in-p"]
     entity_reads = [
-        params for query, params in client.calls if "FROM entity" in query and "WHERE" in query
+        params
+        for query, params in store.calls
+        if "FROM entity" in query and "project_ids" in params
     ]
     assert entity_reads
     assert all(params.get("project_ids") == ["project_p"] for params in entity_reads)
 
     assert (
-        await result_ids(_episode_plan("user-alice", "project_q", {"project_p", "project_q"})) == []
+        await result_ids(
+            _episode_plan(
+                "user-alice",
+                "project_q",
+                {"project_p", "project_q"},
+                organization_id=store.group_id,
+            )
+        )
+        == []
     )
 
 
@@ -1380,99 +1518,46 @@ _SCOPED_EXPANSION_EDGES = {
 }
 
 
-async def _scoped_expansion_rows() -> dict[str, dict[str, object]]:
-    async def row(
-        uuid: str,
-        entity_type: str,
-        project_id: str,
-        scope: tuple[str, str | None, str] | None,
-    ) -> dict[str, object]:
-        attributes: dict[str, object] = {}
-        if scope is not None:
-            memory_scope, scope_key, principal_id = scope
-            attributes = await _captured_episode_attributes(
-                memory_scope=memory_scope,
-                scope_key=scope_key,
-                project_id=project_id,
-                principal_id=principal_id,
-            )
-        return {
-            "uuid": uuid,
-            "name": uuid,
-            "entity_type": entity_type,
-            "content": f"connection pool exhaustion {uuid}",
-            "group_id": "org-123",
-            "project_id": project_id,
-            "attributes": attributes,
-            "created_at": None,
-        }
-
-    q_project = ("project", "project_q", "user-carol")
-    p_project = ("project", "project_p", "user-alice")
-    alice_private = ("private", None, "user-alice")
-    return {
-        "seed-q": await row("seed-q", "episode", "project_q", q_project),
-        "seed-p": await row("seed-p", "episode", "project_p", p_project),
-        "seed-alice-private-q": await row(
-            "seed-alice-private-q", "episode", "project_q", alice_private
-        ),
-        "n-ok": await row("n-ok", "episode", "project_q", q_project),
-        "n-alice-private": await row("n-alice-private", "episode", "project_q", alice_private),
-        "n-p-episode": await row("n-p-episode", "episode", "project_p", p_project),
-        "n-via-p": await row("n-via-p", "topic", "project_q", None),
-        "n-via-private": await row("n-via-private", "topic", "project_q", None),
-    }
-
-
-class _ScopedExpansionGraphClient:
-    """Walks a fixed edge map and hydrates rows without applying the project filter.
-
-    Hydration ignores the database's project clause on purpose, so admission is
-    the only thing standing between the reader and a neighbour.
-    """
-
-    def __init__(self, rows: Mapping[str, dict[str, object]]) -> None:
-        self.rows = rows
-        self.calls: list[tuple[str, dict[str, object]]] = []
-
-    async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
-        self.calls.append((query, params))
-        if "FROM mentions" in query:
-            return []
-        if 'out.entity_type = "community"' in query or "target_id IN $community_uuids" in query:
-            return []
-        if "FROM relates_to" in query and "source_uuids" in params:
-            return [
-                {"uuid": target, "relationship": "MENTIONS"}
-                for source in params.get("source_uuids") or []
-                for target in _SCOPED_EXPANSION_EDGES.get(str(source), [])
-            ]
-        if "FROM relates_to" in query:
-            return []
-        if "FROM entity" in query and "uuid IN $uuids" in query:
-            return [
-                dict(self.rows[uuid]) for uuid in params.get("uuids") or [] if uuid in self.rows
-            ]
-        return []
-
-
 async def _scoped_expansion_search(
     monkeypatch: pytest.MonkeyPatch,
+    store,
     *,
     seeds: tuple[str, ...],
     plan: search_module.RetrievalPlan,
 ) -> tuple[set[str], list[str]]:
-    rows = await _scoped_expansion_rows()
-    client = _ScopedExpansionGraphClient(rows)
-
-    class Runtime:
-        pass
-
-    runtime = Runtime()
-    runtime.client = client
-
-    async def fake_runtime(_organization_id: str, **_kwargs: object) -> Runtime:
-        return runtime
+    scopes = {
+        "seed-q": ("project_q", ("project", "project_q", "user-carol")),
+        "seed-p": ("project_p", ("project", "project_p", "user-alice")),
+        "seed-alice-private-q": ("project_q", ("private", None, "user-alice")),
+        "n-ok": ("project_q", ("project", "project_q", "user-carol")),
+        "n-alice-private": ("project_q", ("private", None, "user-alice")),
+        "n-p-episode": ("project_p", ("project", "project_p", "user-alice")),
+        "n-via-p": ("project_q", None),
+        "n-via-private": ("project_q", None),
+    }
+    rows = {
+        identifier: await _persisted_native_row(
+            store,
+            identifier,
+            project_id=project,
+            scope=scope,
+            entity_type="topic" if scope is None else "episode",
+        )
+        for identifier, (project, scope) in scopes.items()
+    }
+    await store.runtime.relationship_manager.create_direct_bulk(
+        [
+            Relationship(
+                id=f"mentions-{source}-{target}",
+                source_id=source,
+                target_id=target,
+                relationship_type=RelationshipType.MENTIONS,
+            )
+            for source, targets in _SCOPED_EXPANSION_EDGES.items()
+            for target in targets
+        ],
+        generate_embeddings=False,
+    )
 
     async def fake_node_fulltext(**_kwargs: object) -> list[RetrievalCandidate]:
         return [
@@ -1485,7 +1570,6 @@ async def _scoped_expansion_search(
     async def no_raw_memories(**_kwargs: object) -> list[RawMemory]:
         return []
 
-    monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_runtime)
     monkeypatch.setattr(source_module, "_node_fulltext_candidates", fake_node_fulltext)
     response = await search_module.context_search(
         plan=plan,
@@ -1496,7 +1580,7 @@ async def _scoped_expansion_search(
     )
     walked = [
         str(source)
-        for query, params in client.calls
+        for query, params in store.calls
         if "FROM relates_to" in query
         for source in (params.get("source_uuids") or [])
     ]
@@ -1507,10 +1591,12 @@ def _scoped_expansion_plan(
     principal_id: str,
     project_id: str | None,
     accessible_projects: set[str],
+    *,
+    organization_id: str = "org-123",
 ) -> search_module.RetrievalPlan:
     return build_context_retrieval_plan(
         query="connection pool exhaustion",
-        organization_id="org-123",
+        organization_id=organization_id,
         facets=[ContextFacet.RECENT_MEMORY],
         facet_types={ContextFacet.RECENT_MEMORY: ["episode", "topic"]},
         principal_id=principal_id,
@@ -1525,11 +1611,15 @@ def _scoped_expansion_plan(
 async def test_expansion_never_carries_a_non_member_to_a_native_episode(
     monkeypatch: pytest.MonkeyPatch,
     project_id: str | None,
+    native_episode_runtime,
 ) -> None:
     ids, walked = await _scoped_expansion_search(
         monkeypatch,
+        native_episode_runtime,
         seeds=("seed-q", "seed-p", "seed-alice-private-q"),
-        plan=_scoped_expansion_plan("user-bob", project_id, {"project_q"}),
+        plan=_scoped_expansion_plan(
+            "user-bob", project_id, {"project_q"}, organization_id=native_episode_runtime.group_id
+        ),
     )
 
     assert {"seed-q", "n-ok"} <= ids
@@ -1550,11 +1640,18 @@ async def test_expansion_never_carries_a_non_member_to_a_native_episode(
 @pytest.mark.asyncio
 async def test_expansion_follows_an_owner_through_their_private_native_episode(
     monkeypatch: pytest.MonkeyPatch,
+    native_episode_runtime,
 ) -> None:
     ids, walked = await _scoped_expansion_search(
         monkeypatch,
+        native_episode_runtime,
         seeds=("seed-alice-private-q",),
-        plan=_scoped_expansion_plan("user-alice", "project_q", {"project_q"}),
+        plan=_scoped_expansion_plan(
+            "user-alice",
+            "project_q",
+            {"project_q"},
+            organization_id=native_episode_runtime.group_id,
+        ),
     )
 
     assert {"seed-alice-private-q", "n-via-private"} <= ids
