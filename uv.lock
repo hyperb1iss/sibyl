@@ -3559,6 +3559,7 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
     { name = "ruff" },
+    { name = "sibyl-dev" },
 ]
 
 [package.metadata]
@@ -3596,6 +3597,7 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
     { name = "ruff" },
+    { name = "sibyl-dev", editable = "apps/cli" },
 ]
 
 [[package]]
