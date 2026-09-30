@@ -15,7 +15,7 @@ from sibyl_core.auth.memory_policy import (
     memory_row_project_id,
     private_scope_granted_for,
 )
-from sibyl_core.models.entities import Entity, Relationship, RelationshipType
+from sibyl_core.models.entities import Entity, Relationship
 from sibyl_core.services.graph_community_detection import _detect_communities_from_graph
 from sibyl_core.services.graph_community_managers import _entity_summary
 from sibyl_core.services.graph_community_models import (
@@ -35,6 +35,7 @@ from sibyl_core.services.graph_community_selection import (
 from sibyl_core.services.graph_community_snapshot import (
     _count_int,
     _current_graph_entities,
+    _current_graph_relationships,
     _get_graph_snapshot,
     _get_visible_graph_snapshot,
     _native_rows,
@@ -201,23 +202,19 @@ async def _native_relationship_edges_between_ids(
     if rows is None:
         return None
 
-    from sibyl_core.services.graph_records import relationship_from_surreal_row
-
+    current = await _current_graph_relationships(
+        client, organization_id, [str(row["uuid"]) for row in rows if row.get("uuid")]
+    )
     edges: list[dict[str, Any]] = []
     for row in rows:
-        source_id = str(row.get("source_id") or "")
-        target_id = str(row.get("target_id") or "")
-        if (
-            not source_id
-            or not target_id
-            or not relationship_visible(relationship_from_surreal_row(row))
-        ):
+        relationship = current.get(str(row.get("uuid") or ""))
+        if relationship is None or not relationship_visible(relationship):
             continue
         edges.append(
             {
-                "source": source_id,
-                "target": target_id,
-                "type": str(row.get("name") or RelationshipType.RELATED_TO.value),
+                "source": relationship.source_id,
+                "target": relationship.target_id,
+                "type": relationship.relationship_type.value,
             }
         )
     return edges
@@ -456,11 +453,12 @@ async def get_cluster_nodes(
 
     member_ids = cluster.member_ids[:max_nodes]
     member_id_set = set(member_ids)
-    entity_by_id = await _current_graph_entities(
+    edges = await _native_relationship_edges_between_ids(
         client,
         organization_id,
         member_ids,
-        source_visible=partial(
+        max_edges=max_edges,
+        relationship_visible=partial(
             graph_row_read_allowed,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
@@ -470,12 +468,34 @@ async def get_cluster_nodes(
         ),
     )
 
-    edges = await _native_relationship_edges_between_ids(
+    if edges is None:
+        snapshot = await _get_visible_graph_snapshot(
+            client,
+            organization_id,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
+            max_entities=DETECTION_MAX_ENTITIES,
+            max_relationships=DETECTION_MAX_RELATIONSHIPS,
+        )
+        edges = _build_graph_edges_from_snapshot(
+            [
+                relationship
+                for relationship in snapshot.relationships
+                if relationship.source_id in member_id_set
+                and relationship.target_id in member_id_set
+            ],
+            member_id_set,
+            max_edges=max_edges,
+        )
+
+    entity_by_id = await _current_graph_entities(
         client,
         organization_id,
         member_ids,
-        max_edges=max_edges,
-        relationship_visible=partial(
+        source_visible=partial(
             graph_row_read_allowed,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
@@ -515,36 +535,12 @@ async def get_cluster_nodes(
         )
     ]
     visible_ids = {node["id"] for node in nodes}
-    member_id_set &= visible_ids
     if edges is not None:
         edges = [
             edge
             for edge in edges
             if edge["source"] in visible_ids and edge["target"] in visible_ids
         ]
-
-    if edges is None:
-        snapshot = await _get_visible_graph_snapshot(
-            client,
-            organization_id,
-            principal_id=principal_id,
-            accessible_projects=accessible_projects,
-            allowed_memory_scope_keys=allowed_memory_scope_keys,
-            accessible_teams=accessible_teams,
-            accessible_delegations=accessible_delegations,
-            max_entities=DETECTION_MAX_ENTITIES,
-            max_relationships=DETECTION_MAX_RELATIONSHIPS,
-        )
-        edges = _build_graph_edges_from_snapshot(
-            [
-                relationship
-                for relationship in snapshot.relationships
-                if relationship.source_id in member_id_set
-                and relationship.target_id in member_id_set
-            ],
-            member_id_set,
-            max_edges=max_edges,
-        )
 
     return {
         "nodes": nodes,

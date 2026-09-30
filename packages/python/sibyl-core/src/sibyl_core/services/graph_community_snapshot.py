@@ -13,7 +13,7 @@ from typing import Any
 
 import structlog
 
-from sibyl_core.models.entities import Entity
+from sibyl_core.models.entities import Entity, Relationship
 from sibyl_core.services.graph_community_managers import (
     _list_all_entities,
     _list_all_relationships,
@@ -281,6 +281,28 @@ async def _current_graph_entities(
     )
 
 
+async def _current_graph_relationships(
+    client: Any, organization_id: str, ids: list[str]
+) -> dict[str, Relationship]:
+    """Validate current edge bodies and generations on the supplied graph."""
+    from sibyl_core.services.graph_community_managers import (
+        _entity_manager_for_client,
+        _relationship_manager_for_client,
+    )
+    from sibyl_core.services.graph_read_availability import available_graph_relationships
+    from sibyl_core.services.graph_runtime import GraphRuntime
+
+    return await available_graph_relationships(
+        organization_id,
+        ids,
+        runtime=GraphRuntime(
+            client=client,
+            entity_manager=_entity_manager_for_client(client, organization_id),
+            relationship_manager=_relationship_manager_for_client(client, organization_id),
+        ),
+    )
+
+
 async def _current_graph_snapshot(
     client: Any,
     organization_id: str,
@@ -294,29 +316,15 @@ async def _current_graph_snapshot(
     what can be rendered; a replacement using the same ID cannot revive an
     older cached label or relationship fact.
     """
-    from sibyl_core.services.graph_community_managers import (
-        _entity_manager_for_client,
-        _relationship_manager_for_client,
-    )
-    from sibyl_core.services.graph_read_availability import available_graph_relationships
-    from sibyl_core.services.graph_runtime import GraphRuntime
-
-    entities = await _current_graph_entities(
-        client, organization_id, list(snapshot.entity_by_id), source_visible=source_visible
-    )
-    runtime = GraphRuntime(
-        client=client,
-        entity_manager=_entity_manager_for_client(client, organization_id),
-        relationship_manager=_relationship_manager_for_client(client, organization_id),
-    )
-    current_relationships = await available_graph_relationships(
-        organization_id,
-        [r.id for r in snapshot.relationships],
-        runtime=runtime,
+    current_relationships = await _current_graph_relationships(
+        client, organization_id, [r.id for r in snapshot.relationships]
     )
     relationships = [
         current_relationships[r.id] for r in snapshot.relationships if r.id in current_relationships
     ]
+    entities = await _current_graph_entities(
+        client, organization_id, list(snapshot.entity_by_id), source_visible=source_visible
+    )
     return GraphSnapshot(
         entities=list(entities.values()),
         relationships=[

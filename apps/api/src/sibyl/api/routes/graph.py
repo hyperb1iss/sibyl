@@ -15,7 +15,7 @@ from sibyl.auth.dependencies import (
 )
 from sibyl.persistence.auth_runtime import list_accessible_project_graph_ids
 from sibyl_core.auth import AuthOrganization, OrganizationRole
-from sibyl_core.models.entities import Entity, EntityType, RelationshipType
+from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.services.graph_read_availability import (
     available_graph_entities,
     available_graph_relationships,
@@ -146,6 +146,39 @@ async def _current_relationships(runtime, organization_id, relationships):
     return [current[r.id] for r in relationships if r.id in current]
 
 
+async def _current_entities(
+    runtime,
+    organization_id,
+    entity_ids,
+    *,
+    principal_id,
+    accessible_projects,
+    allowed_memory_scope_keys,
+    accessible_teams,
+    accessible_delegations,
+):
+    """Refresh renderable rows after relationship and count discovery awaits."""
+    visible = partial(
+        _graph_entity_visible,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
+    )
+    current = await available_graph_entities(
+        organization_id,
+        entity_ids,
+        runtime=GraphRuntime(
+            client=runtime.client,
+            entity_manager=runtime.entity_manager,
+            relationship_manager=runtime.relationship_manager,
+        ),
+        source_visible=visible,
+    )
+    return {identifier: entity for identifier, entity in current.items() if visible(entity)}
+
+
 @router.get("/debug", dependencies=[Depends(require_org_role(*_ADMIN_ROLES))])
 async def debug_graph(
     org: AuthOrganization = Depends(get_current_organization),
@@ -176,6 +209,18 @@ async def debug_graph(
     node_ids = {entity.id for entity in nodes if entity.id}
     relationships = await runtime.relationship_manager.list_all(limit=1000)
     relationships = await _current_relationships(runtime, group_id, relationships)
+    current = await _current_entities(
+        runtime,
+        group_id,
+        [entity.id for entity in nodes],
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=memory_grants,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
+    )
+    nodes = [current[entity.id] for entity in nodes if entity.id in current]
+    node_ids = {entity.id for entity in nodes}
 
     relationships = [
         relationship
@@ -420,6 +465,19 @@ async def get_all_nodes(
         ),
     )
 
+    current = await _current_entities(
+        runtime,
+        group_id,
+        [entity.id for entity in entities],
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=memory_grants,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
+    )
+    entities = [current[entity.id] for entity in entities if entity.id in current]
+    if isinstance(types, list) and types:
+        entities = [entity for entity in entities if entity.entity_type in types]
     max_connections = max(connection_counts.values()) if connection_counts else 1
     max_connections = max(max_connections, 1)
 
@@ -569,25 +627,7 @@ async def get_full_graph(
         include_archived=True,
     )
 
-    nodes = []
-    node_ids: set[str] = set()
-    for entity in entities:
-        node_id = entity.id
-        if not node_id:
-            continue
-        node_ids.add(node_id)
-        entity_type = entity.entity_type
-
-        nodes.append(
-            GraphNode(
-                id=node_id,
-                type=entity_type.value,
-                label=(entity.name or node_id[:20])[:50],
-                color=get_entity_color(entity_type),
-                size=1.5,
-                metadata={},
-            )
-        )
+    node_ids = {entity.id for entity in entities if entity.id}
 
     relationships = []
     offset = 0
@@ -613,7 +653,57 @@ async def get_full_graph(
         offset += len(stored)
         if len(stored) < max_edges:
             break
-    relationships = relationships[:max_edges]
+    relationships = await _current_relationships(runtime, group_id, relationships[:max_edges])
+    relationships = [
+        relationship
+        for relationship in relationships
+        if _graph_entity_visible(
+            relationship,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=memory_grants,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
+        )
+    ]
+    current = await _current_entities(
+        runtime,
+        group_id,
+        [entity.id for entity in entities],
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=memory_grants,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
+    )
+    entities = [current[entity.id] for entity in entities if entity.id in current]
+    if isinstance(types, list) and types:
+        entities = [entity for entity in entities if entity.entity_type in types]
+    nodes = []
+    node_ids: set[str] = set()
+    for entity in entities:
+        node_id = entity.id
+        if not node_id:
+            continue
+        node_ids.add(node_id)
+        entity_type = entity.entity_type
+
+        nodes.append(
+            GraphNode(
+                id=node_id,
+                type=entity_type.value,
+                label=(entity.name or node_id[:20])[:50],
+                color=get_entity_color(entity_type),
+                size=1.5,
+                metadata={},
+            )
+        )
+
+    relationships = [
+        relationship
+        for relationship in relationships
+        if relationship.source_id in node_ids and relationship.target_id in node_ids
+    ]
 
     log.info(
         "graph_full_raw",
@@ -676,8 +766,8 @@ async def get_subgraph(
         raise HTTPException(status_code=404, detail=f"Entity not found: {payload.entity_id}")
 
     # Build subgraph via traversal
-    visited_nodes: dict[str, GraphNode] = {}
-    edges: list[GraphEdge] = []
+    visited_nodes: dict[str, int] = {}
+    relationships: list[Relationship] = []
 
     async def traverse(entity_id: str, current_depth: int) -> None:
         if current_depth > payload.depth:
@@ -699,18 +789,7 @@ async def get_subgraph(
         if not entity:
             return
 
-        # Add node
-        visited_nodes[entity_id] = GraphNode(
-            id=entity.id,
-            type=entity.entity_type.value,
-            label=entity.name[:50],
-            color=get_entity_color(entity.entity_type),
-            size=2.0 if entity_id == payload.entity_id else 1.5,  # Center node larger
-            metadata={
-                "description": entity.description[:100] if entity.description else "",
-                "depth": current_depth,
-            },
-        )
+        visited_nodes[entity_id] = current_depth
 
         # Get related entities
         related = await runtime.relationship_manager.get_related_entities(
@@ -767,22 +846,72 @@ async def get_subgraph(
             ):
                 continue
 
-            edges.append(
-                GraphEdge(
-                    id=relationship.id,
-                    source=relationship.source_id,
-                    target=relationship.target_id,
-                    type=relationship.relationship_type.value,
-                    label=relationship.relationship_type.value.replace("_", " ").title(),
-                    weight=1.0,
-                )
-            )
+            relationships.append(relationship)
 
             # Recurse
             await traverse(related_entity.id, current_depth + 1)
 
     # Start traversal from center
     await traverse(payload.entity_id, 0)
+
+    relationships = await _current_relationships(runtime, group_id, relationships)
+    edges = [
+        GraphEdge(
+            id=relationship.id,
+            source=relationship.source_id,
+            target=relationship.target_id,
+            type=relationship.relationship_type.value,
+            label=relationship.relationship_type.value.replace("_", " ").title(),
+            weight=1.0,
+        )
+        for relationship in relationships
+        if _graph_entity_visible(
+            relationship,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=memory_grants,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
+        )
+    ]
+    current = await _current_entities(
+        runtime,
+        group_id,
+        list(visited_nodes),
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=memory_grants,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
+    )
+    if payload.entity_id not in current:
+        raise HTTPException(status_code=404, detail=f"Entity not found: {payload.entity_id}")
+    edges = [edge for edge in edges if edge.source in current and edge.target in current]
+    reachable = {payload.entity_id}
+    frontier = {payload.entity_id}
+    adjacency: dict[str, set[str]] = {}
+    for edge in edges:
+        adjacency.setdefault(edge.source, set()).add(edge.target)
+        adjacency.setdefault(edge.target, set()).add(edge.source)
+    while frontier:
+        frontier = {
+            neighbor for node in frontier for neighbor in adjacency.get(node, ())
+        } - reachable
+        reachable.update(frontier)
+    nodes = [
+        GraphNode(
+            id=entity.id,
+            type=entity.entity_type.value,
+            label=entity.name[:50],
+            color=get_entity_color(entity.entity_type),
+            size=2.0 if identifier == payload.entity_id else 1.5,
+            metadata={"description": entity.description[:100], "depth": depth},
+        )
+        for identifier, depth in visited_nodes.items()
+        if identifier in reachable and (entity := current.get(identifier)) is not None
+    ]
+
+    edges = [edge for edge in edges if edge.source in reachable and edge.target in reachable]
 
     # Deduplicate edges
     seen_edges: set[str] = set()
@@ -794,9 +923,9 @@ async def get_subgraph(
             unique_edges.append(edge)
 
     return GraphData(
-        nodes=list(visited_nodes.values()),
+        nodes=nodes,
         edges=unique_edges,
-        node_count=len(visited_nodes),
+        node_count=len(nodes),
         edge_count=len(unique_edges),
     )
 
