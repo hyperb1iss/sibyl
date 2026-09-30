@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
+from sibyl_core.services import graph_view_availability
 from sibyl_core.services.graph_client import SurrealGraphClient, prepare_graph_schema
 from sibyl_core.services.graph_entities import EntityManager
 from sibyl_core.services.graph_relationships import RelationshipManager
@@ -187,12 +188,12 @@ async def test_dependencies_rebuild_reachability_after_late_source_delete(
 
 
 @pytest.mark.parametrize("mode", ["related", "dependencies"])
-async def test_graph_reader_revalidates_root_after_relationship_validation(
+async def test_graph_reader_revalidates_root_after_node_collection(
     runtime, content_store, monkeypatch, mode
 ):
     source, root = await source_task(runtime)
     kind = RelationshipType.RELATED_TO if mode == "related" else RelationshipType.DEPENDS_ON
-    edges = await store_dependency_graph(
+    await store_dependency_graph(
         runtime, [root, task("ordinary")], [(root.id, "ordinary")], kind=kind
     )
     baseline = await exploration.explore(
@@ -202,18 +203,20 @@ async def test_graph_reader_revalidates_root_after_relationship_validation(
         principal_id="user_a",
     )
     assert "ordinary" in {entity.id for entity in baseline.entities}
-    original = exploration.available_graph_relationships
+    original = graph_view_availability.available_graph_entities
     corrected = False
 
-    async def delete_after_validation(org, ids, **kwargs):
+    async def delete_after_collection(org, ids, **kwargs):
         nonlocal corrected
         result = await original(org, ids, **kwargs)
-        if edges[0].id in result and not corrected:
+        if {root.id, "ordinary"} <= set(result) and not corrected:
             corrected = True
             await delete_source(runtime, source)
         return result
 
-    monkeypatch.setattr(exploration, "available_graph_relationships", delete_after_validation)
+    monkeypatch.setattr(
+        graph_view_availability, "available_graph_entities", delete_after_collection
+    )
     result = await exploration.explore(
         mode=mode,
         entity_id=root.id,
@@ -314,28 +317,38 @@ async def test_dependencies_recheck_a_frontier_after_sibling_discovery(
     assert {entity.id for entity in result.entities} == {"root", "first"}
 
 
-async def test_related_rechecks_source_backed_neighbor_after_edge_validation(
+async def test_related_rechecks_source_backed_neighbor_after_node_collection(
     runtime, content_store, monkeypatch
 ):
     source, neighbor = await source_task(runtime)
-    edges = await store_dependency_graph(
+    await store_dependency_graph(
         runtime,
         [task("root"), neighbor],
         [("root", neighbor.id)],
         kind=RelationshipType.RELATED_TO,
     )
-    original = exploration.available_graph_relationships
+    baseline = await exploration.explore(
+        mode="related",
+        entity_id="root",
+        organization_id=runtime.client.group_id,
+        principal_id="user_a",
+    )
+    assert {row.id for row in baseline.entities} == {neighbor.id}
+    assert baseline.entities[0].name == neighbor.name
+    original = graph_view_availability.available_graph_entities
     corrected = False
 
-    async def delete_after_validation(org, ids, **kwargs):
+    async def delete_after_collection(org, ids, **kwargs):
         nonlocal corrected
         result = await original(org, ids, **kwargs)
-        if edges[0].id in result and not corrected:
+        if {"root", neighbor.id} <= set(result) and not corrected:
             corrected = True
             await delete_source(runtime, source)
         return result
 
-    monkeypatch.setattr(exploration, "available_graph_relationships", delete_after_validation)
+    monkeypatch.setattr(
+        graph_view_availability, "available_graph_entities", delete_after_collection
+    )
     result = await exploration.explore(
         mode="related",
         entity_id="root",
@@ -360,17 +373,13 @@ async def test_graph_reader_drops_edge_changed_during_final_node_loading(monkeyp
         kwargs = dict(mode=mode, entity_id="root", organization_id=runtime.client.group_id)
         baseline = await exploration.explore(**kwargs)
         assert "leaf" in {row.id for row in baseline.entities}
-        available = exploration.available_graph_entities
+        available = graph_view_availability.available_graph_entities
         changed = False
 
         async def change_during_nodes(org, ids, **options):
             nonlocal changed
-            if set(ids) == {"root", "leaf"} and not changed:
-                if mode == "dependencies":
-                    import sys
-
-                    if sys._getframe(1).f_code.co_name != "_explore_dependencies":
-                        return await available(org, ids, **options)
+            nodes = await available(org, ids, **options)
+            if set(nodes) == {"root", "leaf"} and not changed:
                 changed = True
                 if change == "delete":
                     assert await runtime.relationship_manager.delete(edges[0].id)
@@ -381,9 +390,11 @@ async def test_graph_reader_drops_edge_changed_during_final_node_loading(monkeyp
                         else {"metadata": {"expired_at": "2026-01-01T00:00:00+00:00"}}
                     )
                     await runtime.relationship_manager.create_direct_bulk([replacement])
-            return await available(org, ids, **options)
+            return nodes
 
-        monkeypatch.setattr(exploration, "available_graph_entities", change_during_nodes)
+        monkeypatch.setattr(
+            graph_view_availability, "available_graph_entities", change_during_nodes
+        )
         result = await exploration.explore(**kwargs)
         assert changed
         assert {row.id for row in await runtime.entity_manager.get_many(["root", "leaf"])} == {

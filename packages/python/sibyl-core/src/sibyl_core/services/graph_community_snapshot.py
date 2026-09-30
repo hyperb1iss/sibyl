@@ -303,18 +303,17 @@ async def _current_graph_snapshot(
     older cached label or relationship fact.
     """
     from sibyl_core.services.graph_community_managers import _runtime_for_client
-    from sibyl_core.services.graph_read_availability import unchanged_graph_relationships
+    from sibyl_core.services.graph_view_availability import available_graph_view
 
-    current_relationships = await _current_graph_relationships(
-        client, organization_id, [r.id for r in snapshot.relationships]
+    discovered_relationships = await _current_graph_relationships(
+        client, organization_id, [relationship.id for relationship in snapshot.relationships]
     )
-    entities = await _current_graph_entities(
-        client, organization_id, list(snapshot.entity_by_id), source_visible=source_visible
-    )
-    current_relationships = await unchanged_graph_relationships(
+    entities, current_relationships = await available_graph_view(
         organization_id,
-        current_relationships,
+        list(snapshot.entity_by_id),
+        discovered_relationships,
         runtime=_runtime_for_client(client, organization_id),
+        source_visible=source_visible,
     )
     relationships = [
         current_relationships[r.id] for r in snapshot.relationships if r.id in current_relationships

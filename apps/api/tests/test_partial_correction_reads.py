@@ -57,6 +57,10 @@ async def test_partial_correction_never_serves_canonical_source_text(
 
         monkeypatch.setattr(content_client, "surreal_content_client", session)
         monkeypatch.setattr(
+            "sibyl_core.services.graph_runtime.get_surreal_graph_runtime",
+            AsyncMock(return_value=runtime),
+        )
+        monkeypatch.setattr(
             "sibyl_core.services.memory_lifecycle.get_surreal_graph_runtime",
             AsyncMock(return_value=runtime),
         )

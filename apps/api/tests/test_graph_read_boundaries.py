@@ -5,7 +5,7 @@ import pytest
 
 from sibyl.api.routes import graph
 from sibyl.persistence.graph_runtime import GraphQueryAdapter
-from sibyl_core.services import graph_community_clusters
+from sibyl_core.services import graph_community_clusters, graph_view_availability
 from sibyl_core.services.graph_relationships import RelationshipManager
 from sibyl_core.services.graph_runtime import get_surreal_graph_runtime
 from sibyl_core.services.memory_correction import apply_memory_correction
@@ -169,9 +169,7 @@ async def test_graph_response_drops_edge_removed_during_final_node_loading(
 
         baseline = await read()
         assert baseline.status_code == 200, baseline.text
-        owner = graph_community_clusters if surface == "clusters" else graph
-        method = "_current_graph_entities" if surface == "clusters" else "_current_entities"
-        load_nodes = getattr(owner, method)
+        load_nodes = graph_view_availability.available_graph_entities
         changed = False
 
         async def remove_during_node_loading(*args, **kwargs):
@@ -182,12 +180,17 @@ async def test_graph_response_drops_edge_removed_during_final_node_loading(
                 changed = True
             return nodes
 
-        monkeypatch.setattr(owner, method, remove_during_node_loading)
+        monkeypatch.setattr(
+            graph_view_availability, "available_graph_entities", remove_during_node_loading
+        )
         response = await read()
         assert changed
         assert response.status_code == 200, response.text
         current = await native.entity_manager.get_many(sorted(wanted))
         assert {row.id for row in current} == wanted
+        stored_edges = await native.relationship_manager.list_all(limit=100)
+        assert removed.id not in {edge.id for edge in stored_edges}
+        assert len(stored_edges) == 2
         data = response.json()
         if surface == "debug":
             assert data["node_count"] == 3

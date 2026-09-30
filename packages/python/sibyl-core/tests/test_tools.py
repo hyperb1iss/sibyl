@@ -3361,8 +3361,13 @@ class TestExploreTool:
                 "sibyl_core.tools.explore.available_graph_relationships", available_relationships
             ),
             patch(
-                "sibyl_core.tools.explore.unchanged_graph_relationships",
-                AsyncMock(side_effect=lambda _org, edges, **_kwargs: edges),
+                "sibyl_core.tools.explore.available_graph_view",
+                AsyncMock(
+                    side_effect=lambda _org, ids, edges, **_kwargs: (
+                        {key: stored[key] for key in ids if key in stored},
+                        edges,
+                    )
+                ),
             ),
             patch(
                 "sibyl_core.tools.explore.get_graph_runtime",

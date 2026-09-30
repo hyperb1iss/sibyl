@@ -7,6 +7,7 @@ import pytest
 
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.services import graph_read_availability as availability
+from sibyl_core.services import graph_view_availability
 from sibyl_core.services.graph_read_availability import (
     available_graph_entities,
     available_graph_relationships,
@@ -68,12 +69,13 @@ async def test_related_final_edge_proof_denies_prior_generation_with_current_end
         "SELECT * FROM relates_to WHERE uuid=$id;", id=protected.id
     )
     assert before[0]["operational_derivation_required"] is True
-    original = exploration.available_graph_entities
+    original = graph_view_availability.available_graph_entities
     revised = None
 
     async def republish_during_final_nodes(org, ids, **kwargs):
         nonlocal revised
-        if protected.target_id in ids and ordinary.id in ids and revised is None:
+        nodes = await original(org, ids, **kwargs)
+        if {protected.target_id, ordinary.id} <= set(nodes) and revised is None:
             revised, replacement = await capture(
                 runtime, authority, revision=memory.revision, metadata={"encoding_revision": 2}
             )
@@ -81,9 +83,11 @@ async def test_related_final_edge_proof_denies_prior_generation_with_current_end
             await runtime.entity_manager.publish_operational_entities(replacement)
             if republish_edges:
                 await runtime.relationship_manager.publish_operational_relationships(replacement)
-        return await original(org, ids, **kwargs)
+        return nodes
 
-    monkeypatch.setattr(exploration, "available_graph_entities", republish_during_final_nodes)
+    monkeypatch.setattr(
+        graph_view_availability, "available_graph_entities", republish_during_final_nodes
+    )
     result = await read()
     assert revised is not None and revised.id == memory.id and revised.revision > memory.revision
     after = await runtime.client.execute_query(
@@ -99,7 +103,16 @@ async def test_related_final_edge_proof_denies_prior_generation_with_current_end
         runtime.client.group_id, [protected.id], runtime=runtime
     )
     assert set(current_edges) == ({protected.id} if republish_edges else set())
-    assert {entity.id for entity in result.entities} == {ordinary.id}
+    # Both paths originate at a root changed after this view collected its proof.
+    assert result.entities == []
+    ordinary_nodes = await available_graph_entities(
+        runtime.client.group_id, [ordinary.id], runtime=runtime
+    )
+    assert set(ordinary_nodes) == {ordinary.id}
+    refreshed = await read()
+    refreshed_ids = {entity.id for entity in refreshed.entities}
+    assert ordinary.id in refreshed_ids
+    assert (protected.target_id in refreshed_ids) is republish_edges
 
 
 @pytest.mark.parametrize("change", ["unchanged", "delete", "type", "retire"])

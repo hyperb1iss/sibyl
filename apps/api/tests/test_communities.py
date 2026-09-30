@@ -42,24 +42,18 @@ def current_rendering_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
     async def current(_client, _organization_id, snapshot, *, source_visible=None):
         return snapshot
 
-    async def current_entities(client, organization_id, ids, *, source_visible=None):
+    async def current_view(organization_id, ids, relationships, *, runtime, source_visible=None):
         from sibyl_core.services.graph_community_snapshot import _get_graph_snapshot
 
-        snapshot = await _get_graph_snapshot(client, organization_id)
-        return {entity.id: entity for entity in snapshot.entities if entity.id in ids}
+        snapshot = await _get_graph_snapshot(runtime.client, organization_id)
+        entities = {entity.id: entity for entity in snapshot.entities if entity.id in ids}
+        return entities, relationships
 
     monkeypatch.setattr(
         "sibyl_core.services.graph_community_snapshot._current_graph_snapshot", current
     )
     monkeypatch.setattr(
-        "sibyl_core.services.graph_community_clusters._current_graph_entities", current_entities
-    )
-
-    async def unchanged(_organization_id, relationships, *, runtime=None):
-        return relationships
-
-    monkeypatch.setattr(
-        "sibyl_core.services.graph_read_availability.unchanged_graph_relationships", unchanged
+        "sibyl_core.services.graph_view_availability.available_graph_view", current_view
     )
     monkeypatch.setattr(
         community_clusters,

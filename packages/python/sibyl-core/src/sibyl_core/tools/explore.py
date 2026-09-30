@@ -5,12 +5,12 @@ from typing import TYPE_CHECKING, Any, Literal
 import structlog
 
 from sibyl_core.memory_pipeline.lifecycle import graph_metadata_recallable
-from sibyl_core.models.entities import Entity, EntityType, RelationshipType
+from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.services.graph_read_availability import (
     available_graph_entities,
     available_graph_relationships,
-    unchanged_graph_relationships,
 )
+from sibyl_core.services.graph_view_availability import available_graph_view
 from sibyl_core.tools.helpers import (
     VALID_ENTITY_TYPES,
     ScopeGuard,
@@ -569,6 +569,7 @@ async def _explore_dependencies(
     # that are still available individually but no longer reachable from root.
     discovered: set[str] = set()
     followed: dict[str, list[tuple[str, str]]] = {}
+    discovered_edges: dict[str, Relationship] = {}
 
     async def discover_dependencies(task_id: str) -> None:
         if task_id in discovered:
@@ -610,23 +611,22 @@ async def _explore_dependencies(
                 or edge.target_id not in current
             ):
                 continue
+            discovered_edges[edge.id] = edge
             followed[task_id].append((edge.id, edge.target_id))
             await discover_dependencies(edge.target_id)
 
     await discover_dependencies(entity_id)
 
-    edges = await available_graph_relationships(
+    current, edges = await available_graph_view(
         group_id,
-        [edge_id for paths in followed.values() for edge_id, _ in paths],
+        sorted(discovered),
+        discovered_edges,
         runtime=runtime,
-    )
-    current = await available_graph_entities(
-        group_id, sorted(discovered), runtime=runtime, source_visible=source_is_visible
+        source_visible=source_is_visible,
     )
     current = {key: row for key, row in current.items() if entity_is_visible(row)}
     if entity_id not in current:
         return ExploreResponse(mode="dependencies", entities=[], total=0, filters=filters)
-    edges = await unchanged_graph_relationships(group_id, edges, runtime=runtime)
 
     visited: set[str] = set()
     in_stack: set[str] = set()
@@ -753,18 +753,19 @@ async def _explore_related(
     endpoint_ids = {entity_id}
     for _entity, relationship in raw_results:
         endpoint_ids.update((relationship.source_id, relationship.target_id))
-    current_relationships = await available_graph_relationships(
+    discovered_relationships = await available_graph_relationships(
         group_id, [relationship.id for _, relationship in raw_results], runtime=runtime
     )
-    current = await available_graph_entities(
-        group_id, sorted(endpoint_ids), runtime=runtime, source_visible=allowed
+    current, current_relationships = await available_graph_view(
+        group_id,
+        sorted(endpoint_ids),
+        discovered_relationships,
+        runtime=runtime,
+        source_visible=allowed,
     )
     current = {key: entity for key, entity in current.items() if allowed(entity)}
     if entity_id not in current:
         return ExploreResponse(mode=mode, entities=[], total=0, filters=filters)
-    current_relationships = await unchanged_graph_relationships(
-        group_id, current_relationships, runtime=runtime
-    )
     results = []
     for entity, relationship in raw_results:
         if relationship.id not in current_relationships:

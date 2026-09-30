@@ -34,7 +34,6 @@ from sibyl_core.services.graph_community_selection import (
 )
 from sibyl_core.services.graph_community_snapshot import (
     _count_int,
-    _current_graph_entities,
     _current_graph_relationships,
     _get_graph_snapshot,
     _get_visible_graph_snapshot,
@@ -478,10 +477,13 @@ async def get_cluster_nodes(
             if relationship.source_id in member_id_set and relationship.target_id in member_id_set
         }
 
-    entity_by_id = await _current_graph_entities(
-        client,
+    from sibyl_core.services.graph_view_availability import available_graph_view
+
+    entity_by_id, relationships = await available_graph_view(
         organization_id,
         member_ids,
+        relationships,
+        runtime=_runtime_for_client(client, organization_id),
         source_visible=partial(
             graph_row_read_allowed,
             principal_id=principal_id,
@@ -490,12 +492,6 @@ async def get_cluster_nodes(
             accessible_teams=accessible_teams,
             accessible_delegations=accessible_delegations,
         ),
-    )
-
-    from sibyl_core.services.graph_read_availability import unchanged_graph_relationships
-
-    relationships = await unchanged_graph_relationships(
-        organization_id, relationships, runtime=_runtime_for_client(client, organization_id)
     )
 
     # This is the surface that emits an entity's name and description text, so

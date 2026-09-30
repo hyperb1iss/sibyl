@@ -375,7 +375,9 @@ class TestInaccessibleProjectWire:
             metadata={"project_id": "proj-mine"},
         )
         runtime = SimpleNamespace(
-            entity_manager=SimpleNamespace(list_all=AsyncMock(return_value=[victim, mine]))
+            client=object(),
+            entity_manager=SimpleNamespace(list_all=AsyncMock(return_value=[victim, mine])),
+            relationship_manager=object(),
         )
         adapter = SimpleNamespace(get_connection_counts=AsyncMock(return_value={}))
 
@@ -387,6 +389,10 @@ class TestInaccessibleProjectWire:
             patch(
                 "sibyl.api.routes.graph.available_graph_entities",
                 AsyncMock(return_value={entity.id: entity for entity in [victim, mine]}),
+            ),
+            patch(
+                "sibyl.api.routes.graph.available_graph_view",
+                AsyncMock(return_value=({entity.id: entity for entity in [victim, mine]}, {})),
             ),
             patch(
                 "sibyl.api.routes.graph.get_graph_query_adapter",
