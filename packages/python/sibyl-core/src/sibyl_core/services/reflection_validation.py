@@ -33,7 +33,7 @@ from sibyl_core.tasks.memory_validation import (
     prepare_reflection_validation,
 )
 from sibyl_core.tasks.ordinary_packets import OrdinaryEvidencePacket
-from sibyl_core.tasks.ordinary_projection import OrdinaryEvidenceProjection
+from sibyl_core.tasks.ordinary_projection import OrdinaryEvidenceProjection, ProjectionReuse
 from sibyl_core.tasks.procedure_review import review_digest
 
 ORDINARY_SNAPSHOT = """
@@ -248,8 +248,11 @@ async def prepare_stored_reflection(
     confidence = memory.metadata.get("confidence", 0)
     from sibyl_core.services.ordinary_evidence_origin import evidence_for_reflection
 
+    # Share only deterministic projection work within this preparation. Every
+    # invocation still resolves authority and reads current source snapshots.
+    projection_reuse = ProjectionReuse()
     selected_evidence, origin_dependencies = await evidence_for_reflection(
-        memory, derivation, observations, resolver, _ancestors
+        memory, derivation, observations, resolver, _ancestors, projection_reuse=projection_reuse
     )
     if selected_evidence is not None:
         citations = selected_evidence.citations
@@ -290,6 +293,7 @@ async def prepare_stored_reflection(
         projection=selected_evidence
         if isinstance(selected_evidence, OrdinaryEvidenceProjection)
         else None,
+        projection_reuse=projection_reuse,
     )
     from sibyl_core.services.ordinary_publication import ordinary_policy_digest
 

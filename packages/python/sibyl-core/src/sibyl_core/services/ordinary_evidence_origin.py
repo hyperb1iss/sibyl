@@ -9,11 +9,14 @@ from sibyl_core.services.validation_dependencies import dependency_reference
 from sibyl_core.services.validation_origin import load_validation_origin
 from sibyl_core.tasks.ordinary_packets import QUALIFICATION, OrdinaryEvidencePacket
 from sibyl_core.tasks.ordinary_projection import VERSION as COMPLETE_PROJECTION
+from sibyl_core.tasks.ordinary_projection import ProjectionReuse
 from sibyl_core.tasks.ordinary_proposal_result import OrdinaryProposalResult
 from sibyl_core.tasks.reflection_correction import ReflectionCorrectionResult
 
 
-async def evidence_for_reflection(memory, derivation, observations, resolver, ancestors):
+async def evidence_for_reflection(
+    memory, derivation, observations, resolver, ancestors, *, projection_reuse: ProjectionReuse
+):
     """Metadata can describe provenance but cannot select or remove the evidence boundary."""
     origin = await load_validation_origin(derivation)
     if origin is None:
@@ -43,9 +46,10 @@ async def evidence_for_reflection(memory, derivation, observations, resolver, an
             packet_binding=binding,
             evidence_mode=COMPLETE_PROJECTION if projection_binding is not None else "raw_v1",
             projection_binding=projection_binding,
+            projection_reuse=projection_reuse,
         )
         result = TypeAdapter(OrdinaryProposalResult).validate_python(value)
-        candidate = prepared.prepared.render(result.proposal)
+        candidate = prepared.prepared.render(result.proposal, projection_reuse=projection_reuse)
         if (
             result.validation_error is not None
             or result.input_sha256 != prepared.prepared.input_sha256
@@ -64,6 +68,7 @@ async def evidence_for_reflection(memory, derivation, observations, resolver, an
             evidence = _projection_for_cohort(
                 PartialCohort.model_validate_json(prepared.prepared.input_json),
                 prepared.prepared.projection_json,
+                reuse=projection_reuse,
             )
         else:
             source = prepared.sources[0].memory
