@@ -39,6 +39,7 @@ from sibyl_core.services.graph_community_snapshot import (
     _get_visible_graph_snapshot,
     _native_rows,
     _reader_cache_key,
+    _ReaderCacheKey,
     _snapshot_fingerprint,
 )
 from sibyl_core.services.graph_visibility import graph_row_read_allowed
@@ -46,7 +47,7 @@ from sibyl_core.services.graph_visibility import graph_row_read_allowed
 log = structlog.get_logger()
 
 CLUSTER_CACHE: dict[
-    tuple[str, tuple[str, tuple[str, ...], tuple[str, ...] | None]],
+    tuple[str, _ReaderCacheKey],
     tuple[datetime, str, list[ClusterSummary]],
 ] = {}
 CLUSTER_CACHE_TTL = timedelta(minutes=5)
@@ -230,6 +231,8 @@ async def get_clusters_for_visualization(
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
     allowed_memory_scope_keys: set[str] | None = None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
 ) -> list[ClusterSummary]:
     """Get clusters optimized for bubble visualization.
 
@@ -247,7 +250,13 @@ async def get_clusters_for_visualization(
     """
     cache_key = (
         organization_id,
-        _reader_cache_key(principal_id, accessible_projects, allowed_memory_scope_keys),
+        _reader_cache_key(
+            principal_id,
+            accessible_projects,
+            allowed_memory_scope_keys,
+            accessible_teams,
+            accessible_delegations,
+        ),
     )
 
     snapshot = await _get_visible_graph_snapshot(
@@ -256,6 +265,8 @@ async def get_clusters_for_visualization(
         principal_id=principal_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
         max_entities=DETECTION_MAX_ENTITIES,
         max_relationships=DETECTION_MAX_RELATIONSHIPS,
     )
@@ -413,6 +424,8 @@ async def get_cluster_nodes(
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
     allowed_memory_scope_keys: set[str] | None = None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
 ) -> dict[str, Any]:
     """Get nodes and edges for a specific cluster.
 
@@ -433,6 +446,8 @@ async def get_cluster_nodes(
         principal_id=principal_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
     )
     cluster = next((c for c in clusters if c.id == cluster_id), None)
 
@@ -450,6 +465,8 @@ async def get_cluster_nodes(
             principal_id=principal_id,
             accessible_projects=accessible_projects,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
         ),
     )
 
@@ -463,6 +480,8 @@ async def get_cluster_nodes(
             principal_id=principal_id,
             accessible_projects=accessible_projects,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
         ),
     )
 
@@ -483,6 +502,8 @@ async def get_cluster_nodes(
             principal_id=principal_id,
             accessible_projects=accessible_projects,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
             private_scope_granted=private_scope_granted_for(
                 allowed_memory_scope_keys, principal_id=principal_id
             ),
@@ -509,6 +530,8 @@ async def get_cluster_nodes(
             principal_id=principal_id,
             accessible_projects=accessible_projects,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
             max_entities=DETECTION_MAX_ENTITIES,
             max_relationships=DETECTION_MAX_RELATIONSHIPS,
         )

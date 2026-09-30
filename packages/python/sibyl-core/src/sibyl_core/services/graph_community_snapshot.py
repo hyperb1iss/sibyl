@@ -23,7 +23,9 @@ from sibyl_core.services.graph_visibility import graph_row_read_allowed
 
 log = structlog.get_logger()
 
-type _ReaderCacheKey = tuple[str, tuple[str, ...], tuple[str, ...] | None]
+type _ReaderCacheKey = tuple[
+    str, tuple[str, ...], tuple[str, ...] | None, tuple[str, ...], tuple[str, ...]
+]
 
 GRAPH_SNAPSHOT_CACHE: dict[tuple[str, int | None, int | None], tuple[datetime, GraphSnapshot]] = {}
 GRAPH_SNAPSHOT_CACHE_TTL = timedelta(minutes=5)
@@ -147,7 +149,9 @@ def _reader_cache_key(
     principal_id: str | None,
     accessible_projects: set[str] | None,
     allowed_memory_scope_keys: set[str] | None = None,
-) -> tuple[str, tuple[str, ...], tuple[str, ...] | None]:
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
+) -> _ReaderCacheKey:
     """Identity component for every cache holding reader-visible graph rows.
 
     Detection input, cluster summaries and rendered levels of detail are all
@@ -160,6 +164,8 @@ def _reader_cache_key(
         None
         if allowed_memory_scope_keys is None
         else tuple(sorted(str(key) for key in allowed_memory_scope_keys)),
+        tuple(sorted(str(key) for key in accessible_teams or ())),
+        tuple(sorted(str(key) for key in accessible_delegations or ())),
     )
 
 
@@ -169,13 +175,15 @@ def _reader_visible_snapshot(
     principal_id: str | None,
     accessible_projects: set[str] | None,
     allowed_memory_scope_keys: set[str] | None = None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
 ) -> GraphSnapshot:
     """Reduce a snapshot to the rows this reader is authorized to see.
 
     The scope predicate is expressible in SurrealQL against the flexible
     attributes object, but pushing it down would restate a policy whose
     branches (owner as principal_id or scope_key, unrecognized scopes denied,
-    team and delegated scopes closed pending their membership threads) already
+    team and delegated scopes require persisted reader grants) already
     live in memory_metadata_read_allowed. Two implementations in two languages
     is the drift this filter exists to prevent, so the snapshot loads whole and
     is narrowed here, once, through the shared rule.
@@ -187,6 +195,8 @@ def _reader_visible_snapshot(
             principal_id=principal_id,
             accessible_projects=accessible_projects,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
         )
 
     entities = [entity for entity in snapshot.entities if allowed(entity)]
@@ -212,6 +222,8 @@ async def _get_visible_graph_snapshot(
     principal_id: str | None,
     accessible_projects: set[str] | None,
     allowed_memory_scope_keys: set[str] | None = None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
     max_entities: int | None = None,
     max_relationships: int | None = None,
 ) -> GraphSnapshot:
@@ -230,6 +242,8 @@ async def _get_visible_graph_snapshot(
             principal_id=principal_id,
             accessible_projects=accessible_projects,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
         ),
     )
     return _reader_visible_snapshot(
@@ -237,6 +251,8 @@ async def _get_visible_graph_snapshot(
         principal_id=principal_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
     )
 
 

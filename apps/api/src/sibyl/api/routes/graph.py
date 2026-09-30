@@ -56,6 +56,8 @@ async def get_clusters_for_visualization(
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
     allowed_memory_scope_keys: set[str] | None = None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
 ):
     adapter = await get_graph_query_adapter(group_id)
     return await adapter.get_clusters_for_visualization(
@@ -63,6 +65,8 @@ async def get_clusters_for_visualization(
         principal_id=principal_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
     )
 
 
@@ -74,6 +78,8 @@ async def get_cluster_nodes(
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
     allowed_memory_scope_keys: set[str] | None = None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
 ):
     adapter = await get_graph_query_adapter(group_id)
     return await adapter.get_cluster_nodes(
@@ -81,6 +87,8 @@ async def get_cluster_nodes(
         principal_id=principal_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
     )
 
 
@@ -97,6 +105,8 @@ async def get_hierarchical_graph(
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
     allowed_memory_scope_keys: set[str] | None = None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
 ):
     adapter = await get_graph_query_adapter(group_id)
     return await adapter.get_hierarchical_graph(
@@ -109,6 +119,8 @@ async def get_hierarchical_graph(
         principal_id=principal_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
     )
 
 
@@ -142,7 +154,13 @@ async def debug_graph(
     """Debug endpoint to trace graph data issue."""
     group_id = str(org.id)
     runtime = await get_entity_graph_runtime(group_id)
-    principal_id, accessible_projects, memory_grants = await _graph_scope_reader(ctx)
+    (
+        principal_id,
+        accessible_projects,
+        memory_grants,
+        accessible_teams,
+        accessible_delegations,
+    ) = await _graph_scope_reader(ctx)
 
     nodes = await _list_graph_entities(
         runtime.entity_manager,
@@ -150,6 +168,8 @@ async def debug_graph(
         principal_id=principal_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=memory_grants,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
         limit=500,
         include_archived=True,
     )
@@ -167,6 +187,8 @@ async def debug_graph(
             principal_id=principal_id,
             accessible_projects=accessible_projects,
             allowed_memory_scope_keys=memory_grants,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
         )
     ]
     sample_edges = relationships[:3]
@@ -209,14 +231,10 @@ def get_entity_color(entity_type: EntityType) -> str:
     return ENTITY_COLORS.get(entity_type, DEFAULT_COLOR)
 
 
-async def _graph_scope_reader(ctx: AuthContext) -> tuple[str | None, set[str], set[str] | None]:
-    """Resolve the identity a visualization request is authorized as.
-
-    The API-key memory grant travels with the principal because a restricted
-    key must not regain a memory space by walking the graph, and because the
-    render caches key on this triple — a full session and a narrowed key for
-    the same principal are different readers.
-    """
+async def _graph_scope_reader(
+    ctx: AuthContext,
+) -> tuple[str | None, set[str], set[str] | None, set[str], set[str]]:
+    """Resolve persisted reader grants and the credential ceiling together."""
     accessible_projects = await list_accessible_project_graph_ids(ctx)
     principal_id = str(getattr(getattr(ctx, "user", None), "id", None) or "") or None
     grants = ctx.api_key_memory_scope_keys
@@ -224,6 +242,8 @@ async def _graph_scope_reader(ctx: AuthContext) -> tuple[str | None, set[str], s
         principal_id,
         {str(project_id) for project_id in accessible_projects or set()},
         set(grants) if grants is not None else None,
+        set(ctx.accessible_teams),
+        set(ctx.accessible_delegations),
     )
 
 
@@ -254,6 +274,8 @@ async def _list_graph_entities(
     principal_id: str | None,
     accessible_projects: set[str],
     allowed_memory_scope_keys: set[str] | None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
     entity_types: list[EntityType] | None = None,
     limit: int = 100,
     offset: int = 0,
@@ -283,6 +305,8 @@ async def _list_graph_entities(
                 principal_id=principal_id,
                 accessible_projects=accessible_projects,
                 allowed_memory_scope_keys=allowed_memory_scope_keys,
+                accessible_teams=accessible_teams,
+                accessible_delegations=accessible_delegations,
             ),
         )
         for listed in batch:
@@ -296,6 +320,8 @@ async def _list_graph_entities(
                 principal_id=principal_id,
                 accessible_projects=accessible_projects,
                 allowed_memory_scope_keys=allowed_memory_scope_keys,
+                accessible_teams=accessible_teams,
+                accessible_delegations=accessible_delegations,
             ):
                 continue
             if remaining_offset:
@@ -317,6 +343,8 @@ async def _get_graph_entity(
     principal_id: str | None,
     accessible_projects: set[str],
     allowed_memory_scope_keys: set[str] | None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
 ) -> Entity | None:
     current = await available_graph_entities(
         organization_id,
@@ -326,6 +354,8 @@ async def _get_graph_entity(
             principal_id=principal_id,
             accessible_projects=accessible_projects,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
         ),
     )
     entity = current.get(entity_id)
@@ -334,6 +364,8 @@ async def _get_graph_entity(
         principal_id=principal_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
     ):
         return None
     return entity
@@ -354,13 +386,21 @@ async def get_all_nodes(
     """
     group_id = str(org.id)
     runtime = await get_entity_graph_runtime(group_id)
-    principal_id, accessible_projects, memory_grants = await _graph_scope_reader(ctx)
+    (
+        principal_id,
+        accessible_projects,
+        memory_grants,
+        accessible_teams,
+        accessible_delegations,
+    ) = await _graph_scope_reader(ctx)
     entities = await _list_graph_entities(
         runtime.entity_manager,
         organization_id=group_id,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=memory_grants,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
         entity_types=types,
         limit=limit,
         offset=offset,
@@ -375,6 +415,8 @@ async def get_all_nodes(
             principal_id=principal_id,
             accessible_projects=accessible_projects,
             allowed_memory_scope_keys=memory_grants,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
         ),
     )
 
@@ -422,7 +464,13 @@ async def get_all_edges(
     """Get all edges for graph visualization."""
     group_id = str(org.id)
     runtime = await get_entity_graph_runtime(group_id)
-    principal_id, accessible_projects, memory_grants = await _graph_scope_reader(ctx)
+    (
+        principal_id,
+        accessible_projects,
+        memory_grants,
+        accessible_teams,
+        accessible_delegations,
+    ) = await _graph_scope_reader(ctx)
 
     all_relationships = await runtime.relationship_manager.list_all(
         relationship_types=relationship_types,
@@ -446,6 +494,8 @@ async def get_all_edges(
             principal_id=principal_id,
             accessible_projects=accessible_projects,
             allowed_memory_scope_keys=memory_grants,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
         ),
     )
     visible_ids = {
@@ -457,6 +507,8 @@ async def get_all_edges(
             principal_id=principal_id,
             accessible_projects=accessible_projects,
             allowed_memory_scope_keys=memory_grants,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
         )
     }
 
@@ -477,6 +529,8 @@ async def get_all_edges(
             principal_id=principal_id,
             accessible_projects=accessible_projects,
             allowed_memory_scope_keys=memory_grants,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
         )
     ]
 
@@ -494,7 +548,13 @@ async def get_full_graph(
     group_id = str(org.id)
     runtime = await get_entity_graph_runtime(group_id)
     adapter = await get_graph_query_adapter(group_id)
-    principal_id, accessible_projects, memory_grants = await _graph_scope_reader(ctx)
+    (
+        principal_id,
+        accessible_projects,
+        memory_grants,
+        accessible_teams,
+        accessible_delegations,
+    ) = await _graph_scope_reader(ctx)
 
     entities = await _list_graph_entities(
         runtime.entity_manager,
@@ -502,6 +562,8 @@ async def get_full_graph(
         principal_id=principal_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=memory_grants,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
         entity_types=types,
         limit=max_nodes,
         include_archived=True,
@@ -544,6 +606,8 @@ async def get_full_graph(
                 principal_id=principal_id,
                 accessible_projects=accessible_projects,
                 allowed_memory_scope_keys=memory_grants,
+                accessible_teams=accessible_teams,
+                accessible_delegations=accessible_delegations,
             )
         )
         offset += len(stored)
@@ -590,7 +654,13 @@ async def get_subgraph(
     """Get a subgraph centered on a specific entity."""
     group_id = str(org.id)
     runtime = await get_entity_graph_runtime(group_id)
-    principal_id, accessible_projects, memory_grants = await _graph_scope_reader(ctx)
+    (
+        principal_id,
+        accessible_projects,
+        memory_grants,
+        accessible_teams,
+        accessible_delegations,
+    ) = await _graph_scope_reader(ctx)
 
     # Get center entity
     center = await _get_graph_entity(
@@ -599,6 +669,8 @@ async def get_subgraph(
         principal_id=principal_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=memory_grants,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
     )
     if not center:
         raise HTTPException(status_code=404, detail=f"Entity not found: {payload.entity_id}")
@@ -621,6 +693,8 @@ async def get_subgraph(
             principal_id=principal_id,
             accessible_projects=accessible_projects,
             allowed_memory_scope_keys=memory_grants,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
         )
         if not entity:
             return
@@ -654,6 +728,8 @@ async def get_subgraph(
                 principal_id=principal_id,
                 accessible_projects=accessible_projects,
                 allowed_memory_scope_keys=memory_grants,
+                accessible_teams=accessible_teams,
+                accessible_delegations=accessible_delegations,
             ),
         )
         current_edges = {
@@ -679,11 +755,15 @@ async def get_subgraph(
                 principal_id=principal_id,
                 accessible_projects=accessible_projects,
                 allowed_memory_scope_keys=memory_grants,
+                accessible_teams=accessible_teams,
+                accessible_delegations=accessible_delegations,
             ) or not _graph_entity_visible(
                 related_entity,
                 principal_id=principal_id,
                 accessible_projects=accessible_projects,
                 allowed_memory_scope_keys=memory_grants,
+                accessible_teams=accessible_teams,
+                accessible_delegations=accessible_delegations,
             ):
                 continue
 
@@ -740,7 +820,13 @@ async def get_clusters(
     """
     group_id = str(org.id)
     runtime = await get_entity_graph_runtime(group_id)
-    principal_id, accessible_projects, memory_grants = await _graph_scope_reader(ctx)
+    (
+        principal_id,
+        accessible_projects,
+        memory_grants,
+        accessible_teams,
+        accessible_delegations,
+    ) = await _graph_scope_reader(ctx)
 
     clusters = await get_clusters_for_visualization(
         runtime.client,
@@ -749,6 +835,8 @@ async def get_clusters(
         principal_id=principal_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=memory_grants,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
     )
 
     # Transform to API response format
@@ -782,7 +870,13 @@ async def get_cluster_detail(
     """Get nodes and edges within a specific cluster for drill-down view."""
     group_id = str(org.id)
     runtime = await get_entity_graph_runtime(group_id)
-    principal_id, accessible_projects, memory_grants = await _graph_scope_reader(ctx)
+    (
+        principal_id,
+        accessible_projects,
+        memory_grants,
+        accessible_teams,
+        accessible_delegations,
+    ) = await _graph_scope_reader(ctx)
 
     result = await get_cluster_nodes(
         runtime.client,
@@ -791,6 +885,8 @@ async def get_cluster_detail(
         principal_id=principal_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=memory_grants,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
     )
 
     if result.get("error"):
@@ -864,7 +960,13 @@ async def get_hierarchical_graph_data(
     """
     group_id = str(org.id)
     runtime = await get_entity_graph_runtime(group_id)
-    principal_id, accessible_projects, memory_grants = await _graph_scope_reader(ctx)
+    (
+        principal_id,
+        accessible_projects,
+        memory_grants,
+        accessible_teams,
+        accessible_delegations,
+    ) = await _graph_scope_reader(ctx)
 
     # A caller-named project is a narrowing filter, never a grant: without
     # this intersection an ordinary member could name a project they do not
@@ -883,6 +985,8 @@ async def get_hierarchical_graph_data(
         principal_id=principal_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=memory_grants,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
     )
 
     # Guard against focused-mode totals undercounting. If filtered data exists,
@@ -941,13 +1045,21 @@ async def get_graph_stats(
 
     group_id = str(org.id)
     runtime = await get_entity_graph_runtime(group_id)
-    principal_id, accessible_projects, memory_grants = await _graph_scope_reader(ctx)
+    (
+        principal_id,
+        accessible_projects,
+        memory_grants,
+        accessible_teams,
+        accessible_delegations,
+    ) = await _graph_scope_reader(ctx)
     snapshot = await _get_visible_graph_snapshot(
         runtime.client,
         group_id,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=memory_grants,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
     )
     return {
         "total_nodes": len(snapshot.entities),

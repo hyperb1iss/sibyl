@@ -815,6 +815,8 @@ class GraphQueryAdapter:
         principal_id: str | None = None,
         accessible_projects: set[str] | None = None,
         allowed_memory_scope_keys: set[str] | None = None,
+        accessible_teams: set[str] | None = None,
+        accessible_delegations: set[str] | None = None,
     ) -> list[Any]:
         from sibyl_core.services.graph_communities import get_clusters_for_visualization
 
@@ -825,6 +827,8 @@ class GraphQueryAdapter:
             principal_id=principal_id,
             accessible_projects=accessible_projects,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
         )
 
     async def get_cluster_nodes(
@@ -834,6 +838,8 @@ class GraphQueryAdapter:
         principal_id: str | None = None,
         accessible_projects: set[str] | None = None,
         allowed_memory_scope_keys: set[str] | None = None,
+        accessible_teams: set[str] | None = None,
+        accessible_delegations: set[str] | None = None,
     ) -> dict[str, Any]:
         from sibyl_core.services.graph_communities import get_cluster_nodes
 
@@ -844,6 +850,8 @@ class GraphQueryAdapter:
             principal_id=principal_id,
             accessible_projects=accessible_projects,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
         )
 
     async def get_hierarchical_graph(
@@ -858,6 +866,8 @@ class GraphQueryAdapter:
         principal_id: str | None = None,
         accessible_projects: set[str] | None = None,
         allowed_memory_scope_keys: set[str] | None = None,
+        accessible_teams: set[str] | None = None,
+        accessible_delegations: set[str] | None = None,
     ) -> Any:
         from sibyl_core.services.graph_communities import get_hierarchical_graph
 
@@ -873,6 +883,8 @@ class GraphQueryAdapter:
             principal_id=principal_id,
             accessible_projects=accessible_projects,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
         )
 
 

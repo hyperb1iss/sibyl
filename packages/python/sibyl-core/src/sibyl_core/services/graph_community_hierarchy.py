@@ -35,13 +35,14 @@ from sibyl_core.services.graph_community_selection import (
 from sibyl_core.services.graph_community_snapshot import (
     _get_visible_graph_snapshot,
     _reader_cache_key,
+    _ReaderCacheKey,
     _snapshot_fingerprint,
 )
 
 log = structlog.get_logger()
 
 HIERARCHICAL_CACHE: dict[
-    tuple[str, tuple[str, tuple[str, ...], tuple[str, ...] | None]],
+    tuple[str, _ReaderCacheKey],
     tuple[datetime, str, dict[str, str], list[dict[str, Any]]],
 ] = {}
 HIERARCHICAL_CACHE_TTL = timedelta(minutes=5)
@@ -143,6 +144,8 @@ async def get_hierarchical_graph(
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
     allowed_memory_scope_keys: set[str] | None = None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
 ) -> HierarchicalGraphData:
     """Get graph data with cluster assignments for rich visualization.
 
@@ -183,6 +186,8 @@ async def get_hierarchical_graph(
         principal_id=principal_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
     )
     # Load the whole graph (within analytic caps) for detection and selection.
     # max_nodes/max_edges are render budgets applied later, never here — capping
@@ -193,6 +198,8 @@ async def get_hierarchical_graph(
         principal_id=principal_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
         max_entities=DETECTION_MAX_ENTITIES,
         max_relationships=DETECTION_MAX_RELATIONSHIPS,
     )
@@ -246,7 +253,13 @@ async def get_hierarchical_graph(
     # on the reader's visible subgraph, so its key carries the reader too.
     community_cache_key = (
         organization_id,
-        _reader_cache_key(principal_id, accessible_projects, allowed_memory_scope_keys),
+        _reader_cache_key(
+            principal_id,
+            accessible_projects,
+            allowed_memory_scope_keys,
+            accessible_teams,
+            accessible_delegations,
+        ),
     )
     node_to_cluster: dict[str, str] = {}
     clusters_meta: list[dict[str, Any]] = []

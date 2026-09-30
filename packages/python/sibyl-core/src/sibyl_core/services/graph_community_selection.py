@@ -52,6 +52,8 @@ def _lod_cache_key(
     principal_id: str | None,
     accessible_projects: set[str] | None,
     allowed_memory_scope_keys: set[str] | None = None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
 ) -> tuple[Any, ...]:
     return (
         organization_id,
@@ -61,7 +63,13 @@ def _lod_cache_key(
         cluster_id,
         max_nodes,
         max_edges,
-        _reader_cache_key(principal_id, accessible_projects, allowed_memory_scope_keys),
+        _reader_cache_key(
+            principal_id,
+            accessible_projects,
+            allowed_memory_scope_keys,
+            accessible_teams,
+            accessible_delegations,
+        ),
     )
 
 
