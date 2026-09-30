@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 import structlog
+from pydantic import ValidationError
 
 from sibyl_core.backends.surreal.records import normalize_records
 from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind
@@ -235,9 +236,16 @@ async def available_graph_view(
             SourceIdentity(organization_id, SourceKind.GRAPH_ENTITY, identifier), changed
         )
     }
-    stored_edges = {
-        row["uuid"]: relationship_from_surreal_row(row) for row in final_graph["relationships"]
-    }
+    stored_edges: dict[str, Relationship] = {}
+    for row in final_graph["relationships"]:
+        try:
+            stored_edges[row["uuid"]] = relationship_from_surreal_row(row)
+        except ValidationError:
+            log.warning(
+                "graph_view_relationship_invalid",
+                organization_id=organization_id,
+                relationship_id=row["uuid"],
+            )
     edges = {
         identifier: edge
         for identifier, edge in current_edges.items()

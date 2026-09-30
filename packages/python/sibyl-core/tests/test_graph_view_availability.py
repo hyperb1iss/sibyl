@@ -301,3 +301,57 @@ async def test_final_view_keeps_protected_generation_bound_to_canonical_source(
         "SELECT * FROM relates_to WHERE uuid=$id;", id=protected.id
     )
     assert set(nodes) == {healthy.id, "ordinary"} and not edges
+
+
+async def test_final_view_malformed_stored_edge_preserves_healthy_nodes_and_edge(
+    runtime, content_store, monkeypatch
+):
+    ids = ["root", "changing", "healthy"]
+    await _ordinary(runtime, *ids)
+    changing = Relationship(
+        id="changing-edge",
+        source_id="root",
+        target_id="changing",
+        relationship_type=RelationshipType.RELATED_TO,
+    )
+    healthy = changing.model_copy(update={"id": "healthy-edge", "target_id": "healthy"})
+    await runtime.relationship_manager.create_direct_bulk([changing, healthy])
+    proven = await available_graph_relationships(
+        runtime.client.group_id, [changing.id, healthy.id], runtime=runtime
+    )
+    baseline_nodes, baseline_edges = await view.available_graph_view(
+        runtime.client.group_id, ids, proven, runtime=runtime
+    )
+    assert set(baseline_nodes) == set(ids)
+    assert set(baseline_edges) == {changing.id, healthy.id}
+    collect_nodes = view.available_graph_entities
+    changed = False
+
+    async def corrupt_edge_after_actual_node_proof(org, wanted, **kwargs):
+        nonlocal changed
+        nodes = await collect_nodes(org, wanted, **kwargs)
+        assert set(ids) <= nodes.keys()
+        replacement = Relationship(
+            id=changing.id,
+            source_id=changing.source_id,
+            target_id=changing.target_id,
+            relationship_type=changing.relationship_type,
+            weight=1,
+            metadata={"weight": -1},
+        )
+        assert replacement.weight == 1
+        assert await runtime.relationship_manager.create_direct_bulk([replacement]) == [changing.id]
+        stored = await runtime.client.execute_query(
+            "SELECT attributes FROM relates_to WHERE uuid=$id;", id=changing.id
+        )
+        assert stored[0]["attributes"]["weight"] == -1
+        changed = True
+        return nodes
+
+    monkeypatch.setattr(view, "available_graph_entities", corrupt_edge_after_actual_node_proof)
+    nodes, edges = await view.available_graph_view(
+        runtime.client.group_id, ids, proven, runtime=runtime
+    )
+    assert changed
+    assert set(nodes) == set(ids)
+    assert set(edges) == {healthy.id}
