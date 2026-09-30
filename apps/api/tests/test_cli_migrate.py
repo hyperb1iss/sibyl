@@ -613,7 +613,9 @@ def test_migrate_export_loads_auth_and_content_by_default_in_one_runtime_pass(
         )
 
     assert result.exit_code == 0
-    load_runtime_exports.assert_called_once_with(include_auth=True, include_content=True)
+    load_runtime_exports.assert_called_once_with(
+        org_id="org-123", include_auth=True, include_content=True
+    )
     loaded = load_archive(archive_path)
     assert AUTH_FILENAME in loaded.files
     assert CONTENT_FILENAME in loaded.files

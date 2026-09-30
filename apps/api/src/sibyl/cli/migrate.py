@@ -448,10 +448,10 @@ def _load_auth_export() -> tuple[dict[str, object], bytes]:
     return _export()
 
 
-def _load_content_export() -> tuple[dict[str, object], bytes]:
+def _load_content_export(org_id: str | None = None) -> tuple[dict[str, object], bytes]:
     @run_async
     async def _export() -> tuple[dict[str, object], bytes]:
-        payload = await export_content_archive_payload()
+        payload = await export_content_archive_payload(organization_id=org_id)
         encoded = json.dumps(
             payload, indent=2, sort_keys=True, default=_archive_json_default
         ).encode("utf-8")
@@ -462,6 +462,7 @@ def _load_content_export() -> tuple[dict[str, object], bytes]:
 
 def _load_runtime_exports(
     *,
+    org_id: str | None = None,
     include_auth: bool,
     include_content: bool,
 ) -> tuple[
@@ -486,7 +487,7 @@ def _load_runtime_exports(
             )
 
         if include_content:
-            payload = await export_content_archive_payload()
+            payload = await export_content_archive_payload(organization_id=org_id)
             content_export = (
                 payload,
                 json.dumps(payload, indent=2, sort_keys=True, default=_archive_json_default).encode(
@@ -1433,6 +1434,7 @@ def export_archive(
     content_export: tuple[dict[str, object], bytes] | None = None
     if include_auth and include_content:
         auth_export, content_export = _load_runtime_exports(
+            org_id=org_id or None,
             include_auth=True,
             include_content=True,
         )
@@ -1455,7 +1457,7 @@ def export_archive(
     if include_content:
         info(f"Exporting content/operations snapshot from {settings.store} content runtime...")
         if content_export is None:
-            content_export = _load_content_export()
+            content_export = _load_content_export(org_id or None)
         content_payload, content_bytes = content_export
         row_counts = dict(content_payload.get("row_counts", {}))
         files[CONTENT_FILENAME] = content_bytes

@@ -68,6 +68,7 @@ async def prepare_companion_restore(
         raise ValueError("graph companion snapshot returned invalid rows")
     existing_episodes = {row["uuid"] for row in snapshot["episode"]}
     existing_mentions = {row["uuid"] for row in snapshot["mentions"]}
+    existing_relationships = {row["uuid"] for row in snapshot["relates_to"]}
     selected_episodes = [
         row for row in episodes if clean or not skip_existing or row.uuid not in existing_episodes
     ]
@@ -86,7 +87,13 @@ async def prepare_companion_restore(
         )
     }
     selected_relationships = [
-        row for row in relationships if clean or row.id not in protected_relationships
+        row
+        for row in relationships
+        if clean
+        or (
+            row.id not in protected_relationships
+            and (not skip_existing or row.id not in existing_relationships)
+        )
     ]
     relationship_records = [
         _relationship_record(row, group_id=organization_id, archive_binding=True)
