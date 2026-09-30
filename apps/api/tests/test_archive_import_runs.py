@@ -6,8 +6,9 @@ from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
-from surrealdb.request_message.message import RequestMessage
-from surrealdb.request_message.methods import RequestMethod
+from surrealdb.connections.async_embedded import AsyncEmbeddedSurrealConnection
+from surrealdb.connections.async_http import AsyncHttpSurrealConnection
+from surrealdb.connections.async_ws import AsyncWsSurrealConnection
 
 from sibyl.persistence.surreal.archive_import_runs import (
     ArchiveCheckConflictError,
@@ -266,20 +267,26 @@ async def test_archive_repository_measures_full_native_envelope_before_mutation(
     writes = []
     wire_sizes = []
 
-    class MeasuredClient:
-        async def execute_query(self, query: str, **params: object):
-            if query.startswith("BEGIN"):
-                writes.append(query)
-                wire_sizes.append(
-                    len(
-                        RequestMessage(
-                            RequestMethod.QUERY, query=query, params=params
-                        ).WS_CBOR_DESCRIPTOR
-                    )
-                )
-            return await metadata_client.execute_query(query, **params)
+    def observe_sdk(sdk_class):
+        actual_send = sdk_class._send
 
-    repo = SurrealArchiveImportRunRepository(MeasuredClient())
+        async def observed_send(self, message, *args, **kwargs):
+            query = message.kwargs.get("query", "")
+            if "CREATE archive_import_artifacts" in query:
+                writes.append(query)
+                wire_sizes.append(len(message.WS_CBOR_DESCRIPTOR))
+            return await actual_send(self, message, *args, **kwargs)
+
+        monkeypatch.setattr(sdk_class, "_send", observed_send)
+
+    for sdk_class in (
+        AsyncEmbeddedSurrealConnection,
+        AsyncHttpSurrealConnection,
+        AsyncWsSurrealConnection,
+    ):
+        observe_sdk(sdk_class)
+
+    repo = SurrealArchiveImportRunRepository(metadata_client)
     baseline = await repo.create_checked(
         plan=plan,
         artifact=artifact,

@@ -12,6 +12,8 @@ from anyio import to_thread
 from surrealdb.request_message.message import RequestMessage
 from surrealdb.request_message.methods import RequestMethod
 
+from sibyl_core.backends.surreal.protocols import QueryParams
+from sibyl_core.backends.surreal.query_guard import guard_native_query_requests
 from sibyl_core.backends.surreal.records import normalize_records, raise_on_error
 from sibyl_core.migrate.personal_archive_intake import ArchiveIntakeCapacityError
 from sibyl_core.migrate.personal_archive_plan import (
@@ -31,16 +33,24 @@ _CREATE_CHECKED_QUERY = (
 )
 
 
-def _metadata_request_size(artifact: dict[str, object], run: dict[str, object]) -> int:
+def _metadata_request(query: str, params: QueryParams) -> RequestMessage:
+    return RequestMessage(RequestMethod.QUERY, query=query, params=params)
+
+
+def _metadata_request_size(query: str, params: QueryParams) -> int:
     # The pinned SDK sends this same CBOR envelope over HTTP and WebSocket.
-    # Generated IDs, timestamps and every persisted metadata field are included.
-    return len(
-        RequestMessage(
-            RequestMethod.QUERY,
-            query=_CREATE_CHECKED_QUERY,
-            params={"artifact": artifact, "run": run},
-        ).WS_CBOR_DESCRIPTOR
-    )
+    # Prepared namespace SQL, IDs, timestamps and all native bindings are included.
+    return len(_metadata_request(query, params).WS_CBOR_DESCRIPTOR)
+
+
+def _validate_unprepared_capacity(
+    query: str, params: QueryParams, metadata_transaction_bytes: int
+) -> None:
+    # Direct SDK-backed repository adapters need a preflight too. Namespace
+    # preparation may enlarge this lower bound; the final native guard then
+    # checks the complete prepared request at its actual dispatch boundary.
+    if len(_metadata_request(query, params).WS_CBOR_DESCRIPTOR) > metadata_transaction_bytes:
+        raise ArchiveIntakeCapacityError("archive metadata transaction-byte budget exceeded")
 
 
 class ArchiveCheckConflictError(ValueError):
@@ -196,16 +206,35 @@ class SurrealArchiveImportRunRepository:
             "created_at": now,
         }
         query = _CREATE_CHECKED_QUERY
+
         if metadata_transaction_bytes is not None:
+            await to_thread.run_sync(
+                _validate_unprepared_capacity,
+                query,
+                {"artifact": artifact_record, "run": record},
+                metadata_transaction_bytes,
+            )
+
+        async def enforce_capacity(prepared_query: str, params: QueryParams | None) -> None:
+            if metadata_transaction_bytes is None or params is None:
+                return
+            # Write preflight queries have no archive bindings. The actual
+            # transaction reaches this guard after embedded USE preparation.
+            if "artifact" not in params or "run" not in params:
+                return
             measured_bytes = await to_thread.run_sync(
-                _metadata_request_size, artifact_record, record
+                _metadata_request_size, prepared_query, params
             )
             if measured_bytes > metadata_transaction_bytes:
                 raise ArchiveIntakeCapacityError(
                     "archive metadata transaction-byte budget exceeded"
                 )
+
         try:
-            result = await self._client.execute_query(query, artifact=artifact_record, run=record)
+            with guard_native_query_requests(enforce_capacity):
+                result = await self._client.execute_query(
+                    query, artifact=artifact_record, run=record
+                )
             raise_on_error(result, query=query)
         except Exception as exc:
             if "archive_import_runs_intake" not in str(exc):
