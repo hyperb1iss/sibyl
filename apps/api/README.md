@@ -147,6 +147,50 @@ jobs, pending state, locks, pub/sub, and schedules all stay in-process with no R
 Redis remains available for distributed or multi-process dev. Set `SIBYL_COORDINATION_BACKEND=redis`
 when you want the `arq` worker model, then run `sibyld worker` or `moon run api:worker` separately.
 
+## Archive Checks
+
+The authenticated archive API records an immutable check before migration applies data:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /api/archive-imports/check` | Upload an archive and save its checked plan |
+| `GET /api/archive-imports/{run_id}` | Read the caller's saved counts and digests |
+
+Send the check as `multipart/form-data` with exactly two parts: `archive` contains the exported
+archive bytes, and `options` contains a JSON object. The options use this shape (replace the owner
+and actor placeholders with the source owner and authenticated destination actor):
+
+```json
+{
+  "mappings": {
+    "source_private_owner_id": "<source-owner>",
+    "projects": {},
+    "teams": {},
+    "quarantine": {
+      "memory_scope": "private",
+      "scope_key": "<authenticated-actor>"
+    }
+  },
+  "conflict_policy": "additive"
+}
+```
+
+Project and team mappings bind source labels to current writable destinations. Eligible private
+rows belong to the authenticated actor. Protected or retired rows and their dependents are
+quarantined. Current membership and credential restrictions gate each destination.
+
+An optional `Idempotency-Key` header binds the request to the actor and organization. Retrying the
+same request preserves its original plan and credential ceiling. A changed request or originating
+API key returns `409`. Invalid archives return `422`; requests exceeding configured budgets return
+`413`. Successful responses contain the run identity, checked status, digests and per-kind counts.
+The status endpoint also works for a caller who retains read authority after losing write access.
+
+The check stores an inert archive artifact and plan in one native transaction. Applying data and
+the client migration command are subsequent protocol layers. Resource settings use the
+`SIBYL_ARCHIVE_IMPORT_` prefix; the complete metadata request defaults to 4 MiB for HTTP and 64 MiB
+for WebSocket or embedded transport. Set `SIBYL_ARCHIVE_IMPORT_METADATA_TRANSACTION_BYTES` only to a
+budget supported by the configured native server.
+
 ## Key Patterns
 
 **Multi-tenancy:** Every operation requires org context.
