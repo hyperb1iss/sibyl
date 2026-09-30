@@ -8,7 +8,12 @@ from datetime import UTC, datetime
 from typing import Protocol
 from uuid import uuid4
 
+from anyio import to_thread
+from surrealdb.request_message.message import RequestMessage
+from surrealdb.request_message.methods import RequestMethod
+
 from sibyl_core.backends.surreal.records import normalize_records, raise_on_error
+from sibyl_core.migrate.personal_archive_intake import ArchiveIntakeCapacityError
 from sibyl_core.migrate.personal_archive_plan import (
     CheckedArchivePlan,
     archive_digest,
@@ -17,6 +22,25 @@ from sibyl_core.migrate.personal_archive_plan import (
     checked_plan_digest,
     verify_checked_plan,
 )
+
+_CREATE_CHECKED_QUERY = (
+    "BEGIN TRANSACTION; "
+    "CREATE archive_import_artifacts CONTENT $artifact RETURN NONE; "
+    "CREATE archive_import_runs CONTENT $run RETURN NONE; "
+    "COMMIT TRANSACTION;"
+)
+
+
+def _metadata_request_size(artifact: dict[str, object], run: dict[str, object]) -> int:
+    # The pinned SDK sends this same CBOR envelope over HTTP and WebSocket.
+    # Generated IDs, timestamps and every persisted metadata field are included.
+    return len(
+        RequestMessage(
+            RequestMethod.QUERY,
+            query=_CREATE_CHECKED_QUERY,
+            params={"artifact": artifact, "run": run},
+        ).WS_CBOR_DESCRIPTOR
+    )
 
 
 class ArchiveCheckConflictError(ValueError):
@@ -107,7 +131,12 @@ class SurrealArchiveImportRunRepository:
         artifact: CheckedArchiveArtifact,
         intake_identity: str,
         request_sha256: str,
+        metadata_transaction_bytes: int | None = None,
     ) -> SavedArchiveCheck:
+        if metadata_transaction_bytes is not None and (
+            type(metadata_transaction_bytes) is not int or metadata_transaction_bytes <= 0
+        ):
+            raise ValueError("archive metadata byte budget must be a positive integer")
         # Frozen models still contain mutable maps. Validate an isolated snapshot
         # before native I/O, then serialize only that snapshot across awaits.
         plan = CheckedArchivePlan.model_validate(plan.model_dump(mode="python"))
@@ -166,12 +195,15 @@ class SurrealArchiveImportRunRepository:
             "measured_sizes_json": artifact.measured_sizes_json,
             "created_at": now,
         }
-        query = (
-            "BEGIN TRANSACTION; "
-            "CREATE archive_import_artifacts CONTENT $artifact; "
-            "CREATE archive_import_runs CONTENT $run; "
-            "COMMIT TRANSACTION;"
-        )
+        query = _CREATE_CHECKED_QUERY
+        if metadata_transaction_bytes is not None:
+            measured_bytes = await to_thread.run_sync(
+                _metadata_request_size, artifact_record, record
+            )
+            if measured_bytes > metadata_transaction_bytes:
+                raise ArchiveIntakeCapacityError(
+                    "archive metadata transaction-byte budget exceeded"
+                )
         try:
             result = await self._client.execute_query(query, artifact=artifact_record, run=record)
             raise_on_error(result, query=query)

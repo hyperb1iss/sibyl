@@ -6,6 +6,8 @@ from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
+from surrealdb.request_message.message import RequestMessage
+from surrealdb.request_message.methods import RequestMethod
 
 from sibyl.persistence.surreal.archive_import_runs import (
     ArchiveCheckConflictError,
@@ -14,6 +16,7 @@ from sibyl.persistence.surreal.archive_import_runs import (
 )
 from sibyl_core.backends.surreal import SurrealContentClient
 from sibyl_core.backends.surreal.schema_archive_imports import ARCHIVE_IMPORT_DEFINITIONS
+from sibyl_core.migrate.personal_archive_intake import ArchiveIntakeCapacityError
 from sibyl_core.migrate.personal_archive_plan import (
     ArchiveAudience,
     ArchiveCredentialCeiling,
@@ -226,3 +229,93 @@ async def test_archive_repository_serializes_validated_snapshot_across_native_aw
         plan=plan, artifact=artifact, intake_identity="snapshot", request_sha256="c" * 64
     )
     assert saved.plan == expected
+
+
+@pytest.mark.parametrize("value", [0, -1, True])
+async def test_archive_repository_rejects_invalid_byte_budget_before_native_io(value):
+    plan, artifact = _intake()
+
+    class UncalledClient:
+        async def execute_query(self, query: str, **params: object):
+            raise AssertionError("invalid byte budget reached native I/O")
+
+    with pytest.raises(ValueError, match="positive integer"):
+        await SurrealArchiveImportRunRepository(UncalledClient()).create_checked(
+            plan=plan,
+            artifact=artifact,
+            intake_identity="invalid-capacity",
+            request_sha256="c" * 64,
+            metadata_transaction_bytes=value,
+        )
+
+
+async def test_archive_repository_measures_full_native_envelope_before_mutation(
+    metadata_client, monkeypatch
+):
+    from datetime import UTC, datetime
+
+    from sibyl.persistence.surreal import archive_import_runs as module
+
+    class FixedClock(datetime):
+        @classmethod
+        def now(cls, _tz=None):
+            return datetime(2026, 9, 30, 12, 0, 0, 123456, tzinfo=UTC)
+
+    monkeypatch.setattr(module, "datetime", FixedClock)
+    plan, artifact = _intake()
+    writes = []
+    wire_sizes = []
+
+    class MeasuredClient:
+        async def execute_query(self, query: str, **params: object):
+            if query.startswith("BEGIN"):
+                writes.append(query)
+                wire_sizes.append(
+                    len(
+                        RequestMessage(
+                            RequestMethod.QUERY, query=query, params=params
+                        ).WS_CBOR_DESCRIPTOR
+                    )
+                )
+            return await metadata_client.execute_query(query, **params)
+
+    repo = SurrealArchiveImportRunRepository(MeasuredClient())
+    baseline = await repo.create_checked(
+        plan=plan,
+        artifact=artifact,
+        intake_identity="reference",
+        request_sha256="c" * 64,
+    )
+    size = wire_sizes[0]
+    assert size > len(artifact.staged_payload_json) + len(baseline.record["checked_plan_json"])
+    assert "RETURN NONE" in writes[0]
+    exact = await repo.create_checked(
+        plan=plan,
+        artifact=artifact,
+        intake_identity="reference",
+        request_sha256="c" * 64,
+        metadata_transaction_bytes=size,
+    )
+    assert exact.replayed
+
+    # Equal-length operation bindings isolate the exact full request boundary.
+    admitted = await repo.create_checked(
+        plan=plan,
+        artifact=artifact,
+        intake_identity="admit-now",
+        request_sha256="c" * 64,
+        metadata_transaction_bytes=size,
+    )
+    assert not admitted.replayed
+    assert wire_sizes[-1] == size
+    with pytest.raises(ArchiveIntakeCapacityError, match="transaction-byte"):
+        await repo.create_checked(
+            plan=plan,
+            artifact=artifact,
+            intake_identity="denied-no",
+            request_sha256="c" * 64,
+            metadata_transaction_bytes=size - 1,
+        )
+    assert len(writes) == 2
+    assert len(await metadata_client.execute_query("SELECT * FROM archive_import_runs;")) == 2
+    assert len(await metadata_client.execute_query("SELECT * FROM archive_import_artifacts;")) == 2
