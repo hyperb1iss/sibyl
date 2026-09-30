@@ -54,8 +54,13 @@ async def available_graph_relationships(
     relationship_ids: Sequence[str],
     *,
     runtime: GraphRuntime | None = None,
+    read: GraphReadValidation | None = None,
 ) -> dict[str, Relationship]:
-    """Refresh stored edges and require their protected operational generation."""
+    """Refresh stored edges and require their protected operational generation.
+
+    The first validation phase is private. The final phase can share its source
+    proof with a caller that records the complete response read footprint.
+    """
     from sibyl_core.backends.surreal.records import normalize_records
     from sibyl_core.services.graph_records import (
         entity_from_surreal_row,
@@ -163,7 +168,9 @@ async def available_graph_relationships(
             == originals[row["uuid"]].get("operational_derivation_required")
         ]
         final_snapshots.append(fresh)
-    return await validate(final_snapshots, GraphReadValidation(organization_id))
+    return await validate(
+        final_snapshots, read if read is not None else GraphReadValidation(organization_id)
+    )
 
 
 async def unchanged_graph_relationships(
@@ -174,9 +181,10 @@ async def unchanged_graph_relationships(
 ) -> dict[str, Relationship]:
     """Keep previously validated edges only while their stored evidence matches.
 
-    Node availability can await source reads after edge validation. Compare the
-    stored edge bodies once more before using them to select or render paths.
-    This read neither repairs graph rows nor reuses a source proof for new facts.
+    Node availability can await source reads after edge validation. Re-prove
+    source and endpoint generations before comparing stored edge bodies once
+    more to select or render paths. This read neither repairs graph rows nor
+    reuses a source proof for new facts.
     """
     from sibyl_core.backends.surreal.records import normalize_records
     from sibyl_core.services.graph_records import relationship_from_surreal_row
@@ -200,7 +208,16 @@ async def unchanged_graph_relationships(
     if not relationships:
         return {}
     graph = runtime or await get_surreal_graph_runtime(organization_id, ensure_schema=False)
-    ids = list(relationships)
+    fresh = await available_graph_relationships(organization_id, list(relationships), runtime=graph)
+    proven = {
+        identifier: expected
+        for identifier, expected in relationships.items()
+        if (current := fresh.get(identifier)) is not None
+        and evidence(current) == evidence(expected)
+        and current.operational_source_binding == expected.operational_source_binding
+        and current.operational_derivation_required == expected.operational_derivation_required
+    }
+    ids = list(proven)
     unchanged: dict[str, Relationship] = {}
     for start in range(0, len(ids), _READ_BATCH_SIZE):
         batch = ids[start : start + _READ_BATCH_SIZE]
@@ -216,7 +233,7 @@ async def unchanged_graph_relationships(
             )
         )
         for row in rows:
-            expected = relationships.get(row.get("uuid"))
+            expected = proven.get(row.get("uuid"))
             if expected is None or row.get("group_id") != organization_id:
                 continue
             current = relationship_from_surreal_row(row)
