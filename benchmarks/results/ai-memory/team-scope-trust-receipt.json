@@ -1,11 +1,10 @@
 {
-  "boundaries": [
-    "graph read helper forwards no team or delegation membership"
-  ],
+  "boundaries": [],
   "budgets": {
     "allow_failure_count": 0,
-    "allow_probe_count": 16,
-    "deny_probe_count": 29,
+    "allow_probe_count": 29,
+    "deny_probe_count": 48,
+    "graph_team_membership_forwarded": 1,
     "leak_count": 0,
     "membership_resolution_mismatch_count": 0,
     "owner_forgery_offered_count": 5,
@@ -13,7 +12,7 @@
     "promotion_attribution_coverage": 1,
     "promotion_preview_coverage": 1,
     "stamped_scope_mismatch_count": 0,
-    "surface_count": 6,
+    "surface_count": 9,
     "surface_disagreement_count": 0
   },
   "checks": [
@@ -34,7 +33,7 @@
       ]
     },
     {
-      "command": "moon run core:test -- tests/test_memory.py -k 'share_memory or share_preview'",
+      "command": "moon run core:test -- -k 'share_memory or share_preview'",
       "exit_code": 0,
       "name": "team-target-preview-redaction",
       "status": "PASS",
@@ -164,18 +163,18 @@
   ],
   "metrics": {
     "allow_failure_count": 0,
-    "allow_probe_count": 16,
-    "deny_probe_count": 29,
-    "graph_team_membership_forwarded": 0,
+    "allow_probe_count": 29,
+    "deny_probe_count": 48,
+    "graph_team_membership_forwarded": 1,
     "leak_count": 0,
     "membership_resolution_mismatch_count": 0,
     "owner_forgery_offered_count": 5,
     "owner_forgery_surviving_count": 0,
-    "probe_count": 45,
+    "probe_count": 77,
     "promotion_attribution_coverage": 1.0,
     "promotion_preview_coverage": 1.0,
     "stamped_scope_mismatch_count": 0,
-    "surface_count": 6,
+    "surface_count": 9,
     "surface_disagreement_count": 0
   },
   "principals": [
@@ -210,9 +209,21 @@
   ],
   "probes": [
     {
-      "boundary": "graph read helper forwards no team or delegation membership",
+      "detail": "stamped_scope=delegated owner_is_reader=True",
+      "expected": "allow",
+      "membership_stage": "provisioned",
+      "memory": "delegated-oncall",
+      "observed": "allow",
+      "reader": "member",
+      "requested_scope_key": "02fa694a-f5d1-5213-9166-34a434e6323c",
+      "status": "PASS",
+      "surface": "graph_metadata_read",
+      "surface_disagreement": false
+    },
+    {
       "detail": "stamped_scope=delegated owner_is_reader=True",
       "expected": "deny",
+      "membership_stage": "revoked",
       "memory": "delegated-oncall",
       "observed": "deny",
       "reader": "member",
@@ -224,6 +235,7 @@
     {
       "detail": "stamped_scope=delegated owner_is_reader=False",
       "expected": "deny",
+      "membership_stage": "provisioned",
       "memory": "delegated-oncall",
       "observed": "deny",
       "reader": "outsider",
@@ -235,6 +247,7 @@
     {
       "detail": "stamped_scope=private owner_is_reader=True",
       "expected": "allow",
+      "membership_stage": "provisioned",
       "memory": "private-member",
       "observed": "allow",
       "reader": "member",
@@ -246,6 +259,7 @@
     {
       "detail": "stamped_scope=private owner_is_reader=False",
       "expected": "deny",
+      "membership_stage": "provisioned",
       "memory": "private-member",
       "observed": "deny",
       "reader": "outsider",
@@ -257,6 +271,7 @@
     {
       "detail": "stamped_scope=project owner_is_reader=True",
       "expected": "allow",
+      "membership_stage": "provisioned",
       "memory": "project-lumen",
       "observed": "allow",
       "reader": "member",
@@ -268,6 +283,7 @@
     {
       "detail": "stamped_scope=project owner_is_reader=False",
       "expected": "deny",
+      "membership_stage": "provisioned",
       "memory": "project-lumen",
       "observed": "deny",
       "reader": "outsider",
@@ -277,9 +293,21 @@
       "surface_disagreement": false
     },
     {
-      "boundary": "graph read helper forwards no team or delegation membership",
+      "detail": "stamped_scope=team owner_is_reader=True",
+      "expected": "allow",
+      "membership_stage": "provisioned",
+      "memory": "team-alpha",
+      "observed": "allow",
+      "reader": "member",
+      "requested_scope_key": "b63cfc01-0255-597d-83b5-8fca205cbc64",
+      "status": "PASS",
+      "surface": "graph_metadata_read",
+      "surface_disagreement": false
+    },
+    {
       "detail": "stamped_scope=team owner_is_reader=True",
       "expected": "deny",
+      "membership_stage": "revoked",
       "memory": "team-alpha",
       "observed": "deny",
       "reader": "member",
@@ -291,6 +319,7 @@
     {
       "detail": "stamped_scope=team owner_is_reader=False",
       "expected": "deny",
+      "membership_stage": "provisioned",
       "memory": "team-alpha",
       "observed": "deny",
       "reader": "outsider",
@@ -300,53 +329,153 @@
       "surface_disagreement": false
     },
     {
-      "boundary": "graph read helper forwards no team or delegation membership",
-      "detail": "granted_spaces=1 row_space=delegated\u001f02fa694a-f5d1-5213-9166-34a434e6323c",
-      "expected": "deny",
-      "memory": "delegated-oncall",
-      "observed": "deny",
-      "reader": "member",
-      "requested_scope_key": "02fa694a-f5d1-5213-9166-34a434e6323c",
-      "status": "PASS",
-      "surface": "graph_metadata_read_narrowed",
-      "surface_disagreement": false
-    },
-    {
-      "detail": "granted_spaces=1 row_space=delegated\u001f02fa694a-f5d1-5213-9166-34a434e6323c",
-      "expected": "deny",
-      "memory": "delegated-oncall",
-      "observed": "deny",
-      "reader": "outsider",
-      "requested_scope_key": "02fa694a-f5d1-5213-9166-34a434e6323c",
-      "status": "PASS",
-      "surface": "graph_metadata_read_narrowed",
-      "surface_disagreement": false
-    },
-    {
-      "detail": "granted_spaces=1 row_space=private\u001f",
-      "expected": "deny",
-      "memory": "private-member",
-      "observed": "deny",
-      "reader": "member",
-      "requested_scope_key": null,
-      "status": "PASS",
-      "surface": "graph_metadata_read_narrowed",
-      "surface_disagreement": false
-    },
-    {
-      "detail": "granted_spaces=1 row_space=private\u001f",
-      "expected": "deny",
-      "memory": "private-member",
-      "observed": "deny",
-      "reader": "outsider",
-      "requested_scope_key": null,
-      "status": "PASS",
-      "surface": "graph_metadata_read_narrowed",
-      "surface_disagreement": false
-    },
-    {
-      "detail": "granted_spaces=1 row_space=project\u001f3b1965c7-246a-5b6b-b32a-ce747c41cdc8",
+      "detail": "stamped_scope=delegated owner_is_reader=True",
       "expected": "allow",
+      "membership_stage": "provisioned",
+      "memory": "delegated-oncall",
+      "observed": "allow",
+      "reader": "member",
+      "requested_scope_key": "02fa694a-f5d1-5213-9166-34a434e6323c",
+      "status": "PASS",
+      "surface": "graph_metadata_read_matching_ceiling",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "stamped_scope=delegated owner_is_reader=False",
+      "expected": "deny",
+      "membership_stage": "provisioned",
+      "memory": "delegated-oncall",
+      "observed": "deny",
+      "reader": "outsider",
+      "requested_scope_key": "02fa694a-f5d1-5213-9166-34a434e6323c",
+      "status": "PASS",
+      "surface": "graph_metadata_read_matching_ceiling",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "stamped_scope=private owner_is_reader=True",
+      "expected": "allow",
+      "membership_stage": "provisioned",
+      "memory": "private-member",
+      "observed": "allow",
+      "reader": "member",
+      "requested_scope_key": null,
+      "status": "PASS",
+      "surface": "graph_metadata_read_matching_ceiling",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "stamped_scope=private owner_is_reader=False",
+      "expected": "deny",
+      "membership_stage": "provisioned",
+      "memory": "private-member",
+      "observed": "deny",
+      "reader": "outsider",
+      "requested_scope_key": null,
+      "status": "PASS",
+      "surface": "graph_metadata_read_matching_ceiling",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "stamped_scope=project owner_is_reader=True",
+      "expected": "allow",
+      "membership_stage": "provisioned",
+      "memory": "project-lumen",
+      "observed": "allow",
+      "reader": "member",
+      "requested_scope_key": "3b1965c7-246a-5b6b-b32a-ce747c41cdc8",
+      "status": "PASS",
+      "surface": "graph_metadata_read_matching_ceiling",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "stamped_scope=project owner_is_reader=False",
+      "expected": "deny",
+      "membership_stage": "provisioned",
+      "memory": "project-lumen",
+      "observed": "deny",
+      "reader": "outsider",
+      "requested_scope_key": "3b1965c7-246a-5b6b-b32a-ce747c41cdc8",
+      "status": "PASS",
+      "surface": "graph_metadata_read_matching_ceiling",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "stamped_scope=team owner_is_reader=True",
+      "expected": "allow",
+      "membership_stage": "provisioned",
+      "memory": "team-alpha",
+      "observed": "allow",
+      "reader": "member",
+      "requested_scope_key": "b63cfc01-0255-597d-83b5-8fca205cbc64",
+      "status": "PASS",
+      "surface": "graph_metadata_read_matching_ceiling",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "stamped_scope=team owner_is_reader=False",
+      "expected": "deny",
+      "membership_stage": "provisioned",
+      "memory": "team-alpha",
+      "observed": "deny",
+      "reader": "outsider",
+      "requested_scope_key": "b63cfc01-0255-597d-83b5-8fca205cbc64",
+      "status": "PASS",
+      "surface": "graph_metadata_read_matching_ceiling",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "stamped_scope=delegated owner_is_reader=True",
+      "expected": "deny",
+      "membership_stage": "provisioned",
+      "memory": "delegated-oncall",
+      "observed": "deny",
+      "reader": "member",
+      "requested_scope_key": "02fa694a-f5d1-5213-9166-34a434e6323c",
+      "status": "PASS",
+      "surface": "graph_metadata_read_narrowed",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "stamped_scope=delegated owner_is_reader=False",
+      "expected": "deny",
+      "membership_stage": "provisioned",
+      "memory": "delegated-oncall",
+      "observed": "deny",
+      "reader": "outsider",
+      "requested_scope_key": "02fa694a-f5d1-5213-9166-34a434e6323c",
+      "status": "PASS",
+      "surface": "graph_metadata_read_narrowed",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "stamped_scope=private owner_is_reader=True",
+      "expected": "deny",
+      "membership_stage": "provisioned",
+      "memory": "private-member",
+      "observed": "deny",
+      "reader": "member",
+      "requested_scope_key": null,
+      "status": "PASS",
+      "surface": "graph_metadata_read_narrowed",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "stamped_scope=private owner_is_reader=False",
+      "expected": "deny",
+      "membership_stage": "provisioned",
+      "memory": "private-member",
+      "observed": "deny",
+      "reader": "outsider",
+      "requested_scope_key": null,
+      "status": "PASS",
+      "surface": "graph_metadata_read_narrowed",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "stamped_scope=project owner_is_reader=True",
+      "expected": "allow",
+      "membership_stage": "provisioned",
       "memory": "project-lumen",
       "observed": "allow",
       "reader": "member",
@@ -356,8 +485,9 @@
       "surface_disagreement": false
     },
     {
-      "detail": "granted_spaces=1 row_space=project\u001f3b1965c7-246a-5b6b-b32a-ce747c41cdc8",
+      "detail": "stamped_scope=project owner_is_reader=False",
       "expected": "deny",
+      "membership_stage": "provisioned",
       "memory": "project-lumen",
       "observed": "deny",
       "reader": "outsider",
@@ -367,9 +497,9 @@
       "surface_disagreement": false
     },
     {
-      "boundary": "graph read helper forwards no team or delegation membership",
-      "detail": "granted_spaces=1 row_space=team\u001fb63cfc01-0255-597d-83b5-8fca205cbc64",
+      "detail": "stamped_scope=team owner_is_reader=True",
       "expected": "deny",
+      "membership_stage": "provisioned",
       "memory": "team-alpha",
       "observed": "deny",
       "reader": "member",
@@ -379,8 +509,9 @@
       "surface_disagreement": false
     },
     {
-      "detail": "granted_spaces=1 row_space=team\u001fb63cfc01-0255-597d-83b5-8fca205cbc64",
+      "detail": "stamped_scope=team owner_is_reader=False",
       "expected": "deny",
+      "membership_stage": "provisioned",
       "memory": "team-alpha",
       "observed": "deny",
       "reader": "outsider",
@@ -392,6 +523,7 @@
     {
       "detail": "reason=delegated_access_verified listed=True recalled=True rows_listed=1 rows_recalled=1",
       "expected": "allow",
+      "membership_stage": "provisioned",
       "memory": "delegated-oncall",
       "observed": "allow",
       "reader": "member",
@@ -403,6 +535,7 @@
     {
       "detail": "reason=private_principal_bound listed=True recalled=True rows_listed=1 rows_recalled=1",
       "expected": "allow",
+      "membership_stage": "provisioned",
       "memory": "private-member",
       "observed": "allow",
       "reader": "member",
@@ -414,6 +547,7 @@
     {
       "detail": "reason=private_principal_bound listed=False recalled=False rows_listed=0 rows_recalled=0",
       "expected": "deny",
+      "membership_stage": "provisioned",
       "memory": "private-member",
       "observed": "deny",
       "reader": "outsider",
@@ -425,6 +559,7 @@
     {
       "detail": "reason=project_access_verified listed=True recalled=True rows_listed=1 rows_recalled=1",
       "expected": "allow",
+      "membership_stage": "provisioned",
       "memory": "project-lumen",
       "observed": "allow",
       "reader": "member",
@@ -436,6 +571,7 @@
     {
       "detail": "reason=project_access_verified listed=False recalled=False rows_listed=0 rows_recalled=0",
       "expected": "deny",
+      "membership_stage": "provisioned",
       "memory": "project-lumen",
       "observed": "deny",
       "reader": "outsider",
@@ -447,6 +583,7 @@
     {
       "detail": "reason=team_access_verified listed=True recalled=True rows_listed=1 rows_recalled=1",
       "expected": "allow",
+      "membership_stage": "provisioned",
       "memory": "team-alpha",
       "observed": "allow",
       "reader": "member",
@@ -458,6 +595,7 @@
     {
       "detail": "reason=team_access_verified listed=False recalled=False rows_listed=0 rows_recalled=0",
       "expected": "deny",
+      "membership_stage": "provisioned",
       "memory": "team-alpha",
       "observed": "deny",
       "reader": "outsider",
@@ -469,6 +607,7 @@
     {
       "detail": "reason=delegated_access_verified listed=True recalled=True rows_listed=1 rows_recalled=1",
       "expected": "allow",
+      "membership_stage": "provisioned",
       "memory": "delegated-oncall",
       "observed": "allow",
       "reader": "member",
@@ -480,6 +619,19 @@
     {
       "detail": "denied_at=authorization reason=unverified_membership",
       "expected": "deny",
+      "membership_stage": "revoked",
+      "memory": "delegated-oncall",
+      "observed": "deny",
+      "reader": "member",
+      "requested_scope_key": "02fa694a-f5d1-5213-9166-34a434e6323c",
+      "status": "PASS",
+      "surface": "raw_targeted_read",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "denied_at=authorization reason=unverified_membership",
+      "expected": "deny",
+      "membership_stage": "provisioned",
       "memory": "delegated-oncall",
       "observed": "deny",
       "reader": "outsider",
@@ -491,6 +643,7 @@
     {
       "detail": "reason=private_principal_bound listed=True recalled=True rows_listed=1 rows_recalled=1",
       "expected": "allow",
+      "membership_stage": "provisioned",
       "memory": "private-member",
       "observed": "allow",
       "reader": "member",
@@ -502,6 +655,7 @@
     {
       "detail": "reason=private_principal_bound listed=False recalled=False rows_listed=0 rows_recalled=0",
       "expected": "deny",
+      "membership_stage": "provisioned",
       "memory": "private-member",
       "observed": "deny",
       "reader": "outsider",
@@ -513,6 +667,7 @@
     {
       "detail": "reason=project_access_verified listed=True recalled=True rows_listed=1 rows_recalled=1",
       "expected": "allow",
+      "membership_stage": "provisioned",
       "memory": "project-lumen",
       "observed": "allow",
       "reader": "member",
@@ -524,6 +679,7 @@
     {
       "detail": "denied_at=authorization reason=unverified_membership",
       "expected": "deny",
+      "membership_stage": "provisioned",
       "memory": "project-lumen",
       "observed": "deny",
       "reader": "outsider",
@@ -535,6 +691,7 @@
     {
       "detail": "reason=team_access_verified listed=True recalled=True rows_listed=1 rows_recalled=1",
       "expected": "allow",
+      "membership_stage": "provisioned",
       "memory": "team-alpha",
       "observed": "allow",
       "reader": "member",
@@ -546,6 +703,19 @@
     {
       "detail": "denied_at=authorization reason=unverified_membership",
       "expected": "deny",
+      "membership_stage": "revoked",
+      "memory": "team-alpha",
+      "observed": "deny",
+      "reader": "member",
+      "requested_scope_key": "b63cfc01-0255-597d-83b5-8fca205cbc64",
+      "status": "PASS",
+      "surface": "raw_targeted_read",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "denied_at=authorization reason=unverified_membership",
+      "expected": "deny",
+      "membership_stage": "provisioned",
       "memory": "team-alpha",
       "observed": "deny",
       "reader": "outsider",
@@ -555,11 +725,11 @@
       "surface_disagreement": false
     },
     {
-      "boundary": "graph read helper forwards no team or delegation membership",
-      "detail": "plan_scopes=private,project",
-      "expected": "deny",
+      "detail": "plan_scopes=delegated,private,project,team",
+      "expected": "allow",
+      "membership_stage": "provisioned",
       "memory": "delegated-oncall",
-      "observed": "deny",
+      "observed": "allow",
       "reader": "member",
       "requested_scope_key": "02fa694a-f5d1-5213-9166-34a434e6323c",
       "status": "PASS",
@@ -569,6 +739,19 @@
     {
       "detail": "plan_scopes=private,project",
       "expected": "deny",
+      "membership_stage": "revoked",
+      "memory": "delegated-oncall",
+      "observed": "deny",
+      "reader": "member",
+      "requested_scope_key": "02fa694a-f5d1-5213-9166-34a434e6323c",
+      "status": "PASS",
+      "surface": "retrieval_candidate_filter",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "plan_scopes=private,project,team",
+      "expected": "deny",
+      "membership_stage": "provisioned",
       "memory": "delegated-oncall",
       "observed": "deny",
       "reader": "outsider",
@@ -578,8 +761,9 @@
       "surface_disagreement": false
     },
     {
-      "detail": "plan_scopes=private,project",
+      "detail": "plan_scopes=delegated,private,project,team",
       "expected": "allow",
+      "membership_stage": "provisioned",
       "memory": "private-member",
       "observed": "allow",
       "reader": "member",
@@ -589,8 +773,9 @@
       "surface_disagreement": false
     },
     {
-      "detail": "plan_scopes=private,project",
+      "detail": "plan_scopes=private,project,team",
       "expected": "deny",
+      "membership_stage": "provisioned",
       "memory": "private-member",
       "observed": "deny",
       "reader": "outsider",
@@ -600,8 +785,9 @@
       "surface_disagreement": false
     },
     {
-      "detail": "plan_scopes=private,project",
+      "detail": "plan_scopes=delegated,private,project,team",
       "expected": "allow",
+      "membership_stage": "provisioned",
       "memory": "project-lumen",
       "observed": "allow",
       "reader": "member",
@@ -611,8 +797,9 @@
       "surface_disagreement": false
     },
     {
-      "detail": "plan_scopes=private,project",
+      "detail": "plan_scopes=private,project,team",
       "expected": "deny",
+      "membership_stage": "provisioned",
       "memory": "project-lumen",
       "observed": "deny",
       "reader": "outsider",
@@ -622,11 +809,11 @@
       "surface_disagreement": false
     },
     {
-      "boundary": "graph read helper forwards no team or delegation membership",
-      "detail": "plan_scopes=private,project",
-      "expected": "deny",
+      "detail": "plan_scopes=delegated,private,project,team",
+      "expected": "allow",
+      "membership_stage": "provisioned",
       "memory": "team-alpha",
-      "observed": "deny",
+      "observed": "allow",
       "reader": "member",
       "requested_scope_key": "b63cfc01-0255-597d-83b5-8fca205cbc64",
       "status": "PASS",
@@ -636,17 +823,223 @@
     {
       "detail": "plan_scopes=private,project",
       "expected": "deny",
+      "membership_stage": "revoked",
+      "memory": "team-alpha",
+      "observed": "deny",
+      "reader": "member",
+      "requested_scope_key": "b63cfc01-0255-597d-83b5-8fca205cbc64",
+      "status": "PASS",
+      "surface": "retrieval_candidate_filter",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "plan_scopes=private,project,team",
+      "expected": "deny",
+      "membership_stage": "provisioned",
       "memory": "team-alpha",
       "observed": "deny",
       "reader": "outsider",
       "requested_scope_key": "b63cfc01-0255-597d-83b5-8fca205cbc64",
       "status": "PASS",
       "surface": "retrieval_candidate_filter",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "plan_scopes=delegated",
+      "expected": "allow",
+      "membership_stage": "provisioned",
+      "memory": "delegated-oncall",
+      "observed": "allow",
+      "reader": "member",
+      "requested_scope_key": "02fa694a-f5d1-5213-9166-34a434e6323c",
+      "status": "PASS",
+      "surface": "retrieval_candidate_matching_ceiling",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "plan_scopes=",
+      "expected": "deny",
+      "membership_stage": "provisioned",
+      "memory": "delegated-oncall",
+      "observed": "deny",
+      "reader": "outsider",
+      "requested_scope_key": "02fa694a-f5d1-5213-9166-34a434e6323c",
+      "status": "PASS",
+      "surface": "retrieval_candidate_matching_ceiling",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "plan_scopes=private",
+      "expected": "allow",
+      "membership_stage": "provisioned",
+      "memory": "private-member",
+      "observed": "allow",
+      "reader": "member",
+      "requested_scope_key": null,
+      "status": "PASS",
+      "surface": "retrieval_candidate_matching_ceiling",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "plan_scopes=",
+      "expected": "deny",
+      "membership_stage": "provisioned",
+      "memory": "private-member",
+      "observed": "deny",
+      "reader": "outsider",
+      "requested_scope_key": null,
+      "status": "PASS",
+      "surface": "retrieval_candidate_matching_ceiling",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "plan_scopes=project",
+      "expected": "allow",
+      "membership_stage": "provisioned",
+      "memory": "project-lumen",
+      "observed": "allow",
+      "reader": "member",
+      "requested_scope_key": "3b1965c7-246a-5b6b-b32a-ce747c41cdc8",
+      "status": "PASS",
+      "surface": "retrieval_candidate_matching_ceiling",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "plan_scopes=",
+      "expected": "deny",
+      "membership_stage": "provisioned",
+      "memory": "project-lumen",
+      "observed": "deny",
+      "reader": "outsider",
+      "requested_scope_key": "3b1965c7-246a-5b6b-b32a-ce747c41cdc8",
+      "status": "PASS",
+      "surface": "retrieval_candidate_matching_ceiling",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "plan_scopes=team",
+      "expected": "allow",
+      "membership_stage": "provisioned",
+      "memory": "team-alpha",
+      "observed": "allow",
+      "reader": "member",
+      "requested_scope_key": "b63cfc01-0255-597d-83b5-8fca205cbc64",
+      "status": "PASS",
+      "surface": "retrieval_candidate_matching_ceiling",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "plan_scopes=",
+      "expected": "deny",
+      "membership_stage": "provisioned",
+      "memory": "team-alpha",
+      "observed": "deny",
+      "reader": "outsider",
+      "requested_scope_key": "b63cfc01-0255-597d-83b5-8fca205cbc64",
+      "status": "PASS",
+      "surface": "retrieval_candidate_matching_ceiling",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "plan_scopes=project",
+      "expected": "deny",
+      "membership_stage": "provisioned",
+      "memory": "delegated-oncall",
+      "observed": "deny",
+      "reader": "member",
+      "requested_scope_key": "02fa694a-f5d1-5213-9166-34a434e6323c",
+      "status": "PASS",
+      "surface": "retrieval_candidate_narrowed",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "plan_scopes=project",
+      "expected": "deny",
+      "membership_stage": "provisioned",
+      "memory": "delegated-oncall",
+      "observed": "deny",
+      "reader": "outsider",
+      "requested_scope_key": "02fa694a-f5d1-5213-9166-34a434e6323c",
+      "status": "PASS",
+      "surface": "retrieval_candidate_narrowed",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "plan_scopes=project",
+      "expected": "deny",
+      "membership_stage": "provisioned",
+      "memory": "private-member",
+      "observed": "deny",
+      "reader": "member",
+      "requested_scope_key": null,
+      "status": "PASS",
+      "surface": "retrieval_candidate_narrowed",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "plan_scopes=project",
+      "expected": "deny",
+      "membership_stage": "provisioned",
+      "memory": "private-member",
+      "observed": "deny",
+      "reader": "outsider",
+      "requested_scope_key": null,
+      "status": "PASS",
+      "surface": "retrieval_candidate_narrowed",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "plan_scopes=project",
+      "expected": "allow",
+      "membership_stage": "provisioned",
+      "memory": "project-lumen",
+      "observed": "allow",
+      "reader": "member",
+      "requested_scope_key": "3b1965c7-246a-5b6b-b32a-ce747c41cdc8",
+      "status": "PASS",
+      "surface": "retrieval_candidate_narrowed",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "plan_scopes=project",
+      "expected": "deny",
+      "membership_stage": "provisioned",
+      "memory": "project-lumen",
+      "observed": "deny",
+      "reader": "outsider",
+      "requested_scope_key": "3b1965c7-246a-5b6b-b32a-ce747c41cdc8",
+      "status": "PASS",
+      "surface": "retrieval_candidate_narrowed",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "plan_scopes=project",
+      "expected": "deny",
+      "membership_stage": "provisioned",
+      "memory": "team-alpha",
+      "observed": "deny",
+      "reader": "member",
+      "requested_scope_key": "b63cfc01-0255-597d-83b5-8fca205cbc64",
+      "status": "PASS",
+      "surface": "retrieval_candidate_narrowed",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "plan_scopes=project",
+      "expected": "deny",
+      "membership_stage": "provisioned",
+      "memory": "team-alpha",
+      "observed": "deny",
+      "reader": "outsider",
+      "requested_scope_key": "b63cfc01-0255-597d-83b5-8fca205cbc64",
+      "status": "PASS",
+      "surface": "retrieval_candidate_narrowed",
       "surface_disagreement": false
     },
     {
       "detail": "reason=delegated_access_verified",
       "expected": "allow",
+      "membership_stage": "provisioned",
       "memory": "delegated-oncall",
       "observed": "allow",
       "reader": "member",
@@ -658,6 +1051,19 @@
     {
       "detail": "reason=unverified_membership",
       "expected": "deny",
+      "membership_stage": "revoked",
+      "memory": "delegated-oncall",
+      "observed": "deny",
+      "reader": "member",
+      "requested_scope_key": "02fa694a-f5d1-5213-9166-34a434e6323c",
+      "status": "PASS",
+      "surface": "scope_authorization",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "reason=unverified_membership",
+      "expected": "deny",
+      "membership_stage": "provisioned",
       "memory": "delegated-oncall",
       "observed": "deny",
       "reader": "outsider",
@@ -669,6 +1075,7 @@
     {
       "detail": "reason=project_access_verified",
       "expected": "allow",
+      "membership_stage": "provisioned",
       "memory": "project-lumen",
       "observed": "allow",
       "reader": "member",
@@ -680,6 +1087,7 @@
     {
       "detail": "reason=unverified_membership",
       "expected": "deny",
+      "membership_stage": "provisioned",
       "memory": "project-lumen",
       "observed": "deny",
       "reader": "outsider",
@@ -691,6 +1099,7 @@
     {
       "detail": "reason=team_access_verified",
       "expected": "allow",
+      "membership_stage": "provisioned",
       "memory": "team-alpha",
       "observed": "allow",
       "reader": "member",
@@ -702,6 +1111,19 @@
     {
       "detail": "reason=unverified_membership",
       "expected": "deny",
+      "membership_stage": "revoked",
+      "memory": "team-alpha",
+      "observed": "deny",
+      "reader": "member",
+      "requested_scope_key": "b63cfc01-0255-597d-83b5-8fca205cbc64",
+      "status": "PASS",
+      "surface": "scope_authorization",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "reason=unverified_membership",
+      "expected": "deny",
+      "membership_stage": "provisioned",
       "memory": "team-alpha",
       "observed": "deny",
       "reader": "outsider",
@@ -716,10 +1138,13 @@
   "stamp_mismatches": [],
   "surfaces": [
     "graph_metadata_read",
+    "graph_metadata_read_matching_ceiling",
     "graph_metadata_read_narrowed",
     "raw_own_scope_read",
     "raw_targeted_read",
     "retrieval_candidate_filter",
+    "retrieval_candidate_matching_ceiling",
+    "retrieval_candidate_narrowed",
     "scope_authorization"
   ]
 }

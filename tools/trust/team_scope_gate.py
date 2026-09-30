@@ -77,9 +77,10 @@ TEAM_SCOPE_BUDGETS: dict[str, float] = {
     # A gate that probes nothing reports zero leaks. These floors are what stop a
     # vacuous receipt from reading as a clean one, so they are budgets rather
     # than commentary: dropping a probe class fails the gate.
-    "deny_probe_count": 29,
-    "allow_probe_count": 16,
-    "surface_count": 6,
+    "deny_probe_count": 48,
+    "allow_probe_count": 29,
+    "surface_count": 9,
+    "graph_team_membership_forwarded": 1,
     # Five forged owner fields, and the two backfill-provenance keys matter most:
     # nothing downstream rewrites them, so they are the pair that proves the
     # write path's drop filter is load bearing rather than belt and braces.
@@ -102,7 +103,6 @@ LOWER_IS_BETTER_METRICS = frozenset(
     (
         "leak_count",
         "allow_failure_count",
-        "graph_team_membership_forwarded",
         "owner_forgery_surviving_count",
         "surface_disagreement_count",
         "membership_resolution_mismatch_count",
@@ -119,6 +119,9 @@ EXPECTED_PROBE_SURFACES: frozenset[str] = frozenset(
         "graph_metadata_read",
         "graph_metadata_read_narrowed",
         "retrieval_candidate_filter",
+        "graph_metadata_read_matching_ceiling",
+        "retrieval_candidate_matching_ceiling",
+        "retrieval_candidate_narrowed",
     )
 )
 
@@ -304,14 +307,16 @@ class ScopeProbe:
     expectation: str
     requested_scope_key: str | None = None
     boundary: str | None = None
+    membership_stage: str = "provisioned"
 
     @property
-    def key(self) -> tuple[str, str, str, str]:
+    def key(self) -> tuple[str, str, str, str, str]:
         return (
             self.surface,
             self.memory_label,
             self.reader_label,
             self.requested_scope_key or "",
+            self.membership_stage,
         )
 
 
@@ -337,6 +342,7 @@ class ProbeObservation:
     def as_receipt_entry(self) -> dict[str, Any]:
         entry: dict[str, Any] = {
             "surface": self.probe.surface,
+            "membership_stage": self.probe.membership_stage,
             "memory": self.probe.memory_label,
             "reader": self.probe.reader_label,
             "requested_scope_key": self.probe.requested_scope_key,
@@ -361,7 +367,6 @@ GATE_CHECKS: tuple[GateCheck, ...] = (
             "run",
             "core:test",
             "--",
-            "tests/test_memory.py",
             "-k",
             "share_memory or share_preview",
         ),
@@ -443,17 +448,9 @@ def missing_required_surfaces(checks: Sequence[GateCheck] = GATE_CHECKS) -> list
 
 
 def graph_team_membership_forwarded() -> bool:
-    """Whether the shared graph read helper can be told about team membership.
-
-    ``memory_metadata_read_allowed`` accepts no team or delegation membership
-    today, so a team-scoped graph row is denied to members and non-members
-    alike, and the scope backfill deliberately refuses to stamp one. That is a
-    real boundary rather than a passing isolation claim, so the receipt records
-    it and this probe fails the gate the moment the signature grows the
-    parameter: the boundary then needs retiring, not carrying forward.
-    """
+    """Require the read helper to accept both persisted membership sets."""
     parameters = inspect.signature(memory_metadata_read_allowed).parameters
-    return "accessible_teams" in parameters or "accessible_delegations" in parameters
+    return {"accessible_teams", "accessible_delegations"} <= parameters.keys()
 
 
 def _auth_context(user_id: str) -> AuthContext:
@@ -546,6 +543,10 @@ async def _provision_principals(client: SurrealAuthClient) -> dict[str, Principa
         other_project_membership=_fixture_id("membership-outsider-mercury"),
     )
 
+    return await _resolve_principals(client)
+
+
+async def _resolve_principals(client: SurrealAuthClient) -> dict[str, Principal]:
     @asynccontextmanager
     async def fixture_auth_scope():
         yield client
@@ -710,7 +711,15 @@ def _reader_grants(principal: Principal, memory: SeededMemory) -> bool:
 
 
 _GRAPH_SERVABLE_SCOPES = frozenset(
-    (MemoryScope.PRIVATE.value, MemoryScope.PROJECT.value),
+    (
+        scope.value
+        for scope in (
+            MemoryScope.PRIVATE,
+            MemoryScope.PROJECT,
+            MemoryScope.TEAM,
+            MemoryScope.DELEGATED,
+        )
+    ),
 )
 GRAPH_MEMBERSHIP_BOUNDARY = "graph read helper forwards no team or delegation membership"
 
@@ -725,7 +734,6 @@ def _expected_probes(
     is structurally able to serve, never from a per-case judgement, so a probe
     cannot be quietly tuned to match whatever the code happens to do.
     """
-    graph_boundary = None if graph_team_membership_forwarded() else GRAPH_MEMBERSHIP_BOUNDARY
     probes: list[ScopeProbe] = []
     for memory in memories:
         for label in sorted(principals):
@@ -773,7 +781,6 @@ def _expected_probes(
 
             graph_servable = memory.memory_scope in _GRAPH_SERVABLE_SCOPES
             graph_expectation = ALLOW if (entitled and graph_servable) else DENY
-            boundary = graph_boundary if entitled and not graph_servable else None
             for surface in ("graph_metadata_read", "retrieval_candidate_filter"):
                 probes.append(
                     ScopeProbe(
@@ -782,7 +789,6 @@ def _expected_probes(
                         memory_label=memory.label,
                         expectation=graph_expectation,
                         requested_scope_key=memory.scope_key,
-                        boundary=boundary,
                     )
                 )
 
@@ -790,6 +796,33 @@ def _expected_probes(
             # reader's project memory spaces. A row whose canonical space the key
             # does not hold must be refused even when the reader owns it, so the
             # private row is denied to its own author here.
+            for surface in (
+                "graph_metadata_read_matching_ceiling",
+                "retrieval_candidate_matching_ceiling",
+            ):
+                probes.append(
+                    ScopeProbe(
+                        surface=surface,
+                        reader_label=label,
+                        memory_label=memory.label,
+                        expectation=graph_expectation,
+                        requested_scope_key=memory.scope_key,
+                    )
+                )
+            probes.append(
+                ScopeProbe(
+                    surface="retrieval_candidate_narrowed",
+                    reader_label=label,
+                    memory_label=memory.label,
+                    expectation=ALLOW
+                    if (
+                        graph_expectation == ALLOW
+                        and _memory_space_key(memory) in principal.granted_memory_scope_keys
+                    )
+                    else DENY,
+                    requested_scope_key=memory.scope_key,
+                )
+            )
             probes.append(
                 ScopeProbe(
                     surface="graph_metadata_read_narrowed",
@@ -802,7 +835,6 @@ def _expected_probes(
                     )
                     else DENY,
                     requested_scope_key=memory.scope_key,
-                    boundary=boundary,
                 )
             )
     return sorted(probes, key=lambda probe: probe.key)
@@ -833,7 +865,12 @@ def membership_resolution_mismatches(
 
 
 def _memory_space_key(memory: SeededMemory) -> str:
-    return memory_scope_policy_key(memory.memory_scope, memory.scope_key)
+    scope_key = (
+        PRINCIPAL_IDS[memory.owner_label]
+        if memory.memory_scope == MemoryScope.PRIVATE.value
+        else memory.scope_key
+    )
+    return memory_scope_policy_key(memory.memory_scope, scope_key)
 
 
 def _authorize_raw_read(
@@ -911,13 +948,21 @@ def _observe_scope_authorization(
 def _observe_graph_metadata_read(
     principal: Principal,
     memory: SeededMemory,
+    *,
+    allowed_memory_scope_keys: frozenset[str] | None = None,
 ) -> SurfaceReading:
     allowed = memory_metadata_read_allowed(
         memory.graph_metadata,
         principal_id=principal.user_id,
-        private_scope_granted=True,
+        private_scope_granted=private_scope_granted_for(
+            allowed_memory_scope_keys,
+            principal_id=principal.user_id,
+        ),
         accessible_projects=principal.projects,
+        accessible_teams=principal.teams,
+        accessible_delegations=principal.delegations,
         project_id=None,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
     )
     stamped_scope = memory.graph_metadata.get("memory_scope")
     stamped_owner = memory.graph_metadata.get("principal_id")
@@ -931,31 +976,20 @@ def _observe_graph_metadata_read_narrowed(
     principal: Principal,
     memory: SeededMemory,
 ) -> SurfaceReading:
-    """Read as an API key narrowed to this reader's project memory space.
-
-    A credential narrowed to a project must not reach the principal's own private
-    rows just because the principal owns them, so this is the surface where the
-    canonical memory-space key is the authorization input rather than a label.
-    """
-    granted = principal.granted_memory_scope_keys
-    allowed = memory_metadata_read_allowed(
-        memory.graph_metadata,
-        principal_id=principal.user_id,
-        private_scope_granted=private_scope_granted_for(
-            granted,
-            principal_id=principal.user_id,
-        ),
-        accessible_projects=principal.projects,
-        project_id=None,
-        allowed_memory_scope_keys=granted,
-    )
-    return SurfaceReading(
-        ALLOW if allowed else DENY,
-        f"granted_spaces={len(granted)} row_space={_memory_space_key(memory)}",
+    """A project-only ceiling cannot add any other readable audience."""
+    return _observe_graph_metadata_read(
+        principal,
+        memory,
+        allowed_memory_scope_keys=principal.granted_memory_scope_keys,
     )
 
 
-def _observe_retrieval_filter(principal: Principal, memory: SeededMemory) -> SurfaceReading:
+def _observe_retrieval_filter(
+    principal: Principal,
+    memory: SeededMemory,
+    *,
+    allowed_memory_scope_keys: frozenset[str] | None = None,
+) -> SurfaceReading:
     plan = build_context_retrieval_plan(
         query=memory.content,
         organization_id=ORGANIZATION_ID,
@@ -964,6 +998,9 @@ def _observe_retrieval_filter(principal: Principal, memory: SeededMemory) -> Sur
         principal_id=principal.user_id,
         project=None,
         accessible_projects=principal.projects,
+        accessible_teams=principal.teams,
+        accessible_delegations=principal.delegations,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
     )
     candidate = RetrievalCandidate(
         id=_fixture_id(f"candidate:{memory.label}"),
@@ -1000,6 +1037,24 @@ async def _observe_probe(
         reading = _observe_graph_metadata_read_narrowed(principal, memory)
     elif probe.surface == "retrieval_candidate_filter":
         reading = _observe_retrieval_filter(principal, memory)
+    elif probe.surface == "graph_metadata_read_matching_ceiling":
+        reading = _observe_graph_metadata_read(
+            principal,
+            memory,
+            allowed_memory_scope_keys=frozenset({_memory_space_key(memory)}),
+        )
+    elif probe.surface == "retrieval_candidate_matching_ceiling":
+        reading = _observe_retrieval_filter(
+            principal,
+            memory,
+            allowed_memory_scope_keys=frozenset({_memory_space_key(memory)}),
+        )
+    elif probe.surface == "retrieval_candidate_narrowed":
+        reading = _observe_retrieval_filter(
+            principal,
+            memory,
+            allowed_memory_scope_keys=principal.granted_memory_scope_keys,
+        )
     else:  # pragma: no cover - guarded by _expected_probes
         msg = f"unknown probe surface {probe.surface!r}"
         raise AssertionError(msg)
@@ -1043,6 +1098,38 @@ async def collect_team_scope_observations() -> dict[str, Any]:
                 )
                 for probe in probes
             ]
+            await auth_client.execute_query(
+                "DELETE team_members WHERE team_id=$team AND user_id=$member; "
+                "DELETE memory_space_members WHERE space_id=$space AND principal_id=$member;",
+                team=TEAM_ID,
+                member=PRINCIPAL_IDS["member"],
+                space=_fixture_id("memory-space-oncall"),
+            )
+            revoked = await _resolve_principals(auth_client)
+            for memory in memories:
+                if memory.memory_scope not in {MemoryScope.TEAM.value, MemoryScope.DELEGATED.value}:
+                    continue
+                for surface in (
+                    "raw_targeted_read",
+                    "scope_authorization",
+                    "graph_metadata_read",
+                    "retrieval_candidate_filter",
+                ):
+                    probe = ScopeProbe(
+                        surface=surface,
+                        reader_label="member",
+                        memory_label=memory.label,
+                        expectation=DENY,
+                        requested_scope_key=memory.scope_key,
+                        membership_stage="revoked",
+                    )
+                    observations.append(
+                        await _observe_probe(
+                            probe,
+                            principals=revoked,
+                            memories=memories_by_label,
+                        )
+                    )
     finally:
         content_client_service.surreal_content_client = previous_content_scope
         await content_client.close()
@@ -1255,6 +1342,10 @@ def validate_team_scope_receipt(receipt: Mapping[str, Any]) -> list[str]:
     metrics = receipt.get("metrics")
     if not isinstance(metrics, dict):
         return [*failures, "receipt metrics must be an object"]
+    if GRAPH_MEMBERSHIP_BOUNDARY in receipt.get("boundaries", []):
+        failures.append(
+            "retire the stale graph membership boundary; granted rows require allow probes"
+        )
     failures.extend(_validate_receipt_metrics(metrics))
     failures.extend(_validate_receipt_probes(receipt.get("probes")))
     failures.extend(_validate_receipt_surfaces(receipt.get("surfaces")))
@@ -1305,13 +1396,6 @@ def _validate_receipt_metrics(
         failures.append(
             "a membership resolver no longer agrees with the provisioned rows, so "
             "probe expectations and probe observations are no longer independent"
-        )
-    forwarded = metrics.get("graph_team_membership_forwarded")
-    if isinstance(forwarded, int | float) and not isinstance(forwarded, bool) and forwarded:
-        failures.append(
-            "graph read helper now forwards team membership: retire the "
-            "'graph read helper forwards no team or delegation membership' boundary "
-            "and add team allow probes on the graph surfaces"
         )
     return failures
 
