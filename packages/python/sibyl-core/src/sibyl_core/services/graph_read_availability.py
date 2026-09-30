@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from pydantic import ValidationError
+
 from sibyl_core.models.entities import Entity, Relationship
 from sibyl_core.services.eval_publication_guards import available_graph_entity_rows
 from sibyl_core.services.graph_read_validation import GraphReadValidation
@@ -64,7 +66,7 @@ async def available_graph_relationships(
     from sibyl_core.backends.surreal.records import normalize_records
     from sibyl_core.services.graph_records import (
         entity_from_surreal_row,
-        relationship_from_surreal_row,
+        readable_relationship_from_surreal_row,
     )
     from sibyl_core.services.operational_relationships import (
         _snapshot,
@@ -126,6 +128,9 @@ async def available_graph_relationships(
                     for endpoint in (row["source_uuid"], row["target_uuid"])
                 ):
                     continue
+                relationship = readable_relationship_from_surreal_row(row)
+                if relationship is None:
+                    continue
                 if await operational_relationship_current(
                     row,
                     targets=targets,
@@ -134,7 +139,7 @@ async def available_graph_relationships(
                     organization_id=organization_id,
                     read=read,
                 ):
-                    result[row["uuid"]] = relationship_from_surreal_row(row)
+                    result[row["uuid"]] = relationship
         return result
 
     first = await validate(
@@ -156,17 +161,27 @@ async def available_graph_relationships(
             original_associations.keys() - {row["target_id"] for row in fresh["associations"]}
         )
         # Compare semantic bodies and protected bindings, not write witnesses.
-        fresh["relationships"] = [
-            row
-            for row in fresh["relationships"]
-            if row["uuid"] in first
-            and not {row.get("source_uuid"), row.get("target_uuid")} & changed_associations
-            and relationship_body_digest(row) == relationship_body_digest(originals[row["uuid"]])
-            and row.get("operational_source_binding")
-            == originals[row["uuid"]].get("operational_source_binding")
-            and row.get("operational_derivation_required")
-            == originals[row["uuid"]].get("operational_derivation_required")
-        ]
+        unchanged_rows = []
+        for row in fresh["relationships"]:
+            if (
+                row["uuid"] not in first
+                or {row.get("source_uuid"), row.get("target_uuid")} & changed_associations
+            ):
+                continue
+            original = originals[row["uuid"]]
+            try:
+                same_body = relationship_body_digest(row) == relationship_body_digest(original)
+            except ValidationError:
+                continue
+            if (
+                same_body
+                and row.get("operational_source_binding")
+                == original.get("operational_source_binding")
+                and row.get("operational_derivation_required")
+                == original.get("operational_derivation_required")
+            ):
+                unchanged_rows.append(row)
+        fresh["relationships"] = unchanged_rows
         final_snapshots.append(fresh)
     return await validate(
         final_snapshots, read if read is not None else GraphReadValidation(organization_id)
@@ -187,7 +202,7 @@ async def unchanged_graph_relationships(
     reuses a source proof for new facts.
     """
     from sibyl_core.backends.surreal.records import normalize_records
-    from sibyl_core.services.graph_records import relationship_from_surreal_row
+    from sibyl_core.services.graph_records import readable_relationship_from_surreal_row
 
     def evidence(relationship: Relationship):
         body = relationship.model_dump(mode="json", exclude={"created_at", "metadata"})
@@ -236,7 +251,9 @@ async def unchanged_graph_relationships(
             expected = proven.get(row.get("uuid"))
             if expected is None or row.get("group_id") != organization_id:
                 continue
-            current = relationship_from_surreal_row(row)
+            current = readable_relationship_from_surreal_row(row)
+            if current is None:
+                continue
             if (
                 evidence(current) == evidence(expected)
                 and current.operational_source_binding == expected.operational_source_binding

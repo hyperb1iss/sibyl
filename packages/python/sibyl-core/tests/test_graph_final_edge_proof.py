@@ -115,7 +115,7 @@ async def test_related_final_edge_proof_denies_prior_generation_with_current_end
     assert (protected.target_id in refreshed_ids) is republish_edges
 
 
-@pytest.mark.parametrize("change", ["unchanged", "delete", "type", "retire"])
+@pytest.mark.parametrize("change", ["unchanged", "delete", "type", "retire", "malformed"])
 async def test_final_edge_body_check_follows_the_new_proof(
     runtime, content_store, monkeypatch, change
 ):
@@ -152,6 +152,23 @@ async def test_final_edge_body_check_follows_the_new_proof(
             await runtime.relationship_manager.create_direct_bulk(
                 [changing.model_copy(update={"relationship_type": RelationshipType.DEPENDS_ON})]
             )
+        elif change == "malformed":
+            replacement = Relationship(
+                id=changing.id,
+                source_id=changing.source_id,
+                target_id=changing.target_id,
+                relationship_type=changing.relationship_type,
+                weight=1,
+                metadata={"weight": -1},
+            )
+            assert replacement.weight == 1
+            assert await runtime.relationship_manager.create_direct_bulk([replacement]) == [
+                changing.id
+            ]
+            stored = await runtime.client.execute_query(
+                "SELECT attributes FROM relates_to WHERE uuid=$id;", id=changing.id
+            )
+            assert stored[0]["attributes"]["weight"] == -1
         elif change == "retire":
             await runtime.relationship_manager.create_direct_bulk(
                 [changing.model_copy(update={"metadata": {"excluded_from_recall": True}})]
@@ -164,3 +181,69 @@ async def test_final_edge_body_check_follows_the_new_proof(
     )
     assert boundary_reached
     assert set(result) == ({changing.id, healthy.id} if change == "unchanged" else {healthy.id})
+
+
+async def test_available_edges_isolate_malformed_replacement_after_actual_endpoint_proof(
+    runtime, content_store, monkeypatch
+):
+    ids = ("available-root", "moving-endpoint", "healthy-endpoint")
+    assert set(
+        await runtime.entity_manager.create_direct_bulk(
+            [Entity(id=key, name=key, entity_type=EntityType.NOTE) for key in ids],
+            generate_embeddings=False,
+        )
+    ) == set(ids)
+    moving = Relationship(
+        id="available-moving-edge",
+        source_id=ids[0],
+        target_id=ids[1],
+        relationship_type=RelationshipType.RELATED_TO,
+    )
+    healthy = moving.model_copy(update={"id": "available-healthy-edge", "target_id": ids[2]})
+    assert set(await runtime.relationship_manager.create_direct_bulk([moving, healthy])) == {
+        moving.id,
+        healthy.id,
+    }
+    assert set(
+        await available_graph_relationships(
+            runtime.client.group_id, [moving.id, healthy.id], runtime=runtime
+        )
+    ) == {moving.id, healthy.id}
+    collect = availability.available_graph_entities
+    changed = False
+
+    async def replace_after_nodes(org, wanted, **kwargs):
+        nonlocal changed
+        nodes = await collect(org, wanted, **kwargs)
+        if set(ids) <= set(wanted) and not changed:
+            assert set(ids) <= set(nodes)
+            replacement = Relationship(
+                id=moving.id,
+                source_id=moving.source_id,
+                target_id=moving.target_id,
+                relationship_type=moving.relationship_type,
+                weight=1,
+                metadata={"weight": -1},
+            )
+            assert replacement.weight == 1
+            assert await runtime.relationship_manager.create_direct_bulk([replacement]) == [
+                moving.id
+            ]
+            stored = await runtime.client.execute_query(
+                "SELECT attributes FROM relates_to WHERE uuid=$id;", id=moving.id
+            )
+            assert stored[0]["attributes"]["weight"] == -1
+            changed = True
+        return nodes
+
+    monkeypatch.setattr(availability, "available_graph_entities", replace_after_nodes)
+    result = await available_graph_relationships(
+        runtime.client.group_id, [moving.id, healthy.id], runtime=runtime
+    )
+    assert changed
+    assert set(result) == {healthy.id}
+    assert set(await collect(runtime.client.group_id, ids, runtime=runtime)) == set(ids)
+    fresh = await available_graph_relationships(
+        runtime.client.group_id, [moving.id, healthy.id], runtime=runtime
+    )
+    assert set(fresh) == {healthy.id}
