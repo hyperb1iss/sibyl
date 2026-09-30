@@ -34,7 +34,8 @@ async def _version(client: SurrealContentClient) -> object:
 
 async def test_refusal_table_is_created_and_upgraded_into() -> None:
     assert RAW_EMBEDDING_REFUSALS_TABLE in CONTENT_TABLES
-    assert CONTENT_SCHEMA_CURRENT_VERSION == RAW_EMBEDDING_REFUSAL_SCHEMA_VERSION == 48
+    assert RAW_EMBEDDING_REFUSAL_SCHEMA_VERSION == 48
+    assert CONTENT_SCHEMA_CURRENT_VERSION >= RAW_EMBEDDING_REFUSAL_SCHEMA_VERSION
     client = SurrealContentClient(url="memory://")
     try:
         await bootstrap_content_schema(client, reset=True)
@@ -50,7 +51,7 @@ async def test_refusal_table_is_created_and_upgraded_into() -> None:
         )
         await bootstrap_content_schema(client)
 
-        assert await _version(client) == 48
+        assert await _version(client) == CONTENT_SCHEMA_CURRENT_VERSION
         assert "UNIQUE" in (await _refusal_indexes(client))["idx_raw_embedding_refusals_capture"]
     finally:
         await client.close()

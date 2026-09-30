@@ -21,6 +21,10 @@ from sibyl_core.backends.surreal.fulltext import (
     build_match_disjunction,
 )
 from sibyl_core.backends.surreal.knn import KNN_TYPE_OVERFETCH_CAP, knn_search_effort
+from sibyl_core.backends.surreal.schema_raw_lexical import (
+    RAW_LEXICAL_READ_FIELDS,
+    RAW_LEXICAL_TABLES,
+)
 from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
 from sibyl_core.config import settings
 from sibyl_core.embeddings.providers import (
@@ -59,39 +63,7 @@ RAW_VECTOR_EMBEDDINGS_MISSING = "RawEmbeddingsMissing"
 # before it could tell a scope without vectors from one with no matches.
 RAW_VECTOR_COVERAGE_UNKNOWN = "embedding_coverage_unknown"
 
-_RAW_MEMORY_RECALL_FIELDS = ", ".join(
-    (
-        "id AS record_id",
-        "uuid",
-        "revision",
-        "organization_id",
-        "source_id",
-        "principal_id",
-        "memory_scope",
-        "scope_key",
-        "agent_id",
-        "project_id",
-        "review_state",
-        "entity_id",
-        "entity_type",
-        "title",
-        "raw_content",
-        "tags",
-        "metadata",
-        "provenance",
-        "capture_surface",
-        "created_by_user_id",
-        "captured_at",
-        "deleted_at",
-        "purge_after",
-        "last_recalled_at",
-        "last_used_at",
-        "retrieval_count",
-        "citation_count",
-        "misled_count",
-        "created_at",
-    )
-)
+_RAW_MEMORY_RECALL_FIELDS = ", ".join(("id AS record_id", *RAW_LEXICAL_READ_FIELDS))
 
 
 @dataclass(frozen=True, slots=True)
@@ -384,28 +356,41 @@ async def _recall_raw_memory_fulltext(
         # Highlights reference one match operator each; pin them to the first
         # term's operator per field, so snippets mark the leading salient term.
     term_count = len(match.params)
-    rows = await with_timeout(
-        content_client.select_many_raw(
-            client,
-            f"SELECT {_RAW_MEMORY_RECALL_FIELDS}, "
-            f"{match.score_expr} AS score, "
-            "search::highlight('<mark>', '</mark>', 0) AS title_snippet, "
-            f"search::highlight('<mark>', '</mark>', {term_count}) AS content_snippet "
-            f"FROM raw_captures WHERE {where_clause} "
-            f"AND {match.where_clause} "
-            "ORDER BY score DESC, captured_at DESC LIMIT $limit;",
-            **params,
-            **match.params,
-            limit=limit * content_client.LIFECYCLE_FILTER_OVERFETCH_FACTOR,
+    memories: dict[str, RawMemory] = {}
+    fields = _RAW_MEMORY_RECALL_FIELDS.replace("id AS record_id", "record_id")
+    # Original evidence and promoted reflections have independent BM25
+    # statistics. A draft never enters either corpus, and promoting a candidate
+    # cannot change an original-only control's scores or ordering.
+    for table in RAW_LEXICAL_TABLES:
+        rows = await with_timeout(
+            content_client.select_many_raw(
+                client,
+                f"SELECT {fields}, "
+                f"{match.score_expr} AS score, "
+                "search::highlight('<mark>', '</mark>', 0) AS title_snippet, "
+                f"search::highlight('<mark>', '</mark>', {term_count}) AS content_snippet "
+                f"FROM {table} WHERE {where_clause} "
+                f"AND {match.where_clause} "
+                "ORDER BY score DESC, captured_at DESC LIMIT $limit;",
+                **params,
+                **match.params,
+                limit=limit * content_client.LIFECYCLE_FILTER_OVERFETCH_FACTOR,
+            ),
+            timeout_seconds=content_client.DIRECT_SEARCH_QUERY_TIMEOUT_SECONDS,
+            operation_name="surreal_raw_memory_fulltext_recall",
+        )
+        for memory in models.recallable_memories(
+            [models.raw_memory_from_record(row) for row in rows], limit=limit, as_of=as_of
+        ):
+            memories.setdefault(memory.id, memory)
+    return sorted(
+        memories.values(),
+        key=lambda memory: (
+            -memory.score,
+            -(memory.captured_at.timestamp() if memory.captured_at else 0),
+            memory.id,
         ),
-        timeout_seconds=content_client.DIRECT_SEARCH_QUERY_TIMEOUT_SECONDS,
-        operation_name="surreal_raw_memory_fulltext_recall",
-    )
-    return models.recallable_memories(
-        [models.raw_memory_from_record(row) for row in rows],
-        limit=limit,
-        as_of=as_of,
-    )
+    )[:limit]
 
 
 async def _recall_raw_memory_vector(

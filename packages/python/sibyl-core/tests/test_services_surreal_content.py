@@ -114,6 +114,9 @@ class FakeClient:
         merged = dict(params or {})
         merged.update(kwargs)
         self.calls.append((query, merged))
+        if "FROM raw_lexical_reflections " in query:
+            # These fixtures contain originals and no promoted reflections.
+            return _query_result([])
         if "LET $publications =" in query:
             # Ordinary capture fixtures have no admitted publication rows.
             return _query_result([{"publications": [], "captures": [], "attempts": []}])
@@ -142,6 +145,9 @@ class FakeClient:
         merged = dict(params or {})
         merged.update(kwargs)
         self.calls.append((query, merged))
+        if "FROM raw_lexical_reflections " in query:
+            # These fixtures contain originals and no promoted reflections.
+            return _query_result([])
         if "LET $publications =" in query:
             # Ordinary capture fixtures have no admitted publication rows.
             return _query_result([{"publications": [], "captures": [], "attempts": []}])
@@ -2643,12 +2649,12 @@ class TestSurrealContentHelpers:
 
         assert [memory.id for memory in memories] == ["memory-vector", "memory-lexical"]
         assert memories[1].snippet == "<mark>SurrealDB</mark> appears in the exact text."
-        assert "search::rrf($lists, $limit, $k)" in _recall_source_calls(fake_client)[2][0]
+        assert "search::rrf($lists, $limit, $k)" in _recall_source_calls(fake_client)[3][0]
         fulltext_query, _fulltext_params = _recall_source_calls(fake_client)[0]
-        vector_query, vector_params = _recall_source_calls(fake_client)[1]
+        vector_query, vector_params = _recall_source_calls(fake_client)[2]
         assert "SELECT * FROM raw_captures" not in fulltext_query
         assert "SELECT *, math::max" not in fulltext_query
-        assert "id AS record_id, uuid" in fulltext_query
+        assert "SELECT record_id, uuid" in fulltext_query
         assert "embedding," not in fulltext_query
         assert "SELECT *, (1 - vector::distance::knn()) AS score" not in vector_query
         assert "id AS record_id, uuid" in vector_query
@@ -2748,7 +2754,7 @@ class TestSurrealContentHelpers:
                 limit=2,
             )
 
-        assert len(_recall_source_calls(fake_client)) == 2
+        assert len(_recall_source_calls(fake_client)) == 3
         assert [memory.id for memory in memories] == ["memory-lexical"]
         assert fake_log.warnings == [
             (
@@ -2761,7 +2767,7 @@ class TestSurrealContentHelpers:
                 },
             )
         ]
-        vector_query, _vector_params = _recall_source_calls(fake_client)[1]
+        vector_query, _vector_params = _recall_source_calls(fake_client)[2]
         assert "embedding <|8, 40|> $query_embedding" in vector_query
 
     @pytest.mark.asyncio
@@ -2865,7 +2871,7 @@ class TestSurrealContentHelpers:
             "raw_recall_failure_count": 1,
             "raw_recall_failures": [{"source": "raw_vector", "error_type": "RuntimeError"}],
         }
-        assert len(_recall_source_calls(fake_client)) == 2
+        assert len(_recall_source_calls(fake_client)) == 3
 
     @pytest.mark.asyncio
     async def test_recall_raw_memory_falls_back_when_query_embedding_fails(self) -> None:
@@ -2922,7 +2928,7 @@ class TestSurrealContentHelpers:
             )
 
         assert [memory.id for memory in memories] == ["memory-lexical"]
-        assert len(_recall_source_calls(fake_client)) == 1
+        assert len(_recall_source_calls(fake_client)) == 2
         assert fake_log.warnings == [
             (
                 "raw_memory_query_embedding_failed",
@@ -2989,7 +2995,7 @@ class TestSurrealContentHelpers:
             )
 
         assert [memory.id for memory in memories] == ["memory-lexical"]
-        assert len(_recall_source_calls(fake_client)) == 1
+        assert len(_recall_source_calls(fake_client)) == 2
         assert fake_log.warnings == [
             (
                 "raw_memory_query_embedding_failed",
@@ -3094,7 +3100,7 @@ class TestSurrealContentHelpers:
 
         assert [memory.id for memory in memories] == ["memory-1"]
         assert memories[0].score == 1.0
-        fallback_query, fallback_params = fake_client.calls[1]
+        fallback_query, fallback_params = _recall_source_calls(fake_client)[-1]
         assert "principal_id = $principal_id" in fallback_query
         assert "capture_surface != $agent_diary_surface" in fallback_query
         assert fallback_params["principal_id"] == "user-a"
@@ -3154,7 +3160,7 @@ class TestSurrealContentHelpers:
         assert [memory.id for memory in memories] == ["diary-1", "memory-2"]
         assert memories[0].score > memories[1].score
         fulltext_query, fulltext_params = fake_client.calls[0]
-        fallback_query, fallback_params = fake_client.calls[1]
+        fallback_query, fallback_params = _recall_source_calls(fake_client)[-1]
         assert "raw_content @" in fulltext_query
         assert "$ft_term0" in fulltext_query
         assert "raw_content @" not in fallback_query
