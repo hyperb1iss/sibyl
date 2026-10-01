@@ -15,6 +15,10 @@ from sibyl_core.backends.surreal.schema_archive_imports import (
     ARCHIVE_IMPORT_DEFINITIONS,
     ARCHIVE_IMPORT_TABLES,
 )
+from sibyl_core.backends.surreal.schema_archive_phases import (
+    ARCHIVE_PHASE_DEFINITIONS,
+    ARCHIVE_PHASE_TABLES,
+)
 from sibyl_core.backends.surreal.schema_derivations import DERIVATION_DEFINITIONS
 from sibyl_core.backends.surreal.schema_embedding_states import (
     EMBEDDING_DEPLOYMENT_DEFINITIONS,
@@ -111,6 +115,7 @@ CONTENT_RELATION_SPECS: Mapping[str, str] = {
 CONTENT_RELATION_TABLES = tuple(CONTENT_RELATION_SPECS)
 CONTENT_TABLES = (
     *ARCHIVE_IMPORT_TABLES,
+    *ARCHIVE_PHASE_TABLES,
     *CONTENT_RELATION_TABLES,
     "entity",
     "crawl_sources",
@@ -138,7 +143,7 @@ CONTENT_TABLES = (
     *RAW_LEXICAL_TABLES,
     RAW_LEXICAL_STATE_TABLE,
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 50
+CONTENT_SCHEMA_CURRENT_VERSION = 51
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -197,6 +202,7 @@ CONTENT_SCHEMA_DEFINITIONS = (
     + VALIDATION_EXECUTION_SCHEMA
     + VALIDATION_DEPENDENCY_SCHEMA
     + ARCHIVE_IMPORT_DEFINITIONS
+    + ARCHIVE_PHASE_DEFINITIONS
 )
 
 
@@ -321,6 +327,8 @@ DEFINE FIELD OVERWRITE status ON backups TYPE string DEFAULT 'pending'
 """
 
 CONTENT_PERMISSION_MIGRATION_DEFINITIONS = """
+ALTER TABLE IF EXISTS archive_phase_controls PERMISSIONS NONE;
+ALTER TABLE IF EXISTS archive_phase_receipts PERMISSIONS NONE;
 ALTER TABLE IF EXISTS archive_import_runs PERMISSIONS NONE;
 ALTER TABLE IF EXISTS archive_import_artifacts PERMISSIONS NONE;
 ALTER TABLE IF EXISTS raw_lexical_originals PERMISSIONS NONE;
@@ -1171,6 +1179,13 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             version=50,
             name="content_checked_archive_imports",
             statements=tuple(split_statements(ARCHIVE_IMPORT_DEFINITIONS)),
+        ),
+        SchemaMigration(
+            version=51,
+            name="content_archive_phase_receipts",
+            statements=tuple(
+                split_statements(render_surreal_compatible_sql(ARCHIVE_PHASE_DEFINITIONS, url=url))
+            ),
         ),
     )
 

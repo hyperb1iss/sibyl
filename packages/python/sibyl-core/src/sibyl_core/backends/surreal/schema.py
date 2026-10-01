@@ -11,6 +11,10 @@ from typing import TYPE_CHECKING, cast
 
 import structlog
 
+from sibyl_core.backends.surreal.schema_archive_phases import (
+    ARCHIVE_PHASE_DEFINITIONS,
+    ARCHIVE_PHASE_TABLES,
+)
 from sibyl_core.backends.surreal.schema_derivations import DERIVATION_DEFINITIONS
 from sibyl_core.backends.surreal.schema_embedding_states import (
     EMBEDDING_STATE_DEFINITIONS,
@@ -694,7 +698,7 @@ ENTITY_SCHEMA_DRIFT_REPAIR_DEFINITIONS = f"""
 CURRENT_SCHEMA_MAINTENANCE_DEFINITIONS = ENTITY_DENORMALIZATION_MAINTENANCE_DEFINITIONS
 
 
-GRAPH_TABLES = ("entity", "episode")
+GRAPH_TABLES = ("entity", "episode", *ARCHIVE_PHASE_TABLES)
 GRAPH_EDGES = ("relates_to", "mentions")
 GRAPH_SCHEMA_MIGRATIONS = (
     SchemaMigration(
@@ -903,6 +907,11 @@ GRAPH_SCHEMA_MIGRATIONS = (
         name="graph_embedding_sweep_states",
         statements=tuple(split_statements(EMBEDDING_STATE_DEFINITIONS)),
         action=snapshot_graph_embedding_evidence,
+    ),
+    SchemaMigration(
+        version=32,
+        name="graph_archive_phase_receipts",
+        statements=tuple(split_statements(ARCHIVE_PHASE_DEFINITIONS)),
     ),
 )
 
