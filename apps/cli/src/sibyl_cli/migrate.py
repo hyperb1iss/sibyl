@@ -39,7 +39,6 @@ _ROUTE_KEYS = ("source_org", "target_context", "target_org_id", "target_project_
 # Ledgers written before the route carried the target org. Their receipts may
 # belong to any org the context was signed in to at the time.
 _LEGACY_ROUTE_KEYS = ("source_org", "target_context", "target_project_id")
-_LEGACY_PROBE_COUNT = 3
 
 
 def _ledger_path(route: dict[str, str], keys: tuple[str, ...] = _ROUTE_KEYS) -> Path:
@@ -87,11 +86,17 @@ async def _adopt_legacy_ledger(
     *,
     persist: bool,
 ) -> dict[str, str]:
-    """Carry an org-less ledger forward only when its receipts live in the target org.
+    """Carry forward the receipts of an org-less ledger that this org can see.
 
     Skipping a source memory because a receipt says it was sent is only safe
-    when that receipt names a memory the target org can see. A receipt from
-    another org would silently leave this org without the memory.
+    when that receipt names a memory in this org. An org-less ledger can mix
+    destinations (a context switched orgs between runs, and project ids repeat
+    across orgs), so every receipt is checked and only the confirmed ones are
+    adopted; the rest are replayed here. The legacy file stays in place for a
+    later run into the org its other receipts belong to.
+
+    The check reads the memory's history through the member-readable blame
+    route, so any teammate who can migrate can also resume.
     """
     legacy_path = _ledger_path(route, _LEGACY_ROUTE_KEYS)
     if path.exists() or not legacy_path.exists():
@@ -100,25 +105,29 @@ async def _adopt_legacy_ledger(
     receipts = _load_ledger(legacy_path, legacy_route)
     if not receipts:
         return {}
-    org_label = f"{target_org['name']} ({target_org['slug']})"
-    for target_id in list(receipts.values())[:_LEGACY_PROBE_COUNT]:
+    adopted: dict[str, str] = {}
+    for source_id, target_id in receipts.items():
         try:
-            await client.memory_inspect(str(target_id))
+            await client.memory_blame(str(target_id))
         except SibylClientError as exc:
             if exc.status_code == 404:
-                raise RuntimeError(
-                    f"ledger {legacy_path} records {len(receipts)} memories sent before "
-                    f"ledgers recorded their org, and they are not in {org_label}. "
-                    "Move it aside to replay into this org."
-                ) from exc
-            raise
-    if persist:
-        _save_ledger(path, route, receipts)
-        legacy_path.replace(legacy_path.with_suffix(".adopted.json"))
-        info(f"Adopted {len(receipts)} receipts from {legacy_path.name} for {org_label}")
-    else:
-        info(f"Would adopt {len(receipts)} receipts from {legacy_path.name} for {org_label}")
-    return receipts
+                continue
+            raise RuntimeError(
+                f"could not check receipt {target_id} from {legacy_path.name} "
+                f"against the target ({exc}); fix access or move the file aside"
+            ) from exc
+        adopted[source_id] = target_id
+    org_label = f"{target_org['name']} ({target_org['slug']})"
+    elsewhere = len(receipts) - len(adopted)
+    verb = "Adopted" if persist else "Would adopt"
+    info(
+        f"{verb} {len(adopted)} of {len(receipts)} receipts from {legacy_path.name} "
+        f"for {org_label}"
+        + (f"; {elsewhere} are not in this org and will be replayed" if elsewhere else "")
+    )
+    if persist and adopted:
+        _save_ledger(path, route, adopted)
+    return adopted
 
 
 async def _resolve_target_org(client: Any) -> dict[str, Any]:

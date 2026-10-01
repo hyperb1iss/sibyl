@@ -64,7 +64,7 @@ def _target(monkeypatch: pytest.MonkeyPatch, current: dict[str, Any]) -> MagicMo
     client.remember_raw_memory = AsyncMock(
         side_effect=[{"id": f"target-{n}"} for n in range(len(ROWS))]
     )
-    client.memory_inspect = AsyncMock(return_value={"id": "found"})
+    client.memory_blame = AsyncMock(return_value={"source": {"id": "found"}})
     monkeypatch.setattr(migrate, "get_client", lambda *_a, **_k: client)
     return client
 
@@ -175,29 +175,78 @@ def test_a_legacy_ledger_is_adopted_when_its_receipts_are_in_this_org(
     result = _run()
 
     assert result.exit_code == 0, result.stdout
-    assert "Adopted 2 receipts" in result.stdout
+    assert "Adopted 2 of 2 receipts" in result.stdout
     assert "Migrated 1 raw memories (2 already in ledger)" in result.stdout
     assert client.remember_raw_memory.await_count == 1
-    assert not legacy.exists()
-    assert legacy.with_suffix(".adopted.json").exists()
+    # Kept for a later run into whichever org its other receipts belong to.
+    assert legacy.exists()
 
 
-def test_a_legacy_ledger_from_another_org_is_refused(
+def test_every_legacy_receipt_is_checked_and_only_confirmed_ones_adopted(
+    ledger_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A context that switched orgs between runs leaves one ledger holding both
+    # orgs' receipts; a sample of the first few would vouch for all of them.
+    receipts = {
+        "src-0": "in-this-org-0",
+        "src-1": "in-this-org-1",
+        "src-extra": "in-this-org-2",
+        "src-2": "in-another-org",
+    }
+    _legacy_ledger(ledger_dir, receipts)
+    client = _target(monkeypatch, TEAM)
+
+    async def _blame(target_id: str) -> dict[str, Any]:
+        if target_id == "in-another-org":
+            raise SibylClientError("API error: not found", status_code=404)
+        return {"source": {"id": target_id}}
+
+    client.memory_blame = AsyncMock(side_effect=_blame)
+
+    result = _run()
+
+    assert result.exit_code == 0, result.stdout
+    assert client.memory_blame.await_count == len(receipts)
+    assert "Adopted 3 of 4 receipts" in result.stdout
+    assert "1 are not in this org and will be replayed" in result.stdout
+    assert client.remember_raw_memory.await_count == 1
+    ledger = ledger_dir / f"{SOURCE_ORG}--team--{TEAM['id']}--{PROJECT}.json"
+    data = json.loads(ledger.read_text(encoding="utf-8"))
+    assert data["receipts"]["src-2"] == "target-0"
+    assert "in-another-org" not in data["receipts"].values()
+
+
+def test_receipts_from_another_org_are_replayed_not_adopted(
     ledger_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     legacy = _legacy_ledger(ledger_dir, {row["uuid"]: f"t-{row['uuid']}" for row in ROWS})
     client = _target(monkeypatch, TEAM)
-    client.memory_inspect = AsyncMock(
+    client.memory_blame = AsyncMock(
         side_effect=SibylClientError("API error: not found", status_code=404)
     )
 
     result = _run()
 
-    assert result.exit_code == 1
-    assert "they are not in Acme (acme)" in result.stdout
-    assert "Move it aside" in result.stdout
-    client.remember_raw_memory.assert_not_awaited()
+    assert result.exit_code == 0, result.stdout
+    assert "Adopted 0 of 3 receipts" in result.stdout
+    assert client.remember_raw_memory.await_count == len(ROWS)
     assert legacy.exists()
+
+
+def test_an_unverifiable_receipt_stops_the_run(
+    ledger_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _legacy_ledger(ledger_dir, {ROWS[0]["uuid"]: "t-0"})
+    client = _target(monkeypatch, TEAM)
+    client.memory_blame = AsyncMock(
+        side_effect=SibylClientError("API error: forbidden", status_code=403)
+    )
+
+    result = _run()
+
+    assert result.exit_code == 1
+    assert "could not check receipt t-0" in result.stdout
+    client.remember_raw_memory.assert_not_awaited()
 
 
 def test_a_dry_run_reports_adoption_without_touching_the_ledgers(
@@ -210,7 +259,7 @@ def test_a_dry_run_reports_adoption_without_touching_the_ledgers(
     result = _run("--dry-run")
 
     assert result.exit_code == 0, result.stdout
-    assert "Would adopt 1 receipts" in result.stdout
+    assert "Would adopt 1 of 1 receipts" in result.stdout
     assert "Would migrate 2 raw memories (1 already in ledger)" in result.stdout
     assert sorted(p.name for p in ledger_dir.iterdir()) == before
     assert legacy.exists()
