@@ -906,6 +906,34 @@ class Settings(BaseSettings):
         default=100,
         description="Token overlap between chunks",
     )
+    # Independent per-request allocation and native transport resources.
+    archive_import_compressed_bytes: int = Field(default=16 * 1024**2, ge=1)
+    archive_import_inflated_bytes: int = Field(default=32 * 1024**2, ge=1)
+    archive_import_member_bytes: int = Field(default=32 * 1024**2, ge=1)
+    archive_import_members: int = Field(default=16, ge=1)
+    archive_import_json_depth: int = Field(default=32, ge=1)
+    archive_import_json_scalar_bytes: int = Field(default=16 * 1024**2, ge=1)
+    archive_import_json_nodes: int = Field(default=1_000_000, ge=1)
+    archive_import_parsed_rows: int = Field(default=50_000, ge=1)
+    archive_import_encoded_artifact_bytes: int = Field(default=48 * 1024**2, ge=1)
+    archive_import_encoded_plan_bytes: int = Field(default=16 * 1024**2, ge=1)
+    archive_import_metadata_transaction_bytes: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Full native archive metadata request budget. Defaults to 4 MiB for "
+            "HTTP or 64 MiB for WebSocket/embedded. Expand with the deployment's "
+            "native RPC body and worker memory resources."
+        ),
+    )
+    archive_import_options_bytes: int = Field(default=1024**2, ge=1)
+    archive_import_header_bytes: int = Field(default=16 * 1024, ge=1)
+    archive_import_request_bytes: int | None = Field(
+        default=None,
+        ge=1,
+        description="Physical archive upload budget; otherwise derived from part budgets.",
+    )
+
     source_import_dir: Path = Field(
         default=Path("./source-imports"),
         description="Directory containing local source archives that API imports may read",

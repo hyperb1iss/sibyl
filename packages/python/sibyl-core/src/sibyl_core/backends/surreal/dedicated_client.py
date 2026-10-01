@@ -31,6 +31,7 @@ from sibyl_core.backends.surreal.observability import (
     query_start,
 )
 from sibyl_core.backends.surreal.protocols import QueryParams, SurrealClient
+from sibyl_core.backends.surreal.query_guard import check_native_query_request
 from sibyl_core.backends.surreal.url_schemes import (
     is_embedded_surreal_url,
     is_file_backed_surreal_url,
@@ -240,7 +241,9 @@ class _EmbeddedNamespaceSession:
         return _checked_query_result(await self.query_raw(query, vars))
 
     async def query_raw(self, query: str, params: QueryParams | None = None) -> object:
-        response = await self._client().query_raw(self._scope + query, params)
+        prepared_query = self._scope + query
+        await check_native_query_request(prepared_query, params)
+        response = await self._client().query_raw(prepared_query, params)
         return _without_scope_result(response)
 
     async def live(self, table: str, *, diff: bool = False) -> object:
@@ -923,6 +926,8 @@ class DedicatedSurrealClient:
         raw: bool,
     ) -> object:
         bound_params = params if params else None
+        if not isinstance(client, _EmbeddedNamespaceSession):
+            await check_native_query_request(query, bound_params)
         if raw:
             return await client.query_raw(query, bound_params)
         return _checked_query_result(await client.query_raw(query, bound_params))

@@ -31,6 +31,7 @@ from sibyl.api.rate_limit import limiter
 from sibyl.api.routes import (
     admin_router,
     ai_settings_router,
+    archive_imports_router,
     auth_router,
     backups_router,
     context_router,
@@ -290,6 +291,7 @@ def create_api_app() -> FastAPI:  # noqa: PLR0915
     app.add_middleware(VersionHeaderMiddleware)
 
     # Register routers
+    app.include_router(archive_imports_router)
     app.include_router(backups_router)
     app.include_router(entities_router)
     app.include_router(tasks_router)
