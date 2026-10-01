@@ -44,6 +44,7 @@ from sibyl_core.backends.surreal.schema_ownership import (
 from sibyl_core.backends.surreal.schema_source_integrity import (
     migrate_graph_source_integrity,
     prepare_source_integrity_upgrade,
+    source_derivation_event,
 )
 from sibyl_core.backends.surreal.schema_source_states import (
     SOURCE_STATE_DEFINITIONS,
@@ -912,6 +913,11 @@ GRAPH_SCHEMA_MIGRATIONS = (
         version=32,
         name="graph_archive_phase_receipts",
         statements=ARCHIVE_PHASE_STATEMENTS,
+    ),
+    SchemaMigration(
+        version=33,
+        name="graph_derivation_source_witness",
+        statements=(source_derivation_event(SourceKind.GRAPH_ENTITY),),
     ),
 )
 

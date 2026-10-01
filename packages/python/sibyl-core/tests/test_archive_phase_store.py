@@ -274,10 +274,13 @@ async def test_archive_phase_actor_and_org_reads_and_native_binding_change(phase
 
 
 async def test_archive_phase_registration_uses_next_store_versions():
-    content = _content_schema_migrations(url="memory://")[-1]
-    graph = GRAPH_SCHEMA_MIGRATIONS[-1]
-    assert content.version == CONTENT_SCHEMA_CURRENT_VERSION == 51
-    assert graph.version == GRAPH_SCHEMA_CURRENT_VERSION == 32
+    content_migrations = _content_schema_migrations(url="memory://")
+    content = content_migrations[-2]
+    graph = GRAPH_SCHEMA_MIGRATIONS[-2]
+    assert content.version == 51
+    assert graph.version == 32
+    assert content_migrations[-1].version == CONTENT_SCHEMA_CURRENT_VERSION == 52
+    assert GRAPH_SCHEMA_MIGRATIONS[-1].version == GRAPH_SCHEMA_CURRENT_VERSION == 33
     assert content.name == "content_archive_phase_receipts"
     assert graph.name == "graph_archive_phase_receipts"
     assert content.statements == graph.statements
@@ -586,6 +589,7 @@ async def test_archive_phase_registered_upgrade_preserves_prior_native_rows(
         if store == "content"
         else _graph_schema_migrations(url=phase_client._url)
     )
+    migrations = tuple(migration for migration in migrations if migration.version <= new_version)
     await ensure_schema_version_table(phase_client.execute_query)
     await record_schema_version(
         phase_client.execute_query, name=store, version=old_version, migrations=migrations[:-1]

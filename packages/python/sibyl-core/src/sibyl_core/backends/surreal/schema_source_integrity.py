@@ -38,6 +38,52 @@ async def prepare_source_integrity_upgrade(
         await execute_query("BEGIN TRANSACTION; " + body + " COMMIT TRANSACTION;")
 
 
+def source_derivation_event(kind: SourceKind) -> str:
+    """Fence association publication on each retained target source ledger."""
+    table = "entity" if kind is SourceKind.GRAPH_ENTITY else "raw_captures"
+    organization_field = "group_id" if kind is SourceKind.GRAPH_ENTITY else "organization_id"
+    return f"""
+DEFINE EVENT OVERWRITE require_target_derivation ON memory_derivations WHEN true THEN {{
+    LET $targets = array::distinct(array::concat(
+        IF $event IN ['UPDATE', 'DELETE'] THEN [{{
+            organization_id: $before.organization_id,
+            target_kind: $before.target_kind, target_id: $before.target_id
+        }}] ELSE [] END,
+        IF $event IN ['CREATE', 'UPDATE'] THEN [{{
+            organization_id: $after.organization_id,
+            target_kind: $after.target_kind, target_id: $after.target_id
+        }}] ELSE [] END
+    ));
+    FOR $target IN $targets {{
+        IF $target.target_kind != '{kind.value}' {{ THROW 'derivation target kind mismatch'; }};
+        LET $state = (SELECT * FROM source_states
+            WHERE organization_id = $target.organization_id
+                AND source_kind = $target.target_kind AND source_id = $target.target_id)[0];
+        IF $state = NONE {{
+            -- Removing an orphan adds no authority; a new binding needs retained history.
+            LET $publishing = $event != 'DELETE'
+                AND $target.organization_id = $after.organization_id
+                AND $target.target_kind = $after.target_kind
+                AND $target.target_id = $after.target_id;
+            LET $physical = (SELECT VALUE id FROM {table}
+                WHERE {organization_field} = $target.organization_id
+                    AND uuid = $target.target_id)[0];
+            IF $publishing OR $physical != NONE {{
+                THROW 'derivation target source state is missing';
+            }};
+        }} ELSE {{
+            UPDATE $state.id SET validation_write_witness = type::string(rand::uuid());
+        }};
+    }};
+    IF $event IN ['CREATE', 'UPDATE'] {{
+        UPDATE {table} SET derivation_required = true
+            WHERE uuid = $after.target_id AND {organization_field} = $after.organization_id
+                AND derivation_required != true;
+    }};
+}};
+"""
+
+
 async def migrate_source_integrity(
     execute_query: SurrealExecute,
     *,
