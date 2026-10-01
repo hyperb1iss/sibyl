@@ -286,5 +286,5 @@ async def archive_check_status(
     plan = await _owned_archive_work(
         _bound_plan, SavedArchiveCheck(record=record, replayed=False), context
     )
-    await refresh_archive_authority(request, context, original_ceiling=plan.credential)
+    await refresh_archive_authority(request, context)
     return _status(record, plan, replayed=False)

@@ -628,7 +628,76 @@ async def test_archive_http_native_replay_cannot_exchange_credential_identity(
     denied = await fixture.post(payload, options)
     assert denied.status_code == 409, denied.text
     status = await fixture.status(created.json()["run_id"])
-    assert status.status_code == 409, status.text
+    assert status.status_code == 200, status.text
+    assert status.json() == created.json()
+    assert (await fixture.counts())["archive_import_runs"] == 1
+    fixture.assert_clean()
+
+
+@pytest.mark.parametrize("credential", ["read_key", "write_key", "session"])
+async def test_archive_http_native_other_current_credential_reads_after_origin_revocation(
+    archive_http, archive_auth, tmp_path, credential
+):
+    fixture = archive_http
+    fixture.http._transport.app.dependency_overrides.clear()
+    payload, options = _personal_archive(tmp_path, fixture.context.user_id)
+    created = await fixture.post(payload, options)
+    assert created.status_code == 200, created.text
+    original_key_id = fixture.context.api_key_id
+    if credential == "session":
+        _, fixture.token, fixture.context = await archive_auth.session()
+    else:
+        scopes = ["api:read"] if credential == "read_key" else ["api:write"]
+        _, fixture.token = await archive_auth.key(
+            spaces=[archive_auth.private_space_id], scopes=scopes
+        )
+        fixture.context = await archive_auth.key_context(fixture.token)
+    await archive_auth.client.execute_query(
+        "UPDATE api_keys SET revoked_at=time::now() WHERE uuid=$key;",
+        key=original_key_id,
+    )
+    status = await fixture.status(created.json()["run_id"])
+    assert status.status_code == 200, status.text
+    assert status.json() == created.json()
+    denied = await fixture.post(payload, options)
+    assert denied.status_code == (403 if credential == "read_key" else 409), denied.text
+    assert await fixture.counts() == {
+        "archive_import_runs": 1,
+        "archive_import_artifacts": 1,
+        "raw_captures": 0,
+    }
+    fixture.assert_clean()
+
+
+async def test_archive_http_native_current_reader_revoked_during_status_load(
+    archive_http, archive_auth, tmp_path, monkeypatch
+):
+    fixture = archive_http
+    fixture.http._transport.app.dependency_overrides.clear()
+    payload, options = _personal_archive(tmp_path, fixture.context.user_id)
+    created = await fixture.post(payload, options)
+    assert created.status_code == 200, created.text
+    _, fixture.token = await archive_auth.key(
+        spaces=[archive_auth.private_space_id], scopes=["api:read"]
+    )
+    fixture.context = await archive_auth.key_context(fixture.token)
+    original_load = routes.SurrealArchiveImportRunRepository.load
+    completed = []
+
+    async def load_then_revoke(repository, run_id, **kwargs):
+        record = await original_load(repository, run_id, **kwargs)
+        assert record is not None
+        await archive_auth.client.execute_query(
+            "UPDATE api_keys SET revoked_at=time::now() WHERE uuid=$key;",
+            key=fixture.context.api_key_id,
+        )
+        completed.append(run_id)
+        return record
+
+    monkeypatch.setattr(routes.SurrealArchiveImportRunRepository, "load", load_then_revoke)
+    denied = await fixture.status(created.json()["run_id"])
+    assert completed == [created.json()["run_id"]]
+    assert denied.status_code == 401, denied.text
     assert (await fixture.counts())["archive_import_runs"] == 1
     fixture.assert_clean()
 

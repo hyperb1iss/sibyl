@@ -183,7 +183,8 @@ An optional `Idempotency-Key` header binds the request to the actor and organiza
 same request preserves its original plan and credential ceiling. A changed request or originating
 API key returns `409`. Invalid archives return `422`; requests exceeding configured budgets return
 `413`. Successful responses contain the run identity, checked status, digests and per-kind counts.
-The status endpoint also works for a caller who retains read authority after losing write access.
+The status endpoint accepts any currently valid same-actor session or API key with read access,
+even after the originating key is revoked. Status reads do not grant permission to replay or apply.
 
 The check stores an inert archive artifact and plan in one native transaction. Applying data and
 the client migration command are subsequent protocol layers. Resource settings use the
