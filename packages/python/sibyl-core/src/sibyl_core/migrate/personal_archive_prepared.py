@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from sibyl_core.auth.memory_policy import stamp_memory_scope_metadata
 from sibyl_core.memory_pipeline.audit import decode_audit_metadata
@@ -86,7 +86,20 @@ def graph_archive_body(entity: Entity, *, organization_id: str) -> dict[str, Any
     # The canonical reader supplies description/content fallbacks and normalizes
     # quality metadata. Mirrored writer fields belong to the top-level body;
     # source revisions remain in the exact destination witnesses.
-    canonical = entity_from_surreal_row(_entity_record(entity, group_id=organization_id))
+    # Preserve normalized explicit metadata before typed writers add defaults.
+    # A Task datetime model loses nanoseconds retained by its metadata text.
+    base = Entity.model_validate(entity.model_dump(mode="python"))
+    attributes = cast(
+        "dict[str, object]", _entity_record(base, group_id=organization_id)["attributes"]
+    )
+    record = _entity_record(entity, group_id=organization_id)
+    record["attributes"] = cast("dict[str, object]", record["attributes"]) | attributes
+    canonical = entity_from_surreal_row(record)
+    typed = _entity_record(canonical, group_id=organization_id)
+    typed["attributes"] = cast("dict[str, object]", typed["attributes"]) | cast(
+        "dict[str, object]", record["attributes"]
+    )
+    canonical = entity_from_surreal_row(typed)
     public = canonical.model_dump(mode="json")
     body = {key: public[key] for key in _GRAPH_MIRROR_FIELDS}
     body["metadata"] = graph_archive_metadata(public["metadata"])

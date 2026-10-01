@@ -162,6 +162,96 @@ async def test_native_prepared_bodies_and_bookkeeping_preserve_checked_authority
             assert row.witnesses[0].state_sha256 != old.witnesses[0].state_sha256
 
 
+def _configure_graph_variant(record, variant):
+    if variant == "empty-body":
+        record["description"] = record["content"] = ""
+    elif variant == "source-file":
+        record["source_file"] = "notes/meaningful-source.md"
+    elif variant == "metadata-source-file":
+        record["attributes"]["source_file"] = "notes/metadata-source.md"
+    elif variant == "writer-mirrors":
+        record["attributes"].update(
+            _direct_insert=False,
+            revision=93,
+            description="foreign mirror",
+            entity_type="foreign mirror",
+            updated_at="2026-09-01T01:02:03Z",
+        )
+    else:
+        record["attributes"].update(
+            user_label={"nested": ["keep", {"value": 17}]},
+            user_timestamp="2026-09-30T01:02:03.123456789Z",
+        )
+        if variant.startswith("task-"):
+            record["entity_type"] = "task"
+            record["labels"] = ["task", "Entity"]
+            if variant == "task-business":
+                record["attributes"].update(
+                    title="distinct title",
+                    status="done",
+                    priority="high",
+                    due_date="2026-09-30T01:02:03.123456789Z",
+                    started_at="2026-09-30T01:02:03.987654321Z",
+                    estimated_hours=2.25,
+                    actual_hours=1.5,
+                    learnings="keep this learning",
+                    blockers_encountered=["a real blocker"],
+                    task_order=7,
+                    complexity="complex",
+                    assignees=["person"],
+                )
+        elif variant.startswith("procedure-"):
+            record["entity_type"] = "procedure"
+            record["labels"] = ["procedure", "Entity"]
+            if variant == "procedure-business":
+                record["attributes"].update(
+                    automation_level="semi-automated",
+                    required_tools=["tool"],
+                    estimated_minutes=19,
+                )
+
+
+def _assert_graph_variant_body(body, public, variant):
+    if variant == "empty-body":
+        assert body["description"] == body["content"] == body["name"]
+    elif variant in {"source-file", "metadata-source-file"}:
+        assert body["source_file"] == public["source_file"]
+    elif variant == "user-metadata" or variant.startswith(("task-", "procedure-")):
+        assert body["metadata"]["user_label"] == public["metadata"]["user_label"]
+        assert body["metadata"]["user_timestamp"] == public["metadata"]["user_timestamp"]
+    if variant.startswith("task-"):
+        assert body["metadata"]["status"] == ("done" if variant == "task-business" else "todo")
+        assert body["metadata"]["task_order"] == (7 if variant == "task-business" else 0)
+        assert body["metadata"]["title"] == (
+            "distinct title" if variant == "task-business" else body["name"]
+        )
+    elif variant.startswith("procedure-"):
+        assert body["metadata"]["automation_level"] == (
+            "semi-automated" if variant == "procedure-business" else "manual"
+        )
+        if variant == "procedure-business":
+            assert body["metadata"]["required_tools"] == ["tool"]
+            assert body["metadata"]["estimated_minutes"] == 19
+    if variant == "task-business":
+        assert body["metadata"]["due_date"] == "2026-09-30T01:02:03.123456789Z"
+        assert body["metadata"]["started_at"] == "2026-09-30T01:02:03.987654321Z"
+        assert body["metadata"]["estimated_hours"] == 2.25
+        assert body["metadata"]["actual_hours"] == 1.5
+        assert body["metadata"]["learnings"] == "keep this learning"
+        assert body["metadata"]["blockers_encountered"] == ["a real blocker"]
+    assert (
+        not {
+            "revision",
+            "_direct_insert",
+            "updated_at",
+            "description",
+            "entity_type",
+            "source_file",
+        }
+        & body["metadata"].keys()
+    )
+
+
 async def test_native_graph_writer_defaults_preserve_semantic_user_fields(
     owned_destination, tmp_path
 ):
@@ -179,6 +269,10 @@ async def test_native_graph_writer_defaults_preserve_semantic_user_fields(
         "metadata-source-file",
         "writer-mirrors",
         "user-metadata",
+        "task-defaults",
+        "task-business",
+        "procedure-defaults",
+        "procedure-business",
     )
     for index, variant in enumerate(variants):
         case_path = tmp_path / str(index)
@@ -186,25 +280,7 @@ async def test_native_graph_writer_defaults_preserve_semantic_user_fields(
         parsed, mappings = fixtures._archive(case_path, actor_id=context.user_id)
         payload = parsed.graph
         record = payload["source_integrity"]["source_rows"][0]["record"]
-        if variant == "empty-body":
-            record["description"] = record["content"] = ""
-        elif variant == "source-file":
-            record["source_file"] = "notes/meaningful-source.md"
-        elif variant == "metadata-source-file":
-            record["attributes"]["source_file"] = "notes/metadata-source.md"
-        elif variant == "writer-mirrors":
-            record["attributes"].update(
-                _direct_insert=False,
-                revision=93,
-                description="foreign mirror",
-                entity_type="foreign mirror",
-                updated_at="2026-09-01T01:02:03Z",
-            )
-        else:
-            record["attributes"].update(
-                user_label={"nested": ["keep", {"value": 17}]},
-                user_timestamp="2026-09-30T01:02:03.123456789Z",
-            )
+        _configure_graph_variant(record, variant)
         public = entity_from_surreal_row(record).model_dump(mode="json")
         payload["entities"][0] = public
         section = payload["source_integrity"]
@@ -243,24 +319,7 @@ async def test_native_graph_writer_defaults_preserve_semantic_user_fields(
         )
         body = item.body
         assert body is not None
-        if variant == "empty-body":
-            assert body["description"] == body["content"] == body["name"]
-        elif variant in {"source-file", "metadata-source-file"}:
-            assert body["source_file"] == public["source_file"]
-        elif variant == "user-metadata":
-            assert body["metadata"]["user_label"] == public["metadata"]["user_label"]
-            assert body["metadata"]["user_timestamp"] == public["metadata"]["user_timestamp"]
-        assert (
-            not {
-                "revision",
-                "_direct_insert",
-                "updated_at",
-                "description",
-                "entity_type",
-                "source_file",
-            }
-            & body["metadata"].keys()
-        )
+        _assert_graph_variant_body(body, public, variant)
         await graph.execute_query(
             "CREATE entity CONTENT $record;",
             record=_entity_record(
@@ -282,6 +341,24 @@ async def test_native_graph_writer_defaults_preserve_semantic_user_fields(
                 "UPDATE entity SET attributes.source_file='notes/different.md', revision+=1 WHERE uuid=$identity;",
                 identity=item.row.destination_id,
             )
+            changed = next(
+                row
+                for row in await fixtures._build(parsed, mappings, context)
+                if row.kind is ArchiveKind.GRAPH_ENTITY and row.original_id == public["id"]
+            )
+            assert changed.disposition is ArchiveDisposition.CONFLICTED
+        if variant.startswith(("task-", "procedure-")):
+            if variant.startswith("task-"):
+                await graph.execute_query(
+                    "UPDATE entity SET attributes.status=$status, status=$status, revision+=1 WHERE uuid=$identity;",
+                    status="todo" if variant == "task-business" else "done",
+                    identity=item.row.destination_id,
+                )
+            else:
+                await graph.execute_query(
+                    "UPDATE entity SET attributes.automation_level='automated', revision+=1 WHERE uuid=$identity;",
+                    identity=item.row.destination_id,
+                )
             changed = next(
                 row
                 for row in await fixtures._build(parsed, mappings, context)

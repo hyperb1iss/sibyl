@@ -216,3 +216,120 @@ def test_graph_projection_keeps_user_fields_and_ignores_storage_mirrors():
     assert (
         graph_archive_body(entity.model_copy(update={"revision": 2}), organization_id=org) == body
     )
+
+
+@pytest.mark.parametrize(
+    ("kind", "metadata", "expected_fields", "changed_field", "changed_value"),
+    [
+        (
+            "task",
+            {},
+            {
+                "title": "typed archive",
+                "status": "todo",
+                "priority": "medium",
+                "task_order": 0,
+                "complexity": "medium",
+            },
+            "status",
+            "done",
+        ),
+        (
+            "task",
+            {
+                "title": "distinct title",
+                "status": "done",
+                "priority": "high",
+                "task_order": 7,
+                "complexity": "complex",
+                "assignees": ["person"],
+                "due_date": "2026-09-28T12:01:02Z",
+            },
+            {
+                "title": "distinct title",
+                "status": "done",
+                "priority": "high",
+                "task_order": 7,
+                "complexity": "complex",
+                "assignees": ["person"],
+                "due_date": "2026-09-28T12:01:02Z",
+            },
+            "status",
+            "todo",
+        ),
+        (
+            "procedure",
+            {},
+            {"automation_level": "manual"},
+            "automation_level",
+            "automated",
+        ),
+        (
+            "procedure",
+            {
+                "automation_level": "semi-automated",
+                "required_tools": ["tool"],
+                "estimated_minutes": 19,
+            },
+            {
+                "automation_level": "semi-automated",
+                "required_tools": ["tool"],
+                "estimated_minutes": 19,
+            },
+            "automation_level",
+            "automated",
+        ),
+    ],
+)
+def test_graph_projection_retains_typed_business_defaults(
+    kind, metadata, expected_fields, changed_field, changed_value
+):
+    from sibyl_core.migrate.personal_archive_prepared import graph_archive_body
+    from sibyl_core.models import Entity
+    from sibyl_core.services.graph_entity_store import _entity_record
+    from sibyl_core.services.graph_records import entity_from_surreal_row
+
+    organization_id = str(uuid4())
+    entity = Entity(
+        id=str(uuid4()),
+        entity_type=kind,
+        name="typed archive",
+        source_file="notes/typed.md",
+        metadata={
+            **metadata,
+            "user_label": {"nested": ["keep", 17]},
+            "user_timestamp": "2026-09-30T01:02:03.123456789Z",
+        },
+    )
+    body = graph_archive_body(entity, organization_id=organization_id)
+    native = entity_from_surreal_row(
+        _entity_record(Entity.model_validate(body), group_id=organization_id)
+    )
+    assert graph_archive_body(native, organization_id=organization_id) == body
+    assert body["source_file"] == entity.source_file
+    assert body["metadata"]["user_label"] == entity.metadata["user_label"]
+    assert body["metadata"]["user_timestamp"] == entity.metadata["user_timestamp"]
+    assert {key: body["metadata"][key] for key in expected_fields} == expected_fields
+    changed = Entity.model_validate(body)
+    changed.metadata[changed_field] = changed_value
+    assert graph_archive_body(changed, organization_id=organization_id) != body
+
+
+@pytest.mark.parametrize("field", ["due_date", "started_at", "completed_at", "reviewed_at"])
+def test_graph_projection_keeps_explicit_task_timestamp_precision(field):
+    from sibyl_core.migrate.personal_archive_prepared import graph_archive_body
+    from sibyl_core.models import Entity
+    from sibyl_core.services.graph_entity_store import _entity_record
+    from sibyl_core.services.graph_records import entity_from_surreal_row
+
+    organization_id = str(uuid4())
+    timestamp = "2026-09-30T01:02:03.123456789Z"
+    entity = Entity(
+        id=str(uuid4()), entity_type="task", name="typed timestamp", metadata={field: timestamp}
+    )
+    body = graph_archive_body(entity, organization_id=organization_id)
+    native = entity_from_surreal_row(
+        _entity_record(Entity.model_validate(body), group_id=organization_id)
+    )
+    assert body["metadata"][field] == timestamp
+    assert graph_archive_body(native, organization_id=organization_id) == body
