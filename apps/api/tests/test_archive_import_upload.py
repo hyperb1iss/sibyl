@@ -163,6 +163,32 @@ async def test_archive_upload_enforces_physical_allocation_budgets_and_cleans_sp
     assert not spool.exists()
 
 
+@pytest.mark.parametrize("chunk", [1, 31])
+async def test_archive_upload_part_header_overflow_removes_created_spool(tmp_path, chunk):
+    budget = ArchiveUploadBudget(100_000, 10_000, 120)
+    encoded_options = options()
+    normal_spool = tmp_path / "normal.spool"
+    await stage_archive_upload(
+        request(multipart(b"archive", encoded_options), chunk=chunk),
+        spool=normal_spool,
+        budget=budget,
+        intake_budget=intake_budget(),
+    )
+    assert normal_spool.read_bytes() == b"archive"
+
+    body = multipart(
+        b"archive", encoded_options, archive_header=b"X-Padding: " + b"p" * 200 + b"\r\n"
+    )
+    spool = tmp_path / "overflow.spool"
+    with pytest.raises(
+        ArchiveIntakeCapacityError, match="archive multipart header-byte budget exceeded"
+    ):
+        await stage_archive_upload(
+            request(body, chunk=chunk), spool=spool, budget=budget, intake_budget=intake_budget()
+        )
+    assert not spool.exists()
+
+
 @pytest.mark.parametrize(
     "extra",
     [
