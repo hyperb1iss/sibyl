@@ -218,6 +218,7 @@ def whoami(ctx: config_store.Context) -> str | None:
 
 def login(ctx: config_store.Context) -> None:
     api_url = normalize_api_url(f"{ctx.server_url}/api")
+    scope = credential_scope(ctx.name, ctx.org_slug)
     logged_in = _login_auto(
         api_url=api_url,
         no_browser=False,
@@ -225,11 +226,11 @@ def login(ctx: config_store.Context) -> None:
         email=None,
         password=None,
         insecure=ctx.insecure,
-        credential_scope_name=credential_scope(ctx.name, ctx.org_slug),
+        credential_scope_name=scope,
     )
     clear_client_cache()
     if logged_in:
-        _settle_login_org(api_url, ctx.name)
+        _settle_login_org(api_url, ctx.name, scope)
 
 
 def sign_in(ctx: config_store.Context) -> str | None:

@@ -78,3 +78,45 @@ def test_switch_pins_the_context_to_the_org_it_switched_to(
         credential_scope=auth_store.credential_scope("team", "acme"),
     )
     assert stored.get("access_token") == "token-for-acme"
+
+
+def test_an_environment_targeted_switch_leaves_the_local_context_alone(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Paired SIBYL_API_URL + SIBYL_AUTH_TOKEN aim the client at another server;
+    # the switch must not refile or repoint the unrelated active context.
+    from sibyl_cli import auth_store, config_store
+
+    monkeypatch.setattr(config_store.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(
+        "sibyl_cli.pending_identity.warm_pending_replay_identity", lambda *_a, **_k: None
+    )
+    monkeypatch.setenv("SIBYL_API_URL", "https://remote.example/api")
+    monkeypatch.setenv("SIBYL_AUTH_TOKEN", "automation-token")
+    config_store.create_context(
+        "local", "http://localhost:3334", org_slug="local-org", set_active=True
+    )
+    mock_client = MagicMock()
+    mock_client.base_url = "https://remote.example/api"
+    mock_client.switch_org = AsyncMock(
+        return_value={
+            "organization": {"id": "org-b", "slug": "team-b", "name": "Team B"},
+            "access_token": "switched-token",
+            "refresh_token": None,
+            "expires_in": 3600,
+        }
+    )
+
+    with patch("sibyl_cli.org.get_client", return_value=mock_client):
+        result = CliRunner().invoke(app, ["switch", "team-b"])
+
+    assert result.exit_code == 0, result.stdout
+    ctx = config_store.get_context("local")
+    assert ctx is not None and ctx.org_slug == "local-org"
+    assert "SIBYL_AUTH_TOKEN authenticates this server" in result.stdout
+    for org in ("team-b", "local-org"):
+        assert not auth_store.read_server_credentials(
+            "https://remote.example/api",
+            credential_scope=auth_store.credential_scope("local", org),
+            fallback_to_server=False,
+        ).get("access_token")

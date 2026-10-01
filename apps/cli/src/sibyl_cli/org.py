@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
 from sibyl_cli import config_store
-from sibyl_cli.auth_store import credential_scope, set_tokens
+from sibyl_cli.auth_store import credential_scope, normalize_api_url, set_tokens
 from sibyl_cli.client import SibylClientError, get_client
-from sibyl_cli.common import error, info, print_json, run_async, success
+from sibyl_cli.client_transport import _environment_auth_token
+from sibyl_cli.common import error, info, print_json, run_async, success, warn
 
 app = typer.Typer(help="Organizations")
 members_app = typer.Typer(help="Manage organization members")
@@ -21,16 +22,26 @@ app.add_typer(members_app, name="members")
 console = Console()
 
 
-def _org_credential_scope(org_slug: str | None) -> str | None:
-    ctx = config_store.resolve_effective_context()
-    if ctx is None:
-        return None
-    return credential_scope(ctx.name, org_slug or ctx.org_slug)
+def _switch_destination(client: Any, slug: str) -> tuple[str | None, str | None]:
+    """Where a switched org's tokens belong: (credential scope, context to pin).
 
-
-def _pin_effective_context_org(slug: str) -> None:
+    Both follow the server the client actually talked to. A paired automation
+    token (SIBYL_API_URL + SIBYL_AUTH_TOKEN) can aim the client away from the
+    effective context, and filing its switched token under that context, or
+    repointing it, would break a context the switch never touched.
+    """
+    if _environment_auth_token(client.base_url):
+        warn(
+            "SIBYL_AUTH_TOKEN authenticates this server, so it keeps deciding which org "
+            "commands use; the switched credential is saved without a context."
+        )
+        return None, None
     ctx = config_store.resolve_effective_context()
-    pin_context_org(ctx.name if ctx else None, slug)
+    if ctx is None or normalize_api_url(f"{ctx.server_url}/api") != normalize_api_url(
+        client.base_url
+    ):
+        return None, None
+    return credential_scope(ctx.name, slug), ctx.name
 
 
 def store_org_tokens(
@@ -121,14 +132,15 @@ def create_cmd(
             expires_in = int(expires_raw) if expires_raw is not None else None
             if token:
                 created_slug = str(result.get("slug") or slug or "")
+                scope_name, pin_to = _switch_destination(client, created_slug)
                 store_org_tokens(
                     client.base_url,
                     token,
                     refresh_token=refresh,
                     expires_in=expires_in,
-                    scope_name=_org_credential_scope(created_slug),
+                    scope_name=scope_name,
                 )
-                _pin_effective_context_org(created_slug)
+                pin_context_org(pin_to, created_slug)
                 success("Switched org (tokens saved to ~/.sibyl/auth.json)")
         print_json(result)
     except SibylClientError as e:
@@ -151,14 +163,15 @@ def switch_cmd(slug: str) -> None:
         expires_raw = result.get("expires_in")
         expires_in = int(expires_raw) if expires_raw is not None else None
         if token:
+            scope_name, pin_to = _switch_destination(client, slug)
             store_org_tokens(
                 client.base_url,
                 token,
                 refresh_token=refresh,
                 expires_in=expires_in,
-                scope_name=_org_credential_scope(slug),
+                scope_name=scope_name,
             )
-            _pin_effective_context_org(slug)
+            pin_context_org(pin_to, slug)
             success("Org switched (tokens saved to ~/.sibyl/auth.json)")
         print_json(result)
     except SibylClientError as e:

@@ -722,7 +722,7 @@ def _login_auto(
     raise typer.Exit(1)
 
 
-def _settle_login_org(api_url: str, context_name: str | None) -> None:
+def _settle_login_org(api_url: str, context_name: str | None, saved_scope: str | None) -> None:
     """Land a fresh login in the org its context means.
 
     A device or OAuth login receives a token for whatever org the server picks,
@@ -730,6 +730,10 @@ def _settle_login_org(api_url: str, context_name: str | None) -> None:
     later command silently acts there. A context that names an org is switched
     to it. A context without one adopts the caller's only team org, and several
     team orgs are the caller's choice, not a guess.
+
+    Every request here carries the token this login just saved: an ambient
+    SIBYL_AUTH_TOKEN could belong to another user, and switching with it would
+    store that user's credential under this context.
     """
     from sibyl_cli import config_store
     from sibyl_cli.org import pin_context_org, store_org_tokens
@@ -737,7 +741,11 @@ def _settle_login_org(api_url: str, context_name: str | None) -> None:
     ctx = config_store.get_context(context_name) if context_name else None
     if ctx is None:
         return
-    client = SibylClient(base_url=api_url, context_name=ctx.name)
+    saved = read_server_credentials(api_url, credential_scope=saved_scope)
+    saved_token = str(saved.get("access_token") or "").strip()
+    if not saved_token:
+        return
+    client = SibylClient(base_url=api_url, auth_token=saved_token, context_name=ctx.name)
 
     @run_async
     async def _identity() -> tuple[dict, dict]:
@@ -1033,7 +1041,9 @@ def login_cmd(
 
     if logged_in:
         _settle_login_org(
-            api_url, context or _login_target_context(api_url, bool(effective_server))
+            api_url,
+            context or _login_target_context(api_url, bool(effective_server)),
+            scope,
         )
 
 
