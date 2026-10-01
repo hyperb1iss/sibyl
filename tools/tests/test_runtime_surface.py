@@ -30,7 +30,7 @@ from tools.trust.enterprise_readiness_evidence import SIBYL_HELM_RENDER_ARGS
 
 from sibyl.config import parse_forwarded_allow_ips
 
-EXPECTED_ROUTER_COUNT = 31
+EXPECTED_ROUTER_COUNT = 32
 EXPECTED_HTTP_ROUTE_COUNT = 3
 EXPECTED_WEBSOCKET_ROUTE_COUNT = 1
 EXPECTED_MCP_TOOL_COUNT = 13
@@ -655,6 +655,7 @@ def test_runtime_surface_finds_known_contracts() -> None:
     assert len(surface.mcp_tools) == EXPECTED_MCP_TOOL_COUNT
     assert len(surface.mcp_resources) == EXPECTED_MCP_RESOURCE_COUNT
 
+    assert "archive_imports_router" in surface.rest_routers
     assert "search_router" in surface.rest_routers
     assert "synthesis_router" in surface.rest_routers
     assert "ai_settings_router" in surface.rest_routers

@@ -19,7 +19,6 @@ import httpx
 import pytest
 from fastapi import FastAPI, Request
 
-import test_archive_import_authority as archive_auth_fixtures
 from sibyl.api.routes import archive_import_preview as preview, archive_imports as routes
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context
@@ -36,6 +35,7 @@ from sibyl_core.migrate.source_integrity import build_integrity_archive
 from sibyl_core.models.memory_scope import MemoryScope
 from sibyl_core.services.content_models import RawMemory, raw_memory_record
 from sibyl_core.services.graph_client import SurrealGraphClient
+from tests import test_archive_import_authority as archive_auth_fixtures
 
 
 @pytest.mark.parametrize(
