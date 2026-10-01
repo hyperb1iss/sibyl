@@ -106,7 +106,7 @@ async def store(request):
     trace = []
     try:
         applied = await initialize(client, request.param, url, migrations)
-        assert applied[-1].version == (52 if request.param == "content" else 33)
+        assert applied[-1].version == (52 if request.param == "content" else 34)
         assert (
             await apply_schema_migrations(client.execute_query, migrations, name=request.param)
             == []
@@ -559,25 +559,25 @@ async def test_derivation_source_witness_registered_upgrade_retains_history(stor
     )
     upgrade = SimpleNamespace(**{**vars(store), "client": client, "writer": client})
     try:
-        await initialize(client, store.name, store.url, store.migrations[:-1])
         old_version = 51 if store.name == "content" else 32
+        historical = tuple(
+            migration for migration in store.migrations if migration.version <= old_version + 1
+        )
+        await initialize(client, store.name, store.url, historical[:-1])
         assert await get_schema_version(client.execute_query, name=store.name) == old_version
         org = str(uuid4())
         identity = await source(upgrade, org)
         await publish(upgrade, org, identity)
         before = await cut(upgrade, org, identity)
         events_before = (await client.execute_query("INFO FOR TABLE memory_derivations;"))["events"]
-        applied = await apply_schema_migrations(
-            client.execute_query, store.migrations, name=store.name
-        )
+        applied = await apply_schema_migrations(client.execute_query, historical, name=store.name)
         assert [migration.version for migration in applied] == [old_version + 1]
         assert await cut(upgrade, org, identity) == before
         events_after = (await client.execute_query("INFO FOR TABLE memory_derivations;"))["events"]
         assert events_after.keys() == events_before.keys()
         assert "validation_write_witness" in events_after["require_target_derivation"]
         assert (
-            await apply_schema_migrations(client.execute_query, store.migrations, name=store.name)
-            == []
+            await apply_schema_migrations(client.execute_query, historical, name=store.name) == []
         )
         await client.execute_query(
             "UPDATE memory_derivations SET active=false WHERE organization_id=$org AND target_id=$identity;",

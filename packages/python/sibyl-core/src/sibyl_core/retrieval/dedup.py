@@ -513,7 +513,7 @@ class EntityDeduplicator:
                            uuid, name, entity_type, created_at,
                            attributes.embedding_metadata AS embedding_space,
                            (1 - vector::distance::knn()) AS score
-                    FROM entity
+                    FROM entity WITH INDEX idx_entity_embedding
                     WHERE """
                 + " AND ".join(clauses)
                 + f"""
@@ -613,7 +613,7 @@ class EntityDeduplicator:
                     SELECT uuid, name, entity_type, created_at,
                            attributes.embedding_metadata AS embedding_space,
                            (1 - vector::distance::knn()) AS score
-                    FROM entity
+                    FROM entity WITH INDEX idx_entity_embedding
                     WHERE """
                 + " AND ".join(clauses)
                 + f"""

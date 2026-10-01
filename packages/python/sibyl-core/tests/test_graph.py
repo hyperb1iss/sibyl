@@ -1923,6 +1923,7 @@ async def test_native_entity_manager_search_overlaps_fulltext_and_vector_branche
     assert {params.get("_query_label") for _query, params in _search_calls(client.calls)} == {
         "entity.search.fulltext",
         "entity.search.vector",
+        "entity.search.vector.exact",
     }
     vector_query = next(
         query
@@ -5323,7 +5324,7 @@ async def test_native_entity_manager_present_type_preserves_vector_fusion() -> N
     original_execute = client.execute_query
 
     async def with_vector_rows(query: str, **params: object) -> object:
-        if params.get("_query_label") == "entity.search.vector":
+        if params.get("_query_label") in {"entity.search.vector", "entity.search.vector.exact"}:
             client.calls.append((query, params))
             return [
                 client._row("vector-only", score=0.99, day=1),

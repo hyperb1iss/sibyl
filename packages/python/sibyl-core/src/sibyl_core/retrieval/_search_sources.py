@@ -681,7 +681,7 @@ async def _node_vector_candidates(
             FROM (
                 SELECT *,
                        (1 - vector::distance::knn()) AS score
-                FROM entity
+                FROM entity WITH INDEX idx_entity_embedding
                 WHERE """
             + _where_clause(
                 [
@@ -721,7 +721,7 @@ async def _node_vector_candidates(
         FROM (
             SELECT *,
                    (1 - vector::distance::knn()) AS score
-            FROM entity
+            FROM entity WITH INDEX idx_entity_embedding
             WHERE """
         + _where_clause(
             [
