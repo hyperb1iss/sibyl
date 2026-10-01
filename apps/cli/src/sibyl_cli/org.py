@@ -12,7 +12,7 @@ from rich.table import Table
 from sibyl_cli import config_store
 from sibyl_cli.auth_store import credential_scope, set_tokens
 from sibyl_cli.client import SibylClientError, get_client
-from sibyl_cli.common import error, print_json, run_async, success
+from sibyl_cli.common import error, info, print_json, run_async, success
 
 app = typer.Typer(help="Organizations")
 members_app = typer.Typer(help="Manage organization members")
@@ -28,7 +28,12 @@ def _org_credential_scope(org_slug: str | None) -> str | None:
     return credential_scope(ctx.name, org_slug or ctx.org_slug)
 
 
-def _store_org_tokens(
+def _pin_effective_context_org(slug: str) -> None:
+    ctx = config_store.resolve_effective_context()
+    pin_context_org(ctx.name if ctx else None, slug)
+
+
+def store_org_tokens(
     api_url: str,
     access_token: str,
     *,
@@ -52,6 +57,22 @@ def _store_org_tokens(
         credential_scope=scope_name,
     )
     warm_pending_replay_identity(api_url, access_token, credential_scope=scope_name)
+
+
+def pin_context_org(context_name: str | None, slug: str) -> None:
+    """Point the context at the org whose tokens were just stored.
+
+    Credentials are keyed by context and org, so switched tokens saved under
+    the new org's scope stay unread while the context still names the old
+    org (or none): every later command would keep acting in the old org.
+    """
+    if not context_name or not slug:
+        return
+    ctx = config_store.get_context(context_name)
+    if ctx is None or ctx.org_slug == slug:
+        return
+    config_store.update_context(context_name, org_slug=slug)
+    info(f"Context '{context_name}' now uses org '{slug}'")
 
 
 class OrgRole(StrEnum):
@@ -99,13 +120,15 @@ def create_cmd(
             expires_raw = result.get("expires_in")
             expires_in = int(expires_raw) if expires_raw is not None else None
             if token:
-                _store_org_tokens(
+                created_slug = str(result.get("slug") or slug or "")
+                store_org_tokens(
                     client.base_url,
                     token,
                     refresh_token=refresh,
                     expires_in=expires_in,
-                    scope_name=_org_credential_scope(str(result.get("slug") or slug or "")),
+                    scope_name=_org_credential_scope(created_slug),
                 )
+                _pin_effective_context_org(created_slug)
                 success("Switched org (tokens saved to ~/.sibyl/auth.json)")
         print_json(result)
     except SibylClientError as e:
@@ -128,13 +151,14 @@ def switch_cmd(slug: str) -> None:
         expires_raw = result.get("expires_in")
         expires_in = int(expires_raw) if expires_raw is not None else None
         if token:
-            _store_org_tokens(
+            store_org_tokens(
                 client.base_url,
                 token,
                 refresh_token=refresh,
                 expires_in=expires_in,
                 scope_name=_org_credential_scope(slug),
             )
+            _pin_effective_context_org(slug)
             success("Org switched (tokens saved to ~/.sibyl/auth.json)")
         print_json(result)
     except SibylClientError as e:

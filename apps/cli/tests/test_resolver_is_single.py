@@ -41,6 +41,10 @@ ALLOWED_ACTIVE_CONTEXT_READERS = {
     ("context.py", "delete_cmd"),
     # Maps a buffered write's recorded base_url back to a context name.
     ("pending.py", "_context_name_for_base_url"),
+    # Decides whether creating a context may also activate it, which writes the
+    # stored active setting; a directory-pinned effective context is not what
+    # that write would replace.
+    ("auth.py", "login_cmd"),
 }
 
 # (module, enclosing function) pairs allowed to read SIBYL_API_URL.

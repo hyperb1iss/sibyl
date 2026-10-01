@@ -24,7 +24,7 @@ import httpx
 import typer
 
 from sibyl_cli import config_store, doctor, setup
-from sibyl_cli.auth import _login_auto
+from sibyl_cli.auth import _login_auto, _settle_login_org
 from sibyl_cli.auth_store import credential_scope, normalize_api_url
 from sibyl_cli.client import SibylClient, SibylClientError, clear_client_cache
 from sibyl_cli.client_transport import _paired_automation_api_url
@@ -218,7 +218,7 @@ def whoami(ctx: config_store.Context) -> str | None:
 
 def login(ctx: config_store.Context) -> None:
     api_url = normalize_api_url(f"{ctx.server_url}/api")
-    _login_auto(
+    logged_in = _login_auto(
         api_url=api_url,
         no_browser=False,
         timeout_seconds=LOGIN_TIMEOUT_MINUTES * 60,
@@ -228,6 +228,8 @@ def login(ctx: config_store.Context) -> None:
         credential_scope_name=credential_scope(ctx.name, ctx.org_slug),
     )
     clear_client_cache()
+    if logged_in:
+        _settle_login_org(api_url, ctx.name)
 
 
 def sign_in(ctx: config_store.Context) -> str | None:
