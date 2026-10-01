@@ -69,7 +69,7 @@ def receipt() -> ArchivePhaseReceipt:
     "field,value",
     [
         ("contract_version", True),
-        ("organization_id", str(uuid4()).upper()),
+        ("organization_id", "550E8400-E29B-41D4-A716-446655440000"),
         ("archive_sha256", "A" * 64),
         ("actor_id", 12),
         ("extra", "forbidden"),
