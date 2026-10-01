@@ -44,6 +44,7 @@ from sibyl_core.backends.surreal.schema_raw_lexical import (
 from sibyl_core.backends.surreal.schema_source_integrity import (
     migrate_source_integrity,
     prepare_source_integrity_upgrade,
+    source_derivation_event,
 )
 from sibyl_core.backends.surreal.schema_source_states import (
     SOURCE_STATE_DEFINITIONS,
@@ -144,7 +145,7 @@ CONTENT_TABLES = (
     *RAW_LEXICAL_TABLES,
     RAW_LEXICAL_STATE_TABLE,
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 51
+CONTENT_SCHEMA_CURRENT_VERSION = 52
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -1189,6 +1190,15 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             version=51,
             name="content_archive_phase_receipts",
             statements=phase_statements,
+        ),
+        SchemaMigration(
+            version=52,
+            name="content_derivation_source_witness",
+            statements=(
+                render_surreal_compatible_sql(
+                    source_derivation_event(SourceKind.RAW_CAPTURE), url=url
+                ),
+            ),
         ),
     )
 
