@@ -18,8 +18,8 @@ from typing import Annotated, Any
 import httpx
 import typer
 
-from sibyl_cli.client import get_client
-from sibyl_cli.common import error, info, run_async, success
+from sibyl_cli.client import SibylClientError, get_client
+from sibyl_cli.common import error, info, run_async, success, warn
 from sibyl_core.backends.surreal.url_schemes import (
     redact_surreal_url,
     safe_error_detail,
@@ -35,10 +35,15 @@ _MAX_TITLE = 300
 _MAX_CONTENT = 500000
 
 
-def _ledger_path(route: dict[str, str]) -> Path:
-    safe = "--".join(
-        route[k] for k in ("source_org", "target_context", "target_project_id")
-    ).replace("/", "_")
+_ROUTE_KEYS = ("source_org", "target_context", "target_org_id", "target_project_id")
+# Ledgers written before the route carried the target org. Their receipts may
+# belong to any org the context was signed in to at the time.
+_LEGACY_ROUTE_KEYS = ("source_org", "target_context", "target_project_id")
+_LEGACY_PROBE_COUNT = 3
+
+
+def _ledger_path(route: dict[str, str], keys: tuple[str, ...] = _ROUTE_KEYS) -> Path:
+    safe = "--".join(route[k] for k in keys).replace("/", "_")
     return _LEDGER_DIR / f"{safe}.json"
 
 
@@ -72,6 +77,68 @@ def _save_ledger(path: Path, route: dict[str, str], ledger: dict[str, str]) -> N
     tmp = path.with_suffix(".tmp")
     tmp.write_text(payload, encoding="utf-8")
     tmp.replace(path)
+
+
+async def _adopt_legacy_ledger(
+    client: Any,
+    path: Path,
+    route: dict[str, str],
+    target_org: dict[str, Any],
+    *,
+    persist: bool,
+) -> dict[str, str]:
+    """Carry an org-less ledger forward only when its receipts live in the target org.
+
+    Skipping a source memory because a receipt says it was sent is only safe
+    when that receipt names a memory the target org can see. A receipt from
+    another org would silently leave this org without the memory.
+    """
+    legacy_path = _ledger_path(route, _LEGACY_ROUTE_KEYS)
+    if path.exists() or not legacy_path.exists():
+        return {}
+    legacy_route = {k: route[k] for k in _LEGACY_ROUTE_KEYS}
+    receipts = _load_ledger(legacy_path, legacy_route)
+    if not receipts:
+        return {}
+    org_label = f"{target_org['name']} ({target_org['slug']})"
+    for target_id in list(receipts.values())[:_LEGACY_PROBE_COUNT]:
+        try:
+            await client.memory_inspect(str(target_id))
+        except SibylClientError as exc:
+            if exc.status_code == 404:
+                raise RuntimeError(
+                    f"ledger {legacy_path} records {len(receipts)} memories sent before "
+                    f"ledgers recorded their org, and they are not in {org_label}. "
+                    "Move it aside to replay into this org."
+                ) from exc
+            raise
+    if persist:
+        _save_ledger(path, route, receipts)
+        legacy_path.replace(legacy_path.with_suffix(".adopted.json"))
+        info(f"Adopted {len(receipts)} receipts from {legacy_path.name} for {org_label}")
+    else:
+        info(f"Would adopt {len(receipts)} receipts from {legacy_path.name} for {org_label}")
+    return receipts
+
+
+async def _resolve_target_org(client: Any) -> dict[str, Any]:
+    """The org the target context's credentials act in, as the server sees it."""
+    me = await client.get("/auth/me")
+    organization = me.get("organization") or {}
+    org_id = str(organization.get("id") or "")
+    if not org_id:
+        raise RuntimeError("the target server did not report an organization for this login")
+    listing = await client.list_orgs()
+    listed = next(
+        (org for org in listing.get("orgs") or [] if str(org.get("id")) == org_id),
+        {},
+    )
+    return {
+        "id": org_id,
+        "slug": str(organization.get("slug") or listed.get("slug") or ""),
+        "name": str(organization.get("name") or listed.get("name") or org_id),
+        "is_personal": bool(listed.get("is_personal")),
+    }
 
 
 _DEFAULT_SOURCE_CREDENTIAL = "root"
@@ -257,6 +324,14 @@ def to_team(
         int | None,
         typer.Option("--limit", help="Migrate at most N memories"),
     ] = None,
+    allow_personal_org: Annotated[
+        bool,
+        typer.Option(
+            "--allow-personal-org",
+            help="Migrate into your personal org on the target (refused by default, "
+            "since a team migration that lands there is invisible to the team)",
+        ),
+    ] = False,
 ) -> None:
     """Replay a project's raw memories into a team server as yourself.
 
@@ -297,6 +372,20 @@ def to_team(
         info(f"Source org {org_id}, project scope {project}")
 
         target = get_client(target_context)
+        target_org = await _resolve_target_org(target)
+        info(f"Target org: {target_org['name']} ({target_org['slug']})")
+        if target_org["is_personal"]:
+            if not allow_personal_org:
+                error(
+                    f"Context '{target_context}' is signed in to your personal org, "
+                    "so the team could not see what this migrates."
+                )
+                info(
+                    f"Switch to the team org first: sibyl -C {target_context} org "
+                    "switch <team-slug>, or pass --allow-personal-org to migrate there."
+                )
+                raise typer.Exit(1)
+            warn("Migrating into your personal org (--allow-personal-org)")
         wanted = target_project or project
         resolved = await _resolve_target_project(target, wanted)
         if resolved is None and target_project is None:
@@ -324,10 +413,14 @@ def to_team(
         route = {
             "source_org": org_id,
             "target_context": target_context,
+            "target_org_id": target_org["id"],
             "target_project_id": target_project_id,
         }
         ledger_file = _ledger_path(route)
-        ledger = _load_ledger(ledger_file, route)
+        ledger = await _adopt_legacy_ledger(
+            target, ledger_file, route, target_org, persist=not dry_run
+        )
+        ledger = ledger or _load_ledger(ledger_file, route)
 
         migrated = 0
         skipped = 0
@@ -423,4 +516,8 @@ def to_team(
                 error(f"  {line}")
             raise typer.Exit(1)
 
-    _run()
+    try:
+        _run()
+    except RuntimeError as exc:
+        error(str(exc))
+        raise typer.Exit(1) from exc
