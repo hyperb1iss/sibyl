@@ -519,22 +519,25 @@ def _personal_manifest(payload: dict[str, object]) -> ArchiveManifest:
     return ArchiveManifest.from_dict(payload)
 
 
-def parse_personal_archive(source: Path, budget: ArchiveIntakeBudget) -> ParsedPersonalArchive:
-    """Validate and stage only inert logical members from an owned upload spool."""
-    digest = hashlib.sha256()
-    compressed = 0
-    with source.open("rb") as spool:
-        for chunk in iter(lambda: spool.read(65536), b""):
-            compressed += len(chunk)
-            if compressed > budget.compressed_bytes:
-                raise ArchiveIntakeCapacityError("archive compressed-byte budget exceeded")
-            digest.update(chunk)
-    try:
-        with source.open("rb") as spool, gzip.GzipFile(fileobj=spool, mode="rb") as gz:
-            inflated = _MeasuredInflation(gz, budget.inflated_bytes)
-            members, payloads, nodes, headers = _read_members(inflated, budget)
-    except (gzip.BadGzipFile, EOFError, tarfile.TarError, OSError, UnicodeError) as exc:
-        raise ArchiveIntakeError("archive is truncated or invalid") from exc
+@dataclass(frozen=True)
+class ValidatedPersonalArchiveMembers:
+    """Caller-owned logical validation result before immutable serialization."""
+
+    archive: LoadedArchive
+    origin: ArchiveSourceOrigin
+    graph: dict[str, object] | None
+    content: dict[str, object] | None
+    parsed_rows: int
+    json_nodes: int
+
+
+def _validate_logical_archive(
+    source: Path,
+    members: dict[str, bytes],
+    payloads: dict[str, dict[str, object]],
+    budget: ArchiveIntakeBudget,
+    nodes: int,
+) -> ValidatedPersonalArchiveMembers:
     envelope = set(members) & {"manifest.json", "metadata.json"}
     if len(envelope) != 1:
         raise ArchiveIntakeError("archive requires exactly one supported envelope")
@@ -568,6 +571,55 @@ def parse_personal_archive(source: Path, budget: ArchiveIntakeBudget) -> ParsedP
         graph, content, _lineage = seal_archive_lineage(graph, content)
     except (ValueError, TypeError, KeyError, RecursionError) as exc:
         raise ArchiveIntakeError("archive source protection validation failed") from exc
+    return ValidatedPersonalArchiveMembers(archive, origin, graph, content, rows, nodes)
+
+
+def validate_personal_archive_members(
+    members: dict[str, bytes], budget: ArchiveIntakeBudget
+) -> ValidatedPersonalArchiveMembers:
+    """Revalidate bounded original logical bytes without restoring native data."""
+    if not members or members.keys() - _LOGICAL_MEMBERS:
+        raise ArchiveIntakeError("archive contains an unsafe or unsupported member")
+    if len(members) > budget.members:
+        raise ArchiveIntakeCapacityError("archive member resource budget exceeded")
+    payloads: dict[str, dict[str, object]] = {}
+    nodes = total_bytes = 0
+    for name, encoded in members.items():
+        if not isinstance(encoded, bytes):
+            raise ArchiveIntakeError("archive member must be immutable bytes")
+        if len(encoded) > budget.member_bytes:
+            raise ArchiveIntakeCapacityError("archive member resource budget exceeded")
+        total_bytes += len(encoded)
+        if total_bytes > budget.inflated_bytes:
+            raise ArchiveIntakeCapacityError("archive inflated-byte budget exceeded")
+        payload, used = _strict_json(encoded, budget, budget.json_nodes - nodes)
+        payloads[name] = payload
+        nodes += used
+    return _validate_logical_archive(
+        Path("staged-personal-archive"), dict(members), payloads, budget, nodes
+    )
+
+
+def parse_personal_archive(source: Path, budget: ArchiveIntakeBudget) -> ParsedPersonalArchive:
+    """Validate and stage only inert logical members from an owned upload spool."""
+    digest = hashlib.sha256()
+    compressed = 0
+    with source.open("rb") as spool:
+        for chunk in iter(lambda: spool.read(65536), b""):
+            compressed += len(chunk)
+            if compressed > budget.compressed_bytes:
+                raise ArchiveIntakeCapacityError("archive compressed-byte budget exceeded")
+            digest.update(chunk)
+    try:
+        with source.open("rb") as spool, gzip.GzipFile(fileobj=spool, mode="rb") as gz:
+            inflated = _MeasuredInflation(gz, budget.inflated_bytes)
+            members, payloads, nodes, headers = _read_members(inflated, budget)
+    except (gzip.BadGzipFile, EOFError, tarfile.TarError, OSError, UnicodeError) as exc:
+        raise ArchiveIntakeError("archive is truncated or invalid") from exc
+    validated = _validate_logical_archive(source, members, payloads, budget, nodes)
+    archive, origin = validated.archive, validated.origin
+    graph, content = validated.graph, validated.content
+    rows, nodes = validated.parsed_rows, validated.json_nodes
     inventory = {
         name: {"sha256": hashlib.sha256(data).hexdigest(), "size_bytes": len(data)}
         for name, data in sorted(members.items())
