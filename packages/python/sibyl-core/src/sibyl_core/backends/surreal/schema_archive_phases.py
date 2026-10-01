@@ -1,5 +1,6 @@
 """Server-only store-local phase evidence and irreversible rollback fences."""
 
+from sibyl_core.backends.surreal.schema_helpers import split_statements
 from sibyl_core.migrate.personal_archive_plan import ArchiveKind
 
 ARCHIVE_PHASE_TABLES = ("archive_phase_controls", "archive_phase_receipts")
@@ -167,8 +168,8 @@ WHEN $event = 'CREATE' THEN {{
                 (SELECT * FROM entity WHERE id = $actual.in AND group_id = $receipt.organization_id)[0],
                 (SELECT * FROM entity WHERE id = $actual.out AND group_id = $receipt.organization_id)[0]];
             LET $states = [
-                (SELECT * FROM source_states WHERE organization_id = $receipt.organization_id AND source_kind = 'graph_entity' AND source_id = $endpoints[0].uuid)[0],
-                (SELECT * FROM source_states WHERE organization_id = $receipt.organization_id AND source_kind = 'graph_entity' AND source_id = $endpoints[1].uuid)[0]];
+                (SELECT * OMIT validation_write_witness FROM source_states WHERE organization_id = $receipt.organization_id AND source_kind = 'graph_entity' AND source_id = $endpoints[0].uuid)[0],
+                (SELECT * OMIT validation_write_witness FROM source_states WHERE organization_id = $receipt.organization_id AND source_kind = 'graph_entity' AND source_id = $endpoints[1].uuid)[0]];
             IF $endpoints[0] = NONE OR $endpoints[1] = NONE OR $states[0] = NONE OR $states[1] = NONE
                 OR $states[0].deleted OR $states[1].deleted
                 OR !type::is::string($states[0].incarnation) OR string::len($states[0].incarnation) = 0
@@ -189,7 +190,7 @@ WHEN $event = 'CREATE' THEN {{
                 THROW 'Archive relationship evidence cannot invent a source state';
             }};
         }} ELSE {{
-            LET $source = (SELECT * FROM source_states WHERE organization_id = $receipt.organization_id
+            LET $source = (SELECT * OMIT validation_write_witness FROM source_states WHERE organization_id = $receipt.organization_id
                 AND source_kind = $row.kind AND source_id = $row.destination_id)[0];
             IF $source = NONE OR $source.deleted OR $source.incarnation != $row.source_incarnation
                 OR $source.generation != $row.source_generation OR $source.revision != $row.source_state_revision
@@ -223,7 +224,7 @@ WHEN $event = 'CREATE' THEN {{
                 THROW 'Archive edge retirement must retain absence evidence';
             }};
         }} ELSE {{
-            LET $state = (SELECT * FROM source_states WHERE organization_id = $receipt.organization_id
+            LET $state = (SELECT * OMIT validation_write_witness FROM source_states WHERE organization_id = $receipt.organization_id
                 AND source_kind = $introduced.kind AND source_id = $introduced.destination_id)[0];
             IF $state = NONE OR !$state.deleted OR $state.incarnation != $retirement.source_incarnation
                 OR $state.generation != $retirement.source_generation
@@ -259,4 +260,13 @@ WHEN $event = 'CREATE' THEN {{
     IF array::len($advanced) != 1 {{ THROW 'Archive phase control changed'; }};
 }};
 """
+)
+
+
+# Keep compound event bodies intact while exposing each unique index to the
+# schema invariant checker. All delimiters belong to these fixed definitions.
+_header, *_events = ARCHIVE_PHASE_DEFINITIONS.split("\nDEFINE EVENT ")
+ARCHIVE_PHASE_STATEMENTS = (
+    *split_statements(_header),
+    *("DEFINE EVENT " + event.strip() for event in _events),
 )

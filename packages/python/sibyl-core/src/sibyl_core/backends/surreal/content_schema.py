@@ -17,6 +17,7 @@ from sibyl_core.backends.surreal.schema_archive_imports import (
 )
 from sibyl_core.backends.surreal.schema_archive_phases import (
     ARCHIVE_PHASE_DEFINITIONS,
+    ARCHIVE_PHASE_STATEMENTS,
     ARCHIVE_PHASE_TABLES,
 )
 from sibyl_core.backends.surreal.schema_derivations import DERIVATION_DEFINITIONS
@@ -853,8 +854,11 @@ FOR $row IN $checkpoint_rows {
 
 def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
     compatible_schema = render_fulltext_compatible_sql(
-        CONTENT_SCHEMA_DEFINITIONS,
+        CONTENT_SCHEMA_DEFINITIONS.removesuffix(ARCHIVE_PHASE_DEFINITIONS),
         url=url,
+    )
+    phase_statements = tuple(
+        render_surreal_compatible_sql(statement, url=url) for statement in ARCHIVE_PHASE_STATEMENTS
     )
     return (
         SchemaMigration(
@@ -862,7 +866,8 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             name="content_schema_bootstrap",
             statements=tuple(
                 split_statements(CONTENT_ANALYZER_DEFINITIONS) + split_statements(compatible_schema)
-            ),
+            )
+            + phase_statements,
         ),
         SchemaMigration(
             version=2,
@@ -1183,9 +1188,7 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
         SchemaMigration(
             version=51,
             name="content_archive_phase_receipts",
-            statements=tuple(
-                split_statements(render_surreal_compatible_sql(ARCHIVE_PHASE_DEFINITIONS, url=url))
-            ),
+            statements=phase_statements,
         ),
     )
 

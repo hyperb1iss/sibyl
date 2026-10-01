@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, cast
 import structlog
 
 from sibyl_core.backends.surreal.schema_archive_phases import (
-    ARCHIVE_PHASE_DEFINITIONS,
+    ARCHIVE_PHASE_STATEMENTS,
     ARCHIVE_PHASE_TABLES,
 )
 from sibyl_core.backends.surreal.schema_derivations import DERIVATION_DEFINITIONS
@@ -911,7 +911,7 @@ GRAPH_SCHEMA_MIGRATIONS = (
     SchemaMigration(
         version=32,
         name="graph_archive_phase_receipts",
-        statements=tuple(split_statements(ARCHIVE_PHASE_DEFINITIONS)),
+        statements=ARCHIVE_PHASE_STATEMENTS,
     ),
 )
 

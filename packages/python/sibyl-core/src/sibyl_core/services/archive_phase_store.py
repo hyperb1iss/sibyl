@@ -15,6 +15,7 @@ from typing import cast
 
 from sibyl_core.backends.surreal.connection import _query_tokens
 from sibyl_core.backends.surreal.schema import render_surreal_compatible_sql
+from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
 from sibyl_core.backends.surreal.schema_version import SurrealExecute
 from sibyl_core.migrate.archive_phase_receipts import (
     ArchiveCreatedIdentity,
@@ -31,7 +32,7 @@ _PREFIX = "sibyl_archive_phase_"
 # The native encoding retains datetime precision and physical record identity.
 # These fingerprints are deliberately distinct from checked semantic digests.
 # Map contexts are explicit because embedded closures do not capture outer LETs.
-_INTRODUCED_READ = """
+_POST_READS = """
 LET $sibyl_archive_phase_post_raw = SELECT * FROM raw_captures WHERE organization_id = $sibyl_archive_phase_org
     AND uuid IN ($sibyl_archive_phase_outcomes.destination_id ?? []);
 LET $sibyl_archive_phase_post_entities = SELECT * FROM entity WHERE group_id = $sibyl_archive_phase_org
@@ -40,9 +41,12 @@ LET $sibyl_archive_phase_post_edges = SELECT * FROM relates_to WHERE group_id = 
     AND uuid IN ($sibyl_archive_phase_outcomes.destination_id ?? []);
 LET $sibyl_archive_phase_post_endpoints = SELECT * FROM entity WHERE group_id = $sibyl_archive_phase_org
     AND id IN array::concat($sibyl_archive_phase_post_edges.in ?? [], $sibyl_archive_phase_post_edges.out ?? []);
-LET $sibyl_archive_phase_post_states = SELECT * FROM source_states WHERE organization_id = $sibyl_archive_phase_org
+LET $sibyl_archive_phase_post_states = SELECT * OMIT validation_write_witness FROM source_states WHERE organization_id = $sibyl_archive_phase_org
     AND source_id IN array::concat($sibyl_archive_phase_outcomes.destination_id ?? [], $sibyl_archive_phase_post_endpoints.uuid ?? []);
 
+"""
+
+_INTRODUCED_READ = """
 LET $sibyl_archive_phase_introduced = array::combine($sibyl_archive_phase_outcomes[WHERE disposition = 'created'] ?? [], [{
     cut: $sibyl_archive_phase_presence_cut, raw: $sibyl_archive_phase_post_raw,
     entities: $sibyl_archive_phase_post_entities, edges: $sibyl_archive_phase_post_edges,
@@ -191,6 +195,21 @@ LET $sibyl_archive_phase_counts = array::combine(array::distinct($sibyl_archive_
 """
 
 
+def _store_local_reads(preamble: str, store: str) -> str:
+    """Emit fixed read statements only for this canonical store inventory."""
+    statements = []
+    for statement in preamble.strip().split(";"):
+        if not statement.strip():
+            continue
+        variable, expression = statement.split(" = ", 1)
+        foreign = (
+            store == "content"
+            and (" FROM entity " in expression or " FROM relates_to " in expression)
+        ) or (store == "graph" and " FROM raw_captures " in expression)
+        statements.append(variable + " = " + ("[]" if foreign else expression) + ";")
+    return "\n".join(statements) + "\n"
+
+
 @dataclass(frozen=True, slots=True)
 class PreparedArchivePhaseTransaction:
     """Exact query and immutable JSON parameters for the native capacity guard."""
@@ -328,16 +347,18 @@ FOR $candidate IN $sibyl_archive_phase_retirement_candidates {
             (SELECT * FROM entity WHERE id = $current.in AND group_id = $sibyl_archive_phase_org)[0],
             (SELECT * FROM entity WHERE id = $current.out AND group_id = $sibyl_archive_phase_org)[0]];
         LET $states = [
-            (SELECT * FROM source_states WHERE organization_id = $sibyl_archive_phase_org AND source_kind = 'graph_entity' AND source_id = $endpoints[0].uuid)[0],
-            (SELECT * FROM source_states WHERE organization_id = $sibyl_archive_phase_org AND source_kind = 'graph_entity' AND source_id = $endpoints[1].uuid)[0]];
+            (SELECT * OMIT validation_write_witness FROM source_states WHERE organization_id = $sibyl_archive_phase_org AND source_kind = 'graph_entity' AND source_id = $endpoints[0].uuid)[0],
+            (SELECT * OMIT validation_write_witness FROM source_states WHERE organization_id = $sibyl_archive_phase_org AND source_kind = 'graph_entity' AND source_id = $endpoints[1].uuid)[0]];
         IF $endpoints[0] = NONE OR $endpoints[1] = NONE OR $states[0] = NONE OR $states[1] = NONE
             OR $states[0].deleted OR $states[1].deleted OR $endpoints.uuid != $candidate.endpoint_ids
             OR [crypto::sha256(type::string($states[0])), crypto::sha256(type::string($states[1]))] != $candidate.endpoint_state_sha256
             OR crypto::sha256(type::string([$current.in, $current.out, $current.source_id, $current.target_id, $current.operational_source_binding])) != $candidate.binding_sha256 {
             THROW 'Archive rollback edge endpoint or binding changed';
         };
+        LET $sibyl_archive_phase_endpoint_states_to_fence = $states;
+        __ARCHIVE_ENDPOINT_WRITE_WITNESS__
     } ELSE {
-        LET $state = (SELECT * FROM source_states WHERE organization_id = $sibyl_archive_phase_org
+        LET $state = (SELECT * OMIT validation_write_witness FROM source_states WHERE organization_id = $sibyl_archive_phase_org
             AND source_kind = $candidate.kind AND source_id = $candidate.destination_id)[0];
         IF $state = NONE OR $state.deleted OR $state.incarnation != $candidate.source_incarnation
             OR $state.generation != $candidate.source_generation OR $state.revision != $candidate.revision {
@@ -346,7 +367,7 @@ FOR $candidate IN $sibyl_archive_phase_retirement_candidates {
     };
 };
 """
-    query += """
+    prior_reads = """
 LET $sibyl_archive_phase_prior_raw = SELECT uuid FROM raw_captures WHERE organization_id = $sibyl_archive_phase_org
     AND uuid IN ($sibyl_archive_phase_planned_creates[WHERE kind = 'raw_capture'].destination_id ?? []);
 LET $sibyl_archive_phase_prior_entities = SELECT uuid FROM entity WHERE group_id = $sibyl_archive_phase_org
@@ -361,6 +382,9 @@ LET $sibyl_archive_phase_prior_retirement_groups = SELECT VALUE retired.introduc
     WHERE organization_id = $sibyl_archive_phase_org
         AND array::len(array::intersect(retired.introduced.destination_id ?? [], $sibyl_archive_phase_planned_creates.destination_id ?? [])) > 0;
 LET $sibyl_archive_phase_prior_retirements = array::flatten($sibyl_archive_phase_prior_retirement_groups);
+"""
+    query += _store_local_reads(prior_reads, key.store)
+    query += """
 FOR $planned IN $sibyl_archive_phase_planned_creates {
     LET $rows = IF $planned.kind = 'raw_capture' THEN $sibyl_archive_phase_prior_raw
         ELSE IF $planned.kind = 'graph_entity' THEN $sibyl_archive_phase_prior_entities ELSE $sibyl_archive_phase_prior_edges END;
@@ -374,7 +398,8 @@ FOR $planned IN $sibyl_archive_phase_planned_creates {
 LET $sibyl_archive_phase_presence_cut = $sibyl_archive_phase_planned_creates;
 """
     query += writer_statements.rstrip().rstrip(";") + ";\n"
-    query += _OUTCOME_GUARD_AND_COUNTS + _INTRODUCED_READ + _RETIREMENT_READ
+    query += _OUTCOME_GUARD_AND_COUNTS + _store_local_reads(_POST_READS, key.store)
+    query += _INTRODUCED_READ + _RETIREMENT_READ
     query += """
 CREATE archive_phase_receipts CONTENT {
     organization_id: $sibyl_archive_phase_org, actor_id: $sibyl_archive_phase_actor,
@@ -391,7 +416,16 @@ CREATE archive_phase_receipts CONTENT {
 COMMIT TRANSACTION;
 """
     return PreparedArchivePhaseTransaction(
-        query=render_surreal_compatible_sql(query, url=url), parameters_json=parameters_json
+        query=render_surreal_compatible_sql(
+            query.replace(
+                "__ARCHIVE_ENDPOINT_WRITE_WITNESS__",
+                SOURCE_STATE_WRITE_WITNESS.replace(
+                    "$source_states_to_fence", "$sibyl_archive_phase_endpoint_states_to_fence"
+                ).replace("$source_state", "$sibyl_archive_phase_endpoint_state"),
+            ),
+            url=url,
+        ),
+        parameters_json=parameters_json,
     )
 
 

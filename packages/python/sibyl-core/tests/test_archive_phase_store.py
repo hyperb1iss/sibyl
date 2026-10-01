@@ -14,6 +14,7 @@ from sibyl_core.backends.surreal.content_schema import (
 )
 from sibyl_core.backends.surreal.schema import (
     GRAPH_SCHEMA_MIGRATIONS,
+    _graph_schema_migrations,
     render_surreal_compatible_sql,
 )
 from sibyl_core.backends.surreal.schema_archive_phases import ARCHIVE_PHASE_DEFINITIONS
@@ -21,7 +22,13 @@ from sibyl_core.backends.surreal.schema_source_states import (
     SOURCE_STATE_DEFINITIONS,
     source_state_event,
 )
-from sibyl_core.backends.surreal.schema_version import GRAPH_SCHEMA_CURRENT_VERSION
+from sibyl_core.backends.surreal.schema_version import (
+    GRAPH_SCHEMA_CURRENT_VERSION,
+    apply_schema_migrations,
+    ensure_schema_version_table,
+    get_schema_version,
+    record_schema_version,
+)
 from sibyl_core.memory_pipeline.observations import SourceKind
 from sibyl_core.migrate.archive_phase_receipts import ArchiveCreatedIdentity, ArchivePhaseKey
 from sibyl_core.services.archive_phase_store import (
@@ -354,10 +361,14 @@ async def test_archive_phase_retained_tombstone_cannot_be_reintroduced(phase_cli
     assert await phase_client.execute_query("SELECT * FROM archive_phase_receipts;") == []
 
 
-@pytest.mark.parametrize("endpoint_changed", [False, True, "missing_incarnation"])
+@pytest.mark.parametrize(
+    "endpoint_changed", [False, True, "missing_incarnation", "bookkeeping", "overlap"]
+)
 async def test_archive_phase_graph_edge_uses_actual_endpoints_and_retirement_absence(
     phase_client, endpoint_changed
 ):
+    if endpoint_changed == "overlap" and not os.environ.get("SIBYL_ARCHIVE_TEST_SURREAL_URL"):
+        pytest.skip("native endpoint write conflicts require the server")
     model, token = binding(), str(uuid4())
     source, target, edge = str(uuid4()), str(uuid4()), str(uuid4())
     await phase_client.execute_query(
@@ -413,7 +424,9 @@ async def test_archive_phase_graph_edge_uses_actual_endpoints_and_retirement_abs
     )
     assert introduced.endpoint_ids == (source, target)
     assert len(introduced.endpoint_state_sha256) == 2
-    state_before = await phase_client.execute_query("SELECT * FROM source_states;")
+    state_before = await phase_client.execute_query(
+        "SELECT * OMIT validation_write_witness FROM source_states;"
+    )
     rollback_token = str(uuid4())
     rollback_key = ArchivePhaseKey(
         binding=model, store="graph", action="rollback", batch_sequence=0
@@ -425,10 +438,39 @@ async def test_archive_phase_graph_edge_uses_actual_endpoints_and_retirement_abs
         expected_token=token,
         rollback_token=rollback_token,
         retirement_candidates=proof.introduced,
-        writer_statements="DELETE type::record($physical); LET $sibyl_archive_phase_outcomes=[{kind:'graph_relationship', disposition:'retired', destination_id:$edge}];",
+        writer_statements=("SLEEP 2s; " if endpoint_changed == "overlap" else "")
+        + "DELETE type::record($physical); LET $sibyl_archive_phase_outcomes=[{kind:'graph_relationship', disposition:'retired', destination_id:$edge}];",
         writer_parameters={"physical": introduced.physical_id, "edge": edge},
     )
-    if endpoint_changed:
+    if endpoint_changed == "overlap":
+        before_control = await phase_client.execute_query("SELECT * FROM archive_phase_controls;")
+        task = asyncio.create_task(commit(phase_client, rollback))
+        await asyncio.sleep(0.25)
+        assert not task.done()
+        await phase_client.execute_query(
+            "UPDATE entity SET name='Overlapping endpoint edit', revision=2 WHERE uuid=$id;",
+            id=source,
+        )
+        assert not task.done()
+        result = (await asyncio.gather(task, return_exceptions=True))[0]
+        assert isinstance(result, SurrealError)
+        assert before_control == await phase_client.execute_query(
+            "SELECT * FROM archive_phase_controls;"
+        )
+        assert len(await phase_client.execute_query("SELECT * FROM archive_phase_receipts;")) == 1
+        assert (await phase_client.execute_query("SELECT * FROM relates_to;"))[0]["uuid"] == edge
+        assert (
+            await phase_client.execute_query(
+                "SELECT * FROM source_states WHERE source_id=$id;", id=source
+            )
+        )[0]["revision"] == 2
+        return
+    if endpoint_changed == "bookkeeping":
+        await phase_client.execute_query(
+            "UPDATE source_states SET validation_write_witness=type::string(rand::uuid()) WHERE source_id=$id;",
+            id=source,
+        )
+    if endpoint_changed is True:
         await phase_client.execute_query(
             "UPDATE entity SET name='Edited endpoint', revision=2 WHERE uuid=$id;", id=source
         )
@@ -448,7 +490,11 @@ async def test_archive_phase_graph_edge_uses_actual_endpoints_and_retirement_abs
     )
     assert rolled.retired[0].absent
     assert rolled.retired[0].source_generation is None
-    assert state_before == await phase_client.execute_query("SELECT * FROM source_states;")
+    states = await phase_client.execute_query("SELECT * FROM source_states;")
+    assert all(state["validation_write_witness"] for state in states)
+    assert state_before == await phase_client.execute_query(
+        "SELECT * OMIT validation_write_witness FROM source_states;"
+    )
     with pytest.raises(SurrealError, match="token is closed"):
         await read_archive_phase_receipt(phase_client.execute_query, key=key, token=rollback_token)
     final_key = ArchivePhaseKey(binding=model, store="graph", action="rollback", batch_sequence=1)
@@ -521,3 +567,102 @@ async def test_archive_phase_malformed_native_receipt_cannot_advance_control(
     )
     assert len(await phase_client.execute_query("SELECT * FROM archive_phase_receipts;")) == 1
     assert len(await phase_client.execute_query("SELECT * FROM raw_captures;")) == 1
+
+
+@pytest.mark.parametrize("store,old_version,new_version", [("content", 50, 51), ("graph", 31, 32)])
+async def test_archive_phase_registered_upgrade_preserves_prior_native_rows(
+    phase_client, store, old_version, new_version
+):
+    await phase_client.execute_query(
+        "REMOVE TABLE archive_phase_controls; REMOVE TABLE archive_phase_receipts;"
+    )
+    model = binding()
+    _, _, record = create_tx(model, str(uuid4()))
+    await phase_client.execute_query("CREATE raw_captures CONTENT $record;", record=record)
+    before_rows = await phase_client.execute_query("SELECT * FROM raw_captures;")
+    before_states = await phase_client.execute_query("SELECT * FROM source_states;")
+    migrations = (
+        _content_schema_migrations(url=phase_client._url)
+        if store == "content"
+        else _graph_schema_migrations(url=phase_client._url)
+    )
+    await ensure_schema_version_table(phase_client.execute_query)
+    await record_schema_version(
+        phase_client.execute_query, name=store, version=old_version, migrations=migrations[:-1]
+    )
+    applied = await apply_schema_migrations(phase_client.execute_query, migrations, name=store)
+    assert len(applied) == 1 and applied[0].version == new_version
+    assert await get_schema_version(phase_client.execute_query, name=store) == new_version
+    assert await apply_schema_migrations(phase_client.execute_query, migrations, name=store) == []
+    info = await phase_client.execute_query("INFO FOR DB;")
+    for table in ("archive_phase_controls", "archive_phase_receipts"):
+        assert "SCHEMAFULL" in info["tables"][table] and "PERMISSIONS NONE" in info["tables"][table]
+    assert before_rows == await phase_client.execute_query("SELECT * FROM raw_captures;")
+    assert before_states == await phase_client.execute_query("SELECT * FROM source_states;")
+
+
+@pytest.mark.parametrize("store", ["content", "graph"])
+async def test_archive_phase_uses_only_canonical_store_inventory(phase_client, store):
+    model, token = binding(), str(uuid4())
+    if store == "content":
+        absent = "relates_to"
+        await phase_client.execute_query("REMOVE TABLE relates_to;")
+        key, tx, _ = create_tx(model, token)
+    else:
+        absent = "raw_captures"
+        await phase_client.execute_query("REMOVE TABLE raw_captures;")
+        identifier = str(uuid4())
+        key = ArchivePhaseKey(binding=model, store="graph", action="apply", batch_sequence=0)
+        tx = prepare_archive_phase_transaction(
+            url=phase_client._url,
+            key=key,
+            expected_revision=0,
+            expected_token=token,
+            planned_creates=(
+                ArchiveCreatedIdentity(kind="graph_entity", destination_id=identifier),
+            ),
+            writer_statements="""CREATE entity CONTENT {uuid:$id,group_id:$org,revision:1,name:'Synthetic graph',entity_type:'topic',attributes:{memory_scope:'private',scope_key:$actor,principal_id:$actor}};
+            LET $sibyl_archive_phase_outcomes=[{kind:'graph_entity',disposition:'created',destination_id:$id}];""",
+            writer_parameters={
+                "id": identifier,
+                "org": model.organization_id,
+                "actor": model.actor_id,
+            },
+        )
+    assert absent not in (await phase_client.execute_query("INFO FOR DB;"))["tables"]
+    await commit(phase_client, tx)
+    proof = await read_archive_phase_receipt(phase_client.execute_query, key=key, token=token)
+    assert len(proof.introduced) == proof.counts[0].created == 1
+    assert absent not in (await phase_client.execute_query("INFO FOR DB;"))["tables"]
+
+
+async def test_archive_phase_registered_fresh_content_bootstrap():
+    namespace = "archive_phase_foundation_author_" + uuid4().hex
+    client = SurrealContentClient(
+        url=os.environ.get("SIBYL_ARCHIVE_TEST_SURREAL_URL", "memory://"),
+        username=os.environ.get("SIBYL_ARCHIVE_TEST_SURREAL_USERNAME", ""),
+        password=os.environ.get("SIBYL_ARCHIVE_TEST_SURREAL_PASSWORD", ""),
+        namespace=namespace,
+    )
+    try:
+        assert (await client.execute_query("INFO FOR DB;"))["tables"] == {}
+        bootstrap = _content_schema_migrations(url=client._url)[:1]
+        applied = await apply_schema_migrations(client.execute_query, bootstrap, name="content")
+        assert [migration.version for migration in applied] == [1]
+        assert await get_schema_version(client.execute_query, name="content") == 1
+        assert await apply_schema_migrations(client.execute_query, bootstrap, name="content") == []
+        info = await client.execute_query("INFO FOR DB;")
+        for table, expected_events in (
+            ("archive_phase_controls", {"archive_phase_control_fence"}),
+            (
+                "archive_phase_receipts",
+                {"archive_phase_receipt_immutable", "archive_phase_receipt_commit"},
+            ),
+        ):
+            assert "SCHEMAFULL" in info["tables"][table]
+            assert "PERMISSIONS NONE" in info["tables"][table]
+            events = (await client.execute_query(f"INFO FOR TABLE {table};"))["events"]
+            assert set(events) == expected_events
+    finally:
+        await client.execute_query(f"REMOVE NAMESPACE {namespace};")
+        await client.close()
