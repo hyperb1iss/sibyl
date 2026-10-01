@@ -18,10 +18,8 @@ from sibyl.persistence.surreal.content import surreal_content_client
 from sibyl_core.auth.memory_policy import (
     MEMORY_PROVENANCE_METADATA_KEYS,
     MemoryPolicyAction,
-    stamp_memory_scope_metadata,
 )
 from sibyl_core.backends.surreal.records import normalize_records, raise_on_error
-from sibyl_core.memory_pipeline.audit import decode_audit_metadata
 from sibyl_core.memory_pipeline.lifecycle import (
     graph_metadata_recallable,
     raw_memory_lifecycle_recallable,
@@ -39,10 +37,17 @@ from sibyl_core.migrate.personal_archive_plan import (
     ArchiveStoreWitness,
     CheckedArchivePlan,
     PlannedArchiveRow,
-    archive_digest,
-    canonical_json,
 )
-from sibyl_core.services.content_models import RawMemory, raw_memory_from_record
+from sibyl_core.migrate.personal_archive_prepared import (
+    _INLINE_REFERENCES,
+    archive_semantic_body as _semantic_body,
+    destination_semantic_digest,
+    graph_archive_body,
+    prepare_archive_body as _prepared_body,
+    raw_archive_body as _raw_semantic_body,
+    semantic_archive_metadata as _metadata,
+)
+from sibyl_core.services.content_models import raw_memory_from_record
 from sibyl_core.services.graph_client import get_surreal_graph_client
 from sibyl_core.services.graph_records import (
     entity_from_surreal_row,
@@ -53,9 +58,11 @@ _CONTENT_CUT = """
 RETURN {
     LET $rows = SELECT *, crypto::sha256(type::string($this)) AS archive_row_sha256
         OMIT id FROM raw_captures WHERE uuid IN $identities ORDER BY uuid;
-    LET $states = SELECT *, crypto::sha256(type::string($this)) AS archive_state_sha256
-        OMIT id FROM source_states WHERE organization_id=$organization_id
+    LET $authority_states = SELECT * OMIT validation_write_witness
+        FROM source_states WHERE organization_id=$organization_id
         AND source_kind='raw_capture' AND source_id IN $identities ORDER BY source_id;
+    LET $states = SELECT *, crypto::sha256(type::string($this)) AS archive_state_sha256
+        OMIT id FROM $authority_states ORDER BY source_id;
     LET $associations = SELECT *,
         crypto::sha256(type::string($this)) AS archive_association_sha256
         OMIT id FROM memory_derivations WHERE organization_id=$organization_id
@@ -73,9 +80,11 @@ RETURN {
     ));
     LET $rows = SELECT *, crypto::sha256(type::string($this)) AS archive_row_sha256
         OMIT id FROM entity WHERE uuid IN $identities ORDER BY uuid;
-    LET $states = SELECT *, crypto::sha256(type::string($this)) AS archive_state_sha256
-        OMIT id FROM source_states WHERE organization_id=$organization_id
+    LET $authority_states = SELECT * OMIT validation_write_witness
+        FROM source_states WHERE organization_id=$organization_id
         AND source_kind='graph_entity' AND source_id IN $identities ORDER BY source_id;
+    LET $states = SELECT *, crypto::sha256(type::string($this)) AS archive_state_sha256
+        OMIT id FROM $authority_states ORDER BY source_id;
     LET $associations = SELECT *,
         crypto::sha256(type::string($this)) AS archive_association_sha256
         OMIT id FROM memory_derivations WHERE organization_id=$organization_id
@@ -83,25 +92,8 @@ RETURN {
     RETURN {rows:$rows, states:$states, associations:$associations, edges:$edges};
 };
 """
-_GRAPH_FIELDS = ("id", "entity_type", "name", "description", "content", "metadata")
-_PHYSICAL_METADATA = frozenset(
-    {
-        "record_id",
-        "organization_id",
-        "group_id",
-        "created_by",
-        "modified_by",
-        # Destination use is measured locally; foreign usage is staged inertly.
-        "last_recalled_at",
-        "last_used_at",
-        "retrieval_count",
-        "citation_count",
-        "misled_count",
-    }
-)
 _PRIVATE = "private"
 _WORK_ITEMS = frozenset({"task", "epic", "milestone"})
-_INLINE_REFERENCES = ("epic_id", "parent_task_id", "task_id", "milestone_id")
 
 
 def _unavailable() -> HTTPException:
@@ -269,22 +261,6 @@ async def _read_cuts(
     return content, graph
 
 
-def _metadata(value: dict[str, Any]) -> dict[str, Any]:
-    return {
-        key: item
-        for key, item in decode_audit_metadata(value).items()
-        if key not in _PHYSICAL_METADATA
-    }
-
-
-def _graph_metadata(value: dict[str, Any]) -> dict[str, Any]:
-    metadata = _metadata(value)
-    # The ordinary graph writer mirrors its storage update clock into attributes.
-    # User timestamps under other metadata keys remain semantic.
-    metadata.pop("updated_at", None)
-    return metadata
-
-
 def _scope_fields(
     fields: dict[str, Any], *, actor_id: str, identity: str, entity_type: str | None = None
 ) -> ArchiveAudience:
@@ -302,24 +278,6 @@ def _scope_fields(
     if scope == "project" and fields.get("project_id") not in (None, key):
         raise _unavailable()
     return ArchiveAudience(memory_scope=scope, scope_key=key)
-
-
-def _raw_semantic_body(memory: RawMemory) -> dict[str, Any]:
-    """Use canonical capture defaults for both foreign candidates and native rows."""
-    return {
-        "raw_content": memory.raw_content,
-        "title": memory.title,
-        "entity_type": memory.entity_type,
-        "source_id": memory.source_id,
-        "principal_id": memory.principal_id,
-        "memory_scope": memory.memory_scope.value,
-        "scope_key": memory.scope_key,
-        "agent_id": memory.agent_id,
-        "project_id": memory.project_id,
-        "review_state": memory.review_state,
-        "metadata": _metadata(memory.metadata),
-        "tags": memory.tags,
-    }
 
 
 def _existing_bodies(
@@ -349,9 +307,7 @@ def _existing_bodies(
                     raw_bodies[identity] = body
                 else:
                     entity = entity_from_surreal_row(row)
-                    public = entity.model_dump(mode="json")
-                    body = {key: public[key] for key in _GRAPH_FIELDS}
-                    body["metadata"] = _graph_metadata(public["metadata"])
+                    body = graph_archive_body(entity, organization_id=organization_id)
                     audience = _scope_fields(
                         body["metadata"],
                         actor_id=actor_id,
@@ -398,81 +354,6 @@ async def _authorize_existing(
     for audience in audiences:
         await gate.audience(audience, MemoryPolicyAction.READ)
     return raw_bodies, graph_bodies, edge_bodies
-
-
-def _prepared_body(
-    candidate: ArchiveCandidate,
-    preview: PlannedArchiveRow,
-    *,
-    actor_id: str,
-    node_ids: dict[str, str],
-) -> dict[str, Any]:
-    body = json.loads(candidate.semantic_json)
-    if candidate.kind is ArchiveKind.RAW_CAPTURE:
-        body = _raw_semantic_body(raw_memory_from_record(body))
-    if candidate.kind is ArchiveKind.GRAPH_RELATIONSHIP:
-        body["metadata"] = _edge_semantic_metadata(body)
-    metadata = stamp_memory_scope_metadata(
-        (_graph_metadata if candidate.kind is ArchiveKind.GRAPH_ENTITY else _metadata)(
-            body.get("metadata", {})
-        ),
-        memory_scope=candidate.audience.memory_scope,
-        scope_key=candidate.audience.scope_key,
-        principal_id=actor_id,
-    )
-    metadata.pop("agent_id", None)
-    metadata.pop("project_id", None)
-    if candidate.audience.memory_scope == "project":
-        metadata["project_id"] = candidate.audience.scope_key
-    for key in _INLINE_REFERENCES:
-        if key in metadata:
-            original = metadata[key]
-            if isinstance(original, str) and original in node_ids:
-                metadata[key] = node_ids[original]
-            else:
-                # An unmapped foreign reference is retained only in the inert
-                # artifact. It cannot point at an unrelated destination row.
-                metadata.pop(key)
-    body["metadata"] = metadata
-    if candidate.kind is ArchiveKind.RAW_CAPTURE:
-        body.update(
-            source_id=preview.destination_id,
-            principal_id=actor_id,
-            memory_scope=candidate.audience.memory_scope,
-            scope_key=None
-            if candidate.audience.memory_scope == _PRIVATE
-            else candidate.audience.scope_key,
-            agent_id=None,
-            project_id=candidate.audience.scope_key
-            if candidate.audience.memory_scope == "project"
-            else None,
-        )
-    else:
-        body["id"] = preview.destination_id
-    if candidate.kind is ArchiveKind.GRAPH_RELATIONSHIP:
-        body["source_id"], body["target_id"] = preview.endpoint_ids[:2]
-    return body
-
-
-def _edge_semantic_metadata(body: dict[str, Any]) -> dict[str, Any]:
-    metadata = dict(body["metadata"])
-    # The ordinary writer/read adapter adds these redundant defaults. Other
-    # facts and nonempty episode inventories remain part of the semantic body.
-    metadata.pop("weight", None)
-    if metadata.get("source_id") == body["source_id"]:
-        metadata.pop("source_id")
-    if metadata.get("episodes") == []:
-        metadata.pop("episodes")
-    default_fact = f"{body['source_id']} {body['relationship_type'].lower()} {body['target_id']}"
-    if metadata.get("fact") in (None, "", default_fact):
-        metadata.pop("fact", None)
-    return metadata
-
-
-def _semantic_body(body: dict[str, Any], kind: ArchiveKind) -> str:
-    if kind is ArchiveKind.GRAPH_RELATIONSHIP:
-        body = {**body, "metadata": _edge_semantic_metadata(body)}
-    return canonical_json(body)
 
 
 def _normalize_preview_inputs(
@@ -582,6 +463,7 @@ async def build_archive_preview(
             candidates,
             previews,
             actor_id=actor_id,
+            organization_id=context.organization_id,
             node_ids=node_ids,
             dependencies=dependencies,
             content=content,
@@ -598,6 +480,7 @@ def _resolve_previews(
     previews: dict[tuple[ArchiveKind, str], PlannedArchiveRow],
     *,
     actor_id: str,
+    organization_id: str,
     node_ids: dict[str, str],
     dependencies: dict[tuple[ArchiveKind, str], tuple[str, ...]],
     content: _StoreCut,
@@ -641,15 +524,14 @@ def _resolve_previews(
                     reason="destination_protected_or_retired",
                 )
         else:
-            expected = _prepared_body(candidate, row, actor_id=actor_id, node_ids=node_ids)
-            updated["semantic_sha256"] = archive_digest(
-                "sibyl-archive-destination-v1",
-                {
-                    "kind": row.kind.value,
-                    "body": _semantic_body(expected, row.kind),
-                    "audience": row.audience.model_dump(mode="json"),
-                },
+            expected = _prepared_body(
+                candidate,
+                row,
+                actor_id=actor_id,
+                node_ids=node_ids,
+                organization_id=organization_id,
             )
+            updated["semantic_sha256"] = destination_semantic_digest(row, expected)
             if native is not None and body is not None:
                 metadata = body["metadata"]
                 recallable = (
