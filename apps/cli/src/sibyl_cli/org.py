@@ -6,20 +6,26 @@ from enum import StrEnum
 from typing import Annotated, Any
 
 import typer
-from rich.console import Console
 from rich.table import Table
 
 from sibyl_cli import config_store
 from sibyl_cli.auth_store import credential_scope, normalize_api_url, set_tokens
 from sibyl_cli.client import SibylClientError, get_client
 from sibyl_cli.client_transport import _environment_auth_token
-from sibyl_cli.common import error, info, print_json, run_async, success, warn
+from sibyl_cli.common import (
+    console,
+    create_table,
+    error,
+    info,
+    print_json,
+    run_async,
+    success,
+    warn,
+)
 
 app = typer.Typer(help="Organizations")
 members_app = typer.Typer(help="Manage organization members")
 app.add_typer(members_app, name="members")
-
-console = Console()
 
 
 def _switch_destination(client: Any, slug: str) -> tuple[str | None, str | None]:
@@ -96,7 +102,12 @@ class OrgRole(StrEnum):
 
 
 @app.command("list")
-def list_cmd() -> None:
+def list_cmd(
+    json_output: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
+    ] = False,
+) -> None:
+    """List the organizations you belong to. Default: table output."""
     client = get_client()
 
     @run_async
@@ -105,10 +116,29 @@ def list_cmd() -> None:
 
     try:
         result = _run()
-        print_json(result)
     except SibylClientError as e:
         error(str(e))
         raise typer.Exit(1) from e
+
+    if json_output:
+        print_json(result)
+        return
+
+    orgs = [org for org in result.get("orgs") or [] if isinstance(org, dict)]
+    if not orgs:
+        info("No organizations found")
+        return
+
+    table = create_table("Organizations", "Slug", "Name", "Role", "Type", "ID")
+    for org in orgs:
+        table.add_row(
+            str(org.get("slug") or ""),
+            str(org.get("name") or ""),
+            str(org.get("role") or "-"),
+            "personal" if org.get("is_personal") else "team",
+            str(org.get("id") or ""),
+        )
+    console.print(table)
 
 
 @app.command("create")
@@ -193,7 +223,7 @@ def switch_cmd(slug: str) -> None:
 @members_app.command("list")
 def list_members_cmd(
     slug: Annotated[str, typer.Argument(help="Organization slug")],
-    json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
+    json_output: Annotated[bool, typer.Option("--json", "-j", help="Output as JSON")] = False,
 ) -> None:
     """List all members of an organization."""
     client = get_client()

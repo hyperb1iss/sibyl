@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -17,10 +18,76 @@ _REJECTED = SibylClientError(
 )
 
 
+_ORG_LISTING = {
+    "orgs": [
+        {
+            "id": "org-personal-0001",
+            "slug": "bliss",
+            "name": "Bliss Personal",
+            "is_personal": True,
+            "role": "owner",
+        },
+        {
+            "id": "org-team-0002",
+            "slug": "hypercolor",
+            "name": "Hypercolor Team",
+            "is_personal": False,
+            "role": "member",
+        },
+    ]
+}
+
+
+def _org_list_client(listing: dict) -> MagicMock:
+    mock_client = MagicMock()
+    mock_client.list_orgs = AsyncMock(return_value=listing)
+    return mock_client
+
+
+@pytest.mark.parametrize("flag", ["--json", "-j"])
+def test_org_list_json_prints_the_server_listing(flag: str) -> None:
+    with patch("sibyl_cli.org.get_client", return_value=_org_list_client(_ORG_LISTING)):
+        result = CliRunner().invoke(app, ["list", flag])
+
+    assert result.exit_code == 0, result.stdout
+    assert json.loads(result.stdout) == _ORG_LISTING
+
+
+def test_org_list_defaults_to_a_table_of_the_same_orgs() -> None:
+    with patch("sibyl_cli.org.get_client", return_value=_org_list_client(_ORG_LISTING)):
+        result = CliRunner().invoke(app, ["list"])
+
+    assert result.exit_code == 0, result.stdout
+    assert '"orgs"' not in result.stdout
+    for value in (
+        "Organizations",
+        "bliss",
+        "Bliss Personal",
+        "owner",
+        "personal",
+        "org-personal-0001",
+        "hypercolor",
+        "Hypercolor Team",
+        "member",
+        "team",
+        "org-team-0002",
+    ):
+        assert value in result.stdout
+
+
+def test_org_list_says_so_when_the_caller_has_no_orgs() -> None:
+    with patch("sibyl_cli.org.get_client", return_value=_org_list_client({"orgs": []})):
+        result = CliRunner().invoke(app, ["list"])
+
+    assert result.exit_code == 0, result.stdout
+    assert "No organizations found" in result.stdout
+
+
 @pytest.mark.parametrize(
     ("client_method", "argv"),
     [
         ("list_orgs", ["list"]),
+        ("list_orgs", ["list", "--json"]),
         ("create_org", ["create", "--name", "Hypercolor"]),
         ("switch_org", ["switch", "hypercolor"]),
         ("list_org_members", ["members", "list", "hypercolor"]),
