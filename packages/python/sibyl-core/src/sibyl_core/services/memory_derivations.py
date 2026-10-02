@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from collections.abc import Mapping, Sequence
+from contextlib import AsyncExitStack
 from dataclasses import asdict, replace
 from typing import TYPE_CHECKING
 
@@ -12,6 +13,7 @@ if TYPE_CHECKING:
     from sibyl_core.services.graph_read_validation import GraphReadValidation
 
 from sibyl_core.auth.memory_policy import memory_scope_policy_key
+from sibyl_core.backends.surreal.schema_version import SurrealExecute
 from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind, SourceObservation
 from sibyl_core.services import content_client
 from sibyl_core.services.content_models import MemoryScope
@@ -60,7 +62,19 @@ def raw_derivation_record(
     }
 
 
-async def load_raw_derivation(organization_id: str, memory_id: str) -> dict[str, object] | None:
+async def load_raw_derivation(
+    organization_id: str, memory_id: str, *, execute_query: SurrealExecute | None = None
+) -> dict[str, object] | None:
+    if execute_query is not None:
+        from sibyl_core.services.validation_execution import _read_query
+
+        rows = await _read_query(
+            "SELECT * FROM memory_derivations WHERE organization_id=$org AND target_kind='raw_capture' AND target_id=$id LIMIT 1;",
+            execute_query=execute_query,
+            org=organization_id,
+            id=memory_id,
+        )
+        return rows[0] if rows else None
     async with content_client.surreal_content_client() as client:
         return await content_client.select_one(
             client,
@@ -170,7 +184,9 @@ async def _raw_association_current(
         return False
     from sibyl_core.services.validation_promotion import validation_binding_current
 
-    if not await validation_binding_current(memory, association):
+    if not await validation_binding_current(
+        memory, association, **({"read": read} if read is not None else {})
+    ):
         return False
     from sibyl_core.services.memory_source_validation import (
         SOURCE_VALIDATION_CONTEXT_KEY,
@@ -214,6 +230,8 @@ async def unavailable_raw_derivation_ids(
     organization_id: str,
     memories,
     authority: SourceReadAuthority,
+    *,
+    read: GraphReadValidation | None = None,
 ) -> set[str]:
     """Use the existing final retrieval gate with a batched target snapshot."""
     from sibyl_core.memory_pipeline.lifecycle import raw_memory_lifecycle_recallable
@@ -225,10 +243,16 @@ async def unavailable_raw_derivation_ids(
         return set()
     unavailable = set()
     by_id = {memory.id: memory for memory in memories}
-    async with content_client.surreal_content_client() as client:
+    if read is not None:
+        read._check_org(organization_id)
+    async with AsyncExitStack() as stack:
+        execute_query = read.content_execute_query if read is not None else None
+        if execute_query is None:
+            client = await stack.enter_async_context(content_client.surreal_content_client())
+            execute_query = client.execute_query
         for batch in content_client.value_batches(sorted(by_id)):
             rows = content_client.normalize_records(
-                await client.execute_query(
+                await execute_query(
                     """RETURN {
                     RETURN {
                         targets: (SELECT * FROM raw_captures WHERE organization_id=$org AND uuid IN $ids),
@@ -288,7 +312,7 @@ async def unavailable_raw_derivation_ids(
                 ):
                     return None
                 if not await _raw_association_current(
-                    memory, associations.get(memory_id), authority, ancestors=frozenset()
+                    memory, associations.get(memory_id), authority, ancestors=frozenset(), read=read
                 ):
                     return memory_id
                 return None

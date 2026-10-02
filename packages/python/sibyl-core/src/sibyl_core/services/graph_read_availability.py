@@ -30,6 +30,8 @@ async def available_graph_entities(
     rows, rather than cached values with the same IDs. Each standalone call owns
     a fresh validation phase unless its caller supplies one.
     """
+    if read is not None and read.content_execute_query is not None:
+        raise ValueError("explicit validation readers require supplied entity rows")
     ids = list(dict.fromkeys(entity_ids))
     if not ids:
         return {}
@@ -74,6 +76,8 @@ async def available_graph_relationships(
         relationship_body_digest,
     )
 
+    if read is not None and read.content_execute_query is not None:
+        raise ValueError("explicit validation readers do not materialize relationships")
     ids = list(dict.fromkeys(relationship_ids))
     if not ids:
         return {}

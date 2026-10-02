@@ -1,12 +1,14 @@
 """Consume a stored critic result through the existing promotion transaction."""
 
+from __future__ import annotations
+
 import asyncio
 import hashlib
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
@@ -28,6 +30,9 @@ from sibyl_core.tasks.memory_validation import (
     MemoryValidationResult,
 )
 from sibyl_core.tasks.procedure_review import review_digest
+
+if TYPE_CHECKING:
+    from sibyl_core.services.graph_read_validation import GraphReadValidation
 
 log = structlog.get_logger()
 
@@ -119,7 +124,11 @@ def _report_unreadable_result(
     )
 
 
-async def validation_binding_current(memory, association) -> bool:
+async def validation_binding_current(
+    memory, association, *, read: GraphReadValidation | None = None
+) -> bool:
+    if read is not None:
+        read._check_org(memory.organization_id)
     value = association.get("validation_binding_json")
     if value is None:
         return True
@@ -130,7 +139,14 @@ async def validation_binding_current(memory, association) -> bool:
         _report_unreadable_binding(memory.organization_id, memory.id)
         return False
     execution = ValidationExecution(
-        binding.execution_id, memory.organization_id, memory.principal_id
+        binding.execution_id,
+        memory.organization_id,
+        memory.principal_id,
+        **(
+            {"read_execute_query": read.content_execute_query}
+            if read is not None and read.content_execute_query is not None
+            else {}
+        ),
     )
     try:
         row = await execution.load()
@@ -162,18 +178,25 @@ class ValidatedPromotion:
     binding: ValidationBinding
     authorize: Callable[[], Awaitable[None]]
 
-    async def current_guard(self) -> tuple[str, dict[str, Any]]:
+    async def current_guard(
+        self, *, read: GraphReadValidation | None = None
+    ) -> tuple[str, dict[str, Any]]:
         from sibyl_core.services.procedure_validation import (
             _SNAPSHOT,
             prepare_stored_procedure_validation,
         )
 
         await self.authorize()
+        if read is not None:
+            read._check_org(self.organization_id)
         current = await prepare_stored_procedure_validation(
-            self.organization_id, self.principal_id, self.candidate_id
+            self.organization_id, self.principal_id, self.candidate_id, read=read
         )
         execution = ValidationExecution(
-            self.binding.execution_id, self.organization_id, self.principal_id
+            self.binding.execution_id,
+            self.organization_id,
+            self.principal_id,
+            read_execute_query=read.content_execute_query if read is not None else None,
         )
         await execution.result()
         row = await execution.load()
@@ -287,19 +310,25 @@ def validation_publication_complete(memory, association) -> bool:
     )
 
 
-async def validated_graph_current(organization_id: str, entity_id: str) -> bool:
+async def validated_graph_current(
+    organization_id: str, entity_id: str, *, read: GraphReadValidation | None = None
+) -> bool:
     """Follow protected reverse references, including legacy publication ledgers."""
-    return (await validated_graph_currents(organization_id, [entity_id]))[entity_id]
+    return (await validated_graph_currents(organization_id, [entity_id], read=read))[entity_id]
 
 
-async def validated_graph_currents(organization_id: str, entity_ids: list[str]) -> dict[str, bool]:
+async def validated_graph_currents(
+    organization_id: str, entity_ids: list[str], *, read: GraphReadValidation | None = None
+) -> dict[str, bool]:
     """Read the same reverse-reference contract for a scoped endpoint batch."""
     from sibyl_core.services.content_models import raw_memory_from_record
-    from sibyl_core.services.validation_execution import _query
+    from sibyl_core.services.validation_execution import _read_query
 
     if not entity_ids:
         return {}
-    rows = await _query(
+    if read is not None:
+        read._check_org(organization_id)
+    rows = await _read_query(
         """RETURN {
         LET $direct=(SELECT * FROM memory_derivations WHERE organization_id=$org
             AND validation_entity_id IN $entities);
@@ -315,6 +344,7 @@ async def validated_graph_currents(organization_id: str, entity_ids: list[str]) 
     };""",
         org=organization_id,
         entities=list(dict.fromkeys(entity_ids)),
+        execute_query=read.content_execute_query if read is not None else None,
     )
     if len(rows) != 1:
         raise ValidationExecutionUnavailable("Validation recall snapshot unavailable")
@@ -349,7 +379,9 @@ async def validated_graph_currents(organization_id: str, entity_ids: list[str]) 
                 or association.get("active") is not True
                 or association.get("validation_entity_id") != entity_id
                 or association.get("body_sha256") != _sha(memory.raw_content)
-                or not await validation_binding_current(memory, association)
+                or not await validation_binding_current(
+                    memory, association, **({"read": read} if read is not None else {})
+                )
             ):
                 return False
         return True

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING, Any
 
 from sibyl_core.auth.memory_policy import EVAL_CONSOLIDATION_METADATA_KEY
@@ -68,17 +69,25 @@ IF $publication_operation_id != NONE {
 """
 
 
-async def verify_publication_admissions(memory: RawMemory) -> bool:
+async def verify_publication_admissions(
+    memory: RawMemory, *, read: GraphReadValidation | None = None
+) -> bool:
     """Fail closed if the original admitted sources or artifacts were replaced."""
     operation_id = memory.metadata.get(EVAL_CONSOLIDATION_METADATA_KEY)
     if operation_id is None:
         return True
     from sibyl_core.services.procedure_artifact import publication_build_receipt_json
 
-    async with content_client.surreal_content_client() as client:
+    if read is not None:
+        read._check_org(memory.organization_id)
+    async with AsyncExitStack() as stack:
+        execute_query = read.content_execute_query if read is not None else None
+        if execute_query is None:
+            client = await stack.enter_async_context(content_client.surreal_content_client())
+            execute_query = client.execute_query
         try:
             snapshots = content_client.normalize_records(
-                await client.execute_query(
+                await execute_query(
                     "RETURN {"
                     + PUBLICATION_ADMISSION_GUARD
                     + """
@@ -165,16 +174,22 @@ async def unavailable_publication_ids(
     batch snapshots candidates and their original evidence; decoding and hashing
     run off the event loop.
     """
+    if read is not None:
+        read._check_org(organization_id)
     unavailable: set[str] = set()
     if rows:
-        async with content_client.surreal_content_client() as client:
+        async with AsyncExitStack() as stack:
+            execute_query = read.content_execute_query if read is not None else None
+            if execute_query is None:
+                client = await stack.enter_async_context(content_client.surreal_content_client())
+                execute_query = client.execute_query
             for batch in content_client.value_batches(sorted(rows)):
                 references = {
                     row_id: _publication_references(row_id, rows[row_id]) for row_id in batch
                 }
                 ids = sorted(set().union(*references.values()))
                 snapshots = content_client.normalize_records(
-                    await client.execute_query(
+                    await execute_query(
                         """
                     RETURN {
                         LET $publications = (SELECT * FROM eval_consolidations
@@ -226,7 +241,9 @@ async def unavailable_publication_ids(
             if raw_memory_unpublished_reflection_candidate(memory)
         )
         unavailable.update(
-            await unavailable_raw_derivation_ids(organization_id, raw_memories, source_authority)
+            await unavailable_raw_derivation_ids(
+                organization_id, raw_memories, source_authority, read=read
+            )
         )
     else:
         from sibyl_core.services.graph_derivations import unavailable_graph_derivation_ids

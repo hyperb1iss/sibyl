@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Mapping
+from contextlib import AsyncExitStack
 from dataclasses import replace
 from typing import Any
 
@@ -72,6 +73,7 @@ async def available_capture_projection_rows[T](
     Audience expansion requires a verified protected publication association.
     """
     if read is not None:
+        read._check_org(organization_id)
         for row in rows.values():
             if isinstance(row, Entity):
                 read.record_entity(row)
@@ -164,17 +166,33 @@ async def available_capture_projection_rows[T](
             break
         captures.update(dict.fromkeys(requested))
         try:
-            async with content_client.surreal_content_client() as client:
+            async with AsyncExitStack() as stack:
+                client = None
+                execute_query = read.content_execute_query if read is not None else None
+                if execute_query is None:
+                    client = await stack.enter_async_context(
+                        content_client.surreal_content_client()
+                    )
+                    execute_query = client.execute_query
                 for batch in content_client.value_batches(sorted(requested)):
                     try:
-                        records = await content_client.select_many(
-                            client,
+                        query = (
                             "SELECT * OMIT raw_content, embedding FROM raw_captures "
                             "WHERE organization_id = $organization_id "
-                            "AND uuid IN $source_ids;",
-                            organization_id=organization_id,
-                            source_ids=batch,
+                            "AND uuid IN $source_ids;"
                         )
+                        if client is not None:
+                            records = await content_client.select_many(
+                                client, query, organization_id=organization_id, source_ids=batch
+                            )
+                        else:
+                            result = await execute_query(
+                                query, organization_id=organization_id, source_ids=batch
+                            )
+                            error = content_client.query_error(result)
+                            if error is not None:
+                                raise RuntimeError(error)
+                            records = content_client.normalize_records(result)
                     except Exception as exc:
                         log.warning(
                             "graph_capture_lifecycle_lookup_failed",
@@ -247,11 +265,13 @@ async def _publication_verdicts(organization_id, rows, *, graph_client, read):
 
     verdicts: dict[str, bool | None] = dict.fromkeys(rows, False)
     try:
-        if graph_client is None:
+        if read is None:
+            read = GraphReadValidation(organization_id)
+        read._check_org(organization_id)
+        if graph_client is None and read.graph_execute_query is None:
             from sibyl_core.services.graph_runtime import get_surreal_graph_runtime
 
             graph_client = (await get_surreal_graph_runtime(organization_id)).client
-        read = read or GraphReadValidation(organization_id)
         for batch in content_client.value_batches(sorted(rows)):
             try:
                 verdicts.update(
@@ -313,6 +333,9 @@ async def _graph_ancestry(organization_id, rows, graph_client, *, refresh_ids, r
     from sibyl_core.backends.surreal.records import normalize_records
     from sibyl_core.services.graph_records import entity_from_surreal_row
 
+    if read is not None:
+        read._check_org(organization_id)
+    execute_query = read.graph_execute_query if read is not None else None
     current = dict(rows)
     parents: dict[str, set[str] | None] = {}
     loaded: set[str] = set()
@@ -334,14 +357,16 @@ async def _graph_ancestry(organization_id, rows, graph_client, *, refresh_ids, r
         loaded.update(requested)
         current.update(dict.fromkeys(requested))
         try:
-            if graph_client is None:
-                from sibyl_core.services.graph_runtime import get_surreal_graph_runtime
+            if execute_query is None:
+                if graph_client is None:
+                    from sibyl_core.services.graph_runtime import get_surreal_graph_runtime
 
-                graph_client = (await get_surreal_graph_runtime(organization_id)).client
+                    graph_client = (await get_surreal_graph_runtime(organization_id)).client
+                execute_query = graph_client.execute_query
             for batch in content_client.value_batches(sorted(requested)):
                 try:
                     records = normalize_records(
-                        await graph_client.execute_query(
+                        await execute_query(
                             "SELECT * OMIT content, embedding, name_embedding, attributes.content "
                             "FROM entity WHERE group_id=$organization_id AND uuid IN $parent_ids;",
                             organization_id=organization_id,

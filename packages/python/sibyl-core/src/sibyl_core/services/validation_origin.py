@@ -1,7 +1,12 @@
 """Resolve a candidate's producing execution from its private derivation."""
 
+from __future__ import annotations
+
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from sibyl_core.services.graph_read_validation import GraphReadValidation
 from uuid import NAMESPACE_URL, uuid5
 
 from sibyl_core.services.source_observations import SourceUnavailableError
@@ -48,13 +53,18 @@ def validate_origin_row(
             raise SourceUnavailableError()
 
 
-async def load_validation_origin(derivation: dict[str, Any] | None) -> dict[str, Any] | None:
+async def load_validation_origin(
+    derivation: dict[str, Any] | None, *, read: GraphReadValidation | None = None
+) -> dict[str, Any] | None:
     if derivation is None or derivation.get("origin_execution_id") is None:
         return None
+    if read is not None:
+        read._check_org(str(derivation["organization_id"]))
     stage = ValidationExecution(
         str(derivation["origin_execution_id"]),
         str(derivation["organization_id"]),
         str(derivation["principal_id"]),
+        read_execute_query=read.content_execute_query if read is not None else None,
     )
     row = await stage.load()
     validate_origin_row(derivation, row)

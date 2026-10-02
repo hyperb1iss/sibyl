@@ -118,9 +118,15 @@ async def graph_derivation_current(
 ) -> bool:
     from sibyl_core.services.graph_runtime import get_surreal_graph_runtime
 
-    runtime = await get_surreal_graph_runtime(entity.organization_id)
+    execute_query = read.graph_execute_query if read is not None else None
+    if read is not None:
+        read._check_org(entity.organization_id)
+    if execute_query is None:
+        execute_query = (
+            await get_surreal_graph_runtime(entity.organization_id)
+        ).client.execute_query
     rows = normalize_records(
-        await runtime.client.execute_query(
+        await execute_query(
             "SELECT * FROM memory_derivations WHERE organization_id=$org AND target_kind='graph_entity' AND target_id=$id LIMIT 1;",
             org=entity.organization_id,
             id=entity.id,
@@ -153,7 +159,7 @@ async def graph_publication_verdicts(
     organization_id: str,
     rows: Mapping[str, Any],
     *,
-    client: SurrealGraphClient,
+    client: SurrealGraphClient | None,
     read: GraphReadValidation,
 ) -> dict[str, bool | None]:
     """Distinguish legacy ancestry from current protected publication proof.
@@ -185,10 +191,15 @@ async def _graph_derivation_verdicts(
         return {}
     from sibyl_core.services.graph_runtime import get_surreal_graph_runtime
 
-    if client is None:
-        client = (await get_surreal_graph_runtime(organization_id)).client
+    execute_query = read.graph_execute_query if read is not None else None
+    if read is not None:
+        read._check_org(organization_id)
+    if execute_query is None:
+        if client is None:
+            client = (await get_surreal_graph_runtime(organization_id)).client
+        execute_query = client.execute_query
     snapshots = normalize_records(
-        await client.execute_query(
+        await execute_query(
             """RETURN {
             RETURN {
                 associations: (SELECT * FROM memory_derivations WHERE organization_id=$org
@@ -314,14 +325,21 @@ def _same_publication_row(row, entity: Entity) -> bool:
     )
 
 
-async def load_graph_projection_source(client, *, organization_id: str, source_id: str):
+async def load_graph_projection_source(
+    client, *, organization_id: str, source_id: str, read: GraphReadValidation | None = None
+):
     """Capture the protected parent snapshot before the projection cuts text."""
     from sibyl_core.memory_pipeline.lifecycle import graph_metadata_recallable
     from sibyl_core.services.source_observations import GraphSourceSnapshot
     from sibyl_core.services.source_state_store import load_source_snapshot
 
+    execute_query = read.graph_execute_query if read is not None else None
+    if read is not None:
+        read._check_org(organization_id)
+    if execute_query is None:
+        execute_query = client.execute_query
     associations = normalize_records(
-        await client.execute_query(
+        await execute_query(
             "SELECT * FROM memory_derivations WHERE organization_id=$org AND target_kind='graph_entity' AND target_id=$id LIMIT 1;",
             org=organization_id,
             id=source_id,
@@ -333,12 +351,12 @@ async def load_graph_projection_source(client, *, organization_id: str, source_i
     snapshot = await load_source_snapshot(
         SourceIdentity(organization_id, SourceKind.GRAPH_ENTITY, source_id),
         organization_id=organization_id,
-        execute_query=client.execute_query,
+        execute_query=execute_query,
     )
     if (
         not isinstance(snapshot, GraphSourceSnapshot)
         or not graph_metadata_recallable(snapshot.entity.metadata)
-        or not await graph_association_current(snapshot.entity, association)
+        or not await graph_association_current(snapshot.entity, association, read=read)
     ):
         raise SourceUnavailableError()
     return snapshot, association

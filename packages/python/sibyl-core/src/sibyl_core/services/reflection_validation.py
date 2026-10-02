@@ -1,7 +1,10 @@
 """Resolve ordinary stored reflection evidence for automatic semantic review."""
 
+from __future__ import annotations
+
 from dataclasses import asdict, dataclass
-from typing import Any
+from functools import partial
+from typing import TYPE_CHECKING, Any
 
 from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
 from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind, SourceObservation
@@ -25,7 +28,7 @@ from sibyl_core.services.memory_source_validation import (
 from sibyl_core.services.observed_sources import load_authorized_source_snapshot
 from sibyl_core.services.source_observations import SourceUnavailableError
 from sibyl_core.services.source_state_store import RawSourceSnapshot
-from sibyl_core.services.validation_execution import _query
+from sibyl_core.services.validation_execution import _query, _read_query
 from sibyl_core.tasks.episode_evidence import EvidenceCitation
 from sibyl_core.tasks.memory_validation import (
     OriginalValidationEvidence,
@@ -35,6 +38,9 @@ from sibyl_core.tasks.memory_validation import (
 from sibyl_core.tasks.ordinary_packets import OrdinaryEvidencePacket
 from sibyl_core.tasks.ordinary_projection import OrdinaryEvidenceProjection
 from sibyl_core.tasks.procedure_review import review_digest
+
+if TYPE_CHECKING:
+    from sibyl_core.services.graph_read_validation import GraphReadValidation
 
 ORDINARY_SNAPSHOT = """
 LET $snapshot = {
@@ -66,10 +72,17 @@ class AuthorizedReflection:
         return sorted([self.memory.id, *(source.id for source in self.sources)])
 
 
-async def _published_checkpoint_fingerprints(memory, derivation) -> list[str]:
+async def _published_checkpoint_fingerprints(
+    memory, derivation, *, read: GraphReadValidation | None = None
+) -> list[str]:
     """Undo only the publisher's terminal finding for the original checkpoint check."""
     from sibyl_core.models.reflection import ReflectionFinding
 
+    execute_query = _query
+    if read is not None:
+        read._check_org(memory.organization_id)
+        if read.content_execute_query is not None:
+            execute_query = partial(_read_query, execute_query=read.content_execute_query)
     findings = memory.metadata.get("reflection_findings")
     entity_id = derivation.get("validation_entity_id")
     if (
@@ -104,7 +117,7 @@ async def _published_checkpoint_fingerprints(memory, derivation) -> list[str]:
     projection = _IMMUTABLE_CANDIDATE.replace(
         "$memory.metadata.reflection_findings", "$original_findings"
     )
-    rows = await _query(
+    rows = await execute_query(
         "RETURN { LET $memory=(SELECT * FROM raw_captures WHERE organization_id=$org AND uuid=$parent)[0];"
         "IF $memory.metadata.reflection_findings != $findings { THROW 'Publication finding changed'; };"
         "LET $original_findings=array::slice($findings,0,array::len($findings)-1);"
@@ -127,16 +140,22 @@ async def prepare_stored_reflection(
     resolver: SourceAuthorityResolver,
     *,
     publication: bool = False,
+    read: GraphReadValidation | None = None,
     _ancestors: frozenset[str] = frozenset(),
 ) -> AuthorizedReflection:
     """Require protected derivation observations and freshly resolved memberships."""
+    execute_query = _query
+    if read is not None:
+        read._check_org(organization_id)
+        if read.content_execute_query is not None:
+            execute_query = partial(_read_query, execute_query=read.content_execute_query)
     if parent_id in _ancestors:
         raise SourceUnavailableError()
     _ancestors = _ancestors | {parent_id}
     authority = await resolver(organization_id, principal_id)
     if authority is None or authority.principal_id != principal_id:
         raise SourceUnavailableError()
-    rows = await _query(
+    rows = await execute_query(
         "SELECT * FROM raw_captures WHERE organization_id=$org AND uuid=$parent;",
         org=organization_id,
         parent=parent_id,
@@ -159,7 +178,7 @@ async def prepare_stored_reflection(
         ).allowed
     ):
         raise SourceUnavailableError()
-    checkpoints = await _query(
+    checkpoints = await execute_query(
         "RETURN { LET $memory=(SELECT * FROM raw_captures WHERE organization_id=$org AND uuid=$parent)[0];"
         "LET $stage=(SELECT * FROM dream_source_checkpoints WHERE organization_id=$org AND candidate_fingerprints[$parent] != NONE);"
         "RETURN {stages:$stage, fingerprint:crypto::sha256(type::string("
@@ -170,10 +189,14 @@ async def prepare_stored_reflection(
     )
     if len(checkpoints) != 1:
         raise SourceUnavailableError()
-    derivation = await load_raw_derivation(organization_id, parent_id)
+    derivation = await load_raw_derivation(
+        organization_id,
+        parent_id,
+        execute_query=read.content_execute_query if read is not None else None,
+    )
     derived_observations = None
     if derivation is not None:
-        if not await raw_derivation_current(memory, authority):
+        if not await raw_derivation_current(memory, authority, read=read):
             raise SourceUnavailableError()
         values = derivation["observations"]
         if not isinstance(values, list):
@@ -198,7 +221,7 @@ async def prepare_stored_reflection(
         if stage["candidate_fingerprints"][parent_id]["stored"] != checkpoints[0]["fingerprint"]:
             if not publication or memory.review_state != "promoted" or derivation is None:
                 raise SourceUnavailableError()
-            fingerprints = await _published_checkpoint_fingerprints(memory, derivation)
+            fingerprints = await _published_checkpoint_fingerprints(memory, derivation, read=read)
             if stage["candidate_fingerprints"][parent_id]["stored"] not in fingerprints:
                 raise SourceUnavailableError()
         import json
@@ -208,6 +231,7 @@ async def prepare_stored_reflection(
             SourceIdentity(organization_id, SourceKind.RAW_CAPTURE, stage["source_id"]),
             authority,
             organization_id=organization_id,
+            execute_query=read.content_execute_query if read is not None else None,
         )
         observation = source.observation
         if (
@@ -229,7 +253,10 @@ async def prepare_stored_reflection(
         if observation.source.kind is not SourceKind.RAW_CAPTURE:
             raise SourceUnavailableError()
         source = await load_authorized_source_snapshot(
-            observation.source, authority, organization_id=organization_id
+            observation.source,
+            authority,
+            organization_id=organization_id,
+            execute_query=read.content_execute_query if read is not None else None,
         )
         if not isinstance(source, RawSourceSnapshot) or not source.observation.same_evidence(
             observation
@@ -249,7 +276,7 @@ async def prepare_stored_reflection(
     from sibyl_core.services.ordinary_evidence_origin import evidence_for_reflection
 
     selected_evidence, origin_dependencies = await evidence_for_reflection(
-        memory, derivation, observations, resolver, _ancestors
+        memory, derivation, observations, resolver, _ancestors, read=read
     )
     if selected_evidence is not None:
         citations = selected_evidence.citations
@@ -266,7 +293,7 @@ async def prepare_stored_reflection(
         claim_records=claim_records_from_metadata(memory.metadata),
     )
     source_ids = sorted([parent_id, *(source.id for source in sources)])
-    snapshot = await _query(
+    snapshot = await execute_query(
         "RETURN {" + ORDINARY_SNAPSHOT + "RETURN {token:$snapshot_digest, data:$snapshot}; };",
         org=organization_id,
         source_ids=source_ids,
