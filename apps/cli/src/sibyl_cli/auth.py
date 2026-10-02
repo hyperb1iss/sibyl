@@ -9,10 +9,13 @@ import secrets
 import threading
 import time
 import webbrowser
+from collections.abc import Mapping
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
 import typer
+from rich.markup import escape
 
 from sibyl_cli.auth_store import (
     clear_tokens,
@@ -28,7 +31,16 @@ from sibyl_cli.client import (
     get_client,
     resolve_api_base_url,
 )
-from sibyl_cli.common import error, info, print_json, run_async, success, warn
+from sibyl_cli.common import (
+    console,
+    create_table,
+    error,
+    info,
+    print_json,
+    run_async,
+    success,
+    warn,
+)
 
 app = typer.Typer(help="Authentication and credentials")
 CLI_AUTH_SCOPE = "mcp api:read api:write"
@@ -1087,20 +1099,133 @@ api_key_app = typer.Typer(help="API key management")
 app.add_typer(api_key_app, name="api-key")
 
 
+# Fields a listed key may carry into output. The key secret is shown only once,
+# at creation, so this allowlist keeps any field the server adds later out of the
+# terminal and out of pipes.
+API_KEY_LIST_FIELDS: tuple[str, ...] = (
+    "id",
+    "name",
+    "prefix",
+    "scopes",
+    "project_ids",
+    "memory_space_ids",
+    "created_at",
+    "expires_at",
+    "last_used_at",
+    "revoked_at",
+)
+
+
+def _listed_api_keys(result: object) -> list[dict[str, object]]:
+    """Project the server's key listing onto the allowlist.
+
+    A listing that is not an object holding a list of key objects is a server
+    fault, and reporting it as "no keys" would hide that, so it raises instead.
+    """
+    raw_keys = result.get("keys") if isinstance(result, Mapping) else None
+    if not isinstance(raw_keys, list) or not all(isinstance(key, Mapping) for key in raw_keys):
+        raise SibylClientError(
+            "Server returned a malformed API key listing; expected a list of keys.",
+            error_code="api_key_listing_invalid",
+        )
+    return [
+        {field: key[field] for field in API_KEY_LIST_FIELDS if field in key} for key in raw_keys
+    ]
+
+
+def _parse_timestamp(value: object) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _short_date(value: object) -> str:
+    return str(value)[:10] if value else "-"
+
+
+def _api_key_limits(key: Mapping[str, object]) -> str:
+    limits: list[str] = []
+    for field, singular, plural in (
+        ("project_ids", "project", "projects"),
+        ("memory_space_ids", "space", "spaces"),
+    ):
+        ids = key.get(field)
+        count = len(ids) if isinstance(ids, list) else 0
+        if count:
+            limits.append(f"{count} {singular if count == 1 else plural}")
+    return ", ".join(limits) or "-"
+
+
+def _api_key_status(key: Mapping[str, object], now: datetime) -> str:
+    if key.get("revoked_at"):
+        return "revoked"
+    raw_expiry = key.get("expires_at")
+    if not raw_expiry:
+        return "active"
+    expires_at = _parse_timestamp(raw_expiry)
+    if expires_at is None:
+        return "unknown"
+    return "expired" if expires_at <= now else "active"
+
+
 @api_key_app.command("list")
-def api_key_list() -> None:
+def api_key_list(
+    json_output: bool = typer.Option(False, "--json", "-j", help="JSON output (for scripting)"),
+) -> None:
+    """List your API keys in the active organization. Default: table output."""
     client = get_client()
 
     @run_async
-    async def _run() -> dict:
-        return await client.list_api_keys()
+    async def _run() -> list[dict[str, object]]:
+        return _listed_api_keys(await client.list_api_keys())
 
     try:
-        result = _run()
-        print_json(result)
+        keys = _run()
     except SibylClientError as e:
         error(str(e))
         raise typer.Exit(1) from e
+
+    if json_output:
+        print_json({"keys": keys})
+        return
+
+    if not keys:
+        info("No API keys found")
+        return
+
+    now = datetime.now(UTC)
+    table = create_table(
+        "API Keys",
+        "Name",
+        "ID",
+        "Prefix",
+        "Scopes",
+        "Limits",
+        "Created",
+        "Last Used",
+        "Expires",
+        "Status",
+    )
+    for key in keys:
+        scopes = key.get("scopes")
+        cells = (
+            str(key.get("name") or ""),
+            str(key.get("id") or ""),
+            str(key.get("prefix") or ""),
+            ", ".join(str(scope) for scope in scopes) if isinstance(scopes, list) else "",
+            _api_key_limits(key),
+            _short_date(key.get("created_at")),
+            _short_date(key.get("last_used_at")),
+            _short_date(key.get("expires_at")),
+            _api_key_status(key, now),
+        )
+        # Key names are free text; unescaped brackets would parse as Rich markup.
+        table.add_row(*(escape(cell) for cell in cells))
+    console.print(table)
 
 
 @api_key_app.command("create")

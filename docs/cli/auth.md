@@ -185,9 +185,17 @@ carry scopes and can be limited to specific projects and memory spaces.
 
 ### auth api-key list
 
+List your API keys in the active organization: name, ID, prefix, scopes, project and memory-space
+limits, created, last-used, and expiry dates, and whether each key is active, expired, or revoked
+(`unknown` when its expiry cannot be read). The key secret never appears here.
+
 ```bash
-sibyl auth api-key list
+sibyl auth api-key list [--json]
 ```
+
+| Option   | Short | Description |
+| -------- | ----- | ----------- |
+| `--json` | `-j`  | JSON output |
 
 ### auth api-key create
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -17,10 +18,111 @@ _REJECTED = SibylClientError(
 )
 
 
+_ORG_LISTING = {
+    "orgs": [
+        {
+            "id": "org-0001",
+            "slug": "bliss",
+            "name": "Bliss Home",
+            "is_personal": True,
+            "role": "owner",
+        },
+        {
+            "id": "org-0002",
+            "slug": "hypercolor",
+            "name": "Hypercolor Crew",
+            "is_personal": False,
+            "role": "member",
+        },
+    ]
+}
+
+
+def _org_list_client(listing: object) -> MagicMock:
+    mock_client = MagicMock()
+    mock_client.list_orgs = AsyncMock(return_value=listing)
+    return mock_client
+
+
+@pytest.mark.parametrize("flag", ["--json", "-j"])
+def test_org_list_json_prints_the_server_listing(flag: str) -> None:
+    with patch("sibyl_cli.org.get_client", return_value=_org_list_client(_ORG_LISTING)):
+        result = CliRunner().invoke(app, ["list", flag])
+
+    assert result.exit_code == 0, result.stdout
+    assert json.loads(result.stdout) == _ORG_LISTING
+
+
+def test_org_list_defaults_to_a_table_of_the_same_orgs() -> None:
+    with patch("sibyl_cli.org.get_client", return_value=_org_list_client(_ORG_LISTING)):
+        result = CliRunner().invoke(app, ["list"])
+
+    assert result.exit_code == 0, result.stdout
+    assert '"orgs"' not in result.stdout
+    assert "Organizations" in result.stdout
+    expected_rows = {
+        "Bliss Home": ("bliss", "owner", "personal", "org-0001"),
+        "Hypercolor Crew": ("hypercolor", "member", "team", "org-0002"),
+    }
+    for name, values in expected_rows.items():
+        rows = [line for line in result.stdout.splitlines() if name in line]
+        assert len(rows) == 1, (name, result.stdout)
+        for value in values:
+            assert value in rows[0], (name, value, rows[0])
+    hypercolor_row = next(line for line in result.stdout.splitlines() if "Hypercolor" in line)
+    assert "personal" not in hypercolor_row
+
+
+def test_org_list_renders_bracketed_names_literally() -> None:
+    listing = {
+        "orgs": [
+            {**_ORG_LISTING["orgs"][0], "name": "[/]broken"},
+            {**_ORG_LISTING["orgs"][1], "name": "[red]prod"},
+        ]
+    }
+    with patch("sibyl_cli.org.get_client", return_value=_org_list_client(listing)):
+        result = CliRunner().invoke(app, ["list"])
+
+    assert result.exit_code == 0, result.output
+    assert "[/]broken" in result.stdout
+    assert "[red]prod" in result.stdout
+
+
+def test_org_list_says_so_when_the_caller_has_no_orgs() -> None:
+    with patch("sibyl_cli.org.get_client", return_value=_org_list_client({"orgs": []})):
+        result = CliRunner().invoke(app, ["list"])
+
+    assert result.exit_code == 0, result.stdout
+    assert "No organizations found" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "listing",
+    [[], None, {}, {"orgs": None}, {"orgs": {"id": "x"}}, {"orgs": ["not-an-org"]}],
+)
+def test_org_list_table_fails_on_a_malformed_listing(listing: object) -> None:
+    # Reporting a broken listing as "no organizations" would hide a server fault.
+    with patch("sibyl_cli.org.get_client", return_value=_org_list_client(listing)):
+        result = CliRunner().invoke(app, ["list"])
+
+    assert result.exit_code == 1, result.output
+    assert "Server returned a malformed organization listing" in result.stdout
+    assert "No organizations found" not in result.stdout
+
+
+def test_org_list_json_passes_a_malformed_listing_through_unchanged() -> None:
+    with patch("sibyl_cli.org.get_client", return_value=_org_list_client([])):
+        result = CliRunner().invoke(app, ["list", "--json"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == []
+
+
 @pytest.mark.parametrize(
     ("client_method", "argv"),
     [
         ("list_orgs", ["list"]),
+        ("list_orgs", ["list", "--json"]),
         ("create_org", ["create", "--name", "Hypercolor"]),
         ("switch_org", ["switch", "hypercolor"]),
         ("list_org_members", ["members", "list", "hypercolor"]),

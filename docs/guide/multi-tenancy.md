@@ -67,7 +67,7 @@ sibyl org create
 sibyl org members
 ```
 
-`sibyl org list` shows the orgs you belong to and which one is active.
+`sibyl org list` shows the orgs you belong to and your role in each.
 
 ## Authentication and Authorization
 

@@ -818,8 +818,8 @@ target auth surface; do not import personal-machine auth into a working hosted i
 ## Output Formats
 
 - **Table** (default): Human-readable, clean output
-- **JSON**: Add `--json` for scripting
-- **CSV**: Add `--csv` for spreadsheet export
+- **JSON**: Add `--json` for scripting (every list command takes it)
+- **CSV**: Add `--csv` to `task list`, `project list`, or `entity list` for spreadsheet export
 
 ---
 

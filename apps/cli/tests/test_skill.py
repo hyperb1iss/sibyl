@@ -1,12 +1,15 @@
 """Tests for the skill command."""
 
+import json
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from typer.testing import CliRunner
 
 from sibyl_cli.main import app as main_app
 from sibyl_cli.skill import (
+    SKILL_PACKS,
     app,
     canonical_skill_markdown,
     install_canonical_skill,
@@ -50,6 +53,16 @@ def test_skill_list_shows_available_packs() -> None:
     assert "contract" in result.stdout
     assert "workflows" in result.stdout
     assert "examples" in result.stdout
+
+
+@pytest.mark.parametrize("flag", ["--json", "-j"])
+def test_skill_list_json_prints_the_same_packs(flag: str) -> None:
+    result = CliRunner().invoke(main_app, ["skill", "list", flag])
+
+    assert result.exit_code == 0, result.stdout
+    assert json.loads(result.stdout) == [
+        {"name": name, "description": SKILL_PACKS[name].description} for name in sorted(SKILL_PACKS)
+    ]
 
 
 def test_skill_get_rejects_unknown_pack() -> None:

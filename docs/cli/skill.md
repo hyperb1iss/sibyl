@@ -60,10 +60,14 @@ sibyl skill install --force
 List the skill packs bundled with this installed CLI version.
 
 ```bash
-sibyl skill list
+sibyl skill list [--json]
 ```
 
-Packs include `core`, `quick`, `workflows`, `examples`, and `migration`.
+| Option   | Short | Description |
+| -------- | ----- | ----------- |
+| `--json` | `-j`  | JSON output |
+
+The bundled packs are `contract`, `core`, `examples`, `migration`, `quick`, and `workflows`.
 
 ---
 

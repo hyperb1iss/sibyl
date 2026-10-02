@@ -12,7 +12,7 @@ from typing import Annotated
 
 import typer
 
-from sibyl_cli.common import NEON_CYAN, console, error, info, success, warn
+from sibyl_cli.common import NEON_CYAN, console, error, info, print_json, success, warn
 
 app = typer.Typer(
     help="Install the loader skill and print bundled markdown packs",
@@ -212,9 +212,17 @@ def install_skill(
 
 
 @app.command("list")
-def list_skill_packs() -> None:
+def list_skill_packs(
+    json_output: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
+    ] = False,
+) -> None:
     """List skill packs available from this installed CLI version."""
-    for pack in available_skill_packs():
+    packs = available_skill_packs()
+    if json_output:
+        print_json([{"name": pack.name, "description": pack.description} for pack in packs])
+        return
+    for pack in packs:
         console.print(f"[{NEON_CYAN}]{pack.name}[/{NEON_CYAN}]  {pack.description}")
 
 

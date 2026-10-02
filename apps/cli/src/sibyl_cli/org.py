@@ -6,20 +6,27 @@ from enum import StrEnum
 from typing import Annotated, Any
 
 import typer
-from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from sibyl_cli import config_store
 from sibyl_cli.auth_store import credential_scope, normalize_api_url, set_tokens
 from sibyl_cli.client import SibylClientError, get_client
 from sibyl_cli.client_transport import _environment_auth_token
-from sibyl_cli.common import error, info, print_json, run_async, success, warn
+from sibyl_cli.common import (
+    console,
+    create_table,
+    error,
+    info,
+    print_json,
+    run_async,
+    success,
+    warn,
+)
 
 app = typer.Typer(help="Organizations")
 members_app = typer.Typer(help="Manage organization members")
 app.add_typer(members_app, name="members")
-
-console = Console()
 
 
 def _switch_destination(client: Any, slug: str) -> tuple[str | None, str | None]:
@@ -95,8 +102,28 @@ class OrgRole(StrEnum):
     VIEWER = "viewer"
 
 
+def _listed_orgs(result: object) -> list[dict[str, Any]]:
+    """Read the server's org listing for the table.
+
+    A listing that is not an object holding a list of org objects is a server
+    fault, and reporting it as "no organizations" would hide that.
+    """
+    listing = result.get("orgs") if isinstance(result, dict) else None
+    if not isinstance(listing, list) or not all(isinstance(org, dict) for org in listing):
+        raise SibylClientError(
+            "Server returned a malformed organization listing; expected a list of orgs.",
+            error_code="org_listing_invalid",
+        )
+    return listing
+
+
 @app.command("list")
-def list_cmd() -> None:
+def list_cmd(
+    json_output: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
+    ] = False,
+) -> None:
+    """List the organizations you belong to. Default: table output."""
     client = get_client()
 
     @run_async
@@ -105,10 +132,30 @@ def list_cmd() -> None:
 
     try:
         result = _run()
-        print_json(result)
+        if json_output:
+            print_json(result)
+            return
+        orgs = _listed_orgs(result)
     except SibylClientError as e:
         error(str(e))
         raise typer.Exit(1) from e
+
+    if not orgs:
+        info("No organizations found")
+        return
+
+    table = create_table("Organizations", "Slug", "Name", "Role", "Type", "ID")
+    for org in orgs:
+        cells = (
+            str(org.get("slug") or ""),
+            str(org.get("name") or ""),
+            str(org.get("role") or "-"),
+            "personal" if org.get("is_personal") else "team",
+            str(org.get("id") or ""),
+        )
+        # Org names are free text; unescaped brackets would parse as Rich markup.
+        table.add_row(*(escape(cell) for cell in cells))
+    console.print(table)
 
 
 @app.command("create")
@@ -193,7 +240,7 @@ def switch_cmd(slug: str) -> None:
 @members_app.command("list")
 def list_members_cmd(
     slug: Annotated[str, typer.Argument(help="Organization slug")],
-    json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
+    json_output: Annotated[bool, typer.Option("--json", "-j", help="Output as JSON")] = False,
 ) -> None:
     """List all members of an organization."""
     client = get_client()
