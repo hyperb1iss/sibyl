@@ -178,11 +178,18 @@ async def test_operator_primary_and_cleanup_failures_remain_visible(monkeypatch,
     grant = authorization()
     calls = []
 
+    class Socket:
+        async def close(self):
+            calls.append("socket-close")
+
     class Connection:
+        socket = None
+
         async def connect(self):
             calls.append("connect")
             if primary == "connect":
                 raise RuntimeError("primary-connect")
+            self.socket = Socket()
 
         async def signin(self, _):
             if primary == "signin":
@@ -257,6 +264,9 @@ async def test_operator_primary_and_cleanup_failures_remain_visible(monkeypatch,
     assert "primary-" + primary in messages
     assert "cleanup-close" in messages
     assert calls[-1] == "close"
+    assert ("socket-close" in calls) == (primary != "connect")
+    if primary != "connect":
+        assert calls[-2] == "socket-close"
     assert ("cleanup-cancel" in messages) == (primary not in ("connect", "signin", "begin"))
 
 
@@ -268,9 +278,16 @@ async def test_operator_unknown_engine_version_closes_without_begin(monkeypatch,
     grant = authorization()
     calls = []
 
+    class Socket:
+        async def close(self):
+            calls.append("socket-close")
+
     class Connection:
+        socket = None
+
         async def connect(self):
             calls.append("connect")
+            self.socket = Socket()
 
         async def signin(self, credentials):
             calls.append("signin")
@@ -294,7 +311,7 @@ async def test_operator_unknown_engine_version_closes_without_begin(monkeypatch,
 
     with pytest.raises(ValueError, match="proven native"):
         await product.capture_archive_operator_native_root(authorize, credentials={})
-    assert calls == ["connect", "signin", "close"]
+    assert calls == ["connect", "signin", "socket-close", "close"]
 
 
 @pytest.mark.parametrize(

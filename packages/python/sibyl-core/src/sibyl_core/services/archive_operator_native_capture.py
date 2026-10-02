@@ -24,6 +24,12 @@ from sibyl_core.backends.surreal.content_schema import (
     CONTENT_SCHEMA_CURRENT_VERSION,
     CONTENT_TABLES,
 )
+from sibyl_core.backends.surreal.native_cleanup import (
+    NativeOwnedSocket,
+    cleanup_owned_native_connection,
+    normalize_cancel_ack_timeout_seconds,
+    require_native_socket_affinity,
+)
 from sibyl_core.backends.surreal.schema import GRAPH_EDGES, GRAPH_TABLES
 from sibyl_core.backends.surreal.schema_version import GRAPH_SCHEMA_CURRENT_VERSION
 from sibyl_core.migrate.archive_operator_native_root import (
@@ -205,24 +211,11 @@ def _root_program(
     return "\n".join(parts), selection
 
 
-async def _cleanup(connection: Any, txn_id: UUID | None) -> list[BaseException]:
-    errors: list[BaseException] = []
-    if txn_id is not None:
-        try:
-            await connection.cancel(txn_id)
-        except BaseException as error:
-            errors.append(error)
-    try:
-        await connection.close()
-    except BaseException as error:
-        errors.append(error)
-    return errors
-
-
 async def capture_archive_operator_native_root(
     authorize_operator: OperatorAuthorize,
     *,
     credentials: dict[str, Any],
+    cancel_ack_timeout_seconds: float = 5.0,
 ) -> PreparedArchiveOperatorRoot:
     """Capture all approved scopes on one owned native RPC transaction.
 
@@ -231,27 +224,36 @@ async def capture_archive_operator_native_root(
     including empty tables and catalog-listed exclusions outside those scopes.
     It makes no full-server, filesystem, restore, or personal-import claim.
     """
+    grace = normalize_cancel_ack_timeout_seconds(cancel_ack_timeout_seconds)
     authorization = await authorize_operator()
     if type(authorization) is not ArchiveOperatorAuthorization:
         raise PermissionError("operator capture requires fresh server-owned authorization")
     if version("surrealdb") != "2.0.0":
         raise ValueError("operator capture requires the proven native SDK 2.0.0")
     connection = cast(AsyncWsSurrealConnection, AsyncSurreal(authorization.endpoint))
+    original_socket: NativeOwnedSocket | None = None
     txn_id: UUID | None = None
     failure: BaseException | None = None
     native = None
     try:
-        await connection.connect()
+        try:
+            await connection.connect()
+        finally:
+            original_socket = connection.socket
+        require_native_socket_affinity(connection, original_socket)
         await connection.signin(credentials)
+        require_native_socket_affinity(connection, original_socket)
         server_version = await connection.version()
         if server_version.split("+", 1)[0] != "surrealdb-3.2.4":
             raise ValueError("operator capture requires the proven native 3.2.4 backend")
+        require_native_socket_affinity(connection, original_socket)
         transaction = await connection.begin()
         if type(transaction) is not UUID:
             raise ValueError("native capture did not receive a valid transaction handle")
         txn_id = transaction
 
         async def execute(query: str, **parameters: Any) -> Any:
+            require_native_socket_affinity(connection, original_socket)
             return _last_result(await connection.query_raw(query, parameters, txn_id=transaction))
 
         root_catalog = await execute("INFO FOR ROOT;")
@@ -348,11 +350,19 @@ async def capture_archive_operator_native_root(
                 "absent_diagnostics": absent_diagnostics,
             },
         )
+        require_native_socket_affinity(connection, original_socket)
         await connection.commit(transaction)
         txn_id = None
     except BaseException as error:
         failure = error
-    cleanup = asyncio.create_task(_cleanup(connection, txn_id))
+    cleanup = asyncio.create_task(
+        cleanup_owned_native_connection(
+            connection,
+            original_socket,
+            txn_id,
+            cancel_ack_timeout_seconds=grace,
+        )
+    )
     interruptions: list[BaseException] = []
     while not cleanup.done():
         try:

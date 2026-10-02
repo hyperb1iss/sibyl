@@ -8,13 +8,12 @@ authorization separately from the service credential profile.
 from __future__ import annotations
 
 import asyncio
-import math
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Literal, Protocol, cast
+from typing import TYPE_CHECKING, Literal, cast
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -22,6 +21,12 @@ from surrealdb.connections.async_ws import AsyncWsSurrealConnection
 from surrealdb.errors import ServerError
 
 from sibyl_core.backends.surreal.dedicated_client import _checked_query_result
+from sibyl_core.backends.surreal.native_cleanup import (
+    NativeOwnedSocket,
+    NativeTransactionError,
+    cleanup_owned_native_connection,
+    normalize_cancel_ack_timeout_seconds,
+)
 
 if TYPE_CHECKING:
     from surrealdb.types import Value
@@ -141,10 +146,6 @@ class NativeCommitOutcome(StrEnum):
     UNKNOWN = "unknown"
 
 
-class NativeTransactionError(RuntimeError):
-    """A local transaction contract or catalog requirement was violated."""
-
-
 @dataclass(frozen=True, slots=True)
 class NativeScopedExecutor:
     """Immutable SurrealExecute adapter for one approved scope.
@@ -163,10 +164,6 @@ class NativeScopedExecutor:
         return await self(statement, **params)
 
 
-class _NativeSocket(Protocol):
-    async def close(self) -> None: ...
-
-
 class NativeTransaction:
     """Opaque owned default-session transaction with explicit commit semantics."""
 
@@ -176,7 +173,7 @@ class NativeTransaction:
         self._binding = binding
         self._cancel_ack_timeout_seconds = cancel_ack_timeout_seconds
         self._client: AsyncWsSurrealConnection | None = None
-        self._socket: _NativeSocket | None = None
+        self._socket: NativeOwnedSocket | None = None
         self._txn: UUID | None = None
         self._state = "opening"
         self._inflight = 0
@@ -304,61 +301,25 @@ class NativeTransaction:
         self._state = "committed"
 
     async def _cleanup(self) -> list[BaseException]:
-        errors: list[BaseException] = []
         self._state = "closing"
-        client = self._client
-        cancel_task: asyncio.Task[None] | None = None
-        if client is not None:
-            if self._txn is not None and self._outcome not in {
-                NativeCommitOutcome.ACKNOWLEDGED,
-                NativeCommitOutcome.REJECTED,
-            }:
-                try:
-
-                    async def _cancel_owned() -> None:
-                        # Scheduling can change socket affinity before this task
-                        # starts. Check at dispatch so lazy SDK connect cannot
-                        # move the owned UUID onto a different transport.
-                        await self._affine_client().cancel(cast(UUID, self._txn))
-
-                    cancel_task = asyncio.create_task(_cancel_owned())
-                    done, _ = await asyncio.wait(
-                        (cancel_task,), timeout=self._cancel_ack_timeout_seconds
-                    )
-                    if done:
-                        completed, cancel_task = cancel_task, None
-                        completed.result()
-                    else:
-                        # Retain the deadline even if the SDK finalizer later fails.
-                        errors.append(TimeoutError("native CANCEL acknowledgment grace expired"))
-                        cancel_task.cancel("owned CANCEL acknowledgment deadline")
-                except BaseException as exc:
-                    errors.append(exc)
-            try:
-                # The pinned SDK close suppresses websocket exceptions. Retain
-                # the bound socket's public close failure before SDK teardown.
-                if self._socket is not None:
-                    await self._socket.close()
-            except BaseException as exc:
-                errors.append(exc)
-            try:
-                if client.socket is not None and client.socket is not self._socket:
-                    # An unexpected replacement is not this handle's transport.
-                    # Public SDK close would close it; fail without touching it.
-                    raise NativeTransactionError("unbound replacement prevents SDK teardown")
-                await client.close()
-            except BaseException as exc:
-                errors.append(exc)
-        if cancel_task is not None:
-            # Join only after closing the original transport and SDK teardown.
-            try:
-                await cancel_task
-            except BaseException as exc:
-                if isinstance(exc, asyncio.CancelledError):
-                    exc.add_note("CANCEL waiter cancelled by owned acknowledgment cleanup")
-                errors.append(exc)
-        # Closing the dedicated transport releases SDK query waiters. Caller
-        # task results stay caller-owned; drain their RPC boundaries only.
+        errors: list[BaseException] = []
+        if self._client is not None:
+            cancel_uuid = (
+                None
+                if self._outcome
+                in {
+                    NativeCommitOutcome.ACKNOWLEDGED,
+                    NativeCommitOutcome.REJECTED,
+                }
+                else self._txn
+            )
+            errors = await cleanup_owned_native_connection(
+                self._client,
+                self._socket,
+                cancel_uuid,
+                cancel_ack_timeout_seconds=self._cancel_ack_timeout_seconds,
+            )
+        # Task results stay caller-owned; drain tracked RPC boundaries only.
         await self._idle.wait()
         self._state = "closed"
         self._client = None
@@ -462,16 +423,7 @@ async def open_native_transaction(
     successful CANCEL; domain-specific durable receipt reconciliation is required.
     """
 
-    if isinstance(cancel_ack_timeout_seconds, bool) or not isinstance(
-        cancel_ack_timeout_seconds, (int, float)
-    ):
-        raise ValueError("CANCEL acknowledgment grace must be positive and finite")
-    try:
-        grace = float(cancel_ack_timeout_seconds)
-    except OverflowError as exc:
-        raise ValueError("CANCEL acknowledgment grace must be positive and finite") from exc
-    if not math.isfinite(grace) or grace <= 0:
-        raise ValueError("CANCEL acknowledgment grace must be positive and finite")
+    grace = normalize_cancel_ack_timeout_seconds(cancel_ack_timeout_seconds)
     authorization = await authorize()
     if (
         type(authorization) is not NativeTransactionAuthorization
