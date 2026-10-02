@@ -3451,7 +3451,7 @@ requires-dist = [
     { name = "networkx", marker = "extra == 'graphrag'", specifier = ">=3.0" },
     { name = "numpy", marker = "extra == 'graph'", specifier = ">=2.5.1" },
     { name = "packaging", specifier = ">=26.0" },
-    { name = "pydantic", specifier = ">=2.0" },
+    { name = "pydantic", specifier = ">=2.12" },
     { name = "pydantic-ai-slim", extras = ["anthropic", "google", "openai"], marker = "extra == 'llm'", specifier = ">=2.42.0,<3" },
     { name = "pydantic-settings", specifier = ">=2.0" },
     { name = "pyjwt", specifier = ">=2.10" },
