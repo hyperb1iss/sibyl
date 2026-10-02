@@ -109,6 +109,10 @@ sibyl org members list <slug> [--json]
 | -------- | -------- | ----------------- |
 | `slug`   | Yes      | Organization slug |
 
+| Option   | Short | Description |
+| -------- | ----- | ----------- |
+| `--json` | `-j`  | JSON output |
+
 ### org members add
 
 ```bash
