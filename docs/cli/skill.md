@@ -67,7 +67,7 @@ sibyl skill list [--json]
 | -------- | ----- | ----------- |
 | `--json` | `-j`  | JSON output |
 
-Packs include `core`, `quick`, `workflows`, `examples`, and `migration`.
+The bundled packs are `contract`, `core`, `examples`, `migration`, `quick`, and `workflows`.
 
 ---
 
