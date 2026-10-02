@@ -131,6 +131,7 @@ def _native_source_selection(kind: SourceKind) -> str:
         if kind is SourceKind.GRAPH_ENTITY
         else "$associations[0]"
     )
+    association_scope = "" if kind is SourceKind.GRAPH_ENTITY else "organization_id=$org AND "
     return f"""
         LET $sources=(SELECT * FROM {table} WHERE (uuid=$uuid AND {organization}=$org)
             OR id=type::record('{table}',$uuid));
@@ -138,11 +139,14 @@ def _native_source_selection(kind: SourceKind) -> str:
             crypto::sha256(type::string([$org,$kind,$uuid]))));
         LET $states=(SELECT * FROM source_states WHERE (organization_id=$org
             AND source_kind=$kind AND source_id=$uuid) OR id=$state_key);
-        LET $associations=(SELECT * FROM memory_derivations WHERE organization_id=$org
-            AND target_kind=$kind AND target_id=$uuid);
+        LET $associations=(SELECT * FROM memory_derivations
+            WHERE {association_scope}target_kind=$kind AND target_id=$uuid);
         IF array::len($sources)!=1 OR array::len($states)!=1
             OR array::len($associations)>1 {{
             THROW 'publication_source_cardinality';
+        }};
+        IF array::len($associations)=1 AND $associations[0].organization_id!=$org {{
+            THROW 'publication_source_association';
         }};
         LET $source=$sources[0];
         LET $state=$states[0];

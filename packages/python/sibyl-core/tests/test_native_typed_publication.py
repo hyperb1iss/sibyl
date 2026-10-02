@@ -829,3 +829,117 @@ async def test_native_typed_reflection_identity_replay(native_typed_stores, chan
             with pytest.raises(Exception, match="not ready"):
                 await tx.commit()
     s.record(phase="reflection-replay", change=change)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retained_target", [False, True])
+async def test_native_typed_foreign_graph_association_rejected(
+    native_typed_stores, retained_target
+):
+    s = native_typed_stores
+    if retained_target:
+        async with s.transaction() as tx:
+            await s.stage(tx)
+            await tx.commit()
+    _, association = s.proposal()
+    association["organization_id"] = str(uuid4())
+    association["body_sha256"] = "a" * 64
+    await s.graph.execute_query(
+        "CREATE type::record('source_states',crypto::sha256(type::string([$foreign,'graph_entity','target']))) "
+        "CONTENT {organization_id:$foreign,source_kind:'graph_entity',source_id:'target',"
+        "generation:1,revision:0,deleted:true,incarnation:type::string(rand::uuid())};",
+        foreign=association["organization_id"],
+    )
+    await s.graph.execute_query(
+        "CREATE memory_derivations CONTENT $association;",
+        association=association,
+    )
+    before = normalize_records(
+        await s.graph.execute_query(
+            "SELECT type::string(id) AS physical_id,crypto::sha256(type::string($this)) AS sha256 "
+            "FROM memory_derivations;"
+        )
+    )
+    async with s.transaction() as tx:
+        with pytest.raises(Exception, match=r"publication_target_(association|cardinality)"):
+            await s.stage(tx)
+        with pytest.raises(Exception, match="not ready"):
+            await tx.commit()
+    after = normalize_records(
+        await s.graph.execute_query(
+            "SELECT type::string(id) AS physical_id,crypto::sha256(type::string($this)) AS sha256 "
+            "FROM memory_derivations;"
+        )
+    )
+    assert after == before
+    if retained_target:
+        with pytest.raises(Exception, match=r"publication_source_(association|cardinality)"):
+            await load_native_source_cut(
+                SourceIdentity(s.org, SourceKind.GRAPH_ENTITY, "target"),
+                execute_query=s.graph.execute_query,
+            )
+    s.record(phase="foreign-graph-association", retained_target=retained_target)
+
+
+@pytest.mark.asyncio
+async def test_native_typed_shared_raw_association_remains_organization_scoped(native_typed_stores):
+    s = native_typed_stores
+    association = {
+        "organization_id": str(uuid4()),
+        "target_kind": "raw_capture",
+        "target_id": s.raw.id,
+        "body_sha256": "a" * 64,
+        "principal_id": "foreign",
+        "authority_ceiling": {},
+        "active": True,
+        "observations": [],
+    }
+    await s.content.execute_query(
+        "CREATE type::record('source_states',crypto::sha256(type::string([$foreign,'raw_capture',$target]))) "
+        "CONTENT {organization_id:$foreign,source_kind:'raw_capture',source_id:$target,"
+        "generation:1,revision:0,deleted:true,incarnation:type::string(rand::uuid())};",
+        foreign=association["organization_id"],
+        target=s.raw.id,
+    )
+    await s.content.execute_query(
+        "CREATE memory_derivations CONTENT $association;",
+        association=association,
+    )
+    cut = await load_native_source_cut(s.source, execute_query=s.content.execute_query)
+    assert cut.association is None and cut.descriptor == s.cut.descriptor
+    async with s.transaction() as tx:
+        staged = await s.stage(tx)
+        assert staged.created
+        await tx.commit()
+    s.record(phase="shared-raw-foreign-association-ignored")
+
+
+@pytest.mark.asyncio
+async def test_native_typed_graph_source_cut_rejects_foreign_only_association(native_typed_stores):
+    s = native_typed_stores
+    async with s.transaction() as tx:
+        await s.stage(tx)
+        await tx.commit()
+    _, association = s.proposal()
+    association["organization_id"] = str(uuid4())
+    association["body_sha256"] = "a" * 64
+    await s.graph.execute_query(
+        "CREATE type::record('source_states',crypto::sha256(type::string([$foreign,'graph_entity','target']))) "
+        "CONTENT {organization_id:$foreign,source_kind:'graph_entity',source_id:'target',"
+        "generation:1,revision:0,deleted:true,incarnation:type::string(rand::uuid())};",
+        foreign=association["organization_id"],
+    )
+    await s.graph.execute_query(
+        "CREATE memory_derivations CONTENT $association;",
+        association=association,
+    )
+    await s.graph.execute_query(
+        "DELETE memory_derivations WHERE organization_id=$org AND target_kind='graph_entity' AND target_id='target';",
+        org=s.org,
+    )
+    with pytest.raises(Exception, match="publication_source_association"):
+        await load_native_source_cut(
+            SourceIdentity(s.org, SourceKind.GRAPH_ENTITY, "target"),
+            execute_query=s.graph.execute_query,
+        )
+    s.record(phase="foreign-only-graph-source-association")

@@ -386,10 +386,13 @@ async def _target_cut(execute: SurrealExecute, org: str, target: str) -> dict[st
         await execute(
             """RETURN {
             LET $targets=(SELECT * FROM entity WHERE uuid=$uuid OR id=type::record('entity',$uuid));
-            LET $associations=(SELECT * FROM memory_derivations WHERE organization_id=$org
-                AND target_kind='graph_entity' AND target_id=$uuid);
+            LET $associations=(SELECT * FROM memory_derivations
+                WHERE target_kind='graph_entity' AND target_id=$uuid);
             IF array::len($targets)>1 OR array::len($associations)>1 {
                 THROW 'publication_target_cardinality';
+            };
+            IF array::len($associations)=1 AND $associations[0].organization_id!=$org {
+                THROW 'publication_target_association';
             };
             RETURN {targets:$targets,associations:$associations,
                 canonical:IF array::len($targets)=1 {
