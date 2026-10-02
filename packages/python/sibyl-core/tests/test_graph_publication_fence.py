@@ -229,3 +229,53 @@ async def test_publication_fence_default_origin_missing_row_preserves_unavailabl
             read=read,
         )
     assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "descriptor",
+    [
+        {"sha256": "a" * 64},
+        {"physical_id": "", "sha256": "a" * 64},
+        {"physical_id": 17, "sha256": "a" * 64},
+        {"physical_id": "memory_validation_executions:retained", "sha256": None},
+        {"physical_id": "memory_validation_executions:retained", "sha256": "A" * 64},
+        {"physical_id": "memory_validation_executions:retained", "sha256": "a" * 63},
+        {"physical_id": "memory_validation_executions:retained", "sha256": "a" * 64, "extra": True},
+    ],
+)
+async def test_publication_fence_execution_descriptor_rejects_malformed(descriptor):
+    org = str(uuid4())
+    root = SourceIdentity(org, SourceKind.GRAPH_ENTITY, "target")
+
+    async def content(query, **params):
+        return [descriptor]
+
+    collector = _PublicationCollector(content, content, org, root)
+    collector.register_execution("a" * 64, "owner", {"request_json": "{}"}, root)
+    read = GraphReadValidation(org, _publication_collector=collector)
+    with pytest.raises(SourceUnavailableError):
+        await collector.finish(read)
+    assert not collector.sealed and collector.execution_cuts == {}
+
+
+@pytest.mark.asyncio
+async def test_publication_fence_execution_descriptor_retains_native_physical_id():
+    org = str(uuid4())
+    root = SourceIdentity(org, SourceKind.GRAPH_ENTITY, "target")
+    descriptor = {"physical_id": "memory_validation_executions:retained", "sha256": "a" * 64}
+    checks = []
+
+    async def content(query, **params):
+        if "expected" in params:
+            checks.append(params["expected"])
+            return [True]
+        return [descriptor]
+
+    collector = _PublicationCollector(content, content, org, root)
+    collector.register_execution("b" * 64, "owner", {"request_json": "{}"}, root)
+    read = GraphReadValidation(org, _publication_collector=collector)
+    await collector.finish(read)
+    assert collector.execution_cuts == {("b" * 64, "owner"): descriptor}
+    await collector.check(witness=False)
+    assert checks == [descriptor]

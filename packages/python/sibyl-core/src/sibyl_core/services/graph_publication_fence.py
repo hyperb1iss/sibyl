@@ -113,7 +113,7 @@ IF $execution.organization_id!=$org OR $execution.uuid!=$execution_id
     OR !type::is_string($execution.request_json) OR !type::is_string($execution.result_json) {
     THROW 'publication_execution_unavailable';
 };
-LET $execution_cut={id:type::string($execution.id),
+LET $execution_cut={physical_id:type::string($execution.id),
     sha256:crypto::sha256(type::string((SELECT * OMIT promotion_write_witness FROM $execution)[0]))};
 """
 
@@ -307,7 +307,17 @@ class _PublicationCollector:
                     principal=principal,
                 )
             )
-            if len(rows) != 1:
+            if len(rows) != 1 or set(rows[0]) != {"physical_id", "sha256"}:
+                raise SourceUnavailableError()
+            physical_id = rows[0]["physical_id"]
+            sha256 = rows[0]["sha256"]
+            if (
+                not isinstance(physical_id, str)
+                or not physical_id
+                or not isinstance(sha256, str)
+                or len(sha256) != 64
+                or any(character not in "0123456789abcdef" for character in sha256)
+            ):
                 raise SourceUnavailableError()
             self.execution_cuts[execution_id, principal] = rows[0]
         self.sealed = True
@@ -434,7 +444,10 @@ def _replay_identity(cut, entity: Entity, association: Mapping[str, object]) -> 
         for a, b in zip(before, after, strict=True)
     ):
         raise SourceUnavailableError()
-    if entity.metadata.get("reflection_identity") is not None:
+    if (
+        entity.metadata.get("reflection_identity") is not None
+        or stored.metadata.get("reflection_identity") is not None
+    ):
         from sibyl_core.services.memory_identity import verify_reflection_identity
 
         verify_reflection_identity(entity, stored)

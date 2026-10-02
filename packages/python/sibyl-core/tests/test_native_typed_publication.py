@@ -106,7 +106,15 @@ async def native_typed_stores(tmp_path, monkeypatch):
             content_ns,
             "content",
             org,
-            ("raw_captures", "source_states", "memory_derivations"),
+            (
+                "raw_captures",
+                "source_states",
+                "memory_derivations",
+                "eval_attempts",
+                "eval_consolidations",
+                "memory_validation_executions",
+                "memory_validation_attempts",
+            ),
         )
         graph_scope = NativeStoreScope(
             "graph", graph_ns, "graph", org, ("entity", "source_states", "memory_derivations")
@@ -474,3 +482,350 @@ async def test_native_typed_exact_target_preflight_rejects_divergence(
             await s.stage(tx)
         with pytest.raises(Exception, match="not ready"):
             await tx.commit()
+
+
+@pytest_asyncio.fixture
+async def native_validated_procedure(native_typed_stores, monkeypatch, tmp_path):
+    """Signed canonical admissions and a real returned offline validation."""
+    from hashlib import sha256
+    from unittest.mock import AsyncMock
+
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from pydantic import TypeAdapter
+    from pydantic_ai import Agent
+    from pydantic_ai.models.test import TestModel
+
+    from sibyl_core.ai.llm.extractor import Extractor
+    from sibyl_core.config import settings
+    from sibyl_core.models.memory_scope import MemoryScope
+    from sibyl_core.services import (
+        content_models,
+        eval_consolidation,
+        eval_publication,
+        procedure_validation,
+    )
+    from sibyl_core.services.eval_admission import admit_eval_outcome, register_eval_assignment
+    from sibyl_core.services.memory_promotion import (
+        _candidate_from_review_memory,
+        _entity_from_candidate,
+    )
+    from sibyl_core.services.validation_execution import ValidationExecution
+    from sibyl_core.services.validation_promotion import ValidatedPromotion, ValidationBinding
+    from sibyl_core.tasks import consolidation as c
+    from sibyl_core.tasks.eval_receipts import TaskAssignment, sign_outcome
+    from sibyl_core.tasks.memory_validation import CriticOutput, MemoryValidationResult
+    from tests.validation_policy import offline_policy
+
+    s = native_typed_stores
+    monkeypatch.setattr(content_models, "configured_raw_memory_embedding_provider", lambda: None)
+    receipts = tmp_path / "receipts"
+    receipts.mkdir(mode=0o700)
+    monkeypatch.setattr(settings, "validation_receipt_dir", str(receipts))
+    monkeypatch.setattr(settings, "consolidation_max_input_chars", 40000)
+    key = Ed25519PrivateKey.generate()
+    assignment = TaskAssignment(
+        organization_id=s.org,
+        owner_principal_id="owner",
+        experiment_id="experiment",
+        experiment_revision="revision-1",
+        task_id="task",
+        task_revision="task-1",
+        task_sha256="a" * 64,
+        family_id="family",
+        split="learning",
+        arm_id="raw",
+        checkpoint=0,
+        seed=7,
+        memory_pack_sha256="b" * 64,
+        controller_policy_sha256="c" * 64,
+        attempt_id="d" * 32,
+        checker_sha256="4" * 64,
+        oracle_sha256="e" * 64,
+        evaluator_sha256="f" * 64,
+        runtime_sha256="1" * 64,
+        image="sha256:" + "2" * 64,
+    )
+    attempts = []
+    for index, status in enumerate(("passed", "task_failed")):
+        task = assignment.model_copy(update={"attempt_id": str(index) * 32})
+        outcome = {
+            "schema_version": "sibyl-json-cli-outcome-v1",
+            "attempt_id": task.attempt_id,
+            "snapshot_sha256": "3" * 64,
+            "checker_sha256": task.checker_sha256,
+            "oracle_sha256": task.oracle_sha256,
+            "evaluator_sha256": task.evaluator_sha256,
+            "runtime_sha256": task.runtime_sha256,
+            "image": task.image,
+            "status": status,
+            "passed": index == 0,
+        }
+        materials = {
+            "outcome_bytes": json.dumps(outcome).encode(),
+            "transcript_bytes": b'{"action":"check"}\n',
+            "episode_bytes": f"Observed {status} episode.\n".encode(),
+        }
+        await register_eval_assignment(organization_id=s.org, assignment=task)
+        admitted = await admit_eval_outcome(
+            organization_id=s.org,
+            experiment_id=task.experiment_id,
+            attempt_id=task.attempt_id,
+            principal_id="owner",
+            issuer_id="oracle-1",
+            trusted_public_key=key.public_key(),
+            expected_controller_policy_sha256=task.controller_policy_sha256,
+            receipt_bytes=sign_outcome(
+                assignment=task, issuer_id="oracle-1", private_key=key, **materials
+            ),
+            **materials,
+        )
+        attempts.append((task, admitted))
+    group = await eval_consolidation.load_admitted_consolidation_group(
+        organization_id=s.org,
+        principal_id="owner",
+        experiment_id=assignment.experiment_id,
+        experiment_revision=assignment.experiment_revision,
+        arm_id="raw",
+        through_checkpoint=0,
+        attempt_ids=tuple(task.attempt_id for task, _ in attempts),
+        group_id="contrast",
+        mechanism="verify observed output",
+        trusted_issuer_id="oracle-1",
+        trusted_public_key=key.public_key(),
+        expected_controller_policy_sha256=assignment.controller_policy_sha256,
+    )
+
+    def assertion(index):
+        episode = group.episodes[index]
+        return c.ConditionalAssertion(
+            statement="Check the actual output",
+            label="inferred",
+            support=[
+                c.SupportRef(
+                    episode_id=episode.episode_id, start_byte=0, end_byte=len(episode.artifact)
+                )
+            ],
+        )
+
+    draft = c.DraftConditionalProcedure(
+        goal=assertion(0),
+        environment=[assertion(0)],
+        preconditions=[assertion(0)],
+        actions=[c.ConditionalAction(order=1, action=assertion(0), success_criteria=assertion(0))],
+        expected_result=assertion(0),
+        failure_modes=[assertion(1)],
+        abstain_when=[assertion(1)],
+    )
+    original = Extractor.extract_with_usage
+
+    async def extract(_self, _prompt):
+        return SimpleNamespace(
+            output=c.ProcedureProposal(procedure=draft),
+            usage=SimpleNamespace(model_dump=lambda **_: {}),
+        )
+
+    monkeypatch.setattr(Extractor, "extract_with_usage", extract)
+    try:
+        result = await c.propose_conditional_procedure(group)
+    finally:
+        monkeypatch.setattr(Extractor, "extract_with_usage", original)
+    operation = eval_publication.ConsolidationOperation(
+        organization_id=s.org,
+        principal_id="owner",
+        experiment_id=assignment.experiment_id,
+        experiment_revision=assignment.experiment_revision,
+        arm_id="raw",
+        checkpoint=0,
+        group_id="contrast",
+        attempt_ids=tuple(task.attempt_id for task, _ in attempts),
+        mechanism="verify observed output",
+        controller_policy_sha256=assignment.controller_policy_sha256,
+        extractor_revision="offline-stored-procedure-v1",
+    )
+    stored = await eval_publication.store_consolidation(operation, result)
+    reader = Extractor(
+        CriticOutput,
+        agent=Agent(TestModel(custom_output_args={"findings": []}), output_type=CriticOutput),
+    )
+    monkeypatch.setattr(
+        procedure_validation,
+        "validation_extractor",
+        AsyncMock(side_effect=lambda *_: (reader, offline_policy(max_input_chars=40000))),
+    )
+    authorize = AsyncMock()
+    validated = await procedure_validation.validate_stored_procedure(
+        organization_id=s.org,
+        principal_id="owner",
+        parent_id=stored.memory.id,
+        authorize=authorize,
+    )
+    row = await ValidationExecution(validated["execution_id"], s.org, "owner").load()
+    returned = TypeAdapter(MemoryValidationResult).validate_json(row["result_json"])
+    promotion = ValidatedPromotion(
+        s.org,
+        "owner",
+        stored.memory.id,
+        ValidationBinding(
+            execution_id=validated["execution_id"],
+            request_sha256=validated["execution_id"],
+            result_sha256=sha256(row["result_json"].encode()).hexdigest(),
+            input_sha256=returned.input_sha256,
+        ),
+        authorize,
+    )
+    candidate = SourceIdentity(s.org, SourceKind.RAW_CAPTURE, stored.memory.id)
+    cut = await load_native_source_cut(candidate, execute_query=s.content.execute_query)
+    admitted_memories = [admitted.memory for _, admitted in attempts]
+    source_ids = [memory.id for memory in admitted_memories]
+    review_candidate = _candidate_from_review_memory(
+        stored.memory,
+        raw_source_ids=source_ids,
+        target_scope=MemoryScope.PRIVATE,
+        target_scope_key=None,
+        domain=None,
+    )
+    entity = _entity_from_candidate(
+        review_candidate,
+        organization_id=s.org,
+        principal_id="owner",
+        domain=None,
+        project=None,
+        source_id=source_ids[0],
+        memory_scope=MemoryScope.PRIVATE,
+        scope_key=None,
+        policy_metadata={},
+        source_memories=admitted_memories,
+    )
+    assert entity.metadata["review_capture_id"] == stored.memory.id
+    derivation = {
+        "organization_id": s.org,
+        "target_kind": "graph_entity",
+        "target_id": entity.id,
+        "active": True,
+        "principal_id": "owner",
+        "authority_ceiling": SourceReadAuthority("owner").ceiling_metadata(),
+        "observations": [asdict(cut.snapshot.observation)],
+    }
+    return SimpleNamespace(
+        stores=s,
+        promotion=promotion,
+        entity=entity,
+        derivation=derivation,
+        candidate=candidate,
+        sources={candidate}
+        | {SourceIdentity(s.org, SourceKind.RAW_CAPTURE, r.memory.id) for _, r in attempts},
+        execution_id=validated["execution_id"],
+    )
+
+
+@pytest.mark.asyncio
+async def test_native_typed_real_stored_procedure_promotion(native_validated_procedure):
+    p = native_validated_procedure
+    s = p.stores
+    async with s.transaction() as tx:
+        staged = await stage_native_typed_graph_publication(
+            tx,
+            content_scope=s.content_scope,
+            graph_scope=s.graph_scope,
+            entity=p.entity,
+            derivation=p.derivation,
+            resolver=s.resolver,
+            promotion=p.promotion,
+        )
+        assert staged.created
+        assert {cut.source for cut in staged.sources} == p.sources
+        await tx.commit()
+    rows = normalize_records(
+        await s.content.execute_query(
+            "SELECT * FROM memory_validation_executions WHERE uuid=$uuid;",
+            uuid=p.execution_id,
+        )
+    )
+    assert len(rows) == 1 and rows[0]["promotion_write_witness"] > 0
+    async with s.transaction() as tx:
+        replay = await stage_native_typed_graph_publication(
+            tx,
+            content_scope=s.content_scope,
+            graph_scope=s.graph_scope,
+            entity=p.entity,
+            derivation=p.derivation,
+            resolver=s.resolver,
+            promotion=p.promotion,
+        )
+        assert not replay.created and replay.physical_id == staged.physical_id
+        assert replay.body_sha256 == staged.body_sha256
+        await tx.commit()
+    s.record(
+        phase="real-procedure",
+        candidate_id=p.candidate.id,
+        execution_id=p.execution_id,
+        source_ids=sorted(source.id for source in p.sources),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "change", ["exact", "omitted", "created_by", "review_capture_id", "source_file"]
+)
+async def test_native_typed_reflection_identity_replay(native_typed_stores, change):
+    from sibyl_core.services.graph_derivations import graph_target_digest
+    from sibyl_core.services.memory_identity import (
+        IDENTITY_KEY,
+        reflection_entity_id,
+        reflection_identity,
+    )
+
+    s = native_typed_stores
+    entity, derivation = s.proposal()
+    entity.created_by = "owner"
+    entity.source_file = s.raw.id
+    entity.metadata["review_capture_id"] = "canonical-review"
+    entity.id = reflection_entity_id(entity)
+    entity.metadata[IDENTITY_KEY] = reflection_identity(entity)
+    derivation["target_id"] = entity.id
+    async with s.transaction() as tx:
+        staged = await stage_native_typed_graph_publication(
+            tx,
+            content_scope=s.content_scope,
+            graph_scope=s.graph_scope,
+            entity=entity,
+            derivation=derivation,
+            resolver=s.resolver,
+        )
+        assert staged.created
+        await tx.commit()
+    replay_entity = entity.model_copy(deep=True)
+    if change != "exact":
+        replay_entity.metadata.pop(IDENTITY_KEY)
+    if change == "created_by":
+        replay_entity.created_by = "another-owner"
+    elif change == "review_capture_id":
+        replay_entity.metadata["review_capture_id"] = "another-review"
+    elif change == "source_file":
+        replay_entity.source_file = "another-source"
+    assert graph_target_digest(replay_entity) == graph_target_digest(entity)
+    async with s.transaction() as tx:
+        if change in {"exact", "omitted"}:
+            replay = await stage_native_typed_graph_publication(
+                tx,
+                content_scope=s.content_scope,
+                graph_scope=s.graph_scope,
+                entity=replay_entity,
+                derivation=derivation,
+                resolver=s.resolver,
+            )
+            assert not replay.created and replay.physical_id == staged.physical_id
+            await tx.commit()
+        else:
+            with pytest.raises(ValueError, match="reflection identity conflict"):
+                await stage_native_typed_graph_publication(
+                    tx,
+                    content_scope=s.content_scope,
+                    graph_scope=s.graph_scope,
+                    entity=replay_entity,
+                    derivation=derivation,
+                    resolver=s.resolver,
+                )
+            with pytest.raises(Exception, match="not ready"):
+                await tx.commit()
+    s.record(phase="reflection-replay", change=change)
