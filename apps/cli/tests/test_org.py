@@ -120,3 +120,44 @@ def test_an_environment_targeted_switch_leaves_the_local_context_alone(
             credential_scope=auth_store.credential_scope("local", org),
             fallback_to_server=False,
         ).get("access_token")
+
+
+def test_create_switches_into_the_new_org_using_its_reported_slug(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The server nests the new slug under "organization"; reading a top-level
+    # slug left a context pinned to the old org while the new token was filed
+    # under the default scope, so the "switch" changed nothing.
+    from sibyl_cli import auth_store, config_store
+
+    monkeypatch.setattr(config_store.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(
+        "sibyl_cli.pending_identity.warm_pending_replay_identity", lambda *_a, **_k: None
+    )
+    config_store.create_context(
+        "team", "https://sibyl.team.example", org_slug="old-team", set_active=True
+    )
+    mock_client = MagicMock()
+    mock_client.base_url = "https://sibyl.team.example/api"
+    mock_client.create_org = AsyncMock(
+        return_value={
+            "organization": {"id": "org-new", "slug": "new-team", "name": "New Team"},
+            "access_token": "token-for-new-team",
+            "refresh_token": "refresh-for-new-team",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+        }
+    )
+
+    with patch("sibyl_cli.org.get_client", return_value=mock_client):
+        result = CliRunner().invoke(app, ["create", "--name", "New Team"])
+
+    assert result.exit_code == 0, result.stdout
+    ctx = config_store.get_context("team")
+    assert ctx is not None and ctx.org_slug == "new-team"
+    stored = auth_store.read_server_credentials(
+        "https://sibyl.team.example/api",
+        credential_scope=auth_store.credential_scope("team", "new-team"),
+        fallback_to_server=False,
+    )
+    assert stored.get("access_token") == "token-for-new-team"

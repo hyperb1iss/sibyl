@@ -130,8 +130,14 @@ def create_cmd(
             refresh = str(result.get("refresh_token", "")).strip() or None
             expires_raw = result.get("expires_in")
             expires_in = int(expires_raw) if expires_raw is not None else None
-            if token:
-                created_slug = str(result.get("slug") or slug or "")
+            organization = result.get("organization") or {}
+            created_slug = str(organization.get("slug") or slug or "")
+            if token and not created_slug:
+                warn(
+                    "The server did not report the new org's slug, so its credential "
+                    "was not saved; switch into it with: sibyl org switch <slug>"
+                )
+            elif token:
                 scope_name, pin_to = _switch_destination(client, created_slug)
                 store_org_tokens(
                     client.base_url,
