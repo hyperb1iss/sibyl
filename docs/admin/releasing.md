@@ -138,9 +138,10 @@ gh workflow run release.yml --ref main -f version=X.Y.Z -f dry_run=false -f expe
 A real cut refuses to start without `expected_sha`, and refuses when `main` no longer points at it.
 If `main` moved after the dry run, the new head needs its own dry run and approval.
 
-Once a real run has started, other merges to `main` no longer cost the cut. Pushes to `main` never
-cancel each other's CI, so the candidate keeps its own CI run, and the landing step merges the
-version pins into whatever `main` has become.
+Once a real run has started, ordinary merges to `main` no longer cost the cut. Pushes to `main`
+never cancel each other's CI, so the candidate keeps its own CI run, and the landing step merges the
+version pins into whatever `main` has become. A merge that touches `tools/release/` or
+`publish.yml`, or edits a pin line itself, still stops the landing, with nothing pushed.
 
 The real run proves every gate again on the same candidate rather than replaying the dry run. It
 cites the same nightly when that run is still the latest verdict on the commit. Then it performs
@@ -149,8 +150,9 @@ these state changes in order:
 1. It creates a pin-only version commit when `VERSION` differs.
 2. It tags the candidate and lands it on `main` in one atomic push with the tag. When other work
    merged to `main` while the gates ran, the version commit reaches `main` through a merge commit,
-   and the tag still names the candidate. The landing refuses, with nothing pushed, when those
-   merges touched a pin file or `tools/release/`; dispatch again on the new head.
+   and the tag still names the candidate. The merge must add exactly the bump's line edits and pass
+   `sync-versions-check`. The landing refuses, with nothing pushed, when it would not, or when those
+   merges touched `tools/release/` or `publish.yml`; dispatch again on the new head.
 3. It creates a GitHub prerelease that is not marked latest.
 4. It dispatches `publish.yml` for the tag.
 5. The publish workflow runs its own RC gate on the tagged checkout, then scans, signs, and

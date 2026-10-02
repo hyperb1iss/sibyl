@@ -120,9 +120,8 @@ jobs:
   # The browser and API end-to-end suites need a production-shaped fixture:
   # SurrealDB, the API, the job worker, the seeded baseline corpus and a built
   # frontend. CI runs this fixture only when a change reaches runtime, CI or
-  # release paths, and CI on main is cancelled whenever a newer push lands, so
-  # CI on the candidate commit may never have run it. The release runs it on
-  # the candidate itself.
+  # release paths, so CI on the candidate commit may never have run it. The
+  # release runs it on the candidate itself.
   #
   # The steps mirror ci.yml's E2E job, and test_release_workflow pins this copy
   # to that one so the two cannot drift. Two deliberate differences: no moon
@@ -742,9 +741,11 @@ jobs:
       # Other work can merge to main during the hour the gates take. The tag
       # always names the gated commit; when main has moved, the version pins
       # reach it through a merge instead of a rejected push, and the branch
-      # and the tag land atomically. The landing refuses, before pushing
-      # anything, when the commits that merged meanwhile touch a pin or the
-      # release tooling (tools/release/land_release.py).
+      # and the tag land atomically. Before pushing anything, the merge must
+      # add exactly the bump's line edits and pass sync-versions-check, and
+      # the commits that merged meanwhile must leave the release tooling and
+      # publish.yml alone: "Trigger publish" runs publish.yml from main's
+      # head, not the tag (tools/release/land_release.py).
       - name: "◆ Create and push tag"
         if: ${{ !inputs.dry_run }}
         id: land
@@ -755,13 +756,13 @@ jobs:
         run: |
           set -euo pipefail
           git tag -a "v${{ steps.version.outputs.version }}" -m "Release v${{ steps.version.outputs.version }}"
-          uv run python tools/release/sync_versions.py --list-targets > "$RUNNER_TEMP/release-guards.txt"
           python3 -m tools.release.land_release \
             --branch "$BRANCH" \
             --tag "v$VERSION" \
             --base-sha "$BASE_SHA" \
-            --guard-file "$RUNNER_TEMP/release-guards.txt" \
-            --guard tools/release/
+            --guard tools/release/ \
+            --guard .github/workflows/publish.yml \
+            --github-output "$GITHUB_OUTPUT"
 
       # Created as a pre-release that is explicitly not "latest", and promoted
       # to a full release by the last job of the publish workflow, once the

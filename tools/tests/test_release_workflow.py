@@ -338,12 +338,15 @@ def test_release_lands_on_a_moved_main_through_the_guarded_merge() -> None:
     workflow = (REPO_ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     land = _steps_by_name(_release_jobs()["release"])["◆ Create and push tag"]
 
+    assert land["id"] == "land"
     assert land["env"]["BASE_SHA"] == "${{ steps.base.outputs.sha }}"
     script = land["run"]
     assert script.index("git tag -a") < script.index("python3 -m tools.release.land_release")
-    assert "sync_versions.py --list-targets" in script
-    assert '--guard-file "$RUNNER_TEMP/release-guards.txt"' in script
     assert "--guard tools/release/" in script
+    # Trigger publish runs publish.yml from main's head, not from the tag.
+    assert "gh workflow run publish.yml -f tag=" in workflow
+    assert "--guard .github/workflows/publish.yml" in script
+    assert '--github-output "$GITHUB_OUTPUT"' in script
     assert "git push origin HEAD:" not in workflow
     summary = _steps_by_name(_release_jobs()["release"])["► Summary"]["run"]
     assert "${{ steps.land.outputs.mode }}" in summary
