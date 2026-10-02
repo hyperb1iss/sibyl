@@ -38,7 +38,7 @@ dependencies = [
     "fastapi>=0.141.1",
     "mcp>=2.2.0,<3",
     "starlette>=1.4.1",
-    "uvicorn[standard]>=0.52.4",
+    "uvicorn[standard]>=0.53.0",
     # Settings (NoDecode needs 2.7)
     "pydantic-settings>=2.7",
     # Database (server-only)
@@ -61,7 +61,7 @@ dependencies = [
     "google-genai>=2.23.0",
     "argon2-cffi>=25.1.0",
     "authlib>=1.7.2,<1.8",
-    "pyjwt[crypto]>=2.13.0,<3",
+    "pyjwt[crypto]>=2.14.0,<3",
     "itsdangerous>=2.2,<3",
     # Transactional email (SMTP uses the standard library)
     "resend>=2.47.0,<3",
@@ -97,7 +97,7 @@ dev = [
     "pytest-asyncio",
     "pytest-cov",
     "ruff",
-    "ty>=0.0.80",
+    "ty>=0.0.84",
     # Cross-adapter fixtures invoke the installed workspace CLI over HTTP.
     "sibyl-dev",
 ]
