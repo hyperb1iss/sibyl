@@ -382,9 +382,10 @@ sibyl config context link <name> [options]
 
 ### Options
 
-| Option   | Short | Default | Description    |
-| -------- | ----- | ------- | -------------- |
-| `--path` | `-p`  | (cwd)   | Directory path |
+| Option            | Short | Default | Description                                   |
+| ----------------- | ----- | ------- | --------------------------------------------- |
+| `--path`          | `-p`  | (cwd)   | Directory path                                |
+| `--this-worktree` |       | off     | Inside a git worktree, pin only this worktree |
 
 ### Example
 
@@ -392,11 +393,17 @@ sibyl config context link <name> [options]
 cd ~/work && sibyl config context link work
 ```
 
+Inside a git worktree the pin is stored on the equivalent path in the main checkout, so the
+repository and all of its worktrees reach the same server (see
+[project link](./project.md#git-worktrees)).
+
 ---
 
 ## config context unlink
 
-Remove the context pin from a directory. Any project link on the directory is kept.
+Remove the context pin from a directory. Any project link on the directory is kept. Inside a git
+worktree with no context pin of its own, this removes the repository's pin, which every worktree of
+it uses.
 
 ### Synopsis
 
