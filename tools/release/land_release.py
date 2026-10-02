@@ -106,15 +106,18 @@ def _line_edits(repo: Path, old: str, new: str) -> str:
     return "\n".join(kept)
 
 
-def _remote_tag(repo: Path, remote: str, tag: str) -> str | None:
-    """The commit ``tag`` names on the remote, or None when it is absent."""
+def _remote_tag(repo: Path, remote: str, tag: str) -> tuple[str, str] | None:
+    """The remote's ``tag`` as (tag object, commit it names), or None when absent."""
     out = _git(repo, "ls-remote", remote, f"refs/tags/{tag}", f"refs/tags/{tag}^{{}}").stdout
     refs: dict[str, str] = {}
     for line in out.splitlines():
         sha, _, ref = line.partition("\t")
         refs[ref] = sha
+    obj = refs.get(f"refs/tags/{tag}")
+    if obj is None:
+        return None
     # An annotated tag lists its own object and, peeled, the commit it names.
-    return refs.get(f"refs/tags/{tag}^{{}}") or refs.get(f"refs/tags/{tag}")
+    return obj, refs.get(f"refs/tags/{tag}^{{}}", obj)
 
 
 def _fetch_branch(repo: Path, remote: str, branch: str) -> str:
@@ -215,6 +218,7 @@ def land_release(
     runs after each fetch, which lets tests move the branch mid-attempt.
     """
     release = _rev(repo, tag)
+    tag_object = _git(repo, "rev-parse", "--verify", f"refs/tags/{tag}").stdout.strip()
     if release != base_sha and _git(repo, "rev-parse", f"{release}^").stdout.strip() != base_sha:
         raise LandError(f"{tag} names {release}, which is neither the validated base nor its child")
 
@@ -254,12 +258,17 @@ def land_release(
 
         now = _fetch_branch(repo, remote, branch)
         remote_tag = _remote_tag(repo, remote, tag)
-        if remote_tag == release and _is_ancestor(repo, target, now):
-            # The push landed and only its acknowledgement was lost.
+        # Our own tag object on the remote means the push landed and only its
+        # acknowledgement was lost; a same-named tag naming the same commit
+        # is someone else's.
+        if remote_tag and remote_tag[0] == tag_object and _is_ancestor(repo, target, now):
             log(f"Landed {tag} on {branch} by {mode} at {target} (attempt {attempt}).")
             return Landing(mode=mode, branch_sha=target, attempts=attempt)
         if remote_tag is not None:
-            raise LandError(f"{tag} already exists on {remote} at {remote_tag}, not {release}")
+            raise LandError(
+                f"{tag} already exists on {remote} (object {remote_tag[0]}, naming "
+                f"{remote_tag[1]}), so this release's tag cannot land"
+            )
         # A push rejected while the branch stayed put was not a lost race, so
         # fetching again would only repeat it.
         if now == moved:

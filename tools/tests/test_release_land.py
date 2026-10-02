@@ -15,6 +15,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+from tools.release import land_release as land_module
 from tools.release.land_release import LandError, Landing, land_release, main
 
 GIT = shutil.which("git") or "git"
@@ -341,6 +342,89 @@ def test_an_occupied_remote_tag_fails_at_once_and_moves_nothing(
     assert attempts == [1]
     assert _origin(world, "main") == expected_main
     assert _origin(world, TAG) == occupied
+
+
+def _lose_first_push_ack(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The first push really lands, but reports failure, as a dropped connection does."""
+    real = land_module._git
+    pushes: list[int] = []
+
+    def flaky(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+        result = real(repo, *args, check=check)
+        if args[:1] == ("push",):
+            pushes.append(result.returncode)
+            if len(pushes) == 1:
+                return subprocess.CompletedProcess(result.args, 128, "", "remote hung up")
+        return result
+
+    monkeypatch.setattr(land_module, "_git", flaky)
+
+
+@pytest.mark.parametrize("bump", [True, False], ids=["merge", "tag-only"])
+def test_a_push_whose_acknowledgement_was_lost_counts_as_landed(
+    world: World, monkeypatch: pytest.MonkeyPatch, bump: bool
+) -> None:
+    if not bump:
+        runner = Path(world["runner"])
+        _git(runner, "reset", "-q", "--hard", str(world["base"]))
+        _git(runner, "tag", "-f", "-a", TAG, "-m", f"Release {TAG}")
+    _merge_other_work(world)
+    _lose_first_push_ack(monkeypatch)
+
+    landing = _land(world)
+
+    assert landing.mode == ("merge" if bump else "tag-only")
+    assert landing.attempts == 1
+    assert _origin(world, "main") == landing.branch_sha
+    assert _origin(world, TAG) == _release(world)
+
+
+def test_a_landed_tag_on_a_rewound_branch_is_not_a_landing(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Our tag object reached the remote, but main was forced back behind the
+    # release before the re-fetch, so main does not carry the release.
+    moved = _merge_other_work(world)
+    real = land_module._git
+
+    def push_then_rewind(
+        repo: Path, *args: str, check: bool = True
+    ) -> subprocess.CompletedProcess[str]:
+        result = real(repo, *args, check=check)
+        if args[:1] == ("push",) and result.returncode == 0:
+            _git(
+                Path(world["other"]), "push", "-q", "--force", "origin", f"{moved}:refs/heads/main"
+            )
+            return subprocess.CompletedProcess(result.args, 128, "", "remote hung up")
+        return result
+
+    monkeypatch.setattr(land_module, "_git", push_then_rewind)
+
+    with pytest.raises(LandError, match="already exists"):
+        _land(world)
+
+    assert _origin(world, "main") == moved
+
+
+def test_someone_elses_tag_on_the_same_commit_is_not_our_landing(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A tag-only cut whose push fails while a same-named lightweight tag on
+    # the base appears: the peeled commits match, the tag objects do not.
+    runner = Path(world["runner"])
+    _git(runner, "reset", "-q", "--hard", str(world["base"]))
+    _git(runner, "tag", "-f", "-a", TAG, "-m", f"Release {TAG}")
+    _merge_other_work(world)
+    other = Path(world["other"])
+
+    def squat(_attempt: int) -> None:
+        _git(other, "tag", TAG, str(world["base"]))
+        _git(other, "push", "-q", "origin", TAG)
+
+    with pytest.raises(LandError, match=f"{re.escape(TAG)} already exists on origin"):
+        _land(world, before_push=squat)
+
+    assert _git(Path(world["origin"]), "cat-file", "-t", f"refs/tags/{TAG}") == "commit"
 
 
 def test_a_release_without_a_version_commit_pushes_only_the_tag(world: World) -> None:

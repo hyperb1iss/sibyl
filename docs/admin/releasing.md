@@ -141,7 +141,8 @@ If `main` moved after the dry run, the new head needs its own dry run and approv
 Once a real run has started, ordinary merges to `main` no longer cost the cut. Pushes to `main`
 never cancel each other's CI, so the candidate keeps its own CI run, and the landing step merges the
 version pins into whatever `main` has become. A merge that touches `tools/release/` or
-`publish.yml`, or edits a pin line itself, still stops the landing, with nothing pushed.
+`publish.yml`, or edits a pin line or a line next to one, still stops the landing, with nothing
+pushed.
 
 The real run proves every gate again on the same candidate rather than replaying the dry run. It
 cites the same nightly when that run is still the latest verdict on the commit. Then it performs
