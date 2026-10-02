@@ -147,9 +147,10 @@ def resolve_ci(
             if not active and clock() - started >= appear_grace_seconds:
                 raise EvidenceError(
                     [
-                        f"no CI run on {candidate_sha} passed, and none is running. A "
-                        "cancelled run usually means a newer push superseded this commit; "
-                        "dispatch the release on the new head.",
+                        f"no CI run on {candidate_sha} passed, and none is running. Pushes "
+                        "to main never cancel each other's CI, so a cancelled run there was "
+                        "stopped by hand (a pull request's run is cancelled by its next "
+                        "push); re-run it or dispatch the release on the new head.",
                         *(reason for reasons in judged.values() for reason in reasons),
                     ]
                 )

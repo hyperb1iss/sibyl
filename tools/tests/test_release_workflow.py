@@ -179,8 +179,8 @@ E2E_FIXTURE_STEPS = (
 # a cut, and where the Release workflow now proves it on the candidate. Gates
 # inside the :check closure run in the forced RC bundle. The rest run as
 # forced commands in a named release job, because no CI job runs them on
-# every commit: the path classifier skips E2E for docs-only merges, CI on
-# main is cancelled when a newer push lands, and no CI job runs the last two.
+# every commit: the path classifier skips E2E for docs-only merges, and no
+# CI job runs the last two.
 MANUAL_GATES_IN_CHECK = {
     "root:sync-versions-check",
     "root:release-workflow-test",
@@ -309,6 +309,7 @@ def test_dry_run_never_changes_remote_release_state() -> None:
         if (
             "git push" in script
             or "git tag -a" in script
+            or "tools.release.land_release" in script
             or "gh workflow run publish.yml" in script
             or uses.startswith("softprops/action-gh-release")
         ):
@@ -327,7 +328,40 @@ def test_dry_run_never_changes_remote_release_state() -> None:
             script = str(step.get("run", ""))
             assert "git push" not in script, name
             assert "git tag -a" not in script, name
+            assert "land_release" not in script, name
             assert "gh workflow run publish" not in script, name
+
+
+def test_release_lands_on_a_moved_main_through_the_guarded_merge() -> None:
+    # Other work merges to main during the gate window. A bare push of the
+    # release commit as main's head was rejected then, losing the whole cut.
+    workflow = (REPO_ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    land = _steps_by_name(_release_jobs()["release"])["◆ Create and push tag"]
+
+    assert land["id"] == "land"
+    assert land["env"]["BASE_SHA"] == "${{ steps.base.outputs.sha }}"
+    script = land["run"]
+    assert script.index("git tag -a") < script.index("python3 -m tools.release.land_release")
+    assert "--guard tools/release/" in script
+    # Trigger publish runs publish.yml from main's head, not from the tag.
+    assert "gh workflow run publish.yml -f tag=" in workflow
+    assert "--guard .github/workflows/publish.yml" in script
+    assert '--github-output "$GITHUB_OUTPUT"' in script
+    assert "git push origin HEAD:" not in workflow
+    summary = _steps_by_name(_release_jobs()["release"])["► Summary"]["run"]
+    assert "${{ steps.land.outputs.mode }}" in summary
+
+
+def test_ci_on_main_never_cancels_a_release_candidates_evidence() -> None:
+    # The release cites the CI run on its exact commit. In one shared group a
+    # later merge cancels it, running or pending, and the cut has no evidence.
+    concurrency = _load_workflow("ci.yml")["concurrency"]
+
+    assert concurrency["group"] == (
+        "${{ github.workflow }}-"
+        "${{ github.event_name == 'pull_request' && github.ref || github.sha }}"
+    )
+    assert concurrency["cancel-in-progress"] == "${{ github.event_name == 'pull_request' }}"
 
 
 def test_dry_runs_never_share_the_real_cut_concurrency_group() -> None:

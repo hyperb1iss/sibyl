@@ -25,7 +25,7 @@ Each dispatch runs these gates on the candidate:
 | Run RC gate bundle          | `moon run :check`, the LongMemEval V2 release CI test and the doc claim gate pass, all forced past the moon cache.                     |
 | Release notes               | On the real run, the generated notes pass the public claim gate.                                                                       |
 | Validate same-SHA Nightly   | The cited nightly is checked once more, as the last gate before the tag, and must still be the newest verdict on the candidate.        |
-| Tag, release, publish       | On the real run only: the version commit and tag are pushed, a prerelease is created, and `publish.yml` starts.                        |
+| Tag, release, publish       | On the real run only: the tag and version commit land atomically, a prerelease is created, and `publish.yml` starts.                   |
 
 The RC bundle forces every task because the moon output cache is restored across runs. Without
 `--force`, a gate whose declared inputs miss a real dependency would replay a pass recorded on
@@ -138,12 +138,22 @@ gh workflow run release.yml --ref main -f version=X.Y.Z -f dry_run=false -f expe
 A real cut refuses to start without `expected_sha`, and refuses when `main` no longer points at it.
 If `main` moved after the dry run, the new head needs its own dry run and approval.
 
+Once a real run has started, ordinary merges to `main` no longer cost the cut. Pushes to `main`
+never cancel each other's CI, so the candidate keeps its own CI run, and the landing step merges the
+version pins into whatever `main` has become. A merge that touches `tools/release/` or
+`publish.yml`, or edits a pin line or a line next to one, still stops the landing, with nothing
+pushed.
+
 The real run proves every gate again on the same candidate rather than replaying the dry run. It
 cites the same nightly when that run is still the latest verdict on the commit. Then it performs
 these state changes in order:
 
 1. It creates a pin-only version commit when `VERSION` differs.
-2. It tags the candidate and pushes the version commit and tag.
+2. It tags the candidate and lands it on `main` in one atomic push with the tag. When other work
+   merged to `main` while the gates ran, the version commit reaches `main` through a merge commit,
+   and the tag still names the candidate. The merge must add exactly the bump's line edits and pass
+   `sync-versions-check`. The landing refuses, with nothing pushed, when it would not, or when those
+   merges touched `tools/release/` or `publish.yml`; dispatch again on the new head.
 3. It creates a GitHub prerelease that is not marked latest.
 4. It dispatches `publish.yml` for the tag.
 5. The publish workflow runs its own RC gate on the tagged checkout, then scans, signs, and
@@ -209,9 +219,9 @@ release and publish run IDs. A rollback needs named targets, not a search.
 
 Before the tag push, cancel the workflow and fix the candidate. No public release state exists.
 
-After the version commit reaches `main` but before the tag exists, stop and inspect the failed step.
-The generated commit can remain. Rerun the same version only after a dry run on the new head passes
-and the tag is still absent.
+The version commit and the tag land in one atomic push, so `main` never carries the version commit
+without its tag. A failed landing pushed nothing; read its error, then rerun the same version after
+a dry run on the new head passes.
 
 After the tag or any package is public, do not move the tag or replace an immutable artifact. Mark a
 broken GitHub release as a prerelease, pause remaining channels where possible, and fix forward with
