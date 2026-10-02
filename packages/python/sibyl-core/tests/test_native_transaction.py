@@ -466,7 +466,7 @@ async def test_native_transaction_inflight_commit_rejects_and_teardown_drains(fi
         await query
 
 
-@pytest.mark.parametrize("stage", ["connect", "signin", "begin"])
+@pytest.mark.parametrize("stage", ["connect", "partial-connect", "signin", "begin"])
 @pytest.mark.asyncio
 async def test_native_transaction_startup_failure_closes_owned_socket(fixture, monkeypatch, stage):
     made, _, authorize, credentials = fixture
@@ -474,10 +474,15 @@ async def test_native_transaction_startup_failure_closes_owned_socket(fixture, m
     def factory(endpoint):
         conn = Connection(endpoint)
 
+        if stage == "partial-connect":
+            conn.socket = None
+
         async def fail(*args, **kwargs):
+            if stage == "partial-connect":
+                conn.socket = Socket()
             raise ConnectionError("startup " + stage)
 
-        setattr(conn, stage, fail)
+        setattr(conn, "connect" if stage == "partial-connect" else stage, fail)
         made.append(conn)
         return conn
 
@@ -603,6 +608,55 @@ async def test_native_transaction_cancel_grace_does_not_limit_domain_rpc(fixture
 
 @pytest.mark.parametrize("transport", ["replacement", "lost"])
 @pytest.mark.asyncio
+async def test_native_transaction_cancel_task_start_rechecks_socket(monkeypatch, transport):
+    from sibyl_core.backends.surreal import native_cleanup as cleanup
+
+    conn = Connection(binding().endpoint)
+    original = conn.socket
+    foreign = Socket()
+    entered, release = asyncio.Event(), asyncio.Event()
+    real_task = asyncio.create_task
+
+    def delayed_task(coroutine, *args, **kwargs):
+        if coroutine.cr_code.co_name == "cancel_owned_transaction":
+
+            async def delayed():
+                entered.set()
+                await release.wait()
+                return await coroutine
+
+            return real_task(delayed(), *args, **kwargs)
+        return real_task(coroutine, *args, **kwargs)
+
+    monkeypatch.setattr(cleanup.asyncio, "create_task", delayed_task)
+    job = real_task(
+        cleanup.cleanup_owned_native_connection(
+            conn, original, conn.txn, cancel_ack_timeout_seconds=2.0
+        )
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        conn.socket = foreign if transport == "replacement" else None
+        release.set()
+        errors = await job
+        assert not any(call[0] == "cancel" for call in conn.calls)
+        assert original.closed and not foreign.closed
+        assert any(
+            isinstance(error, leaf.NativeTransactionError) and "affinity" in str(error)
+            for error in errors
+        )
+        assert not any(isinstance(error, TimeoutError) for error in errors)
+        assert conn.closed == (transport == "lost")
+        assert len(errors) == (2 if transport == "replacement" else 1)
+    finally:
+        release.set()
+        if not job.done():
+            await original.close()
+            await job
+
+
+@pytest.mark.parametrize("transport", ["replacement", "lost"])
+@pytest.mark.asyncio
 async def test_native_transaction_cancel_task_rechecks_socket_at_dispatch(monkeypatch, transport):
     conn = Connection(binding().endpoint)
     original = conn.socket
@@ -613,7 +667,7 @@ async def test_native_transaction_cancel_task_rechecks_socket_at_dispatch(monkey
     scheduled = []
 
     def change_socket_before_task_starts(coro, *args, **kwargs):
-        if coro.cr_code.co_name in {"cancel", "_cancel_owned"}:
+        if coro.cr_code.co_name == "cancel_owned_transaction":
             scheduled.append(coro.cr_code.co_name)
             conn.socket = replacement if transport == "replacement" else None
         return create_task(coro, *args, **kwargs)
