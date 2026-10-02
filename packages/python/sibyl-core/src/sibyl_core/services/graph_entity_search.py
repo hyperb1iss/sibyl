@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Sequence
+from itertools import product
 from typing import Any
 
 import structlog
@@ -15,7 +16,7 @@ from sibyl_core.backends.surreal.fulltext import (
 )
 from sibyl_core.backends.surreal.knn import knn_overfetch_pool, knn_search_effort
 from sibyl_core.config import settings
-from sibyl_core.embeddings.provenance import vector_space_predicate
+from sibyl_core.embeddings.provenance import VECTOR_SPACE_FIELDS, vector_space_predicate
 from sibyl_core.embeddings.providers import EmbeddingProvider
 from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.query_anchors import (
@@ -45,13 +46,16 @@ log = structlog.get_logger()
 _FULLTEXT_FIELDS = ("name", "summary", "description", "content")
 
 
-# Vector lanes score only rows embedded in the query's vector space, filtered
-# inside the HNSW bracket so nearer vectors from an older model cannot crowd
-# the candidate pool mid-sweep.
-def _stamp_in_query_space(*, admit_unstamped: bool = False) -> str:
-    return vector_space_predicate(
+# Vector lanes score only rows embedded in the query's vector space.
+def _stamp_in_query_space(*, admit_unstamped: bool = False, scalar_parameters: bool = False) -> str:
+    predicate = vector_space_predicate(
         "attributes.embedding_metadata", "embedding_metadata", admit_unstamped=admit_unstamped
     )
+    if scalar_parameters:
+        # Scalar bindings let the composite index constrain the whole space.
+        for field in VECTOR_SPACE_FIELDS:
+            predicate = predicate.replace(f"$embedding_metadata.{field}", f"$embedding_{field}")
+    return predicate
 
 
 def _build_explicit_anchor_search_query(query: str) -> str:
@@ -388,12 +392,60 @@ class _EntitySearchManager:
         return (
             "SELECT * FROM ("
             "SELECT " + _ENTITY_SEARCH_FIELDS + ", (1 - vector::distance::knn()) AS score"
-            " FROM entity WHERE group_id = $group_id"
+            " FROM entity WITH INDEX idx_entity_embedding WHERE group_id = $group_id"
             f" AND {_stamp_in_query_space(admit_unstamped=admit_unstamped)}"
             f" AND name_embedding <|{pool}, {overfetch_knn_effort}|> $query_embedding"
             ") WHERE entity_type IN $entity_types"
             " ORDER BY score DESC, created_at DESC, uuid DESC"
             " LIMIT $limit;"
+        )
+
+    @staticmethod
+    def _exact_vector_query(*, type_count: int, admit_unstamped: bool) -> str:
+        # Every branch binds the complete index key. Compatible stamp and
+        # requested type partitions are disjoint, so LIMIT applies once.
+        stamp_partitions = (
+            tuple(product((False, True), repeat=len(VECTOR_SPACE_FIELDS)))
+            if admit_unstamped
+            else ((True,) * len(VECTOR_SPACE_FIELDS),)
+        )
+        type_partitions = range(type_count) if type_count else (None,)
+        branches = [
+            "("
+            + (f"entity_type = $entity_type_{index} AND " if index is not None else "")
+            + "group_id = $group_id AND "
+            + " AND ".join(
+                f"attributes.embedding_metadata.{field} = "
+                + (f"$embedding_{field}" if stamped else "NONE")
+                for field, stamped in zip(VECTOR_SPACE_FIELDS, present, strict=True)
+            )
+            + ")"
+            for index in type_partitions
+            for present in stamp_partitions
+        ]
+        # A balanced tree keeps all partitions below engine expression depth
+        # limits even when every supported type admits all eight stamp shapes.
+        while len(branches) > 1:
+            branches = [
+                f"({branches[index]} OR {branches[index + 1]})"
+                if index + 1 < len(branches)
+                else branches[index]
+                for index in range(0, len(branches), 2)
+            ]
+        predicate = branches[0]
+        return (
+            "SELECT "
+            + _ENTITY_SEARCH_FIELDS
+            + f""",
+                IF array::len(name_embedding ?? []) = $embedding_dimensions {{
+                    vector::similarity::cosine(name_embedding, $query_embedding)
+                }} ELSE {{ NONE }} AS score
+            FROM entity
+            WHERE {predicate}
+                AND array::len(name_embedding ?? []) = $embedding_dimensions
+            ORDER BY score DESC, created_at DESC, uuid DESC
+            LIMIT $limit;
+            """
         )
 
     async def _vector_search(
@@ -419,7 +471,7 @@ class _EntitySearchManager:
         )
         if not readiness.run:
             return []
-        type_values = [entity_type.value for entity_type in entity_types or ()]
+        type_values = list(dict.fromkeys(entity_type.value for entity_type in entity_types or ()))
         type_clause = "AND entity_type IN $entity_types" if type_values else ""
         candidate_limit = min(max(int(limit) * 4, 32), 200)
         knn_effort = knn_search_effort(candidate_limit, settings.graph_knn_ef)
@@ -460,7 +512,8 @@ class _EntitySearchManager:
                 # Yield shortfall: the query embedding sits in a cluster the
                 # requested types do not reach at this depth, so the exactness
                 # argument no longer covers the tail. Fall through to the
-                # classic typed form, which digs as deep as it needs to.
+                # classic typed form, then complete any remaining shortfall
+                # over the eligible vector space.
                 log.info(
                     "entity_vector_search_overfetch_fallback",
                     typed_yield=len(rows),
@@ -474,7 +527,7 @@ class _EntitySearchManager:
                     + _ENTITY_SEARCH_FIELDS
                     + """,
                                (1 - vector::distance::knn()) AS score
-                        FROM entity
+                        FROM entity WITH INDEX idx_entity_embedding
                         WHERE group_id = $group_id
                     """
                     + type_clause
@@ -493,6 +546,34 @@ class _EntitySearchManager:
                     _query_label="entity.search.vector",
                 )
             )
+            if len(rows) < candidate_limit:
+                # Filtered HNSW can exhaust its traversal before the eligible
+                # rows. Score the whole eligible slice before limiting output.
+                try:
+                    rows = normalize_records(
+                        await self._client.execute_query(
+                            self._exact_vector_query(
+                                type_count=len(type_values),
+                                admit_unstamped=readiness.admit_unstamped,
+                            ),
+                            group_id=self._group_id,
+                            query_embedding=query_embedding,
+                            **{f"entity_type_{i}": value for i, value in enumerate(type_values)},
+                            limit=candidate_limit,
+                            **{
+                                f"embedding_{field}": embedding_metadata[field]
+                                for field in VECTOR_SPACE_FIELDS
+                            },
+                            _query_label="entity.search.vector.exact",
+                        )
+                    )
+                except Exception as exc:
+                    log.warning(
+                        "entity_vector_search_completion_failed",
+                        error_type=type(exc).__name__,
+                        ann_yield=len(rows),
+                        candidate_limit=candidate_limit,
+                    )
         except Exception as exc:
             log.warning(
                 "entity_vector_search_failed",

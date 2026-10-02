@@ -118,6 +118,19 @@ DEFINE ANALYZER IF NOT EXISTS content_analyzer
 """
 
 
+ENTITY_VECTOR_SPACE_INDEX_DEFINITIONS = """
+DEFINE INDEX IF NOT EXISTS idx_entity_vector_space ON entity
+    FIELDS attributes.embedding_metadata.provider, attributes.embedding_metadata.model,
+        attributes.embedding_metadata.dimensions, group_id;
+"""
+
+
+ENTITY_TYPED_VECTOR_SPACE_INDEX_DEFINITIONS = """
+DEFINE INDEX IF NOT EXISTS idx_entity_typed_vector_space ON entity
+    FIELDS entity_type, attributes.embedding_metadata.provider,
+        attributes.embedding_metadata.model, attributes.embedding_metadata.dimensions, group_id;
+"""
+
 NODE_DEFINITIONS = f"""
 DEFINE TABLE IF NOT EXISTS entity SCHEMAFULL;
 ALTER TABLE IF EXISTS entity SCHEMAFULL;
@@ -190,6 +203,9 @@ DEFINE INDEX IF NOT EXISTS idx_entity_description_text_ft ON entity FIELDS descr
 DEFINE INDEX IF NOT EXISTS idx_entity_content_text_ft ON entity FIELDS content FULLTEXT ANALYZER content_analyzer BM25;
 DEFINE INDEX IF NOT EXISTS idx_entity_embedding ON entity FIELDS name_embedding
     HNSW DIMENSION {EMBEDDING_DIM} DIST COSINE TYPE F32 EFC {HNSW_EFC} M {HNSW_M};
+
+{ENTITY_VECTOR_SPACE_INDEX_DEFINITIONS}
+{ENTITY_TYPED_VECTOR_SPACE_INDEX_DEFINITIONS}
 
 DEFINE TABLE IF NOT EXISTS episode SCHEMAFULL;
 ALTER TABLE IF EXISTS episode SCHEMAFULL;
@@ -919,6 +935,16 @@ GRAPH_SCHEMA_MIGRATIONS = (
         name="graph_derivation_source_witness",
         statements=(source_derivation_event(SourceKind.GRAPH_ENTITY),),
     ),
+    SchemaMigration(
+        version=34,
+        name="entity_vector_space_index",
+        statements=tuple(split_statements(ENTITY_VECTOR_SPACE_INDEX_DEFINITIONS)),
+    ),
+    SchemaMigration(
+        version=35,
+        name="entity_typed_vector_space_index",
+        statements=tuple(split_statements(ENTITY_TYPED_VECTOR_SPACE_INDEX_DEFINITIONS)),
+    ),
 )
 
 
@@ -1436,9 +1462,11 @@ __all__ = [
     "ENTITY_RETRIEVAL_KEYS_COLUMN_DEFINITIONS",
     "ENTITY_REVISION_MIGRATION_DEFINITIONS",
     "ENTITY_SCHEMA_DRIFT_REPAIR_DEFINITIONS",
+    "ENTITY_TYPED_VECTOR_SPACE_INDEX_DEFINITIONS",
     "ENTITY_UPDATED_AT_DATETIME_FIELD_REPAIR_DEFINITIONS",
     "ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS",
     "ENTITY_USAGE_SIGNAL_DEFINITIONS",
+    "ENTITY_VECTOR_SPACE_INDEX_DEFINITIONS",
     "GRAPH_EDGES",
     "GRAPH_ENUM_ASSERTION_DEFINITIONS",
     "GRAPH_INDEX_PRUNE_DEFINITIONS",
