@@ -11,6 +11,10 @@ const SHOWCASE_NAME = 'Sibyl Showcase';
 const SHOWCASE_SLUG = 'sibyl-showcase';
 const SHOWCASE_THEME = 'neon';
 const THEME_STORAGE_KEY = 'sibyl-theme';
+// The web app opens on the most recently active project. Every capture pins
+// the explicit every-project choice so each frame shows the whole corpus.
+const PROJECT_STORAGE_KEY = 'sibyl-project-context';
+const SHOWCASE_PROJECT_SCOPE = JSON.stringify({ mode: 'all' });
 const WEB_URL = process.env.SIBYL_SHOWCASE_WEB_URL ?? 'http://localhost:3337';
 const ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 const STORAGE_STATE_PATH = process.env.SIBYL_SHOWCASE_STORAGE_STATE
@@ -103,6 +107,19 @@ export function assertDarkTheme(theme) {
   if (theme !== SHOWCASE_THEME) {
     throw new Error('Showcase capture requires the neon dark theme.');
   }
+}
+
+/** Interactive sign-in needs a visible window; a saved storage state does not. */
+export function browserLaunchOptions(storageStatePath) {
+  return { headless: Boolean(storageStatePath) };
+}
+
+/** localStorage entries every capture page starts with. */
+export function captureStorageEntries() {
+  return [
+    [THEME_STORAGE_KEY, SHOWCASE_THEME],
+    [PROJECT_STORAGE_KEY, SHOWCASE_PROJECT_SCOPE],
+  ];
 }
 
 export function validateSession(me, orgs, manifest, forbiddenTerms) {
@@ -414,17 +431,16 @@ async function main() {
     throw new Error('The pre-capture seed created rows. Rerun capture after inspecting the corpus.');
   }
 
-  const browser = await chromium.launch({ headless: false });
+  const browser = await chromium.launch(browserLaunchOptions(STORAGE_STATE_PATH));
   const context = await browser.newContext({
     viewport: { width: 1322, height: 916 },
     deviceScaleFactor: 2,
     colorScheme: 'dark',
     ...(STORAGE_STATE_PATH ? { storageState: STORAGE_STATE_PATH } : {}),
   });
-  await context.addInitScript(
-    ({ storageKey, theme }) => localStorage.setItem(storageKey, theme),
-    { storageKey: THEME_STORAGE_KEY, theme: SHOWCASE_THEME }
-  );
+  await context.addInitScript(entries => {
+    for (const [key, value] of entries) localStorage.setItem(key, value);
+  }, captureStorageEntries());
   const page = await context.newPage();
   const terminal = STORAGE_STATE_PATH
     ? null
