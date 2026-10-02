@@ -5,9 +5,11 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import TypedDict
+from uuid import UUID
 
 from sibyl_core.migrate.archive import ArchiveManifest, LoadedArchive
 from sibyl_core.migrate.personal_archive_intake import (
@@ -19,8 +21,10 @@ from sibyl_core.migrate.personal_archive_intake import (
 )
 from sibyl_core.migrate.personal_archive_plan import (
     ArchiveSourceOrigin,
+    CheckedArchivePlan,
     archive_digest,
     canonical_json,
+    verify_checked_plan,
 )
 
 _MEMBER_NAMES = frozenset({"manifest.json", "metadata.json", "graph.json", "content.json"})
@@ -287,3 +291,113 @@ def _rehydrate(
         staged_payload_json=staged_json,
         measured_sizes_json=sizes_json,
     )
+
+
+@dataclass(frozen=True)
+class ValidatedArchiveCheckedPair:
+    """Detached original checked plan and admitted artifact, never an apply grant."""
+
+    run_id: str
+    artifact_id: str
+    checked_plan_json: str
+    checked_plan_sha256: str
+    archive: RehydratedPersonalArchive
+
+    @property
+    def plan(self) -> CheckedArchivePlan:
+        """Return a fresh parsed plan while retaining its original serialized bytes."""
+        return verify_checked_plan(self.checked_plan_json, self.checked_plan_sha256)
+
+
+def _saved_pair_uuid(value: object) -> str:
+    if not isinstance(value, str):
+        raise ArchiveArtifactIntegrityError("archive identity must be a canonical UUID")
+    try:
+        canonical = str(UUID(value))
+    except ValueError as exc:
+        raise ArchiveArtifactIntegrityError("archive identity must be a canonical UUID") from exc
+    if canonical != value:
+        raise ArchiveArtifactIntegrityError("archive identity must be a canonical UUID")
+    return value
+
+
+def _saved_pair_string(record: Mapping[str, object], field: str) -> str:
+    value = record[field]
+    if not isinstance(value, str):
+        raise ArchiveArtifactIntegrityError("archive binding must be a string")
+    return value
+
+
+def validate_saved_archive_pair(
+    run: Mapping[str, object],
+    artifact: Mapping[str, object],
+    *,
+    run_id: str,
+    organization_id: str,
+    actor_id: str,
+) -> ValidatedArchiveCheckedPair:
+    """Verify exact saved bytes and original admission, without authorizing apply."""
+    try:
+        archive = rehydrate_personal_archive(
+            archive_sha256=_saved_pair_string(artifact, "archive_sha256"),
+            artifact_sha256=_saved_pair_string(artifact, "artifact_sha256"),
+            member_inventory_json=_saved_pair_string(artifact, "member_inventory_json"),
+            staged_payload_json=_saved_pair_string(artifact, "staged_payload_json"),
+            measured_sizes_json=_saved_pair_string(artifact, "measured_sizes_json"),
+        )
+        encoded, digest = (
+            _saved_pair_string(run, "checked_plan_json"),
+            _saved_pair_string(run, "checked_plan_sha256"),
+        )
+        maximum = archive.original_budget.encoded_plan_bytes
+        if len(encoded) > maximum:
+            raise ArchiveArtifactIntegrityError("saved archive plan exceeds original admission")
+        encoded_bytes = 0
+        for offset in range(0, len(encoded), 65536):
+            encoded_bytes += len(encoded[offset : offset + 65536].encode("utf-8"))
+            if encoded_bytes > maximum:
+                raise ArchiveArtifactIntegrityError("saved archive plan exceeds original admission")
+        plan = verify_checked_plan(encoded, digest)
+        artifact_id = _saved_pair_uuid(run["artifact_id"])
+        expected_run = {
+            "uuid": run_id,
+            "organization_id": organization_id,
+            "actor_id": actor_id,
+            "archive_sha256": plan.archive_sha256,
+            "artifact_sha256": plan.artifact_sha256,
+            "origin_json": canonical_json(plan.origin),
+            "mappings_json": canonical_json(plan.mappings),
+            "mappings_sha256": archive_digest("sibyl-archive-mappings-v1", plan.mappings),
+            "conflict_policy": plan.conflict_policy,
+            "credential_kind": plan.credential.credential_kind,
+            "original_api_key_id": plan.credential.api_key_id,
+            "original_ceiling_json": canonical_json(plan.credential),
+            "preview_counts_json": canonical_json(
+                {kind: count.model_dump(mode="json") for kind, count in plan.counts.items()}
+            ),
+        }
+        expected_artifact = {
+            "uuid": artifact_id,
+            "run_id": run_id,
+            "organization_id": organization_id,
+            "actor_id": actor_id,
+            "archive_sha256": plan.archive_sha256,
+            "artifact_sha256": plan.artifact_sha256,
+        }
+        if (
+            any(run.get(field) != value for field, value in expected_run.items())
+            or any(artifact.get(field) != value for field, value in expected_artifact.items())
+            or type(run.get("contract_version")) is not int
+            or type(artifact.get("contract_version")) is not int
+            or run["contract_version"] != plan.contract_version
+            or artifact["contract_version"] != plan.contract_version
+            or plan.organization_id != organization_id
+            or plan.actor_id != actor_id
+            or archive.origin != plan.origin
+        ):
+            raise ArchiveArtifactIntegrityError("saved archive pair binding mismatch")
+        return ValidatedArchiveCheckedPair(run_id, artifact_id, encoded, digest, archive)
+    except (ValueError, TypeError, KeyError, RecursionError) as exc:
+        if isinstance(exc, ArchiveArtifactIntegrityError):
+            raise
+        raise ArchiveArtifactIntegrityError("saved archive pair is invalid") from exc

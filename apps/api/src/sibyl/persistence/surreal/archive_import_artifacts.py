@@ -18,12 +18,10 @@ from sibyl_core.backends.surreal.records import normalize_records, raise_on_erro
 from sibyl_core.migrate.personal_archive_artifact import (
     ArchiveArtifactIntegrityError,
     RehydratedPersonalArchive,
-    rehydrate_personal_archive,
+    validate_saved_archive_pair,
 )
 from sibyl_core.migrate.personal_archive_plan import (
     CheckedArchivePlan,
-    archive_digest,
-    canonical_json,
     verify_checked_plan,
 )
 
@@ -56,13 +54,6 @@ def _canonical_uuid(value: object) -> str:
     return value
 
 
-def _string(record: Mapping[str, object], field: str) -> str:
-    value = record[field]
-    if not isinstance(value, str):
-        raise ArchiveArtifactIntegrityError("archive binding must be a string")
-    return value
-
-
 def _validated_pair(
     run: Mapping[str, object],
     artifact: Mapping[str, object],
@@ -70,67 +61,16 @@ def _validated_pair(
     organization_id: str,
     actor_id: str,
 ) -> SavedArchiveArtifact:
-    try:
-        archive = rehydrate_personal_archive(
-            archive_sha256=_string(artifact, "archive_sha256"),
-            artifact_sha256=_string(artifact, "artifact_sha256"),
-            member_inventory_json=_string(artifact, "member_inventory_json"),
-            staged_payload_json=_string(artifact, "staged_payload_json"),
-            measured_sizes_json=_string(artifact, "measured_sizes_json"),
-        )
-        encoded, digest = _string(run, "checked_plan_json"), _string(run, "checked_plan_sha256")
-        maximum = archive.original_budget.encoded_plan_bytes
-        if len(encoded) > maximum:
-            raise ArchiveArtifactIntegrityError("saved archive plan exceeds original admission")
-        encoded_bytes = 0
-        for offset in range(0, len(encoded), 65536):
-            encoded_bytes += len(encoded[offset : offset + 65536].encode("utf-8"))
-            if encoded_bytes > maximum:
-                raise ArchiveArtifactIntegrityError("saved archive plan exceeds original admission")
-        plan = verify_checked_plan(encoded, digest)
-        artifact_id = _canonical_uuid(run["artifact_id"])
-        expected_run = {
-            "uuid": run_id,
-            "organization_id": organization_id,
-            "actor_id": actor_id,
-            "archive_sha256": plan.archive_sha256,
-            "artifact_sha256": plan.artifact_sha256,
-            "origin_json": canonical_json(plan.origin),
-            "mappings_json": canonical_json(plan.mappings),
-            "mappings_sha256": archive_digest("sibyl-archive-mappings-v1", plan.mappings),
-            "conflict_policy": plan.conflict_policy,
-            "credential_kind": plan.credential.credential_kind,
-            "original_api_key_id": plan.credential.api_key_id,
-            "original_ceiling_json": canonical_json(plan.credential),
-            "preview_counts_json": canonical_json(
-                {kind: count.model_dump(mode="json") for kind, count in plan.counts.items()}
-            ),
-        }
-        expected_artifact = {
-            "uuid": artifact_id,
-            "run_id": run_id,
-            "organization_id": organization_id,
-            "actor_id": actor_id,
-            "archive_sha256": plan.archive_sha256,
-            "artifact_sha256": plan.artifact_sha256,
-        }
-        if (
-            any(run.get(field) != value for field, value in expected_run.items())
-            or any(artifact.get(field) != value for field, value in expected_artifact.items())
-            or type(run.get("contract_version")) is not int
-            or type(artifact.get("contract_version")) is not int
-            or run["contract_version"] != plan.contract_version
-            or artifact["contract_version"] != plan.contract_version
-            or plan.organization_id != organization_id
-            or plan.actor_id != actor_id
-            or archive.origin != plan.origin
-        ):
-            raise ArchiveArtifactIntegrityError("saved archive pair binding mismatch")
-        return SavedArchiveArtifact(run_id, artifact_id, encoded, digest, archive)
-    except (ValueError, TypeError, KeyError, RecursionError) as exc:
-        if isinstance(exc, ArchiveArtifactIntegrityError):
-            raise
-        raise ArchiveArtifactIntegrityError("saved archive pair is invalid") from exc
+    pair = validate_saved_archive_pair(
+        run, artifact, run_id=run_id, organization_id=organization_id, actor_id=actor_id
+    )
+    return SavedArchiveArtifact(
+        pair.run_id,
+        pair.artifact_id,
+        pair.checked_plan_json,
+        pair.checked_plan_sha256,
+        pair.archive,
+    )
 
 
 async def _joined_validation(
