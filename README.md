@@ -209,9 +209,9 @@ sibyl docs list                           # Browse document collections
 sibyl project link proj_xxx
 ```
 
-Tasks flow `backlog → todo → doing → review → done → archived` (with a `blocked` side state), and
-every list command supports `--json` and `--csv` for scripting. Full command reference:
-[`docs/cli/`](docs/cli/).
+Tasks flow `backlog → todo → doing → review → done → archived` (with a `blocked` side state). Every
+list command supports `--json` for scripting, and the task, project, and entity lists also take
+`--csv`. Full command reference: [`docs/cli/`](docs/cli/).
 
 ## 🦋 Web UI
 

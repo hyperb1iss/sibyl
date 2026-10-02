@@ -152,8 +152,8 @@ sibyl -V                                         # Short form
 
 ### Output Formats
 
-Most commands support a `--json` / `-j` flag for machine-readable output, and list-style commands
-add `--csv`:
+Most commands support a `--json` / `-j` flag for machine-readable output, and every list command
+does. The task, project, and entity lists also take `--csv`:
 
 | Option          | Description  | Use Case                              |
 | --------------- | ------------ | ------------------------------------- |

@@ -23,11 +23,16 @@ can do inside an org.
 
 ## org list
 
-List the organizations you belong to.
+List the organizations you belong to, with your role in each and whether it is a personal or team
+org.
 
 ```bash
-sibyl org list
+sibyl org list [--json]
 ```
+
+| Option   | Short | Description |
+| -------- | ----- | ----------- |
+| `--json` | `-j`  | JSON output |
 
 ---
 
