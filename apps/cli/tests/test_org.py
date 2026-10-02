@@ -88,13 +88,34 @@ def test_org_list_renders_bracketed_names_literally() -> None:
     assert "[red]prod" in result.stdout
 
 
-@pytest.mark.parametrize("listing", [{"orgs": []}, [], None, {"orgs": None}, {"orgs": {"id": "x"}}])
-def test_org_list_says_so_when_the_caller_has_no_orgs(listing: object) -> None:
-    with patch("sibyl_cli.org.get_client", return_value=_org_list_client(listing)):
+def test_org_list_says_so_when_the_caller_has_no_orgs() -> None:
+    with patch("sibyl_cli.org.get_client", return_value=_org_list_client({"orgs": []})):
         result = CliRunner().invoke(app, ["list"])
 
     assert result.exit_code == 0, result.stdout
     assert "No organizations found" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "listing",
+    [[], None, {}, {"orgs": None}, {"orgs": {"id": "x"}}, {"orgs": ["not-an-org"]}],
+)
+def test_org_list_table_fails_on_a_malformed_listing(listing: object) -> None:
+    # Reporting a broken listing as "no organizations" would hide a server fault.
+    with patch("sibyl_cli.org.get_client", return_value=_org_list_client(listing)):
+        result = CliRunner().invoke(app, ["list"])
+
+    assert result.exit_code == 1, result.output
+    assert "Server returned a malformed organization listing" in result.stdout
+    assert "No organizations found" not in result.stdout
+
+
+def test_org_list_json_passes_a_malformed_listing_through_unchanged() -> None:
+    with patch("sibyl_cli.org.get_client", return_value=_org_list_client([])):
+        result = CliRunner().invoke(app, ["list", "--json"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == []
 
 
 @pytest.mark.parametrize(

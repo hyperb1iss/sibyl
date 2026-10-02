@@ -154,13 +154,27 @@ def test_api_key_list_renders_bracketed_names_literally() -> None:
     assert "[red]prod" in result.stdout
 
 
-@pytest.mark.parametrize("listing", [[], None, {"keys": None}, {"keys": {"id": "x"}}])
-def test_api_key_list_json_tolerates_a_malformed_listing(listing: object) -> None:
-    with patch("sibyl_cli.auth.get_client", return_value=_api_key_client(listing)):
-        result = CliRunner().invoke(app, ["api-key", "list", "--json"])
+_MALFORMED_KEY_LISTINGS = [
+    [],
+    None,
+    {},
+    {"keys": None},
+    {"keys": {"id": "x"}},
+    {"keys": [_ACTIVE_KEY, "not-a-key"]},
+]
 
-    assert result.exit_code == 0, result.output
-    assert json.loads(result.stdout) == {"keys": []}
+
+@pytest.mark.parametrize("flags", [[], ["--json"]])
+@pytest.mark.parametrize("listing", _MALFORMED_KEY_LISTINGS)
+def test_api_key_list_fails_on_a_malformed_listing(listing: object, flags: list[str]) -> None:
+    # Reporting a broken listing as "no keys" would hide a server fault.
+    with patch("sibyl_cli.auth.get_client", return_value=_api_key_client(listing)):
+        result = CliRunner().invoke(app, ["api-key", "list", *flags])
+
+    assert result.exit_code == 1, result.output
+    assert "Server returned a malformed API key listing" in result.stdout
+    assert '"keys"' not in result.stdout
+    assert "No API keys found" not in result.stdout
 
 
 def test_api_key_list_says_so_when_there_are_no_keys() -> None:

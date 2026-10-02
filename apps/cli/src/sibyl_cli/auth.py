@@ -1117,13 +1117,19 @@ API_KEY_LIST_FIELDS: tuple[str, ...] = (
 
 
 def _listed_api_keys(result: object) -> list[dict[str, object]]:
+    """Project the server's key listing onto the allowlist.
+
+    A listing that is not an object holding a list of key objects is a server
+    fault, and reporting it as "no keys" would hide that, so it raises instead.
+    """
     raw_keys = result.get("keys") if isinstance(result, Mapping) else None
-    if not isinstance(raw_keys, list):
-        return []
+    if not isinstance(raw_keys, list) or not all(isinstance(key, Mapping) for key in raw_keys):
+        raise SibylClientError(
+            "Server returned a malformed API key listing; expected a list of keys.",
+            error_code="api_key_listing_invalid",
+        )
     return [
-        {field: key[field] for field in API_KEY_LIST_FIELDS if field in key}
-        for key in raw_keys
-        if isinstance(key, Mapping)
+        {field: key[field] for field in API_KEY_LIST_FIELDS if field in key} for key in raw_keys
     ]
 
 
@@ -1174,16 +1180,15 @@ def api_key_list(
     client = get_client()
 
     @run_async
-    async def _run() -> dict:
-        return await client.list_api_keys()
+    async def _run() -> list[dict[str, object]]:
+        return _listed_api_keys(await client.list_api_keys())
 
     try:
-        result = _run()
+        keys = _run()
     except SibylClientError as e:
         error(str(e))
         raise typer.Exit(1) from e
 
-    keys = _listed_api_keys(result)
     if json_output:
         print_json({"keys": keys})
         return

@@ -102,6 +102,21 @@ class OrgRole(StrEnum):
     VIEWER = "viewer"
 
 
+def _listed_orgs(result: object) -> list[dict[str, Any]]:
+    """Read the server's org listing for the table.
+
+    A listing that is not an object holding a list of org objects is a server
+    fault, and reporting it as "no organizations" would hide that.
+    """
+    listing = result.get("orgs") if isinstance(result, dict) else None
+    if not isinstance(listing, list) or not all(isinstance(org, dict) for org in listing):
+        raise SibylClientError(
+            "Server returned a malformed organization listing; expected a list of orgs.",
+            error_code="org_listing_invalid",
+        )
+    return listing
+
+
 @app.command("list")
 def list_cmd(
     json_output: Annotated[
@@ -117,16 +132,14 @@ def list_cmd(
 
     try:
         result = _run()
+        if json_output:
+            print_json(result)
+            return
+        orgs = _listed_orgs(result)
     except SibylClientError as e:
         error(str(e))
         raise typer.Exit(1) from e
 
-    if json_output:
-        print_json(result)
-        return
-
-    listing = result.get("orgs") if isinstance(result, dict) else None
-    orgs = [org for org in listing or [] if isinstance(org, dict)]
     if not orgs:
         info("No organizations found")
         return
