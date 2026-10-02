@@ -52,12 +52,11 @@ through the critic and retired 37 superseded drafts. One orphaned correction chi
 and is filed as a task. After PR 621, 34 of 34 entities carry embeddings.
 
 Measured Anthropic spend on this database is about $285. Pages one and two account for $250.08, page
-three ran under a killed resume and left no receipt, and the drain accounts for
-$23.19. Campaign
-real spend is about $385. Every attempt on the final runs reports complete usage,
-with an unrecorded estimate of zero. The first paid attempt, on September 17, was stopped after a
-single invocation. The attempt produced 4 usable proposals out of 18 at
-$54.35 measured plus roughly $42 unrecorded, and the restore discarded its state.
+three ran under a killed resume and left no receipt, and the drain accounts for $23.19. Campaign
+real spend is about $385. Every attempt on the final runs reports complete usage, with an unrecorded
+estimate of zero. The first paid attempt, on September 17, was stopped after a single invocation.
+The attempt produced 4 usable proposals out of 18 at $54.35 measured plus roughly $42 unrecorded,
+and the restore discarded its state.
 
 Checkpoint one prepared 24 of 24 cells on runtime cdaedf33db57 at 10:02 UTC on September 18. Native
 packs differ from checkpoint zero on all six tasks, so the treatment reached the native arm. The raw
@@ -106,10 +105,10 @@ ledger remain intact. Counting produced no consolidated memory, generation reser
 result.
 
 The measured initial proposal reservation is $88.073815. Existing holds remain $217.247410,
-including both unknown-usage attempts. Together, the
-$305.321225 initial-only floor exceeds the current $300 memory ceiling by $5.321225, before critics,
-corrections, embeddings or retries. Reservations are conservative bounds, not billed costs. No new
-budget or generation authority has been issued.
+including both unknown-usage attempts. Together, the $305.321225 initial-only floor exceeds the
+current $300 memory ceiling by $5.321225, before critics, corrections, embeddings or retries.
+Reservations are conservative bounds, not billed costs. No new budget or generation authority has
+been issued.
 
 The checkpoint composer and materialized embedding adapter have accepted source implementations. The
 ordinary request accountant and combined provider network owner are undergoing integration review.
@@ -143,11 +142,11 @@ on source commit `324cd673`. The continuation reused the original 16 paid maps, 
 earlier output and ledger files, and completed the remaining work. The native terminal reports
 success, and independent review plus root checks have accepted the actual outcome.
 
-The continuation began 20 new generation calls and reserved
-$34.396155. The whole summary construction contains 36 generation calls and $70.906280 in generation
-reservations. Cumulative memory reservations are $217.247410 under the original $300 ceiling. These
-are reservation totals, not billed cost. Both unknown-usage holds remain reserved; the original
-failed terminal and prior attempt history remain intact.
+The continuation began 20 new generation calls and reserved $34.396155. The whole summary
+construction contains 36 generation calls and $70.906280 in generation reservations. Cumulative
+memory reservations are $217.247410 under the original $300 ceiling. These are reservation totals,
+not billed cost. Both unknown-usage holds remain reserved; the original failed terminal and prior
+attempt history remain intact.
 
 The ordinary-capture callback, native entry and preparation source passed independent review. Root
 checks accepted the callback and entry. The real retained corpus has not yet run through the capture
@@ -193,9 +192,8 @@ existing producer, count and accounting owners.
 At 19:05:43 UTC, the continuation process was live, the recovered map request had begun, and no new
 outcome had arrived. All 337 prior output files and 94 ledger files were unchanged. Memory
 reservations totalled $183.953455, including the new $1.102200 hold and all 100 prior attempts. The
-original
-$300 ceiling remains enforced. The complete summary schedule retains its conservative $256.953130
-upper bound; these figures are reservations, not billed costs.
+original $300 ceiling remains enforced. The complete summary schedule retains its conservative
+$256.953130 upper bound; these figures are reservations, not billed costs.
 
 The capture callback also passed independent review and root checks. Its complete synthetic run
 preserved all 233 sources and 240 assignment slots through the real partitioner and SDK request
@@ -229,9 +227,9 @@ remains in the record. Counting produced no summaries and made no new generation
 The fixed summary run is now executing on the isolated devbox database. At 11:51:40 UTC, two maps
 had passed output validation and a third request had begun. The run reused the 28 accepted counts
 and permits eight later reducer counts, 36 generation requests and 20 complete family references.
-Existing reservations plus this run's conservative maximum fit within
-$256.953130 of the original $300 memory ceiling. No reservation is released. The complete library
-and final database state remain unqualified until the run finishes.
+Existing reservations plus this run's conservative maximum fit within $256.953130 of the original
+$300 memory ceiling. No reservation is released. The complete library and final database state
+remain unqualified until the run finishes.
 
 The full 233-source fitting measurement finished: 40 groups contain every capture exactly once under
 an unadopted 800,000-character dual-input allowance. The full measurement took 4,918.56 seconds.
@@ -367,13 +365,12 @@ selected interval and UTF-8 families contribute four calls to that full 36-call 
 output policy and worker are unarmed. The ordinary planner needs 51 packets for those selected
 families, but the full cohort remains the available training corpus for both memory pipelines.
 
-Known physical controller usage totals
-$1.08454070, including the original failed controller. The original $48 reservation remains held,
-with $0 added by the continuation and $755.2186368 reserved cumulatively. Memory construction
-remains at 84 attempts and
-$146.341130 reserved. These reservations differ from observed controller spend. The proposed full ordinary pass cannot fit under the unchanged $300
-memory ceiling using the retained maximum-output assumptions; inputs, critics and correction stages
-also need counting.
+Known physical controller usage totals $1.08454070, including the original failed controller. The
+original $48 reservation remains held, with $0 added by the continuation and $755.2186368 reserved
+cumulatively. Memory construction remains at 84 attempts and $146.341130 reserved. These
+reservations differ from observed controller spend. The proposed full ordinary pass cannot fit under
+the unchanged $300 memory ceiling using the retained maximum-output assumptions; inputs, critics and
+correction stages also need counting.
 
 The bytecode, ordinary-packet and publication fixes are merged in PRs
 [#593](https://github.com/hyperb1iss/sibyl/pull/593),
@@ -415,12 +412,11 @@ runtime was restored and independently verified. Actual child startup, exact sou
 native authority checks passed before launch. Each cell still requires the same authority checks
 before and after execution.
 
-The original
-$48 solver reservation remains held, with no new reservation or release. The cumulative solver reservation is unchanged at $755.2186368,
-below the existing
-$762.4700928 ceiling. Memory construction remains at 84 physical attempts and $146.341130 reserved;
-no memory call was added for this continuation. Both complete summaries, the original draft and
-every earlier failure remain retained. Reservations are not billed-cost measurements.
+The original $48 solver reservation remains held, with no new reservation or release. The cumulative
+solver reservation is unchanged at $755.2186368, below the existing $762.4700928 ceiling. Memory
+construction remains at 84 physical attempts and $146.341130 reserved; no memory call was added for
+this continuation. Both complete summaries, the original draft and every earlier failure remain
+retained. Reservations are not billed-cost measurements.
 
 The ordinary-dream packet path merged in [PR #594](https://github.com/hyperb1iss/sibyl/pull/594)
 (commit `1e4a22b3`). The existing proposer and critic can now process long captures in bounded
@@ -457,13 +453,12 @@ first family's audit. The successful responses contained thinking followed by te
 responses from attempts 80 and 81 still have unknown rejection causes. The result is an amended
 exploratory comparison on two exposed, admission-selected families.
 
-The memory ledger now retains 84 physical attempts and
-$146.341130 reserved. Embeddings remain separately accounted (4,603 tokens; $0.00009206 reserved).
-The solver launch claimed $48 against the prior $707.2186368. The entire
-$755.2186368 cumulative reservation remains retained, below the existing $762.4700928 ceiling. The
-first task will not be replayed; a continuation for the 23 never-started cells is not armed.
-Reservations are not billed-cost measurements. The raw-history arm keeps all 76,351 and 72,731
-tokens, and all four arms retain identical solver ceilings.
+The memory ledger now retains 84 physical attempts and $146.341130 reserved. Embeddings remain
+separately accounted (4,603 tokens; $0.00009206 reserved). The solver launch claimed $48 against the
+prior $707.2186368. The entire $755.2186368 cumulative reservation remains retained, below the
+existing $762.4700928 ceiling. The first task will not be replayed; a continuation for the 23
+never-started cells is not armed. Reservations are not billed-cost measurements. The raw-history arm
+keeps all 76,351 and 72,731 tokens, and all four arms retain identical solver ceilings.
 
 The runtime delta contains 92 added bytecode files, no modified files and no missing files. The
 isolated controller child launched without an explicit `-B`, so the parent environment's no-bytecode
@@ -523,10 +518,11 @@ would receive a fourth physical attempt; the old three-attempt cap is not reset.
 comparison must be labeled amended and exploratory. No recovery call has launched at this
 checkpoint.
 
-The memory ledger retains 81 physical attempts and
-$142.205045 reserved, including the two new usage-unknown outcomes from attempts 78 and 79. Reservations are not billed-cost measurements. Embeddings remain separate (4,603 tokens; $0.00009206
-reserved). The prior solver reservation remains $707.2186368; the planned 24 cells would add $48
-within the existing $762.4700928 ceiling. No new solver claim exists.
+The memory ledger retains 81 physical attempts and $142.205045 reserved, including the two new
+usage-unknown outcomes from attempts 78 and 79. Reservations are not billed-cost measurements.
+Embeddings remain separate (4,603 tokens; $0.00009206 reserved). The prior solver reservation
+remains $707.2186368; the planned 24 cells would add $48 within the existing $762.4700928 ceiling.
+No new solver claim exists.
 
 The index and content-bootstrap improvements are merged through
 [PR #590](https://github.com/hyperb1iss/sibyl/pull/590), including the batching work from
@@ -570,11 +566,11 @@ PCRE2 package update; core CI remains pending. The separate repeated-bootstrap p
 merged. A private Docker CLI and a fresh owned database clone passed qualification while the
 original publication database stayed stopped and the user's instances remained untouched.
 
-The retained memory ledger now has 79 physical attempts and
-$139.440050 reserved, including two new attempts with unknown usage. Those reservations are not billed-cost measurements. Embedding accounting remains separate (4,603 tokens; $0.00009206
-reserved). No new solver budget has been claimed: the prior
-$707.2186368 reservation is unchanged, with $48 planned for the 24 cells inside the existing
-$762.4700928 ceiling.
+The retained memory ledger now has 79 physical attempts and $139.440050 reserved, including two new
+attempts with unknown usage. Those reservations are not billed-cost measurements. Embedding
+accounting remains separate (4,603 tokens; $0.00009206 reserved). No new solver budget has been
+claimed: the prior $707.2186368 reservation is unchanged, with $48 planned for the 24 cells inside
+the existing $762.4700928 ceiling.
 
 Next, diagnose the actual audit rejection and finish the fixed summary recipe, then qualify the
 complete requests and execute the 24 frozen cells. The original routing pair remains unmet. Sealed
@@ -814,14 +810,16 @@ cannot establish learned-memory benefit. Any follow-up needs useful packs and ne
 manifests.
 
 The output-capacity successor completed 15 critic and correction requests without truncation, but
-produced no usable packs. The ledger retains 54 attempts and
-$73.082255 reserved; actual billed cost is unknown. Source adjudication confirmed five new factual errors caused by whole-procedure regeneration. Other critic concerns included inherited problems and overreach. The targeted-edit diagnostic completed all 15 requests against five retained parents, with no truncation and no accepted candidate. Cumulative accounting retains 69 attempts and $103.749590
-reserved; actual billed cost remains unknown. The routing correction repaired three assertions and
-preserved 32 exactly, but its second critic found unresolved inherited claims. An actual replay
-control confirmed that repeating the original request reuses the same three stages. Production
-ordinary reflection also archives both drafts after a failed recheck. Automatically advancing
-corrected drafts across dream cycles is now a required implementation gap; no learning gain is
-established.
+produced no usable packs. The ledger retains 54 attempts and $73.082255 reserved; actual billed cost
+is unknown. Source adjudication confirmed five new factual errors caused by whole-procedure
+regeneration. Other critic concerns included inherited problems and overreach. The targeted-edit
+diagnostic completed all 15 requests against five retained parents, with no truncation and no
+accepted candidate. Cumulative accounting retains 69 attempts and $103.749590 reserved; actual
+billed cost remains unknown. The routing correction repaired three assertions and preserved 32
+exactly, but its second critic found unresolved inherited claims. An actual replay control confirmed
+that repeating the original request reuses the same three stages. Production ordinary reflection
+also archives both drafts after a failed recheck. Automatically advancing corrected drafts across
+dream cycles is now a required implementation gap; no learning gain is established.
 
 The original paired latency run failed its fixed-corpus check: scheduled consolidation performed 27
 graph merges during the baseline measurement. Its 902 query artifacts remain recorded, and that
