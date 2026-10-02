@@ -599,3 +599,32 @@ async def test_native_transaction_cancel_grace_does_not_limit_domain_rpc(fixture
         await tx.commit()
     assert tx.commit_outcome == leaf.NativeCommitOutcome.ACKNOWLEDGED
     assert not any(c[0] == "cancel" for c in conn.calls)
+
+
+@pytest.mark.parametrize("transport", ["replacement", "lost"])
+@pytest.mark.asyncio
+async def test_native_transaction_cancel_task_rechecks_socket_at_dispatch(monkeypatch, transport):
+    conn = Connection(binding().endpoint)
+    original = conn.socket
+    replacement = Socket()
+    tx = leaf.NativeTransaction(binding(), cancel_ack_timeout_seconds=1.0)
+    tx._client, tx._socket, tx._txn = conn, original, conn.txn
+    create_task = asyncio.create_task
+    scheduled = []
+
+    def change_socket_before_task_starts(coro, *args, **kwargs):
+        if coro.cr_code.co_name in {"cancel", "_cancel_owned"}:
+            scheduled.append(coro.cr_code.co_name)
+            conn.socket = replacement if transport == "replacement" else None
+        return create_task(coro, *args, **kwargs)
+
+    monkeypatch.setattr(leaf.asyncio, "create_task", change_socket_before_task_starts)
+    errors = await tx._cleanup()
+
+    assert len(scheduled) == 1
+    assert not any(call[0] == "cancel" for call in conn.calls)
+    assert any(isinstance(error, leaf.NativeTransactionError) for error in errors)
+    assert original.closed and not replacement.closed
+    assert conn.closed == (transport == "lost")
+    assert tx.commit_outcome == leaf.NativeCommitOutcome.NOT_REQUESTED
+    assert tx._state == "closed"

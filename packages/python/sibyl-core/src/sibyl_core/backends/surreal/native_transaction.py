@@ -314,9 +314,14 @@ class NativeTransaction:
                 NativeCommitOutcome.REJECTED,
             }:
                 try:
-                    # SDK RPC methods connect lazily. Never move an owned UUID
-                    # onto a replacement socket during attempted cancellation.
-                    cancel_task = asyncio.create_task(self._affine_client().cancel(self._txn))
+
+                    async def _cancel_owned() -> None:
+                        # Scheduling can change socket affinity before this task
+                        # starts. Check at dispatch so lazy SDK connect cannot
+                        # move the owned UUID onto a different transport.
+                        await self._affine_client().cancel(cast(UUID, self._txn))
+
+                    cancel_task = asyncio.create_task(_cancel_owned())
                     done, _ = await asyncio.wait(
                         (cancel_task,), timeout=self._cancel_ack_timeout_seconds
                     )
