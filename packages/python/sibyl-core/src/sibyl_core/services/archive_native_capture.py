@@ -366,6 +366,29 @@ async def capture_archive_native_records(
             raise ValueError("native capture physical records must be unique")
         identities.add(identity)
     selected = copy.deepcopy(record_ids)
+    return PreparedArchiveNativeCapture(
+        await capture_archive_native_tree(
+            execute_query, url=url, selection_sql=_CUT, parameters={"record_ids": list(selected)}
+        )
+    )
+
+
+async def capture_archive_native_tree(
+    execute_query: SurrealExecute,
+    *,
+    url: str,
+    selection_sql: str,
+    parameters: dict[str, object],
+    preamble_sql: str = "",
+) -> PreparedArchiveNativeValue:
+    """Traverse a server-built native root without exposing lossy SDK values.
+
+    The caller owns authorization, the read-only selection program and its
+    transaction. Never supply selection SQL from an archive or public request.
+    Selected-record capture and the qualified operator root share this codec.
+    """
+    describe = preamble_sql + "\n" + _DESCRIBE.replace(_CUT, selection_sql)
+    verify = preamble_sql + "\n" + _VERIFY.replace(_CUT, selection_sql)
     holder: dict[str, Any] = {"value": None}
     annotations: list[dict[str, Any]] = []
     pending = [_Node([], [], annotations, holder, "value")]
@@ -373,8 +396,8 @@ async def capture_archive_native_records(
     while pending:
         response = _response(
             await execute_query(
-                _sql(_DESCRIBE, url),
-                record_ids=list(selected),
+                _sql(describe, url),
+                **parameters,
                 requests=[node.address for node in pending],
                 expected=fingerprint,
             ),
@@ -397,12 +420,12 @@ async def capture_archive_native_records(
     )
     _response(
         await execute_query(
-            _sql(_VERIFY, url),
-            record_ids=list(selected),
+            _sql(verify, url),
+            **parameters,
             expected=fingerprint,
             reconstructed=archive_native_value_parameters(envelope),
         ),
         expected=fingerprint,
         fields={"fingerprint"},
     )
-    return PreparedArchiveNativeCapture(envelope)
+    return envelope
