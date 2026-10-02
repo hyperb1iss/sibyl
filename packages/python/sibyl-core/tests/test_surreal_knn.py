@@ -19,6 +19,7 @@ from sibyl_core.backends.surreal.schema import (
     ANALYZER_DEFINITIONS,
     EDGE_DEFINITIONS,
     EMBEDDING_DIM,
+    ENTITY_TYPED_VECTOR_SPACE_INDEX_DEFINITIONS,
     ENTITY_VECTOR_SPACE_INDEX_DEFINITIONS,
     NODE_DEFINITIONS,
     _graph_schema_migrations,
@@ -780,8 +781,12 @@ async def test_entity_vector_space_index_registered_upgrade_retains_sources(
     vector_completion_client: SurrealGraphClient,
 ) -> None:
     client = vector_completion_client
-    migrations = _graph_schema_migrations(url=client._url, group_id=client.group_id)
-    assert await get_schema_version(client.execute_query, name="graph") == 34
+    migrations = tuple(
+        migration
+        for migration in _graph_schema_migrations(url=client._url, group_id=client.group_id)
+        if migration.version <= 34
+    )
+    assert await get_schema_version(client.execute_query, name="graph") == 35
     info = await client.execute_query("INFO FOR TABLE entity;")
     assert "idx_entity_vector_space" in info["indexes"]
 
@@ -796,7 +801,9 @@ async def test_entity_vector_space_index_registered_upgrade_retains_sources(
     try:
         for block in (
             ANALYZER_DEFINITIONS,
-            NODE_DEFINITIONS.replace(ENTITY_VECTOR_SPACE_INDEX_DEFINITIONS, ""),
+            NODE_DEFINITIONS.replace(ENTITY_VECTOR_SPACE_INDEX_DEFINITIONS, "").replace(
+                ENTITY_TYPED_VECTOR_SPACE_INDEX_DEFINITIONS, ""
+            ),
             EDGE_DEFINITIONS,
         ):
             await historical.execute_query(render_surreal_compatible_sql(block, url=client._url))
@@ -884,7 +891,7 @@ async def test_graph34_index_preserves_stamped_and_unstamped_dedup(
     from sibyl_core.models.entities import Entity
 
     client = vector_completion_client
-    assert await get_schema_version(client.execute_query, name="graph") == 34
+    assert await get_schema_version(client.execute_query, name="graph") == 35
     stamp = _overfetch_provider("dedup-space").metadata.to_dict()
     vector = [1.0, *([0.0] * (EMBEDDING_DIM - 1))]
     await client.execute_query(
@@ -1029,6 +1036,7 @@ async def test_graph34_index_preserves_context_vector_consumers(
     # Compare the same physical HNSW graph before the added scalar index.
     # Equal-vector ties belong to the approximate pool until its final sort.
     await execute("REMOVE INDEX idx_entity_vector_space ON entity;")
+    await execute("REMOVE INDEX idx_entity_typed_vector_space ON entity;")
 
     async def without_scalar_index(query: str, **params: object) -> object:
         return await execute(query.replace(" WITH INDEX idx_entity_embedding", ""), **params)
@@ -1039,6 +1047,7 @@ async def test_graph34_index_preserves_context_vector_consumers(
     finally:
         monkeypatch.setattr(client, "execute_query", observed)
         await execute(ENTITY_VECTOR_SPACE_INDEX_DEFINITIONS)
+        await execute(ENTITY_TYPED_VECTOR_SPACE_INDEX_DEFINITIONS)
     assert found == baseline
 
 
@@ -1123,11 +1132,11 @@ async def test_graph34_vector_index_preserves_nested_endpoint_reads(
     ]
 
 
-@pytest.mark.parametrize("typed", [False, True], ids=["untyped", "typed"])
+@pytest.mark.parametrize("type_selection", ["untyped", "typed", "all-types"])
 @pytest.mark.parametrize("global_limit", [False, True], ids=["complete-cohort", "global-limit"])
 async def test_adopted_vector_completion_bounds_all_stamp_partitions(
     vector_completion_client: SurrealGraphClient,
-    typed: bool,
+    type_selection: str,
     global_limit: bool,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1139,6 +1148,14 @@ async def test_adopted_vector_completion_bounds_all_stamp_partitions(
     client = vector_completion_client
     provider = _overfetch_provider("adopted-indexed-completion")
     stamp = provider.metadata.to_dict()
+    types = (
+        None
+        if type_selection == "untyped"
+        else [EntityType.TOPIC]
+        if type_selection == "typed"
+        else list(EntityType)
+    )
+    requested = {kind.value for kind in types or ()}
     fields = ("provider", "model", "dimensions")
     query_vector = [1.0, *([0.0] * (EMBEDDING_DIM - 1))]
     start = datetime(2026, 9, 30, 12, tzinfo=UTC)
@@ -1222,8 +1239,10 @@ async def test_adopted_vector_completion_bounds_all_stamp_partitions(
     exact_calls: list[tuple[str, dict[str, Any]]] = []
 
     async def observed(query: str, **params: Any) -> Any:
-        if global_limit and params.get("_query_label") == "entity.search.vector":
-            # Force a real ANN shortfall over the full eighty-vector cohort.
+        if (global_limit or type_selection == "all-types") and params.get(
+            "_query_label"
+        ) == "entity.search.vector":
+            # Force a real shortfall across full stamp and requested type cohorts.
             query = re.sub(r"<\|\d+,\s*(\d+)\|>", r"<|1, \1|>", query, count=1)
         result = await execute(query, **params)
         if params.get("_query_label") == "entity.search.vector.exact":
@@ -1235,11 +1254,11 @@ async def test_adopted_vector_completion_bounds_all_stamp_partitions(
         client, group_id=client.group_id, embedding_provider=provider
     )._vector_search(
         query="adopted completion",
-        entity_types=[EntityType.TOPIC] if typed else None,
+        entity_types=types,
         limit=5,
     )
     expected = sorted(
-        (row for row in rows if not typed or row["entity_type"] == "topic"),
+        (row for row in rows if not requested or row["entity_type"] in requested),
         key=lambda row: (
             _cosine_score(row["name_embedding"], query_vector),
             row["created_at"],
@@ -1271,9 +1290,315 @@ async def test_adopted_vector_completion_bounds_all_stamp_partitions(
                     yield from nodes(child)
 
         scans = [node for node in nodes(plan) if node.get("operator") == "IndexScan"]
-        assert len(scans) == 8, plan
+        assert len(scans) == 8 * (len(requested) or 1), plan
         assert all(
-            node.get("attributes", {}).get("index") == "idx_entity_vector_space" for node in scans
+            node.get("attributes", {}).get("index")
+            == ("idx_entity_typed_vector_space" if requested else "idx_entity_vector_space")
+            for node in scans
         ), plan
-        assert sum(node["metrics"]["output_rows"] for node in scans) == len(rows) + 1, plan
+        assert (
+            sum(node["metrics"]["output_rows"] for node in scans)
+            == sum(not requested or row["entity_type"] in requested for row in rows) + 1
+        ), plan
         assert not any(node.get("operator") == "TableScan" for node in nodes(plan)), plan
+
+
+@pytest.mark.parametrize("admit_unstamped", [False, True])
+@pytest.mark.parametrize("overfetch", [0, 4])
+async def test_entity_vector_completion_failure_retains_ann_rows(
+    monkeypatch: pytest.MonkeyPatch, admit_unstamped: bool, overfetch: int
+) -> None:
+    from structlog.testing import capture_logs
+
+    from sibyl_core.services.embedding_lane_readiness import LaneReadiness
+
+    async def ready(**_kwargs: object) -> LaneReadiness:
+        return LaneReadiness(run=True, reason="test", admit_unstamped=admit_unstamped)
+
+    monkeypatch.setattr("sibyl_core.services.embedding_lane_readiness.vector_lane_readiness", ready)
+    ann = [_entity_row("valid-ann", score=0.83), _entity_row("another-ann", score=0.74)]
+    client = _ScriptedClient(
+        "org-overfetch",
+        {"entity.search.vector": ann, "entity.search.vector.overfetch": ann[:1]},
+    )
+    execute = client.execute_query
+
+    async def fault(query: str, **params: object) -> list[dict[str, object]]:
+        if params.get("_query_label") == "entity.search.vector.exact":
+            raise RuntimeError("exact completion fault injection")
+        return await execute(query, **params)
+
+    monkeypatch.setattr(client, "execute_query", fault)
+    manager = EntityManager(
+        client, group_id=client.group_id, embedding_provider=_overfetch_provider("fault")
+    )
+    with capture_logs() as captured:
+        found = await manager._vector_search(
+            query="completion failure",
+            entity_types=[EntityType.TOPIC],
+            limit=5,
+            knn_type_overfetch=overfetch,
+        )
+    assert [(entity.id, score) for entity, score in found] == [
+        ("valid-ann", 0.83),
+        ("another-ann", 0.74),
+    ]
+    assert [
+        entry for entry in captured if entry["event"] == "entity_vector_search_completion_failed"
+    ] == [
+        {
+            "event": "entity_vector_search_completion_failed",
+            "log_level": "warning",
+            "error_type": "RuntimeError",
+            "ann_yield": 2,
+            "candidate_limit": 32,
+        }
+    ]
+    assert not any(entry["event"] == "entity_vector_search_failed" for entry in captured)
+
+
+@pytest.mark.parametrize("admit_unstamped", [False, True], ids=["strict", "adopted"])
+@pytest.mark.parametrize(
+    "types",
+    [
+        (EntityType.TOPIC,),
+        (EntityType.TOPIC, EntityType.PATTERN),
+        (EntityType.TOPIC, EntityType.PATTERN, EntityType.TOPIC),
+    ],
+    ids=["single", "multiple", "duplicate"],
+)
+async def test_typed_vector_completion_bounds_wrong_type_growth(
+    vector_completion_client: SurrealGraphClient,
+    monkeypatch: pytest.MonkeyPatch,
+    types: tuple[EntityType, ...],
+    admit_unstamped: bool,
+) -> None:
+    from datetime import timedelta
+    from itertools import product
+
+    from sibyl_core.services.embedding_lane_readiness import LaneReadiness
+
+    client = vector_completion_client
+    provider = _overfetch_provider("typed-space-completion")
+    stamp = provider.metadata.to_dict()
+    fields = ("provider", "model", "dimensions")
+    query_vector = [1.0, *([0.0] * (EMBEDDING_DIM - 1))]
+    start = datetime(2026, 9, 30, 12, tzinfo=UTC)
+    rows = []
+    for present in product((False, True), repeat=3):
+        for entity_type in ("topic", "pattern"):
+            for _ in range(4):
+                ordinal = len(rows)
+                angle = (ordinal // 4 + 1) / 50
+                rows.append(
+                    {
+                        "uuid": f"typed-{ordinal:04d}",
+                        "name": f"Typed {ordinal}",
+                        "entity_type": entity_type,
+                        "group_id": client.group_id,
+                        "name_embedding": [
+                            math.cos(angle),
+                            math.sin(angle),
+                            *([0.0] * (EMBEDDING_DIM - 2)),
+                        ],
+                        "attributes": {
+                            "embedding_metadata": {
+                                field: stamp[field]
+                                for field, exists in zip(fields, present, strict=True)
+                                if exists
+                            },
+                            "user_metadata": {"ordinal": ordinal},
+                        },
+                        "content": f"Full typed content {ordinal}",
+                        "created_at": start + timedelta(seconds=ordinal % 7),
+                        "revision": 9,
+                    }
+                )
+    nulls = [
+        {
+            "uuid": f"typed-null-{kind}",
+            "name": "Null vector",
+            "entity_type": kind,
+            "group_id": client.group_id,
+            "name_embedding": None,
+            "attributes": {"embedding_metadata": stamp},
+        }
+        for kind in ("topic", "pattern")
+    ]
+    await client.execute_query("INSERT INTO entity $rows;", rows=[*rows, *nulls])
+
+    async def ready(**_kwargs: object) -> LaneReadiness:
+        return LaneReadiness(run=True, reason="test", admit_unstamped=admit_unstamped)
+
+    async def embed_query(*_args: object, **_kwargs: object) -> list[list[float]]:
+        return [query_vector]
+
+    monkeypatch.setattr("sibyl_core.services.embedding_lane_readiness.vector_lane_readiness", ready)
+    monkeypatch.setattr(provider, "embed_texts", embed_query)
+    execute = client.execute_query
+    exact_calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def observed(query: str, **params: Any) -> Any:
+        if params.get("_query_label") == "entity.search.vector":
+            query = re.sub(r"<\|\d+,\s*(\d+)\|>", r"<|1, \1|>", query, count=1)
+        result = await execute(query, **params)
+        if params.get("_query_label") == "entity.search.vector.exact":
+            exact_calls.append((query, params))
+        return result
+
+    monkeypatch.setattr(client, "execute_query", observed)
+    requested = {kind.value for kind in types}
+    eligible = [
+        row
+        for row in rows
+        if row["entity_type"] in requested
+        and (
+            admit_unstamped
+            or all(
+                row["attributes"]["embedding_metadata"].get(field) == stamp[field]
+                for field in fields
+            )
+        )
+    ]
+    expected = sorted(
+        eligible,
+        key=lambda row: (
+            _cosine_score(row["name_embedding"], query_vector),
+            row["created_at"],
+            row["uuid"],
+        ),
+        reverse=True,
+    )[:32]
+    for growth in (320, 800):
+        wrong = []
+        for i in range(growth):
+            present = tuple(bool((i // 10 >> j) & 1) for j in range(3))
+            wrong.append(
+                {
+                    "uuid": f"wrong-type-{growth}-{i}",
+                    "name": "Wrong type",
+                    "entity_type": "note",
+                    "group_id": client.group_id,
+                    "name_embedding": query_vector,
+                    "attributes": {
+                        "embedding_metadata": {
+                            field: stamp[field]
+                            for field, exists in zip(fields, present, strict=True)
+                            if exists
+                        }
+                    },
+                }
+            )
+        await client.execute_query("INSERT INTO entity $rows;", rows=wrong)
+        found = await EntityManager(
+            client, group_id=client.group_id, embedding_provider=provider
+        )._vector_search(query="typed completion", entity_types=types, limit=5)
+        assert [entity.id for entity, _score in found] == [row["uuid"] for row in expected]
+        assert len({entity.id for entity, _score in found}) == len(found)
+        for (entity, score), row in zip(found, expected, strict=True):
+            assert score == pytest.approx(_cosine_score(row["name_embedding"], query_vector))
+            assert entity.content == row["content"]
+            assert entity.created_at == row["created_at"]
+            assert entity.metadata["user_metadata"] == row["attributes"]["user_metadata"]
+            assert entity.revision == 9
+        assert len(exact_calls) == (1 if growth == 320 else 2)
+        query, params = exact_calls[-1]
+        assert params["limit"] == 32
+        assert "entity_type IN" not in query
+        assert "'topic'" not in query and "'pattern'" not in query
+        assert {
+            value for key, value in params.items() if key.startswith("entity_type_")
+        } == requested
+        assert query.count("LIMIT $limit") == 1
+        if client._url != "memory://":
+            plan = await execute(query.rstrip().removesuffix(";") + " EXPLAIN FULL;", **params)
+
+            def nodes(value: object):
+                if isinstance(value, dict):
+                    yield value
+                    for child in value.values():
+                        yield from nodes(child)
+                elif isinstance(value, list):
+                    for child in value:
+                        yield from nodes(child)
+
+            scans = [node for node in nodes(plan) if node.get("operator") == "IndexScan"]
+            assert len(scans) == len(requested) * (8 if admit_unstamped else 1), plan
+            assert all(
+                node["attributes"]["index"] == "idx_entity_typed_vector_space" for node in scans
+            ), plan
+            assert sum(node["metrics"]["output_rows"] for node in scans) == len(eligible) + len(
+                requested
+            ), plan
+            assert not any(node.get("operator") == "TableScan" for node in nodes(plan)), plan
+
+
+async def test_entity_typed_vector_space_index_upgrade_retains_sources_and_associations(
+    vector_completion_client: SurrealGraphClient,
+) -> None:
+    client = vector_completion_client
+    migrations = _graph_schema_migrations(url=client._url, group_id=client.group_id)
+    assert await get_schema_version(client.execute_query, name="graph") == 35
+    assert {"idx_entity_vector_space", "idx_entity_typed_vector_space", "idx_entity_embedding"} <= (
+        await client.execute_query("INFO FOR TABLE entity;")
+    )["indexes"].keys()
+    historical = SurrealGraphClient(
+        group_id="typed-vector-upgrade-" + uuid4().hex,
+        url=client._url,
+        username=os.environ.get("SIBYL_ARCHIVE_TEST_SURREAL_USERNAME", ""),
+        password=os.environ.get("SIBYL_ARCHIVE_TEST_SURREAL_PASSWORD", ""),
+    )
+    try:
+        for block in (
+            ANALYZER_DEFINITIONS,
+            NODE_DEFINITIONS.replace(ENTITY_TYPED_VECTOR_SPACE_INDEX_DEFINITIONS, ""),
+            EDGE_DEFINITIONS,
+        ):
+            await historical.execute_query(render_surreal_compatible_sql(block, url=client._url))
+        old = tuple(migration for migration in migrations if migration.version <= 34)
+        await apply_schema_migrations(historical.execute_query, old, name="graph")
+        assert await get_schema_version(historical.execute_query, name="graph") == 34
+        assert (
+            "idx_entity_typed_vector_space"
+            not in (await historical.execute_query("INFO FOR TABLE entity;"))["indexes"]
+        )
+        await _seed_entities(
+            historical, 12, stamp=_overfetch_provider("typed-upgrade").metadata.to_dict()
+        )
+        await historical.execute_query(
+            "CREATE memory_derivations CONTENT $association;",
+            association={
+                "organization_id": historical.group_id,
+                "target_kind": "graph_entity",
+                "target_id": "knn_pool_0000",
+                "body_sha256": "b" * 64,
+                "principal_id": "proof-owner",
+                "authority_ceiling": {},
+                "observations": [],
+                "active": True,
+            },
+        )
+        before = {}
+        for table in ("entity", "source_states", "memory_derivations"):
+            before[table] = await historical.execute_query(f"SELECT * FROM {table} ORDER BY id;")
+        applied = await apply_schema_migrations(historical.execute_query, migrations, name="graph")
+        assert [migration.version for migration in applied] == [35]
+        assert await get_schema_version(historical.execute_query, name="graph") == 35
+        assert {
+            "idx_entity_vector_space",
+            "idx_entity_typed_vector_space",
+            "idx_entity_embedding",
+        } <= (await historical.execute_query("INFO FOR TABLE entity;"))["indexes"].keys()
+        for table, snapshot in before.items():
+            assert await historical.execute_query(f"SELECT * FROM {table} ORDER BY id;") == snapshot
+        assert before["source_states"] and before["memory_derivations"]
+        assert (
+            await apply_schema_migrations(historical.execute_query, migrations, name="graph") == []
+        )
+    finally:
+        await historical.execute_query(f"REMOVE NAMESPACE {historical.namespace};")
+        assert (
+            historical.namespace
+            not in (await historical.execute_query("INFO FOR ROOT;"))["namespaces"]
+        )
+        await historical.close()

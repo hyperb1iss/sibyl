@@ -106,7 +106,7 @@ async def store(request):
     trace = []
     try:
         applied = await initialize(client, request.param, url, migrations)
-        assert applied[-1].version == (52 if request.param == "content" else 34)
+        assert applied[-1].version == (52 if request.param == "content" else 35)
         assert (
             await apply_schema_migrations(client.execute_query, migrations, name=request.param)
             == []

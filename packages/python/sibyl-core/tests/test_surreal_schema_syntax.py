@@ -1892,3 +1892,19 @@ def test_entity_vector_space_completion_index_is_versioned() -> None:
     assert "FIELDS attributes.embedding_metadata.provider" in migration.statements[0]
     assert "attributes.embedding_metadata.model" in migration.statements[0]
     assert "attributes.embedding_metadata.dimensions, group_id" in migration.statements[0]
+
+
+def test_entity_typed_vector_space_completion_index_is_versioned() -> None:
+    from sibyl_core.backends.surreal.schema import ENTITY_TYPED_VECTOR_SPACE_INDEX_DEFINITIONS
+
+    migration = next(
+        item for item in GRAPH_SCHEMA_MIGRATIONS if item.name == "entity_typed_vector_space_index"
+    )
+    assert migration.version == 35
+    assert migration.statements == tuple(
+        split_statements(ENTITY_TYPED_VECTOR_SPACE_INDEX_DEFINITIONS)
+    )
+    assert ENTITY_TYPED_VECTOR_SPACE_INDEX_DEFINITIONS in NODE_DEFINITIONS
+    assert "FIELDS entity_type, attributes.embedding_metadata.provider" in migration.statements[0]
+    assert "attributes.embedding_metadata.model" in migration.statements[0]
+    assert "attributes.embedding_metadata.dimensions, group_id" in migration.statements[0]

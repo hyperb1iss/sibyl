@@ -280,7 +280,7 @@ async def test_archive_phase_registration_uses_next_store_versions():
     assert content.version == 51
     assert graph.version == 32
     assert content_migrations[-1].version == CONTENT_SCHEMA_CURRENT_VERSION == 52
-    assert GRAPH_SCHEMA_MIGRATIONS[-1].version == GRAPH_SCHEMA_CURRENT_VERSION == 34
+    assert GRAPH_SCHEMA_MIGRATIONS[-1].version == GRAPH_SCHEMA_CURRENT_VERSION == 35
     assert content.name == "content_archive_phase_receipts"
     assert graph.name == "graph_archive_phase_receipts"
     assert content.statements == graph.statements

@@ -5201,7 +5201,11 @@ async def test_native_entity_manager_uncertain_or_present_type_preserves_ranking
         limit=3,
     )
     baseline_calls = [
-        (query, {**params, "entity_types": ["topic"]}) for query, params in client.calls
+        (
+            query,
+            {**params, **({"entity_types": ["topic"]} if "entity_types" in params else {})},
+        )
+        for query, params in client.calls
     ]
     client.calls.clear()
 
@@ -5344,7 +5348,10 @@ async def test_native_entity_manager_present_type_preserves_vector_fusion() -> N
         limit=3,
     )
     expected_calls = [
-        (query, {**params, "entity_types": ["topic"]})
+        (
+            query,
+            {**params, **({"entity_types": ["topic"]} if "entity_types" in params else {})},
+        )
         for query, params in _search_calls(client.calls)
     ]
     client.calls.clear()
