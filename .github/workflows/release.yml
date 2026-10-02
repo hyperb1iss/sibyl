@@ -739,12 +739,29 @@ jobs:
           path: .moon/cache/release/*.json
           if-no-files-found: error
 
+      # Other work can merge to main during the hour the gates take. The tag
+      # always names the gated commit; when main has moved, the version pins
+      # reach it through a merge instead of a rejected push, and the branch
+      # and the tag land atomically. The landing refuses, before pushing
+      # anything, when the commits that merged meanwhile touch a pin or the
+      # release tooling (tools/release/land_release.py).
       - name: "◆ Create and push tag"
         if: ${{ !inputs.dry_run }}
+        id: land
+        env:
+          BASE_SHA: ${{ steps.base.outputs.sha }}
+          BRANCH: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
+          set -euo pipefail
           git tag -a "v${{ steps.version.outputs.version }}" -m "Release v${{ steps.version.outputs.version }}"
-          git push origin HEAD:${{ github.ref_name }}
-          git push origin "v${{ steps.version.outputs.version }}"
+          uv run python tools/release/sync_versions.py --list-targets > "$RUNNER_TEMP/release-guards.txt"
+          python3 -m tools.release.land_release \
+            --branch "$BRANCH" \
+            --tag "v$VERSION" \
+            --base-sha "$BASE_SHA" \
+            --guard-file "$RUNNER_TEMP/release-guards.txt" \
+            --guard tools/release/
 
       # Created as a pre-release that is explicitly not "latest", and promoted
       # to a full release by the last job of the publish workflow, once the
@@ -810,6 +827,8 @@ jobs:
               fi
             else
               echo "✓ Released: ${{ steps.version.outputs.previous_tag }} → v${{ steps.version.outputs.version }}"
+              echo ""
+              echo "- Landed on \`${{ github.ref_name }}\` by ${{ steps.land.outputs.mode }} at \`${{ steps.land.outputs.branch_sha }}\`"
               echo ""
               echo "### Published Packages"
               echo "- [sibyl-core on PyPI](https://pypi.org/project/sibyl-core/${{ steps.version.outputs.version }}/)"
