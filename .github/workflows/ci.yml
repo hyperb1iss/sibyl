@@ -13,9 +13,13 @@ defaults:
   run:
     shell: bash
 
+# A pull request cancels its superseded runs. Every push to main keeps its own
+# group and runs to completion: the Release workflow cites the CI run on its
+# exact candidate commit, and a merge landing behind that commit would
+# otherwise cancel the evidence (a shared group also cancels pending runs).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   COMPOSE_PROJECT_NAME: sibyl-ci
