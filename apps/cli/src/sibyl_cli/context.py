@@ -45,6 +45,7 @@ from sibyl_cli.config_store import (
     update_context,
 )
 from sibyl_cli.context_quick import quick_context_payload, render_quick_context
+from sibyl_cli.link_paths import resolve_link_target, resolve_unlink_target
 from sibyl_cli.project_refs import (
     PROJECT_RELINK_HINT,
     list_accessible_projects,
@@ -813,6 +814,13 @@ def link_cmd(
     path: Annotated[
         str | None, typer.Option("--path", "-p", help="Directory path (defaults to cwd)")
     ] = None,
+    this_worktree: Annotated[
+        bool,
+        typer.Option(
+            "--this-worktree",
+            help="Inside a git worktree, pin only this worktree instead of its repository",
+        ),
+    ] = False,
 ) -> None:
     """Pin a directory tree to a context so commands here route to its server.
 
@@ -820,7 +828,6 @@ def link_cmd(
     so new repositories under this tree route to the right server before they are
     linked to a specific project.
     """
-    import os
 
     ctx = get_context(name)
     if not ctx:
@@ -830,8 +837,14 @@ def link_cmd(
             info(f"Available: {', '.join(c.name for c in contexts)}")
         raise typer.Exit(1)
 
-    target_path = path or os.getcwd()
+    link_target = resolve_link_target(path, this_worktree=this_worktree, fields=("context",))
+    target_path = link_target.path
     set_path_context(target_path, name)
+    if link_target.shadowing_pin and remove_path_context(link_target.shadowing_pin):
+        info(
+            f"Removed the worktree's own context pin on {link_target.shadowing_pin}, "
+            "which would have overridden it"
+        )
     clear_client_cache()  # New connections under this path use the pinned context
 
     success(f"Pinned [{NEON_CYAN}]{target_path}[/{NEON_CYAN}] to context '{name}'")
@@ -846,9 +859,7 @@ def unlink_cmd(
     ] = None,
 ) -> None:
     """Remove the context pin from a directory (keeps any project link)."""
-    import os
-
-    target_path = path or os.getcwd()
+    target_path = resolve_unlink_target(path, "context")
     if remove_path_context(target_path):
         clear_client_cache()
         success(f"Unpinned context from [{NEON_CYAN}]{target_path}[/{NEON_CYAN}]")

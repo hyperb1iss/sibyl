@@ -246,9 +246,10 @@ sibyl project link <project_id> [options]
 
 ### Options
 
-| Option   | Short | Default | Description            |
-| -------- | ----- | ------- | ---------------------- |
-| `--path` | `-p`  | cwd     | Directory path to link |
+| Option            | Short | Default | Description                                               |
+| ----------------- | ----- | ------- | --------------------------------------------------------- |
+| `--path`          | `-p`  | cwd     | Directory path to link                                    |
+| `--this-worktree` |       | off     | Inside a git worktree, pin only this worktree (see below) |
 
 ### Example
 
@@ -290,6 +291,27 @@ The link is stored in `~/.sibyl/config.toml`:
 "/home/user/dev/mobile-app" = "proj_xyz789"
 ```
 
+### Git worktrees
+
+Every worktree of a repository routes like the repository. Run `sibyl project link` inside a git
+worktree and the link is stored at the equivalent path in the main checkout, so the main checkout
+and all of its worktrees, current and future, reach the same project and server:
+
+```bash
+cd ~/dev/worktrees/backend-api/fix-login
+sibyl project link proj_abc123
+# links ~/dev/backend-api, which every worktree of it uses
+```
+
+If the worktree had its own link, that link is removed, since it would keep overriding the
+repository's. Pass `--this-worktree` to pin a single worktree on purpose.
+
+Inside a worktree, a directory resolves its project and server in this order: a link inside the
+worktree itself, then the equivalent path in the main checkout (so a link on
+`~/dev/backend-api/apps/web` also applies in `apps/web` of every worktree), then the nearest linked
+parent directory. The project and the server resolve separately, so a worktree link that names only
+a project still uses the repository's server.
+
 ---
 
 ## project relink
@@ -305,10 +327,11 @@ sibyl project relink [options]
 
 ### Options
 
-| Option   | Short | Default | Description                                  |
-| -------- | ----- | ------- | -------------------------------------------- |
-| `--id`   |       | (none)  | Project ID, UUID, name, or slug to relink to |
-| `--path` | `-p`  | cwd     | Directory path                               |
+| Option            | Short | Default | Description                                   |
+| ----------------- | ----- | ------- | --------------------------------------------- |
+| `--id`            |       | (none)  | Project ID, UUID, name, or slug to relink to  |
+| `--path`          | `-p`  | cwd     | Directory path                                |
+| `--this-worktree` |       | off     | Inside a git worktree, pin only this worktree |
 
 ### Example
 
@@ -354,17 +377,27 @@ Unlinked /home/user/dev/backend-api
 sibyl project unlink --path ~/dev/old-project
 ```
 
+Inside a git worktree without a link of its own, `unlink` removes the repository's link, which every
+worktree of it uses, and says so.
+
 ---
 
 ## project links
 
-List all directory-to-project links.
+List all directory-to-project links, or plan a cleanup of them.
 
 ### Synopsis
 
 ```bash
-sibyl project links
+sibyl project links [--prune [--apply]]
 ```
+
+### Options
+
+| Option    | Default | Description                                 |
+| --------- | ------- | ------------------------------------------- |
+| `--prune` | off     | Plan a cleanup of directory links (dry run) |
+| `--apply` | off     | With `--prune`, write the planned cleanup   |
 
 ### Example
 
@@ -384,6 +417,29 @@ Project Links:
 
 * = current context
 ```
+
+### Cleaning up links
+
+Links made inside worktrees by older CLI versions live on the worktree path, and removed worktrees
+leave their links behind. `--prune` plans a cleanup:
+
+- Links whose checkout is gone (a removed worktree) and empty links are dropped.
+- A worktree link the repository's link already implies is dropped.
+- A worktree link moves onto its repository when the repository has none and every worktree agrees.
+  This deliberately makes the repository and its other worktrees route that way too.
+- A worktree link that pins something different is kept and reported, with the command to remove it.
+- A change that would expose a pin higher up in the same worktree is kept and reported.
+
+Apart from lifts, no link's own directory changes where it routes. A directory below a dropped
+worktree link can start following a deeper link in the repository, which is how the main checkout
+already routes it.
+
+```bash
+sibyl project links --prune          # dry run: prints the plan
+sibyl project links --prune --apply  # writes it
+```
+
+`--apply` re-plans under the config lock and refuses if the links changed since the dry run.
 
 ---
 
