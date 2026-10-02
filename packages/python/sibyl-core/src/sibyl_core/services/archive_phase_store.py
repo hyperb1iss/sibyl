@@ -28,6 +28,7 @@ from sibyl_core.migrate.archive_phase_receipts import (
 )
 
 _PREFIX = "sibyl_archive_phase_"
+_UNUSED_STORE_CLOSE_WRITER = "LET $sibyl_archive_phase_outcomes = [];"
 
 # The native encoding retains datetime precision and physical record identity.
 # These fingerprints are deliberately distinct from checked semantic digests.
@@ -235,6 +236,7 @@ def prepare_archive_phase_transaction(
     terminal: bool = False,
     retirement_candidates: tuple[IntroducedArchiveRow, ...] = (),
     planned_creates: tuple[ArchiveCreatedIdentity, ...] = (),
+    _unused_store_close: bool = False,
 ) -> PreparedArchivePhaseTransaction:
     """Compose only trusted, server-owned writer SQL with its native receipt.
 
@@ -285,6 +287,22 @@ def prepare_archive_phase_transaction(
         raise ValueError("archive planned creates belong to another store")
     if key.action != "apply" and planned:
         raise ValueError("archive rollback cannot plan creates")
+    if type(_unused_store_close) is not bool or (
+        _unused_store_close
+        and (
+            key.action != "rollback"
+            or key.batch_sequence != 0
+            or expected_revision != 0
+            or not terminal
+            or rollback_token is None
+            or rollback_token == expected_token
+            or candidates
+            or planned
+            or writer_parameters
+            or writer_statements != _UNUSED_STORE_CLOSE_WRITER
+        )
+    ):
+        raise ValueError("unused archive store closure must be a fixed empty terminal phase")
     parameters = {
         **writer_parameters,
         _PREFIX + "org": binding.organization_id,
@@ -301,15 +319,25 @@ def prepare_archive_phase_transaction(
         _PREFIX + "token": control.token,
         _PREFIX + "next_token": next_token,
         _PREFIX + "terminal": terminal,
+        _PREFIX + "unused_store_close": _unused_store_close,
         _PREFIX + "planned_creates": [row.model_dump(mode="json") for row in planned],
         _PREFIX + "retirement_candidates": [row.model_dump(mode="json") for row in candidates],
     }
     parameters_json = strict_phase_json(parameters)
     query = """BEGIN TRANSACTION;
+IF $sibyl_archive_phase_unused_store_close {
+    LET $sibyl_archive_phase_existing_receipts = SELECT id FROM archive_phase_receipts
+        WHERE organization_id = $sibyl_archive_phase_org AND run_id = $sibyl_archive_phase_run
+            AND store = $sibyl_archive_phase_store LIMIT 1;
+    IF array::len($sibyl_archive_phase_existing_receipts) != 0 {
+        THROW 'Archive store already has committed phase evidence';
+    };
+};
 LET $sibyl_archive_phase_control = (SELECT * FROM archive_phase_controls
     WHERE organization_id = $sibyl_archive_phase_org AND run_id = $sibyl_archive_phase_run)[0];
 IF $sibyl_archive_phase_control = NONE {
-    IF $sibyl_archive_phase_revision != 0 OR $sibyl_archive_phase_action != 'apply' {
+    IF $sibyl_archive_phase_revision != 0 OR ($sibyl_archive_phase_action != 'apply'
+        AND !$sibyl_archive_phase_unused_store_close) {
         THROW 'Archive phase control is missing';
     };
     CREATE archive_phase_controls CONTENT {
@@ -426,6 +454,33 @@ COMMIT TRANSACTION;
             url=url,
         ),
         parameters_json=parameters_json,
+    )
+
+
+def prepare_archive_unused_store_close(
+    *,
+    key: ArchivePhaseKey,
+    url: str,
+    expected_token: str,
+    rollback_token: str,
+) -> PreparedArchivePhaseTransaction:
+    """Close first-apply admission without inventing a committed apply phase.
+
+    The caller owns verified saved input and current rollback authorization.
+    An unused store has no phase receipt. Native admission either closes it
+    atomically with its genuine empty terminal receipt, or rejects a first
+    apply winner so the caller must recover that committed phase instead.
+    """
+    return prepare_archive_phase_transaction(
+        key=key,
+        url=url,
+        expected_revision=0,
+        expected_token=expected_token,
+        writer_statements=_UNUSED_STORE_CLOSE_WRITER,
+        writer_parameters={},
+        rollback_token=rollback_token,
+        terminal=True,
+        _unused_store_close=True,
     )
 
 
