@@ -73,7 +73,7 @@ llm = [
     # json_schema while Sibyl reports and budgets tool mode, and deprecates
     # the Bedrock profile's forced-tool-choice key. Lift the cap together
     # with the move to the new output modes.
-    "pydantic-ai-slim[anthropic,google,openai]>=2.42.0,<2.52",
+    "pydantic-ai-slim[anthropic,google,openai]>=2.51.0,<2.52",
 ]
 reranking = [
     "sentence-transformers>=5.6.1",
@@ -96,7 +96,7 @@ dev = [
     # so CI stays fast; its tests mock the cross-encoder instead.
     "surrealdb>=2.0.0,<3.0",
     "numpy>=2.5.1",
-    "pydantic-ai-slim[anthropic,google,openai]>=2.42.0,<2.52",
+    "pydantic-ai-slim[anthropic,google,openai]>=2.51.0,<2.52",
     "ty>=0.0.84",
 ]
 
