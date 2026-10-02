@@ -16,7 +16,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import tomli_w
 
@@ -483,39 +483,95 @@ def remove_path_mapping(path: str) -> bool:
     return update_config(mutation)
 
 
-def _resolve_worktree_main_repo(start_path: Path) -> Path | None:
-    """Detect if path is inside a git worktree and resolve to main repo.
+@dataclass(frozen=True)
+class LinkCleanup:
+    """One planned change to the ``[paths]`` table."""
+
+    action: Literal["drop_missing", "lift", "drop_duplicate"]
+    path: str
+    project: str | None = None
+    context: str | None = None
+    # The repository path a worktree entry belongs on, and (for drop_duplicate)
+    # the link already stored there.
+    target: str | None = None
+    kept_project: str | None = None
+    kept_context: str | None = None
+
+
+def plan_link_cleanup() -> list[LinkCleanup]:
+    """Plan moving worktree links onto their repositories and dropping dead links.
+
+    A worktree entry moves to the equivalent path in its main repository when
+    that path has no link yet, and is dropped when it does (the repository's
+    link already governs every worktree). Entries for directories that no
+    longer exist, such as removed worktrees, are dropped.
+    """
+    paths = load_config().get("paths", {})
+    planned: dict[str, tuple[str | None, str | None]] = {}
+    actions: list[LinkCleanup] = []
+    for mapped_path in sorted(paths):
+        project, context = _path_entry_fields(paths[mapped_path])
+        if not Path(mapped_path).exists():
+            actions.append(LinkCleanup("drop_missing", mapped_path, project, context))
+            continue
+        target, worktree_root = canonical_link_path(mapped_path)
+        if worktree_root is None:
+            continue
+        kept = planned.get(target) or _path_entry_fields(paths.get(target))
+        if any(kept):
+            actions.append(
+                LinkCleanup(
+                    "drop_duplicate",
+                    mapped_path,
+                    project,
+                    context,
+                    target=target,
+                    kept_project=kept[0],
+                    kept_context=kept[1],
+                )
+            )
+        else:
+            planned[target] = (project, context)
+            actions.append(LinkCleanup("lift", mapped_path, project, context, target=target))
+    return actions
+
+
+def apply_link_cleanup(actions: list[LinkCleanup]) -> None:
+    """Write a cleanup plan in one config update."""
+
+    def mutation(config: dict[str, Any]) -> None:
+        paths = config.setdefault("paths", {})
+        for action in actions:
+            if action.action == "lift" and action.target:
+                paths[action.target] = _make_path_entry(action.project, action.context)
+            paths.pop(action.path, None)
+
+    update_config(mutation)
+
+
+def _worktree_location(start_path: Path) -> tuple[Path, Path] | None:
+    """Locate the git worktree containing a path: (worktree root, main repo root).
 
     Git worktrees have a .git file (not directory) containing:
         gitdir: /path/to/main/repo/.git/worktrees/<worktree-name>
 
-    Args:
-        start_path: Path to check (typically cwd)
-
-    Returns:
-        Main repo path if in a worktree, None otherwise
+    Returns None for a regular checkout, a path outside any repository, or a
+    .git file that does not point into a main repository's worktrees directory.
     """
-    # Walk up to find .git file/directory
     current = start_path
     while current != current.parent:
         git_path = current / ".git"
         if git_path.exists():
             if git_path.is_file():
-                # Worktree detected - parse gitdir
                 try:
                     content = git_path.read_text().strip()
                     if content.startswith("gitdir:"):
-                        gitdir = content[7:].strip()
-                        # gitdir looks like: /main/repo/.git/worktrees/branch-name
-                        # Walk up from gitdir to find the main .git, then its parent
-                        gitdir_path = Path(gitdir).resolve()
-                        # Should be under .git/worktrees/, go up to .git then to repo root
+                        gitdir_path = Path(content[7:].strip()).resolve()
                         if "worktrees" in gitdir_path.parts:
-                            # Find the .git directory (parent of worktrees)
                             worktrees_idx = gitdir_path.parts.index("worktrees")
                             main_git = Path(*gitdir_path.parts[:worktrees_idx])
                             if main_git.name == ".git":
-                                return main_git.parent
+                                return current, main_git.parent
                 except (OSError, ValueError):
                     pass
             # Regular repo or failed to parse - stop searching
@@ -524,114 +580,111 @@ def _resolve_worktree_main_repo(start_path: Path) -> Path | None:
     return None
 
 
-def _find_project_in_mappings(
-    search_path: Path, mappings: dict[str, str]
-) -> tuple[str | None, int]:
-    """Find best matching project for a path in mappings.
+def _resolve_worktree_main_repo(start_path: Path) -> Path | None:
+    """Main repository root for a path inside a git worktree, else None."""
+    location = _worktree_location(start_path)
+    return location[1] if location else None
 
-    Returns:
-        Tuple of (project_id, match_length) or (None, 0) if not found
+
+def canonical_link_path(path: str) -> tuple[str, str | None]:
+    """Where a directory link for ``path`` belongs: (path to store, worktree root).
+
+    A link made inside a git worktree is stored at the equivalent path in the
+    main repository, so every worktree of that repository (current and future)
+    routes the same way. Worktrees are disposable; a pin on one goes stale when
+    it is removed and silently overrides the repository while it exists.
     """
-    best_match: str | None = None
-    best_length = 0
+    resolved = Path(path).expanduser().resolve()
+    location = _worktree_location(resolved)
+    if location is None:
+        return str(resolved), None
+    worktree_root, main_repo = location
+    return str(main_repo / resolved.relative_to(worktree_root)), str(worktree_root)
 
-    for mapped_path, project_id in mappings.items():
+
+def _best_prefix(
+    search_path: Path, mappings: dict[str, str], *, within: Path | None = None
+) -> tuple[str | None, str | None]:
+    """Longest mapped ancestor of ``search_path``: (value, mapped path).
+
+    ``within`` restricts candidates to mapped paths inside that directory.
+    """
+    best: tuple[str | None, str | None] = (None, None)
+    best_length = -1
+    for mapped_path, value in mappings.items():
         mapped = Path(mapped_path)
-        try:
-            search_path.relative_to(mapped)
-            if len(mapped_path) > best_length:
-                best_match = project_id
-                best_length = len(mapped_path)
-        except ValueError:
+        if within is not None and not mapped.is_relative_to(within):
             continue
+        if search_path.is_relative_to(mapped) and len(mapped.parts) > best_length:
+            best = (value, mapped_path)
+            best_length = len(mapped.parts)
+    return best
 
-    return best_match, best_length
+
+def _match_link(cwd: Path, mappings: dict[str, str]) -> tuple[str | None, str | None]:
+    """Resolve one link field for a directory: (value, mapped path).
+
+    Outside a worktree the longest mapped ancestor wins. Inside one, precedence
+    is by meaning rather than by raw path length (a worktree path is always
+    longer than its repository's): an explicit pin inside the worktree, then the
+    equivalent path in the main repository (so a link on a subdirectory of the
+    repository applies in every worktree too), then the nearest ancestor
+    directory pin of either location.
+    """
+    location = _worktree_location(cwd)
+    if location is None:
+        return _best_prefix(cwd, mappings)
+    worktree_root, main_repo = location
+    pinned = _best_prefix(cwd, mappings, within=worktree_root)
+    if pinned[0]:
+        return pinned
+    equivalent = main_repo / cwd.relative_to(worktree_root)
+    inherited = _best_prefix(equivalent, mappings, within=main_repo)
+    if inherited[0]:
+        return inherited
+    around_worktree = _best_prefix(cwd, mappings)
+    around_repo = _best_prefix(main_repo, mappings)
+    candidates = [hit for hit in (around_worktree, around_repo) if hit[0] and hit[1]]
+    if not candidates:
+        return None, None
+    return max(candidates, key=lambda hit: len(Path(str(hit[1])).parts))
 
 
 def resolve_project_from_cwd() -> str | None:
     """Resolve project ID from current working directory.
 
-    Walks up from cwd looking for longest matching path prefix.
-    If in a git worktree, also checks the main repo's path.
+    Walks up from cwd looking for the nearest linked directory. Inside a git
+    worktree, the main repository's links apply too (see ``_match_link``).
 
     Returns:
         Project ID if found, None otherwise
     """
     import os
 
-    cwd = Path(os.getcwd()).resolve()
     mappings = get_path_mappings()
-
     if not mappings:
         return None
-
-    # First try direct cwd match
-    best_match, best_length = _find_project_in_mappings(cwd, mappings)
-
-    # If in a worktree, also check the main repo path
-    main_repo = _resolve_worktree_main_repo(cwd)
-    if main_repo:
-        repo_match, repo_length = _find_project_in_mappings(main_repo, mappings)
-        # Use main repo match if it's better (or only match)
-        if repo_match and repo_length > best_length:
-            best_match = repo_match
-
-    return best_match
+    return _match_link(Path(os.getcwd()).resolve(), mappings)[0]
 
 
 def resolve_context_from_cwd() -> str | None:
     """Resolve the pinned context name from the current working directory.
 
-    Walks up from cwd looking for the longest matching path prefix in the context
-    pins, and (when inside a git worktree) the main repo path too. This is what lets
-    a directory route to its own Sibyl server without a manual ``context use``.
+    Walks up from cwd looking for the nearest context pin, and (when inside a
+    git worktree) the main repository's pins too. This is what lets a directory
+    route to its own Sibyl server without a manual ``context use``. The context
+    resolves independently of the project, so a worktree link that names only a
+    project still inherits its repository's server.
 
     Returns:
         Context name if a pin covers the cwd, None otherwise.
     """
     import os
 
-    cwd = Path(os.getcwd()).resolve()
     mappings = get_path_context_mappings()
-
     if not mappings:
         return None
-
-    best_match, best_length = _find_project_in_mappings(cwd, mappings)
-
-    main_repo = _resolve_worktree_main_repo(cwd)
-    if main_repo:
-        repo_match, repo_length = _find_project_in_mappings(main_repo, mappings)
-        if repo_match and repo_length > best_length:
-            best_match = repo_match
-
-    return best_match
-
-
-def _find_project_with_path(
-    search_path: Path, mappings: dict[str, str]
-) -> tuple[str | None, str | None, int]:
-    """Find best matching project for a path, returning both ID and matched path.
-
-    Returns:
-        Tuple of (project_id, matched_path, match_length)
-    """
-    best_match: str | None = None
-    best_path: str | None = None
-    best_length = 0
-
-    for mapped_path, project_id in mappings.items():
-        mapped = Path(mapped_path)
-        try:
-            search_path.relative_to(mapped)
-            if len(mapped_path) > best_length:
-                best_match = project_id
-                best_path = mapped_path
-                best_length = len(mapped_path)
-        except ValueError:
-            continue
-
-    return best_match, best_path, best_length
+    return _match_link(Path(os.getcwd()).resolve(), mappings)[0]
 
 
 def get_current_context() -> tuple[str | None, str | None]:
@@ -644,25 +697,10 @@ def get_current_context() -> tuple[str | None, str | None]:
     """
     import os
 
-    cwd = Path(os.getcwd()).resolve()
     mappings = get_path_mappings()
-
     if not mappings:
         return None, None
-
-    # First try direct cwd match
-    best_match, best_path, best_length = _find_project_with_path(cwd, mappings)
-
-    # If in a worktree, also check the main repo path
-    main_repo = _resolve_worktree_main_repo(cwd)
-    if main_repo:
-        repo_match, repo_path, repo_length = _find_project_with_path(main_repo, mappings)
-        # Use main repo match if it's better (or only match)
-        if repo_match and repo_length > best_length:
-            best_match = repo_match
-            best_path = repo_path
-
-    return best_match, best_path
+    return _match_link(Path(os.getcwd()).resolve(), mappings)
 
 
 # --- Private helpers ---

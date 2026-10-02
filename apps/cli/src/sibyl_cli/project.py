@@ -4,7 +4,6 @@ Commands: list, show, create, update, progress, link, unlink.
 All commands communicate with the REST API to ensure proper event broadcasting.
 """
 
-import os
 from typing import Annotated
 
 import typer
@@ -30,13 +29,16 @@ from sibyl_cli.common import (
     warn,
 )
 from sibyl_cli.config_store import (
+    apply_link_cleanup,
     get_context,
     get_current_context,
     get_path_context_mappings,
     get_path_mappings,
+    plan_link_cleanup,
     remove_path_mapping,
     set_path_mapping,
 )
+from sibyl_cli.link_paths import resolve_link_target, resolve_unlink_target
 from sibyl_cli.project_refs import (
     PROJECT_RELINK_HINT,
     list_accessible_projects,
@@ -359,16 +361,25 @@ def link_project(
     path: Annotated[
         str | None, typer.Option("--path", "-p", help="Directory path (defaults to cwd)")
     ] = None,
+    this_worktree: Annotated[
+        bool,
+        typer.Option(
+            "--this-worktree",
+            help="Inside a git worktree, pin only this worktree instead of its repository",
+        ),
+    ] = False,
 ) -> None:
     """Link current directory to a project for automatic context.
 
     Once linked, task commands in this directory will auto-scope to the project.
+    Inside a git worktree the link is stored on the main repository, so every
+    worktree of it routes the same way.
 
     Examples:
         sibyl project link project_abc123     # Link cwd to specific project
         sibyl project link project_abc --path ~/dev/myproject
     """
-    target_path = path or os.getcwd()
+    target_path = resolve_link_target(path, this_worktree=this_worktree)
 
     @run_async
     async def _link() -> None:
@@ -405,9 +416,16 @@ def relink_project(
     path: Annotated[
         str | None, typer.Option("--path", "-p", help="Directory path (defaults to cwd)")
     ] = None,
+    this_worktree: Annotated[
+        bool,
+        typer.Option(
+            "--this-worktree",
+            help="Inside a git worktree, pin only this worktree instead of its repository",
+        ),
+    ] = False,
 ) -> None:
     """Repair the project link for the current directory."""
-    target_path = path or os.getcwd()
+    target_path = resolve_link_target(path, this_worktree=this_worktree)
 
     @run_async
     async def _relink() -> None:
@@ -472,7 +490,7 @@ def unlink_project(
         sibyl project unlink              # Unlink cwd
         sibyl project unlink --path ~/dev/myproject
     """
-    target_path = path or os.getcwd()
+    target_path = resolve_unlink_target(path)
 
     if remove_path_mapping(target_path):
         success(f"Unlinked [{NEON_CYAN}]{target_path}[/{NEON_CYAN}]")
@@ -481,8 +499,26 @@ def unlink_project(
 
 
 @app.command("links")
-def list_links() -> None:
+def list_links(
+    prune: Annotated[
+        bool,
+        typer.Option(
+            "--prune",
+            help="Plan a cleanup: move worktree links onto their repository and drop "
+            "links to directories that no longer exist",
+        ),
+    ] = False,
+    apply: Annotated[
+        bool, typer.Option("--apply", help="With --prune, write the planned cleanup")
+    ] = False,
+) -> None:
     """List all directory links (project and/or context pins)."""
+    if apply and not prune:
+        error("--apply only applies a --prune plan")
+        raise typer.Exit(1)
+    if prune:
+        _prune_links(apply=apply)
+        return
     project_map = get_path_mappings()
     context_map = get_path_context_mappings()
 
@@ -509,3 +545,36 @@ def list_links() -> None:
 
     if current_path:
         console.print("\n[dim]* = current directory[/dim]")
+
+
+def _describe_link(project: str | None, context: str | None) -> str:
+    parts = [f"project {project}" if project else "", f"context {context}" if context else ""]
+    return ", ".join(part for part in parts if part) or "nothing"
+
+
+def _prune_links(*, apply: bool) -> None:
+    actions = plan_link_cleanup()
+    if not actions:
+        success("Directory links are already tidy")
+        return
+    for action in actions:
+        stored = _describe_link(action.project, action.context)
+        if action.action == "drop_missing":
+            console.print(f"  drop  [{NEON_CYAN}]{action.path}[/{NEON_CYAN}]  (directory is gone)")
+        elif action.action == "lift":
+            console.print(
+                f"  move  [{NEON_CYAN}]{action.path}[/{NEON_CYAN}] → "
+                f"[{NEON_CYAN}]{action.target}[/{NEON_CYAN}]  ({stored})"
+            )
+        else:
+            kept = _describe_link(action.kept_project, action.kept_context)
+            note = "" if stored == kept else f"; this worktree pinned {stored}"
+            console.print(
+                f"  drop  [{NEON_CYAN}]{action.path}[/{NEON_CYAN}]  "
+                f"(repository {action.target} already links {kept}{note})"
+            )
+    if apply:
+        apply_link_cleanup(actions)
+        success(f"Applied {len(actions)} link changes")
+    else:
+        info(f"Dry run: sibyl project links --prune --apply writes these {len(actions)} changes")
