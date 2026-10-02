@@ -127,9 +127,9 @@ Rules for every benchmark mention:
    retrieval recall is a different axis from end-to-end QA accuracy. The retrieval-vs-QA distinction
    travels with the number, every time. See
    [`ai-memory-landscape.md`](../testing/ai-memory-landscape.md).
-5. **Name the honest gaps.** No citable retrieval number yet, no published QA-accuracy number, a
-   live eval that runs on OpenAI embeddings, one dataset. Stating them is the asset, not the
-   liability.
+5. **Name the honest gaps.** No citable retrieval number yet, no published QA-accuracy number, no
+   citable LongMemEval-V2 score, no LOCOMO or BEAM numbers, and a LongMemEval-S live eval that runs
+   on OpenAI embeddings. Stating them is the asset, not the liability.
 
 ### 6. The character
 
