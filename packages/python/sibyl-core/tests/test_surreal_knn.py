@@ -601,7 +601,10 @@ async def test_entity_vector_search_completes_filtered_shortfall(
     assert params["embedding_model"] == provider.metadata.model
     assert params["embedding_dimensions"] == EMBEDDING_DIM
     assert "embedding_metadata" not in params
-    assert ("NONE] CONTAINS" in query) is admit_unstamped
+    assert all(
+        (f"attributes.embedding_metadata.{field} = NONE" in query) is admit_unstamped
+        for field in ("provider", "model", "dimensions")
+    )
 
 
 @pytest.fixture
@@ -1118,3 +1121,159 @@ async def test_graph34_vector_index_preserves_nested_endpoint_reads(
     assert normalize_records(found) == [
         {**edge, "source_match": "endpoint-source", "target_match": "endpoint-target"}
     ]
+
+
+@pytest.mark.parametrize("typed", [False, True], ids=["untyped", "typed"])
+@pytest.mark.parametrize("global_limit", [False, True], ids=["complete-cohort", "global-limit"])
+async def test_adopted_vector_completion_bounds_all_stamp_partitions(
+    vector_completion_client: SurrealGraphClient,
+    typed: bool,
+    global_limit: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import timedelta
+    from itertools import product
+
+    from sibyl_core.backends.surreal.schema_embedding_states import embedding_state_key
+
+    client = vector_completion_client
+    provider = _overfetch_provider("adopted-indexed-completion")
+    stamp = provider.metadata.to_dict()
+    fields = ("provider", "model", "dimensions")
+    query_vector = [1.0, *([0.0] * (EMBEDDING_DIM - 1))]
+    start = datetime(2026, 9, 30, 12, tzinfo=UTC)
+    rows = []
+    for present in product((False, True), repeat=3):
+        count = 10 if global_limit else 7 if all(present) or not any(present) else 1
+        for _ in range(count):
+            ordinal = len(rows)
+            angle = (ordinal // 4 + 1) / 50
+            rows.append(
+                {
+                    "uuid": f"adopted-{ordinal:04d}",
+                    "name": f"Adopted {ordinal}",
+                    "entity_type": "pattern" if global_limit and ordinal % 3 == 0 else "topic",
+                    "group_id": client.group_id,
+                    "name_embedding": [
+                        math.cos(angle),
+                        math.sin(angle),
+                        *([0.0] * (EMBEDDING_DIM - 2)),
+                    ],
+                    "attributes": {
+                        "embedding_metadata": {
+                            field: stamp[field]
+                            for field, exists in zip(fields, present, strict=True)
+                            if exists
+                        },
+                        "user_metadata": {"ordinal": ordinal},
+                    },
+                    "content": f"Full adopted content {ordinal}",
+                    "description": "Full adopted description",
+                    "created_at": start + timedelta(seconds=ordinal % 7),
+                    "revision": 9,
+                }
+            )
+    incompatible = []
+    for i in range(160 if global_limit else 80):
+        for field in (*fields, "organization"):
+            wrong_stamp = stamp.copy()
+            if field in fields:
+                wrong_stamp[field] = EMBEDDING_DIM - 1 if field == "dimensions" else "another"
+            incompatible.append(
+                {
+                    "uuid": f"rejected-{field}-{i:04d}",
+                    "name": "Rejected nearest vector",
+                    "entity_type": "topic",
+                    "group_id": "another-organization"
+                    if field == "organization"
+                    else client.group_id,
+                    "name_embedding": query_vector,
+                    "attributes": {"embedding_metadata": wrong_stamp},
+                }
+            )
+    await client.execute_query(
+        "INSERT INTO entity $rows;",
+        rows=[
+            *rows,
+            *incompatible,
+            {
+                "uuid": "adopted-null-vector",
+                "name": "Adopted null vector",
+                "entity_type": "topic",
+                "group_id": client.group_id,
+                "name_embedding": None,
+                "attributes": {"embedding_metadata": stamp},
+            },
+        ],
+    )
+    await client.execute_query(
+        "UPSERT type::record($key) SET organization_id=$org, plane='graph', "
+        "legacy_decision='adopt', legacy_metadata=$stamp;",
+        key=embedding_state_key(client.group_id, "graph"),
+        org=client.group_id,
+        stamp=stamp,
+    )
+
+    async def embed_query(*_args: object, **_kwargs: object) -> list[list[float]]:
+        return [query_vector]
+
+    monkeypatch.setattr(provider, "embed_texts", embed_query)
+    execute = client.execute_query
+    exact_calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def observed(query: str, **params: Any) -> Any:
+        if global_limit and params.get("_query_label") == "entity.search.vector":
+            # Force a real ANN shortfall over the full eighty-vector cohort.
+            query = re.sub(r"<\|\d+,\s*(\d+)\|>", r"<|1, \1|>", query, count=1)
+        result = await execute(query, **params)
+        if params.get("_query_label") == "entity.search.vector.exact":
+            exact_calls.append((query, params))
+        return result
+
+    monkeypatch.setattr(client, "execute_query", observed)
+    found = await EntityManager(
+        client, group_id=client.group_id, embedding_provider=provider
+    )._vector_search(
+        query="adopted completion",
+        entity_types=[EntityType.TOPIC] if typed else None,
+        limit=5,
+    )
+    expected = sorted(
+        (row for row in rows if not typed or row["entity_type"] == "topic"),
+        key=lambda row: (
+            _cosine_score(row["name_embedding"], query_vector),
+            row["created_at"],
+            row["uuid"],
+        ),
+        reverse=True,
+    )[:32]
+    assert [entity.id for entity, _score in found] == [row["uuid"] for row in expected]
+    for (entity, score), row in zip(found, expected, strict=True):
+        assert score == pytest.approx(_cosine_score(row["name_embedding"], query_vector))
+        assert entity.content == row["content"]
+        assert entity.description == row["description"]
+        assert entity.created_at == row["created_at"]
+        assert entity.metadata["user_metadata"] == row["attributes"]["user_metadata"]
+        assert entity.revision == 9
+    assert len(exact_calls) == 1
+    query, params = exact_calls[0]
+    assert params["limit"] == 32
+    if client._url != "memory://":
+        plan = await execute(query.rstrip().removesuffix(";") + " EXPLAIN FULL;", **params)
+
+        def nodes(value: object):
+            if isinstance(value, dict):
+                yield value
+                for child in value.values():
+                    yield from nodes(child)
+            elif isinstance(value, list):
+                for child in value:
+                    yield from nodes(child)
+
+        scans = [node for node in nodes(plan) if node.get("operator") == "IndexScan"]
+        assert len(scans) == 8, plan
+        assert all(
+            node.get("attributes", {}).get("index") == "idx_entity_vector_space" for node in scans
+        ), plan
+        assert sum(node["metrics"]["output_rows"] for node in scans) == len(rows) + 1, plan
+        assert not any(node.get("operator") == "TableScan" for node in nodes(plan)), plan

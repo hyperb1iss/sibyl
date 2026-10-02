@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Sequence
+from itertools import product
 from typing import Any
 
 import structlog
@@ -402,6 +403,21 @@ class _EntitySearchManager:
     @staticmethod
     def _exact_vector_query(*, typed: bool, admit_unstamped: bool) -> str:
         type_clause = "AND entity_type IN $entity_types" if typed else ""
+        predicate = _stamp_in_query_space(scalar_parameters=True)
+        if admit_unstamped:
+            # Each compatible partial stamp is a disjoint full-key lookup.
+            # Include the organization in every branch to bind all four keys.
+            branches = (
+                "(group_id = $group_id AND "
+                + " AND ".join(
+                    f"attributes.embedding_metadata.{field} = "
+                    + (f"$embedding_{field}" if stamped else "NONE")
+                    for field, stamped in zip(VECTOR_SPACE_FIELDS, present, strict=True)
+                )
+                + ")"
+                for present in product((False, True), repeat=len(VECTOR_SPACE_FIELDS))
+            )
+            predicate = "(" + " OR ".join(branches) + ")"
         return (
             "SELECT "
             + _ENTITY_SEARCH_FIELDS
@@ -414,7 +430,7 @@ class _EntitySearchManager:
             """
             + type_clause
             + f"""
-                AND {_stamp_in_query_space(admit_unstamped=admit_unstamped, scalar_parameters=True)}
+                AND {predicate}
                 AND array::len(name_embedding ?? []) = $embedding_dimensions
             ORDER BY score DESC, created_at DESC, uuid DESC
             LIMIT $limit;
