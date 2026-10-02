@@ -639,8 +639,10 @@ def plan_link_cleanup() -> list[LinkCleanup]:
     and every worktree of it agrees; this deliberately makes the repository
     and its other worktrees route the same way. Kept and reported: worktree
     pins that differ from the repository or from each other, and any drop or
-    lift that would change where its own path routes. Apart from lifts, every
-    live directory keeps routing where it did.
+    lift that would change where its own path routes. Apart from lifts, no
+    link's own directory changes where it routes; a directory below a dropped
+    worktree link can start following a deeper repository link, which is how
+    the main checkout already routes it.
     """
     return _plan_cleanup(load_config().get("paths", {}))
 

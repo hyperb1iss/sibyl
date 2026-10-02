@@ -430,7 +430,9 @@ leave their links behind. `--prune` plans a cleanup:
 - A worktree link that pins something different is kept and reported, with the command to remove it.
 - A change that would expose a pin higher up in the same worktree is kept and reported.
 
-Apart from those moves, every existing directory keeps routing where it does now.
+Apart from lifts, no link's own directory changes where it routes. A directory below a dropped
+worktree link can start following a deeper link in the repository, which is how the main checkout
+already routes it.
 
 ```bash
 sibyl project links --prune          # dry run: prints the plan
