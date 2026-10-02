@@ -531,7 +531,7 @@ export const GraphCanvas = forwardRef<KnowledgeGraphRef, GraphCanvasProps>(funct
         const screenRadius = size * globalScale;
         if (screenRadius > SEMANTIC_ZOOM.EXPAND_SCREEN_RADIUS * SEMANTIC_ZOOM.DOMAIN_FIT_FRACTION) {
           const hintFont = Math.max(5, 9 / globalScale);
-          ctx.font = `${hintFont}px "JetBrains Mono", monospace`;
+          ctx.font = `${hintFont}px "Fira Code", monospace`;
           ctx.fillStyle = `${colors.fgMuted}cc`;
           ctx.fillText('zoom to open', x, y + size * 0.55);
         }
@@ -618,7 +618,7 @@ export const GraphCanvas = forwardRef<KnowledgeGraphRef, GraphCanvasProps>(funct
         const screenFontSize = 11; // desired size on screen in pixels
         const fontSize = screenFontSize / globalScale;
 
-        ctx.font = `${fontSize}px "JetBrains Mono", monospace`;
+        ctx.font = `${fontSize}px "Fira Code", monospace`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
 
