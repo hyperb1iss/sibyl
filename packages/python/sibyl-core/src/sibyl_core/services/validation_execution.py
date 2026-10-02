@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from cryptography.fernet import Fernet
@@ -48,6 +48,11 @@ async def _read_query(
     return content_client.normalize_records(result)
 
 
+if TYPE_CHECKING:
+    from sibyl_core.memory_pipeline.observations import SourceIdentity
+    from sibyl_core.services.graph_read_validation import GraphReadValidation
+
+
 class ValidationExecution:
     """One immutable request identity with separately committed physical attempts."""
 
@@ -59,9 +64,18 @@ class ValidationExecution:
         *,
         authorize: Callable[[], Awaitable[None]] | None = None,
         read_execute_query: SurrealExecute | None = None,
+        publication_read: GraphReadValidation | None = None,
+        publication_owner: SourceIdentity | None = None,
         dispatch_guard: str = "",
         guard_params: dict[str, Any] | None = None,
     ) -> None:
+        if publication_read is not None and (
+            publication_read.organization_id != organization_id
+            or read_execute_query is not publication_read.content_execute_query
+        ):
+            raise ValidationExecutionUnavailable("Publication execution reader differs")
+        self._publication_read = publication_read
+        self._publication_owner = publication_owner
         self.id = execution_id
         self.org = organization_id
         self.principal = principal_id
@@ -87,6 +101,10 @@ class ValidationExecution:
             execute_query=self._read_execute_query,
             **self.params,
         )
+        if rows and self._publication_read is not None:
+            self._publication_read._publication_execution(
+                self.id, self.principal, rows[0], self._publication_owner
+            )
         return rows[0] if rows else None
 
     async def begin(
@@ -149,8 +167,20 @@ class ValidationExecution:
         )
 
         async def load(identity: str) -> dict[str, Any] | None:
+            if self._publication_read is not None:
+                self._publication_read._publication_execution_dependency(
+                    self.id, self.principal, identity
+                )
             return await ValidationExecution(
-                identity, self.org, self.principal, read_execute_query=self._read_execute_query
+                identity,
+                self.org,
+                self.principal,
+                read_execute_query=self._read_execute_query,
+                **(
+                    self._publication_read._publication_execution_kwargs()
+                    if self._publication_read is not None
+                    else {}
+                ),
             ).load()
 
         self._dependency_ids, self._dependency_guard = await resolve_dependencies(
@@ -167,11 +197,20 @@ class ValidationExecution:
         binding = ProgressHistoryBinding.model_validate(value)
         if binding.execution_id == self.id:
             raise ValidationExecutionUnavailable("Progress history cannot reference itself")
+        if self._publication_read is not None:
+            self._publication_read._publication_execution_dependency(
+                self.id, self.principal, binding.execution_id
+            )
         row = await ValidationExecution(
             binding.execution_id,
             self.org,
             self.principal,
             read_execute_query=self._read_execute_query,
+            **(
+                self._publication_read._publication_execution_kwargs()
+                if self._publication_read is not None
+                else {}
+            ),
         ).load()
         if row is None:
             raise ValidationExecutionUnavailable("Progress prior execution disappeared")

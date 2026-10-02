@@ -152,7 +152,11 @@ async def prepare_stored_reflection(
     if parent_id in _ancestors:
         raise SourceUnavailableError()
     _ancestors = _ancestors | {parent_id}
-    authority = await resolver(organization_id, principal_id)
+    authority = (
+        await read.resolve_authority(organization_id, principal_id, resolver)
+        if read is not None
+        else await resolver(organization_id, principal_id)
+    )
     if authority is None or authority.principal_id != principal_id:
         raise SourceUnavailableError()
     rows = await execute_query(
@@ -162,6 +166,10 @@ async def prepare_stored_reflection(
     )
     if len(rows) != 1:
         raise SourceUnavailableError()
+    if read is not None:
+        await read._publication_source(
+            SourceIdentity(organization_id, SourceKind.RAW_CAPTURE, parent_id), candidate=True
+        )
     memory = raw_memory_from_record(rows[0])
     if (
         memory.principal_id != principal_id
@@ -227,6 +235,15 @@ async def prepare_stored_reflection(
         import json
 
         request = json.loads(stage["request_json"])
+        if read is not None:
+            await read._publication_source(
+                SourceIdentity(organization_id, SourceKind.RAW_CAPTURE, stage["source_id"])
+            )
+        if read is not None:
+            read.depend_on(
+                SourceIdentity(organization_id, SourceKind.RAW_CAPTURE, parent_id),
+                [SourceIdentity(organization_id, SourceKind.RAW_CAPTURE, stage["source_id"])],
+            )
         source = await load_authorized_source_snapshot(
             SourceIdentity(organization_id, SourceKind.RAW_CAPTURE, stage["source_id"]),
             authority,
@@ -262,6 +279,14 @@ async def prepare_stored_reflection(
             observation
         ):
             raise SourceUnavailableError()
+        if read is not None:
+            await read._publication_source(source.observation.source)
+            read.record_observation(source.observation)
+        if read is not None:
+            read.depend_on(
+                SourceIdentity(organization_id, SourceKind.RAW_CAPTURE, parent_id),
+                [source.observation.source],
+            )
         sources.append(source.memory)
         content = source.memory.raw_content.encode("utf-8")
         evidence.append(

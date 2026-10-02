@@ -105,6 +105,26 @@ async def prepare_stored_procedure_validation(
     parent_row = by_id.get(parent)
     if parent_row is None or ledger.get("principal_id") != principal:
         raise ValidationExecutionUnavailable("Parent is outside private scope")
+    if read is not None:
+        from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind
+
+        await read._publication_procedure(parent)
+        for identifier in by_id:
+            await read._publication_source(
+                SourceIdentity(org, SourceKind.RAW_CAPTURE, identifier),
+                candidate=identifier == parent,
+            )
+    if read is not None:
+        from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind
+
+        read.depend_on(
+            SourceIdentity(org, SourceKind.RAW_CAPTURE, parent),
+            [
+                SourceIdentity(org, SourceKind.RAW_CAPTURE, identifier)
+                for identifier in by_id
+                if identifier != parent
+            ],
+        )
     memory = raw_memory_from_record(parent_row)
     # Pending procedures are reviewable, not recallable. All other retirement
     # and audience checks remain unchanged after removing this one recall gate.

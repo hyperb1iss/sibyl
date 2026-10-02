@@ -62,7 +62,11 @@ async def _graph_association_current(
     if ceiling is None:
         return False
     try:
-        resolver = get_source_authority_resolver()
+        resolver = (
+            read.source_authority_resolver
+            if read is not None and read.source_authority_resolver is not None
+            else get_source_authority_resolver()
+        )
     except RuntimePortUnavailable:
         return False
     authority = (

@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from sibyl_core.backends.surreal.schema_version import SurrealExecute
 from sibyl_core.embeddings.provenance import same_vector_identity
 from sibyl_core.embeddings.providers import entity_embedding_text
 from sibyl_core.errors import RevisionConflictError
@@ -75,7 +76,11 @@ class EntityManager(_EntityWorkItemManager):
         )
 
     async def create_direct_if_absent(
-        self, entity: Entity, *, derivation: Mapping[str, object] | None = None
+        self,
+        entity: Entity,
+        *,
+        derivation: Mapping[str, object] | None = None,
+        execute_query: SurrealExecute | None = None,
     ) -> tuple[Entity, bool]:
         """Insert once, returning the stored row and whether this call created it."""
         row, created = await _insert_entity_if_absent(
@@ -83,6 +88,7 @@ class EntityManager(_EntityWorkItemManager):
             entity,
             group_id=self._group_id,
             derivation=derivation,
+            **({"execute_query": execute_query} if execute_query is not None else {}),
         )
         return _entity_from_row(row), created
 

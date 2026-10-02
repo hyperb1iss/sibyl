@@ -139,7 +139,11 @@ async def prepare_stored_cohort(
     ids = sorted(source_ids)
     if len(ids) < (1 if allow_single or packet_binding else 2) or len(ids) != len(set(ids)):
         raise ValueError("An ordinary cohort requires distinct retained sources")
-    authority = await resolver(org, principal)
+    authority = (
+        await read.resolve_authority(org, principal, resolver)
+        if read is not None
+        else await resolver(org, principal)
+    )
     if authority is None or authority.principal_id != principal:
         raise SourceUnavailableError()
     rows = await execute_query(
@@ -166,6 +170,9 @@ async def prepare_stored_cohort(
         )
         if not isinstance(source, RawSourceSnapshot):
             raise SourceUnavailableError()
+        if read is not None:
+            await read._publication_source(source.observation.source)
+            read.record_observation(source.observation)
         memory = source.memory
         state = states[identifier]
         identity = (memory.memory_scope, memory.scope_key, memory.project_id)
