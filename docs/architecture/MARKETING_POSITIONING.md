@@ -114,17 +114,21 @@ isolation, strict multi-answer recall, no LLM in the retrieval path. See
 
 Rules for every benchmark mention:
 
-1. **Manifest first.** A number appears on a surface only when
-   `benchmarks/results/ai-memory/manifest.json` lists its artifact as citable and the doc claim gate
-   passes. When a run is promoted, propagate it to every surface in the same change.
+1. **Live run first.** A number appears on a surface only when it meets the bar
+   [`docs/testing/longmemeval.md`](../testing/longmemeval.md) sets: a live full run on a current
+   release passes `moon run bench-gate`, and `benchmarks/results/ai-memory/manifest.json` lists its
+   artifact as citable. The doc claim gate must pass too. A citable manifest entry alone does not
+   qualify: the pre-1.0 offline baselines the manifest still lists as citable ran on an offline
+   component runner, not the live API path, so no surface cites them. When a run is promoted,
+   propagate it to every surface in the same change.
 2. **One run.** Every surface cites the same run.
 3. **Never round up.** Report the exact value. The precision is the honesty signal.
 4. **Always carry the caveat.** `hit@k` and strict `recall@k` measure different things, and
    retrieval recall is a different axis from end-to-end QA accuracy. The retrieval-vs-QA distinction
    travels with the number, every time. See
    [`ai-memory-landscape.md`](../testing/ai-memory-landscape.md).
-5. **Name the honest gaps.** No citable retrieval number yet, no published QA-accuracy number,
-   OpenAI embeddings, one dataset, no principled forgetting. Stating them is the asset, not the
+5. **Name the honest gaps.** No citable retrieval number yet, no published QA-accuracy number, a
+   live eval that runs on OpenAI embeddings, one dataset. Stating them is the asset, not the
    liability.
 
 ### 6. The character
@@ -180,8 +184,9 @@ Consistency checklist before any launch surface ships:
 - [ ] Does NOT open on the "sessions start cold / your AI forgets" trope; uses the land-grab
       sovereignty inversion instead.
 - [ ] Uses "cross-agent memory" as the category phrase.
-- [ ] Carries no benchmark number unless the manifest marks a current run citable, and any number it
-      does carry keeps the retrieval-vs-QA caveat.
+- [ ] Carries no benchmark number unless a live full run on a current release passed
+      `moon run bench-gate` and the manifest lists it as citable, and any number it does carry keeps
+      the retrieval-vs-QA caveat.
 - [ ] License stated accurately: Apache-2.0 across the whole tree (server, CLI, core).
 - [ ] Self-host-free flank is loud, not buried.
 - [ ] Codemode / shell-native present as the how, not the headline.
