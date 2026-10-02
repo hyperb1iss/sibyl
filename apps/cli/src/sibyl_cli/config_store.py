@@ -485,97 +485,202 @@ def remove_path_mapping(path: str) -> bool:
 
 @dataclass(frozen=True)
 class LinkCleanup:
-    """One planned change to the ``[paths]`` table."""
+    """One finding of a ``[paths]`` cleanup plan."""
 
-    action: Literal["drop_missing", "lift", "drop_duplicate"]
+    # drop_* and lift change the table; keep_* are reported and left alone.
+    action: Literal[
+        "drop_empty", "drop_missing", "drop_redundant", "lift", "keep_differs", "keep_conflict"
+    ]
     path: str
     project: str | None = None
     context: str | None = None
-    # The repository path a worktree entry belongs on, and (for drop_duplicate)
-    # the link already stored there.
+    # For worktree entries: the equivalent path in the main repository, and the
+    # link the repository holds (or will hold after a lift).
     target: str | None = None
     kept_project: str | None = None
     kept_context: str | None = None
 
+    @property
+    def changes(self) -> bool:
+        return not self.action.startswith("keep_")
 
-def plan_link_cleanup() -> list[LinkCleanup]:
-    """Plan moving worktree links onto their repositories and dropping dead links.
 
-    A worktree entry moves to the equivalent path in its main repository when
-    that path has no link yet, and is dropped when it does (the repository's
-    link already governs every worktree). Entries for directories that no
-    longer exist, such as removed worktrees, are dropped.
+def _within_live_checkout(path: Path) -> bool:
+    """Whether a missing path still sits inside an existing git checkout.
+
+    A link on a directory that exists only on some branch (stored at the
+    repository's equivalent path by ``project link`` in a worktree) is missing
+    in the main checkout but still governs that worktree.
     """
-    paths = load_config().get("paths", {})
-    planned: dict[str, tuple[str | None, str | None]] = {}
+    current = path
+    while not current.exists():
+        if current == current.parent:
+            return False
+        current = current.parent
+    while current != current.parent:
+        if (current / ".git").exists():
+            return True
+        current = current.parent
+    return False
+
+
+def _redundant(entry: tuple[str | None, str | None], repo: tuple[str | None, str | None]) -> bool:
+    """A worktree entry adds nothing when every field it sets matches the repository's."""
+    return all(
+        value is None or value == repo_value for value, repo_value in zip(entry, repo, strict=True)
+    )
+
+
+def _plan_cleanup(paths: dict[str, Any]) -> list[LinkCleanup]:
+    entries = {mapped: _path_entry_fields(value) for mapped, value in paths.items()}
     actions: list[LinkCleanup] = []
-    for mapped_path in sorted(paths):
-        project, context = _path_entry_fields(paths[mapped_path])
-        if not Path(mapped_path).exists():
-            actions.append(LinkCleanup("drop_missing", mapped_path, project, context))
+    dead: set[str] = set()
+    for mapped in sorted(entries):
+        project, context = entries[mapped]
+        if not project and not context:
+            actions.append(LinkCleanup("drop_empty", mapped))
+            dead.add(mapped)
+        elif not Path(mapped).exists() and not _within_live_checkout(Path(mapped)):
+            actions.append(LinkCleanup("drop_missing", mapped, project, context))
+            dead.add(mapped)
+
+    by_target: dict[str, list[str]] = {}
+    for mapped in sorted(entries):
+        if mapped in dead:
             continue
-        target, worktree_root = canonical_link_path(mapped_path)
-        if worktree_root is None:
-            continue
-        kept = planned.get(target) or _path_entry_fields(paths.get(target))
-        if any(kept):
-            actions.append(
-                LinkCleanup(
-                    "drop_duplicate",
-                    mapped_path,
-                    project,
-                    context,
-                    target=target,
-                    kept_project=kept[0],
-                    kept_context=kept[1],
+        target, worktree_root = canonical_link_path(mapped)
+        if worktree_root is not None:
+            by_target.setdefault(target, []).append(mapped)
+
+    for target, members in sorted(by_target.items()):
+        repo = entries.get(target) if target not in dead else None
+        if repo and any(repo):
+            for mapped in members:
+                action = "drop_redundant" if _redundant(entries[mapped], repo) else "keep_differs"
+                actions.append(
+                    LinkCleanup(
+                        action,
+                        mapped,
+                        *entries[mapped],
+                        target=target,
+                        kept_project=repo[0],
+                        kept_context=repo[1],
+                    )
                 )
-            )
+        elif len({entries[mapped] for mapped in members}) == 1:
+            first, *rest = members
+            actions.append(LinkCleanup("lift", first, *entries[first], target=target))
+            for mapped in rest:
+                actions.append(
+                    LinkCleanup(
+                        "drop_redundant",
+                        mapped,
+                        *entries[mapped],
+                        target=target,
+                        kept_project=entries[first][0],
+                        kept_context=entries[first][1],
+                    )
+                )
         else:
-            planned[target] = (project, context)
-            actions.append(LinkCleanup("lift", mapped_path, project, context, target=target))
+            for mapped in members:
+                actions.append(
+                    LinkCleanup("keep_conflict", mapped, *entries[mapped], target=target)
+                )
     return actions
 
 
-def apply_link_cleanup(actions: list[LinkCleanup]) -> None:
-    """Write a cleanup plan in one config update."""
+def plan_link_cleanup() -> list[LinkCleanup]:
+    """Plan a ``[paths]`` cleanup that leaves every live directory routing as before.
+
+    Dropped: empty entries, entries whose whole checkout is gone (removed
+    worktrees), and worktree entries the repository's link already implies.
+    Lifted: a worktree link onto its repository when the repository has none
+    and every worktree of it agrees. Kept and reported: worktree pins that
+    differ from the repository or from each other, since dropping them would
+    change where that worktree routes.
+    """
+    return _plan_cleanup(load_config().get("paths", {}))
+
+
+class LinkCleanupConflictError(RuntimeError):
+    """The links changed between planning and applying a cleanup."""
+
+
+def apply_link_cleanup(planned: list[LinkCleanup]) -> None:
+    """Apply a cleanup plan, re-planning under the config lock first.
+
+    Another session may have changed the links since the plan was shown; a
+    stale plan could then overwrite a fresh link, so it is refused instead.
+    """
 
     def mutation(config: dict[str, Any]) -> None:
         paths = config.setdefault("paths", {})
-        for action in actions:
+        if _plan_cleanup(paths) != planned:
+            raise LinkCleanupConflictError(
+                "Directory links changed since the plan was made; run the prune again"
+            )
+        for action in planned:
             if action.action == "lift" and action.target:
                 paths[action.target] = _make_path_entry(action.project, action.context)
-            paths.pop(action.path, None)
+            if action.changes:
+                paths.pop(action.path, None)
 
     update_config(mutation)
+
+
+def _gitdir_from_file(git_file: Path) -> Path | None:
+    """The directory a ``.git`` file points at, resolved against that file's directory.
+
+    Git writes relative gitdirs for submodules and for worktrees created with
+    ``--relative-paths``; resolving them against the process cwd misreads both.
+    """
+    try:
+        content = git_file.read_text().strip()
+    except OSError:
+        return None
+    if not content.startswith("gitdir:"):
+        return None
+    return (git_file.parent / content[len("gitdir:") :].strip()).resolve()
+
+
+def _linked_worktree_main_repo(gitdir: Path) -> Path | None:
+    """Main checkout of a linked worktree's private gitdir, else None.
+
+    A linked worktree's gitdir is ``<common dir>/worktrees/<name>``, with a
+    ``commondir`` file naming the common dir. A submodule's gitdir lives under
+    ``modules/`` instead, even when the submodule sits inside a worktree.
+    """
+    if gitdir.parent.name != "worktrees":
+        return None
+    common_dir = gitdir.parent.parent
+    commondir_file = gitdir / "commondir"
+    if commondir_file.is_file():
+        try:
+            common_dir = (gitdir / commondir_file.read_text().strip()).resolve()
+        except OSError:
+            return None
+    if common_dir.name != ".git" or common_dir != gitdir.parent.parent:
+        return None
+    return common_dir.parent
 
 
 def _worktree_location(start_path: Path) -> tuple[Path, Path] | None:
     """Locate the git worktree containing a path: (worktree root, main repo root).
 
-    Git worktrees have a .git file (not directory) containing:
-        gitdir: /path/to/main/repo/.git/worktrees/<worktree-name>
-
-    Returns None for a regular checkout, a path outside any repository, or a
-    .git file that does not point into a main repository's worktrees directory.
+    Returns None inside a main checkout and outside any repository. A
+    submodule's ``.git`` file is stepped over, so a path in a submodule of a
+    worktree still belongs to that worktree.
     """
     current = start_path
     while current != current.parent:
         git_path = current / ".git"
-        if git_path.exists():
-            if git_path.is_file():
-                try:
-                    content = git_path.read_text().strip()
-                    if content.startswith("gitdir:"):
-                        gitdir_path = Path(content[7:].strip()).resolve()
-                        if "worktrees" in gitdir_path.parts:
-                            worktrees_idx = gitdir_path.parts.index("worktrees")
-                            main_git = Path(*gitdir_path.parts[:worktrees_idx])
-                            if main_git.name == ".git":
-                                return current, main_git.parent
-                except (OSError, ValueError):
-                    pass
-            # Regular repo or failed to parse - stop searching
+        if git_path.is_dir():
             return None
+        if git_path.is_file():
+            gitdir = _gitdir_from_file(git_path)
+            main_repo = _linked_worktree_main_repo(gitdir) if gitdir else None
+            if main_repo is not None:
+                return current, main_repo
         current = current.parent
     return None
 

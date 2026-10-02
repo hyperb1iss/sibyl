@@ -29,6 +29,7 @@ from sibyl_cli.common import (
     warn,
 )
 from sibyl_cli.config_store import (
+    LinkCleanupConflictError,
     apply_link_cleanup,
     get_context,
     get_current_context,
@@ -355,6 +356,12 @@ def project_progress(
     _progress()
 
 
+def _retire_shadowing_pin(pin: str | None) -> None:
+    """Remove a worktree's own link that would override the repository link just written."""
+    if pin and remove_path_mapping(pin):
+        info(f"Removed the worktree's own link on {pin}, which would have overridden it")
+
+
 @app.command("link")
 def link_project(
     project_id: Annotated[str, typer.Argument(help="Project ID to link (required)")],
@@ -379,7 +386,8 @@ def link_project(
         sibyl project link project_abc123     # Link cwd to specific project
         sibyl project link project_abc --path ~/dev/myproject
     """
-    target_path = resolve_link_target(path, this_worktree=this_worktree)
+    link_target = resolve_link_target(path, this_worktree=this_worktree)
+    target_path = link_target.path
 
     @run_async
     async def _link() -> None:
@@ -398,6 +406,7 @@ def link_project(
         # always routes to the right server regardless of the active context.
         assert project_id is not None
         set_path_mapping(target_path, project_id, context=context_name)
+        _retire_shadowing_pin(link_target.shadowing_pin)
 
         success(f"Linked [{NEON_CYAN}]{target_path}[/{NEON_CYAN}]")
         console.print(f"  → [{ELECTRIC_PURPLE}]{project_name}[/{ELECTRIC_PURPLE}] ({project_id})")
@@ -425,7 +434,8 @@ def relink_project(
     ] = False,
 ) -> None:
     """Repair the project link for the current directory."""
-    target_path = resolve_link_target(path, this_worktree=this_worktree)
+    link_target = resolve_link_target(path, this_worktree=this_worktree)
+    target_path = link_target.path
 
     @run_async
     async def _relink() -> None:
@@ -465,6 +475,7 @@ def relink_project(
                     raise typer.Exit(1)
 
             set_path_mapping(target_path, selected_id, context=context_name)
+            _retire_shadowing_pin(link_target.shadowing_pin)
             success(f"Relinked [{NEON_CYAN}]{target_path}[/{NEON_CYAN}]")
             console.print(
                 f"  → [{ELECTRIC_PURPLE}]{selected_name}[/{ELECTRIC_PURPLE}] ({selected_id})"
@@ -490,7 +501,7 @@ def unlink_project(
         sibyl project unlink              # Unlink cwd
         sibyl project unlink --path ~/dev/myproject
     """
-    target_path = resolve_unlink_target(path)
+    target_path = resolve_unlink_target(path, "project")
 
     if remove_path_mapping(target_path):
         success(f"Unlinked [{NEON_CYAN}]{target_path}[/{NEON_CYAN}]")
@@ -554,27 +565,39 @@ def _describe_link(project: str | None, context: str | None) -> str:
 
 def _prune_links(*, apply: bool) -> None:
     actions = plan_link_cleanup()
-    if not actions:
-        success("Directory links are already tidy")
-        return
+    changes = [action for action in actions if action.changes]
     for action in actions:
         stored = _describe_link(action.project, action.context)
-        if action.action == "drop_missing":
-            console.print(f"  drop  [{NEON_CYAN}]{action.path}[/{NEON_CYAN}]  (directory is gone)")
+        kept = _describe_link(action.kept_project, action.kept_context)
+        path = f"[{NEON_CYAN}]{action.path}[/{NEON_CYAN}]"
+        if action.action == "drop_empty":
+            console.print(f"  drop  {path}  (empty link)")
+        elif action.action == "drop_missing":
+            console.print(f"  drop  {path}  (its checkout is gone)")
         elif action.action == "lift":
             console.print(
-                f"  move  [{NEON_CYAN}]{action.path}[/{NEON_CYAN}] → "
-                f"[{NEON_CYAN}]{action.target}[/{NEON_CYAN}]  ({stored})"
+                f"  move  {path} → [{NEON_CYAN}]{action.target}[/{NEON_CYAN}]  ({stored})"
+            )
+        elif action.action == "drop_redundant":
+            console.print(f"  drop  {path}  ({action.target} already provides {kept})")
+        elif action.action == "keep_differs":
+            console.print(
+                f"  keep  {path}  (pins {stored}, unlike {action.target} with {kept}; "
+                f"remove it with: sibyl project unlink --path {action.path})"
             )
         else:
-            kept = _describe_link(action.kept_project, action.kept_context)
-            note = "" if stored == kept else f"; this worktree pinned {stored}"
             console.print(
-                f"  drop  [{NEON_CYAN}]{action.path}[/{NEON_CYAN}]  "
-                f"(repository {action.target} already links {kept}{note})"
+                f"  keep  {path}  (pins {stored}; other worktrees of {action.target} disagree)"
             )
+    if not changes:
+        success("Directory links are already tidy")
+        return
     if apply:
-        apply_link_cleanup(actions)
-        success(f"Applied {len(actions)} link changes")
+        try:
+            apply_link_cleanup(actions)
+        except LinkCleanupConflictError as exc:
+            error(str(exc))
+            raise typer.Exit(1) from exc
+        success(f"Applied {len(changes)} link changes")
     else:
-        info(f"Dry run: sibyl project links --prune --apply writes these {len(actions)} changes")
+        info(f"Dry run: sibyl project links --prune --apply writes these {len(changes)} changes")

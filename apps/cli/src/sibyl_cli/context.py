@@ -837,8 +837,14 @@ def link_cmd(
             info(f"Available: {', '.join(c.name for c in contexts)}")
         raise typer.Exit(1)
 
-    target_path = resolve_link_target(path, this_worktree=this_worktree)
+    link_target = resolve_link_target(path, this_worktree=this_worktree)
+    target_path = link_target.path
     set_path_context(target_path, name)
+    if link_target.shadowing_pin and remove_path_context(link_target.shadowing_pin):
+        info(
+            f"Removed the worktree's own context pin on {link_target.shadowing_pin}, "
+            "which would have overridden it"
+        )
     clear_client_cache()  # New connections under this path use the pinned context
 
     success(f"Pinned [{NEON_CYAN}]{target_path}[/{NEON_CYAN}] to context '{name}'")
@@ -853,7 +859,7 @@ def unlink_cmd(
     ] = None,
 ) -> None:
     """Remove the context pin from a directory (keeps any project link)."""
-    target_path = resolve_unlink_target(path)
+    target_path = resolve_unlink_target(path, "context")
     if remove_path_context(target_path):
         clear_client_cache()
         success(f"Unpinned context from [{NEON_CYAN}]{target_path}[/{NEON_CYAN}]")

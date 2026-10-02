@@ -164,38 +164,187 @@ def test_context_link_and_unlink_inside_a_worktree_act_on_the_repository(home: P
         assert config_store.get_path_link(str(main_repo)) == (None, None)
 
 
-def test_prune_plans_then_applies_worktree_and_dead_link_cleanup(home: Path) -> None:
+def _resolved_link(cwd: Path) -> tuple[str | None, str | None]:
+    with patch("os.getcwd", return_value=str(cwd)):
+        return config_store.resolve_project_from_cwd(), config_store.resolve_context_from_cwd()
+
+
+def test_prune_drops_dead_and_redundant_links_and_keeps_differing_pins(home: Path) -> None:
     main_repo, worktree = _repo_with_worktree(home)
     other_repo, other_worktree = _repo_with_worktree(home / "other")
+    _third_repo, redundant_worktree = _repo_with_worktree(home / "third")
     gone = home / "removed-worktree"
     config_store.set_path_mapping(str(main_repo), "project_v2")
     config_store.set_path_mapping(str(worktree), "project_v2", context="local")
     config_store.set_path_mapping(str(other_worktree), "project_other", context="team")
+    config_store.set_path_mapping(str(_third_repo), "project_third", context="team")
+    config_store.set_path_mapping(str(redundant_worktree), "project_third")
     gone.mkdir()
     config_store.set_path_mapping(str(gone), "project_old")
     gone.rmdir()
     before = dict(_paths())
+    routes_before = {cwd: _resolved_link(cwd) for cwd in (worktree, other_worktree, main_repo)}
 
     dry = CliRunner().invoke(app, ["project", "links", "--prune"])
 
     assert dry.exit_code == 0, dry.stdout
     assert _paths() == before
-    assert "this worktree pinned project project_v2, context local" in _flat(dry.stdout)
-    assert "directory is gone" in _flat(dry.stdout)
-    assert "Dry run" in _flat(dry.stdout)
+    flat = _flat(dry.stdout)
+    assert "its checkout is gone" in flat
+    assert "unlike" in flat and "sibyl project unlink --path" in flat
+    assert "already provides project project_third, context team" in flat
+    assert "writes these 3 changes" in flat
 
     applied = CliRunner().invoke(app, ["project", "links", "--prune", "--apply"])
 
     assert applied.exit_code == 0, applied.stdout
     paths = _paths()
-    assert str(worktree.resolve()) not in paths
     assert str(gone.resolve()) not in paths
-    assert str(other_worktree.resolve()) not in paths
-    assert config_store.get_path_link(str(main_repo)) == ("project_v2", None)
+    assert str(redundant_worktree.resolve()) not in paths
+    # The differing pin stays, so that worktree still routes where it did.
+    assert str(worktree.resolve()) in paths
     assert config_store.get_path_link(str(other_repo)) == ("project_other", "team")
+    assert {cwd: _resolved_link(cwd) for cwd in (worktree, main_repo)} == {
+        cwd: routes_before[cwd] for cwd in (worktree, main_repo)
+    }
+    assert _resolved_link(other_worktree) == routes_before[other_worktree]
 
-    tidy = CliRunner().invoke(app, ["project", "links", "--prune"])
-    assert "already tidy" in _flat(tidy.stdout)
+    again = CliRunner().invoke(app, ["project", "links", "--prune"])
+    assert "already tidy" in _flat(again.stdout)
+
+
+def test_prune_keeps_a_link_on_a_branch_only_directory(home: Path) -> None:
+    # project link inside a worktree stores this at the repository's
+    # equivalent path, which does not exist in the main checkout.
+    main_repo, worktree = _repo_with_worktree(home)
+    (worktree / "apps" / "newthing").mkdir(parents=True)
+    config_store.set_path_mapping(
+        str(main_repo / "apps" / "newthing"), "project_new", context="team"
+    )
+
+    result = CliRunner().invoke(app, ["project", "links", "--prune", "--apply"])
+
+    assert result.exit_code == 0, result.stdout
+    assert config_store.get_path_link(str(main_repo / "apps" / "newthing")) == (
+        "project_new",
+        "team",
+    )
+    assert _resolved_link(worktree / "apps" / "newthing") == ("project_new", "team")
+
+
+def test_prune_lifts_an_unlinked_repository_s_unanimous_worktree_link(home: Path) -> None:
+    main_repo, worktree = _repo_with_worktree(home)
+    config_store.set_path_mapping(str(worktree), "project_v2", context="team")
+
+    result = CliRunner().invoke(app, ["project", "links", "--prune", "--apply"])
+
+    assert result.exit_code == 0, result.stdout
+    assert config_store.get_path_link(str(main_repo)) == ("project_v2", "team")
+    assert config_store.get_path_link(str(worktree)) == (None, None)
+
+
+def test_prune_refuses_a_plan_made_stale_by_another_writer(home: Path) -> None:
+    _main_repo, worktree = _repo_with_worktree(home)
+    config_store.set_path_mapping(str(worktree), "project_v2", context="team")
+    plan = config_store.plan_link_cleanup()
+    config_store.set_path_mapping(str(home / "elsewhere"), "project_new")
+
+    with pytest.raises(config_store.LinkCleanupConflictError):
+        config_store.apply_link_cleanup(plan)
+    assert config_store.get_path_link(str(worktree)) == ("project_v2", "team")
+
+
+def test_relative_and_submodule_gitdirs_resolve_against_their_own_directory(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main_repo = home / "repo"
+    worktree_git = main_repo / ".git" / "worktrees" / "feature"
+    worktree_git.mkdir(parents=True)
+    (worktree_git / "commondir").write_text("../..\n")
+    worktree = home / "worktrees" / "feature"
+    worktree.mkdir(parents=True)
+    (worktree / ".git").write_text("gitdir: ../../repo/.git/worktrees/feature\n")
+    submodule = worktree / "libs" / "sub"
+    submodule.mkdir(parents=True)
+    (worktree_git / "modules" / "libs" / "sub").mkdir(parents=True)
+    (submodule / ".git").write_text(
+        "gitdir: ../../../../repo/.git/worktrees/feature/modules/libs/sub\n"
+    )
+    # Resolution must not depend on where the CLI happens to run.
+    monkeypatch.chdir(home / "worktrees")
+
+    assert config_store.canonical_link_path(str(worktree)) == (
+        str(main_repo.resolve()),
+        str(worktree.resolve()),
+    )
+    assert config_store.canonical_link_path(str(submodule)) == (
+        str((main_repo / "libs" / "sub").resolve()),
+        str(worktree.resolve()),
+    )
+
+
+def test_a_real_git_worktree_routes_like_its_repository(home: Path) -> None:
+    import shutil
+    import subprocess
+
+    if shutil.which("git") is None:
+        pytest.skip("git is not installed")
+    main_repo = home / "real"
+    main_repo.mkdir()
+    env = {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null", "HOME": str(home)}
+
+    def git(*argv: str) -> None:
+        subprocess.run(
+            ["git", "-C", str(main_repo), *argv], check=True, capture_output=True, env=env
+        )
+
+    git("init", "-q", "-b", "main")
+    git(
+        "-c", "user.email=a@b.c", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"
+    )
+    worktree = home / "worktrees" / "real" / "feature"
+    git("worktree", "add", "-q", "-b", "feature", str(worktree))
+    config_store.set_path_mapping(str(main_repo), "project_real", context="team")
+
+    assert _resolved_link(worktree) == ("project_real", "team")
+    assert config_store.canonical_link_path(str(worktree))[0] == str(main_repo.resolve())
+
+
+def test_linking_from_a_pinned_worktree_retires_the_shadowing_pin(home: Path) -> None:
+    main_repo, worktree = _repo_with_worktree(home)
+    config_store.create_context("personal", "https://sibyl.personal.example")
+    config_store.create_context("team", "https://sibyl.team.example")
+    config_store.set_path_mapping(str(worktree), "project_mine", context="personal")
+    client = MagicMock()
+    client.context_name = "team"
+    client.get_entity = AsyncMock(return_value={"id": "project_v2", "name": "V2"})
+
+    with (
+        patch("sibyl_cli.project.get_client", return_value=client),
+        patch("os.getcwd", return_value=str(worktree)),
+    ):
+        result = CliRunner().invoke(app, ["project", "link", "project_v2"])
+
+    assert result.exit_code == 0, result.stdout
+    assert config_store.get_path_link(str(main_repo)) == ("project_v2", "team")
+    assert config_store.get_path_link(str(worktree)) == (None, None)
+    assert _resolved_link(worktree) == ("project_v2", "team")
+
+
+def test_unlink_removes_the_field_that_actually_governs_the_directory(home: Path) -> None:
+    main_repo, worktree = _repo_with_worktree(home)
+    config_store.create_context("team", "https://sibyl.team.example")
+    config_store.set_path_mapping(str(main_repo), "project_v2", context="team")
+    config_store.set_path_mapping(str(worktree), "project_mine")
+
+    with patch("os.getcwd", return_value=str(worktree)):
+        unpinned = CliRunner().invoke(app, ["config", "context", "unlink"])
+
+    assert unpinned.exit_code == 0, unpinned.stdout
+    # The worktree's own entry has no context, so the repository's pin was the one to remove.
+    assert config_store.get_path_link(str(main_repo)) == ("project_v2", None)
+    assert config_store.get_path_link(str(worktree)) == ("project_mine", None)
+    assert "removes the link on" in _flat(unpinned.stdout)
 
 
 def test_apply_without_prune_is_refused(home: Path) -> None:
