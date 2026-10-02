@@ -6,7 +6,7 @@ import asyncio
 import json
 import os
 from contextlib import asynccontextmanager
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -580,7 +580,7 @@ async def native_validated_procedure(native_typed_stores, monkeypatch, tmp_path)
             **materials,
         )
         attempts.append((task, admitted))
-    group = await eval_consolidation.load_admitted_consolidation_group(
+    group_inputs = dict(
         organization_id=s.org,
         principal_id="owner",
         experiment_id=assignment.experiment_id,
@@ -594,6 +594,7 @@ async def native_validated_procedure(native_typed_stores, monkeypatch, tmp_path)
         trusted_public_key=key.public_key(),
         expected_controller_policy_sha256=assignment.controller_policy_sha256,
     )
+    group = await eval_consolidation.load_admitted_consolidation_group(**group_inputs)
 
     def assertion(index):
         episode = group.episodes[index]
@@ -677,25 +678,30 @@ async def native_validated_procedure(native_typed_stores, monkeypatch, tmp_path)
     cut = await load_native_source_cut(candidate, execute_query=s.content.execute_query)
     admitted_memories = [admitted.memory for _, admitted in attempts]
     source_ids = [memory.id for memory in admitted_memories]
-    review_candidate = _candidate_from_review_memory(
-        stored.memory,
-        raw_source_ids=source_ids,
-        target_scope=MemoryScope.PRIVATE,
-        target_scope_key=None,
-        domain=None,
-    )
-    entity = _entity_from_candidate(
-        review_candidate,
-        organization_id=s.org,
-        principal_id="owner",
-        domain=None,
-        project=None,
-        source_id=source_ids[0],
-        memory_scope=MemoryScope.PRIVATE,
-        scope_key=None,
-        policy_metadata={},
-        source_memories=admitted_memories,
-    )
+
+    def target_from_memory(memory):
+        review_candidate = _candidate_from_review_memory(
+            memory,
+            raw_source_ids=source_ids,
+            target_scope=MemoryScope.PRIVATE,
+            target_scope_key=None,
+            domain=None,
+        )
+        entity = _entity_from_candidate(
+            review_candidate,
+            organization_id=s.org,
+            principal_id="owner",
+            domain=None,
+            project=None,
+            source_id=source_ids[0],
+            memory_scope=MemoryScope.PRIVATE,
+            scope_key=None,
+            policy_metadata={},
+            source_memories=admitted_memories,
+        )
+        return entity
+
+    entity = target_from_memory(stored.memory)
     assert entity.metadata["review_capture_id"] == stored.memory.id
     derivation = {
         "organization_id": s.org,
@@ -706,9 +712,25 @@ async def native_validated_procedure(native_typed_stores, monkeypatch, tmp_path)
         "authority_ceiling": SourceReadAuthority("owner").ceiling_metadata(),
         "observations": [asdict(cut.snapshot.observation)],
     }
+
+    async def alternate_candidate():
+        alternate_group = await eval_consolidation.load_admitted_consolidation_group(
+            **{**group_inputs, "group_id": "alternate-candidate"}
+        )
+        with monkeypatch.context() as extraction_patch:
+            extraction_patch.setattr(Extractor, "extract_with_usage", extract)
+            alternate_proposal = await c.propose_conditional_procedure(alternate_group)
+        alternate = await eval_publication.store_consolidation(
+            replace(operation, group_id=alternate_group.group_id), alternate_proposal
+        )
+        assert alternate.memory is not None and alternate.memory.id != candidate.id
+        return alternate.memory
+
     return SimpleNamespace(
         stores=s,
         promotion=promotion,
+        alternate_candidate=alternate_candidate,
+        target_from_memory=target_from_memory,
         entity=entity,
         derivation=derivation,
         candidate=candidate,
@@ -943,3 +965,48 @@ async def test_native_typed_graph_source_cut_rejects_foreign_only_association(na
             execute_query=s.graph.execute_query,
         )
     s.record(phase="foreign-only-graph-source-association")
+
+
+@pytest.mark.asyncio
+async def test_native_typed_named_target_matches_validated_candidate(native_validated_procedure):
+    from sibyl_core.services.source_observations import SourceUnavailableError
+
+    p = native_validated_procedure
+    s = p.stores
+    alternate = await p.alternate_candidate()
+    entity = p.target_from_memory(alternate)
+    assert entity.metadata["review_capture_id"] == alternate.id != p.promotion.candidate_id
+    derivation = {**p.derivation, "target_id": entity.id}
+    before = normalize_records(
+        await s.content.execute_query(
+            "SELECT type::string(id) AS physical_id,crypto::sha256(type::string($this)) AS sha256 "
+            "FROM source_states;"
+        )
+    )
+    async with s.transaction() as tx:
+        with pytest.raises(SourceUnavailableError):
+            await stage_native_typed_graph_publication(
+                tx,
+                content_scope=s.content_scope,
+                graph_scope=s.graph_scope,
+                entity=entity,
+                derivation=derivation,
+                resolver=s.resolver,
+                promotion=p.promotion,
+            )
+        with pytest.raises(Exception, match="not ready"):
+            await tx.commit()
+    after = normalize_records(
+        await s.content.execute_query(
+            "SELECT type::string(id) AS physical_id,crypto::sha256(type::string($this)) AS sha256 "
+            "FROM source_states;"
+        )
+    )
+    assert after == before
+    assert normalize_records(await s.graph.execute_query("SELECT * FROM entity;")) == []
+    s.record(
+        phase="named-candidate-correspondence",
+        validated_candidate=p.promotion.candidate_id,
+        alternate_candidate=alternate.id,
+        canonical_target=entity.id,
+    )

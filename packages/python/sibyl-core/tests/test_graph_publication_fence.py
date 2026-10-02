@@ -95,6 +95,7 @@ async def test_publication_fence_input_denial_before_io(failure):
     elif failure == "duplicate_observation":
         derivation["observations"] *= 2
     else:
+        entity.metadata["review_capture_id"] = "candidate"
 
         async def divergent(org, principal):
             raise AssertionError("Divergent promotion resolver ran")
@@ -279,3 +280,43 @@ async def test_publication_fence_execution_descriptor_retains_native_physical_id
     assert collector.execution_cuts == {("b" * 64, "owner"): descriptor}
     await collector.check(witness=False)
     assert checks == [descriptor]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ordinary", [False, True])
+async def test_publication_fence_named_candidate_mismatch_before_io(ordinary):
+    from unittest.mock import AsyncMock
+
+    from sibyl_core.services.validation_promotion import ValidatedPromotion
+
+    org, content, graph, entity, derivation = inputs()
+    transaction = NoIO()
+    authorize = AsyncMock()
+
+    async def resolver(org, principal):
+        raise AssertionError("Mismatched named target resolved authority")
+
+    binding = ValidationBinding(
+        execution_id="a" * 64,
+        request_sha256="a" * 64,
+        result_sha256="b" * 64,
+        input_sha256="c" * 64,
+    )
+    promotion = (
+        OrdinaryValidatedPromotion(org, "owner", "candidate", binding, authorize, resolver)
+        if ordinary
+        else ValidatedPromotion(org, "owner", "candidate", binding, authorize)
+    )
+    entity.metadata["review_capture_id"] = "another-candidate"
+    with pytest.raises(SourceUnavailableError):
+        await stage_native_typed_graph_publication(
+            transaction,
+            content_scope=content,
+            graph_scope=graph,
+            entity=entity,
+            derivation=derivation,
+            resolver=resolver,
+            promotion=promotion,
+        )
+    assert transaction.invalidated and transaction.attempted == []
+    authorize.assert_not_awaited()

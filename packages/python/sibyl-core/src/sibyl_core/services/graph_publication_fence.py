@@ -489,7 +489,9 @@ async def stage_native_typed_graph_publication(
             raise SourceUnavailableError()
         if promotion is not None:
             if type(promotion) not in (ValidatedPromotion, OrdinaryValidatedPromotion) or (
-                promotion.organization_id != org or promotion.principal_id != principal
+                promotion.organization_id != org
+                or promotion.principal_id != principal
+                or entity.metadata.get("review_capture_id") != promotion.candidate_id
             ):
                 raise SourceUnavailableError()
             if (
