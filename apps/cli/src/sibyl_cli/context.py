@@ -837,7 +837,7 @@ def link_cmd(
             info(f"Available: {', '.join(c.name for c in contexts)}")
         raise typer.Exit(1)
 
-    link_target = resolve_link_target(path, this_worktree=this_worktree)
+    link_target = resolve_link_target(path, this_worktree=this_worktree, fields=("context",))
     target_path = link_target.path
     set_path_context(target_path, name)
     if link_target.shadowing_pin and remove_path_context(link_target.shadowing_pin):

@@ -386,7 +386,9 @@ def link_project(
         sibyl project link project_abc123     # Link cwd to specific project
         sibyl project link project_abc --path ~/dev/myproject
     """
-    link_target = resolve_link_target(path, this_worktree=this_worktree)
+    link_target = resolve_link_target(
+        path, this_worktree=this_worktree, fields=("project", "context")
+    )
     target_path = link_target.path
 
     @run_async
@@ -434,7 +436,9 @@ def relink_project(
     ] = False,
 ) -> None:
     """Repair the project link for the current directory."""
-    link_target = resolve_link_target(path, this_worktree=this_worktree)
+    link_target = resolve_link_target(
+        path, this_worktree=this_worktree, fields=("project", "context")
+    )
     target_path = link_target.path
 
     @run_async
@@ -584,6 +588,10 @@ def _prune_links(*, apply: bool) -> None:
             console.print(
                 f"  keep  {path}  (pins {stored}, unlike {action.target} with {kept}; "
                 f"remove it with: sibyl project unlink --path {action.path})"
+            )
+        elif action.action == "keep_shadowed":
+            console.print(
+                f"  keep  {path}  (removing it would expose a pin higher up in this worktree)"
             )
         else:
             console.print(

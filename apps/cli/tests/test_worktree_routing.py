@@ -352,3 +352,54 @@ def test_apply_without_prune_is_refused(home: Path) -> None:
 
     assert result.exit_code == 1
     assert "--apply only applies a --prune plan" in _flat(result.stdout)
+
+
+def test_prune_keeps_a_deeper_entry_whose_removal_would_expose_a_worktree_pin(
+    home: Path,
+) -> None:
+    main_repo, worktree = _repo_with_worktree(home)
+    (worktree / "apps" / "web").mkdir(parents=True)
+    (main_repo / "apps" / "web").mkdir(parents=True)
+    config_store.set_path_mapping(str(main_repo), "project_v2")
+    config_store.set_path_mapping(str(main_repo / "apps" / "web"), "project_web")
+    config_store.set_path_mapping(str(worktree), "project_mine")
+    config_store.set_path_mapping(str(worktree / "apps" / "web"), "project_web")
+    before = _resolved_link(worktree / "apps" / "web")
+
+    result = CliRunner().invoke(app, ["project", "links", "--prune", "--apply"])
+
+    assert result.exit_code == 0, result.stdout
+    assert "would expose a pin higher up" in _flat(result.stdout)
+    assert _resolved_link(worktree / "apps" / "web") == before == ("project_web", None)
+
+
+def test_a_worktree_of_a_moved_main_checkout_is_not_redirected(home: Path) -> None:
+    main_repo, worktree = _repo_with_worktree(home)
+    import shutil
+
+    shutil.rmtree(main_repo / ".git")
+
+    assert config_store.canonical_link_path(str(worktree)) == (str(worktree.resolve()), None)
+
+
+def test_linking_under_a_worktree_root_pin_stores_the_link_where_it_applies(home: Path) -> None:
+    main_repo, worktree = _repo_with_worktree(home)
+    (worktree / "apps" / "web").mkdir(parents=True)
+    config_store.create_context("team", "https://sibyl.team.example")
+    config_store.set_path_mapping(str(worktree), "project_mine", context="team")
+    client = MagicMock()
+    client.context_name = "team"
+    client.get_entity = AsyncMock(return_value={"id": "project_web", "name": "Web"})
+
+    with (
+        patch("sibyl_cli.project.get_client", return_value=client),
+        patch("os.getcwd", return_value=str(worktree / "apps" / "web")),
+    ):
+        result = CliRunner().invoke(app, ["project", "link", "project_web"])
+
+    assert result.exit_code == 0, result.stdout
+    assert "outranks repository links" in _flat(result.stdout)
+    assert config_store.get_path_link(str(worktree / "apps" / "web")) == ("project_web", "team")
+    assert config_store.get_path_link(str(main_repo / "apps" / "web")) == (None, None)
+    assert _resolved_link(worktree / "apps" / "web") == ("project_web", "team")
+    assert config_store.get_path_link(str(worktree)) == ("project_mine", "team")

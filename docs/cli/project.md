@@ -421,13 +421,16 @@ Project Links:
 ### Cleaning up links
 
 Links made inside worktrees by older CLI versions live on the worktree path, and removed worktrees
-leave their links behind. `--prune` plans a cleanup that leaves every existing directory routing as
-it does now:
+leave their links behind. `--prune` plans a cleanup:
 
 - Links whose checkout is gone (a removed worktree) and empty links are dropped.
 - A worktree link the repository's link already implies is dropped.
 - A worktree link moves onto its repository when the repository has none and every worktree agrees.
+  This deliberately makes the repository and its other worktrees route that way too.
 - A worktree link that pins something different is kept and reported, with the command to remove it.
+- A change that would expose a pin higher up in the same worktree is kept and reported.
+
+Apart from those moves, every existing directory keeps routing where it does now.
 
 ```bash
 sibyl project links --prune          # dry run: prints the plan

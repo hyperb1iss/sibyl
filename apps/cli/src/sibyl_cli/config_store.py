@@ -489,7 +489,13 @@ class LinkCleanup:
 
     # drop_* and lift change the table; keep_* are reported and left alone.
     action: Literal[
-        "drop_empty", "drop_missing", "drop_redundant", "lift", "keep_differs", "keep_conflict"
+        "drop_empty",
+        "drop_missing",
+        "drop_redundant",
+        "lift",
+        "keep_differs",
+        "keep_conflict",
+        "keep_shadowed",
     ]
     path: str
     project: str | None = None
@@ -586,18 +592,55 @@ def _plan_cleanup(paths: dict[str, Any]) -> list[LinkCleanup]:
                 actions.append(
                     LinkCleanup("keep_conflict", mapped, *entries[mapped], target=target)
                 )
-    return actions
+    return [_unless_it_reroutes(action, entries) for action in actions]
+
+
+def _route_with(
+    path: Path, entries: dict[str, tuple[str | None, str | None]]
+) -> tuple[str | None, str | None]:
+    projects = {mapped: fields[0] for mapped, fields in entries.items() if fields[0]}
+    contexts = {mapped: fields[1] for mapped, fields in entries.items() if fields[1]}
+    return _match_link(path, projects)[0], _match_link(path, contexts)[0]
+
+
+def _unless_it_reroutes(
+    action: LinkCleanup, entries: dict[str, tuple[str | None, str | None]]
+) -> LinkCleanup:
+    """Downgrade a worktree drop or lift that would change where its own path routes.
+
+    Removing a deeper worktree entry can expose a shallower pin in the same
+    worktree, since pins inside a worktree outrank the repository's links.
+    """
+    if action.action not in ("drop_redundant", "lift"):
+        return action
+    after = {mapped: fields for mapped, fields in entries.items() if mapped != action.path}
+    if action.action == "lift" and action.target:
+        after[action.target] = (action.project, action.context)
+    path = Path(action.path)
+    if _route_with(path, after) == _route_with(path, entries):
+        return action
+    return LinkCleanup(
+        "keep_shadowed",
+        action.path,
+        action.project,
+        action.context,
+        target=action.target,
+        kept_project=action.kept_project,
+        kept_context=action.kept_context,
+    )
 
 
 def plan_link_cleanup() -> list[LinkCleanup]:
-    """Plan a ``[paths]`` cleanup that leaves every live directory routing as before.
+    """Plan a ``[paths]`` cleanup of stale and worktree-local links.
 
     Dropped: empty entries, entries whose whole checkout is gone (removed
     worktrees), and worktree entries the repository's link already implies.
     Lifted: a worktree link onto its repository when the repository has none
-    and every worktree of it agrees. Kept and reported: worktree pins that
-    differ from the repository or from each other, since dropping them would
-    change where that worktree routes.
+    and every worktree of it agrees; this deliberately makes the repository
+    and its other worktrees route the same way. Kept and reported: worktree
+    pins that differ from the repository or from each other, and any drop or
+    lift that would change where its own path routes. Apart from lifts, every
+    live directory keeps routing where it did.
     """
     return _plan_cleanup(load_config().get("paths", {}))
 
@@ -650,7 +693,7 @@ def _linked_worktree_main_repo(gitdir: Path) -> Path | None:
     ``commondir`` file naming the common dir. A submodule's gitdir lives under
     ``modules/`` instead, even when the submodule sits inside a worktree.
     """
-    if gitdir.parent.name != "worktrees":
+    if gitdir.parent.name != "worktrees" or not gitdir.is_dir():
         return None
     common_dir = gitdir.parent.parent
     commondir_file = gitdir / "commondir"
@@ -659,7 +702,11 @@ def _linked_worktree_main_repo(gitdir: Path) -> Path | None:
             common_dir = (gitdir / commondir_file.read_text().strip()).resolve()
         except OSError:
             return None
+    # A main checkout moved without `git worktree repair` leaves worktrees
+    # pointing at a common dir that no longer exists; they are not routable.
     if common_dir.name != ".git" or common_dir != gitdir.parent.parent:
+        return None
+    if not common_dir.is_dir():
         return None
     return common_dir.parent
 
