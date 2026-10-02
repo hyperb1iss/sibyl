@@ -11,6 +11,12 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
 
+type ArchiveWitnessScheme = Literal["native-full-v1", "graph-association-authority-v2"]
+
+CURRENT_ARCHIVE_WITNESS_SCHEME: Literal["graph-association-authority-v2"] = (
+    "graph-association-authority-v2"
+)
+
 
 class ArchiveContractModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -162,6 +168,11 @@ class PlannedArchiveRow(ArchiveContractModel):
 
 class CheckedArchivePlan(ArchiveContractModel):
     contract_version: Literal[1] = 1
+    # Only the new marker is optional. Existing nullable authority fields stay
+    # serialized so historical checked bytes and digests remain unchanged.
+    witness_scheme: Literal["graph-association-authority-v2"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     organization_id: str
     actor_id: str
     archive_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -172,6 +183,11 @@ class CheckedArchivePlan(ArchiveContractModel):
     conflict_policy: Literal["additive"] = "additive"
     rows: tuple[PlannedArchiveRow, ...]
     counts: dict[str, ArchivePreviewCounts]
+
+    @property
+    def effective_witness_scheme(self) -> ArchiveWitnessScheme:
+        """Read guard semantics from the saved plan, never the current default."""
+        return self.witness_scheme or "native-full-v1"
 
     @field_validator("organization_id", "actor_id")
     @classmethod

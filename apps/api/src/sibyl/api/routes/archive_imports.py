@@ -42,6 +42,7 @@ from sibyl_core.migrate.personal_archive_intake import (
     parse_personal_archive,
 )
 from sibyl_core.migrate.personal_archive_plan import (
+    CURRENT_ARCHIVE_WITNESS_SCHEME,
     ArchiveCredentialCeiling,
     CheckedArchivePlan,
     PlannedArchiveRow,
@@ -122,6 +123,7 @@ def _build_checked_plan(
 ) -> CheckedArchivePlan:
     organization_id, actor_id = _principal(context)
     return CheckedArchivePlan(
+        witness_scheme=CURRENT_ARCHIVE_WITNESS_SCHEME,
         organization_id=organization_id,
         actor_id=actor_id,
         archive_sha256=parsed.archive_sha256,
@@ -230,6 +232,7 @@ async def check_archive(
 
                 rows = await build_archive_preview(
                     parsed=parsed,
+                    witness_scheme=CURRENT_ARCHIVE_WITNESS_SCHEME,
                     mappings=upload.options.mappings,
                     context=context,
                     request=request,
