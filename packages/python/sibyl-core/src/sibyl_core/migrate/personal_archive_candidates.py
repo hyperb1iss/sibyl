@@ -73,7 +73,15 @@ _RAW_MIRROR_FIELDS = (
     "metadata",
     "tags",
 )
-_GRAPH_MIRROR_FIELDS = ("id", "entity_type", "name", "description", "content", "metadata")
+_GRAPH_MIRROR_FIELDS = (
+    "id",
+    "entity_type",
+    "name",
+    "description",
+    "content",
+    "source_file",
+    "metadata",
+)
 
 
 @dataclass(frozen=True, slots=True)
