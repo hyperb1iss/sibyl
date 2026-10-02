@@ -24,6 +24,7 @@ from sibyl_cli.auth_store import (
 from sibyl_cli.client import (
     SibylClient,
     SibylClientError,
+    clear_client_cache,
     get_client,
     resolve_api_base_url,
 )
@@ -141,6 +142,13 @@ def _scope_for_login_target(
             f"'{ambient}'. Storing the credential for {matched or 'this server'}."
         )
     return _current_credential_scope(matched) if matched else None
+
+
+def _login_target_context(api_url: str, explicit_target: bool) -> str | None:
+    """The context a login without --context stored its credential for."""
+    if not explicit_target:
+        return _effective_context_name()
+    return _context_for_server(api_url)
 
 
 def _load_oauth_metadata(*, issuer_url: str, insecure: bool = False) -> dict:
@@ -585,8 +593,11 @@ def _login_auto(
     break_glass_reason: str | None = None,
     insecure: bool = False,
     credential_scope_name: str | None = None,
-) -> None:
+) -> bool:
     """Single login entrypoint.
+
+    Returns True when credentials were saved, False when a no-browser login
+    only printed its approval URL.
 
     Preference order:
     1) Local password login when email/password are provided
@@ -625,7 +636,7 @@ def _login_auto(
         )
         _warn_if_env_token_overrides_login()
         success(f"Login complete (saved credentials for {api_url})")
-        return
+        return True
 
     # 2) Device flow (preferred for browser-based login)
     try:
@@ -644,10 +655,10 @@ def _login_auto(
         )
         _warn_if_env_token_overrides_login()
         success(f"Login complete (saved credentials for {api_url})")
-        return
+        return True
     except _NoBrowserLoginPrinted as e:
         success(str(e))
-        return
+        return False
     except TimeoutError as e:
         error("Timed out waiting for approval")
         raise typer.Exit(1) from e
@@ -683,10 +694,10 @@ def _login_auto(
         )
         _warn_if_env_token_overrides_login()
         success(f"Login complete (saved credentials for {api_url})")
-        return
+        return True
     except _NoBrowserLoginPrinted as e:
         success(str(e))
-        return
+        return False
     except TimeoutError as e:
         error("Timed out waiting for browser login")
         raise typer.Exit(1) from e
@@ -709,6 +720,111 @@ def _login_auto(
         "No supported login methods detected for this server (need device/oauth, or provide --email/--password)."
     )
     raise typer.Exit(1)
+
+
+def _settle_login_org(api_url: str, context_name: str | None, saved_scope: str | None) -> None:
+    """Land a fresh login in the org its context means.
+
+    A device or OAuth login receives a token for whatever org the server picks,
+    which on a team server is the caller's auto-created personal org, so every
+    later command silently acts there. A context that names an org is switched
+    to it. A context without one adopts the caller's only team org, and several
+    team orgs are the caller's choice, not a guess.
+
+    Every request here carries the token this login just saved: an ambient
+    SIBYL_AUTH_TOKEN could belong to another user, and switching with it would
+    store that user's credential under this context.
+    """
+    from sibyl_cli import config_store
+    from sibyl_cli.org import pin_context_org, store_org_tokens
+
+    ctx = config_store.get_context(context_name) if context_name else None
+    if ctx is None:
+        return
+    saved = read_server_credentials(api_url, credential_scope=saved_scope)
+    saved_token = str(saved.get("access_token") or "").strip()
+    if not saved_token:
+        return
+    client = SibylClient(base_url=api_url, auth_token=saved_token, context_name=ctx.name)
+
+    @run_async
+    async def _identity() -> tuple[dict, dict]:
+        try:
+            me = await client._request("GET", "/auth/me", _replay_pending=False)
+            orgs = await client._request("GET", "/orgs", _replay_pending=False)
+            return me, orgs
+        finally:
+            await client.close()
+
+    @run_async
+    async def _switch(slug: str) -> dict:
+        try:
+            return await client._request(
+                "POST",
+                f"/orgs/{slug}/switch",
+                _buffer_pending=False,
+                _replay_pending=False,
+            )
+        finally:
+            await client.close()
+
+    try:
+        me, listing = _identity()
+    except SibylClientError as e:
+        warn(f"Signed in, but could not confirm which org this login uses: {e}")
+        return
+
+    current = me.get("organization") or {}
+    orgs = [org for org in listing.get("orgs") or [] if isinstance(org, dict)]
+    pinned = (ctx.org_slug or "").strip()
+    if pinned:
+        if current.get("slug") == pinned:
+            return
+        target_slug = pinned
+    else:
+        current_org = next((org for org in orgs if org.get("id") == current.get("id")), None)
+        if current_org is None or not current_org.get("is_personal"):
+            return
+        teams = [org for org in orgs if not org.get("is_personal")]
+        if not teams:
+            return
+        if len(teams) > 1:
+            warn(
+                f"Signed in to your personal org. This server also has team orgs: "
+                f"{', '.join(str(org.get('slug')) for org in teams)}."
+            )
+            info(f"Work in one with: sibyl -C {ctx.name} org switch <slug>")
+            return
+        target_slug = str(teams[0].get("slug") or "")
+        if not target_slug:
+            return
+
+    try:
+        switched = _switch(target_slug)
+    except SibylClientError as e:
+        warn(f"Signed in, but could not switch to org '{target_slug}': {e}")
+        return
+    token = str(switched.get("access_token") or "").strip()
+    if not token:
+        warn(f"Signed in, but the switch to org '{target_slug}' returned no token")
+        return
+    try:
+        expires_in = int(switched["expires_in"]) if switched.get("expires_in") is not None else None
+    except (TypeError, ValueError):
+        # An unreadable expiry only costs the early-refresh hint; the switch
+        # itself succeeded and the login must not fail after saving.
+        expires_in = None
+    store_org_tokens(
+        client.base_url,
+        token,
+        refresh_token=str(switched.get("refresh_token") or "").strip() or None,
+        expires_in=expires_in,
+        scope_name=credential_scope(ctx.name, target_slug),
+    )
+    pin_context_org(ctx.name, target_slug)
+    clear_client_cache()
+    organization = switched.get("organization") or {}
+    success(f"Using org {organization.get('name') or target_slug} ({target_slug})")
 
 
 def _warn_if_env_token_overrides_login() -> None:
@@ -854,8 +970,18 @@ def login_cmd(
         "-k",
         help="Disable SSL certificate verification (for self-signed certs)",
     ),
+    use: bool = typer.Option(
+        False,
+        "--use",
+        "-u",
+        help="Make a newly created --context the active context",
+    ),
 ) -> None:
     """Login to a Sibyl server and save credentials.
+
+    A new --context becomes active only with --use or when no context is
+    active yet, so logging in to a team server never redirects the commands
+    other sessions on this machine are running.
 
     Examples:
         sibyl auth login                           # Login to active context or default
@@ -872,7 +998,7 @@ def login_cmd(
     )
 
     # Perform login
-    _login_auto(
+    logged_in = _login_auto(
         api_url=api_url,
         no_browser=no_browser,
         timeout_seconds=timeout_seconds,
@@ -885,9 +1011,9 @@ def login_cmd(
 
     # Create/update context if requested
     if context:
-        from sibyl_cli.client import clear_client_cache
         from sibyl_cli.config_store import (
             create_context,
+            get_active_context_name,
             get_context,
             update_context,
         )
@@ -902,10 +1028,28 @@ def login_cmd(
             update_context(context, server_url=server_url, insecure=insecure)
             info(f"Updated context '{context}' with server {server_url}")
         else:
-            create_context(name=context, server_url=server_url, set_active=True, insecure=insecure)
-            success(f"Created context '{context}' and set as active")
+            active = get_active_context_name()
+            activate = use or not active
+            create_context(
+                name=context, server_url=server_url, set_active=activate, insecure=insecure
+            )
+            if activate:
+                success(f"Created context '{context}' and set as active")
+            else:
+                success(f"Created context '{context}'; the active context is still '{active}'")
+                info(
+                    f"Target it with: sibyl -C {context} <command>, or make it active "
+                    f"with: sibyl config context use {context}"
+                )
 
         clear_client_cache()
+
+    if logged_in:
+        _settle_login_org(
+            api_url,
+            context or _login_target_context(api_url, bool(effective_server)),
+            scope,
+        )
 
 
 @app.command("local-signup")
