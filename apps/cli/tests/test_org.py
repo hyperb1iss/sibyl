@@ -21,16 +21,16 @@ _REJECTED = SibylClientError(
 _ORG_LISTING = {
     "orgs": [
         {
-            "id": "org-personal-0001",
+            "id": "org-0001",
             "slug": "bliss",
-            "name": "Bliss Personal",
+            "name": "Bliss Home",
             "is_personal": True,
             "role": "owner",
         },
         {
-            "id": "org-team-0002",
+            "id": "org-0002",
             "slug": "hypercolor",
-            "name": "Hypercolor Team",
+            "name": "Hypercolor Crew",
             "is_personal": False,
             "role": "member",
         },
@@ -38,7 +38,7 @@ _ORG_LISTING = {
 }
 
 
-def _org_list_client(listing: dict) -> MagicMock:
+def _org_list_client(listing: object) -> MagicMock:
     mock_client = MagicMock()
     mock_client.list_orgs = AsyncMock(return_value=listing)
     return mock_client
@@ -59,20 +59,18 @@ def test_org_list_defaults_to_a_table_of_the_same_orgs() -> None:
 
     assert result.exit_code == 0, result.stdout
     assert '"orgs"' not in result.stdout
-    for value in (
-        "Organizations",
-        "bliss",
-        "Bliss Personal",
-        "owner",
-        "personal",
-        "org-personal-0001",
-        "hypercolor",
-        "Hypercolor Team",
-        "member",
-        "team",
-        "org-team-0002",
-    ):
-        assert value in result.stdout
+    assert "Organizations" in result.stdout
+    expected_rows = {
+        "Bliss Home": ("bliss", "owner", "personal", "org-0001"),
+        "Hypercolor Crew": ("hypercolor", "member", "team", "org-0002"),
+    }
+    for name, values in expected_rows.items():
+        rows = [line for line in result.stdout.splitlines() if name in line]
+        assert len(rows) == 1, (name, result.stdout)
+        for value in values:
+            assert value in rows[0], (name, value, rows[0])
+    hypercolor_row = next(line for line in result.stdout.splitlines() if "Hypercolor" in line)
+    assert "personal" not in hypercolor_row
 
 
 def test_org_list_renders_bracketed_names_literally() -> None:
@@ -90,8 +88,9 @@ def test_org_list_renders_bracketed_names_literally() -> None:
     assert "[red]prod" in result.stdout
 
 
-def test_org_list_says_so_when_the_caller_has_no_orgs() -> None:
-    with patch("sibyl_cli.org.get_client", return_value=_org_list_client({"orgs": []})):
+@pytest.mark.parametrize("listing", [{"orgs": []}, [], None, {"orgs": None}, {"orgs": {"id": "x"}}])
+def test_org_list_says_so_when_the_caller_has_no_orgs(listing: object) -> None:
+    with patch("sibyl_cli.org.get_client", return_value=_org_list_client(listing)):
         result = CliRunner().invoke(app, ["list"])
 
     assert result.exit_code == 0, result.stdout
