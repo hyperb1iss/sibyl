@@ -590,6 +590,10 @@ _SCOPE_READERS_THAT_DO_NOT_AUTHORIZE = {
     "projection/memory.py::_projected_fact_entity": "write stamp: mirrors an inherited scope",
     "projection/memory.py::_projection_allowed": "derivation gate: refuses to project private and delegated sources at all",
     "projection/memory.py::_projection_identity_scope": "builds a dedupe identity for a projection",
+    "services/archive_graph_compiler.py::_audience": (
+        "write identity: requires the canonical body audience and actor to match "
+        "the saved checked binding; does not decide read visibility"
+    ),
     "services/content_models.py::raw_memory_from_record": "deserializes a raw memory's stored scope",
     "services/content_raw_persistence.py::get_raw_memory_by_dedupe_key": "matches a stored dedupe key",
     "services/content_raw_persistence.py::get_raw_memory_by_source_id": "matches a stored source id",

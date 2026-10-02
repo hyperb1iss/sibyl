@@ -35,6 +35,7 @@ from sibyl_core.migrate.personal_archive_plan import (
     ArchiveKind,
     ArchiveMappings,
     ArchiveStoreWitness,
+    ArchiveWitnessScheme,
     CheckedArchivePlan,
     PlannedArchiveRow,
 )
@@ -89,6 +90,30 @@ RETURN {
         crypto::sha256(type::string($this)) AS archive_association_sha256
         OMIT id FROM memory_derivations WHERE organization_id=$organization_id
         AND target_kind='graph_entity' AND target_id IN $identities ORDER BY target_id;
+    RETURN {rows:$rows, states:$states, associations:$associations, edges:$edges};
+};
+"""
+_GRAPH_AUTHORITY_CUT = """
+RETURN {
+    LET $edges = SELECT *, crypto::sha256(type::string($this)) AS archive_row_sha256,
+        in.uuid AS source_uuid, out.uuid AS target_uuid
+        OMIT id, in, out FROM relates_to WHERE uuid IN $edge_ids ORDER BY uuid;
+    LET $identities = array::distinct(array::concat(
+        $node_ids, $edges.source_uuid, $edges.target_uuid
+    ));
+    LET $rows = SELECT *, crypto::sha256(type::string($this)) AS archive_row_sha256
+        OMIT id FROM entity WHERE uuid IN $identities ORDER BY uuid;
+    LET $authority_states = SELECT * OMIT validation_write_witness
+        FROM source_states WHERE organization_id=$organization_id
+        AND source_kind='graph_entity' AND source_id IN $identities ORDER BY source_id;
+    LET $states = SELECT *, crypto::sha256(type::string($this)) AS archive_state_sha256
+        OMIT id FROM $authority_states ORDER BY source_id;
+    LET $authority_associations = SELECT * OMIT validation_write_witness
+        FROM memory_derivations WHERE organization_id=$organization_id
+        AND target_kind='graph_entity' AND target_id IN $identities ORDER BY target_id;
+    LET $associations = SELECT *,
+        crypto::sha256(type::string($this)) AS archive_association_sha256
+        OMIT id FROM $authority_associations ORDER BY target_id;
     RETURN {rows:$rows, states:$states, associations:$associations, edges:$edges};
 };
 """
@@ -233,7 +258,12 @@ class _StoreCut:
 
 
 async def _read_cuts(
-    *, organization_id: str, raw_ids: list[str], node_ids: list[str], edge_ids: list[str]
+    *,
+    organization_id: str,
+    raw_ids: list[str],
+    node_ids: list[str],
+    edge_ids: list[str],
+    witness_scheme: ArchiveWitnessScheme = "native-full-v1",
 ) -> tuple[_StoreCut, _StoreCut]:
     content = _StoreCut("content")
     graph = _StoreCut("graph")
@@ -252,7 +282,7 @@ async def _read_cuts(
         graph = _StoreCut.decode(
             "graph",
             await client.execute_query(
-                _GRAPH_CUT,
+                _GRAPH_CUT if witness_scheme == "native-full-v1" else _GRAPH_AUTHORITY_CUT,
                 organization_id=organization_id,
                 node_ids=node_ids,
                 edge_ids=edge_ids,
@@ -424,8 +454,11 @@ async def build_archive_preview(
     mappings: ArchiveMappings,
     context: AuthContext,
     request: Request,
+    witness_scheme: ArchiveWitnessScheme = "native-full-v1",
 ) -> tuple[PlannedArchiveRow, ...]:
-    """Build a checked preview, with separate authorization and store-local cuts."""
+    """Build a checked preview under an explicit server-owned witness scheme."""
+    if witness_scheme not in {"native-full-v1", "graph-association-authority-v2"}:
+        raise ValueError("unsupported archive witness scheme")
     organization_id, actor_id = _principal(context)
     mappings = ArchiveMappings.model_validate(mappings.model_dump(mode="python"))
     gate = _PolicyGate(context, request)
@@ -444,6 +477,7 @@ async def build_archive_preview(
     rows = tuple(previews.values())
     content, graph = await _read_cuts(
         organization_id=organization_id,
+        witness_scheme=witness_scheme,
         raw_ids=[
             row.destination_id
             for row in rows
@@ -609,6 +643,7 @@ async def authorize_archive_plan(
                 raise _unavailable()
     content, graph = await _read_cuts(
         organization_id=organization_id,
+        witness_scheme=plan.effective_witness_scheme,
         raw_ids=[
             row.destination_id
             for row in plan.rows
