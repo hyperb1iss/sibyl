@@ -30,6 +30,7 @@ constraint-dependencies = [
     "cryptography>=50.0.0",
     "numpy>=2.4.1",
     "python-multipart>=0.0.30",
+    "urllib3>=2.8.0",
 ]
 
 [tool.uv.workspace]
