@@ -133,10 +133,10 @@ function GraphPageContent() {
             onNodeClick={graph.handleNodeClick}
           />
 
-          {graph.data && graph.data.clusters.length > 0 && (
+          {graph.legendClusters.length > 0 && (
             <div className="absolute bottom-4 left-4 z-10 hidden md:block">
               <ClusterLegend
-                clusters={graph.data.clusters}
+                clusters={graph.legendClusters}
                 clusterColorMap={graph.clusterColorMap}
                 selectedCluster={graph.selectedCluster}
                 onClusterClick={graph.handleClusterClick}

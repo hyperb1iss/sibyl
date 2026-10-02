@@ -8,7 +8,7 @@ import type { Theme } from '@/lib/theme';
 import { getClusterLabel } from './cluster-legend';
 import { addNodeDegrees, createClusterColorMap, getRelatedEntities } from './graph-data';
 import type { GraphNode } from './graph-types';
-import { buildSemanticGraphData, collectClusters } from './semantic-graph';
+import { buildSemanticGraphData, collectClusters, withDomainLabels } from './semantic-graph';
 import {
   type ClusterExtent,
   countCollapsedInView,
@@ -340,12 +340,16 @@ export function useGraphPageState(theme: Theme) {
     () => getRelatedEntities(selectedNodeId, graphData),
     [graphData, selectedNodeId]
   );
+  const legendClusters = useMemo(
+    () => withDomainLabels(data?.clusters ?? [], semanticClusters),
+    [data?.clusters, semanticClusters]
+  );
   const selectedClusterLabel = useMemo(() => {
     if (!selectedCluster) return null;
-    const cluster = data?.clusters.find(item => item.id === selectedCluster);
+    const cluster = legendClusters.find(item => item.id === selectedCluster);
     if (cluster) return cluster.label || getClusterLabel(cluster, allNodesWithDegree);
     return semanticClusters.find(item => item.id === selectedCluster)?.label ?? null;
-  }, [selectedCluster, data?.clusters, allNodesWithDegree, semanticClusters]);
+  }, [selectedCluster, legendClusters, allNodesWithDegree, semanticClusters]);
 
   return {
     data,
@@ -363,6 +367,7 @@ export function useGraphPageState(theme: Theme) {
     selectedNodeId,
     selectedCluster,
     selectedClusterLabel,
+    legendClusters,
     selectedNodeRelated,
     clusterColorMap,
     allNodesWithDegree,
