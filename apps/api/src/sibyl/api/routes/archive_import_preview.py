@@ -42,7 +42,7 @@ from sibyl_core.migrate.personal_archive_plan import (
     archive_digest,
     canonical_json,
 )
-from sibyl_core.services.content_models import raw_memory_from_record
+from sibyl_core.services.content_models import RawMemory, raw_memory_from_record
 from sibyl_core.services.graph_client import get_surreal_graph_client
 from sibyl_core.services.graph_records import (
     entity_from_surreal_row,
@@ -84,20 +84,6 @@ RETURN {
 };
 """
 _GRAPH_FIELDS = ("id", "entity_type", "name", "description", "content", "metadata")
-_RAW_FIELDS = (
-    "raw_content",
-    "title",
-    "entity_type",
-    "source_id",
-    "principal_id",
-    "memory_scope",
-    "scope_key",
-    "agent_id",
-    "project_id",
-    "review_state",
-    "metadata",
-    "tags",
-)
 _PHYSICAL_METADATA = frozenset(
     {
         "record_id",
@@ -318,6 +304,24 @@ def _scope_fields(
     return ArchiveAudience(memory_scope=scope, scope_key=key)
 
 
+def _raw_semantic_body(memory: RawMemory) -> dict[str, Any]:
+    """Use canonical capture defaults for both foreign candidates and native rows."""
+    return {
+        "raw_content": memory.raw_content,
+        "title": memory.title,
+        "entity_type": memory.entity_type,
+        "source_id": memory.source_id,
+        "principal_id": memory.principal_id,
+        "memory_scope": memory.memory_scope.value,
+        "scope_key": memory.scope_key,
+        "agent_id": memory.agent_id,
+        "project_id": memory.project_id,
+        "review_state": memory.review_state,
+        "metadata": _metadata(memory.metadata),
+        "tags": memory.tags,
+    }
+
+
 def _existing_bodies(
     content: _StoreCut, graph: _StoreCut, *, organization_id: str, actor_id: str
 ) -> tuple[
@@ -340,21 +344,7 @@ def _existing_bodies(
             try:
                 if cut.store == "content":
                     memory = raw_memory_from_record(row)
-                    body = {key: row.get(key) for key in _RAW_FIELDS}
-                    body.update(
-                        metadata=_metadata(memory.metadata),
-                        tags=memory.tags,
-                        title=memory.title,
-                        raw_content=memory.raw_content,
-                        entity_type=memory.entity_type,
-                        review_state=memory.review_state,
-                        source_id=memory.source_id,
-                        principal_id=memory.principal_id,
-                        memory_scope=memory.memory_scope.value,
-                        scope_key=memory.scope_key,
-                        agent_id=memory.agent_id,
-                        project_id=memory.project_id,
-                    )
+                    body = _raw_semantic_body(memory)
                     audience = _scope_fields(body, actor_id=actor_id, identity=identity)
                     raw_bodies[identity] = body
                 else:
@@ -418,6 +408,8 @@ def _prepared_body(
     node_ids: dict[str, str],
 ) -> dict[str, Any]:
     body = json.loads(candidate.semantic_json)
+    if candidate.kind is ArchiveKind.RAW_CAPTURE:
+        body = _raw_semantic_body(raw_memory_from_record(body))
     if candidate.kind is ArchiveKind.GRAPH_RELATIONSHIP:
         body["metadata"] = _edge_semantic_metadata(body)
     metadata = stamp_memory_scope_metadata(
@@ -517,7 +509,12 @@ def _normalize_preview_inputs(
         if candidate.protection != "ordinary":
             continue
         key = candidate.kind, candidate.original_id
-        metadata = json.loads(candidate.semantic_json).get("metadata", {})
+        body = json.loads(candidate.semantic_json)
+        metadata = (
+            raw_memory_from_record(body).metadata
+            if candidate.kind is ArchiveKind.RAW_CAPTURE
+            else body.get("metadata", {})
+        )
         inline = [
             value
             for field in _INLINE_REFERENCES
