@@ -866,3 +866,91 @@ def test_history_missing_saved_artifact_cannot_collide_with_retained_logical_uui
     # retained table's UUID unique index still owns the incoming logical UUID.
     with pytest.raises(ValueError, match="logical identity"):
         prefix(validate(data, scopes), validate(target, scopes))
+
+
+def retained_intake_pair(data):
+    target = deepcopy(data)
+    run = table(target, "content", "archive_import_runs")["rows"][0]
+    artifact = table(target, "content", "archive_import_artifacts")["rows"][0]
+    run_id, artifact_id = str(uuid4()), str(uuid4())
+    run.update(
+        uuid=run_id,
+        artifact_id=artifact_id,
+        id=Record("archive_import_runs", ["retained", run_id]),
+    )
+    artifact.update(
+        uuid=artifact_id,
+        run_id=run_id,
+        id=Record("archive_import_artifacts", ["retained", artifact_id]),
+    )
+    return target, run, artifact
+
+
+@pytest.mark.parametrize("same_request", [False, True])
+@pytest.mark.parametrize("relocated_content", [False, True])
+def test_history_missing_pair_rejects_retained_intake_owner(
+    dataset, same_request, relocated_content
+):
+    data, scopes, _, _ = dataset
+    target, run, _ = retained_intake_pair(data)
+    incoming = table(data, "content", "archive_import_runs")["rows"][0]
+    run["request_sha256"] = incoming["request_sha256"] if same_request else "c" * 64
+    target_scopes = scopes
+    if relocated_content:
+        content = next(s for s in target["scopes"] if s["store"] == "content")
+        old_namespace = content["namespace"]
+        content.update(namespace="relocated_content", database="recovery")
+        content["namespace_catalog"]["databases"] = {"recovery": "database-definition"}
+        del target["namespace_catalog"]["namespaces"][old_namespace]
+        target["namespace_catalog"]["namespaces"]["relocated_content"] = "namespace-definition"
+        target_scopes = tuple(
+            replace(s, namespace="relocated_content", database="recovery")
+            if s.store == "content"
+            else s
+            for s in scopes
+        )
+    archived, retained = validate(data, scopes), validate(target, target_scopes)
+    assert incoming["uuid"] != run["uuid"]
+    assert incoming["artifact_id"] != run["artifact_id"]
+    assert all(
+        incoming[name] == run[name] for name in ("organization_id", "actor_id", "intake_identity")
+    )
+    with pytest.raises(ValueError, match="intake identity"):
+        prefix(archived, retained)
+
+
+@pytest.mark.parametrize("distinct", ["intake", "actor", "organization"])
+def test_history_missing_pair_allows_distinct_native_intake_key(dataset, distinct):
+    data, scopes, _, plan = dataset
+    target, run, artifact = retained_intake_pair(data)
+    if distinct == "intake":
+        run["intake_identity"] = "another-server-owned-check"
+    else:
+        field = "actor_id" if distinct == "actor" else "organization_id"
+        value = str(uuid4())
+        other_plan = CheckedArchivePlan.model_validate(
+            {**plan.model_dump(mode="python"), field: value}
+        )
+        run.update(
+            **{
+                field: value,
+                "checked_plan_json": checked_plan_bytes(other_plan),
+                "checked_plan_sha256": checked_plan_digest(other_plan),
+            }
+        )
+        artifact[field] = value
+        if distinct == "organization":
+            table(target, "auth", "organizations")["rows"].append(
+                {"id": Record("organizations", value), "uuid": value}
+            )
+    archived, retained = validate(data, scopes), validate(target, scopes)
+    result = prefix(archived, retained)
+    incoming_id = archived.payload["pairs"][0]["run_id"]
+    missing = next(p for p in result.payload["pairs"] if p["run_id"] == incoming_id)
+    assert missing["outcome"] == "missing"
+    assert missing["archived"] == archived.payload["pairs"][0]
+    assert retained.payload["pairs"][0]["run"]["image"]["value"]["uuid"] == run["uuid"]
+    if distinct == "organization":
+        assert result.payload["uncovered_organization_ids"] == [run["organization_id"]]
+    else:
+        assert sorted(p["outcome"] for p in result.payload["pairs"]) == ["missing", "retain"]

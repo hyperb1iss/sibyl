@@ -744,10 +744,20 @@ def _prefix(
     ) != set(retained.expected_scopes):
         raise ValueError("prefix mapping must cover both exact approved scope inventories")
     a, b = archived.payload, retained.payload
+    target_scope = {m.source: m.target for m in mappings}
     covered = {s.organization_id for s in archived.expected_scopes if s.store == "graph"}
     pair_a = {p["run_id"]: p for p in a["pairs"]}
     pair_b = {p["run_id"]: p for p in b["pairs"]}
     pair_plans = []
+    intake_owners = {
+        (
+            *ArchiveHistoryScope(**p["run"]["scope"]).locator,
+            p["run"]["image"]["value"]["organization_id"],
+            p["run"]["image"]["value"]["actor_id"],
+            p["run"]["image"]["value"]["intake_identity"],
+        ): p["run_id"]
+        for p in b["pairs"]
+    }
     artifact_owners = {p["artifact"]["image"]["value"]["uuid"]: p["run_id"] for p in b["pairs"]}
     target_ids = {
         (p[name]["table"], _json(p[name]["identity"])): p["run_id"]
@@ -761,6 +771,13 @@ def _prefix(
         artifact_id = pair["artifact"]["image"]["value"]["uuid"]
         if artifact_id in artifact_owners and artifact_owners[artifact_id] != run_id:
             raise ValueError("saved artifact logical identity collides with retained pair")
+        run = pair["run"]["image"]["value"]
+        locator = target_scope[ArchiveHistoryScope(**pair["run"]["scope"])].locator
+        intake_owner = intake_owners.get(
+            (*locator, run["organization_id"], run["actor_id"], run["intake_identity"])
+        )
+        if intake_owner is not None and intake_owner != run_id:
+            raise ValueError("saved run intake identity belongs to another retained pair")
         if other is not None and any(
             not _same_image(pair[name], other[name]) for name in ("run", "artifact")
         ):
@@ -792,7 +809,6 @@ def _prefix(
         }
 
     source, target = index(a), index(b)
-    target_scope = {m.source: m.target for m in mappings}
     target_ids = {
         (c["scope"]["namespace"], c["scope"]["database"], row["table"], _json(row["identity"])): (
             c["organization_id"],
