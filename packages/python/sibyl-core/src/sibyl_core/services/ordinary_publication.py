@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import TypeAdapter
 
 from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
+from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind
 from sibyl_core.services.content_models import RawMemory
 from sibyl_core.services.memory_autonomy import reflection_autonomy_candidate_metadata
 from sibyl_core.services.memory_source_validation import SourceAuthorityResolver
@@ -72,9 +73,14 @@ class OrdinaryValidatedPromotion(ValidatedPromotion):
     async def current_guard(
         self, *, read: GraphReadValidation | None = None
     ) -> tuple[str, dict[str, Any]]:
-        await self.authorize()
         if read is not None:
             read._check_org(self.organization_id)
+            if (
+                read.source_authority_resolver is not None
+                and self.resolver is not read.source_authority_resolver
+            ):
+                raise ValidationExecutionUnavailable("Ordinary publication resolver differs")
+        await self.authorize()
         current = await prepare_stored_reflection(
             self.organization_id,
             self.principal_id,
@@ -88,6 +94,13 @@ class OrdinaryValidatedPromotion(ValidatedPromotion):
             self.organization_id,
             self.principal_id,
             read_execute_query=read.content_execute_query if read is not None else None,
+            **(
+                read._publication_execution_kwargs(
+                    SourceIdentity(self.organization_id, SourceKind.RAW_CAPTURE, self.candidate_id)
+                )
+                if read is not None
+                else {}
+            ),
         )
         await execution.result()
         row = await execution.load()
@@ -137,11 +150,21 @@ async def ordinary_promotion_binding(
 ):
     if read is not None:
         read._check_org(org)
+        if (
+            read.source_authority_resolver is not None
+            and resolver is not read.source_authority_resolver
+        ):
+            raise ValidationExecutionUnavailable("Ordinary publication resolver differs")
     row = await ValidationExecution(
         execution_id,
         org,
         principal,
         read_execute_query=read.content_execute_query if read is not None else None,
+        **(
+            read._publication_execution_kwargs(SourceIdentity(org, SourceKind.RAW_CAPTURE, parent))
+            if read is not None
+            else {}
+        ),
     ).load()
     if row is None or not isinstance(row.get("result_json"), str):
         raise ValidationExecutionUnavailable("Ordinary promotion validation unavailable")

@@ -682,3 +682,148 @@ async def test_native_transaction_cancel_task_rechecks_socket_at_dispatch(monkey
     assert conn.closed == (transport == "lost")
     assert tx.commit_outcome == leaf.NativeCommitOutcome.NOT_REQUESTED
     assert tx._state == "closed"
+
+
+@pytest.mark.parametrize(
+    "cause",
+    [ValueError("stage validation failed"), asyncio.CancelledError("stage cancelled")],
+    ids=["python-error", "cancellation"],
+)
+@pytest.mark.asyncio
+async def test_native_transaction_invalidate_caught_stage_error_seals_cached_executor(
+    fixture, cause
+):
+    made, _, authorize, credentials = fixture
+    async with leaf.open_native_transaction(
+        binding(), authorize=authorize, credentials=credentials
+    ) as tx:
+        execute = tx.executor(binding().scopes[0])
+        assert await execute("RETURN {value: 1};") == {"value": 1}
+        before = list(made[0].calls)
+
+        async def stage():
+            try:
+                raise cause
+            except BaseException:
+                tx.invalidate()
+                raise
+
+        with pytest.raises(type(cause)) as caught:
+            await stage()
+        assert caught.value is cause
+        assert tx.invalidate() is None
+        assert tx.invalidate() is None
+        assert tx._state == "failed"
+        assert tx.commit_outcome == leaf.NativeCommitOutcome.NOT_REQUESTED
+        with pytest.raises(leaf.NativeTransactionError, match="not ready"):
+            tx.executor(binding().scopes[0])
+        with pytest.raises(leaf.NativeTransactionError, match="not ready"):
+            await execute("RETURN true;")
+        with pytest.raises(leaf.NativeTransactionError, match="not ready"):
+            await tx.commit()
+        assert made[0].calls == before
+    assert made[0].socket.closed and made[0].closed
+    assert [call[0] for call in made[0].calls[-2:]] == ["cancel", "close"]
+    tx.invalidate()
+    assert tx._state == "closed"
+    assert tx.commit_outcome == leaf.NativeCommitOutcome.NOT_REQUESTED
+
+
+@pytest.mark.asyncio
+async def test_native_transaction_invalidate_opening_handle_cannot_yield_ready(
+    fixture, monkeypatch
+):
+    made, _, authorize, credentials = fixture
+    original_catalog = leaf.NativeTransaction._catalog
+    handles = []
+
+    async def invalidate_after_catalog(tx):
+        await original_catalog(tx)
+        handles.append(tx)
+        before = list(made[0].calls)
+        assert tx._state == "opening"
+        assert tx.invalidate() is None
+        assert tx.invalidate() is None
+        assert tx._state == "failed"
+        assert made[0].calls == before
+
+    monkeypatch.setattr(leaf.NativeTransaction, "_catalog", invalidate_after_catalog)
+    with pytest.raises(leaf.NativeTransactionError, match="invalidated while opening"):
+        async with leaf.open_native_transaction(
+            binding(), authorize=authorize, credentials=credentials
+        ):
+            pytest.fail("invalidated opening handle became ready")
+    assert handles[0]._state == "closed"
+    assert handles[0].commit_outcome == leaf.NativeCommitOutcome.NOT_REQUESTED
+    assert made[0].socket.closed and made[0].closed
+    assert [call[0] for call in made[0].calls[-2:]] == ["cancel", "close"]
+
+
+@pytest.mark.parametrize(
+    "state,outcome",
+    [
+        ("failed", leaf.NativeCommitOutcome.NOT_REQUESTED),
+        ("committing", leaf.NativeCommitOutcome.UNKNOWN),
+        ("committed", leaf.NativeCommitOutcome.ACKNOWLEDGED),
+        ("failed", leaf.NativeCommitOutcome.REJECTED),
+        ("failed", leaf.NativeCommitOutcome.UNKNOWN),
+        ("closing", leaf.NativeCommitOutcome.UNKNOWN),
+        ("closed", leaf.NativeCommitOutcome.ACKNOWLEDGED),
+    ],
+)
+def test_native_transaction_invalidate_preserves_lifecycle_and_commit_evidence(state, outcome):
+    tx = leaf.NativeTransaction(binding(), cancel_ack_timeout_seconds=5.0)
+    tx._state, tx._outcome = state, outcome
+    assert tx.invalidate() is None
+    assert tx.invalidate() is None
+    assert tx._state == state
+    assert tx.commit_outcome == outcome
+    assert tx._client is None and tx._socket is None and tx._txn is None
+
+
+@pytest.mark.parametrize("state", ["opening", "ready"])
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        leaf.NativeCommitOutcome.ACKNOWLEDGED,
+        leaf.NativeCommitOutcome.REJECTED,
+        leaf.NativeCommitOutcome.UNKNOWN,
+    ],
+)
+def test_native_transaction_invalidate_never_changes_known_commit_evidence(state, outcome):
+    tx = leaf.NativeTransaction(binding(), cancel_ack_timeout_seconds=5.0)
+    tx._state, tx._outcome = state, outcome
+    assert tx.invalidate() is None
+    assert tx.invalidate() is None
+    assert tx._state == state
+    assert tx.commit_outcome == outcome
+
+
+@pytest.mark.asyncio
+async def test_native_transaction_invalidate_owner_cancellation_keeps_context_cleanup(fixture):
+    made, _, authorize, credentials = fixture
+    ready = asyncio.Event()
+    handles = []
+
+    async def work():
+        async with leaf.open_native_transaction(
+            binding(), authorize=authorize, credentials=credentials
+        ) as tx:
+            handles.append(tx)
+            ready.set()
+            try:
+                await asyncio.Future()
+            except BaseException:
+                tx.invalidate()
+                raise
+
+    owner = asyncio.create_task(work())
+    await ready.wait()
+    owner.cancel("stage owner cancelled")
+    with pytest.raises(asyncio.CancelledError, match="stage owner cancelled"):
+        await owner
+    assert handles[0]._state == "closed"
+    assert handles[0].commit_outcome == leaf.NativeCommitOutcome.NOT_REQUESTED
+    assert made[0].socket.closed and made[0].closed
+    assert [call[0] for call in made[0].calls[-2:]] == ["cancel", "close"]
+    assert not any(call[0] == "commit" for call in made[0].calls)

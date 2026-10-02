@@ -10,12 +10,23 @@ import asyncio
 import hashlib
 from collections.abc import Callable, Coroutine, Hashable, Sequence
 from dataclasses import asdict
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from sibyl_core.backends.surreal.schema_version import SurrealExecute
 from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind
-from sibyl_core.services.memory_source_validation import SourceReadAuthority
+from sibyl_core.services.memory_source_validation import (
+    SourceAuthorityResolver,
+    SourceReadAuthority,
+)
 from sibyl_core.services.source_observations import SourceUnavailableError
+
+if TYPE_CHECKING:
+    from sibyl_core.services.graph_publication_fence import _PublicationCollector
+
+
+class _PublicationExecutionKwargs(TypedDict, total=False):
+    publication_read: GraphReadValidation
+    publication_owner: SourceIdentity | None
 
 
 class GraphReadValidation:
@@ -34,10 +45,14 @@ class GraphReadValidation:
         *,
         content_execute_query: SurrealExecute | None = None,
         graph_execute_query: SurrealExecute | None = None,
+        source_authority_resolver: SourceAuthorityResolver | None = None,
+        _publication_collector: _PublicationCollector | None = None,
     ) -> None:
         if (content_execute_query is None) != (graph_execute_query is None):
             raise ValueError("validation requires both content and graph readers")
         self.organization_id = organization_id
+        self._source_authority_resolver = source_authority_resolver
+        self._publication_collector = _publication_collector
         self._content_execute_query = content_execute_query
         self._graph_execute_query = graph_execute_query
         self._inputs: dict[Hashable, asyncio.Task[Any]] = {}
@@ -51,6 +66,11 @@ class GraphReadValidation:
         self.observations: dict[SourceIdentity, Any] = {}
         self.dependencies: dict[SourceIdentity, set[SourceIdentity]] = {}
         self.conflicts: set[SourceIdentity] = set()
+
+    @property
+    def source_authority_resolver(self) -> SourceAuthorityResolver | None:
+        """Operation-selected resolver; recursive callers may not replace it."""
+        return self._source_authority_resolver
 
     @property
     def content_execute_query(self) -> SurrealExecute | None:
@@ -75,6 +95,11 @@ class GraphReadValidation:
 
     async def resolve_authority(self, organization_id: str, principal_id: str, resolver):
         self._check_org(organization_id)
+        if (
+            self.source_authority_resolver is not None
+            and resolver is not self.source_authority_resolver
+        ):
+            raise SourceUnavailableError()
         return await self._once(
             ("authority", organization_id, principal_id),
             lambda: resolver(organization_id, principal_id),
@@ -85,23 +110,26 @@ class GraphReadValidation:
         from sibyl_core.services.source_state_store import RawSourceSnapshot
 
         self._check_org(source.organization_id)
-        snapshot = await self._once(
-            ("source", source, authority),
-            lambda: load_authorized_source_snapshot(
-                source,
-                authority,
-                organization_id=self.organization_id,
-                **(
-                    {
-                        "execute_query": self.content_execute_query
-                        if source.kind is SourceKind.RAW_CAPTURE
-                        else self.graph_execute_query
-                    }
-                    if self.content_execute_query is not None
-                    else {}
+        if self._publication_collector is not None:
+            snapshot = await self._publication_collector.authorized_snapshot(source, authority)
+        else:
+            snapshot = await self._once(
+                ("source", source, authority),
+                lambda: load_authorized_source_snapshot(
+                    source,
+                    authority,
+                    organization_id=self.organization_id,
+                    **(
+                        {
+                            "execute_query": self.content_execute_query
+                            if source.kind is SourceKind.RAW_CAPTURE
+                            else self.graph_execute_query
+                        }
+                        if self.content_execute_query is not None
+                        else {}
+                    ),
                 ),
-            ),
-        )
+            )
         self.record_observation(snapshot.observation)
         if isinstance(snapshot, RawSourceSnapshot):
             self.record_capture(snapshot.memory)
@@ -113,6 +141,36 @@ class GraphReadValidation:
         else:
             self.record_entity(snapshot.entity)
         return snapshot
+
+    async def _publication_source(self, source: SourceIdentity, *, candidate: bool = False) -> None:
+        self._check_org(source.organization_id)
+        if self._publication_collector is not None:
+            await self._publication_collector.capture_source(source, candidate=candidate)
+
+    def _publication_execution_kwargs(
+        self, owner: SourceIdentity | None = None
+    ) -> _PublicationExecutionKwargs:
+        return (
+            {"publication_read": self, "publication_owner": owner}
+            if self._publication_collector is not None
+            else {}
+        )
+
+    def _publication_execution(
+        self, execution_id: str, principal: str, row, owner: SourceIdentity | None = None
+    ) -> None:
+        if self._publication_collector is not None:
+            self._publication_collector.register_execution(execution_id, principal, row, owner)
+
+    def _publication_execution_dependency(
+        self, execution_id: str, principal: str, child: str
+    ) -> None:
+        if self._publication_collector is not None:
+            self._publication_collector.execution_dependency(execution_id, principal, child)
+
+    async def _publication_procedure(self, candidate: str) -> None:
+        if self._publication_collector is not None:
+            await self._publication_collector.capture_procedure(candidate)
 
     async def raw_association(self, organization_id: str, memory_id: str):
         from sibyl_core.services.memory_derivations import load_raw_derivation
@@ -211,17 +269,23 @@ class GraphReadValidation:
     def record_entity(self, entity, *, ancestry: bool = False) -> None:
         self._check_org(entity.organization_id)
         source = SourceIdentity(self.organization_id, SourceKind.GRAPH_ENTITY, entity.id)
+        if self._publication_collector is not None:
+            self._publication_collector.register_source(source)
         evidence = entity_read_evidence(entity, ancestry=ancestry)
         self._remember(self.graph_ancestry if ancestry else self.graph_rows, source, evidence)
 
     def record_capture(self, memory) -> None:
         self._check_org(memory.organization_id)
         source = SourceIdentity(self.organization_id, SourceKind.RAW_CAPTURE, memory.id)
+        if self._publication_collector is not None:
+            self._publication_collector.register_source(source)
         self._remember(self.raw_rows, source, capture_read_evidence(memory))
 
     def record_association(self, source: SourceIdentity, association) -> None:
         from sibyl_core.services.memory_derivations import observation_from_record
 
+        if self._publication_collector is not None:
+            self._publication_collector.register_source(source)
         self._remember(self.associations, source, association_read_evidence(association))
         if association is not None:
             for value in association.get("observations", []):

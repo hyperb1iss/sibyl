@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 import structlog
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
+from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind
 from sibyl_core.services.validation_execution import (
     ValidationExecution,
     ValidationExecutionUnavailable,
@@ -143,7 +144,12 @@ async def validation_binding_current(
         memory.organization_id,
         memory.principal_id,
         **(
-            {"read_execute_query": read.content_execute_query}
+            {
+                "read_execute_query": read.content_execute_query,
+                **read._publication_execution_kwargs(
+                    SourceIdentity(memory.organization_id, SourceKind.RAW_CAPTURE, memory.id)
+                ),
+            }
             if read is not None and read.content_execute_query is not None
             else {}
         ),
@@ -197,6 +203,13 @@ class ValidatedPromotion:
             self.organization_id,
             self.principal_id,
             read_execute_query=read.content_execute_query if read is not None else None,
+            **(
+                read._publication_execution_kwargs(
+                    SourceIdentity(self.organization_id, SourceKind.RAW_CAPTURE, self.candidate_id)
+                )
+                if read is not None
+                else {}
+            ),
         )
         await execution.result()
         row = await execution.load()
@@ -348,6 +361,33 @@ async def validated_graph_currents(
     )
     if len(rows) != 1:
         raise ValidationExecutionUnavailable("Validation recall snapshot unavailable")
+    if read is not None and read._publication_collector is not None:
+        from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind
+
+        for value in rows[0]["published"]:
+            await read._publication_procedure(value["candidate_id"])
+        for value in rows[0]["captures"]:
+            await read._publication_source(
+                SourceIdentity(organization_id, SourceKind.RAW_CAPTURE, value["uuid"])
+            )
+        for entity_id in entity_ids:
+            dependencies = {
+                value["target_id"]
+                for value in rows[0]["direct"]
+                if value.get("validation_entity_id") == entity_id
+            }
+            dependencies.update(
+                value["candidate_id"]
+                for value in rows[0]["published"]
+                if value.get("promoted_entity_id") == entity_id
+            )
+            read.depend_on(
+                SourceIdentity(organization_id, SourceKind.GRAPH_ENTITY, entity_id),
+                [
+                    SourceIdentity(organization_id, SourceKind.RAW_CAPTURE, value)
+                    for value in dependencies
+                ],
+            )
     captures = {row["uuid"]: row for row in rows[0]["captures"]}
     associations = {row["target_id"]: row for row in rows[0]["associations"]}
 
@@ -367,10 +407,14 @@ async def validated_graph_currents(
             memory = raw_memory_from_record(record)
             association = associations.get(identifier)
             if association is None:
+                if read is not None and read._publication_collector is not None:
+                    return False
                 if memory.derivation_required:
                     return False
                 continue
             if association.get("validation_binding_json") is None:
+                if read is not None and read._publication_collector is not None:
+                    return False
                 if association.get("validation_entity_id") is not None:
                     return False
                 continue

@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from sibyl_core.backends.surreal.connection import _is_transient_connection_error
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM, render_surreal_compatible_sql
 from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
+from sibyl_core.backends.surreal.schema_version import SurrealExecute
 from sibyl_core.embeddings.provenance import (
     EMBEDDING_STAMP_KEY,
     vector_identity_differs_predicate,
@@ -219,13 +220,20 @@ async def _replace_entity(
 
 
 async def _insert_entity_if_absent(
-    client: SurrealGraphClient,
+    client: SurrealGraphClient | None,
     entity: Entity,
     *,
     group_id: str,
     derivation: Mapping[str, object] | None = None,
+    execute_query: SurrealExecute | None = None,
 ) -> tuple[SurrealRecord, bool]:
     """Arbitrate creation by physical record ID without rewriting a retry."""
+    if execute_query is None:
+        if client is None:
+            raise ValueError("graph insertion requires an executor")
+        execute_query = client.execute_query
+    elif derivation is None:
+        raise ValueError("explicit insertion requires a typed derivation")
     _enforce_entity_content_limit([entity])
     record = _entity_record(entity, group_id=group_id)
     record["id"] = entity.id
@@ -243,7 +251,7 @@ async def _insert_entity_if_absent(
             raise ValueError("derivation does not match graph target")
         association["body_sha256"] = graph_target_digest(entity_from_surreal_row(record))
         result = normalize_records(
-            await client.execute_query(
+            await execute_query(
                 """RETURN {
                 LET $inserted = INSERT IGNORE INTO entity $rows;
                 IF array::len($inserted) > 0 {
@@ -289,16 +297,15 @@ async def _insert_entity_if_absent(
         return stored, created
     query = "INSERT IGNORE INTO entity $rows;"
     try:
-        result = await client.execute_query(query, rows=[record])
+        result = await execute_query(query, rows=[record])
     except Exception as exc:
         if not _is_legacy_updated_at_string_schema_error(exc):
             raise
-        result = await client.execute_query(
-            query, rows=_records_with_legacy_updated_at_strings([record])
-        )
+        result = await execute_query(query, rows=_records_with_legacy_updated_at_strings([record]))
     rows = normalize_records(result)
     if rows:
         return rows[0], True
+    assert client is not None
     stored = await _select_one(
         client,
         "SELECT * FROM entity WHERE uuid = $uuid LIMIT 1;",
