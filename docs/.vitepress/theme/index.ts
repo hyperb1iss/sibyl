@@ -78,9 +78,10 @@ export default {
         let mermaidLoadPromise: Promise<any> | null = null
         const ensureMermaid = async () => {
             if (!mermaidLoadPromise) {
-                mermaidLoadPromise = import(
-                    /* @vite-ignore */ 'mermaid/dist/mermaid.esm.mjs'
-                ).then((mod) => mod.default ?? mod)
+                // A plain dynamic import lets Vite bundle mermaid as a lazy
+                // chunk. A bare deep path behind @vite-ignore reached the
+                // browser unresolved, so no diagram ever rendered.
+                mermaidLoadPromise = import('mermaid').then((mod) => mod.default ?? mod)
             }
             return mermaidLoadPromise
         }

@@ -167,12 +167,11 @@ candidates archived by the critic and 37 superseded drafts retired. One orphaned
 remains pending and is filed as a task. After PR 621, 34 of 34 entities are embedded.
 
 Measured Anthropic spend on this database is about $285: $250.08 for pages one and two, no receipt
-for page three because it ran under a killed resume, and
-$23.19 for the drain. Campaign real spend
-is about $385. All attempts on the final runs carry
-complete usage, so the unrecorded estimate is 0. The first paid attempt, on September 17, was
-stopped after one invocation. The attempt returned 4 usable proposals of 18 at
-$54.35 measured plus about $42 unrecorded, and the restore discarded its state.
+for page three because it ran under a killed resume, and $23.19 for the drain. Campaign real spend
+is about $385. All attempts on the final runs carry complete usage, so the unrecorded estimate is 0.
+The first paid attempt, on September 17, was stopped after one invocation. The attempt returned 4
+usable proposals of 18 at $54.35 measured plus about $42 unrecorded, and the restore discarded its
+state.
 
 Checkpoint one prepared 24 of 24 cells on runtime cdaedf33db57 at 10:02 UTC on September 18. Native
 packs differ from checkpoint zero on all six tasks, which confirms the treatment reached the native
@@ -224,10 +223,10 @@ ledger remain intact. Counting produced no consolidated memory, generation reser
 result.
 
 The measured initial proposal reservation is $88.073815. Existing holds remain $217.247410,
-including both unknown-usage attempts. Together, the
-$305.321225 initial-only floor exceeds the current $300 memory ceiling by $5.321225, before critics,
-corrections, embeddings or retries. Reservations are conservative bounds, not billed costs. No new
-budget or generation authority has been issued.
+including both unknown-usage attempts. Together, the $305.321225 initial-only floor exceeds the
+current $300 memory ceiling by $5.321225, before critics, corrections, embeddings or retries.
+Reservations are conservative bounds, not billed costs. No new budget or generation authority has
+been issued.
 
 The checkpoint composer and materialized embedding adapter have accepted source implementations. The
 ordinary request accountant and combined provider network owner are undergoing integration review.
@@ -273,10 +272,10 @@ present. The final native checks report the owned database stopped, protected re
 and source/runtime checks passed. No solver calls ran and the next comparison remains unarmed.
 
 Accounting now records 76 historical attempts plus 44 subsequent physical attempts (120 total
-generation attempts). The 20 continuation generation calls reserved
-$34.396155; all 36 construction generation calls reserved $70.906280. Cumulative memory reservations
-are $217.247410 against the existing $300 ceiling. Reservations do not establish billed cost. Two
-unknown-usage holds remain unreleased, and no prior history was replaced.
+generation attempts). The 20 continuation generation calls reserved $34.396155; all 36 construction
+generation calls reserved $70.906280. Cumulative memory reservations are $217.247410 against the
+existing $300 ceiling. Reservations do not establish billed cost. Two unknown-usage holds remain
+unreleased, and no prior history was replaced.
 
 The unarmed ordinary-capture entry has independent review and root acceptance. Its preparation
 source also passed independent review. The accepted source is ready to bind the completed-summary
@@ -332,11 +331,11 @@ with the provider key supplied only through private standard input. Only the own
 is inside the lifecycle boundary.
 
 The retained 19:05:43 UTC observation found the continuation process live and one new request begun
-for map 16. No new outcome or network denial existed. Its reservation is
-$1.102200, bringing retained cumulative reservations to $183.953455 under the original $300 ceiling.
-All 431 previously bound files still match. The continuation permits at most 20 new generation
-phases and eight reducer counts; it cannot replay prior paid maps or release unknown holds. Summary
-completion and final native-state acceptance remain pending.
+for map 16. No new outcome or network denial existed. Its reservation is $1.102200, bringing
+retained cumulative reservations to $183.953455 under the original $300 ceiling. All 431 previously
+bound files still match. The continuation permits at most 20 new generation phases and eight reducer
+counts; it cannot replay prior paid maps or release unknown holds. Summary completion and final
+native-state acceptance remain pending.
 
 The ordinary capture callback passed independent review and root spot checks, including the
 unchanged 233-source and 240-slot synthetic denominator. Actual retained-corpus capture and provider
@@ -379,11 +378,10 @@ The exact source and current authority are rechecked by the existing owners thro
 
 At the retained 11:51:40 UTC progress snapshot, two maps were complete, three generation
 reservations existed, two HTTP 200 outcomes were observed and no phase failure or network denial was
-recorded. New reservations totalled
-$6.668130. Together with all 84 earlier attempts, retained memory reservations were $153.009260.
-These are reservations, not billed costs. The full accepted schedule has a conservative cumulative
-upper bound of $256.953130 under $300. No final summary terminal or final native-state acceptance
-exists at this checkpoint, and no solver cell has run.
+recorded. New reservations totalled $6.668130. Together with all 84 earlier attempts, retained
+memory reservations were $153.009260. These are reservations, not billed costs. The full accepted
+schedule has a conservative cumulative upper bound of $256.953130 under $300. No final summary
+terminal or final native-state acceptance exists at this checkpoint, and no solver cell has run.
 
 The full ordinary fitting measurement produced 40 fixture groups containing all 233 captures once.
 The 800,000-character allowance remains unadopted. Actual tool-mode SDK requests include transformed
@@ -521,12 +519,11 @@ bootstrap output.
 
 The known total controller usage is 8,494,554 input tokens, 70,560 output tokens, 381 tool calls and
 $1.08454070, including the original failed controller. The continuation adds $1.06960102 known
-controller spend. The full
-$48 reservation remains held, with no release or new reservation; cumulative reserved solver capacity remains $755.2186368
-under the existing
-$762.4700928 ceiling. Memory preparation remains at 84 physical attempts and $146.341130 reserved.
-Embeddings remain separate at 4,603 tokens and $0.00009206. Original failures and unknown
-reservations remain recorded.
+controller spend. The full $48 reservation remains held, with no release or new reservation;
+cumulative reserved solver capacity remains $755.2186368 under the existing $762.4700928 ceiling.
+Memory preparation remains at 84 physical attempts and $146.341130 reserved. Embeddings remain
+separate at 4,603 tokens and $0.00009206. Original failures and unknown reservations remain
+recorded.
 
 The post-terminal read-only scan matched all 21,513 dependency-runtime members, the 2,201-file
 solver export and its original symlink, the six implementation files, original execution/claim files
@@ -563,12 +560,12 @@ contain 20 references; the selected two families account for four construction c
 allowance, source authority and the phase adapter still require review. The prior two-family worker
 cannot launch this new schedule unchanged.
 
-The broader budget remains unresolved. At the retained 32,768-output-token ceiling and
-$25 per million output tokens, 602 proposals alone contribute $493.1584 of maximum-output
-reservation before any input, critic or correction. The existing $300 memory ceiling is unchanged.
-Packet count alone cannot bound the ordinary correction loop. The new 48-cell solver screen would
-also exceed the current solver envelope without an explicit revised cumulative reservation. No new
-envelope is armed by these measurements.
+The broader budget remains unresolved. At the retained 32,768-output-token ceiling and $25 per
+million output tokens, 602 proposals alone contribute $493.1584 of maximum-output reservation before
+any input, critic or correction. The existing $300 memory ceiling is unchanged. Packet count alone
+cannot bound the ordinary correction loop. The new 48-cell solver screen would also exceed the
+current solver envelope without an explicit revised cumulative reservation. No new envelope is armed
+by these measurements.
 
 The native restore plan is frozen with read-only source-volume observations and exact
 archive/runtime/source bindings. It preserves 233 admissions, all 240 source assignment slots,
@@ -632,13 +629,13 @@ original schedule wrapper hash (`b6462837`) still describes the same 24 cells. T
 receipt remains tied to its original runner; the continuation uses the reviewed explicit no-bytecode
 child flag without changing task or provider inputs.
 
-The memory ledger remains at 84 attempts and
-$146.341130 reserved, with embeddings separately retained at 4,603 tokens and $0.00009206. The final
-summaries remain 1,397 and 1,472 Qwen tokens; no summary was replayed. The raw-history arm remains
-complete and larger. All arms retain their full solver ceilings. Sibyl consolidation and the strong
-summary both passed the first task and the applicability contrast. The summary failed
-checkpointed-credit-batch, while raw history, Sibyl consolidation and no memory passed. The partial
-results do not establish a learning advantage or a performance estimate.
+The memory ledger remains at 84 attempts and $146.341130 reserved, with embeddings separately
+retained at 4,603 tokens and $0.00009206. The final summaries remain 1,397 and 1,472 Qwen tokens; no
+summary was replayed. The raw-history arm remains complete and larger. All arms retain their full
+solver ceilings. Sibyl consolidation and the strong summary both passed the first task and the
+applicability contrast. The summary failed checkpointed-credit-batch, while raw history, Sibyl
+consolidation and no memory passed. The partial results do not establish a learning advantage or a
+performance estimate.
 
 The packet pipeline removes the known default input-size obstacle through the existing durable
 proposer and critic stages. Complete packet coverage, protected source origins, correction scope,
@@ -746,11 +743,12 @@ must remain auditable without retaining reasoning contents or secrets. No furthe
 mechanism is selected. A failed draft blocks its audit; authority, accounting, acceptance or
 persistence failures abort the recovery.
 
-The retained memory prefix is 76 attempts and
-$135.234950 reserved. Five new physical requests reserve $6.970095, producing 81 total attempts and
-$142.205045 reserved. The two new usage-unknown outcomes remain charged to the reservation; no reservation was released, and actual billed cost is unknown. Four embedding requests remain separate at 4,603 tokens and $0.00009206
-reserved. Solver reservations remain $707.2186368. The planned 24 cells would reserve $48 up front,
-for $755.2186368 within the $762.4700928 ceiling. No new solver claim exists.
+The retained memory prefix is 76 attempts and $135.234950 reserved. Five new physical requests
+reserve $6.970095, producing 81 total attempts and $142.205045 reserved. The two new usage-unknown
+outcomes remain charged to the reservation; no reservation was released, and actual billed cost is
+unknown. Four embedding requests remain separate at 4,603 tokens and $0.00009206 reserved. Solver
+reservations remain $707.2186368. The planned 24 cells would reserve $48 up front, for $755.2186368
+within the $762.4700928 ceiling. No new solver claim exists.
 
 The embedding repair in PR #589 and four-arm report in PR #591 remain merged. The index and
 content-bootstrap work merged through [PR #590](https://github.com/hyperb1iss/sibyl/pull/590) at
@@ -806,10 +804,9 @@ solver ceilings are identical across arms. The complete-request counter and laun
 independent provider-free implementation review. Actual completed summaries, final request counts
 and the concrete launch bindings are still required before solver dispatch.
 
-The existing memory prefix remains 76 attempts and
-$135.234950 reserved. The three new physical requests reserve $4.205100, for
-$139.440050 cumulative; actual billed cost remains unknown. Four prior embedding requests retain 4,603 tokens and $0.00009206
-separately. Solver reservations remain
+The existing memory prefix remains 76 attempts and $135.234950 reserved. The three new physical
+requests reserve $4.205100, for $139.440050 cumulative; actual billed cost remains unknown. Four
+prior embedding requests retain 4,603 tokens and $0.00009206 separately. Solver reservations remain
 $707.2186368. The proposed 24-cell run would reserve the full $48 up front, within the $762.4700928
 ceiling, retaining missing, failed and unknown outcomes. No solver claim exists at this checkpoint.
 
@@ -1113,14 +1110,16 @@ cannot establish learned-memory benefit. Any follow-up needs useful packs and ne
 manifests.
 
 The output-capacity successor completed 15 critic and correction requests without truncation, but
-produced no usable packs. The ledger retains 54 attempts and
-$73.082255 reserved; actual billed cost is unknown. Source adjudication confirmed five new factual errors caused by whole-procedure regeneration. Other critic concerns included inherited problems and overreach. The targeted-edit diagnostic completed all 15 requests against five retained parents, with no truncation and no accepted candidate. Cumulative accounting retains 69 attempts and $103.749590
-reserved; actual billed cost remains unknown. The routing correction repaired three assertions and
-preserved 32 exactly, but its second critic found unresolved inherited claims. An actual replay
-control confirmed that repeating the original request reuses the same three stages. Production
-ordinary reflection also archives both drafts after a failed recheck. Automatically advancing
-corrected drafts across dream cycles is now a required implementation gap; no learning gain is
-established.
+produced no usable packs. The ledger retains 54 attempts and $73.082255 reserved; actual billed cost
+is unknown. Source adjudication confirmed five new factual errors caused by whole-procedure
+regeneration. Other critic concerns included inherited problems and overreach. The targeted-edit
+diagnostic completed all 15 requests against five retained parents, with no truncation and no
+accepted candidate. Cumulative accounting retains 69 attempts and $103.749590 reserved; actual
+billed cost remains unknown. The routing correction repaired three assertions and preserved 32
+exactly, but its second critic found unresolved inherited claims. An actual replay control confirmed
+that repeating the original request reuses the same three stages. Production ordinary reflection
+also archives both drafts after a failed recheck. Automatically advancing corrected drafts across
+dream cycles is now a required implementation gap; no learning gain is established.
 
 The original paired latency run failed its fixed-corpus check: scheduled consolidation performed 27
 graph merges during the baseline measurement. Its 902 query artifacts remain recorded, and that
@@ -1278,17 +1277,14 @@ empty-memory solver cells; they are not counted as automatic task failures.
 The provisional-candidate contract merged through PR 539 (`bdab762f`) after all applicable hosted
 checks passed. The change clarifies candidate scope; measured learning gain remains unproven.
 
-The provisional-candidate prompt diagnostic still abstained
-($0.00765923).
-The same frozen prompt and evidence then went to the reference model. Three
-responses failed the output schema; the request ended with HTTP 502 and reported
-cost of $1.87045.
-Neither result establishes a candidate or learning gain. A tiny synthetic probe also returned
-non-JSON despite the verified strict schema (667 input tokens, 1,315 output tokens, reported cost
-$0.03621). Large evidence
-is not required to trigger the failure. The matched Chat Completions probe also failed the schema ($0.03761),
-so a protocol switch is unsupported. A forced strict-tool request received HTTP 400; the provider
-error body was not retained, leaving the rejection reason unknown. Further probes on that route have
+The provisional-candidate prompt diagnostic still abstained ($0.00765923). The same frozen prompt
+and evidence then went to the reference model. Three responses failed the output schema; the request
+ended with HTTP 502 and reported cost of $1.87045. Neither result establishes a candidate or
+learning gain. A tiny synthetic probe also returned non-JSON despite the verified strict schema (667
+input tokens, 1,315 output tokens, reported cost $0.03621). Large evidence is not required to
+trigger the failure. The matched Chat Completions probe also failed the schema ($0.03761), so a
+protocol switch is unsupported. A forced strict-tool request received HTTP 400; the provider error
+body was not retained, leaving the rejection reason unknown. Further probes on that route have
 stopped.
 
 The direct Anthropic diagnostic rejected an unsupported integer minimum before generation. Applying
@@ -1452,21 +1448,19 @@ required before another call. Both failed request identities remain retained. Th
 diagnostic hook passed seven root controls, including the actual included production router and
 concurrent requests. A third request retained its real failure: `procedure` was a string containing
 malformed JSON, but the schema requires an object. The model stopped normally after 68,005 input and
-855 output tokens; its private response reports
-$0.00816455. The public failure receipt
-remains unknown-cost. The first two attempts still have unknown cost. No
-procedure was accepted. An offline same-SDK reconstruction confirmed the declared
-object schema and non-strict tool calling. The merged retry correction was then
-exercised in an owned schema-32 recovery. Three provider responses returned the
-same invalid string-valued procedure despite validation feedback. Their private
-reported cost totals $0.02338931;
-public failure accounting remains unknown. No candidate was accepted. Native strict JSON output
-passed independent review and six root controls, then merged through PR 529 at
-`2a8b759861ba43410a8e7c90f2a540c98726d4c9`. Its first live pilot returned three truncated responses,
-each consuming the 2,048-token output ceiling. Each procedure began as an object, but no complete
-JSON proposal was accepted. Private reported cost totals $0.02493804. A separate 8,192-token
-experiment retains the same model, routing, evidence and source commit. No JSON repair is used to
-manufacture a valid proposal. Tier-aware price reservation is an estimate, not a hard spend cap.
+855 output tokens; its private response reports $0.00816455. The public failure receipt remains
+unknown-cost. The first two attempts still have unknown cost. No procedure was accepted. An offline
+same-SDK reconstruction confirmed the declared object schema and non-strict tool calling. The merged
+retry correction was then exercised in an owned schema-32 recovery. Three provider responses
+returned the same invalid string-valued procedure despite validation feedback. Their private
+reported cost totals $0.02338931; public failure accounting remains unknown. No candidate was
+accepted. Native strict JSON output passed independent review and six root controls, then merged
+through PR 529 at `2a8b759861ba43410a8e7c90f2a540c98726d4c9`. Its first live pilot returned three
+truncated responses, each consuming the 2,048-token output ceiling. Each procedure began as an
+object, but no complete JSON proposal was accepted. Private reported cost totals $0.02493804. A
+separate 8,192-token experiment retains the same model, routing, evidence and source commit. No JSON
+repair is used to manufacture a valid proposal. Tier-aware price reservation is an estimate, not a
+hard spend cap.
 
 The official loader and nonempty processor now pass in an isolated 84-package runtime. Actual text,
 image, and mixed-context counts and truncation boundaries passed alongside seven privacy tests and
@@ -1659,18 +1653,14 @@ evaluation families.
 
 The first two real development attempts both exhausted their 20-tool allowance: primary completion
 remains 0/2. Separate unchanged-snapshot diagnostics found one correct patch and one duplicate-edge
-bug. Total reported cost was
-$0.01435668. These results establish neither transfer nor learning gain.
-A reviewed controller correction exposes remaining budgets and requests a
-text-only final response at zero tools, preserving execution and cost limits.
-Its full agent-task suite passed 329 tests (one platform skip); independent
-review passed 13 cases. A separately frozen run with the new policy completed
-both controllers normally. Reservation passed all six checks in 13 tools;
-build planning used 20 tools and a final text-only response but retained its
-duplicate-edge bug (six of seven checks passed). Primary task success was 1/2,
-with reported cost $0.012652.
-Original calibration results remain unchanged. The new run measures controller behavior, not memory
-gain.
+bug. Total reported cost was $0.01435668. These results establish neither transfer nor learning
+gain. A reviewed controller correction exposes remaining budgets and requests a text-only final
+response at zero tools, preserving execution and cost limits. Its full agent-task suite passed 329
+tests (one platform skip); independent review passed 13 cases. A separately frozen run with the new
+policy completed both controllers normally. Reservation passed all six checks in 13 tools; build
+planning used 20 tools and a final text-only response but retained its duplicate-edge bug (six of
+seven checks passed). Primary task success was 1/2, with reported cost $0.012652. Original
+calibration results remain unchanged. The new run measures controller behavior, not memory gain.
 
 The frozen 24-attempt learning-source pilot completed once per task through real HTTP authorization:
 16 passed, six failed their task checks, and two controllers failed. Exactly 22 scored outcomes were
@@ -2071,8 +2061,7 @@ planned learning corpus or a release quality result.
 
 The eight exposed coding tasks now have real no-memory controller receipts. All eight passed their
 separate checkers using Qwen3-Coder-Next, 20 tool calls, 100,000 input tokens, 8,000 output tokens,
-and a $0.10 allowance per task.
-The batch reported $0.04749332 total cost, 206,435 input tokens,
+and a $0.10 allowance per task. The batch reported $0.04749332 total cost, 206,435 input tokens,
 17,961 output tokens, and 93 tool calls. All trace and receipt hashes verify, all eight
 controller/checker snapshot pairs match, and a scan of 274 retained files found no matches for the
 credential.

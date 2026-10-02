@@ -241,7 +241,8 @@ class Extractor[T]:
         settings = dict(agent.model.settings or {}) if isinstance(agent.model, Model) else {}
         if isinstance(agent.model_settings, dict):
             settings.update(agent.model_settings)
-        return settings.get("max_tokens")
+        limit = settings.get("max_tokens")
+        return limit if isinstance(limit, int) else None
 
     def _budget_prompt(self, prompt: str, agent: Agent[Any, Any], mode: OutputMode) -> str:
         instructions = self.system_prompt or ()
