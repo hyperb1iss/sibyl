@@ -52,13 +52,20 @@ const themeScript = `
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    // A custom property resolves var() where it is declared, so the :root
+    // theme tokens --font-sans and --font-mono need the next/font variables
+    // on <html>. On <body> they arrive too late and the tokens go invalid.
+    <html
+      lang="en"
+      className={`${spaceGrotesk.variable} ${firaCode.variable}`}
+      suppressHydrationWarning
+    >
       <head>
         {/* biome-ignore lint/security/noDangerouslySetInnerHtml: FOUC prevention requires inline script */}
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
         <PublicEnvScript />
       </head>
-      <body className={`${spaceGrotesk.variable} ${firaCode.variable} antialiased bg-sc-bg-dark`}>
+      <body className="antialiased bg-sc-bg-dark">
         <Providers>{children}</Providers>
       </body>
     </html>
