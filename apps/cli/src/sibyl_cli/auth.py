@@ -808,12 +808,17 @@ def _settle_login_org(api_url: str, context_name: str | None, saved_scope: str |
     if not token:
         warn(f"Signed in, but the switch to org '{target_slug}' returned no token")
         return
-    expires_raw = switched.get("expires_in")
+    try:
+        expires_in = int(switched["expires_in"]) if switched.get("expires_in") is not None else None
+    except (TypeError, ValueError):
+        # An unreadable expiry only costs the early-refresh hint; the switch
+        # itself succeeded and the login must not fail after saving.
+        expires_in = None
     store_org_tokens(
         client.base_url,
         token,
         refresh_token=str(switched.get("refresh_token") or "").strip() or None,
-        expires_in=int(expires_raw) if expires_raw is not None else None,
+        expires_in=expires_in,
         scope_name=credential_scope(ctx.name, target_slug),
     )
     pin_context_org(ctx.name, target_slug)

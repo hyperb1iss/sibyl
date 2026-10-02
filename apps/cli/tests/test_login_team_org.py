@@ -214,6 +214,30 @@ def test_an_unreachable_org_listing_warns_without_failing_the_login(
     assert "could not confirm which org this login uses" in result.stdout
 
 
+def test_an_unreadable_token_expiry_does_not_fail_a_completed_login(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _fake_server(monkeypatch, current=PERSONAL, orgs=[PERSONAL, TEAM])
+    original = SibylClient._request
+
+    async def _request(self: SibylClient, method: str, path: str, **kwargs: Any) -> dict:
+        response = await original(self, method, path, **kwargs)
+        if path.endswith("/switch"):
+            return {**response, "expires_in": "soon"}
+        return response
+
+    monkeypatch.setattr(SibylClient, "_request", _request)
+
+    result = _login(TEAM_SERVER, "--context", "team")
+
+    assert result.exit_code == 0, result.stdout
+    assert ("POST", "/orgs/acme/switch") in calls
+    stored = auth_store.read_server_credentials(
+        f"{TEAM_SERVER}/api", credential_scope=auth_store.credential_scope("team", "acme")
+    )
+    assert stored.get("access_token") == "token-for-acme"
+
+
 def test_an_ambient_environment_token_never_drives_the_org_switch(
     home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
