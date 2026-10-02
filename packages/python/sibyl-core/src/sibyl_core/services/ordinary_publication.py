@@ -1,8 +1,10 @@
 """Publish ordinary memories using the actual stored semantic review binding."""
 
+from __future__ import annotations
+
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import TypeAdapter
 
@@ -22,6 +24,9 @@ from sibyl_core.services.validation_promotion import (
 )
 from sibyl_core.tasks.memory_validation import MemoryValidationResult, PreparedMemoryValidation
 from sibyl_core.tasks.procedure_review import review_digest
+
+if TYPE_CHECKING:
+    from sibyl_core.services.graph_read_validation import GraphReadValidation
 
 
 def ordinary_semantic_digest(prepared: PreparedMemoryValidation) -> str:
@@ -64,17 +69,25 @@ def ordinary_policy_digest(memories: list[RawMemory]) -> str:
 class OrdinaryValidatedPromotion(ValidatedPromotion):
     resolver: SourceAuthorityResolver
 
-    async def current_guard(self) -> tuple[str, dict[str, Any]]:
+    async def current_guard(
+        self, *, read: GraphReadValidation | None = None
+    ) -> tuple[str, dict[str, Any]]:
         await self.authorize()
+        if read is not None:
+            read._check_org(self.organization_id)
         current = await prepare_stored_reflection(
             self.organization_id,
             self.principal_id,
             self.candidate_id,
             self.resolver,
             publication=True,
+            read=read,
         )
         execution = ValidationExecution(
-            self.binding.execution_id, self.organization_id, self.principal_id
+            self.binding.execution_id,
+            self.organization_id,
+            self.principal_id,
+            read_execute_query=read.content_execute_query if read is not None else None,
         )
         await execution.result()
         row = await execution.load()
@@ -112,8 +125,24 @@ class OrdinaryValidatedPromotion(ValidatedPromotion):
         )
 
 
-async def ordinary_promotion_binding(org, principal, parent, execution_id, resolver, authorize):
-    row = await ValidationExecution(execution_id, org, principal).load()
+async def ordinary_promotion_binding(
+    org,
+    principal,
+    parent,
+    execution_id,
+    resolver,
+    authorize,
+    *,
+    read: GraphReadValidation | None = None,
+):
+    if read is not None:
+        read._check_org(org)
+    row = await ValidationExecution(
+        execution_id,
+        org,
+        principal,
+        read_execute_query=read.content_execute_query if read is not None else None,
+    ).load()
     if row is None or not isinstance(row.get("result_json"), str):
         raise ValidationExecutionUnavailable("Ordinary promotion validation unavailable")
     result = TypeAdapter(MemoryValidationResult).validate_json(row["result_json"])
@@ -126,5 +155,5 @@ async def ordinary_promotion_binding(org, principal, parent, execution_id, resol
         input_sha256=result.input_sha256,
     )
     promotion = OrdinaryValidatedPromotion(org, principal, parent, binding, authorize, resolver)
-    await promotion.current_guard()
+    await promotion.current_guard(read=read)
     return promotion

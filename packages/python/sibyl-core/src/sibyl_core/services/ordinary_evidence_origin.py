@@ -1,6 +1,12 @@
 """Reconstruct ordinary evidence through the candidate's protected execution lineage."""
 
+from __future__ import annotations
+
 import json
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sibyl_core.services.graph_read_validation import GraphReadValidation
 
 from pydantic import TypeAdapter
 
@@ -13,9 +19,19 @@ from sibyl_core.tasks.ordinary_proposal_result import OrdinaryProposalResult
 from sibyl_core.tasks.reflection_correction import ReflectionCorrectionResult
 
 
-async def evidence_for_reflection(memory, derivation, observations, resolver, ancestors):
+async def evidence_for_reflection(
+    memory,
+    derivation,
+    observations,
+    resolver,
+    ancestors,
+    *,
+    read: GraphReadValidation | None = None,
+):
     """Metadata can describe provenance but cannot select or remove the evidence boundary."""
-    origin = await load_validation_origin(derivation)
+    if read is not None:
+        read._check_org(memory.organization_id)
+    origin = await load_validation_origin(derivation, read=read)
     if origin is None:
         receipt = memory.metadata.get("ordinary_proposal_receipt")
         if isinstance(receipt, dict) and any(
@@ -43,6 +59,7 @@ async def evidence_for_reflection(memory, derivation, observations, resolver, an
             packet_binding=binding,
             evidence_mode=COMPLETE_PROJECTION if projection_binding is not None else "raw_v1",
             projection_binding=projection_binding,
+            read=read,
         )
         result = TypeAdapter(OrdinaryProposalResult).validate_python(value)
         candidate = prepared.prepared.render(result.proposal)
@@ -81,6 +98,7 @@ async def evidence_for_reflection(memory, derivation, observations, resolver, an
             origin["parent_id"],
             resolver,
             _ancestors=ancestors,
+            read=read,
         )
         if result.parent_candidate_sha256 != parent.snapshot_sha256 or (
             observations != parent.observations

@@ -13,6 +13,7 @@ from cryptography.fernet import Fernet
 from sibyl_core.ai.errors import provider_error_detail
 from sibyl_core.ai.llm.extractor import ExtractionUsage
 from sibyl_core.ai.transport import FailedExtractionUsage, TransportAttempt
+from sibyl_core.backends.surreal.schema_version import SurrealExecute
 from sibyl_core.services import content_client, validation_receipts
 from sibyl_core.services.validation_result_codec import (
     ValidationStageResult,
@@ -35,6 +36,18 @@ async def _query(query: str, **params: Any) -> list[dict[str, Any]]:
         return content_client.normalize_records(await client.execute_query(query, **params))
 
 
+async def _read_query(
+    query: str, *, execute_query: SurrealExecute | None = None, **params: Any
+) -> list[dict[str, Any]]:
+    if execute_query is None:
+        return await _query(query, **params)
+    result = await execute_query(query, **params)
+    error = content_client.query_error(result)
+    if error is not None:
+        raise RuntimeError(error)
+    return content_client.normalize_records(result)
+
+
 class ValidationExecution:
     """One immutable request identity with separately committed physical attempts."""
 
@@ -45,6 +58,7 @@ class ValidationExecution:
         principal_id: str,
         *,
         authorize: Callable[[], Awaitable[None]] | None = None,
+        read_execute_query: SurrealExecute | None = None,
         dispatch_guard: str = "",
         guard_params: dict[str, Any] | None = None,
     ) -> None:
@@ -52,6 +66,7 @@ class ValidationExecution:
         self.org = organization_id
         self.principal = principal_id
         self.authorize = authorize
+        self._read_execute_query = read_execute_query
         self.dispatch_guard = dispatch_guard
         self.guard_params = guard_params or {}
         self._source_dispatch_guard = dispatch_guard
@@ -66,9 +81,10 @@ class ValidationExecution:
         return {"uuid": self.id, "org": self.org, "principal": self.principal}
 
     async def load(self) -> dict[str, Any] | None:
-        rows = await _query(
+        rows = await _read_query(
             "SELECT * FROM memory_validation_executions WHERE uuid = $uuid "
             "AND organization_id = $org AND principal_id = $principal LIMIT 1;",
+            execute_query=self._read_execute_query,
             **self.params,
         )
         return rows[0] if rows else None
@@ -133,7 +149,9 @@ class ValidationExecution:
         )
 
         async def load(identity: str) -> dict[str, Any] | None:
-            return await ValidationExecution(identity, self.org, self.principal).load()
+            return await ValidationExecution(
+                identity, self.org, self.principal, read_execute_query=self._read_execute_query
+            ).load()
 
         self._dependency_ids, self._dependency_guard = await resolve_dependencies(
             request, execution_id=self.id, org=self.org, principal=self.principal, load=load
@@ -149,7 +167,12 @@ class ValidationExecution:
         binding = ProgressHistoryBinding.model_validate(value)
         if binding.execution_id == self.id:
             raise ValidationExecutionUnavailable("Progress history cannot reference itself")
-        row = await ValidationExecution(binding.execution_id, self.org, self.principal).load()
+        row = await ValidationExecution(
+            binding.execution_id,
+            self.org,
+            self.principal,
+            read_execute_query=self._read_execute_query,
+        ).load()
         if row is None:
             raise ValidationExecutionUnavailable("Progress prior execution disappeared")
         prior = validate_history_row(row, binding, self.org, self.principal)

@@ -12,16 +12,34 @@ from collections.abc import Callable, Coroutine, Hashable, Sequence
 from dataclasses import asdict
 from typing import Any
 
+from sibyl_core.backends.surreal.schema_version import SurrealExecute
 from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind
 from sibyl_core.services.memory_source_validation import SourceReadAuthority
 from sibyl_core.services.source_observations import SourceUnavailableError
 
 
 class GraphReadValidation:
-    """Coalesce identical input reads within one organization's validation pass."""
+    """Coalesce input reads within one organization's validation pass.
 
-    def __init__(self, organization_id: str) -> None:
+    Paired readers cover stored validation, recursive ancestry, and availability
+    checks over supplied entity rows. Outer entity and relationship materializers
+    reject this explicit mode. Callers own reader lifetime, store affinity, and
+    current authorization; selecting readers does not redirect any writer or
+    make writer operations atomic.
+    """
+
+    def __init__(
+        self,
+        organization_id: str,
+        *,
+        content_execute_query: SurrealExecute | None = None,
+        graph_execute_query: SurrealExecute | None = None,
+    ) -> None:
+        if (content_execute_query is None) != (graph_execute_query is None):
+            raise ValueError("validation requires both content and graph readers")
         self.organization_id = organization_id
+        self._content_execute_query = content_execute_query
+        self._graph_execute_query = graph_execute_query
         self._inputs: dict[Hashable, asyncio.Task[Any]] = {}
         self._validated_graph: dict[str, bool] = {}
         self._graph_loads: dict[str, asyncio.Task[dict[str, bool]]] = {}
@@ -33,6 +51,16 @@ class GraphReadValidation:
         self.observations: dict[SourceIdentity, Any] = {}
         self.dependencies: dict[SourceIdentity, set[SourceIdentity]] = {}
         self.conflicts: set[SourceIdentity] = set()
+
+    @property
+    def content_execute_query(self) -> SurrealExecute | None:
+        """Selected content reader for this validation pass."""
+        return self._content_execute_query
+
+    @property
+    def graph_execute_query(self) -> SurrealExecute | None:
+        """Selected graph reader; callable ownership remains with the caller."""
+        return self._graph_execute_query
 
     async def _once[T](self, key: Hashable, load: Callable[[], Coroutine[Any, Any, T]]) -> T:
         task = self._inputs.get(key)
@@ -60,7 +88,18 @@ class GraphReadValidation:
         snapshot = await self._once(
             ("source", source, authority),
             lambda: load_authorized_source_snapshot(
-                source, authority, organization_id=self.organization_id
+                source,
+                authority,
+                organization_id=self.organization_id,
+                **(
+                    {
+                        "execute_query": self.content_execute_query
+                        if source.kind is SourceKind.RAW_CAPTURE
+                        else self.graph_execute_query
+                    }
+                    if self.content_execute_query is not None
+                    else {}
+                ),
             ),
         )
         self.record_observation(snapshot.observation)
@@ -81,7 +120,15 @@ class GraphReadValidation:
         self._check_org(organization_id)
         association = await self._once(
             ("raw_association", organization_id, memory_id),
-            lambda: load_raw_derivation(organization_id, memory_id),
+            lambda: load_raw_derivation(
+                organization_id,
+                memory_id,
+                **(
+                    {"execute_query": self.content_execute_query}
+                    if self.content_execute_query is not None
+                    else {}
+                ),
+            ),
         )
         self.record_association(
             SourceIdentity(organization_id, SourceKind.RAW_CAPTURE, memory_id), association
@@ -96,7 +143,13 @@ class GraphReadValidation:
         if missing:
             # Reserve every key before yielding, so overlapping batches share
             # the same snapshot without serializing unrelated graph inputs.
-            task = asyncio.create_task(validated_graph_currents(self.organization_id, missing))
+            task = asyncio.create_task(
+                validated_graph_currents(
+                    self.organization_id,
+                    missing,
+                    **({"read": self} if self.content_execute_query is not None else {}),
+                )
+            )
             self._graph_loads.update(dict.fromkeys(missing, task))
         for task in {self._graph_loads[identifier] for identifier in identifiers}:
             self._validated_graph.update(await asyncio.shield(task))

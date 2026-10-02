@@ -7,7 +7,8 @@ import json
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, replace
-from typing import Any
+from functools import partial
+from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import Agent, NativeOutput
 
@@ -33,6 +34,7 @@ from sibyl_core.services.validation_execution import (
     ValidationExecution,
     ValidationExecutionUnavailable,
     _query,
+    _read_query,
 )
 from sibyl_core.services.validation_progress import ProgressContext
 from sibyl_core.tasks._evidence_json import canonical
@@ -50,6 +52,9 @@ from sibyl_core.tasks.memory_validation import (
     run_memory_validation,
 )
 from sibyl_core.tasks.procedure_review import review_digest
+
+if TYPE_CHECKING:
+    from sibyl_core.services.graph_read_validation import GraphReadValidation
 
 # Hash the server's representation before SDK datetime/null normalization. The
 # same selection closes the final write race without persisting source bodies.
@@ -78,10 +83,15 @@ class AuthorizedProcedureValidation:
 
 
 async def prepare_stored_procedure_validation(
-    org: str, principal: str, parent: str
+    org: str, principal: str, parent: str, *, read: GraphReadValidation | None = None
 ) -> AuthorizedProcedureValidation:
     """Resolve persisted private artifacts; HTTP/job callers authenticate principal."""
-    rows = await _query(
+    execute_query = _query
+    if read is not None:
+        read._check_org(org)
+        if read.content_execute_query is not None:
+            execute_query = partial(_read_query, execute_query=read.content_execute_query)
+    rows = await execute_query(
         "RETURN {" + _SNAPSHOT + "RETURN {snapshot: $snapshot, token: $snapshot_digest}; };",
         org=org,
         parent=parent,
@@ -115,7 +125,7 @@ async def prepare_stored_procedure_validation(
         or not raw_memory_currently_recallable(view)
     ):
         raise ValidationExecutionUnavailable("Parent is retired or inaccessible")
-    if not await verify_publication_admissions(memory):
+    if not await verify_publication_admissions(memory, read=read):
         raise ValidationExecutionUnavailable("Parent admissions changed")
     artifact = await asyncio.to_thread(resolve_procedure_artifact, memory, ledger, captures)
     if artifact is None:

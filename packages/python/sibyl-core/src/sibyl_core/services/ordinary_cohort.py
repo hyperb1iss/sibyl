@@ -8,7 +8,9 @@ import json
 import math
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
+from functools import partial
 from threading import Event
+from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter
 from pydantic_ai import Agent, NativeOutput
@@ -32,7 +34,7 @@ from sibyl_core.services.observed_sources import load_authorized_source_snapshot
 from sibyl_core.services.source_observations import SourceUnavailableError
 from sibyl_core.services.source_state_store import RawSourceSnapshot
 from sibyl_core.services.validation_candidate import ValidationCandidateWrite
-from sibyl_core.services.validation_execution import ValidationExecution, _query
+from sibyl_core.services.validation_execution import ValidationExecution, _query, _read_query
 from sibyl_core.services.validation_stages import run_validation_stage
 from sibyl_core.tasks._evidence_json import canonical
 from sibyl_core.tasks.episode_evidence import is_controller_episode
@@ -53,6 +55,9 @@ from sibyl_core.tasks.ordinary_proposals import (
     prepare_partial_proposal,
 )
 from sibyl_core.tasks.procedure_review import review_digest
+
+if TYPE_CHECKING:
+    from sibyl_core.services.graph_read_validation import GraphReadValidation
 
 COHORT_SNAPSHOT = """
 LET $captures=(SELECT * OMIT embedding, retrieval_count, citation_count, misled_count, last_recalled_at, last_used_at, metadata.embedding_metadata FROM raw_captures WHERE organization_id=$org AND uuid IN $source_ids ORDER BY uuid);
@@ -123,15 +128,21 @@ async def prepare_stored_cohort(
     allow_single: bool = False,
     evidence_mode: str = "auto",
     projection_binding: dict | None = None,
+    read: GraphReadValidation | None = None,
 ) -> PreparedCohort:
     """Resolve actual retained sources; project grouping never proves environment facts."""
+    execute_query = _query
+    if read is not None:
+        read._check_org(org)
+        if read.content_execute_query is not None:
+            execute_query = partial(_read_query, execute_query=read.content_execute_query)
     ids = sorted(source_ids)
     if len(ids) < (1 if allow_single or packet_binding else 2) or len(ids) != len(set(ids)):
         raise ValueError("An ordinary cohort requires distinct retained sources")
     authority = await resolver(org, principal)
     if authority is None or authority.principal_id != principal:
         raise SourceUnavailableError()
-    rows = await _query(
+    rows = await execute_query(
         "RETURN {" + COHORT_SNAPSHOT + "RETURN {snapshot:$snapshot,token:$snapshot_digest}; };",
         org=org,
         source_ids=ids,
@@ -148,7 +159,10 @@ async def prepare_stored_cohort(
     scope = None
     for identifier in ids:
         source = await load_authorized_source_snapshot(
-            SourceIdentity(org, SourceKind.RAW_CAPTURE, identifier), authority, organization_id=org
+            SourceIdentity(org, SourceKind.RAW_CAPTURE, identifier),
+            authority,
+            organization_id=org,
+            execute_query=read.content_execute_query if read is not None else None,
         )
         if not isinstance(source, RawSourceSnapshot):
             raise SourceUnavailableError()
