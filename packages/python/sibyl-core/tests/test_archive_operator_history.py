@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from copy import deepcopy
 from dataclasses import dataclass, replace
@@ -825,6 +826,25 @@ def test_history_same_native_ids_in_distinct_graph_databases_do_not_collide(data
     assert full[0]["control"]["identity"] == full[1]["control"]["identity"]
     assert (
         full[0]["control"]["encoded_subtree_sha256"] != full[1]["control"]["encoded_subtree_sha256"]
+    )
+
+
+def test_history_qualified_subtree_hash_uses_nul_delimited_canonical_frame(dataset):
+    data, scopes, binding, _ = dataset
+    install(data, binding, chain(binding)[:1])
+    qualified = validate(data, scopes).payload["chains"][0]["control"]
+    frame = {key: value for key, value in qualified.items() if key != "encoded_subtree_sha256"}
+    encoded = json.dumps(
+        frame, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
+    ).encode()
+    domain = b"sibyl-archive-qualified-typed-subtree-v1"
+    assert (
+        qualified["encoded_subtree_sha256"]
+        == hashlib.sha256(domain + bytes([0]) + encoded).hexdigest()
+    )
+    assert (
+        qualified["encoded_subtree_sha256"]
+        != hashlib.sha256(domain + bytes([92, 48]) + encoded).hexdigest()
     )
 
 

@@ -82,7 +82,7 @@ _GRAPH_ORG_FIELDS = {
     "archive_phase_controls": "organization_id",
     "archive_phase_receipts": "organization_id",
 }
-_FRAME_DOMAIN = b"sibyl-archive-qualified-typed-subtree-v1\\0"
+_FRAME_DOMAIN = b"sibyl-archive-qualified-typed-subtree-v1\0"
 
 
 def _json(value: object) -> str:
