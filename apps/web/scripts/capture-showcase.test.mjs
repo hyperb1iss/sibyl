@@ -4,7 +4,9 @@ import {
   assertCompleteSourcePage,
   assertDarkTheme,
   assertNoForbiddenTerms,
+  browserLaunchOptions,
   buildCorpusSnapshot,
+  captureStorageEntries,
   parseForbiddenTerms,
   readGraphPayload,
   requireLoopback,
@@ -175,4 +177,15 @@ test('capture refuses a truncated source response', () => {
     () => assertCompleteSourcePage({ sources: [{ id: 'one' }], total: 2 }),
     /truncated source/
   );
+});
+
+test('captures start in the neon theme with every project selected', () => {
+  const storage = Object.fromEntries(captureStorageEntries());
+  assert.equal(storage['sibyl-theme'], 'neon');
+  assert.deepEqual(JSON.parse(storage['sibyl-project-context']), { mode: 'all' });
+});
+
+test('capture runs headless only when a saved storage state replaces sign-in', () => {
+  assert.equal(browserLaunchOptions(undefined).headless, false);
+  assert.equal(browserLaunchOptions('/tmp/showcase-state.json').headless, true);
 });

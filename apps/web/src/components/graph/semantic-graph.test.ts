@@ -7,6 +7,7 @@ import {
   type HierarchySource,
   LOOSE_CLUSTER_ID,
   LOOSE_NODE_ID,
+  withDomainLabels,
 } from './semantic-graph';
 import { clusterRadius } from './semantic-zoom';
 
@@ -104,6 +105,55 @@ function build(
 function ids(graph: { nodes: GraphNode[] }): string[] {
   return graph.nodes.map(node => node.id).sort();
 }
+
+describe('withDomainLabels', () => {
+  it('names unlabeled clusters with their domain-map label and keeps explicit labels', () => {
+    const clusters = response(
+      [],
+      [],
+      [
+        { id: 'a', member_count: 5 },
+        { id: 'b', member_count: 3, label: 'Explicit' },
+        { id: 'c', member_count: 2 },
+      ]
+    ).clusters;
+    const semantic = collectClusters({
+      overview: response(
+        [bubble('a', 5, 'Hypercolor, Profile a dense room scene'), bubble('b', 3, 'Map b')],
+        []
+      ),
+      detail: undefined,
+    });
+
+    expect(withDomainLabels(clusters, semantic).map(cluster => cluster.label)).toEqual([
+      'Hypercolor, Profile a dense room scene',
+      'Explicit',
+      undefined,
+    ]);
+  });
+});
+
+describe('withDomainLabels with the legend response as detail', () => {
+  it('leaves an unlabeled tail cluster for the member-name fallback', () => {
+    const detail = response(
+      [member('m1', 'c_bubble'), member('m2', 'c_tail')],
+      [{ source: 'm2', target: 'm1' }],
+      [
+        { id: 'c_bubble', member_count: 1 },
+        { id: 'c_tail', member_count: 1 },
+      ]
+    );
+    const semantic = collectClusters({
+      overview: response([bubble('c_bubble', 1, 'Hypercolor, Profile a dense room scene')], []),
+      detail,
+    });
+
+    expect(withDomainLabels(detail.clusters, semantic).map(cluster => cluster.label)).toEqual([
+      'Hypercolor, Profile a dense room scene',
+      undefined,
+    ]);
+  });
+});
 
 describe('collectClusters', () => {
   it('lists bubbles first, then a loose-ends bubble, then the hosted tail', () => {

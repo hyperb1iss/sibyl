@@ -48,6 +48,20 @@ stay in a temporary directory until every route passes, then the complete set re
 files. Credentials stay in the browser and never enter a command line, environment variable, or
 committed file.
 
+### Capture without a sign-in window
+
+Set `SIBYL_SHOWCASE_WEB_URL` when the web app runs on another loopback port, and set
+`SIBYL_SHOWCASE_STORAGE_STATE` to a Playwright storage state saved after signing in as
+`sibyl-showcase@localhost`. With a storage state the capture skips the sign-in prompt and runs
+headless; without one it opens a visible browser as described above. To make one, sign in once in a
+Playwright browser and call `context.storageState({ path })`. A relative path resolves against the
+repository root, not the current directory. Keep the file outside the repository, because it holds
+the session cookies.
+
+Every capture page starts in the neon theme with the explicit every-project choice, because the web
+app otherwise opens on the most recently active project and the frames would show only part of the
+corpus.
+
 ## Capture set
 
 The capture task uses a 1322 by 916 viewport at 2x pixel density. Browser chrome stays out of the

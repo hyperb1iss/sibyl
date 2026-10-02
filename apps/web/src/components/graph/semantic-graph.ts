@@ -1,4 +1,4 @@
-import type { HierarchicalGraphResponse } from '@/lib/api';
+import type { HierarchicalCluster, HierarchicalGraphResponse } from '@/lib/api';
 import { getEntityColor } from '@/lib/constants/entities';
 import type { GraphData, GraphLink, GraphNode } from './graph-types';
 import { clusterRadius, memberSeedPosition } from './semantic-zoom';
@@ -172,6 +172,29 @@ interface BuildArgs {
   searchTerm: string;
   /** Reused across rebuilds so d3 keeps positions for nodes that did not change level. */
   nodeCache: Map<string, GraphNode>;
+}
+
+/**
+ * Detail clusters often arrive without a label, and the legend would then
+ * invent one from member names that disagrees with the domain map. Give each
+ * unlabeled cluster the name its bubble and in-canvas label already use.
+ */
+export function withDomainLabels(
+  clusters: HierarchicalCluster[],
+  semanticClusters: SemanticCluster[]
+): HierarchicalCluster[] {
+  // Only bubbles carry a domain-map name. Tail clusters fall back to their
+  // id, which must not replace the legend's member-name fallback.
+  const domainLabels = new Map(
+    semanticClusters
+      .filter(cluster => cluster.hasBubble)
+      .map(cluster => [cluster.id, cluster.label])
+  );
+  return clusters.map(cluster => {
+    if (cluster.label) return cluster;
+    const label = domainLabels.get(cluster.id);
+    return label ? { ...cluster, label } : cluster;
+  });
 }
 
 export function buildSemanticGraphData({
