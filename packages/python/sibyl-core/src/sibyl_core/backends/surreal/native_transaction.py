@@ -185,6 +185,17 @@ class NativeTransaction:
     def commit_outcome(self) -> NativeCommitOutcome:
         return self._outcome
 
+    def invalidate(self) -> None:
+        """Seal an opening or ready handle before any COMMIT request.
+
+        Cleanup remains context-owned; existing commit evidence stays intact.
+        """
+        if (
+            self._state in {"opening", "ready"}
+            and self._outcome == NativeCommitOutcome.NOT_REQUESTED
+        ):
+            self._state = "failed"
+
     def executor(self, scope: NativeStoreScope) -> NativeScopedExecutor:
         self._ready()
         if scope not in self._binding.scopes:
@@ -450,6 +461,8 @@ async def open_native_transaction(
         if not isinstance(transaction._txn, UUID):
             raise NativeTransactionError("invalid native transaction handle")
         await transaction._catalog()
+        if transaction._state != "opening":
+            raise NativeTransactionError("native transaction was invalidated while opening")
         transaction._state = "ready"
         yield transaction
     except BaseException as exc:
