@@ -15,6 +15,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
 import typer
+from rich.markup import escape
 
 from sibyl_cli.auth_store import (
     clear_tokens,
@@ -1115,8 +1116,8 @@ API_KEY_LIST_FIELDS: tuple[str, ...] = (
 )
 
 
-def _listed_api_keys(result: Mapping[str, object]) -> list[dict[str, object]]:
-    raw_keys = result.get("keys")
+def _listed_api_keys(result: object) -> list[dict[str, object]]:
+    raw_keys = result.get("keys") if isinstance(result, Mapping) else None
     if not isinstance(raw_keys, list):
         return []
     return [
@@ -1156,10 +1157,13 @@ def _api_key_limits(key: Mapping[str, object]) -> str:
 def _api_key_status(key: Mapping[str, object], now: datetime) -> str:
     if key.get("revoked_at"):
         return "revoked"
-    expires_at = _parse_timestamp(key.get("expires_at"))
-    if expires_at is not None and expires_at <= now:
-        return "expired"
-    return "active"
+    raw_expiry = key.get("expires_at")
+    if not raw_expiry:
+        return "active"
+    expires_at = _parse_timestamp(raw_expiry)
+    if expires_at is None:
+        return "unknown"
+    return "expired" if expires_at <= now else "active"
 
 
 @api_key_app.command("list")
@@ -1203,7 +1207,7 @@ def api_key_list(
     )
     for key in keys:
         scopes = key.get("scopes")
-        table.add_row(
+        cells = (
             str(key.get("name") or ""),
             str(key.get("id") or ""),
             str(key.get("prefix") or ""),
@@ -1214,6 +1218,8 @@ def api_key_list(
             _short_date(key.get("expires_at")),
             _api_key_status(key, now),
         )
+        # Key names are free text; unescaped brackets would parse as Rich markup.
+        table.add_row(*(escape(cell) for cell in cells))
     console.print(table)
 
 

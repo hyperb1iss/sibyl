@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from typer.testing import CliRunner
 
 from sibyl_cli.main import app as main_app
@@ -54,15 +55,14 @@ def test_skill_list_shows_available_packs() -> None:
     assert "examples" in result.stdout
 
 
-def test_skill_list_json_prints_the_same_packs() -> None:
-    for flag in ("--json", "-j"):
-        result = CliRunner().invoke(main_app, ["skill", "list", flag])
+@pytest.mark.parametrize("flag", ["--json", "-j"])
+def test_skill_list_json_prints_the_same_packs(flag: str) -> None:
+    result = CliRunner().invoke(main_app, ["skill", "list", flag])
 
-        assert result.exit_code == 0, result.stdout
-        assert json.loads(result.stdout) == [
-            {"name": name, "description": SKILL_PACKS[name].description}
-            for name in sorted(SKILL_PACKS)
-        ]
+    assert result.exit_code == 0, result.stdout
+    assert json.loads(result.stdout) == [
+        {"name": name, "description": SKILL_PACKS[name].description} for name in sorted(SKILL_PACKS)
+    ]
 
 
 def test_skill_get_rejects_unknown_pack() -> None:

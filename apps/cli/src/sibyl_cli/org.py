@@ -6,6 +6,7 @@ from enum import StrEnum
 from typing import Annotated, Any
 
 import typer
+from rich.markup import escape
 from rich.table import Table
 
 from sibyl_cli import config_store
@@ -124,20 +125,23 @@ def list_cmd(
         print_json(result)
         return
 
-    orgs = [org for org in result.get("orgs") or [] if isinstance(org, dict)]
+    listing = result.get("orgs") if isinstance(result, dict) else None
+    orgs = [org for org in listing or [] if isinstance(org, dict)]
     if not orgs:
         info("No organizations found")
         return
 
     table = create_table("Organizations", "Slug", "Name", "Role", "Type", "ID")
     for org in orgs:
-        table.add_row(
+        cells = (
             str(org.get("slug") or ""),
             str(org.get("name") or ""),
             str(org.get("role") or "-"),
             "personal" if org.get("is_personal") else "team",
             str(org.get("id") or ""),
         )
+        # Org names are free text; unescaped brackets would parse as Rich markup.
+        table.add_row(*(escape(cell) for cell in cells))
     console.print(table)
 
 

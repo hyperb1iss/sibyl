@@ -14,7 +14,7 @@ from sibyl_cli.client import SibylClientError
 _SECRET = "secret-canary-0123456789abcdef-never-printed"
 
 _ACTIVE_KEY = {
-    "id": "key-active-0001",
+    "id": "key-0001",
     "name": "claude-mcp",
     "prefix": "sk_live_0123",
     "scopes": ["mcp", "api:read"],
@@ -26,7 +26,7 @@ _ACTIVE_KEY = {
     "created_at": "2026-09-01T12:00:00+00:00",
 }
 _EXPIRED_KEY = {
-    "id": "key-expired-0002",
+    "id": "key-0002",
     "name": "ci-readonly",
     "prefix": "sk_test_4567",
     "scopes": ["api:read"],
@@ -38,7 +38,7 @@ _EXPIRED_KEY = {
     "created_at": "2019-12-01T00:00:00Z",
 }
 _REVOKED_KEY = {
-    "id": "key-revoked-0003",
+    "id": "key-0003",
     "name": "old-laptop",
     "prefix": "sk_live_89ab",
     "scopes": ["mcp"],
@@ -49,20 +49,40 @@ _REVOKED_KEY = {
     "last_used_at": None,
     "created_at": "2026-07-01T00:00:00+00:00",
 }
+_NAIVE_EXPIRY_KEY = {
+    "id": "key-0004",
+    "name": "naive-clock",
+    "prefix": "sk_test_cdef",
+    "scopes": ["mcp"],
+    "project_ids": [],
+    "memory_space_ids": [],
+    "expires_at": "2020-06-01T00:00:00",
+    "revoked_at": None,
+    "last_used_at": None,
+    "created_at": "2020-05-01T00:00:00",
+}
+_GARBLED_EXPIRY_KEY = {
+    "id": "key-0005",
+    "name": "garbled-clock",
+    "prefix": "sk_test_9876",
+    "scopes": ["mcp"],
+    "project_ids": [],
+    "memory_space_ids": [],
+    "expires_at": "not-a-date",
+    "revoked_at": None,
+    "last_used_at": None,
+    "created_at": "2026-07-01T00:00:00+00:00",
+}
+_KEYS = (_ACTIVE_KEY, _EXPIRED_KEY, _REVOKED_KEY, _NAIVE_EXPIRY_KEY, _GARBLED_EXPIRY_KEY)
 
 
 def _listing_with_secret_fields() -> dict:
     # A server that ever adds secret material to the listing must not leak it
     # through the CLI, so each key carries fields the CLI has to drop.
-    return {
-        "keys": [
-            {**key, "key": _SECRET, "key_hash": f"hash-of-{_SECRET}"}
-            for key in (_ACTIVE_KEY, _EXPIRED_KEY, _REVOKED_KEY)
-        ]
-    }
+    return {"keys": [{**key, "key": _SECRET, "key_hash": f"hash-of-{_SECRET}"} for key in _KEYS]}
 
 
-def _api_key_client(listing: dict) -> MagicMock:
+def _api_key_client(listing: object) -> MagicMock:
     mock_client = MagicMock()
     mock_client.list_api_keys = AsyncMock(return_value=listing)
     return mock_client
@@ -75,7 +95,7 @@ def test_api_key_list_json_carries_listing_fields_and_no_secret(flag: str) -> No
         result = CliRunner().invoke(app, ["api-key", "list", flag])
 
     assert result.exit_code == 0, result.stdout
-    assert json.loads(result.stdout) == {"keys": [_ACTIVE_KEY, _EXPIRED_KEY, _REVOKED_KEY]}
+    assert json.loads(result.stdout) == {"keys": list(_KEYS)}
     assert _SECRET not in result.stdout
     assert "key_hash" not in result.stdout
 
@@ -88,22 +108,59 @@ def test_api_key_list_defaults_to_a_table_without_the_secret() -> None:
     assert result.exit_code == 0, result.stdout
     assert '"keys"' not in result.stdout
     assert _SECRET not in result.stdout
-    for value in (
-        "API Keys",
-        "claude-mcp",
-        "key-active-0001",
-        "sk_live_0123",
-        "mcp, api:read",
-        "2 projects, 1 space",
-        "2026-09-01",
-        "2026-09-30",
-        "active",
-        "ci-readonly",
-        "expired",
-        "old-laptop",
-        "revoked",
-    ):
-        assert value in result.stdout
+    assert "API Keys" in result.stdout
+    expected_rows = {
+        "claude-mcp": (
+            "key-0001",
+            "sk_live_0123",
+            "mcp, api:read",
+            "2 projects, 1 space",
+            "2026-09-01",
+            "2026-09-30",
+            "2999-01-01",
+            "active",
+        ),
+        "ci-readonly": ("key-0002", "sk_test_4567", "2020-01-01", "expired"),
+        "old-laptop": ("key-0003", "sk_live_89ab", "revoked"),
+        # A timestamp without an offset is read as UTC, not skipped.
+        "naive-clock": ("key-0004", "2020-06-01", "expired"),
+        # An expiry the CLI cannot read is not reported as active.
+        "garbled-clock": ("key-0005", "not-a-date", "unknown"),
+    }
+    for name, values in expected_rows.items():
+        row = _table_row(result.stdout, name)
+        for value in values:
+            assert value in row, (name, value, row)
+
+
+def _table_row(output: str, name: str) -> str:
+    rows = [line for line in output.splitlines() if name in line]
+    assert len(rows) == 1, (name, output)
+    return rows[0]
+
+
+def test_api_key_list_renders_bracketed_names_literally() -> None:
+    listing = {
+        "keys": [
+            {**_ACTIVE_KEY, "name": "[/]broken"},
+            {**_EXPIRED_KEY, "name": "[red]prod"},
+        ]
+    }
+    with patch("sibyl_cli.auth.get_client", return_value=_api_key_client(listing)):
+        result = CliRunner().invoke(app, ["api-key", "list"])
+
+    assert result.exit_code == 0, result.output
+    assert "[/]broken" in result.stdout
+    assert "[red]prod" in result.stdout
+
+
+@pytest.mark.parametrize("listing", [[], None, {"keys": None}, {"keys": {"id": "x"}}])
+def test_api_key_list_json_tolerates_a_malformed_listing(listing: object) -> None:
+    with patch("sibyl_cli.auth.get_client", return_value=_api_key_client(listing)):
+        result = CliRunner().invoke(app, ["api-key", "list", "--json"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == {"keys": []}
 
 
 def test_api_key_list_says_so_when_there_are_no_keys() -> None:

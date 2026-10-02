@@ -75,6 +75,21 @@ def test_org_list_defaults_to_a_table_of_the_same_orgs() -> None:
         assert value in result.stdout
 
 
+def test_org_list_renders_bracketed_names_literally() -> None:
+    listing = {
+        "orgs": [
+            {**_ORG_LISTING["orgs"][0], "name": "[/]broken"},
+            {**_ORG_LISTING["orgs"][1], "name": "[red]prod"},
+        ]
+    }
+    with patch("sibyl_cli.org.get_client", return_value=_org_list_client(listing)):
+        result = CliRunner().invoke(app, ["list"])
+
+    assert result.exit_code == 0, result.output
+    assert "[/]broken" in result.stdout
+    assert "[red]prod" in result.stdout
+
+
 def test_org_list_says_so_when_the_caller_has_no_orgs() -> None:
     with patch("sibyl_cli.org.get_client", return_value=_org_list_client({"orgs": []})):
         result = CliRunner().invoke(app, ["list"])
