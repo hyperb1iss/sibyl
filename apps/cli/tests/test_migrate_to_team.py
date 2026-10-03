@@ -20,7 +20,7 @@ from sibyl_cli import migrate
 from sibyl_cli.client import SibylClientError
 from sibyl_cli.main import app
 
-SOURCE_ORG = "source-org"
+SOURCE_ORG = "5f0e0b8a-1c2d-4e3f-9a8b-7c6d5e4f3a2b"
 PROJECT = "project_v2"
 PERSONAL = {"id": "org-personal", "slug": "u-alice", "name": "Alice", "is_personal": True}
 TEAM = {"id": "org-team", "slug": "acme", "name": "Acme", "is_personal": False}
@@ -51,6 +51,9 @@ def ledger_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         return [ROWS if "START 0" in statement else []]
 
     monkeypatch.setattr(migrate, "_source_sql", _source_sql)
+    # The graph pass has its own tests; these cover the raw replay and the
+    # org and ledger guards around it.
+    monkeypatch.setattr(migrate, "_read_source_graph", lambda **_kwargs: ([], []))
     return directory
 
 

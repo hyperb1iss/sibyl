@@ -398,7 +398,8 @@ async def test_create_entities_bulk_uses_runtime_bulk_create() -> None:
     )
     runtime = SimpleNamespace(
         entity_manager=SimpleNamespace(
-            create_direct_bulk=AsyncMock(return_value=["session_one", "session_two"])
+            get=AsyncMock(side_effect=KeyError),
+            create_direct_bulk=AsyncMock(return_value=["session_one", "session_two"]),
         ),
         relationship_manager=SimpleNamespace(create_bulk=AsyncMock(return_value=(0, 0))),
     )
@@ -440,7 +441,8 @@ async def test_create_entities_bulk_verifies_each_project_once() -> None:
     )
     runtime = SimpleNamespace(
         entity_manager=SimpleNamespace(
-            create_direct_bulk=AsyncMock(return_value=["session_one", "session_two"])
+            get=AsyncMock(side_effect=KeyError),
+            create_direct_bulk=AsyncMock(return_value=["session_one", "session_two"]),
         ),
         relationship_manager=SimpleNamespace(create_bulk=AsyncMock(return_value=(0, 0))),
     )
@@ -1128,7 +1130,10 @@ async def test_create_entities_bulk_enqueues_memory_projection() -> None:
         ]
     )
     runtime = SimpleNamespace(
-        entity_manager=SimpleNamespace(create_direct_bulk=AsyncMock(return_value=["session_one"])),
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(side_effect=KeyError),
+            create_direct_bulk=AsyncMock(return_value=["session_one"]),
+        ),
         relationship_manager=SimpleNamespace(create_bulk=AsyncMock(return_value=(0, 0))),
     )
 
@@ -1169,7 +1174,10 @@ async def test_create_entities_bulk_returns_memory_extraction_jobs() -> None:
         ]
     )
     runtime = SimpleNamespace(
-        entity_manager=SimpleNamespace(create_direct_bulk=AsyncMock(return_value=["session_one"])),
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(side_effect=KeyError),
+            create_direct_bulk=AsyncMock(return_value=["session_one"]),
+        ),
         relationship_manager=SimpleNamespace(create_bulk=AsyncMock(return_value=(0, 0))),
     )
     enqueue_result = SimpleNamespace(
@@ -1221,7 +1229,10 @@ async def test_create_entities_bulk_reports_partial_memory_extraction() -> None:
         ]
     )
     runtime = SimpleNamespace(
-        entity_manager=SimpleNamespace(create_direct_bulk=AsyncMock(return_value=["session_one"])),
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(side_effect=KeyError),
+            create_direct_bulk=AsyncMock(return_value=["session_one"]),
+        ),
         relationship_manager=SimpleNamespace(create_bulk=AsyncMock(return_value=(0, 0))),
     )
     enqueue_result = SimpleNamespace(
@@ -1281,7 +1292,10 @@ async def test_create_entities_bulk_reports_every_failed_derived_enqueue() -> No
         ],
     )
     runtime = SimpleNamespace(
-        entity_manager=SimpleNamespace(create_direct_bulk=AsyncMock(return_value=["session_one"])),
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(side_effect=KeyError),
+            create_direct_bulk=AsyncMock(return_value=["session_one"]),
+        ),
         relationship_manager=SimpleNamespace(create_bulk=AsyncMock(return_value=(0, 0))),
     )
 
@@ -1397,7 +1411,9 @@ async def test_create_entities_bulk_requires_explicit_conflict_skip() -> None:
         ]
     )
     runtime = SimpleNamespace(
-        entity_manager=SimpleNamespace(create_direct_bulk=AsyncMock(return_value=[])),
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(side_effect=KeyError), create_direct_bulk=AsyncMock(return_value=[])
+        ),
         relationship_manager=SimpleNamespace(create_bulk=AsyncMock(return_value=(0, 0))),
     )
 
@@ -1901,7 +1917,10 @@ async def test_create_entities_bulk_stamps_the_caller_onto_scoped_rows() -> None
         ]
     )
     runtime = SimpleNamespace(
-        entity_manager=SimpleNamespace(create_direct_bulk=AsyncMock(return_value=["episode_one"])),
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(side_effect=KeyError),
+            create_direct_bulk=AsyncMock(return_value=["episode_one"]),
+        ),
         relationship_manager=SimpleNamespace(create_bulk=AsyncMock(return_value=(0, 0))),
     )
 
@@ -2876,3 +2895,52 @@ def test_a_hint_whose_id_trips_the_sanitizer_falls_back_to_a_placeholder() -> No
     assert _correct_hint(template, "drop delete me") == (
         "Run 'sibyl correct <id> --help' for the actions."
     )
+
+
+@pytest.mark.asyncio
+async def test_create_entities_bulk_never_replaces_another_members_row() -> None:
+    from sibyl_core.tools.helpers import _generate_id
+
+    org = _org()
+    ctx = _ctx()
+    batch = EntityBulkCreateRequest(
+        entities=[
+            EntityCreate(
+                name="Shared title",
+                content="this member's decision",
+                entity_type=EntityType.DECISION,
+                skip_conflicts=True,
+                metadata={},
+            )
+        ]
+    )
+    plain_id = _generate_id("decision", "Shared title", "general")
+    someone_elses = SimpleNamespace(
+        metadata={"principal_id": "user-someone-else"}, created_by="user-someone-else"
+    )
+
+    async def get(entity_id: str) -> Any:
+        if entity_id == plain_id:
+            return someone_elses
+        raise KeyError(entity_id)
+
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(side_effect=get),
+            create_direct_bulk=AsyncMock(
+                side_effect=lambda entities, **_kwargs: [entity.id for entity in entities]
+            ),
+        ),
+        relationship_manager=SimpleNamespace(create_bulk=AsyncMock(return_value=(0, 0))),
+    )
+
+    with patch(
+        "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
+        AsyncMock(return_value=runtime),
+    ):
+        response = await create_entities_bulk(batch=batch, org=org, ctx=ctx, content_session=None)
+
+    written = runtime.entity_manager.create_direct_bulk.await_args.args[0][0]
+    assert written.id != plain_id
+    assert response.entities[0].id == written.id
+    assert written.created_by == str(ctx.user.id)

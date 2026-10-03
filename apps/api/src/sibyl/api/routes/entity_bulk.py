@@ -7,6 +7,7 @@ from typing import Any
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
 
+from sibyl.api.errors import constraint_violation
 from sibyl.api.routes import (
     entity_contracts as contracts,
     entity_policy as policy,
@@ -34,6 +35,7 @@ from sibyl_core.projection import (
     MANIFEST_STATE_COMPLETE,
     extract_projected_memory_entities,
 )
+from sibyl_core.tools.add import resolve_write_id
 
 log = structlog.get_logger()
 
@@ -165,12 +167,30 @@ async def create_entities_bulk(
 
     now = datetime.now(UTC)
     principal_id = str(ctx.user.id) if ctx.user is not None else None
-    entities = [
-        serialization.entity_from_bulk_create(
-            entity, group_id=group_id, now=now, principal_id=principal_id
+    entities: list[Entity] = []
+    for requested in batch.entities:
+        built = serialization.entity_from_bulk_create(
+            requested, group_id=group_id, now=now, principal_id=principal_id
         )
-        for entity in batch.entities
-    ]
+        # Bulk rows go through the same id guard as single writes, so a
+        # batch cannot replace another member's memory or move a row out of
+        # another project by reusing its title.
+        try:
+            entity_id = await resolve_write_id(
+                runtime.entity_manager,
+                entity_type=requested.entity_type.value,
+                base_parts=serialization.bulk_identity_parts(requested, built.metadata),
+                title=requested.name,
+                principal_id=principal_id,
+                project=str(built.metadata.get("project_id") or "") or None,
+            )
+        except ValueError as exc:
+            raise constraint_violation(
+                "duplicate entity name in scope",
+                remediation="Use a different title or update the existing entity.",
+                details={"field": "name", "entity_type": requested.entity_type.value},
+            ) from exc
+        entities.append(built.model_copy(update={"id": entity_id}))
     created_ids = await runtime.entity_manager.create_direct_bulk(
         entities,
         generate_embeddings=not batch.defer_embeddings,
