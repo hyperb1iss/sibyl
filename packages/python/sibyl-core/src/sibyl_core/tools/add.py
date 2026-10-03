@@ -552,10 +552,30 @@ async def _persist_synchronously(
     )
 
 
-# A second author's project, epic, or milestone of the same name is almost
-# always meant to be the same container, so it is refused rather than minted
-# as a twin nobody can tell apart.
+# A second author's project, epic, or milestone of the same name in the same
+# project is almost always meant to be the same container, so it is refused
+# rather than minted as a twin nobody can tell apart.
 _NAMED_CONTAINER_TYPES = frozenset({"project", "epic", "milestone"})
+
+
+async def _existing_row(entity_manager: Any, entity_id: str) -> Entity | None:
+    try:
+        return await entity_manager.get(entity_id)
+    except (KeyError, EntityNotFoundError):
+        return None
+
+
+def _row_author(row: Entity) -> str | None:
+    author = (row.metadata or {}).get("principal_id") or row.created_by
+    return str(author) if author else None
+
+
+def _row_project(row: Entity) -> str | None:
+    metadata = row.metadata or {}
+    project = getattr(row, "project_id", None) or metadata.get("project_id")
+    if not project and metadata.get("memory_scope") == "project":
+        project = metadata.get("scope_key")
+    return str(project) if project else None
 
 
 async def _author_entity_id(
@@ -565,32 +585,44 @@ async def _author_entity_id(
     title: str,
     category: str | None,
     principal_id: str | None,
+    project: str | None,
 ) -> str:
-    """The id this author's write may use.
+    """The id this write may use without touching anyone else's row.
 
-    Ids hash type, title, and category, so two people who write the same title
-    mint the same id, and the write path upserts there. Unchecked, one person's
-    write replaced another's memory and took over its authorship, including a
-    private memory the writer could not read. A row with no recorded author, or
-    one this author wrote, keeps the upsert. A row another author wrote keeps
-    its id: this write gets an id qualified by its own author, which stays
-    stable across that author's re-writes.
+    Ids hash type, title, and category, so writes that share a title mint the
+    same id, and the write path upserts there. Unchecked, one member's write
+    replaced another's memory and took over its authorship (a private memory
+    the writer could not even read included), and a write in one project moved
+    a same-titled row out of another project the writer had no access to.
+
+    The row already at the id keeps it unless this write is its author's and
+    stays in its project; a row with no recorded author in the same project
+    keeps the upsert, as before. Otherwise the write gets an id qualified by
+    its own project and then its own author, which stays stable across that
+    author's re-writes. A second author's container of the same name in the
+    same project is refused.
     """
-    base_id = _generate_id(entity_type, title, category or "general")
-    if not principal_id:
-        return base_id
-    try:
-        existing = await entity_manager.get(base_id)
-    except (KeyError, EntityNotFoundError):
-        return base_id
-    if existing is None:
-        return base_id
-    author = (existing.metadata or {}).get("principal_id") or existing.created_by
-    if not author or str(author) == principal_id:
-        return base_id
-    if entity_type in _NAMED_CONTAINER_TYPES:
-        raise ValueError(f"A {entity_type} named '{title}' already exists")
-    return _generate_id(entity_type, title, category or "general", f"author:{principal_id}")
+    qualifiers: list[str] = []
+    candidate = _generate_id(entity_type, title, category or "general")
+    while True:
+        existing = await _existing_row(entity_manager, candidate)
+        if existing is None:
+            return candidate
+        author = _row_author(existing)
+        row_project = _row_project(existing)
+        moves = bool(project and row_project and row_project != project)
+        foreign = bool(principal_id and author and author != principal_id)
+        if not moves and not foreign:
+            return candidate
+        if moves and f"project:{project}" not in qualifiers:
+            qualifiers.append(f"project:{project}")
+        elif foreign and f"author:{principal_id}" not in qualifiers:
+            if entity_type in _NAMED_CONTAINER_TYPES:
+                raise ValueError(f"A {entity_type} named '{title}' already exists")
+            qualifiers.append(f"author:{principal_id}")
+        else:
+            return candidate
+        candidate = _generate_id(entity_type, title, category or "general", *qualifiers)
 
 
 async def add(
@@ -813,6 +845,7 @@ async def add(
             title=title,
             category=category,
             principal_id=principal_id,
+            project=project or (scope_key if memory_scope == "project" else None),
         )
 
         if skip_conflicts:
@@ -1065,6 +1098,12 @@ async def add(
                 content=content,
                 metadata=full_metadata,
             )
+
+        # Authorship is recorded on every row, scoped or not, so the id guard
+        # above can tell whose row a later write would land on. It grants no
+        # access: unscoped rows are read through their project alone.
+        if principal_id and not entity.created_by:
+            entity = entity.model_copy(update={"created_by": principal_id})
 
         # Build list of explicit relationships to create
         relationships_to_create: list[dict[str, Any]] = []

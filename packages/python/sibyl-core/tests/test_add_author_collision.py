@@ -65,7 +65,8 @@ async def _write(
     *,
     principal: str | None,
     entity_type: str = "decision",
-    scope: str = "private",
+    scope: str | None = "private",
+    project: str | None = None,
 ) -> Any:
     return await add(
         title,
@@ -74,6 +75,8 @@ async def _write(
         metadata={"organization_id": GROUP},
         principal_id=principal,
         memory_scope=scope,
+        scope_key=project if scope == "project" else None,
+        project=project,
         sync=True,
         generate_embeddings=False,
         check_conflicts=False,
@@ -154,3 +157,91 @@ async def test_a_second_authors_project_of_the_same_name_is_refused(
         scope="project",
     )
     assert alice_again.id == first.id
+
+
+@pytest.mark.asyncio
+async def test_unscoped_rows_record_their_author_and_are_protected(
+    runtime: GraphRuntime,
+) -> None:
+    first = await _write(
+        "Fix the flaky deploy",
+        "Alice's task",
+        principal=ALICE,
+        entity_type="task",
+        scope=None,
+        project="project_p",
+    )
+    second = await _write(
+        "Fix the flaky deploy",
+        "Bob's task",
+        principal=BOB,
+        entity_type="task",
+        scope=None,
+        project="project_p",
+    )
+
+    assert first.success and second.success, (first.message, second.message)
+    assert first.id != second.id
+    alice_row = await runtime.entity_manager.get(str(first.id))
+    assert alice_row.created_by == ALICE
+
+
+@pytest.mark.asyncio
+async def test_a_write_in_another_project_never_moves_an_existing_row(
+    runtime: GraphRuntime,
+) -> None:
+    first = await _write(
+        "Rotate the signing keys",
+        "in project p",
+        principal=ALICE,
+        scope="project",
+        project="project_p",
+    )
+    by_bob = await _write(
+        "Rotate the signing keys",
+        "in project q",
+        principal=BOB,
+        scope="project",
+        project="project_q",
+    )
+    by_alice = await _write(
+        "Rotate the signing keys",
+        "also in q",
+        principal=ALICE,
+        scope="project",
+        project="project_q",
+    )
+
+    assert len({first.id, by_bob.id, by_alice.id}) == 3
+    original = await runtime.entity_manager.get(str(first.id))
+    assert original.metadata.get("project_id") == "project_p"
+    assert original.created_by == ALICE
+
+
+@pytest.mark.asyncio
+async def test_same_named_epics_live_in_different_projects_but_not_twice_in_one(
+    runtime: GraphRuntime,
+) -> None:
+    alice_p = await _write(
+        "Platform",
+        "Alice's epic",
+        principal=ALICE,
+        entity_type="epic",
+        scope=None,
+        project="project_p",
+    )
+    bob_q = await _write(
+        "Platform", "Bob's epic", principal=BOB, entity_type="epic", scope=None, project="project_q"
+    )
+    bob_p = await _write(
+        "Platform",
+        "Bob's epic in p",
+        principal=BOB,
+        entity_type="epic",
+        scope=None,
+        project="project_p",
+    )
+
+    assert alice_p.success and bob_q.success, (alice_p.message, bob_q.message)
+    assert alice_p.id != bob_q.id
+    assert not bob_p.success and "already exists" in bob_p.message
