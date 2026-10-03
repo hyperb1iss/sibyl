@@ -559,3 +559,27 @@ def test_a_source_row_keeps_its_full_content_over_the_summary() -> None:
 
     assert body["content"] == row["content"]
     assert body["retrieval_keys"] == ["E_LIMIT"]
+
+
+def test_a_task_keeps_a_description_longer_than_its_content() -> None:
+    from sibyl_cli.migrate_graph import PlannedEntity, _payload
+
+    entity = SourceEntity(
+        uuid="task_1",
+        entity_type="task",
+        name="Short body, longer description",
+        memory_scope=None,
+        attributes={},
+        content="the short body",
+        description="the longer description that the task view shows",
+    )
+    body, _ = _payload(
+        PlannedEntity(source=entity, name=entity.name, scope=None),
+        ids={},
+        target_project_id="project_target",
+        origin_org="org",
+    )
+
+    assert "the short body" in body["content"]
+    assert "the longer description that the task view shows" in body["content"]
+    assert "description" not in body

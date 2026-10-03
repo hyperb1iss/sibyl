@@ -453,9 +453,16 @@ def _payload(
         "metadata": metadata,
         "skip_conflicts": True,
     }
-    description = source.description or attributes.get("description")
-    if description and description != content:
-        body["description"] = str(description)
+    description = str(source.description or attributes.get("description") or "")
+    if description and description not in content:
+        if source.entity_type == "task":
+            # A task stores its body as its description, so a separate
+            # description would be overwritten: both texts go in the body.
+            body["content"] = (
+                description if content in description else f"{content}\n\n{description}"
+            )
+        else:
+            body["description"] = description
     if attributes.get("category"):
         body["category"] = str(attributes["category"])
     languages = attributes.get("languages")
