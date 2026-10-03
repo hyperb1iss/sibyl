@@ -46,7 +46,7 @@ sibyl migrate to-team --target-context <context> --project <project_id> [options
 | `--source-surreal-url`  | `ws://localhost:8000/rpc` | Local SurrealDB endpoint                                        |
 | `--source-surreal-user` | URL userinfo, else `root` | Local SurrealDB username                                        |
 | `--source-surreal-pass` | URL userinfo, else `root` | Local SurrealDB password (prefer `SIBYL_SOURCE_SURREAL_PASS`)   |
-| `--limit`               | none                      | Replay at most N raw memories                                   |
+| `--limit`               | none                      | Migrate at most N raw memories and N graph entities             |
 
 ### Before you start
 
@@ -78,20 +78,32 @@ target will re-derive instead.
 
 Memories that are private to you locally stay private to you on the team server: teammates cannot
 read them, but your own recall and context packs there include them. Pass `--share-private` to make
-them visible to everyone in the project instead.
+them visible to everyone in the project instead. Rows flagged as holding a credential or token stay
+private either way, and rows taken out of recall on your instance (contested or retired) are not
+migrated.
 
 ### Re-running
 
-Ledgers under `~/.sibyl/migrations` map every migrated row to its id on the target, and every write
-carries an idempotency key. Re-running after an interruption resumes where it stopped and never
-duplicates what already landed, so it is safe to run the command again at any time.
+A ledger under `~/.sibyl/migrations` maps every migrated row to its id on the target, so running the
+command again skips what already landed and finishes the rest. Writing a row a second time is safe:
+your own row keeps its id on the server and is updated in place. A row that landed while one of its
+link targets had failed is written again on the next run, once that target lands, which adds the
+missing link.
+
+Re-running does not carry edits you made locally after a row was migrated. Once a project has moved,
+work on it in the team server.
+
+`--limit N` migrates at most N raw memories and N graph entities, which is useful for a first trial.
 
 ### What changes on the way
 
 - Ids can differ on the target. Each migrated row keeps its original id, timestamps, and scope under
   `metadata.migration`, along with the original title when a repeated title had to be numbered.
 - Creation time on the target is the migration time; the original sits in
-  `metadata.migration.origin_created_at`.
+  `metadata.migration.origin_created_at`. A task's original start and completion times sit there
+  too.
+- An epic's status derives from its tasks, so its original status is kept only under
+  `metadata.migration.origin_status`.
 - The API declares links at creation and accepts `supersedes`, `contradicts`, `requires`,
   `supports`, and `decides` as typed links. Other link types (such as `DERIVED_FROM` or
   `USES_PROCEDURE`) arrive as untyped links, and the original type is recorded under
@@ -99,5 +111,9 @@ duplicates what already landed, so it is safe to run the command again at any ti
 
 ### Server version
 
-Team servers before 1.4.4 let one member's write replace another member's memory when both used the
-same title. Upgrade the team server to 1.4.4 or newer before several people migrate into it.
+On team servers before 1.4.4, a write whose title matched someone else's memory replaced it, and a
+write in one project could move a same-titled row out of another project. From 1.4.4, every write
+records its author, a row written by someone else or in another project keeps its id, and a second
+author's project, epic, or milestone of the same name in the same project is refused. Rows written
+before the upgrade without a recorded author are protected across projects but not within one.
+Upgrade the team server to 1.4.4 or newer before several people migrate into it.

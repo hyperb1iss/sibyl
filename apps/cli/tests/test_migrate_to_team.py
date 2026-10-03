@@ -20,7 +20,7 @@ from sibyl_cli import migrate
 from sibyl_cli.client import SibylClientError
 from sibyl_cli.main import app
 
-SOURCE_ORG = "source-org"
+SOURCE_ORG = "5f0e0b8a-1c2d-4e3f-9a8b-7c6d5e4f3a2b"
 PROJECT = "project_v2"
 PERSONAL = {"id": "org-personal", "slug": "u-alice", "name": "Alice", "is_personal": True}
 TEAM = {"id": "org-team", "slug": "acme", "name": "Acme", "is_personal": False}

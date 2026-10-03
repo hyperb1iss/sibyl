@@ -18,7 +18,7 @@ from sibyl_cli.migrate_graph import (
     SourceEntity,
     build_plan,
     execute_plan,
-    idempotency_key,
+    validate_organization_id,
     validate_project_scope,
 )
 
@@ -33,6 +33,8 @@ def _entity(
     scope: str | None = "project",
     created: str = "2026-01-01T00:00:00Z",
     status: str | None = None,
+    content: str | None = None,
+    summary: str | None = None,
     **attributes: Any,
 ) -> SourceEntity:
     return SourceEntity(
@@ -43,6 +45,8 @@ def _entity(
         attributes=attributes,
         created_at=created,
         status=status,
+        content=content,
+        summary=summary,
     )
 
 
@@ -198,10 +202,16 @@ def test_every_declared_target_lives_in_an_earlier_layer() -> None:
             assert layer[target] < node.layer
 
 
-def test_project_scope_rejects_anything_but_a_project_id() -> None:
+def test_ids_must_have_a_project_or_uuid_shape() -> None:
     assert validate_project_scope(PROJECT) == PROJECT
+    assert validate_project_scope("proj_02b86e331f124126") == "proj_02b86e331f124126"
     with pytest.raises(ValueError):
         validate_project_scope("project_x' OR 1=1")
+    assert validate_organization_id("E7B94A25-DD4C-4FB8-B300-0C75E83998E2") == (
+        "e7b94a25-dd4c-4fb8-b300-0c75e83998e2"
+    )
+    with pytest.raises(ValueError):
+        validate_organization_id("org' OR 1=1")
 
 
 def test_legacy_task_statuses_map_to_workflow_statuses() -> None:
@@ -221,12 +231,114 @@ def test_legacy_task_statuses_map_to_workflow_statuses() -> None:
     assert [_task_status(_node(plan, uuid)) for uuid in "abcd"] == ["done", "doing", None, None]
 
 
-class _Target:
-    """Records every write; ids are derived so re-runs are checkable."""
+def test_rows_out_of_recall_stay_behind_and_flagged_rows_stay_private() -> None:
+    plan = build_plan(
+        [
+            _entity(
+                "episode_contested",
+                "episode",
+                excluded_from_recall=True,
+                lifecycle_state="contested",
+            ),
+            _entity("episode_retired", "episode", lifecycle_state="retired"),
+            _entity(
+                "plan_secret", "plan", contains_sensitive=True, sensitivity_flags=["credential"]
+            ),
+            _entity("plan_shared", "plan", scope="private"),
+        ],
+        [],
+        project=PROJECT,
+        share_private=True,
+    )
 
-    def __init__(self, fail: set[str] | None = None) -> None:
-        self.calls: list[tuple[str, str, dict[str, Any] | None, str | None]] = []
+    assert [node.source.uuid for node in plan.entities] == ["plan_secret", "plan_shared"]
+    assert _node(plan, "plan_secret").scope == "private"
+    assert _node(plan, "plan_shared").scope == "project"
+    assert plan.kept_private == 1
+
+
+def test_the_category_is_part_of_the_id_so_it_disambiguates_titles() -> None:
+    plan = build_plan(
+        [
+            _entity("d1", "decision", name="Retry policy", category="ci"),
+            _entity("d2", "decision", name="Retry policy", category="deploy"),
+            _entity("d3", "decision", name="Retry policy", category="ci", created="2026-02-01"),
+        ],
+        [],
+        project=PROJECT,
+    )
+
+    assert [_node(plan, uuid).name for uuid in ("d1", "d2", "d3")] == [
+        "Retry policy",
+        "Retry policy",
+        "Retry policy (2)",
+    ]
+
+
+def test_a_task_waits_for_its_epic_even_when_the_epic_is_younger() -> None:
+    plan = build_plan(
+        [
+            _entity("task_1", "task", created="2026-01-01"),
+            _entity("epic_1", "epic", created="2026-06-01"),
+            _entity("epic_2", "epic", created="2026-07-01"),
+        ],
+        [SourceEdge("BELONGS_TO", "task_1", "epic_2")],
+        project=PROJECT,
+    )
+
+    layer = _layer_of(plan)
+    assert layer["task_1"] > layer["epic_2"]
+    order = [node.source.uuid for node in plan.entities]
+    assert order.index("epic_2") < order.index("task_1")
+
+
+def test_a_cycle_loses_one_of_its_own_edges_and_nothing_else() -> None:
+    plan = build_plan(
+        [
+            _entity("a", "decision", created="2026-01-01"),
+            _entity("b", "decision", created="2026-01-02"),
+            _entity("c", "decision", created="2026-01-03"),
+            _entity("waiter", "decision", created="2026-01-04"),
+        ],
+        [
+            SourceEdge("SUPERSEDES", "a", "b"),
+            SourceEdge("SUPERSEDES", "b", "c"),
+            SourceEdge("SUPERSEDES", "c", "a"),
+            SourceEdge("SUPPORTS", "waiter", "a"),
+        ],
+        project=PROJECT,
+    )
+
+    assert len(plan.dropped_edges) == 1
+    assert plan.dropped_edges[0].startswith("a -> b")
+    assert _node(plan, "waiter").declares == [("supports", "a")]
+    layer = _layer_of(plan)
+    for node in plan.entities:
+        for _, target in node.declares:
+            assert layer[target] < node.layer
+
+
+def test_a_limited_plan_is_a_prefix_that_keeps_its_link_targets() -> None:
+    plan = build_plan(
+        [_entity(f"t{n}", "task", created=f"2026-01-{n + 1:02d}") for n in range(6)],
+        [SourceEdge("DEPENDS_ON", "t1", "t5"), SourceEdge("DEPENDS_ON", "t2", "t1")],
+        project=PROJECT,
+    )
+
+    limited = plan.limited(3)
+    included = {node.source.uuid for node in limited.entities}
+    assert len(included) == 3
+    for node in limited.entities:
+        assert set(node.depends_on) <= included
+
+
+class _Target:
+    """Records every write; target ids are derived from the origin id."""
+
+    def __init__(self, fail: set[str] | None = None, no_id: set[str] | None = None) -> None:
+        self.calls: list[tuple[str, str, dict[str, Any] | None]] = []
         self.fail = fail or set()
+        self.no_id = no_id or set()
 
     async def _request(
         self,
@@ -236,16 +348,24 @@ class _Target:
         params: dict[str, Any] | None = None,
         *,
         _buffer_pending: bool = True,
-        _idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         assert _buffer_pending is False
-        self.calls.append((method, path, json, _idempotency_key))
+        self.calls.append((method, path, json))
         if method == "POST":
             origin = json["metadata"]["migration"]["origin_entity_id"]  # type: ignore[index]
             if origin in self.fail:
                 raise RuntimeError("boom")
+            if origin in self.no_id:
+                return {}
             return {"id": f"target-{origin}"}
         return {}
+
+    def posts(self) -> dict[str, dict[str, Any]]:
+        return {
+            call[2]["metadata"]["migration"]["origin_entity_id"]: call[2]  # type: ignore[index]
+            for call in self.calls
+            if call[0] == "POST"
+        }
 
 
 def _plan() -> GraphPlan:
@@ -254,7 +374,14 @@ def _plan() -> GraphPlan:
             _entity("epic_1", "epic", status="in_progress"),
             _entity("task_1", "task", status="done", learnings="what we learned"),
             _entity("task_2", "task", status="todo", created="2026-02-01"),
-            _entity("decision_1", "decision", scope="private", content="the decision"),
+            _entity(
+                "decision_1",
+                "decision",
+                scope="private",
+                content="the full decision body",
+                summary="the summary",
+                retrieval_keys=["E_RETRY_LIMIT"],
+            ),
         ],
         [
             SourceEdge("BELONGS_TO", "task_1", "epic_1"),
@@ -265,80 +392,170 @@ def _plan() -> GraphPlan:
     )
 
 
-async def _execute(target: _Target, ids: dict[str, str], statuses: dict[str, str]) -> Any:
-    saves: list[int] = []
-    outcome = await execute_plan(
+class _Ledger:
+    def __init__(self) -> None:
+        self.ids: dict[str, str] = {}
+        self.statuses: dict[str, str] = {}
+        self.partial: dict[str, list[str]] = {}
+        self.saves = 0
+
+
+async def _execute(target: _Target, ledger: _Ledger, plan: GraphPlan | None = None) -> Any:
+    def save() -> None:
+        ledger.saves += 1
+
+    return await execute_plan(
         target,
-        _plan(),
-        ids=ids,
-        statuses=statuses,
-        route_key="route",
+        plan or _plan(),
+        ids=ledger.ids,
+        statuses=ledger.statuses,
+        partial=ledger.partial,
         target_project_id="project_target",
         origin_org="org-src",
-        save=lambda: saves.append(len(ids)),
+        save=save,
     )
-    return outcome, saves
 
 
 @pytest.mark.asyncio
 async def test_execute_writes_bodies_links_and_statuses() -> None:
     target = _Target()
-    ids: dict[str, str] = {}
-    statuses: dict[str, str] = {}
+    ledger = _Ledger()
 
-    outcome, saves = await _execute(target, ids, statuses)
+    outcome = await _execute(target, ledger)
 
     assert outcome.created == 4 and outcome.failures == []
-    posts = {
-        call[2]["metadata"]["migration"]["origin_entity_id"]: call
-        for call in target.calls
-        if call[0] == "POST"
-    }  # type: ignore[index]
-    task_1 = posts["task_1"][2]
+    posts = target.posts()
+    task_1 = posts["task_1"]
     assert task_1["metadata"]["epic_id"] == "target-epic_1"
     assert task_1["metadata"]["learnings"] == "what we learned"
     assert task_1["metadata"]["project_id"] == "project_target"
-    assert posts["task_2"][2]["metadata"]["depends_on"] == ["target-task_1"]
-    decision = posts["decision_1"][2]
+    assert posts["task_2"]["metadata"]["depends_on"] == ["target-task_1"]
+    decision = posts["decision_1"]
     assert decision["related_to"] == ["target-task_1"]
     assert decision["metadata"]["memory_scope"] == "private"
-    assert decision["content"] == "the decision"
-    assert posts["epic_1"][2]["metadata"]["status"] == "in_progress"
+    assert decision["content"] == "the full decision body"
+    assert decision["retrieval_keys"] == ["E_RETRY_LIMIT"]
+    assert posts["epic_1"]["metadata"]["migration"]["origin_status"] == "in_progress"
     patches = [call for call in target.calls if call[0] == "PATCH"]
     assert [(p[1], p[2]) for p in patches] == [("/tasks/target-task_1", {"status": "done"})]
-    assert posts["task_1"][3] == idempotency_key("route", "task_1", "create")
-    assert statuses == {"task_1": "done"}
-    assert saves and saves[-1] == 4
+    assert ledger.statuses == {"task_1": "done"}
+    assert ledger.partial == {}
+    assert ledger.saves >= 1
 
 
 @pytest.mark.asyncio
 async def test_a_rerun_resumes_from_the_ledger_without_writing_again() -> None:
-    target = _Target()
-    ids: dict[str, str] = {}
-    statuses: dict[str, str] = {}
-    await _execute(target, ids, statuses)
+    ledger = _Ledger()
+    await _execute(_Target(), ledger)
     rerun = _Target()
 
-    outcome, _ = await _execute(rerun, ids, statuses)
+    outcome = await _execute(rerun, ledger)
 
     assert outcome.created == 0 and outcome.resumed == 4
     assert rerun.calls == []
 
 
 @pytest.mark.asyncio
-async def test_a_failed_write_is_reported_and_its_dependents_still_land_unlinked() -> None:
-    target = _Target(fail={"task_1"})
-    ids: dict[str, str] = {}
+async def test_a_failed_write_is_reported_and_its_dependents_land_then_get_relinked() -> None:
+    ledger = _Ledger()
+    first = await _execute(_Target(fail={"task_1"}), ledger)
 
-    outcome, _ = await _execute(target, ids, {})
+    assert any("task_1" in failure for failure in first.failures)
+    assert "task_1" not in ledger.ids
+    assert {"epic_1", "task_2", "decision_1"} <= set(ledger.ids)
+    assert set(ledger.partial) == {"task_2", "decision_1"}
 
-    assert any("task_1" in failure for failure in outcome.failures)
-    assert "task_1" not in ids
-    assert {"epic_1", "task_2", "decision_1"} <= set(ids)
-    assert len(outcome.unlinked) == 2
-    post = next(
-        c
-        for c in target.calls
-        if c[0] == "POST" and c[2]["metadata"]["migration"]["origin_entity_id"] == "decision_1"
-    )  # type: ignore[index]
-    assert "related_to" not in post[2]
+    rerun = _Target()
+    second = await _execute(rerun, ledger)
+
+    assert second.failures == []
+    assert second.created == 1 and second.relinked == 2
+    posts = rerun.posts()
+    assert posts["decision_1"]["related_to"] == ["target-task_1"]
+    assert posts["task_2"]["metadata"]["depends_on"] == ["target-task_1"]
+    assert ledger.partial == {}
+
+
+@pytest.mark.asyncio
+async def test_a_write_that_returns_no_id_is_a_failure_not_a_landing() -> None:
+    ledger = _Ledger()
+
+    outcome = await _execute(_Target(no_id={"decision_1"}), ledger)
+
+    assert any("decision_1" in failure and "no id" in failure for failure in outcome.failures)
+    assert "decision_1" not in ledger.ids
+
+
+def test_the_graph_ledger_round_trips_and_refuses_another_route(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sibyl_cli import migrate
+
+    monkeypatch.setattr(migrate, "_LEDGER_DIR", tmp_path)
+    route = {
+        "source_org": "s",
+        "target_context": "team",
+        "target_org_id": "o",
+        "target_project_id": "p",
+    }
+    path = migrate._graph_ledger_path(route)
+    migrate._save_graph_ledger(path, route, {"a": "t-a"}, {"a": "done"}, {"b": ["a"]})
+
+    assert migrate._load_graph_ledger(path, route) == ({"a": "t-a"}, {"a": "done"}, {"b": ["a"]})
+    with pytest.raises(RuntimeError, match="different migration route"):
+        migrate._load_graph_ledger(path, {**route, "target_org_id": "elsewhere"})
+
+
+def test_the_source_org_is_found_by_the_namespace_holding_the_project(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sibyl_cli import migrate
+
+    holder = "org_e7b94a25dd4c4fb8b3000c75e83998e2"
+
+    def fake_sql(*, statement: str, namespace: str = "sibyl_content", **_kwargs: Any) -> list[Any]:
+        if statement.startswith("INFO FOR ROOT"):
+            return [
+                {
+                    "namespaces": {
+                        holder: "",
+                        "org_00000000000000000000000000000000": "",
+                        "sibyl_auth": "",
+                    }
+                }
+            ]
+        return [[{"n": 12}] if namespace == holder else []]
+
+    monkeypatch.setattr(migrate, "_source_sql", fake_sql)
+
+    found = migrate._source_orgs_with_graph(
+        surreal_url="ws://localhost:8000/rpc", username=None, password=None, project=PROJECT
+    )
+
+    assert found == ["e7b94a25-dd4c-4fb8-b300-0c75e83998e2"]
+
+
+def test_a_source_row_keeps_its_full_content_over_the_summary() -> None:
+    from sibyl_cli import migrate
+    from sibyl_cli.migrate_graph import PlannedEntity, _payload
+
+    row = {
+        "uuid": "decision_1",
+        "entity_type": "decision",
+        "name": "Long decision",
+        "summary": "x" * 500,
+        "content": "the whole " + "body " * 2000,
+        "description": "x" * 500,
+        "memory_scope": "project",
+        "attributes": {"retrieval_keys": ["E_LIMIT"], "category": "ci"},
+    }
+    entity = migrate._source_entity(row)
+    body, _missing = _payload(
+        PlannedEntity(source=entity, name=entity.name, scope="project"),
+        ids={},
+        target_project_id="project_target",
+        origin_org="org",
+    )
+
+    assert body["content"] == row["content"]
+    assert body["retrieval_keys"] == ["E_LIMIT"]

@@ -323,6 +323,8 @@ def _source_entity(row: dict[str, Any]) -> migrate_graph.SourceEntity:
         priority=row.get("priority") or attributes.get("priority"),
         tags=tuple(str(tag) for tag in tags if tag),
         summary=row.get("summary"),
+        content=row.get("content"),
+        description=row.get("description"),
     )
 
 
@@ -350,8 +352,8 @@ def _read_source_graph(
             password=password,
             namespace=namespace,
             statement=(
-                "SELECT uuid, entity_type, name, summary, status, priority, memory_scope, "
-                "tags, created_at, updated_at, attributes FROM entity "
+                "SELECT uuid, entity_type, name, summary, content, description, status, "
+                "priority, memory_scope, tags, created_at, updated_at, attributes FROM entity "
                 f"WHERE project_id = '{project}' "
                 "AND entity_type NOT IN ['topic', 'passage'] "
                 f"ORDER BY uuid LIMIT {_GRAPH_PAGE} START {start};"
@@ -394,34 +396,43 @@ def _graph_ledger_path(route: dict[str, str]) -> Path:
     return _ledger_path(route).with_suffix(".graph.json")
 
 
-def _load_graph_ledger(path: Path, route: dict[str, str]) -> tuple[dict[str, str], dict[str, str]]:
+def _load_graph_ledger(
+    path: Path, route: dict[str, str]
+) -> tuple[dict[str, str], dict[str, str], dict[str, list[str]]]:
+    """What a previous run landed: target ids, task statuses, rows missing links."""
     if not path.exists():
-        return {}, {}
+        return {}, {}, {}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {}, {}
+        return {}, {}, {}
     if not isinstance(data, dict):
-        return {}, {}
+        return {}, {}, {}
     if data.get("route") != route:
         raise RuntimeError(
             f"ledger {path} belongs to a different migration route; "
             "move it aside or pass a different target"
         )
-    ids = data.get("ids")
-    statuses = data.get("statuses")
+    ids, statuses, partial = data.get("ids"), data.get("statuses"), data.get("partial")
     return (
         ids if isinstance(ids, dict) else {},
         statuses if isinstance(statuses, dict) else {},
+        partial if isinstance(partial, dict) else {},
     )
 
 
 def _save_graph_ledger(
-    path: Path, route: dict[str, str], ids: dict[str, str], statuses: dict[str, str]
+    path: Path,
+    route: dict[str, str],
+    ids: dict[str, str],
+    statuses: dict[str, str],
+    partial: dict[str, list[str]],
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(
-        {"route": route, "ids": ids, "statuses": statuses}, indent=1, sort_keys=True
+        {"route": route, "ids": ids, "statuses": statuses, "partial": partial},
+        indent=1,
+        sort_keys=True,
     )
     tmp = path.with_suffix(".tmp")
     tmp.write_text(payload, encoding="utf-8")
@@ -447,6 +458,11 @@ def _report_graph_plan(plan: migrate_graph.GraphPlan, *, resumed: int, share_pri
         info(
             "  private rows stay private to you; --share-private makes them visible to the project"
         )
+    if plan.kept_private:
+        info(
+            f"  {plan.kept_private} row(s) flagged as holding credentials or tokens stay "
+            "private whatever the flags"
+        )
     if plan.edge_counts:
         info(
             "  links: "
@@ -469,6 +485,7 @@ async def _migrate_graph(
     target_project_id: str,
     dry_run: bool,
     share_private: bool,
+    limit: int | None,
     surreal_url: str,
     username: str | None,
     password: str | None,
@@ -480,9 +497,11 @@ async def _migrate_graph(
         organization_id=organization_id,
         project=project,
     )
-    plan = migrate_graph.build_plan(entities, edges, project=project, share_private=share_private)
+    plan = migrate_graph.build_plan(
+        entities, edges, project=project, share_private=share_private
+    ).limited(limit)
     ledger_file = _graph_ledger_path(route)
-    ids, statuses = _load_graph_ledger(ledger_file, route)
+    ids, statuses, partial = _load_graph_ledger(ledger_file, route)
     planned = {node.source.uuid for node in plan.entities}
     _report_graph_plan(plan, resumed=len(planned & set(ids)), share_private=share_private)
     if dry_run:
@@ -493,15 +512,16 @@ async def _migrate_graph(
         plan,
         ids=ids,
         statuses=statuses,
-        route_key=json.dumps(route, sort_keys=True),
+        partial=partial,
         target_project_id=target_project_id,
         origin_org=organization_id,
-        save=lambda: _save_graph_ledger(ledger_file, route, ids, statuses),
+        save=lambda: _save_graph_ledger(ledger_file, route, ids, statuses, partial),
         log=info,
     )
     success(
-        f"Created {outcome.created} graph entities ({outcome.resumed} already in the ledger), "
-        f"set {outcome.statuses} task statuses"
+        f"Created {outcome.created} graph entities ({outcome.resumed} already in the ledger"
+        + (f", {outcome.relinked} re-written to add links" if outcome.relinked else "")
+        + f"), set {outcome.statuses} task statuses"
     )
     for line in outcome.unlinked[:10]:
         warn(f"  {line}")
@@ -594,7 +614,7 @@ def to_team(
     ] = False,
     limit: Annotated[
         int | None,
-        typer.Option("--limit", help="Migrate at most N memories"),
+        typer.Option("--limit", help="Migrate at most N raw memories and N graph entities"),
     ] = None,
     allow_personal_org: Annotated[
         bool,
@@ -640,7 +660,10 @@ def to_team(
         except ValueError as exc:
             raise RuntimeError(str(exc)) from exc
         if source_org:
-            org_id = source_org
+            try:
+                org_id = migrate_graph.validate_organization_id(source_org)
+            except ValueError as exc:
+                raise RuntimeError(str(exc)) from exc
         else:
             orgs = _source_sql(
                 surreal_url=source_surreal_url,
@@ -822,6 +845,7 @@ def to_team(
                     target_project_id=target_project_id,
                     dry_run=dry_run,
                     share_private=share_private,
+                    limit=limit,
                     surreal_url=source_surreal_url,
                     username=source_surreal_user,
                     password=source_surreal_pass,

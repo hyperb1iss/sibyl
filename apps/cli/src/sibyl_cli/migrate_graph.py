@@ -8,22 +8,25 @@ the caller's target identity and no cluster access is involved.
 
 Rows the server derives (topics and mention edges from the memory
 projection, passages from the passage projection, projected facts) are left
-behind, because the target re-derives them from what is written here.
+behind, because the target re-derives them from what is written here. Rows
+retired from recall stay behind too.
 
 The API only lets an entity declare links at creation, with itself as the
 subject and every target already present. So the plan orders creation:
 epics and milestones first, then tasks, then everything else, with typed
 links and task dependencies as hard ordering constraints. An untyped link
 carries no direction worth keeping, so it is declared from whichever end is
-created later. Each write carries a deterministic Idempotency-Key and a
-ledger maps source ids to target ids, so a re-run resumes without
-duplicating anything.
+created later.
+
+Entity ids are deterministic, and the server upserts a caller's own row at
+its id, so writing a row again is safe: a ledger maps source ids to target
+ids to skip finished work, and a row written while one of its link targets
+had failed is written again once that target exists, which adds the link.
 """
 
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import heapq
 import re
 from collections import defaultdict
@@ -37,6 +40,8 @@ DERIVED_CATEGORIES = frozenset(
 )
 # Types that are always derived or that the target already holds.
 SKIPPED_TYPES = frozenset({"topic", "passage", "project"})
+# Lifecycle states that took a row out of recall on the source.
+RETIRED_STATES = frozenset({"contested", "retired", "quarantined", "superseded", "withdrawn"})
 # Edges the target re-derives or implies, never declared by this pass.
 IMPLIED_EDGES = frozenset({"PART_OF", "MENTIONS"})
 # Predicates the API accepts on `related_to`, keyed by stored edge name.
@@ -57,14 +62,23 @@ _MAX_NAME = 200
 # The server hashes each id part truncated to this many characters, so two
 # titles that agree this far mint the same id however they end.
 _ID_PART_CHARS = 100
-_PROJECT_ID = re.compile(r"^project_[0-9a-z]+$")
+_SAVE_EVERY = 100
+_PROJECT_ID = re.compile(r"^(project|proj)_[0-9a-z]+$")
+_ORGANIZATION_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 
 def validate_project_scope(project: str) -> str:
-    """The source query interpolates the scope key, so only a project id shape passes."""
+    """The source queries interpolate the scope key, so only a project id shape passes."""
     if not _PROJECT_ID.fullmatch(project):
-        raise ValueError(f"'{project}' is not a project id (project_...)")
+        raise ValueError(f"'{project}' is not a project id (project_... or proj_...)")
     return project
+
+
+def validate_organization_id(organization_id: str) -> str:
+    """The source queries interpolate the org id, so only a UUID passes."""
+    if not _ORGANIZATION_ID.fullmatch(organization_id.lower()):
+        raise ValueError(f"'{organization_id}' is not an organization UUID")
+    return organization_id.lower()
 
 
 @dataclass(frozen=True)
@@ -80,11 +94,17 @@ class SourceEntity:
     priority: str | None = None
     tags: tuple[str, ...] = ()
     summary: str | None = None
+    content: str | None = None
+    description: str | None = None
 
     @property
     def category(self) -> str | None:
         value = self.attributes.get("category")
         return str(value) if value else None
+
+    @property
+    def sensitive(self) -> bool:
+        return bool(self.attributes.get("contains_sensitive"))
 
 
 @dataclass(frozen=True)
@@ -114,6 +134,7 @@ class GraphPlan:
     skipped: dict[str, int]
     dropped_edges: list[str]
     edge_counts: dict[str, int]
+    kept_private: int = 0
 
     @property
     def layers(self) -> list[list[PlannedEntity]]:
@@ -121,6 +142,18 @@ class GraphPlan:
         for planned in self.entities:
             grouped[planned.layer].append(planned)
         return [grouped[layer] for layer in sorted(grouped)]
+
+    def limited(self, count: int | None) -> GraphPlan:
+        """The first `count` entities; a prefix of the order keeps every link target."""
+        if count is None:
+            return self
+        return GraphPlan(
+            entities=self.entities[: max(count, 0)],
+            skipped=self.skipped,
+            dropped_edges=self.dropped_edges,
+            edge_counts=self.edge_counts,
+            kept_private=self.kept_private,
+        )
 
 
 def _skip_reason(entity: SourceEntity, project: str) -> str | None:
@@ -130,10 +163,17 @@ def _skip_reason(entity: SourceEntity, project: str) -> str | None:
         return f"{entity.entity_type} {entity.category} (re-derived by the target)"
     if entity.uuid == project:
         return "the project itself"
+    if entity.attributes.get("excluded_from_recall") or (
+        str(entity.attributes.get("lifecycle_state") or "") in RETIRED_STATES
+    ):
+        return f"{entity.entity_type} excluded from recall on the source"
     return None
 
 
 def _target_scope(entity: SourceEntity, *, share_private: bool) -> str | None:
+    # A row flagged as holding a credential or token never widens to the team.
+    if entity.sensitive:
+        return "private"
     if entity.memory_scope == "private":
         return "project" if share_private else "private"
     return entity.memory_scope
@@ -172,10 +212,11 @@ def _creation_order(
 ) -> tuple[list[str], list[tuple[str, str]]]:
     """Topological order over hard constraints, breaking ties by class then age.
 
-    Returns the order and the hard constraints that had to be dropped to
-    break a cycle (dependent, prerequisite).
+    Returns the order and the hard constraints dropped to break cycles
+    (dependent, prerequisite): one edge per cycle, chosen on the cycle itself,
+    so entities merely waiting on a cycle keep their links.
     """
-    pending = {uuid: set(prereqs) for uuid, prereqs in hard.items()}
+    pending = {uuid: set(hard.get(uuid, ())) for uuid in selected}
     dependents: dict[str, set[str]] = defaultdict(set)
     for uuid, prereqs in pending.items():
         for prereq in prereqs:
@@ -185,21 +226,31 @@ def _creation_order(
         entity = selected[uuid]
         return (_CLASS.get(entity.entity_type, _OTHER_CLASS), entity.created_at or "", uuid)
 
-    ready = [rank(uuid) for uuid in selected if not pending.get(uuid)]
+    ready = [rank(uuid) for uuid in selected if not pending[uuid]]
     heapq.heapify(ready)
     order: list[str] = []
     placed: set[str] = set()
     dropped: list[tuple[str, str]] = []
     while len(order) < len(selected):
         if not ready:
-            # A cycle among hard constraints: release the lowest-ranked
-            # blocked entity by dropping what it still waits on.
-            blocked = min((u for u in selected if u not in placed), key=rank)
-            for prereq in sorted(pending[blocked]):
-                dropped.append((blocked, prereq))
-                dependents[prereq].discard(blocked)
-            pending[blocked] = set()
-            heapq.heappush(ready, rank(blocked))
+            # Every unplaced entity waits on another unplaced one, so walking
+            # prerequisites from any of them must revisit a node: that loop
+            # is a cycle, and one of its own edges is what has to go.
+            walk: list[str] = []
+            seen: dict[str, int] = {}
+            node = min((u for u in selected if u not in placed), key=rank)
+            while node not in seen:
+                seen[node] = len(walk)
+                walk.append(node)
+                node = min(pending[node], key=rank)
+            cycle = walk[seen[node] :]
+            breaker = min(cycle, key=rank)
+            successor = cycle[(cycle.index(breaker) + 1) % len(cycle)]
+            dropped.append((breaker, successor))
+            pending[breaker].discard(successor)
+            dependents[successor].discard(breaker)
+            if not pending[breaker]:
+                heapq.heappush(ready, rank(breaker))
             continue
         _, _, uuid = heapq.heappop(ready)
         if uuid in placed:
@@ -319,12 +370,15 @@ def build_plan(
         skipped=dict(skipped),
         dropped_edges=dropped_edges,
         edge_counts=dict(edge_counts),
+        kept_private=sum(
+            1 for node in planned.values() if node.source.sensitive and node.scope == "private"
+        ),
     )
 
 
-def idempotency_key(route_key: str, origin_id: str, step: str) -> str:
-    digest = hashlib.sha256(f"{route_key}|{origin_id}|{step}".encode()).hexdigest()[:40]
-    return f"migrate-graph-{digest}"
+def _link_targets(node: PlannedEntity) -> list[str]:
+    targets = [t for _, t in node.declares] + node.depends_on
+    return targets + [t for t in (node.epic, node.parent) if t]
 
 
 def _payload(
@@ -334,20 +388,22 @@ def _payload(
     target_project_id: str,
     origin_org: str,
 ) -> tuple[dict[str, Any], list[str]]:
-    """The create body for one entity, plus links whose target never landed."""
+    """The create body for one entity, plus link targets that are not on the target yet."""
     source = node.source
     attributes = dict(source.attributes)
     content = str(
-        attributes.get("content") or source.summary or attributes.get("description") or ""
+        source.content
+        or attributes.get("content")
+        or source.summary
+        or source.description
+        or attributes.get("description")
+        or ""
     )
-    missing: list[str] = []
+    missing = [target for target in _link_targets(node) if target not in ids]
     related: list[str] = []
     for predicate, target in node.declares:
-        mapped = ids.get(target)
-        if mapped is None:
-            missing.append(target)
-            continue
-        related.append(f"{predicate}:{mapped}" if predicate else mapped)
+        if target in ids:
+            related.append(f"{predicate}:{ids[target]}" if predicate else ids[target])
 
     migration: dict[str, Any] = {
         "tool": "sibyl migrate to-team",
@@ -371,29 +427,22 @@ def _payload(
     for key in ("started_at", "completed_at", "due_date"):
         if attributes.get(key):
             migration[f"origin_{key}"] = attributes[key]
+    container_status = source.status or attributes.get("status")
+    if source.entity_type == "milestone" and container_status:
+        metadata["status"] = container_status
+    elif source.entity_type == "epic" and container_status:
+        # An epic's status derives from its tasks on the target.
+        migration["origin_status"] = container_status
     priority = source.priority or attributes.get("priority")
     if priority:
         metadata["priority"] = priority
-    if source.entity_type in {"epic", "milestone"} and (source.status or attributes.get("status")):
-        metadata["status"] = source.status or attributes.get("status")
-    if node.epic:
-        if node.epic in ids:
-            metadata["epic_id"] = ids[node.epic]
-        else:
-            missing.append(node.epic)
-    if node.parent:
-        if node.parent in ids:
-            metadata["parent_task_id"] = ids[node.parent]
-            if ids[node.parent] not in related:
-                related.append(ids[node.parent])
-        else:
-            missing.append(node.parent)
-    depends = []
-    for target in node.depends_on:
-        if target in ids:
-            depends.append(ids[target])
-        else:
-            missing.append(target)
+    if node.epic and node.epic in ids:
+        metadata["epic_id"] = ids[node.epic]
+    if node.parent and node.parent in ids:
+        metadata["parent_task_id"] = ids[node.parent]
+        if ids[node.parent] not in related:
+            related.append(ids[node.parent])
+    depends = [ids[target] for target in node.depends_on if target in ids]
     if depends:
         metadata["depends_on"] = depends
 
@@ -404,7 +453,7 @@ def _payload(
         "metadata": metadata,
         "skip_conflicts": True,
     }
-    description = attributes.get("description")
+    description = source.description or attributes.get("description")
     if description and description != content:
         body["description"] = str(description)
     if attributes.get("category"):
@@ -412,6 +461,9 @@ def _payload(
     languages = attributes.get("languages")
     if isinstance(languages, list) and languages:
         body["languages"] = [str(lang) for lang in languages]
+    retrieval_keys = attributes.get("retrieval_keys")
+    if isinstance(retrieval_keys, list) and retrieval_keys:
+        body["retrieval_keys"] = [str(key) for key in retrieval_keys]
     tags = list(source.tags) or list(attributes.get("tags") or [])
     if tags:
         body["tags"] = [str(tag) for tag in tags]
@@ -424,6 +476,7 @@ def _payload(
 class GraphOutcome:
     created: int = 0
     resumed: int = 0
+    relinked: int = 0
     statuses: int = 0
     failures: list[str] = field(default_factory=list)
     unlinked: list[str] = field(default_factory=list)
@@ -443,46 +496,71 @@ async def execute_plan(
     *,
     ids: dict[str, str],
     statuses: dict[str, str],
-    route_key: str,
+    partial: dict[str, list[str]],
     target_project_id: str,
     origin_org: str,
     save: Callable[[], None],
     concurrency: int = 8,
     log: Callable[[str], None] = lambda _message: None,
 ) -> GraphOutcome:
-    """Create the plan layer by layer; `ids` and `statuses` are the ledger."""
+    """Create the plan layer by layer.
+
+    `ids`, `statuses`, and `partial` are the ledger: what landed, which task
+    statuses were set, and which rows landed without some of their links.
+    """
     outcome = GraphOutcome()
     gate = asyncio.Semaphore(concurrency)
+    writes = 0
 
     async def create(node: PlannedEntity) -> None:
+        nonlocal writes
         origin = node.source.uuid
-        if origin in ids:
+        relink = origin in ids and bool(partial.get(origin))
+        if origin in ids and not relink:
             outcome.resumed += 1
         else:
             body, missing = _payload(
                 node, ids=ids, target_project_id=target_project_id, origin_org=origin_org
             )
-            if missing:
-                outcome.unlinked.append(f"{origin}: {len(missing)} link(s) to entities that failed")
-            async with gate:
-                try:
-                    response = await client._request(
-                        "POST",
-                        "/entities",
-                        json=body,
-                        params={"sync": "true"},
-                        _buffer_pending=False,
-                        _idempotency_key=idempotency_key(route_key, origin, "create"),
-                    )
-                except Exception as exc:
-                    outcome.failures.append(f"{node.source.entity_type} {origin}: {exc}")
+            if relink and set(missing) >= set(partial[origin]):
+                # None of the links it was missing can be added yet.
+                outcome.resumed += 1
+                outcome.unlinked.append(
+                    f"{origin}: still missing {len(missing)} link(s) to rows that failed"
+                )
+            else:
+                async with gate:
+                    try:
+                        response = await client._request(
+                            "POST",
+                            "/entities",
+                            json=body,
+                            params={"sync": "true"},
+                            _buffer_pending=False,
+                        )
+                    except Exception as exc:
+                        outcome.failures.append(f"{node.source.entity_type} {origin}: {exc}")
+                        return
+                target_id = str(response.get("id") or "")
+                if not target_id:
+                    outcome.failures.append(f"{node.source.entity_type} {origin}: no id returned")
                     return
-            target_id = str(response.get("id") or "")
-            if not target_id:
-                outcome.failures.append(f"{node.source.entity_type} {origin}: no id returned")
-                return
-            ids[origin] = target_id
-            outcome.created += 1
+                ids[origin] = target_id
+                if missing:
+                    partial[origin] = missing
+                    outcome.unlinked.append(
+                        f"{origin}: landed without {len(missing)} link(s) to rows that failed; "
+                        "a re-run adds them once those rows land"
+                    )
+                else:
+                    partial.pop(origin, None)
+                if relink:
+                    outcome.relinked += 1
+                else:
+                    outcome.created += 1
+                writes += 1
+                if writes % _SAVE_EVERY == 0:
+                    save()
         status = _task_status(node)
         if status and statuses.get(origin) != status:
             async with gate:
@@ -492,7 +570,6 @@ async def execute_plan(
                         f"/tasks/{ids[origin]}",
                         json={"status": status},
                         _buffer_pending=False,
-                        _idempotency_key=idempotency_key(route_key, origin, f"status:{status}"),
                     )
                 except Exception as exc:
                     outcome.failures.append(f"task {origin}: status {status} not set ({exc})")
