@@ -14,6 +14,7 @@ from sibyl_core.auth.memory_policy import (
 )
 from sibyl_core.embeddings.provenance import without_client_embedding_stamp
 from sibyl_core.embeddings.providers import configured_embedding_provider
+from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.memory_pipeline.retrieval_keys import (
     coerce_retrieval_keys,
     normalize_retrieval_keys,
@@ -551,6 +552,47 @@ async def _persist_synchronously(
     )
 
 
+# A second author's project, epic, or milestone of the same name is almost
+# always meant to be the same container, so it is refused rather than minted
+# as a twin nobody can tell apart.
+_NAMED_CONTAINER_TYPES = frozenset({"project", "epic", "milestone"})
+
+
+async def _author_entity_id(
+    entity_manager: Any,
+    *,
+    entity_type: str,
+    title: str,
+    category: str | None,
+    principal_id: str | None,
+) -> str:
+    """The id this author's write may use.
+
+    Ids hash type, title, and category, so two people who write the same title
+    mint the same id, and the write path upserts there. Unchecked, one person's
+    write replaced another's memory and took over its authorship, including a
+    private memory the writer could not read. A row with no recorded author, or
+    one this author wrote, keeps the upsert. A row another author wrote keeps
+    its id: this write gets an id qualified by its own author, which stays
+    stable across that author's re-writes.
+    """
+    base_id = _generate_id(entity_type, title, category or "general")
+    if not principal_id:
+        return base_id
+    try:
+        existing = await entity_manager.get(base_id)
+    except (KeyError, EntityNotFoundError):
+        return base_id
+    if existing is None:
+        return base_id
+    author = (existing.metadata or {}).get("principal_id") or existing.created_by
+    if not author or str(author) == principal_id:
+        return base_id
+    if entity_type in _NAMED_CONTAINER_TYPES:
+        raise ValueError(f"A {entity_type} named '{title}' already exists")
+    return _generate_id(entity_type, title, category or "general", f"author:{principal_id}")
+
+
 async def add(
     title: str,
     content: str,
@@ -765,8 +807,13 @@ async def add(
         runtime = await get_graph_runtime(org_id)
         entity_manager = runtime.entity_manager
 
-        # Generate deterministic ID
-        entity_id = _generate_id(entity_type, title, category or "general")
+        entity_id = await _author_entity_id(
+            entity_manager,
+            entity_type=entity_type,
+            title=title,
+            category=category,
+            principal_id=principal_id,
+        )
 
         if skip_conflicts:
             check_conflicts = False
