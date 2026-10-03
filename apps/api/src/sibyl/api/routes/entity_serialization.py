@@ -1,5 +1,6 @@
 """Canonical serialization ownership for entity routes."""
 
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
@@ -190,21 +191,27 @@ def entity_from_bulk_create(
         now=now,
         principal_id=principal_id,
     )
-    identity_parts = [entity.name, entity.category or "general"]
-    project_id = str(metadata.get("project_id") or "").strip()
-    if project_id:
-        identity_parts.insert(0, project_id)
     return Entity(
-        id=_generate_id(entity.entity_type.value, *identity_parts),
+        id=_generate_id(entity.entity_type.value, *bulk_identity_parts(entity, metadata)),
         entity_type=entity.entity_type,
         name=entity.name,
         description=entity.description or content[:500],
         content=content,
         organization_id=group_id,
         metadata=metadata,
+        created_by=principal_id,
         created_at=now,
         updated_at=now,
     )
+
+
+def bulk_identity_parts(entity: EntityCreate, metadata: Mapping[str, Any]) -> list[str]:
+    """What a bulk row's plain id hashes: its project when it has one, name, category."""
+    identity_parts = [entity.name, entity.category or "general"]
+    project_id = str(metadata.get("project_id") or "").strip()
+    if project_id:
+        identity_parts.insert(0, project_id)
+    return identity_parts
 
 
 def entity_response_from_bulk_create(

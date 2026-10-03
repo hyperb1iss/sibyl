@@ -566,7 +566,7 @@ async def _existing_row(entity_manager: Any, entity_id: str) -> Entity | None:
 
 
 def _row_author(row: Entity) -> str | None:
-    author = (row.metadata or {}).get("principal_id") or row.created_by
+    author = (row.metadata or {}).get("principal_id") or getattr(row, "created_by", None)
     return str(author) if author else None
 
 
@@ -578,12 +578,12 @@ def _row_project(row: Entity) -> str | None:
     return str(project) if project else None
 
 
-async def _author_entity_id(
+async def resolve_write_id(
     entity_manager: Any,
     *,
     entity_type: str,
+    base_parts: Sequence[str],
     title: str,
-    category: str | None,
     principal_id: str | None,
     project: str | None,
 ) -> str:
@@ -601,9 +601,14 @@ async def _author_entity_id(
     its own project and then its own author, which stays stable across that
     author's re-writes. A second author's container of the same name in the
     same project is refused.
+
+    `base_parts` are what the calling write path hashes into its plain id
+    (add uses title and category; the bulk route also leads with the
+    project). Two different authors writing the same title at the same
+    instant can still race: this is a check, then a write.
     """
     qualifiers: list[str] = []
-    candidate = _generate_id(entity_type, title, category or "general")
+    candidate = _generate_id(entity_type, *base_parts)
     while True:
         existing = await _existing_row(entity_manager, candidate)
         if existing is None:
@@ -622,7 +627,7 @@ async def _author_entity_id(
             qualifiers.append(f"author:{principal_id}")
         else:
             return candidate
-        candidate = _generate_id(entity_type, title, category or "general", *qualifiers)
+        candidate = _generate_id(entity_type, *base_parts, *qualifiers)
 
 
 async def add(
@@ -839,11 +844,11 @@ async def add(
         runtime = await get_graph_runtime(org_id)
         entity_manager = runtime.entity_manager
 
-        entity_id = await _author_entity_id(
+        entity_id = await resolve_write_id(
             entity_manager,
             entity_type=entity_type,
+            base_parts=(title, category or "general"),
             title=title,
-            category=category,
             principal_id=principal_id,
             project=project or (scope_key if memory_scope == "project" else None),
         )
