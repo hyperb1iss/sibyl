@@ -398,7 +398,7 @@ def _graph_ledger_path(route: dict[str, str]) -> Path:
 
 def _load_graph_ledger(
     path: Path, route: dict[str, str]
-) -> tuple[dict[str, str], dict[str, str], dict[str, list[str]]]:
+) -> tuple[dict[str, str], dict[str, str], dict[str, dict[str, Any]]]:
     """What a previous run landed: target ids, task statuses, rows missing links."""
     if not path.exists():
         return {}, {}, {}
@@ -426,7 +426,7 @@ def _save_graph_ledger(
     route: dict[str, str],
     ids: dict[str, str],
     statuses: dict[str, str],
-    partial: dict[str, list[str]],
+    partial: dict[str, dict[str, Any]],
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(
@@ -521,6 +521,11 @@ async def _migrate_graph(
     success(
         f"Created {outcome.created} graph entities ({outcome.resumed} already in the ledger"
         + (f", {outcome.relinked} re-written to add links" if outcome.relinked else "")
+        + (
+            f", {outcome.adopted} linked to the team's existing container"
+            if outcome.adopted
+            else ""
+        )
         + f"), set {outcome.statuses} task statuses"
     )
     for line in outcome.unlinked[:10]:

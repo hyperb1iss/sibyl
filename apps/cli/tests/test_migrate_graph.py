@@ -332,13 +332,26 @@ def test_a_limited_plan_is_a_prefix_that_keeps_its_link_targets() -> None:
         assert set(node.depends_on) <= included
 
 
-class _Target:
-    """Records every write; target ids are derived from the origin id."""
+class _ApiError(Exception):
+    def __init__(self, status_code: int) -> None:
+        super().__init__(f"HTTP {status_code}")
+        self.status_code = status_code
 
-    def __init__(self, fail: set[str] | None = None, no_id: set[str] | None = None) -> None:
+
+class _Target:
+    """An in-memory team server: target ids derive from the origin id, rows are kept."""
+
+    def __init__(
+        self,
+        fail: set[str] | None = None,
+        no_id: set[str] | None = None,
+        taken_containers: dict[str, str] | None = None,
+    ) -> None:
         self.calls: list[tuple[str, str, dict[str, Any] | None]] = []
         self.fail = fail or set()
         self.no_id = no_id or set()
+        self.taken = taken_containers or {}
+        self.rows: dict[str, dict[str, Any]] = {}
 
     async def _request(
         self,
@@ -351,20 +364,42 @@ class _Target:
     ) -> dict[str, Any]:
         assert _buffer_pending is False
         self.calls.append((method, path, json))
+        if method == "POST" and path == "/search/explore":
+            return {"entities": [{"id": tid, "name": name} for name, tid in self.taken.items()]}
         if method == "POST":
-            origin = json["metadata"]["migration"]["origin_entity_id"]  # type: ignore[index]
+            body = json or {}
+            origin = body["metadata"]["migration"]["origin_entity_id"]
             if origin in self.fail:
                 raise RuntimeError("boom")
             if origin in self.no_id:
                 return {}
-            return {"id": f"target-{origin}"}
+            if body["name"] in self.taken:
+                raise _ApiError(409)
+            target_id = f"target-{origin}"
+            self.rows[target_id] = {
+                "id": target_id,
+                "name": body["name"],
+                "content": body["content"],
+                "description": body.get("description"),
+                "tags": body.get("tags") or [],
+                "metadata": {**body["metadata"], "status": "todo"},
+            }
+            return {"id": target_id}
+        if method == "GET":
+            target_id = path.rsplit("/", 1)[-1]
+            if target_id not in self.rows:
+                raise _ApiError(404)
+            return self.rows[target_id]
+        if method == "PATCH":
+            target_id = path.rsplit("/", 1)[-1]
+            self.rows[target_id]["metadata"]["status"] = (json or {})["status"]
         return {}
 
     def posts(self) -> dict[str, dict[str, Any]]:
         return {
             call[2]["metadata"]["migration"]["origin_entity_id"]: call[2]  # type: ignore[index]
             for call in self.calls
-            if call[0] == "POST"
+            if call[0] == "POST" and call[1] == "/entities"
         }
 
 
@@ -396,7 +431,7 @@ class _Ledger:
     def __init__(self) -> None:
         self.ids: dict[str, str] = {}
         self.statuses: dict[str, str] = {}
-        self.partial: dict[str, list[str]] = {}
+        self.partial: dict[str, dict[str, Any]] = {}
         self.saves = 0
 
 
@@ -458,21 +493,23 @@ async def test_a_rerun_resumes_from_the_ledger_without_writing_again() -> None:
 @pytest.mark.asyncio
 async def test_a_failed_write_is_reported_and_its_dependents_land_then_get_relinked() -> None:
     ledger = _Ledger()
-    first = await _execute(_Target(fail={"task_1"}), ledger)
+    target = _Target(fail={"task_1"})
+    first = await _execute(target, ledger)
 
     assert any("task_1" in failure for failure in first.failures)
     assert "task_1" not in ledger.ids
     assert {"epic_1", "task_2", "decision_1"} <= set(ledger.ids)
     assert set(ledger.partial) == {"task_2", "decision_1"}
 
-    rerun = _Target()
-    second = await _execute(rerun, ledger)
+    target.fail = set()
+    second = await _execute(target, ledger)
 
     assert second.failures == []
     assert second.created == 1 and second.relinked == 2
-    posts = rerun.posts()
-    assert posts["decision_1"]["related_to"] == ["target-task_1"]
-    assert posts["task_2"]["metadata"]["depends_on"] == ["target-task_1"]
+    rows = target.rows
+    assert rows["target-decision_1"]["metadata"]["migration"]["origin_entity_id"] == "decision_1"
+    resent = [c for c in target.calls[len(target.calls) - 10 :] if c[0] == "POST"]
+    assert any(c[2]["related_to"] == ["target-task_1"] for c in resent if c[2].get("related_to"))  # type: ignore[index]
     assert ledger.partial == {}
 
 
@@ -583,3 +620,95 @@ def test_a_task_keeps_a_description_longer_than_its_content() -> None:
     assert "the short body" in body["content"]
     assert "the longer description that the task view shows" in body["content"]
     assert "description" not in body
+
+
+def _epic_and_done_task() -> GraphPlan:
+    return build_plan(
+        [
+            _entity("epic_1", "epic"),
+            _entity("task_1", "task", status="done"),
+        ],
+        [SourceEdge("BELONGS_TO", "task_1", "epic_1")],
+        project=PROJECT,
+    )
+
+
+@pytest.mark.asyncio
+async def test_relinking_a_done_task_puts_its_status_back() -> None:
+    ledger = _Ledger()
+    target = _Target(fail={"epic_1"})
+    await _execute(target, ledger, _epic_and_done_task())
+    assert target.rows["target-task_1"]["metadata"]["status"] == "done"
+
+    target.fail = set()
+    outcome = await _execute(target, ledger, _epic_and_done_task())
+
+    assert outcome.relinked == 1
+    assert target.rows["target-task_1"]["metadata"]["epic_id"] == "target-epic_1"
+    assert target.rows["target-task_1"]["metadata"]["status"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_a_row_edited_on_the_team_server_is_not_written_again() -> None:
+    ledger = _Ledger()
+    target = _Target(fail={"epic_1"})
+    await _execute(target, ledger, _epic_and_done_task())
+    target.rows["target-task_1"]["content"] = "edited on the team server"
+    target.rows["target-task_1"]["metadata"]["status"] = "doing"
+
+    target.fail = set()
+    outcome = await _execute(target, ledger, _epic_and_done_task())
+
+    assert outcome.relinked == 0
+    assert target.rows["target-task_1"]["content"] == "edited on the team server"
+    assert target.rows["target-task_1"]["metadata"]["status"] == "doing"
+    assert any("changed on the team server" in line for line in outcome.unlinked)
+    assert "task_1" not in ledger.partial
+
+
+@pytest.mark.asyncio
+async def test_a_teammates_epic_of_the_same_name_is_adopted() -> None:
+    ledger = _Ledger()
+    target = _Target(taken_containers={"epic_1": "team-epic"})
+
+    outcome = await _execute(target, ledger, _epic_and_done_task())
+
+    assert outcome.adopted == 1 and outcome.failures == []
+    assert ledger.ids["epic_1"] == "team-epic"
+    assert target.posts()["task_1"]["metadata"]["epic_id"] == "team-epic"
+
+
+def test_titles_that_agree_for_100_characters_get_distinct_ids() -> None:
+    prefix = (
+        "Retry the nightly export when the upstream bucket rotates its signing keys and " + "z" * 30
+    )
+    plan = build_plan(
+        [
+            _entity("a", "decision", name=prefix + " first ending", created="2026-01-01"),
+            _entity("b", "decision", name=prefix + " second ending", created="2026-01-02"),
+        ],
+        [],
+        project=PROJECT,
+    )
+
+    first, second = _node(plan, "a").name, _node(plan, "b").name
+    assert first == prefix + " first ending"
+    assert second[:100] != first[:100]
+
+
+@pytest.mark.asyncio
+async def test_the_ledger_is_saved_during_a_large_layer() -> None:
+    plan = build_plan(
+        [
+            _entity(f"d{n}", "decision", created=f"2026-01-01T00:{n // 60:02d}:{n % 60:02d}Z")
+            for n in range(250)
+        ],
+        [],
+        project=PROJECT,
+    )
+    ledger = _Ledger()
+
+    await _execute(_Target(), ledger, plan)
+
+    assert len(plan.layers) == 1
+    assert ledger.saves >= 3

@@ -85,15 +85,26 @@ migrated.
 ### Re-running
 
 A ledger under `~/.sibyl/migrations` maps every migrated row to its id on the target, so running the
-command again skips what already landed and finishes the rest. Writing a row a second time is safe:
-your own row keeps its id on the server and is updated in place. A row that landed while one of its
+command again skips what already landed and finishes the rest. A row that landed while one of its
 link targets had failed is written again on the next run, once that target lands, which adds the
-missing link.
+missing link and keeps the task's status. That second write only happens while the row is still as
+the migration left it: if someone edited or deleted it on the team server, the edit wins and the run
+reports the links it could not add.
 
 Re-running does not carry edits you made locally after a row was migrated. Once a project has moved,
 work on it in the team server.
 
 `--limit N` migrates at most N raw memories and N graph entities, which is useful for a first trial.
+
+### Migrating as a team
+
+Several people can migrate into the same team project. Each person's rows land under their own
+account, and a memory never replaces one with the same title that someone else wrote. When a
+teammate already created an epic or milestone with the same name in the project, your tasks link to
+theirs instead of creating a second one.
+
+If you already wrote memories with the same titles in that project on the team server, the migration
+updates those rows rather than adding copies.
 
 ### What changes on the way
 
@@ -112,8 +123,9 @@ work on it in the team server.
 ### Server version
 
 On team servers before 1.4.4, a write whose title matched someone else's memory replaced it, and a
-write in one project could move a same-titled row out of another project. From 1.4.4, every write
-records its author, a row written by someone else or in another project keeps its id, and a second
-author's project, epic, or milestone of the same name in the same project is refused. Rows written
-before the upgrade without a recorded author are protected across projects but not within one.
-Upgrade the team server to 1.4.4 or newer before several people migrate into it.
+write in one project could move a same-titled row out of another project. From 1.4.4, single and
+bulk writes record their author, a row written by someone else or living in another project keeps
+its id, and a second author's project, epic, or milestone of the same name in the same project is
+refused. Rows written before the upgrade without a recorded author are protected across projects but
+not within one, and two people writing the same title at the same instant can still race. Upgrade
+the team server to 1.4.4 or newer before several people migrate into it.

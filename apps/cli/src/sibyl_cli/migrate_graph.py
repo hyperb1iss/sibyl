@@ -22,12 +22,16 @@ Entity ids are deterministic, and the server upserts a caller's own row at
 its id, so writing a row again is safe: a ledger maps source ids to target
 ids to skip finished work, and a row written while one of its link targets
 had failed is written again once that target exists, which adds the link.
+That second write only happens while the row on the target is still as the
+migration left it, so edits made on the team server win.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import heapq
+import json
 import re
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping
@@ -462,7 +466,9 @@ def _payload(
                 description if content in description else f"{content}\n\n{description}"
             )
         else:
-            body["description"] = description
+            # Other types derive their description from the body, so a
+            # distinct one is kept with the provenance.
+            migration["origin_description"] = description
     if attributes.get("category"):
         body["category"] = str(attributes["category"])
     languages = attributes.get("languages")
@@ -484,9 +490,51 @@ class GraphOutcome:
     created: int = 0
     resumed: int = 0
     relinked: int = 0
+    adopted: int = 0
     statuses: int = 0
     failures: list[str] = field(default_factory=list)
     unlinked: list[str] = field(default_factory=list)
+
+
+def target_digest(row: Mapping[str, Any]) -> str:
+    """What the migration compares to tell whether someone edited a row it wrote."""
+    metadata = row.get("metadata") or {}
+    snapshot = {
+        "name": row.get("name"),
+        "content": row.get("content"),
+        "description": row.get("description"),
+        "tags": sorted(str(tag) for tag in row.get("tags") or []),
+        "memory_scope": metadata.get("memory_scope"),
+    }
+    return hashlib.sha256(json.dumps(snapshot, sort_keys=True).encode()).hexdigest()
+
+
+def _target_task_status(row: Mapping[str, Any]) -> str | None:
+    status = str((row.get("metadata") or {}).get("status") or row.get("status") or "").lower()
+    return status if status in _TASK_STATUSES and status != "todo" else None
+
+
+async def _existing_container(
+    client: Any, node: PlannedEntity, target_project_id: str
+) -> str | None:
+    """The team's own epic or milestone of this name in the target project."""
+    response = await client._request(
+        "POST",
+        "/search/explore",
+        json={
+            "mode": "list",
+            "types": [node.source.entity_type],
+            "project": target_project_id,
+            "limit": 200,
+            "offset": 0,
+            "depth": 1,
+        },
+        _buffer_pending=False,
+    )
+    for entity in response.get("entities") or []:
+        if str(entity.get("name") or "") == node.name and entity.get("id"):
+            return str(entity["id"])
+    return None
 
 
 def _task_status(node: PlannedEntity) -> str | None:
@@ -503,7 +551,7 @@ async def execute_plan(
     *,
     ids: dict[str, str],
     statuses: dict[str, str],
-    partial: dict[str, list[str]],
+    partial: dict[str, dict[str, Any]],
     target_project_id: str,
     origin_org: str,
     save: Callable[[], None],
@@ -513,76 +561,137 @@ async def execute_plan(
     """Create the plan layer by layer.
 
     `ids`, `statuses`, and `partial` are the ledger: what landed, which task
-    statuses were set, and which rows landed without some of their links.
+    statuses were set, and which rows landed without some of their links
+    (with a digest of how each looked on the target right after it landed).
     """
     outcome = GraphOutcome()
     gate = asyncio.Semaphore(concurrency)
     writes = 0
 
+    async def read(target_id: str) -> dict[str, Any] | None:
+        async with gate:
+            try:
+                return await client._request("GET", f"/entities/{target_id}", _buffer_pending=False)
+            except Exception as exc:
+                if getattr(exc, "status_code", None) == 404:
+                    return None
+                raise
+
+    async def write(node: PlannedEntity, body: dict[str, Any]) -> str | None:
+        origin = node.source.uuid
+        kind = node.source.entity_type
+        async with gate:
+            try:
+                response = await client._request(
+                    "POST", "/entities", json=body, params={"sync": "true"}, _buffer_pending=False
+                )
+            except Exception as exc:
+                if getattr(exc, "status_code", None) != 409 or kind not in {"epic", "milestone"}:
+                    outcome.failures.append(f"{kind} {origin}: {exc}")
+                    return None
+                response = None
+        if response is None:
+            # A teammate already holds this container in the project: link to it.
+            existing = await _existing_container(client, node, target_project_id)
+            if existing is None:
+                outcome.failures.append(
+                    f"{kind} {origin}: a {kind} named '{node.name}' exists in the project "
+                    "but could not be found to link to"
+                )
+                return None
+            outcome.adopted += 1
+            return existing
+        target_id = str(response.get("id") or "")
+        if not target_id:
+            outcome.failures.append(f"{kind} {origin}: no id returned")
+            return None
+        return target_id
+
+    async def set_status(origin: str, target_id: str, status: str) -> bool:
+        async with gate:
+            try:
+                await client._request(
+                    "PATCH", f"/tasks/{target_id}", json={"status": status}, _buffer_pending=False
+                )
+            except Exception as exc:
+                outcome.failures.append(f"task {origin}: status {status} not set ({exc})")
+                return False
+        statuses[origin] = status
+        outcome.statuses += 1
+        return True
+
     async def create(node: PlannedEntity) -> None:
         nonlocal writes
         origin = node.source.uuid
-        relink = origin in ids and bool(partial.get(origin))
-        if origin in ids and not relink:
+        pending = partial.get(origin)
+        if origin in ids and not pending:
             outcome.resumed += 1
+        elif origin in ids and pending:
+            await relink(node, pending)
+            return
         else:
             body, missing = _payload(
                 node, ids=ids, target_project_id=target_project_id, origin_org=origin_org
             )
-            if relink and set(missing) >= set(partial[origin]):
-                # None of the links it was missing can be added yet.
-                outcome.resumed += 1
+            target_id = await write(node, body)
+            if target_id is None:
+                return
+            ids[origin] = target_id
+            outcome.created += 1
+            if missing:
+                landed = await read(target_id)
+                partial[origin] = {
+                    "missing": missing,
+                    "digest": target_digest(landed) if landed else None,
+                }
                 outcome.unlinked.append(
-                    f"{origin}: still missing {len(missing)} link(s) to rows that failed"
+                    f"{origin}: landed without {len(missing)} link(s) to rows that failed; "
+                    "a re-run adds them once those rows land"
                 )
-            else:
-                async with gate:
-                    try:
-                        response = await client._request(
-                            "POST",
-                            "/entities",
-                            json=body,
-                            params={"sync": "true"},
-                            _buffer_pending=False,
-                        )
-                    except Exception as exc:
-                        outcome.failures.append(f"{node.source.entity_type} {origin}: {exc}")
-                        return
-                target_id = str(response.get("id") or "")
-                if not target_id:
-                    outcome.failures.append(f"{node.source.entity_type} {origin}: no id returned")
-                    return
-                ids[origin] = target_id
-                if missing:
-                    partial[origin] = missing
-                    outcome.unlinked.append(
-                        f"{origin}: landed without {len(missing)} link(s) to rows that failed; "
-                        "a re-run adds them once those rows land"
-                    )
-                else:
-                    partial.pop(origin, None)
-                if relink:
-                    outcome.relinked += 1
-                else:
-                    outcome.created += 1
-                writes += 1
-                if writes % _SAVE_EVERY == 0:
-                    save()
+            writes += 1
+            if writes % _SAVE_EVERY == 0:
+                save()
         status = _task_status(node)
         if status and statuses.get(origin) != status:
-            async with gate:
-                try:
-                    await client._request(
-                        "PATCH",
-                        f"/tasks/{ids[origin]}",
-                        json={"status": status},
-                        _buffer_pending=False,
-                    )
-                except Exception as exc:
-                    outcome.failures.append(f"task {origin}: status {status} not set ({exc})")
-                    return
-            statuses[origin] = status
-            outcome.statuses += 1
+            await set_status(origin, ids[origin], status)
+
+    async def relink(node: PlannedEntity, pending: dict[str, Any]) -> None:
+        origin = node.source.uuid
+        body, missing = _payload(
+            node, ids=ids, target_project_id=target_project_id, origin_org=origin_org
+        )
+        if set(missing) >= set(pending.get("missing") or []):
+            outcome.resumed += 1
+            outcome.unlinked.append(
+                f"{origin}: still missing {len(missing)} link(s) to rows that failed"
+            )
+            return
+        current = await read(ids[origin])
+        if current is None or target_digest(current) != pending.get("digest"):
+            # Deleted or edited on the team server since it landed: leave it.
+            partial.pop(origin, None)
+            outcome.resumed += 1
+            outcome.unlinked.append(
+                f"{origin}: changed on the team server since it was migrated, so its "
+                "missing links were not added"
+            )
+            return
+        target_id = await write(node, body)
+        if target_id is None:
+            return
+        outcome.relinked += 1
+        if missing:
+            landed = await read(target_id)
+            partial[origin] = {
+                "missing": missing,
+                "digest": target_digest(landed) if landed else None,
+            }
+        else:
+            partial.pop(origin, None)
+        # Writing the row again resets a task's status; put back the one it had.
+        status = _target_task_status(current)
+        if status:
+            await set_status(origin, target_id, status)
 
     for index, layer in enumerate(plan.layers):
         await asyncio.gather(*(create(node) for node in layer))
