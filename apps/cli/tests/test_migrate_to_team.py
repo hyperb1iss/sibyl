@@ -51,6 +51,9 @@ def ledger_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         return [ROWS if "START 0" in statement else []]
 
     monkeypatch.setattr(migrate, "_source_sql", _source_sql)
+    # The graph pass has its own tests; these cover the raw replay and the
+    # org and ledger guards around it.
+    monkeypatch.setattr(migrate, "_read_source_graph", lambda **_kwargs: ([], []))
     return directory
 
 

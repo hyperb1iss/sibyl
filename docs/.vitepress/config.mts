@@ -190,6 +190,7 @@ export default defineConfig({
                         { text: 'init', link: '/cli/init' },
                         { text: 'auth', link: '/cli/auth' },
                         { text: 'org', link: '/cli/org' },
+                        { text: 'migrate', link: '/cli/migrate' },
                         { text: 'team', link: '/cli/team' },
                         { text: 'context', link: '/cli/context' },
                         { text: 'doctor', link: '/cli/doctor' },

@@ -1,11 +1,13 @@
-"""Migrate raw memories from a personal instance into a team server.
+"""Migrate a project from a personal instance into a team server.
 
 The replay path: raw memory is law, so migration re-submits the verbatim
 raw captures to the target through the ordinary authenticated API, as the
-caller. Ownership lands on the caller's target identity by construction,
-the target re-projects and re-embeds server-side, and no cluster or
-operator access is involved. The source side reads the local content
-store directly, which every personal-instance owner has by definition.
+caller. The graph pass then carries the project's authored entities and
+their links the same way (see migrate_graph). Ownership lands on the
+caller's target identity by construction, the target re-projects and
+re-embeds server-side, and no cluster or operator access is involved. The
+source side reads the local stores directly, which every personal-instance
+owner has by definition.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from typing import Annotated, Any
 import httpx
 import typer
 
+from sibyl_cli import migrate_graph
 from sibyl_cli.client import SibylClientError, get_client
 from sibyl_cli.common import error, info, run_async, success, warn
 from sibyl_core.backends.surreal.url_schemes import (
@@ -171,8 +174,10 @@ def _source_sql(
     username: str | None,
     password: str | None,
     statement: str,
+    namespace: str = "sibyl_content",
+    database: str = "content",
 ) -> list[Any]:
-    """Run one read-only statement against the local content store."""
+    """Run one read-only statement against a local store (the content store by default)."""
     # Built without userinfo, so an HTTP error that quotes the URL cannot
     # carry a password; credentials travel only through `auth`.
     base = surreal_http_base_url(surreal_url)
@@ -190,8 +195,8 @@ def _source_sql(
             headers={
                 "Accept": "application/json",
                 "Content-Type": "text/plain",
-                "surreal-ns": "sibyl_content",
-                "surreal-db": "content",
+                "surreal-ns": namespace,
+                "surreal-db": database,
             },
             timeout=60.0,
         )
@@ -243,6 +248,264 @@ def _fetch_source_page(
         statement=statement,
     )[0]
     return rows or []
+
+
+_GRAPH_PAGE = 500
+_UUID_HEX = 32
+
+
+def _graph_namespace(organization_id: str) -> str:
+    return "org_" + organization_id.replace("-", "").lower()
+
+
+def _organization_id_from_namespace(namespace: str) -> str | None:
+    hex_id = namespace.removeprefix("org_")
+    if len(hex_id) != _UUID_HEX or any(c not in "0123456789abcdef" for c in hex_id):
+        return None
+    return "-".join((hex_id[:8], hex_id[8:12], hex_id[12:16], hex_id[16:20], hex_id[20:]))
+
+
+def _graph_sql(
+    *, surreal_url: str, username: str | None, password: str | None, namespace: str, statement: str
+) -> list[dict[str, Any]]:
+    rows = _source_sql(
+        surreal_url=surreal_url,
+        username=username,
+        password=password,
+        statement=statement,
+        namespace=namespace,
+        database="graph",
+    )[0]
+    return list(rows or [])
+
+
+def _source_orgs_with_graph(
+    *, surreal_url: str, username: str | None, password: str | None, project: str
+) -> list[str]:
+    """Every source org whose graph holds rows for the project."""
+    root = _source_sql(
+        surreal_url=surreal_url,
+        username=username,
+        password=password,
+        statement="INFO FOR ROOT;",
+    )[0]
+    namespaces = sorted((root or {}).get("namespaces") or {})
+    found: list[str] = []
+    for namespace in namespaces:
+        organization_id = _organization_id_from_namespace(namespace)
+        if organization_id is None:
+            continue
+        rows = _graph_sql(
+            surreal_url=surreal_url,
+            username=username,
+            password=password,
+            namespace=namespace,
+            statement=f"SELECT count() AS n FROM entity WHERE project_id = '{project}' GROUP ALL;",
+        )
+        if rows and int(rows[0].get("n") or 0) > 0:
+            found.append(organization_id)
+    return found
+
+
+def _source_entity(row: dict[str, Any]) -> migrate_graph.SourceEntity:
+    attributes = row.get("attributes")
+    attributes = attributes if isinstance(attributes, dict) else {}
+    tags = row.get("tags") or attributes.get("tags") or []
+    return migrate_graph.SourceEntity(
+        uuid=str(row.get("uuid")),
+        entity_type=str(row.get("entity_type") or attributes.get("entity_type") or ""),
+        name=str(row.get("name") or attributes.get("name") or ""),
+        memory_scope=row.get("memory_scope") or attributes.get("memory_scope"),
+        attributes=attributes,
+        created_at=str(row["created_at"]) if row.get("created_at") else None,
+        updated_at=str(row["updated_at"]) if row.get("updated_at") else None,
+        status=row.get("status") or attributes.get("status"),
+        priority=row.get("priority") or attributes.get("priority"),
+        tags=tuple(str(tag) for tag in tags if tag),
+        summary=row.get("summary"),
+    )
+
+
+def _read_source_graph(
+    *,
+    surreal_url: str,
+    username: str | None,
+    password: str | None,
+    organization_id: str,
+    project: str,
+) -> tuple[list[migrate_graph.SourceEntity], list[migrate_graph.SourceEdge]]:
+    """The project's authored entities and the edges between them.
+
+    Topics and passages are not read at all: the target re-derives both, and
+    passages carry whole memory bodies. Every ORDER BY field is projected,
+    since SurrealDB 3.x refuses to order by a field the SELECT leaves out.
+    """
+    namespace = _graph_namespace(organization_id)
+    entities: list[migrate_graph.SourceEntity] = []
+    start = 0
+    while True:
+        rows = _graph_sql(
+            surreal_url=surreal_url,
+            username=username,
+            password=password,
+            namespace=namespace,
+            statement=(
+                "SELECT uuid, entity_type, name, summary, status, priority, memory_scope, "
+                "tags, created_at, updated_at, attributes FROM entity "
+                f"WHERE project_id = '{project}' "
+                "AND entity_type NOT IN ['topic', 'passage'] "
+                f"ORDER BY uuid LIMIT {_GRAPH_PAGE} START {start};"
+            ),
+        )
+        if not rows:
+            break
+        entities.extend(_source_entity(row) for row in rows)
+        start += _GRAPH_PAGE
+    edges: list[migrate_graph.SourceEdge] = []
+    start = 0
+    while True:
+        rows = _graph_sql(
+            surreal_url=surreal_url,
+            username=username,
+            password=password,
+            namespace=namespace,
+            statement=(
+                "SELECT id, name, source_id, target_id FROM relates_to "
+                f"WHERE in.project_id = '{project}' AND out.project_id = '{project}' "
+                "AND name NOT IN ['PART_OF', 'MENTIONS'] "
+                f"ORDER BY id LIMIT {_GRAPH_PAGE} START {start};"
+            ),
+        )
+        if not rows:
+            break
+        edges.extend(
+            migrate_graph.SourceEdge(
+                name=str(row.get("name") or ""),
+                source_id=str(row.get("source_id") or ""),
+                target_id=str(row.get("target_id") or ""),
+            )
+            for row in rows
+        )
+        start += _GRAPH_PAGE
+    return entities, edges
+
+
+def _graph_ledger_path(route: dict[str, str]) -> Path:
+    return _ledger_path(route).with_suffix(".graph.json")
+
+
+def _load_graph_ledger(path: Path, route: dict[str, str]) -> tuple[dict[str, str], dict[str, str]]:
+    if not path.exists():
+        return {}, {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}, {}
+    if not isinstance(data, dict):
+        return {}, {}
+    if data.get("route") != route:
+        raise RuntimeError(
+            f"ledger {path} belongs to a different migration route; "
+            "move it aside or pass a different target"
+        )
+    ids = data.get("ids")
+    statuses = data.get("statuses")
+    return (
+        ids if isinstance(ids, dict) else {},
+        statuses if isinstance(statuses, dict) else {},
+    )
+
+
+def _save_graph_ledger(
+    path: Path, route: dict[str, str], ids: dict[str, str], statuses: dict[str, str]
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(
+        {"route": route, "ids": ids, "statuses": statuses}, indent=1, sort_keys=True
+    )
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(payload, encoding="utf-8")
+    tmp.replace(path)
+
+
+def _report_graph_plan(plan: migrate_graph.GraphPlan, *, resumed: int, share_private: bool) -> None:
+    by_type: dict[str, int] = {}
+    by_scope: dict[str, int] = {}
+    for node in plan.entities:
+        by_type[node.source.entity_type] = by_type.get(node.source.entity_type, 0) + 1
+        scope = node.scope or "unscoped"
+        by_scope[scope] = by_scope.get(scope, 0) + 1
+    info(
+        f"Graph: {len(plan.entities)} entities in {len(plan.layers)} ordered layers "
+        f"({resumed} already in the ledger)"
+    )
+    info(
+        "  " + ", ".join(f"{n} {kind}" for kind, n in sorted(by_type.items(), key=lambda i: -i[1]))
+    )
+    info("  scope: " + ", ".join(f"{n} {scope}" for scope, n in sorted(by_scope.items())))
+    if by_scope.get("private") and not share_private:
+        info(
+            "  private rows stay private to you; --share-private makes them visible to the project"
+        )
+    if plan.edge_counts:
+        info(
+            "  links: "
+            + ", ".join(
+                f"{n} {name}" for name, n in sorted(plan.edge_counts.items(), key=lambda i: -i[1])
+            )
+        )
+    for reason, count in sorted(plan.skipped.items()):
+        info(f"  left for the target to re-derive or already there: {count} {reason}")
+    for line in plan.dropped_edges[:10]:
+        warn(f"  dropped link {line}")
+
+
+async def _migrate_graph(
+    target: Any,
+    *,
+    route: dict[str, str],
+    organization_id: str,
+    project: str,
+    target_project_id: str,
+    dry_run: bool,
+    share_private: bool,
+    surreal_url: str,
+    username: str | None,
+    password: str | None,
+) -> list[str]:
+    entities, edges = _read_source_graph(
+        surreal_url=surreal_url,
+        username=username,
+        password=password,
+        organization_id=organization_id,
+        project=project,
+    )
+    plan = migrate_graph.build_plan(entities, edges, project=project, share_private=share_private)
+    ledger_file = _graph_ledger_path(route)
+    ids, statuses = _load_graph_ledger(ledger_file, route)
+    planned = {node.source.uuid for node in plan.entities}
+    _report_graph_plan(plan, resumed=len(planned & set(ids)), share_private=share_private)
+    if dry_run:
+        success(f"Would create {len(planned - set(ids))} graph entities")
+        return []
+    outcome = await migrate_graph.execute_plan(
+        target,
+        plan,
+        ids=ids,
+        statuses=statuses,
+        route_key=json.dumps(route, sort_keys=True),
+        target_project_id=target_project_id,
+        origin_org=organization_id,
+        save=lambda: _save_graph_ledger(ledger_file, route, ids, statuses),
+        log=info,
+    )
+    success(
+        f"Created {outcome.created} graph entities ({outcome.resumed} already in the ledger), "
+        f"set {outcome.statuses} task statuses"
+    )
+    for line in outcome.unlinked[:10]:
+        warn(f"  {line}")
+    return outcome.failures
 
 
 async def _resolve_target_project(client: Any, wanted: str) -> dict[str, Any] | None:
@@ -341,18 +604,41 @@ def to_team(
             "since a team migration that lands there is invisible to the team)",
         ),
     ] = False,
+    graph: Annotated[
+        bool,
+        typer.Option(
+            "--graph/--no-graph",
+            help="Also migrate the project's tasks, epics, decisions, and other "
+            "authored entities with their links (on by default)",
+        ),
+    ] = True,
+    share_private: Annotated[
+        bool,
+        typer.Option(
+            "--share-private",
+            help="Make your private memories in this project visible to the project "
+            "on the target (by default they stay private to you)",
+        ),
+    ] = False,
 ) -> None:
-    """Replay a project's raw memories into a team server as yourself.
+    """Migrate a project into a team server as yourself.
 
-    Reads the verbatim raw captures for one project scope from the local
-    content store, then re-submits each to the target through POST
-    /memory/raw with provenance recording the original identity and
-    timestamps. A ledger under ~/.sibyl/migrations makes re-runs skip
-    everything already migrated.
+    Replays the verbatim raw captures for one project scope from the local
+    content store through POST /memory/raw, then (unless --no-graph) creates
+    the project's authored graph: tasks with their status and learnings,
+    epics, decisions, error patterns, procedures and the rest, with the links
+    between them. Topics, passages, and mention links are left for the target
+    to re-derive. Provenance records each original id and timestamp, and
+    ledgers under ~/.sibyl/migrations make re-runs skip everything already
+    migrated.
     """
 
     @run_async
     async def _run() -> None:
+        try:
+            migrate_graph.validate_project_scope(project)
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
         if source_org:
             org_id = source_org
         else:
@@ -366,17 +652,24 @@ def to_team(
                     f"'{project}' GROUP BY organization_id;"
                 ),
             )[0]
-            if not orgs:
-                error(f"No project-scoped raw memories found for {project}")
+            candidates = [str(o["organization_id"]) for o in orgs or []]
+            if not candidates and graph:
+                candidates = _source_orgs_with_graph(
+                    surreal_url=source_surreal_url,
+                    username=source_surreal_user,
+                    password=source_surreal_pass,
+                    project=project,
+                )
+            if not candidates:
+                error(f"No project-scoped memories or graph rows found for {project}")
                 raise typer.Exit(1)
-            if len(orgs) > 1:
+            if len(candidates) > 1:
                 error(
                     "Multiple source orgs carry this project scope; pass "
-                    "--source-org to disambiguate: "
-                    + ", ".join(str(o["organization_id"]) for o in orgs)
+                    "--source-org to disambiguate: " + ", ".join(candidates)
                 )
                 raise typer.Exit(1)
-            org_id = str(orgs[0]["organization_id"])
+            org_id = candidates[0]
 
         info(f"Source org {org_id}, project scope {project}")
 
@@ -519,6 +812,21 @@ def to_team(
 
         verb = "Would migrate" if dry_run else "Migrated"
         success(f"{verb} {migrated} raw memories ({skipped} already in ledger)")
+        if graph:
+            failed.extend(
+                await _migrate_graph(
+                    target,
+                    route=route,
+                    organization_id=org_id,
+                    project=project,
+                    target_project_id=target_project_id,
+                    dry_run=dry_run,
+                    share_private=share_private,
+                    surreal_url=source_surreal_url,
+                    username=source_surreal_user,
+                    password=source_surreal_pass,
+                )
+            )
         if failed:
             error(f"{len(failed)} failures:")
             for line in failed[:10]:
