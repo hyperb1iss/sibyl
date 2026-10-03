@@ -496,6 +496,26 @@ class GraphOutcome:
     unlinked: list[str] = field(default_factory=list)
 
 
+# Every metadata field a write from this pass sets. A row whose value for any
+# of them changed on the team server was edited there; status is left out
+# because the pass sets it after landing and restores it after a re-write.
+_WRITTEN_METADATA = (
+    "memory_scope",
+    "project_id",
+    "priority",
+    "learnings",
+    "epic_id",
+    "parent_task_id",
+    "depends_on",
+    "assignees",
+    "technologies",
+    "branch_name",
+    "feature",
+    "complexity",
+    "retrieval_keys",
+)
+
+
 def target_digest(row: Mapping[str, Any]) -> str:
     """What the migration compares to tell whether someone edited a row it wrote."""
     metadata = row.get("metadata") or {}
@@ -504,9 +524,10 @@ def target_digest(row: Mapping[str, Any]) -> str:
         "content": row.get("content"),
         "description": row.get("description"),
         "tags": sorted(str(tag) for tag in row.get("tags") or []),
-        "memory_scope": metadata.get("memory_scope"),
+        "retrieval_keys": row.get("retrieval_keys"),
+        **{key: metadata.get(key) for key in _WRITTEN_METADATA},
     }
-    return hashlib.sha256(json.dumps(snapshot, sort_keys=True).encode()).hexdigest()
+    return hashlib.sha256(json.dumps(snapshot, sort_keys=True, default=str).encode()).hexdigest()
 
 
 def _target_task_status(row: Mapping[str, Any]) -> str | None:
@@ -569,6 +590,7 @@ async def execute_plan(
     writes = 0
 
     async def read(target_id: str) -> dict[str, Any] | None:
+        """The row as the team server holds it; None when it is gone."""
         async with gate:
             try:
                 return await client._request("GET", f"/entities/{target_id}", _buffer_pending=False)
@@ -621,6 +643,14 @@ async def execute_plan(
         return True
 
     async def create(node: PlannedEntity) -> None:
+        # One row's trouble never stops the run: it is reported, and the
+        # ledger keeps what is needed to finish it next time.
+        try:
+            await create_one(node)
+        except Exception as exc:
+            outcome.failures.append(f"{node.source.entity_type} {node.source.uuid}: {exc}")
+
+    async def create_one(node: PlannedEntity) -> None:
         nonlocal writes
         origin = node.source.uuid
         pending = partial.get(origin)
@@ -639,11 +669,11 @@ async def execute_plan(
             ids[origin] = target_id
             outcome.created += 1
             if missing:
+                # Recorded before the read, so a failed read cannot leave the
+                # row looking finished.
+                partial[origin] = {"missing": missing, "digest": None}
                 landed = await read(target_id)
-                partial[origin] = {
-                    "missing": missing,
-                    "digest": target_digest(landed) if landed else None,
-                }
+                partial[origin]["digest"] = target_digest(landed) if landed else None
                 outcome.unlinked.append(
                     f"{origin}: landed without {len(missing)} link(s) to rows that failed; "
                     "a re-run adds them once those rows land"
@@ -666,6 +696,14 @@ async def execute_plan(
                 f"{origin}: still missing {len(missing)} link(s) to rows that failed"
             )
             return
+        if not pending.get("digest"):
+            partial.pop(origin, None)
+            outcome.resumed += 1
+            outcome.unlinked.append(
+                f"{origin}: could not confirm it was unchanged on the team server, so its "
+                "missing links were not added"
+            )
+            return
         current = await read(ids[origin])
         if current is None or target_digest(current) != pending.get("digest"):
             # Deleted or edited on the team server since it landed: leave it.
@@ -681,11 +719,9 @@ async def execute_plan(
             return
         outcome.relinked += 1
         if missing:
+            partial[origin] = {"missing": missing, "digest": None}
             landed = await read(target_id)
-            partial[origin] = {
-                "missing": missing,
-                "digest": target_digest(landed) if landed else None,
-            }
+            partial[origin]["digest"] = target_digest(landed) if landed else None
         else:
             partial.pop(origin, None)
         # Writing the row again resets a task's status; put back the one it had.

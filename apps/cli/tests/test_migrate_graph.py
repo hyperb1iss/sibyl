@@ -536,9 +536,10 @@ def test_the_graph_ledger_round_trips_and_refuses_another_route(
         "target_project_id": "p",
     }
     path = migrate._graph_ledger_path(route)
-    migrate._save_graph_ledger(path, route, {"a": "t-a"}, {"a": "done"}, {"b": ["a"]})
+    pending = {"b": {"missing": ["a"], "digest": "abc"}}
+    migrate._save_graph_ledger(path, route, {"a": "t-a"}, {"a": "done"}, pending)
 
-    assert migrate._load_graph_ledger(path, route) == ({"a": "t-a"}, {"a": "done"}, {"b": ["a"]})
+    assert migrate._load_graph_ledger(path, route) == ({"a": "t-a"}, {"a": "done"}, pending)
     with pytest.raises(RuntimeError, match="different migration route"):
         migrate._load_graph_ledger(path, {**route, "target_org_id": "elsewhere"})
 
@@ -712,3 +713,81 @@ async def test_the_ledger_is_saved_during_a_large_layer() -> None:
 
     assert len(plan.layers) == 1
     assert ledger.saves >= 3
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("priority", "critical"), ("learnings", "what the team learned"), ("epic_id", "team-epic")],
+)
+@pytest.mark.asyncio
+async def test_a_task_field_edited_on_the_team_server_survives_a_relink(
+    field: str, value: str
+) -> None:
+    plan = build_plan(
+        [
+            _entity("epic_1", "epic"),
+            _entity("dep_1", "task", created="2025-12-01"),
+            _entity("task_1", "task", status="done", priority="low", learnings="source learnings"),
+        ],
+        [SourceEdge("DEPENDS_ON", "task_1", "dep_1"), SourceEdge("BELONGS_TO", "task_1", "epic_1")],
+        project=PROJECT,
+    )
+    ledger = _Ledger()
+    target = _Target(fail={"dep_1"})
+    await _execute(target, ledger, plan)
+    target.rows["target-task_1"]["metadata"][field] = value
+
+    target.fail = set()
+    outcome = await _execute(target, ledger, plan)
+
+    assert outcome.relinked == 0
+    assert target.rows["target-task_1"]["metadata"][field] == value
+
+
+class _FlakyReads(_Target):
+    async def _request(self, method: str, path: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        if method == "GET":
+            raise RuntimeError("read timed out")
+        return await super()._request(method, path, *args, **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_read_after_landing_neither_stops_the_run_nor_loses_the_row() -> None:
+    ledger = _Ledger()
+
+    outcome = await _execute(_FlakyReads(fail={"task_1"}), ledger)
+
+    assert {"epic_1", "task_2", "decision_1"} <= set(ledger.ids)
+    assert set(ledger.partial) == {"task_2", "decision_1"}
+    assert all(entry["digest"] is None for entry in ledger.partial.values())
+    assert any("read timed out" in failure for failure in outcome.failures)
+
+    rerun = await _execute(_Target(), ledger)
+
+    assert rerun.relinked == 0
+    assert any("could not confirm" in line for line in rerun.unlinked)
+    assert ledger.partial == {}
+
+
+def test_an_older_ledger_with_list_entries_loads_as_unconfirmed(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    from sibyl_cli import migrate
+
+    monkeypatch.setattr(migrate, "_LEDGER_DIR", tmp_path)
+    route = {
+        "source_org": "s",
+        "target_context": "t",
+        "target_org_id": "o",
+        "target_project_id": "p",
+    }
+    path = migrate._graph_ledger_path(route)
+    path.write_text(
+        json.dumps({"route": route, "ids": {"a": "t-a"}, "statuses": {}, "partial": {"a": ["b"]}})
+    )
+
+    _ids, _statuses, partial = migrate._load_graph_ledger(path, route)
+
+    assert partial == {"a": {"missing": ["b"], "digest": None}}

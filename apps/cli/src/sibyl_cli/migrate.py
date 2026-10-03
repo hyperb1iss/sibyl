@@ -414,10 +414,17 @@ def _load_graph_ledger(
             "move it aside or pass a different target"
         )
     ids, statuses, partial = data.get("ids"), data.get("statuses"), data.get("partial")
+    pending: dict[str, dict[str, Any]] = {}
+    for origin, entry in (partial if isinstance(partial, dict) else {}).items():
+        # An entry without a digest cannot prove the row is unedited.
+        if isinstance(entry, dict):
+            pending[origin] = entry
+        elif isinstance(entry, list):
+            pending[origin] = {"missing": entry, "digest": None}
     return (
         ids if isinstance(ids, dict) else {},
         statuses if isinstance(statuses, dict) else {},
-        partial if isinstance(partial, dict) else {},
+        pending,
     )
 
 
