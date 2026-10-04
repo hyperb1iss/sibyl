@@ -58,9 +58,9 @@ sibyl auth login https://sibyl.example.com --context team
 sibyl -C team project create --name "Backend API"
 ```
 
-The command refuses a personal org by default because the team could not see the result. Switch
-with `sibyl -C team org switch <team-slug>`, or use `--allow-personal-org` when that personal org is
-your intended destination.
+The command refuses a personal org by default because the team could not see the result. Switch with
+`sibyl -C team org switch <team-slug>`, or use `--allow-personal-org` when that personal org is your
+intended destination.
 
 ### Example
 
@@ -86,12 +86,12 @@ migrated.
 ### Re-running
 
 A ledger under `~/.sibyl/migrations` binds progress to the source server and project, target server,
-organization, and signed-in account. Running the command again skips completed rows and finishes
-the rest. The ledger stores pending request bodies with private file permissions. Keep the ledger
-until migration is complete.
+organization, and signed-in account. Running the command again skips completed rows and finishes the
+rest. The ledger stores pending request bodies with private file permissions. Keep the ledger until
+migration is complete.
 
-Task status changes use the revision returned by the original creation transaction. If someone
-edits the task before its status is set, the status change stops instead of replacing that edit.
+Task status changes use the revision returned by the original creation transaction. If someone edits
+the task before its status is set, the status change stops instead of replacing that edit.
 
 Stable operation keys let the server replay a completed receipt when a response was lost. If the
 server cannot confirm whether a write completed, migration stops with
@@ -119,8 +119,8 @@ Several people can migrate into the same team project. Each person's rows land u
 account. The server protects same-titled memories with a recorded owner, including legacy private
 ownership, and rejects a write when its qualified ID is occupied by another owner. Older rows with
 no recorded owner can still be updated within the same project. When a teammate already created an
-epic or milestone with the same name in the project, your tasks link to theirs instead of creating
-a second one.
+epic or milestone with the same name in the project, your tasks link to theirs instead of creating a
+second one.
 
 If you already wrote memories with the same titles in that project on the team server, the migration
 updates those rows rather than adding copies.
@@ -144,11 +144,11 @@ updates those rows rather than adding copies.
 Upgrade the team server before migrating. The command checks the server's authenticated migration
 capabilities before writing and refuses a server without protected retry support. Graph migration
 also requires the server to advertise atomic ownership checks and additive link writes. A raw-only
-run (`--no-graph`) needs only protected retry support. Link repair never falls back to rewriting
-an entire entity.
+run (`--no-graph`) needs only protected retry support. Link repair never falls back to rewriting an
+entire entity.
 
 Older servers can replace a teammate's same-titled memory or move a row out of another project.
 Migration writes record their author and atomically check existing ownership and project before
-writing. A concurrent first writer cannot replace the winning author's row. A second author's project, epic, or milestone with the same name in the same
-project is refused. Older rows without a recorded author are protected across projects but can
-still be updated within one project.
+writing. A concurrent first writer cannot replace the winning author's row. A second author's
+project, epic, or milestone with the same name in the same project is refused. Older rows without a
+recorded author are protected across projects but can still be updated within one project.
