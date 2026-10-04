@@ -1463,6 +1463,7 @@ async def test_replay_identity_is_stable_across_sessions_and_roles(monkeypatch) 
     second = await auth_routes.replay_identity(ctx=replace(ctx, org_role=OrganizationRole.OWNER))
     assert first == second
     assert first["server_instance_id"] == instance
+    assert "migration_replay_policy_v1" in first["capabilities"]
     assert first["user_id"] == str(ctx.user.id)
     assert first["organization_id"] == str(ctx.organization.id)
     assert first["credential"]["kind"] == "session"

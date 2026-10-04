@@ -63,6 +63,7 @@ def _target(monkeypatch: pytest.MonkeyPatch, current: dict[str, Any]) -> MagicMo
     async def _get(path: str) -> dict[str, Any]:
         if path == "/auth/replay-identity":
             return {
+                "capabilities": ["migration_replay_policy_v1"],
                 "server_instance_id": "server-a",
                 "user_id": "alice",
                 "organization_id": current["id"],
@@ -294,7 +295,12 @@ def test_a_dry_run_reports_adoption_without_touching_the_ledgers(
 
 async def test_bound_routes_separate_actor_server_and_source() -> None:
     client = MagicMock()
-    identity = {"server_instance_id": "server-a", "user_id": "alice", "organization_id": "team"}
+    identity = {
+        "capabilities": ["migration_replay_policy_v1"],
+        "server_instance_id": "server-a",
+        "user_id": "alice",
+        "organization_id": "team",
+    }
     client.get = AsyncMock(side_effect=lambda _: dict(identity))
     base = {
         "source_org": "source",
@@ -417,3 +423,22 @@ def test_retry_ledger_payloads_are_private_and_leave_no_temporary_files(tmp_path
     assert path.stat().st_mode & 0o777 == 0o600
     assert json.loads(path.read_text()) == {"private": "body"}
     assert list(path.parent.iterdir()) == [path]
+
+
+def test_old_server_is_refused_before_migration_writes(
+    ledger_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = _target(monkeypatch, TEAM)
+    client.get = AsyncMock(
+        return_value={
+            "organization": TEAM,
+            "organization_id": TEAM["id"],
+            "server_instance_id": "old",
+            "user_id": "alice",
+        }
+    )
+    result = _run()
+    assert result.exit_code == 1
+    assert "upgrade the target server" in result.stdout
+    client.remember_raw_memory.assert_not_awaited()
+    assert not ledger_dir.exists()

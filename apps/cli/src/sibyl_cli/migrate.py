@@ -60,6 +60,11 @@ async def _bind_route(
     client: Any, route: dict[str, str], *, source_url: str, source_project: str
 ) -> dict[str, str]:
     identity = await client.get("/auth/replay-identity")
+    if "migration_replay_policy_v1" not in identity.get("capabilities", []):
+        raise RuntimeError(
+            "upgrade the target server before migrating: it does not advertise "
+            "protected migration retry handling"
+        )
     if (
         not identity.get("server_instance_id")
         or not identity.get("user_id")
