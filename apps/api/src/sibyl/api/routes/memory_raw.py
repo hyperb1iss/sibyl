@@ -85,6 +85,9 @@ async def remember_raw(
     http_request: Request = memory_auth.REQUEST_AUTO_INJECT_SENTINEL,
     org: AuthOrganization = Depends(get_current_organization),
     ctx: AuthContext = Depends(get_auth_context),
+    replay_interrupted: bool = Query(
+        default=True, description="Allow re-execution when an earlier receipt is incomplete"
+    ),
 ) -> RawMemoryResponse:
     """Store verbatim memory before extraction or graph reflection."""
     principal_id = ctx.user_id
@@ -125,6 +128,8 @@ async def remember_raw(
             project_id=request.project_id,
         )
         idempotency_payload = {"body": request.model_dump(mode="json")}
+        if replay_interrupted is False:
+            idempotency_payload["query"] = {"replay_interrupted": False}
         replayed = await replay_idempotent_response(
             http_request,
             organization_id=org.id,
@@ -134,6 +139,7 @@ async def remember_raw(
             payload=idempotency_payload,
             response_model=RawMemoryResponse,
             content_session=None,
+            replay_interrupted=replay_interrupted is not False,
         )
         if replayed is not None:
             telemetry_registry().record_memory_operation(

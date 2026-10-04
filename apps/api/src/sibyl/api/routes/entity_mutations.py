@@ -195,6 +195,9 @@ async def create_entity(
         default=False,
         description="Wait for entity creation to complete (slower but entity is immediately available)",
     ),
+    replay_interrupted: bool = Query(
+        default=True, description="Allow re-execution when an earlier receipt is incomplete"
+    ),
 ) -> EntityResponse:
     """Create a new entity.
 
@@ -232,6 +235,9 @@ async def create_entity(
         "query": {"sync": sync},
     }
 
+    if replay_interrupted is False:
+        idempotency_payload["query"]["replay_interrupted"] = False
+
     if ctx.user is not None:
         replayed = await replay_idempotent_response(
             request,
@@ -242,6 +248,7 @@ async def create_entity(
             payload=idempotency_payload,
             response_model=EntityResponse,
             content_session=content_session,
+            replay_interrupted=replay_interrupted is not False,
         )
         if replayed is not None:
             return replayed

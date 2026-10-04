@@ -233,3 +233,73 @@ async def test_busy_idempotency_lock_exposes_retryable_error_code() -> None:
         await mutate(http_request=request, org=SimpleNamespace(id=uuid4()), ctx=None)
     assert caught.value.status_code == 409
     assert caught.value.detail["error"] == "idempotency_in_progress"
+
+
+@pytest.mark.asyncio
+async def test_migration_pending_receipt_requires_reconciliation_but_completed_replays() -> None:
+    organization_id = uuid4()
+    stored_record = None
+
+    async def get_record(*_args, **_kwargs):
+        return stored_record
+
+    async def save_record(*_args, **kwargs):
+        nonlocal stored_record
+        stored_record = kwargs["record"]
+        return stored_record
+
+    payload = {"body": {"title": "migration"}, "query": {"replay_interrupted": False}}
+    kwargs = {
+        "organization_id": organization_id,
+        "principal_id": "user-1",
+        "method": "POST",
+        "path": "/entities",
+        "payload": payload,
+        "response_model": _MutationResponse,
+        "content_session": None,
+        "replay_interrupted": False,
+    }
+
+    request = SimpleNamespace(headers={"Idempotency-Key": "migration-1"})
+    with (
+        patch(
+            "sibyl.api.idempotency.content_runtime.get_api_idempotency_record",
+            side_effect=get_record,
+        ),
+        patch(
+            "sibyl.api.idempotency.content_runtime.save_api_idempotency_record",
+            side_effect=save_record,
+        ),
+    ):
+        assert await replay_idempotent_response(request, **kwargs) is None
+        pending = stored_record
+        retry = SimpleNamespace(headers={"Idempotency-Key": "migration-1"})
+        with pytest.raises(HTTPException) as uncertain:
+            await replay_idempotent_response(retry, **kwargs)
+        assert uncertain.value.status_code == 409
+        assert uncertain.value.detail["error"] == "idempotency_reconciliation_required"
+        assert stored_record is pending
+        assert not hasattr(retry, "_sibyl_idempotency_claim")
+
+        with pytest.raises(HTTPException, match="different request"):
+            await replay_idempotent_response(
+                retry,
+                **{
+                    **kwargs,
+                    "payload": {"body": {"title": "migration"}},
+                    "replay_interrupted": True,
+                },
+            )
+        await save_idempotent_response(
+            request,
+            organization_id=organization_id,
+            principal_id="user-1",
+            method="POST",
+            path="/entities",
+            payload=payload,
+            response=_MutationResponse(value="applied"),
+            status_code=201,
+            content_session=None,
+        )
+        replay = await replay_idempotent_response(retry, **kwargs)
+        assert replay.value == "applied"

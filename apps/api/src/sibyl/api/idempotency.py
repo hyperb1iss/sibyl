@@ -308,6 +308,7 @@ async def replay_idempotent_response[ResponseModelT: BaseModel](
     payload: object,
     response_model: type[ResponseModelT],
     content_session: object,
+    replay_interrupted: bool = True,
 ) -> ResponseModelT | None:
     key = idempotency_key(request)
     if key is None:
@@ -332,6 +333,16 @@ async def replay_idempotent_response[ResponseModelT: BaseModel](
             detail="Idempotency-Key was already used for a different request",
         )
     if idempotency_record_pending(record):
+        if not replay_interrupted:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "idempotency_reconciliation_required",
+                    "message": "The write may have landed without its receipt. "
+                    "Verify the target record before resuming this operation; "
+                    "do not discard the ledger or retry with a new key.",
+                },
+            )
         # Every caller executes under serialize_idempotent_request's lock, so a
         # live executor cannot hold this key: it would still own the lock this
         # request just acquired. A pending reservation observed here was
