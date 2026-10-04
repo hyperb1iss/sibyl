@@ -566,8 +566,14 @@ async def _existing_row(entity_manager: Any, entity_id: str) -> Entity | None:
 
 
 def _row_author(row: Entity) -> str | None:
-    author = (row.metadata or {}).get("principal_id") or getattr(row, "created_by", None)
-    return str(author) if author else None
+    metadata = row.metadata or {}
+    author = metadata.get("principal_id")
+    if author in (None, "") and metadata.get("memory_scope") == "private":
+        # The read policy also recognizes legacy private owners in scope_key.
+        author = metadata.get("scope_key")
+    if author in (None, ""):
+        author = getattr(row, "created_by", None)
+    return str(author) if author not in (None, "") else None
 
 
 def _row_project(row: Entity) -> str | None:
@@ -626,7 +632,7 @@ async def resolve_write_id(
                 raise ValueError(f"A {entity_type} named '{title}' already exists")
             qualifiers.append(f"author:{principal_id}")
         else:
-            return candidate
+            raise ValueError(f"A {entity_type} named '{title}' already exists")
         candidate = _generate_id(entity_type, *base_parts, *qualifiers)
 
 
