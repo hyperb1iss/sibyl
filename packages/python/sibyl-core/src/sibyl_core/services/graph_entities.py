@@ -98,6 +98,27 @@ class EntityManager(_EntityWorkItemManager):
         await _replace_entity(self._client, entity, group_id=self._group_id)
         return entity.id
 
+    async def create_direct_authorized(
+        self,
+        entity: Entity,
+        *,
+        principal_id: str,
+        project_id: str | None,
+        generate_embedding: bool = False,
+    ) -> Entity:
+        """Persist an authenticated write with a native owner and project fence."""
+        from sibyl_core.services.graph_write_authority import replace_authorized_entity
+
+        if generate_embedding:
+            entity = await _entity_with_native_embedding(entity, self._embedding_provider)
+        return await replace_authorized_entity(
+            self._client,
+            entity,
+            group_id=self._group_id,
+            principal_id=principal_id,
+            project_id=project_id,
+        )
+
     async def load_projection_source(self, source_id: str):
         from sibyl_core.services.graph_derivations import load_graph_projection_source
 
