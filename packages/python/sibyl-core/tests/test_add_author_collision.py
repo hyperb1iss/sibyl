@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 
 import sibyl_core.tools.add as add_module
+from sibyl_core.auth.memory_policy import memory_metadata_read_allowed
 from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.services.graph import (
     EntityManager,
@@ -25,7 +26,7 @@ from sibyl_core.services.graph import (
     SurrealGraphClient,
     prepare_graph_schema,
 )
-from sibyl_core.tools.add import add
+from sibyl_core.tools.add import add, resolve_write_id
 from sibyl_core.tools.helpers import _generate_id
 
 GROUP = "author-collision-org"
@@ -67,11 +68,13 @@ async def _write(
     entity_type: str = "decision",
     scope: str | None = "private",
     project: str | None = None,
+    category: str | None = None,
 ) -> Any:
     return await add(
         title,
         content,
         entity_type=entity_type,
+        category=category,
         metadata={"organization_id": GROUP},
         principal_id=principal,
         memory_scope=scope,
@@ -245,3 +248,107 @@ async def test_same_named_epics_live_in_different_projects_but_not_twice_in_one(
     assert alice_p.success and bob_q.success, (alice_p.message, bob_q.message)
     assert alice_p.id != bob_q.id
     assert not bob_p.success and "already exists" in bob_p.message
+
+
+@pytest.mark.asyncio
+async def test_an_occupied_author_qualified_id_is_refused(runtime: GraphRuntime) -> None:
+    first = await _write("Shared title", "Alice's first row", principal=ALICE, category="general")
+    qualified = await _write(
+        "Shared title:general",
+        "Alice's other row",
+        principal=ALICE,
+        category=f"author:{BOB}",
+    )
+    assert first.success and qualified.success
+    assert qualified.id == _generate_id("decision", "Shared title", "general", f"author:{BOB}")
+
+    written = await _write("Shared title", "Bob's row", principal=BOB, category="general")
+
+    assert not written.success and written.id is None
+    assert "already exists" in written.message
+    assert await _content(runtime, str(first.id)) == "Alice's first row"
+    assert await _content(runtime, str(qualified.id)) == "Alice's other row"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("created_by", [None, BOB])
+async def test_a_legacy_private_owner_keeps_their_row(
+    runtime: GraphRuntime, created_by: str | None
+) -> None:
+    legacy_id = _generate_id("decision", "Legacy private decision", "general")
+    await runtime.entity_manager.create_direct(
+        Entity(
+            id=legacy_id,
+            entity_type=EntityType.DECISION,
+            name="Legacy private decision",
+            content="Alice's legacy private body",
+            created_by=created_by,
+            metadata={
+                "organization_id": GROUP,
+                "memory_scope": "private",
+                "scope_key": ALICE,
+            },
+        ),
+        generate_embedding=False,
+    )
+    previous = await runtime.entity_manager.get(legacy_id)
+    assert memory_metadata_read_allowed(
+        previous.metadata,
+        principal_id=ALICE,
+        private_scope_granted=True,
+        accessible_projects=set(),
+    )
+    assert not memory_metadata_read_allowed(
+        previous.metadata,
+        principal_id=BOB,
+        private_scope_granted=True,
+        accessible_projects=set(),
+    )
+
+    written = await _write("Legacy private decision", "Bob's body", principal=BOB)
+
+    assert written.success, written.message
+    assert written.id != legacy_id
+    assert await _content(runtime, legacy_id) == "Alice's legacy private body"
+    assert await _content(runtime, str(written.id)) == "Bob's body"
+
+
+@pytest.mark.asyncio
+async def test_occupied_project_and_author_qualified_ids_are_refused() -> None:
+    from types import SimpleNamespace
+
+    base = ("Shared title", "general")
+    identities = [
+        _generate_id("decision", *base),
+        _generate_id("decision", *base, "project:project_q"),
+        _generate_id("decision", *base, "project:project_q", f"author:{BOB}"),
+    ]
+    rows = {
+        identity: Entity(
+            id=identity,
+            entity_type=EntityType.DECISION,
+            name="Existing",
+            created_by=ALICE,
+            metadata={
+                "principal_id": ALICE,
+                "project_id": "project_p" if index == 0 else "project_q",
+            },
+        )
+        for index, identity in enumerate(identities)
+    }
+    visited = []
+
+    async def get(identity: str) -> Entity:
+        visited.append(identity)
+        return rows[identity]
+
+    with pytest.raises(ValueError, match="already exists"):
+        await resolve_write_id(
+            SimpleNamespace(get=get),
+            entity_type="decision",
+            base_parts=base,
+            title="Shared title",
+            principal_id=BOB,
+            project="project_q",
+        )
+    assert visited == identities

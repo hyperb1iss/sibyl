@@ -195,6 +195,12 @@ async def create_entity(
         default=False,
         description="Wait for entity creation to complete (slower but entity is immediately available)",
     ),
+    protect_ownership: bool = Query(
+        default=False, description="Atomically preserve existing owner and project authority"
+    ),
+    replay_interrupted: bool = Query(
+        default=True, description="Allow re-execution when an earlier receipt is incomplete"
+    ),
 ) -> EntityResponse:
     """Create a new entity.
 
@@ -204,6 +210,10 @@ async def create_entity(
     """
 
     group_id = str(org.id)
+    if protect_ownership is True and (sync is not True or ctx.user is None):
+        raise HTTPException(
+            status_code=422, detail="Protected writes require authenticated sync=true"
+        )
 
     # Extract task-specific fields from metadata if present
     project = entity.metadata.get("project_id") if entity.metadata else None
@@ -232,6 +242,11 @@ async def create_entity(
         "query": {"sync": sync},
     }
 
+    if protect_ownership is True:
+        idempotency_payload["query"]["protect_ownership"] = True
+    if replay_interrupted is False:
+        idempotency_payload["query"]["replay_interrupted"] = False
+
     if ctx.user is not None:
         replayed = await replay_idempotent_response(
             request,
@@ -242,6 +257,7 @@ async def create_entity(
             payload=idempotency_payload,
             response_model=EntityResponse,
             content_session=content_session,
+            replay_interrupted=replay_interrupted is not False,
         )
         if replayed is not None:
             return replayed
@@ -294,6 +310,7 @@ async def create_entity(
         depends_on=depends_on,
         # Sync for projects, async for everything else
         sync=is_sync,
+        protect_ownership=protect_ownership is True,
         skip_conflicts=entity.skip_conflicts,
         generate_embeddings=not entity.defer_embeddings,
         memory_scope=str(declared_memory_scope) if declared_memory_scope is not None else None,
@@ -384,6 +401,7 @@ async def create_entity(
     response_timestamp = getattr(result, "timestamp", None) or datetime.now(UTC)
     response = EntityResponse(
         id=result.id,
+        revision=getattr(result, "revision", None),
         entity_type=entity.entity_type,
         name=entity.name,
         description=entity.description or "",

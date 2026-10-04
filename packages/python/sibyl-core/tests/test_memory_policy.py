@@ -586,7 +586,11 @@ _SCOPE_READERS_THAT_DO_NOT_AUTHORIZE = {
     "migrate/scope_backfill.py::_reverse_in_org": "write stamp: names the clear the upsert requires",
     "migrate/scope_backfill.py::_stamped_entity": "write stamp: derives a scope for a row that has none",
     "models/reflection.py::ClaimRecord.from_dict": "deserializes a stored field",
-    "tools/add.py::_row_project": (
+    "services/graph_write_authority.py::row_author": (
+        "write id guard: identifies the effective private owner to prevent "
+        "replacement by another author; does not decide who may see the row"
+    ),
+    "services/graph_write_authority.py::row_project": (
         "write id guard: finds the project an existing row lives in so a write "
         "never moves it; does not decide who may see the row"
     ),

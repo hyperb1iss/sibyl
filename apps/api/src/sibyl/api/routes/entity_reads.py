@@ -644,6 +644,7 @@ async def get_entity(
 
             return EntityResponse(
                 id=entity.id,
+                revision=getattr(entity, "revision", None),
                 entity_type=entity.entity_type,
                 name=entity.name,
                 description=entity.description or "",
@@ -684,6 +685,7 @@ async def get_entity(
 
             return EntityResponse(
                 id=entity.id,
+                revision=getattr(entity, "revision", None),
                 entity_type=entity.entity_type,
                 name=entity.name,
                 description=entity.description or "",
@@ -751,6 +753,7 @@ async def get_entity(
 
         return EntityResponse(
             id=entity.id,
+            revision=getattr(entity, "revision", None),
             entity_type=entity.entity_type,
             name=entity.name,
             description=entity.description or "",

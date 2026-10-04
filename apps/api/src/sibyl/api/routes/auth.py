@@ -1788,6 +1788,7 @@ async def replay_identity(ctx: AuthContext = Depends(get_auth_context)):
 
     return {
         "version": 1,
+        "capabilities": ["migration_replay_policy_v1", "migration_graph_writes_v1"],
         "server_instance_id": await get_server_instance_id(),
         "user_id": str(ctx.user.id),
         "organization_id": str(ctx.organization.id),

@@ -190,6 +190,7 @@ class EntityResponse(EntityBase):
         return public_memory_metadata(value)
 
     id: str = Field(..., description="Unique entity ID")
+    revision: int | None = Field(default=None, ge=1, description="Stored graph revision")
     entity_type: EntityType = Field(..., description="Type of entity")
     source_file: str | None = Field(default=None, description="Source file path")
     created_at: datetime | None = Field(default=None, description="Creation timestamp")
@@ -204,6 +205,36 @@ class EntityResponse(EntityBase):
     )
 
     model_config = {"from_attributes": True}
+
+
+class EntityLinksRequest(BaseModel):
+    """Additive link intent for one existing graph entity."""
+
+    expected_revision: int = Field(..., ge=1, strict=True)
+    related_to: list[str] = Field(default_factory=list)
+    epic_id: str | None = Field(default=None, min_length=1)
+    parent_task_id: str | None = Field(default=None, min_length=1)
+    depends_on: list[str] = Field(default_factory=list)
+
+    model_config = {"extra": "forbid"}
+
+    @field_validator("related_to", "depends_on")
+    @classmethod
+    def validate_link_ids(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() for value in values):
+            raise ValueError("Link declarations must not be empty")
+        return list(dict.fromkeys(values))
+
+
+class EntityLinksResponse(BaseModel):
+    entity_id: str
+    revision: int
+    added_relationship_ids: list[str]
+    existing_relationship_ids: list[str]
+    epic_id: str | None
+    parent_task_id: str | None
+    depends_on: list[str]
+    replayed: bool
 
 
 class EntityListResponse(BaseModel):

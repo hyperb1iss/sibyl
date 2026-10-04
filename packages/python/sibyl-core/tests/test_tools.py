@@ -4166,7 +4166,7 @@ class TestAddTool:
             patch("sibyl_core.tools.add.get_queue_port", return_value=queue),
             patch(
                 "sibyl_core.tools.add._create_entity_record",
-                AsyncMock(side_effect=lambda _manager, entity, **_kwargs: entity.id),
+                AsyncMock(side_effect=lambda _manager, entity, **_kwargs: (entity.id, None)),
             ),
             patch(
                 "sibyl_core.tools.add._create_relationships_bulk",
@@ -4271,7 +4271,7 @@ class TestAddTool:
         with (
             patch(
                 "sibyl_core.tools.add._create_entity_record",
-                AsyncMock(return_value=entity.id),
+                AsyncMock(return_value=(entity.id, None)),
             ),
             patch(
                 "sibyl_core.tools.add._create_relationships_bulk",

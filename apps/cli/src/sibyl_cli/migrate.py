@@ -13,7 +13,10 @@ owner has by definition.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -28,6 +31,11 @@ from sibyl_core.backends.surreal.url_schemes import (
     safe_error_detail,
     surreal_http_base_url,
     surreal_url_credentials,
+)
+from sibyl_core.services.content_models import (
+    RawMemory,
+    raw_memory_recallable,
+    raw_memory_unpublished_reflection_candidate,
 )
 
 app = typer.Typer(help="Migrate data between Sibyl instances")
@@ -44,7 +52,50 @@ _ROUTE_KEYS = ("source_org", "target_context", "target_org_id", "target_project_
 _LEGACY_ROUTE_KEYS = ("source_org", "target_context", "target_project_id")
 
 
+def _route_fingerprint(route: dict[str, str]) -> str:
+    return hashlib.sha256(json.dumps(route, sort_keys=True).encode()).hexdigest()
+
+
+async def _bind_route(
+    client: Any,
+    route: dict[str, str],
+    *,
+    source_url: str,
+    source_project: str,
+    require_graph: bool = False,
+) -> dict[str, str]:
+    identity = await client.get("/auth/replay-identity")
+    if "migration_replay_policy_v1" not in identity.get("capabilities", []):
+        raise RuntimeError(
+            "upgrade the target server before migrating: it does not advertise "
+            "protected migration retry handling"
+        )
+    if require_graph and "migration_graph_writes_v1" not in identity.get("capabilities", []):
+        raise RuntimeError(
+            "upgrade the target server before migrating graph data: it does not advertise "
+            "protected graph creation and additive link writes"
+        )
+    if (
+        not identity.get("server_instance_id")
+        or not identity.get("user_id")
+        or identity.get("organization_id") != route["target_org_id"]
+    ):
+        raise RuntimeError("the target server did not confirm this migration's write identity")
+    source_base = surreal_http_base_url(source_url)
+    if not source_base:
+        raise RuntimeError("the source must be a SurrealDB server URL")
+    return {
+        **route,
+        "source_endpoint_id": hashlib.sha256(source_base.encode()).hexdigest(),
+        "source_project_id": source_project,
+        "target_server_id": str(identity["server_instance_id"]),
+        "target_user_id": str(identity["user_id"]),
+    }
+
+
 def _ledger_path(route: dict[str, str], keys: tuple[str, ...] = _ROUTE_KEYS) -> Path:
+    if keys == _ROUTE_KEYS and "target_user_id" in route:
+        return _LEDGER_DIR / f"{_route_fingerprint(route)}.json"
     safe = "--".join(route[k] for k in keys).replace("/", "_")
     return _LEDGER_DIR / f"{safe}.json"
 
@@ -73,12 +124,31 @@ def _load_ledger(path: Path, route: dict[str, str]) -> dict[str, str]:
     return receipts if isinstance(receipts, dict) else {}
 
 
+def _save_migration_ledger(path: Path, data: dict[str, Any]) -> None:
+    """Persist private retry bodies before allowing their remote writes."""
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent, prefix=path.name + ".", delete=False
+        ) as stream:
+            temporary = Path(stream.name)
+            json.dump(data, stream, indent=1, sort_keys=True)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(path)
+        directory_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 def _save_ledger(path: Path, route: dict[str, str], ledger: dict[str, str]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps({"route": route, "receipts": ledger}, indent=1, sort_keys=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(payload, encoding="utf-8")
-    tmp.replace(path)
+    _save_migration_ledger(path, {"route": route, "receipts": ledger})
 
 
 async def _adopt_legacy_ledger(
@@ -101,17 +171,20 @@ async def _adopt_legacy_ledger(
     The check reads the memory's history through the member-readable blame
     route, so any teammate who can migrate can also resume.
     """
-    legacy_path = _ledger_path(route, _LEGACY_ROUTE_KEYS)
+    legacy_route = {k: route[k] for k in _ROUTE_KEYS}
+    legacy_path = _ledger_path(legacy_route)
+    if not legacy_path.exists():
+        legacy_route = {k: route[k] for k in _LEGACY_ROUTE_KEYS}
+        legacy_path = _ledger_path(route, _LEGACY_ROUTE_KEYS)
     if path.exists() or not legacy_path.exists():
         return {}
-    legacy_route = {k: route[k] for k in _LEGACY_ROUTE_KEYS}
     receipts = _load_ledger(legacy_path, legacy_route)
     if not receipts:
         return {}
     adopted: dict[str, str] = {}
     for source_id, target_id in receipts.items():
         try:
-            await client.memory_blame(str(target_id))
+            response = await client.memory_blame(str(target_id))
         except SibylClientError as exc:
             if exc.status_code == 404:
                 continue
@@ -119,6 +192,13 @@ async def _adopt_legacy_ledger(
                 f"could not check receipt {target_id} from {legacy_path.name} "
                 f"against the target ({exc}); fix access or move the file aside"
             ) from exc
+        source = response.get("source") or {}
+        if "target_user_id" in route and (
+            source.get("principal_id") != route["target_user_id"]
+            or source.get("organization_id") != route["target_org_id"]
+            or source.get("scope_key") != route["target_project_id"]
+        ):
+            continue
         adopted[source_id] = target_id
     org_label = f"{target_org['name']} ({target_org['slug']})"
     elsewhere = len(receipts) - len(adopted)
@@ -234,12 +314,13 @@ def _fetch_source_page(
 ) -> list[dict[str, Any]]:
     statement = (
         "SELECT uuid, title, raw_content, memory_scope, scope_key, tags, "
-        "metadata, provenance, source_id, capture_surface, created_at "
+        "metadata, provenance, source_id, capture_surface, created_at, "
+        "review_state, revision, deleted_at "
         "FROM raw_captures "
         f"WHERE organization_id = '{organization_id}' "
         "AND memory_scope = 'project' "
         f"AND scope_key = '{scope_key}' "
-        f"ORDER BY created_at ASC LIMIT {_PAGE_SIZE} START {start};"
+        f"ORDER BY created_at ASC, uuid ASC LIMIT {_PAGE_SIZE} START {start};"
     )
     rows = _source_sql(
         surreal_url=surreal_url,
@@ -248,6 +329,22 @@ def _fetch_source_page(
         statement=statement,
     )[0]
     return rows or []
+
+
+def _raw_migratable(row: dict[str, Any]) -> bool:
+    if row.get("deleted_at"):
+        return False
+    memory = RawMemory(
+        id=str(row.get("uuid") or ""),
+        organization_id="",
+        principal_id="",
+        source_id=str(row.get("source_id") or ""),
+        review_state=str(row.get("review_state") or "pending"),
+        revision=int(row.get("revision") or 1),
+        metadata=dict(row.get("metadata") or {}),
+        capture_surface=row.get("capture_surface"),
+    )
+    return raw_memory_recallable(memory) and not raw_memory_unpublished_reflection_candidate(memory)
 
 
 _GRAPH_PAGE = 500
@@ -435,15 +532,9 @@ def _save_graph_ledger(
     statuses: dict[str, str],
     partial: dict[str, dict[str, Any]],
 ) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(
-        {"route": route, "ids": ids, "statuses": statuses, "partial": partial},
-        indent=1,
-        sort_keys=True,
+    _save_migration_ledger(
+        path, {"route": route, "ids": ids, "statuses": statuses, "partial": partial}
     )
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(payload, encoding="utf-8")
-    tmp.replace(path)
 
 
 def _report_graph_plan(plan: migrate_graph.GraphPlan, *, resumed: int, share_private: bool) -> None:
@@ -504,11 +595,11 @@ async def _migrate_graph(
         organization_id=organization_id,
         project=project,
     )
-    plan = migrate_graph.build_plan(
-        entities, edges, project=project, share_private=share_private
-    ).limited(limit)
     ledger_file = _graph_ledger_path(route)
     ids, statuses, partial = _load_graph_ledger(ledger_file, route)
+    plan = migrate_graph.build_plan(
+        entities, edges, project=project, share_private=share_private
+    ).limited(limit, done=set(ids))
     planned = {node.source.uuid for node in plan.entities}
     _report_graph_plan(plan, resumed=len(planned & set(ids)), share_private=share_private)
     if dry_run:
@@ -522,6 +613,7 @@ async def _migrate_graph(
         partial=partial,
         target_project_id=target_project_id,
         origin_org=organization_id,
+        operation_namespace=_route_fingerprint(route),
         save=lambda: _save_graph_ledger(ledger_file, route, ids, statuses, partial),
         log=info,
     )
@@ -753,6 +845,19 @@ def to_team(
             "target_org_id": target_org["id"],
             "target_project_id": target_project_id,
         }
+        route = await _bind_route(
+            target,
+            route,
+            source_url=source_surreal_url,
+            source_project=project,
+            require_graph=graph,
+        )
+        unbound_route = {key: route[key] for key in _ROUTE_KEYS}
+        if graph and _graph_ledger_path(unbound_route).exists():
+            raise RuntimeError(
+                "an older graph migration ledger has no verified server or author identity; "
+                "its target rows must be verified before resuming"
+            )
         ledger_file = _ledger_path(route)
         ledger = await _adopt_legacy_ledger(
             target, ledger_file, route, target_org, persist=not dry_run
@@ -761,6 +866,7 @@ def to_team(
 
         migrated = 0
         skipped = 0
+        excluded = 0
         failed: list[str] = []
         start = 0
         while True:
@@ -781,8 +887,8 @@ def to_team(
                     continue
                 if limit is not None and migrated >= limit:
                     break
-                if dry_run:
-                    migrated += 1
+                if not _raw_migratable(row):
+                    excluded += 1
                     continue
                 raw_content = str(row.get("raw_content") or "")
                 if not raw_content.strip():
@@ -794,6 +900,9 @@ def to_team(
                         f"({len(raw_content)} > {_MAX_CONTENT}); migrate "
                         "this record manually"
                     )
+                    continue
+                if dry_run:
+                    migrated += 1
                     continue
                 title = str(row.get("title") or "")
                 provenance = dict(row.get("provenance") or {})
@@ -828,6 +937,10 @@ def to_team(
                         metadata=metadata,
                         provenance=provenance,
                         capture_surface="migration",
+                        _idempotency_key="migration-raw:"
+                        + hashlib.sha256(
+                            f"{_route_fingerprint(route)}:{original_id}".encode()
+                        ).hexdigest(),
                     )
                 except Exception as exc:
                     failed.append(f"{original_id}: {exc}")
@@ -847,6 +960,8 @@ def to_team(
 
         verb = "Would migrate" if dry_run else "Migrated"
         success(f"{verb} {migrated} raw memories ({skipped} already in ledger)")
+        if excluded:
+            info(f"Left {excluded} raw memories excluded by their source lifecycle")
         if graph:
             failed.extend(
                 await _migrate_graph(

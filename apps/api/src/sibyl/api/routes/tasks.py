@@ -794,6 +794,9 @@ async def update_task(
     request: UpdateTaskRequest,
     http_request: Request = _REQUEST_AUTO_INJECT_SENTINEL,
     sync: bool = Query(False, description="Wait for update to complete synchronously"),
+    replay_interrupted: bool = Query(
+        default=True, description="Allow re-execution when an earlier receipt is incomplete"
+    ),
     org: AuthOrganization = Depends(get_current_organization),
     user: AuthUser = Depends(get_current_user),
     auth: AuthContext = Depends(get_auth_context),
@@ -814,6 +817,7 @@ async def update_task(
     idempotency_payload = {
         "body": request.model_dump(mode="json"),
         "sync": sync,
+        **({"replay_interrupted": False} if replay_interrupted is False else {}),
     }
     replayed = await replay_idempotent_response(
         http_request,
@@ -824,6 +828,7 @@ async def update_task(
         payload=idempotency_payload,
         response_model=TaskActionResponse,
         content_session=None,
+        replay_interrupted=replay_interrupted is not False,
     )
     if replayed is not None:
         return replayed

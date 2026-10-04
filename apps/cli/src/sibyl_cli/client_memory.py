@@ -22,6 +22,7 @@ class ClientMemoryMixin:
         metadata: dict[str, Any] | None = None,
         provenance: dict[str, Any] | None = None,
         capture_surface: str = "cli",
+        _idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Store verbatim raw memory."""
         data: dict[str, Any] = {
@@ -42,6 +43,16 @@ class ClientMemoryMixin:
             data["agent_id"] = agent_id
         if project_id:
             data["project_id"] = project_id
+        if _idempotency_key is not None:
+            # The migration owns durable retry identity across process restarts.
+            return await self._request(
+                "POST",
+                "/memory/raw",
+                json=data,
+                params={"replay_interrupted": "false"},
+                _idempotency_key=_idempotency_key,
+                _buffer_pending=False,
+            )
         return await self._request("POST", "/memory/raw", json=data)
 
     async def recall_raw_memory(

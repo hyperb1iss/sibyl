@@ -59,15 +59,33 @@ def ledger_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def _target(monkeypatch: pytest.MonkeyPatch, current: dict[str, Any]) -> MagicMock:
     client = MagicMock()
-    client.get = AsyncMock(
-        return_value={"organization": {k: current[k] for k in ("id", "slug", "name")}}
-    )
+
+    async def _get(path: str) -> dict[str, Any]:
+        if path == "/auth/replay-identity":
+            return {
+                "capabilities": ["migration_replay_policy_v1", "migration_graph_writes_v1"],
+                "server_instance_id": "server-a",
+                "user_id": "alice",
+                "organization_id": current["id"],
+            }
+        return {"organization": {k: current[k] for k in ("id", "slug", "name")}}
+
+    client.get = AsyncMock(side_effect=_get)
     client.list_orgs = AsyncMock(return_value={"orgs": [PERSONAL, TEAM]})
     client.get_entity = AsyncMock(return_value={"id": PROJECT, "name": "V2"})
     client.remember_raw_memory = AsyncMock(
         side_effect=[{"id": f"target-{n}"} for n in range(len(ROWS))]
     )
-    client.memory_blame = AsyncMock(return_value={"source": {"id": "found"}})
+    client.memory_blame = AsyncMock(
+        return_value={
+            "source": {
+                "id": "found",
+                "principal_id": "alice",
+                "organization_id": current["id"],
+                "scope_key": PROJECT,
+            }
+        }
+    )
     monkeypatch.setattr(migrate, "get_client", lambda *_a, **_k: client)
     return client
 
@@ -141,7 +159,7 @@ def test_the_ledger_is_keyed_by_the_target_org(
 
     assert result.exit_code == 0, result.stdout
     assert "Target org: Acme (acme)" in result.stdout
-    ledger = ledger_dir / f"{SOURCE_ORG}--team--{TEAM['id']}--{PROJECT}.json"
+    ledger = next(path for path in ledger_dir.glob("*.json") if len(path.stem) == 64)
     data = json.loads(ledger.read_text(encoding="utf-8"))
     assert data["route"]["target_org_id"] == TEAM["id"]
     assert sorted(data["receipts"]) == [row["uuid"] for row in ROWS]
@@ -202,7 +220,14 @@ def test_every_legacy_receipt_is_checked_and_only_confirmed_ones_adopted(
     async def _blame(target_id: str) -> dict[str, Any]:
         if target_id == "in-another-org":
             raise SibylClientError("API error: not found", status_code=404)
-        return {"source": {"id": target_id}}
+        return {
+            "source": {
+                "id": target_id,
+                "principal_id": "alice",
+                "organization_id": TEAM["id"],
+                "scope_key": PROJECT,
+            }
+        }
 
     client.memory_blame = AsyncMock(side_effect=_blame)
 
@@ -213,7 +238,7 @@ def test_every_legacy_receipt_is_checked_and_only_confirmed_ones_adopted(
     assert "Adopted 3 of 4 receipts" in result.stdout
     assert "1 are not in this org and will be replayed" in result.stdout
     assert client.remember_raw_memory.await_count == 1
-    ledger = ledger_dir / f"{SOURCE_ORG}--team--{TEAM['id']}--{PROJECT}.json"
+    ledger = next(path for path in ledger_dir.glob("*.json") if len(path.stem) == 64)
     data = json.loads(ledger.read_text(encoding="utf-8"))
     assert data["receipts"]["src-2"] == "target-0"
     assert "in-another-org" not in data["receipts"].values()
@@ -266,3 +291,180 @@ def test_a_dry_run_reports_adoption_without_touching_the_ledgers(
     assert "Would migrate 2 raw memories (1 already in ledger)" in result.stdout
     assert sorted(p.name for p in ledger_dir.iterdir()) == before
     assert legacy.exists()
+
+
+async def test_bound_routes_separate_actor_server_and_source() -> None:
+    client = MagicMock()
+    identity = {
+        "capabilities": ["migration_replay_policy_v1", "migration_graph_writes_v1"],
+        "server_instance_id": "server-a",
+        "user_id": "alice",
+        "organization_id": "team",
+    }
+    client.get = AsyncMock(side_effect=lambda _: dict(identity))
+    base = {
+        "source_org": "source",
+        "target_context": "team",
+        "target_org_id": "team",
+        "target_project_id": "project_target",
+    }
+    original = await migrate._bind_route(
+        client, base, source_url="ws://localhost:8000/rpc", source_project="project_a"
+    )
+    routes = [original]
+    for key, value in (("server_instance_id", "server-b"), ("user_id", "bob")):
+        previous = identity[key]
+        identity[key] = value
+        routes.append(
+            await migrate._bind_route(
+                client, base, source_url="ws://localhost:8000/rpc", source_project="project_a"
+            )
+        )
+        identity[key] = previous
+    routes.append(
+        await migrate._bind_route(
+            client, base, source_url="ws://localhost:8001/rpc", source_project="project_a"
+        )
+    )
+    routes.append(
+        await migrate._bind_route(
+            client, base, source_url="ws://localhost:8000/rpc", source_project="project_b"
+        )
+    )
+    assert len({migrate._ledger_path(route) for route in routes}) == 5
+    identity["organization_id"] = "other"
+    with pytest.raises(RuntimeError, match="write identity"):
+        await migrate._bind_route(
+            client, base, source_url="ws://localhost:8000/rpc", source_project="project_a"
+        )
+
+
+def test_legacy_receipts_owned_by_another_member_do_not_suppress_writes(
+    ledger_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _legacy_ledger(ledger_dir, {ROWS[0]["uuid"]: "foreign"})
+    client = _target(monkeypatch, TEAM)
+    client.memory_blame = AsyncMock(
+        return_value={
+            "source": {
+                "principal_id": "bob",
+                "organization_id": TEAM["id"],
+                "scope_key": PROJECT,
+            }
+        }
+    )
+    result = _run()
+    assert result.exit_code == 0, result.stdout
+    assert client.remember_raw_memory.await_count == len(ROWS)
+
+
+def test_raw_retry_reuses_operation_key_after_lost_acknowledgment(
+    ledger_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = _target(monkeypatch, TEAM)
+    client.remember_raw_memory.side_effect = [
+        SibylClientError("response lost", status_code=503),
+        {"id": "target-1"},
+        {"id": "target-2"},
+        {"id": "target-0"},
+    ]
+    assert _run().exit_code == 1
+    assert _run().exit_code == 0
+    calls = client.remember_raw_memory.await_args_list
+    assert calls[0].kwargs["_idempotency_key"] == calls[3].kwargs["_idempotency_key"]
+    assert len({call.kwargs["_idempotency_key"] for call in calls}) == 3
+
+
+async def test_raw_client_forwards_migration_key_without_replacing_it() -> None:
+    from sibyl_cli.client_memory import ClientMemoryMixin
+
+    class Client(ClientMemoryMixin):
+        _request = AsyncMock(return_value={"id": "raw"})
+
+    client = Client()
+    await client.remember_raw_memory(title="title", raw_content="body", _idempotency_key="stable")
+    assert client._request.await_args.kwargs["_idempotency_key"] == "stable"
+    assert client._request.await_args.kwargs["_buffer_pending"] is False
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"review_state": "redacted"},
+        {"deleted_at": "2026-01-01T00:00:00Z"},
+        {"metadata": {"lifecycle_state": "archived"}},
+        {"metadata": {"lifecycle_flags": ["hidden"]}},
+        {"capture_surface": "reflection_candidate", "review_state": "pending"},
+    ],
+)
+def test_raw_source_exclusions_are_not_reactivated(change: dict[str, Any]) -> None:
+    assert migrate._raw_migratable(ROWS[0])
+    assert not migrate._raw_migratable({**ROWS[0], **change})
+
+
+def test_raw_dry_run_validates_content_before_claiming_it_can_migrate(
+    ledger_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = _target(monkeypatch, TEAM)
+    monkeypatch.setattr(
+        migrate,
+        "_fetch_source_page",
+        lambda **_: [{**ROWS[0], "raw_content": ""}] if _["start"] == 0 else [],
+    )
+    result = _run("--dry-run")
+    assert result.exit_code == 1
+    assert "empty content" in result.stdout
+    client.remember_raw_memory.assert_not_awaited()
+
+
+def test_retry_ledger_payloads_are_private_and_leave_no_temporary_files(tmp_path: Path) -> None:
+    path = tmp_path / "migrations" / "ledger.json"
+    migrate._save_migration_ledger(path, {"private": "body"})
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert json.loads(path.read_text()) == {"private": "body"}
+    assert list(path.parent.iterdir()) == [path]
+
+
+def test_old_server_is_refused_before_migration_writes(
+    ledger_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = _target(monkeypatch, TEAM)
+    client.get = AsyncMock(
+        return_value={
+            "organization": TEAM,
+            "organization_id": TEAM["id"],
+            "server_instance_id": "old",
+            "user_id": "alice",
+        }
+    )
+    result = _run()
+    assert result.exit_code == 1
+    assert "upgrade the target server" in result.stdout
+    client.remember_raw_memory.assert_not_awaited()
+    assert not ledger_dir.exists()
+
+
+@pytest.mark.parametrize("graph", [False, True])
+def test_replay_only_server_allows_raw_but_refuses_graph_before_writes(
+    ledger_dir: Path, monkeypatch: pytest.MonkeyPatch, graph: bool
+) -> None:
+    client = _target(monkeypatch, TEAM)
+    original_get = client.get.side_effect
+
+    async def replay_only_identity(path: str) -> dict[str, Any]:
+        result = await original_get(path)
+        if path == "/auth/replay-identity":
+            result["capabilities"] = ["migration_replay_policy_v1"]
+        return result
+
+    client.get.side_effect = replay_only_identity
+    result = _run("--graph" if graph else "--no-graph")
+    if graph:
+        assert result.exit_code == 1
+        assert "upgrade the target server before migrating graph data" in result.stdout
+        client.remember_raw_memory.assert_not_awaited()
+        client.post.assert_not_called()
+        assert not ledger_dir.exists()
+    else:
+        assert result.exit_code == 0, result.stdout
+        assert client.remember_raw_memory.await_count == len(ROWS)

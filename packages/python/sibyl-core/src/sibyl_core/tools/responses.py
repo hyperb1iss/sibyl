@@ -175,6 +175,7 @@ class AddResponse:
     background_jobs: dict[str, Any] = field(default_factory=dict)
     # Per-probe rank-or-absent, present only when the write carried probes.
     probe_rehearsal: dict[str, Any] | None = None
+    revision: int | None = None
 
 
 @dataclass

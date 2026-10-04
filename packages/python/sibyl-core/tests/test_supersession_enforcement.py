@@ -1484,7 +1484,7 @@ async def test_a_synchronous_create_reconciles_the_capture_before_writing_the_ro
         metadata={"raw_memory_id": "raw-corrected"},
     )
 
-    created_id = await add_module._create_entity_record(
+    created_id, revision = await add_module._create_entity_record(
         _Manager(),
         entity,
         generate_embeddings=False,
@@ -1492,6 +1492,7 @@ async def test_a_synchronous_create_reconciles_the_capture_before_writing_the_ro
     )
 
     assert created_id == "sync-row"
+    assert revision is None
     assert graph_metadata_recallable(written[0].metadata) is False
     assert written[0].metadata["correction_blockers"]["raw-corrected"]["blocking"] is True
 
@@ -1526,15 +1527,12 @@ async def test_a_synchronous_create_reads_nothing_for_a_row_with_no_provenance(
         metadata={},
     )
 
-    assert (
-        await add_module._create_entity_record(
-            _Manager(),
-            entity,
-            generate_embeddings=False,
-            organization_id="org-1",
-        )
-        == "plain-row"
-    )
+    assert await add_module._create_entity_record(
+        _Manager(),
+        entity,
+        generate_embeddings=False,
+        organization_id="org-1",
+    ) == ("plain-row", None)
     lookup.assert_not_awaited()
 
 

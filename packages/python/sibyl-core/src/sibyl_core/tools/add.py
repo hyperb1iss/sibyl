@@ -52,6 +52,12 @@ from sibyl_core.projection import project_entity_passages, project_memory_entity
 from sibyl_core.projection.reconcile import prewrite_capture_stamp, reconcile_with_capture
 from sibyl_core.runtime_ports import get_queue_port
 from sibyl_core.services.graph import get_surreal_graph_runtime
+from sibyl_core.services.graph_write_authority import (
+    row_author as _row_author,
+)
+from sibyl_core.services.graph_write_authority import (
+    row_project as _row_project,
+)
 from sibyl_core.tools.helpers import (
     MAX_CONTENT_LENGTH,
     MAX_TITLE_LENGTH,
@@ -222,7 +228,10 @@ async def _create_entity_record(
     *,
     generate_embeddings: bool,
     organization_id: str | None = None,
-) -> str:
+    protect_ownership: bool = False,
+    principal_id: str | None = None,
+    project_id: str | None = None,
+) -> tuple[str, int | None]:
     # The same reconciliation the queued path does at the worker, for the same
     # reason: the capture is written before this runs and can be corrected in
     # between, and the row would otherwise be created recallable carrying text
@@ -239,8 +248,19 @@ async def _create_entity_record(
             object.__setattr__(entity, "metadata", {**(entity.metadata or {}), **stamp})
             log.info("add_entity_born_retired", entity_id=entity.id)
 
+    revision = None
     create_direct = getattr(entity_manager, "create_direct", None)
-    if inspect.iscoroutinefunction(create_direct):
+    if protect_ownership:
+        if not principal_id:
+            raise ValueError("Protected writes require an authenticated principal")
+        created = await entity_manager.create_direct_authorized(
+            entity,
+            principal_id=principal_id,
+            project_id=project_id,
+            generate_embedding=generate_embeddings,
+        )
+        created_id, revision = created.id, created.revision
+    elif inspect.iscoroutinefunction(create_direct):
         if _accepts_keyword(create_direct, "generate_embedding"):
             created_id = await create_direct(entity, generate_embedding=generate_embeddings)
         else:
@@ -254,7 +274,7 @@ async def _create_entity_record(
             metadata=entity.metadata,
             row_ids=[created_id],
         )
-    return created_id
+    return created_id, revision
 
 
 async def _create_relationships_bulk(
@@ -364,11 +384,13 @@ class _SynchronousWrite:
     memory_scope: str | None
     scope_key: str | None
     project: str | None
+    protect_ownership: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class _SynchronousPersistenceResult:
     created_id: str
+    revision: int | None
     projection_result: Any
     passage_result: Any
     rehearsal_receipt: dict[str, Any] | None
@@ -509,11 +531,14 @@ async def _persist_synchronously(
     write: _SynchronousWrite,
 ) -> _SynchronousPersistenceResult:
     """Persist one add request when the caller must wait for durable storage."""
-    created_id = await _create_entity_record(
+    created_id, revision = await _create_entity_record(
         write.entity_manager,
         write.entity,
         generate_embeddings=write.generate_embeddings,
         organization_id=write.organization_id,
+        protect_ownership=write.protect_ownership,
+        principal_id=write.principal_id,
+        project_id=write.project,
     )
     await _create_relationships_bulk(
         write.relationship_manager,
@@ -545,6 +570,7 @@ async def _persist_synchronously(
 
     return _SynchronousPersistenceResult(
         created_id=created_id,
+        revision=revision,
         projection_result=projection_result,
         passage_result=passage_result,
         rehearsal_receipt=rehearsal_receipt,
@@ -563,19 +589,6 @@ async def _existing_row(entity_manager: Any, entity_id: str) -> Entity | None:
         return await entity_manager.get(entity_id)
     except (KeyError, EntityNotFoundError):
         return None
-
-
-def _row_author(row: Entity) -> str | None:
-    author = (row.metadata or {}).get("principal_id") or getattr(row, "created_by", None)
-    return str(author) if author else None
-
-
-def _row_project(row: Entity) -> str | None:
-    metadata = row.metadata or {}
-    project = getattr(row, "project_id", None) or metadata.get("project_id")
-    if not project and metadata.get("memory_scope") == "project":
-        project = metadata.get("scope_key")
-    return str(project) if project else None
 
 
 async def resolve_write_id(
@@ -626,7 +639,7 @@ async def resolve_write_id(
                 raise ValueError(f"A {entity_type} named '{title}' already exists")
             qualifiers.append(f"author:{principal_id}")
         else:
-            return candidate
+            raise ValueError(f"A {entity_type} named '{title}' already exists")
         candidate = _generate_id(entity_type, *base_parts, *qualifiers)
 
 
@@ -651,6 +664,7 @@ async def add(
     repository_url: str | None = None,
     # Sync mode - wait for Surreal graph writes instead of returning immediately
     sync: bool = False,
+    protect_ownership: bool = False,
     generate_embeddings: bool = True,
     # Conflict detection - check for contradicting/duplicate knowledge
     check_conflicts: bool = True,
@@ -764,6 +778,14 @@ async def add(
         add("E-commerce API", "Backend services for...", entity_type="project", repository_url="github.com/...")
         add("Connection pooling pattern", "Best practice for...", entity_type="pattern")
     """
+    if protect_ownership and (not sync or not principal_id):
+        return AddResponse(
+            success=False,
+            id=None,
+            message="Protected writes require authenticated synchronous execution",
+            timestamp=datetime.now(UTC),
+        )
+
     # Sanitize inputs
     title = title.strip()
     content = content.strip()
@@ -1200,6 +1222,7 @@ async def add(
             memory_scope=memory_scope,
             scope_key=scope_key,
             project=project,
+            protect_ownership=protect_ownership,
         )
 
         # Sync mode: create entity + relationships immediately via Surreal
@@ -1234,6 +1257,7 @@ async def add(
             return AddResponse(
                 success=True,
                 id=persisted.created_id,
+                revision=persisted.revision,
                 message=message,
                 timestamp=datetime.now(UTC),
                 conflicts=conflicts,
@@ -1291,6 +1315,7 @@ async def add(
             return AddResponse(
                 success=True,
                 id=persisted.created_id,
+                revision=persisted.revision,
                 message=fallback_message,
                 timestamp=datetime.now(UTC),
                 conflicts=conflicts,

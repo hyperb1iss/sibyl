@@ -58,8 +58,9 @@ sibyl auth login https://sibyl.example.com --context team
 sibyl -C team project create --name "Backend API"
 ```
 
-The command refuses to migrate into a personal org, because the team could not see the result. If
-your login landed in a personal org, switch first with `sibyl -C team org switch <team-slug>`.
+The command refuses a personal org by default because the team could not see the result. Switch with
+`sibyl -C team org switch <team-slug>`, or use `--allow-personal-org` when that personal org is your
+intended destination.
 
 ### Example
 
@@ -84,24 +85,42 @@ migrated.
 
 ### Re-running
 
-A ledger under `~/.sibyl/migrations` maps every migrated row to its id on the target, so running the
-command again skips what already landed and finishes the rest. A row that landed while one of its
-link targets had failed is written again on the next run, once that target lands, which adds the
-missing link and keeps the task's status. That second write only happens while the row is still as
-the migration left it: if someone edited or deleted it on the team server, the edit wins and the run
-reports the links it could not add.
+A ledger under `~/.sibyl/migrations` binds progress to the source server and project, target server,
+organization, and signed-in account. Running the command again skips completed rows and finishes the
+rest. The ledger stores pending request bodies with private file permissions. Keep the ledger until
+migration is complete.
+
+Task status changes use the revision returned by the original creation transaction. If someone edits
+the task before its status is set, the status change stops instead of replacing that edit.
+
+Stable operation keys let the server replay a completed receipt when a response was lost. If the
+server cannot confirm whether a write completed, migration stops with
+`idempotency_reconciliation_required`. Preserve the ledger and ask your server administrator to
+check the operation before continuing; repeated runs do not overwrite the row to resolve the doubt.
+
+When a linked row failed to migrate, the next run can add the missing link after that row lands.
+Link repair changes only relationships and task topology. The server checks the saved revision in
+the same transaction, so a concurrent edit stops a new link write. If the link write completed but
+its response was lost, the server can acknowledge the existing links without changing the row.
+
+Older raw ledgers are adopted only after checking each receipt against the destination account,
+organization, and project. An older graph ledger without server and account identity stops the run
+for target-row verification; deleting that ledger can cause existing rows to be written again.
 
 Re-running does not carry edits you made locally after a row was migrated. Once a project has moved,
 work on it in the team server.
 
-`--limit N` migrates at most N raw memories and N graph entities, which is useful for a first trial.
+`--limit N` migrates at most N new raw memories and N new graph entities. Repeat the command to
+advance through another batch; completed rows remain available for unfinished status and link work.
 
 ### Migrating as a team
 
 Several people can migrate into the same team project. Each person's rows land under their own
-account, and a memory never replaces one with the same title that someone else wrote. When a
-teammate already created an epic or milestone with the same name in the project, your tasks link to
-theirs instead of creating a second one.
+account. The server protects same-titled memories with a recorded owner, including legacy private
+ownership, and rejects a write when its qualified ID is occupied by another owner. Older rows with
+no recorded owner can still be updated within the same project. When a teammate already created an
+epic or milestone with the same name in the project, your tasks link to theirs instead of creating a
+second one.
 
 If you already wrote memories with the same titles in that project on the team server, the migration
 updates those rows rather than adding copies.
@@ -120,12 +139,16 @@ updates those rows rather than adding copies.
   `USES_PROCEDURE`) arrive as untyped links, and the original type is recorded under
   `metadata.migration.coerced_edges`.
 
-### Server version
+### Server compatibility
 
-On team servers before 1.4.4, a write whose title matched someone else's memory replaced it, and a
-write in one project could move a same-titled row out of another project. From 1.4.4, single and
-bulk writes record their author, a row written by someone else or living in another project keeps
-its id, and a second author's project, epic, or milestone of the same name in the same project is
-refused. Rows written before the upgrade without a recorded author are protected across projects but
-not within one, and two people writing the same title at the same instant can still race. Upgrade
-the team server to 1.4.4 or newer before several people migrate into it.
+Upgrade the team server before migrating. The command checks the server's authenticated migration
+capabilities before writing and refuses a server without protected retry support. Graph migration
+also requires the server to advertise atomic ownership checks and additive link writes. A raw-only
+run (`--no-graph`) needs only protected retry support. Link repair never falls back to rewriting an
+entire entity.
+
+Older servers can replace a teammate's same-titled memory or move a row out of another project.
+Migration writes record their author and atomically check existing ownership and project before
+writing. A concurrent first writer cannot replace the winning author's row. A second author's
+project, epic, or milestone with the same name in the same project is refused. Older rows without a
+recorded author are protected across projects but can still be updated within one project.
