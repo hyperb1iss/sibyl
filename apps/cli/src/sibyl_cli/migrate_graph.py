@@ -35,8 +35,10 @@ import json
 import re
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any
+
+from sibyl_core.memory_pipeline.lifecycle import graph_metadata_recallable
 
 # Categories the server stamps on rows it derives itself.
 DERIVED_CATEGORIES = frozenset(
@@ -147,12 +149,21 @@ class GraphPlan:
             grouped[planned.layer].append(planned)
         return [grouped[layer] for layer in sorted(grouped)]
 
-    def limited(self, count: int | None) -> GraphPlan:
-        """The first `count` entities; a prefix of the order keeps every link target."""
+    def limited(self, count: int | None, *, done: set[str] | None = None) -> GraphPlan:
+        """Keep completed rows and at most `count` new rows in dependency order."""
         if count is None:
             return self
+        done = done or set()
+        remaining = max(count, 0)
+        selected = []
+        for node in self.entities:
+            if node.source.uuid in done:
+                selected.append(node)
+            elif remaining:
+                selected.append(node)
+                remaining -= 1
         return GraphPlan(
-            entities=self.entities[: max(count, 0)],
+            entities=selected,
             skipped=self.skipped,
             dropped_edges=self.dropped_edges,
             edge_counts=self.edge_counts,
@@ -167,7 +178,7 @@ def _skip_reason(entity: SourceEntity, project: str) -> str | None:
         return f"{entity.entity_type} {entity.category} (re-derived by the target)"
     if entity.uuid == project:
         return "the project itself"
-    if entity.attributes.get("excluded_from_recall") or (
+    if not graph_metadata_recallable(entity.attributes) or (
         str(entity.attributes.get("lifecycle_state") or "") in RETIRED_STATES
     ):
         return f"{entity.entity_type} excluded from recall on the source"
@@ -183,10 +194,10 @@ def _target_scope(entity: SourceEntity, *, share_private: bool) -> str | None:
     return entity.memory_scope
 
 
-def _id_key(entity: SourceEntity, name: str) -> tuple[str, str, str]:
+def _id_key(entity: SourceEntity, name: str) -> tuple[str, str]:
     """What the server hashes into an entity id: type, title, and category."""
     category = entity.category or "general"
-    return (entity.entity_type, name[:_ID_PART_CHARS], category[:_ID_PART_CHARS])
+    return (entity.entity_type, f"{name[:_ID_PART_CHARS]}:{category[:_ID_PART_CHARS]}")
 
 
 def _unique_names(entities: Iterable[SourceEntity]) -> dict[str, str]:
@@ -196,7 +207,7 @@ def _unique_names(entities: Iterable[SourceEntity]) -> dict[str, str]:
     second replacing the first, so a repeat gets a counter placed where the
     hash still sees it.
     """
-    taken: set[tuple[str, str, str]] = set()
+    taken: set[tuple[str, str]] = set()
     names: dict[str, str] = {}
     for entity in sorted(entities, key=lambda e: (e.created_at or "", e.uuid)):
         base = (entity.name or entity.uuid).strip()[:_MAX_NAME] or entity.uuid
@@ -578,6 +589,7 @@ async def execute_plan(
     save: Callable[[], None],
     concurrency: int = 8,
     log: Callable[[str], None] = lambda _message: None,
+    operation_namespace: str = "",
 ) -> GraphOutcome:
     """Create the plan layer by layer.
 
@@ -599,16 +611,50 @@ async def execute_plan(
                     return None
                 raise
 
-    async def write(node: PlannedEntity, body: dict[str, Any]) -> str | None:
+    def operation_key(node: PlannedEntity, stage: str, links: object = None) -> str:
+        identity = [
+            operation_namespace,
+            origin_org,
+            target_project_id,
+            node.source.uuid,
+            stage,
+            links,
+        ]
+        digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+        return f"migrate-graph-{digest}"
+
+    def resolved_links(body: dict[str, Any]) -> dict[str, Any]:
+        metadata = body["metadata"]
+        return {
+            "related_to": sorted(body.get("related_to") or []),
+            "epic_id": metadata.get("epic_id"),
+            "parent_task_id": metadata.get("parent_task_id"),
+            "depends_on": sorted(metadata.get("depends_on") or []),
+        }
+
+    async def write(
+        node: PlannedEntity, body: dict[str, Any], *, stage: str = "create"
+    ) -> str | None:
         origin = node.source.uuid
         kind = node.source.entity_type
         async with gate:
             try:
                 response = await client._request(
-                    "POST", "/entities", json=body, params={"sync": "true"}, _buffer_pending=False
+                    "POST",
+                    "/entities",
+                    json=body,
+                    params={"sync": "true", "replay_interrupted": "false"},
+                    _buffer_pending=False,
+                    _idempotency_key=operation_key(
+                        node, stage, resolved_links(body) if stage == "relink" else None
+                    ),
                 )
             except Exception as exc:
-                if getattr(exc, "status_code", None) != 409 or kind not in {"epic", "milestone"}:
+                if (
+                    getattr(exc, "status_code", None) != 409
+                    or kind not in {"epic", "milestone"}
+                    or getattr(exc, "error_code", None) not in {None, "constraint_violation"}
+                ):
                     outcome.failures.append(f"{kind} {origin}: {exc}")
                     return None
                 response = None
@@ -629,12 +675,24 @@ async def execute_plan(
             return None
         return target_id
 
-    async def set_status(origin: str, target_id: str, status: str) -> bool:
+    async def set_status(
+        node: PlannedEntity, target_id: str, status: str, *, key: str | None = None
+    ) -> bool:
+        origin = node.source.uuid
+        statuses.pop(origin, None)
+        key = key or operation_key(node, "status", {"target_id": target_id, "status": status})
         async with gate:
             try:
-                await client._request(
-                    "PATCH", f"/tasks/{target_id}", json={"status": status}, _buffer_pending=False
+                response = await client._request(
+                    "PATCH",
+                    f"/tasks/{target_id}",
+                    json={"status": status},
+                    params={"sync": "true", "replay_interrupted": "false"},
+                    _buffer_pending=False,
+                    _idempotency_key=key,
                 )
+                if (response.get("mutation_receipt") or {}).get("applied") is False:
+                    raise RuntimeError("the server queued the status instead of applying it")
             except Exception as exc:
                 outcome.failures.append(f"task {origin}: status {status} not set ({exc})")
                 return False
@@ -653,16 +711,57 @@ async def execute_plan(
     async def create_one(node: PlannedEntity) -> None:
         nonlocal writes
         origin = node.source.uuid
+        relink_after_create = False
         pending = partial.get(origin)
+        if origin in ids and pending and pending.get("restore_status"):
+            if not await set_status(
+                node,
+                ids[origin],
+                str(pending["restore_status"]),
+                key=pending.get("restore_status_key"),
+            ):
+                return
+            statuses[origin] = _task_status(node) or "todo"
+            pending.pop("restore_status")
+            pending.pop("restore_status_key", None)
+            if not pending.get("missing"):
+                partial.pop(origin)
+                outcome.resumed += 1
+                return
         if origin in ids and not pending:
             outcome.resumed += 1
         elif origin in ids and pending:
             await relink(node, pending)
             return
         else:
-            body, missing = _payload(
-                node, ids=ids, target_project_id=target_project_id, origin_org=origin_org
-            )
+            source_digest = hashlib.sha256(
+                json.dumps(
+                    {"source": asdict(node.source), "name": node.name, "scope": node.scope},
+                    sort_keys=True,
+                    default=str,
+                ).encode()
+            ).hexdigest()
+            if pending and "create_body" in pending:
+                if pending.get("source_digest") != source_digest:
+                    raise RuntimeError(
+                        "the source changed after its create intent was saved; restore the "
+                        "original source or reconcile the saved target receipt before retrying"
+                    )
+                body = pending["create_body"]
+                missing = pending["missing"]
+            else:
+                body, missing = _payload(
+                    node, ids=ids, target_project_id=target_project_id, origin_org=origin_org
+                )
+                # Retry the same body even when a dependency lands after a lost
+                # acknowledgement; new links belong to the later relink operation.
+                partial[origin] = {
+                    "create_body": body,
+                    "source_digest": source_digest,
+                    "missing": missing,
+                    "digest": None,
+                }
+                save()
             target_id = await write(node, body)
             if target_id is None:
                 return
@@ -674,16 +773,27 @@ async def execute_plan(
                 partial[origin] = {"missing": missing, "digest": None}
                 landed = await read(target_id)
                 partial[origin]["digest"] = target_digest(landed) if landed else None
+                relink_after_create = any(target in ids for target in missing)
                 outcome.unlinked.append(
                     f"{origin}: landed without {len(missing)} link(s) to rows that failed; "
                     "a re-run adds them once those rows land"
                 )
+            else:
+                partial.pop(origin, None)
             writes += 1
             if writes % _SAVE_EVERY == 0:
                 save()
         status = _task_status(node)
-        if status and statuses.get(origin) != status:
-            await set_status(origin, ids[origin], status)
+        if (
+            status
+            and statuses.get(origin) != status
+            and not await set_status(node, ids[origin], status)
+        ):
+            if origin in partial:
+                partial[origin]["restore_status"] = status
+            return
+        if relink_after_create:
+            await relink(node, partial[origin])
 
     async def relink(node: PlannedEntity, pending: dict[str, Any]) -> None:
         origin = node.source.uuid
@@ -714,9 +824,10 @@ async def execute_plan(
                 "missing links were not added"
             )
             return
-        target_id = await write(node, body)
+        target_id = await write(node, body, stage="relink")
         if target_id is None:
             return
+        statuses.pop(origin, None)
         outcome.relinked += 1
         if missing:
             partial[origin] = {"missing": missing, "digest": None}
@@ -727,7 +838,16 @@ async def execute_plan(
         # Writing the row again resets a task's status; put back the one it had.
         status = _target_task_status(current)
         if status:
-            await set_status(origin, target_id, status)
+            key = operation_key(node, "relink-status", {"status": status, **resolved_links(body)})
+            if not await set_status(node, target_id, status, key=key):
+                restoration = partial.setdefault(origin, {"missing": [], "digest": None})
+                restoration["restore_status"] = status
+                restoration["restore_status_key"] = key
+                return
+        if node.source.entity_type == "task":
+            # The source status is already reconciled, even when the teammate's
+            # newer status was the one restored after adding links.
+            statuses[origin] = _task_status(node) or "todo"
 
     for index, layer in enumerate(plan.layers):
         await asyncio.gather(*(create(node) for node in layer))

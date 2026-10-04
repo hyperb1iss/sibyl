@@ -332,6 +332,68 @@ def test_a_limited_plan_is_a_prefix_that_keeps_its_link_targets() -> None:
         assert set(node.depends_on) <= included
 
 
+async def test_repeated_limited_runs_advance_and_finish_task_statuses() -> None:
+    plan = build_plan(
+        [_entity(f"t{n}", "task", status="done") for n in range(6)],
+        [SourceEdge("DEPENDS_ON", "t1", "t5"), SourceEdge("DEPENDS_ON", "t2", "t1")],
+        project=PROJECT,
+    )
+    target = _Target()
+    ledger = _Ledger()
+    for expected in (2, 4, 6):
+        batch = plan.limited(2, done=set(ledger.ids))
+        outcome = await _execute(target, ledger, batch)
+        assert outcome.created == 2
+        assert len(ledger.ids) == expected
+        assert len(ledger.statuses) == expected
+        for node in batch.entities:
+            assert set(node.depends_on) <= set(ledger.ids)
+    outcome = await _execute(target, ledger, plan.limited(2, done=set(ledger.ids)))
+    assert outcome.created == 0
+    assert outcome.resumed == 6
+
+
+async def test_graph_command_loads_progress_before_applying_limit(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sibyl_cli import migrate
+
+    rows = [_entity(f"t{n}", "task", status="done") for n in range(3)]
+    monkeypatch.setattr(migrate, "_read_source_graph", lambda **_: (rows, []))
+    monkeypatch.setattr(migrate, "_LEDGER_DIR", tmp_path)
+    target = _Target()
+    route = {
+        "source_org": "source",
+        "target_context": "team",
+        "target_org_id": "target-org",
+        "target_project_id": "target",
+    }
+    for _ in range(3):
+        failures = await migrate._migrate_graph(
+            target,
+            route=route,
+            organization_id="source",
+            project=PROJECT,
+            target_project_id="target",
+            dry_run=False,
+            share_private=False,
+            limit=1,
+            surreal_url="memory://",
+            username=None,
+            password=None,
+        )
+        assert failures == []
+    ids, statuses, _ = migrate._load_graph_ledger(migrate._graph_ledger_path(route), route)
+    assert set(ids) == {"t0", "t1", "t2"}
+    assert statuses == dict.fromkeys(ids, "done")
+
+
+def test_a_zero_limit_keeps_completed_rows_for_status_and_link_recovery() -> None:
+    plan = build_plan([_entity("a", "task"), _entity("b", "task")], [], project=PROJECT)
+    assert [node.source.uuid for node in plan.limited(0, done={"b"}).entities] == ["b"]
+    assert plan.limited(0).entities == []
+
+
 class _ApiError(Exception):
     def __init__(self, status_code: int) -> None:
         super().__init__(f"HTTP {status_code}")
@@ -361,6 +423,7 @@ class _Target:
         params: dict[str, Any] | None = None,
         *,
         _buffer_pending: bool = True,
+        _idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         assert _buffer_pending is False
         self.calls.append((method, path, json))
@@ -391,6 +454,7 @@ class _Target:
                 raise _ApiError(404)
             return self.rows[target_id]
         if method == "PATCH":
+            assert params == {"sync": "true", "replay_interrupted": "false"}
             target_id = path.rsplit("/", 1)[-1]
             self.rows[target_id]["metadata"]["status"] = (json or {})["status"]
         return {}
@@ -499,7 +563,7 @@ async def test_a_failed_write_is_reported_and_its_dependents_land_then_get_relin
     assert any("task_1" in failure for failure in first.failures)
     assert "task_1" not in ledger.ids
     assert {"epic_1", "task_2", "decision_1"} <= set(ledger.ids)
-    assert set(ledger.partial) == {"task_2", "decision_1"}
+    assert set(ledger.partial) == {"task_1", "task_2", "decision_1"}
 
     target.fail = set()
     second = await _execute(target, ledger)
@@ -758,7 +822,7 @@ async def test_a_failed_read_after_landing_neither_stops_the_run_nor_loses_the_r
     outcome = await _execute(_FlakyReads(fail={"task_1"}), ledger)
 
     assert {"epic_1", "task_2", "decision_1"} <= set(ledger.ids)
-    assert set(ledger.partial) == {"task_2", "decision_1"}
+    assert set(ledger.partial) == {"task_1", "task_2", "decision_1"}
     assert all(entry["digest"] is None for entry in ledger.partial.values())
     assert any("read timed out" in failure for failure in outcome.failures)
 
@@ -791,3 +855,304 @@ def test_an_older_ledger_with_list_entries_loads_as_unconfirmed(
     _ids, _statuses, partial = migrate._load_graph_ledger(path, route)
 
     assert partial == {"a": {"missing": ["b"], "digest": None}}
+
+
+@pytest.mark.parametrize(
+    "attributes",
+    [
+        {"lifecycle_state": "archived"},
+        {"lifecycle_state": "deleted"},
+        {"review_state": "redacted"},
+        {"lifecycle_flags": ["hidden"]},
+        {"source_validation_pending": {"source": True}},
+        {"correction_blockers": {"source": True}},
+    ],
+)
+def test_canonical_lifecycle_exclusions_are_not_migrated(attributes: dict[str, Any]) -> None:
+    from sibyl_core.memory_pipeline.lifecycle import graph_metadata_recallable
+
+    assert not graph_metadata_recallable(attributes)
+    plan = build_plan([_entity("decision", "decision", **attributes)], [], project=PROJECT)
+    assert plan.entities == []
+    assert sum(plan.skipped.values()) == 1
+
+
+def test_name_disambiguation_matches_the_server_colon_framing() -> None:
+    from sibyl_core.tools.helpers import _generate_id
+
+    plan = build_plan(
+        [
+            _entity("first", "decision", name="alpha:beta", category="gamma"),
+            _entity("second", "decision", name="alpha", category="beta:gamma"),
+        ],
+        [],
+        project=PROJECT,
+    )
+    actual_ids = {
+        _generate_id(node.source.entity_type, node.name, node.source.category or "general")
+        for node in plan.entities
+    }
+    assert len(actual_ids) == 2
+
+
+class _FailedStatuses(_Target):
+    fail_status = False
+    queue_status = False
+
+    async def _request(self, method: str, path: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        if method == "PATCH" and self.fail_status:
+            raise RuntimeError("status write failed")
+        if method == "PATCH" and self.queue_status:
+            assert kwargs["params"] == {"sync": "true", "replay_interrupted": "false"}
+            return {"mutation_receipt": {"applied": False}, "data": {"job_id": "queued"}}
+        return await super()._request(method, path, *args, **kwargs)
+
+
+async def test_relink_status_failure_retains_restoration_for_the_next_run() -> None:
+    ledger = _Ledger()
+    target = _FailedStatuses(fail={"epic_1"})
+    plan = _epic_and_done_task()
+    await _execute(target, ledger, plan)
+    target.rows["target-task_1"]["metadata"]["status"] = "doing"
+    target.fail.clear()
+    target.fail_status = True
+    failed = await _execute(target, ledger, plan)
+    assert failed.failures
+    assert target.rows["target-task_1"]["metadata"]["status"] == "todo"
+    assert ledger.partial["task_1"]["restore_status"] == "doing"
+    assert "task_1" not in ledger.statuses
+    target.fail_status = False
+    repaired = await _execute(target, ledger, plan)
+    assert repaired.failures == []
+    assert target.rows["target-task_1"]["metadata"]["status"] == "doing"
+    assert ledger.partial == {}
+    posts = len(target.posts())
+    await _execute(target, ledger, plan)
+    assert target.rows["target-task_1"]["metadata"]["status"] == "doing"
+    assert len(target.posts()) == posts
+
+
+async def test_queued_status_response_does_not_mark_the_ledger_applied() -> None:
+    ledger = _Ledger()
+    target = _FailedStatuses()
+    target.queue_status = True
+    result = await _execute(
+        target, ledger, build_plan([_entity("task_1", "task", status="done")], [], project=PROJECT)
+    )
+    assert result.failures
+    assert ledger.statuses == {}
+    target.queue_status = False
+    result = await _execute(
+        target, ledger, build_plan([_entity("task_1", "task", status="done")], [], project=PROJECT)
+    )
+    assert result.failures == []
+    assert target.rows["target-task_1"]["metadata"]["status"] == "done"
+
+
+class _IdempotentTarget(_Target):
+    def __init__(self) -> None:
+        super().__init__()
+        self.responses: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
+        self.keys: list[str] = []
+        self.lose_ack = False
+
+    async def _request(self, method: str, path: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        import copy
+
+        if method != "POST" or path != "/entities":
+            return await super()._request(method, path, *args, **kwargs)
+        key = kwargs["_idempotency_key"]
+        assert key
+        self.keys.append(key)
+        body = kwargs["json"]
+        if key in self.responses:
+            previous, response = self.responses[key]
+            if previous != body:
+                raise _ApiError(409)
+            return copy.deepcopy(response)
+        response = await super()._request(method, path, *args, **kwargs)
+        self.responses[key] = (copy.deepcopy(body), copy.deepcopy(response))
+        if self.lose_ack:
+            self.lose_ack = False
+            raise RuntimeError("lost acknowledgement")
+        return response
+
+
+async def test_unknown_create_replays_receipt_without_replacing_a_team_edit() -> None:
+    ledger = _Ledger()
+    target = _IdempotentTarget()
+    target.lose_ack = True
+    plan = build_plan([_entity("decision_1", "decision")], [], project=PROJECT)
+    result = await _execute(target, ledger, plan)
+    assert result.failures and not ledger.ids
+    target.rows["target-decision_1"]["content"] = "team edit"
+    result = await _execute(target, ledger, plan)
+    assert result.failures == []
+    assert target.rows["target-decision_1"]["content"] == "team edit"
+    assert len(target.keys) == 2 and target.keys[0] == target.keys[1]
+
+
+async def test_source_edits_do_not_mint_a_new_key_after_an_unknown_create() -> None:
+    ledger = _Ledger()
+    target = _IdempotentTarget()
+    target.lose_ack = True
+    original = build_plan(
+        [_entity("decision_1", "decision", content="original")], [], project=PROJECT
+    )
+    result = await _execute(target, ledger, original)
+    assert result.failures
+    changed = build_plan(
+        [_entity("decision_1", "decision", content="changed")], [], project=PROJECT
+    )
+    result = await _execute(target, ledger, changed)
+    assert result.failures and not ledger.ids
+    assert target.rows["target-decision_1"]["content"] == "original"
+    assert len(set(target.keys)) == 1
+    assert any("source changed" in failure for failure in result.failures)
+
+
+async def test_relink_uses_a_distinct_key_for_the_resolved_links() -> None:
+    ledger = _Ledger()
+    target = _IdempotentTarget()
+    target.fail = {"epic_1"}
+    plan = _epic_and_done_task()
+    await _execute(target, ledger, plan)
+    target.fail.clear()
+    result = await _execute(target, ledger, plan)
+    assert result.failures == []
+    task_keys = [
+        key
+        for key, (body, _) in target.responses.items()
+        if body["metadata"]["migration"]["origin_entity_id"] == "task_1"
+    ]
+    assert len(task_keys) == 2
+
+
+async def test_operation_namespace_qualifies_the_create_key() -> None:
+    plan = build_plan([_entity("decision_1", "decision")], [], project=PROJECT)
+    targets = [_IdempotentTarget(), _IdempotentTarget()]
+    for target, namespace in zip(targets, ("route-one", "route-two"), strict=True):
+        await execute_plan(
+            target,
+            plan,
+            ids={},
+            statuses={},
+            partial={},
+            target_project_id=PROJECT,
+            origin_org="source-org",
+            save=lambda: None,
+            operation_namespace=namespace,
+        )
+    assert targets[0].keys[0] != targets[1].keys[0]
+
+
+async def test_unknown_create_keeps_its_body_when_a_dependency_lands_on_retry() -> None:
+    ledger = _Ledger()
+    target = _IdempotentTarget()
+    target.fail = {"epic_1"}
+    target.lose_ack = True
+    plan = _epic_and_done_task()
+    first = await _execute(target, ledger, plan)
+    assert first.failures and not ledger.ids
+    assert "epic_id" not in ledger.partial["task_1"]["create_body"]["metadata"]
+    original = ledger.partial["task_1"]["create_body"]
+    target.fail.clear()
+    second = await _execute(target, ledger, plan)
+    assert second.failures == []
+    assert target.rows["target-task_1"]["metadata"]["epic_id"] == "target-epic_1"
+    assert target.rows["target-task_1"]["metadata"]["status"] == "done"
+    assert ledger.partial == {}
+    stored = [
+        body
+        for body, _ in target.responses.values()
+        if body["metadata"]["migration"]["origin_entity_id"] == "task_1"
+    ]
+    assert len(stored) == 2 and stored[0] == original
+
+
+async def test_create_intent_is_saved_before_any_target_write() -> None:
+    ledger = _Ledger()
+    plan = build_plan([_entity("decision_1", "decision")], [], project=PROJECT)
+
+    class Target(_Target):
+        async def _request(
+            self, method: str, path: str, *args: Any, **kwargs: Any
+        ) -> dict[str, Any]:
+            if method == "POST":
+                assert ledger.saves >= 1
+                assert ledger.partial["decision_1"]["create_body"] == kwargs["json"]
+            return await super()._request(method, path, *args, **kwargs)
+
+    result = await _execute(Target(), ledger, plan)
+    assert result.failures == [] and ledger.partial == {}
+
+
+class _IdempotentStatusTarget(_IdempotentTarget):
+    def __init__(self) -> None:
+        super().__init__()
+        self.status_responses: dict[str, dict[str, Any]] = {}
+        self.status_keys: list[str] = []
+        self.lose_status_ack = False
+
+    async def _request(self, method: str, path: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        if method != "PATCH":
+            return await super()._request(method, path, *args, **kwargs)
+        key = kwargs["_idempotency_key"]
+        assert key
+        self.status_keys.append(key)
+        if key in self.status_responses:
+            return self.status_responses[key]
+        result = await super()._request(method, path, *args, **kwargs)
+        self.status_responses[key] = result
+        if self.lose_status_ack:
+            self.lose_status_ack = False
+            raise RuntimeError("lost completed status response")
+        return result
+
+
+async def test_completed_status_retry_does_not_replace_a_newer_team_status() -> None:
+    ledger = _Ledger()
+    target = _IdempotentStatusTarget()
+    target.lose_status_ack = True
+    plan = build_plan([_entity("task_1", "task", status="done")], [], project=PROJECT)
+    first = await _execute(target, ledger, plan)
+    assert first.failures and ledger.statuses == {}
+    target.rows["target-task_1"]["metadata"]["status"] = "doing"
+    second = await _execute(target, ledger, plan)
+    assert second.failures == []
+    assert target.rows["target-task_1"]["metadata"]["status"] == "doing"
+    assert len(target.status_keys) == 2 and len(set(target.status_keys)) == 1
+
+
+async def test_status_restoration_uses_a_different_key_from_initial_status() -> None:
+    ledger = _Ledger()
+    target = _IdempotentStatusTarget()
+    target.fail = {"epic_1"}
+    plan = _epic_and_done_task()
+    await _execute(target, ledger, plan)
+    target.fail.clear()
+    second = await _execute(target, ledger, plan)
+    assert second.failures == []
+    assert target.rows["target-task_1"]["metadata"]["status"] == "done"
+    assert len(set(target.status_keys)) == 2
+
+
+async def test_interrupted_container_conflict_cannot_adopt_a_same_named_row() -> None:
+    ledger = _Ledger()
+    target = _Target(taken_containers={"epic_1": "team-epic"})
+
+    class UncertainTarget(_Target):
+        async def _request(
+            self, method: str, path: str, *args: Any, **kwargs: Any
+        ) -> dict[str, Any]:
+            if method == "POST" and path == "/entities":
+                error = _ApiError(409)
+                error.error_code = "idempotency_reconciliation_required"
+                raise error
+            return await target._request(method, path, *args, **kwargs)
+
+    result = await _execute(UncertainTarget(), ledger, _epic_and_done_task())
+    assert result.failures
+    assert result.adopted == 0
+    assert "epic_1" not in ledger.ids
+    assert target.calls == []
