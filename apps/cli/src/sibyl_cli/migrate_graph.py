@@ -11,19 +11,19 @@ projection, passages from the passage projection, projected facts) are left
 behind, because the target re-derives them from what is written here. Rows
 retired from recall stay behind too.
 
-The API only lets an entity declare links at creation, with itself as the
-subject and every target already present. So the plan orders creation:
+An entity declares links to targets that already exist. The plan orders
+creation so most links land with the entity:
 epics and milestones first, then tasks, then everything else, with typed
 links and task dependencies as hard ordering constraints. An untyped link
 carries no direction worth keeping, so it is declared from whichever end is
 created later.
 
-Entity ids are deterministic, and the server upserts a caller's own row at
-its id, so writing a row again is safe: a ledger maps source ids to target
-ids to skip finished work, and a row written while one of its link targets
-had failed is written again once that target exists, which adds the link.
-That second write only happens while the row on the target is still as the
-migration left it, so edits made on the team server win.
+A ledger maps source ids to target ids and skips finished work. Durable
+create receipts recover a completed write whose response was lost. A row
+written while one of its link targets had failed receives only its missing
+links once that target exists.
+The link operation checks the actual target revision atomically, so edits
+made on the team server win without rewriting the row's body or status.
 """
 
 from __future__ import annotations
@@ -509,7 +509,7 @@ class GraphOutcome:
 
 # Every metadata field a write from this pass sets. A row whose value for any
 # of them changed on the team server was edited there; status is left out
-# because the pass sets it after landing and restores it after a re-write.
+# because linking does not write status.
 _WRITTEN_METADATA = (
     "memory_scope",
     "project_id",
@@ -539,11 +539,6 @@ def target_digest(row: Mapping[str, Any]) -> str:
         **{key: metadata.get(key) for key in _WRITTEN_METADATA},
     }
     return hashlib.sha256(json.dumps(snapshot, sort_keys=True, default=str).encode()).hexdigest()
-
-
-def _target_task_status(row: Mapping[str, Any]) -> str | None:
-    status = str((row.get("metadata") or {}).get("status") or row.get("status") or "").lower()
-    return status if status in _TASK_STATUSES and status != "todo" else None
 
 
 async def _existing_container(
@@ -632,9 +627,7 @@ async def execute_plan(
             "depends_on": sorted(metadata.get("depends_on") or []),
         }
 
-    async def write(
-        node: PlannedEntity, body: dict[str, Any], *, stage: str = "create"
-    ) -> str | None:
+    async def write(node: PlannedEntity, body: dict[str, Any]) -> tuple[str, int | None] | None:
         origin = node.source.uuid
         kind = node.source.entity_type
         async with gate:
@@ -643,11 +636,13 @@ async def execute_plan(
                     "POST",
                     "/entities",
                     json=body,
-                    params={"sync": "true", "replay_interrupted": "false"},
+                    params={
+                        "sync": "true",
+                        "replay_interrupted": "false",
+                        "protect_ownership": "true",
+                    },
                     _buffer_pending=False,
-                    _idempotency_key=operation_key(
-                        node, stage, resolved_links(body) if stage == "relink" else None
-                    ),
+                    _idempotency_key=operation_key(node, "create"),
                 )
             except Exception as exc:
                 if (
@@ -668,35 +663,65 @@ async def execute_plan(
                 )
                 return None
             outcome.adopted += 1
-            return existing
+            return existing, None
         target_id = str(response.get("id") or "")
         if not target_id:
             outcome.failures.append(f"{kind} {origin}: no id returned")
             return None
-        return target_id
+        revision = response.get("revision")
+        if type(revision) is not int or revision < 1:
+            raise RuntimeError(
+                "the create receipt omitted its exact entity revision; upgrade the team "
+                "server and reconcile the saved create receipt before retrying"
+            )
+        return target_id, revision
 
-    async def set_status(
-        node: PlannedEntity, target_id: str, status: str, *, key: str | None = None
-    ) -> bool:
+    async def set_status(node: PlannedEntity, target_id: str, status: str) -> bool:
         origin = node.source.uuid
         statuses.pop(origin, None)
-        key = key or operation_key(node, "status", {"target_id": target_id, "status": status})
-        async with gate:
-            try:
+        pending = partial.setdefault(origin, {"missing": [], "digest": None})
+        try:
+            intent: dict[str, Any] | None = pending.get("status_intent")
+            if intent is None:
+                revision = pending.get("created_revision")
+                if type(revision) is not int or revision < 1:
+                    pending["status_revision_required"] = True
+                    save()
+                    raise RuntimeError(
+                        "no trustworthy saved create revision is available; reconcile "
+                        "the target status before retrying"
+                    )
+                intent = {
+                    "target_id": target_id,
+                    "body": {"status": status, "expected_revision": revision},
+                    "key": operation_key(
+                        node, "status", {"target_id": target_id, "status": status}
+                    ),
+                }
+                pending["status_intent"] = intent
+                save()
+            if intent["target_id"] != target_id or intent["body"]["status"] != status:
+                raise RuntimeError(
+                    "the source status or target changed after its intent was saved; "
+                    "restore the original input or reconcile the saved status receipt"
+                )
+            async with gate:
                 response = await client._request(
                     "PATCH",
                     f"/tasks/{target_id}",
-                    json={"status": status},
+                    json=intent["body"],
                     params={"sync": "true", "replay_interrupted": "false"},
                     _buffer_pending=False,
-                    _idempotency_key=key,
+                    _idempotency_key=intent["key"],
                 )
                 if (response.get("mutation_receipt") or {}).get("applied") is False:
                     raise RuntimeError("the server queued the status instead of applying it")
-            except Exception as exc:
-                outcome.failures.append(f"task {origin}: status {status} not set ({exc})")
-                return False
+        except Exception as exc:
+            outcome.failures.append(f"task {origin}: status {status} not set ({exc})")
+            return False
         statuses[origin] = status
+        pending.pop("status_intent")
+        pending.pop("created_revision", None)
         outcome.statuses += 1
         return True
 
@@ -714,16 +739,35 @@ async def execute_plan(
         relink_after_create = False
         pending = partial.get(origin)
         if origin in ids and pending and pending.get("restore_status"):
-            if not await set_status(
-                node,
-                ids[origin],
-                str(pending["restore_status"]),
-                key=pending.get("restore_status_key"),
-            ):
+            raise RuntimeError(
+                "the legacy status restoration has no trustworthy saved revision; "
+                "reconcile the target status before retrying"
+            )
+        if origin in ids and pending and pending.get("status_revision_required"):
+            raise RuntimeError(
+                "no trustworthy saved create revision is available; reconcile "
+                "the target status before retrying"
+            )
+        if (
+            origin in ids
+            and pending
+            and (
+                pending.get("status_intent")
+                or (
+                    "created_revision" in pending
+                    and _task_status(node)
+                    and statuses.get(origin) != _task_status(node)
+                )
+            )
+        ):
+            status = _task_status(node)
+            if not status:
+                raise RuntimeError(
+                    "the source status changed after its intent was saved; restore "
+                    "the original input or reconcile the saved status receipt"
+                )
+            if not await set_status(node, ids[origin], status):
                 return
-            statuses[origin] = _task_status(node) or "todo"
-            pending.pop("restore_status")
-            pending.pop("restore_status_key", None)
             if not pending.get("missing"):
                 partial.pop(origin)
                 outcome.resumed += 1
@@ -731,7 +775,11 @@ async def execute_plan(
         if origin in ids and not pending:
             outcome.resumed += 1
         elif origin in ids and pending:
-            await relink(node, pending)
+            if not pending.get("missing") and "link_body" not in pending:
+                partial.pop(origin)
+                outcome.resumed += 1
+            else:
+                await relink(node, pending)
             return
         else:
             source_digest = hashlib.sha256(
@@ -762,15 +810,20 @@ async def execute_plan(
                     "digest": None,
                 }
                 save()
-            target_id = await write(node, body)
-            if target_id is None:
+            created = await write(node, body)
+            if created is None:
                 return
+            target_id, revision = created
             ids[origin] = target_id
             outcome.created += 1
+            partial[origin] = {
+                "missing": missing,
+                "digest": None,
+                "created_revision": revision,
+            }
             if missing:
                 # Recorded before the read, so a failed read cannot leave the
                 # row looking finished.
-                partial[origin] = {"missing": missing, "digest": None}
                 landed = await read(target_id)
                 partial[origin]["digest"] = target_digest(landed) if landed else None
                 relink_after_create = any(target in ids for target in missing)
@@ -778,8 +831,6 @@ async def execute_plan(
                     f"{origin}: landed without {len(missing)} link(s) to rows that failed; "
                     "a re-run adds them once those rows land"
                 )
-            else:
-                partial.pop(origin, None)
             writes += 1
             if writes % _SAVE_EVERY == 0:
                 save()
@@ -789,45 +840,78 @@ async def execute_plan(
             and statuses.get(origin) != status
             and not await set_status(node, ids[origin], status)
         ):
-            if origin in partial:
-                partial[origin]["restore_status"] = status
             return
         if relink_after_create:
             await relink(node, partial[origin])
+        elif origin in partial and not partial[origin].get("missing"):
+            partial.pop(origin)
 
     async def relink(node: PlannedEntity, pending: dict[str, Any]) -> None:
         origin = node.source.uuid
-        body, missing = _payload(
-            node, ids=ids, target_project_id=target_project_id, origin_org=origin_org
-        )
-        if set(missing) >= set(pending.get("missing") or []):
-            outcome.resumed += 1
-            outcome.unlinked.append(
-                f"{origin}: still missing {len(missing)} link(s) to rows that failed"
+        target_id = ids[origin]
+        if "link_body" not in pending:
+            body, missing = _payload(
+                node, ids=ids, target_project_id=target_project_id, origin_org=origin_org
             )
-            return
-        if not pending.get("digest"):
-            partial.pop(origin, None)
-            outcome.resumed += 1
-            outcome.unlinked.append(
-                f"{origin}: could not confirm it was unchanged on the team server, so its "
-                "missing links were not added"
+            if set(missing) >= set(pending.get("missing") or []):
+                outcome.resumed += 1
+                outcome.unlinked.append(
+                    f"{origin}: still missing {len(missing)} link(s) to rows that failed"
+                )
+                return
+            if not pending.get("digest"):
+                partial.pop(origin, None)
+                outcome.resumed += 1
+                outcome.unlinked.append(
+                    f"{origin}: could not confirm it was unchanged on the team server, so its "
+                    "missing links were not added"
+                )
+                return
+            current = await read(target_id)
+            if current is None or target_digest(current) != pending.get("digest"):
+                partial.pop(origin, None)
+                outcome.resumed += 1
+                outcome.unlinked.append(
+                    f"{origin}: changed on the team server since it was migrated, so its "
+                    "missing links were not added"
+                )
+                return
+            revision = current.get("revision")
+            if type(revision) is not int or revision < 1:
+                raise RuntimeError(
+                    "the target did not return an entity revision; upgrade the team server "
+                    "before retrying missing links"
+                )
+            topology = resolved_links(body)
+            request = {"expected_revision": revision, **topology}
+            pending["link_body"] = request
+            pending["link_missing"] = missing
+            pending["link_key"] = operation_key(node, "links", topology)
+            # A lost response retries this exact request. The server either finds
+            # every binding already applied or enforces the saved revision.
+            save()
+        async with gate:
+            try:
+                response = await client._request(
+                    "POST",
+                    f"/entities/{target_id}/links",
+                    json=pending["link_body"],
+                    _buffer_pending=False,
+                    _idempotency_key=pending["link_key"],
+                )
+            except Exception as exc:
+                if getattr(exc, "status_code", None) == 404:
+                    raise RuntimeError(
+                        "the target entity or its additive link endpoint is unavailable; "
+                        "check the entity and upgrade the team server before retrying"
+                    ) from exc
+                raise
+        revision = response.get("revision")
+        if response.get("entity_id") != target_id or type(revision) is not int or revision < 1:
+            raise RuntimeError(
+                "the target returned an invalid link receipt; retry the saved intent"
             )
-            return
-        current = await read(ids[origin])
-        if current is None or target_digest(current) != pending.get("digest"):
-            # Deleted or edited on the team server since it landed: leave it.
-            partial.pop(origin, None)
-            outcome.resumed += 1
-            outcome.unlinked.append(
-                f"{origin}: changed on the team server since it was migrated, so its "
-                "missing links were not added"
-            )
-            return
-        target_id = await write(node, body, stage="relink")
-        if target_id is None:
-            return
-        statuses.pop(origin, None)
+        missing = pending["link_missing"]
         outcome.relinked += 1
         if missing:
             partial[origin] = {"missing": missing, "digest": None}
@@ -835,19 +919,6 @@ async def execute_plan(
             partial[origin]["digest"] = target_digest(landed) if landed else None
         else:
             partial.pop(origin, None)
-        # Writing the row again resets a task's status; put back the one it had.
-        status = _target_task_status(current)
-        if status:
-            key = operation_key(node, "relink-status", {"status": status, **resolved_links(body)})
-            if not await set_status(node, target_id, status, key=key):
-                restoration = partial.setdefault(origin, {"missing": [], "digest": None})
-                restoration["restore_status"] = status
-                restoration["restore_status_key"] = key
-                return
-        if node.source.entity_type == "task":
-            # The source status is already reconciled, even when the teammate's
-            # newer status was the one restored after adding links.
-            statuses[origin] = _task_status(node) or "todo"
 
     for index, layer in enumerate(plan.layers):
         await asyncio.gather(*(create(node) for node in layer))

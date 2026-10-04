@@ -1,9 +1,8 @@
 """The graph pass of `sibyl migrate to-team` plans and writes a project's authored graph.
 
-The API only accepts links declared at creation, from the new entity to ones
-that already exist, so the plan has to order every write. These cover what
-is carried, what is left for the target to re-derive, and that a re-run
-resumes without duplicating anything.
+Creation declares links to existing targets, and additive recovery fills
+missing links without rewriting an imported body. These tests cover ordering,
+selection and saved intents across partial failures and lost responses.
 """
 
 from __future__ import annotations
@@ -429,6 +428,27 @@ class _Target:
         self.calls.append((method, path, json))
         if method == "POST" and path == "/search/explore":
             return {"entities": [{"id": tid, "name": name} for name, tid in self.taken.items()]}
+        if method == "POST" and path.endswith("/links"):
+            body = json or {}
+            target_id = path.split("/")[-2]
+            row = self.rows[target_id]
+            metadata = row["metadata"]
+            for field in ("epic_id", "parent_task_id"):
+                if body.get(field):
+                    metadata[field] = body[field]
+            if body.get("depends_on"):
+                metadata["depends_on"] = body["depends_on"]
+            row["revision"] += 1
+            return {
+                "entity_id": target_id,
+                "revision": row["revision"],
+                "added_relationship_ids": [],
+                "existing_relationship_ids": [],
+                "epic_id": metadata.get("epic_id"),
+                "parent_task_id": metadata.get("parent_task_id"),
+                "depends_on": metadata.get("depends_on") or [],
+                "replayed": False,
+            }
         if method == "POST":
             body = json or {}
             origin = body["metadata"]["migration"]["origin_entity_id"]
@@ -441,13 +461,14 @@ class _Target:
             target_id = f"target-{origin}"
             self.rows[target_id] = {
                 "id": target_id,
+                "revision": 1,
                 "name": body["name"],
                 "content": body["content"],
                 "description": body.get("description"),
                 "tags": body.get("tags") or [],
                 "metadata": {**body["metadata"], "status": "todo"},
             }
-            return {"id": target_id}
+            return {"id": target_id, "revision": 1}
         if method == "GET":
             target_id = path.rsplit("/", 1)[-1]
             if target_id not in self.rows:
@@ -456,7 +477,11 @@ class _Target:
         if method == "PATCH":
             assert params == {"sync": "true", "replay_interrupted": "false"}
             target_id = path.rsplit("/", 1)[-1]
-            self.rows[target_id]["metadata"]["status"] = (json or {})["status"]
+            row = self.rows[target_id]
+            if (json or {}).get("expected_revision") != row["revision"]:
+                raise _ApiError(409)
+            row["metadata"]["status"] = (json or {})["status"]
+            row["revision"] += 1
         return {}
 
     def posts(self) -> dict[str, dict[str, Any]]:
@@ -536,7 +561,9 @@ async def test_execute_writes_bodies_links_and_statuses() -> None:
     assert decision["retrieval_keys"] == ["E_RETRY_LIMIT"]
     assert posts["epic_1"]["metadata"]["migration"]["origin_status"] == "in_progress"
     patches = [call for call in target.calls if call[0] == "PATCH"]
-    assert [(p[1], p[2]) for p in patches] == [("/tasks/target-task_1", {"status": "done"})]
+    assert [(p[1], p[2]) for p in patches] == [
+        ("/tasks/target-task_1", {"status": "done", "expected_revision": 1})
+    ]
     assert ledger.statuses == {"task_1": "done"}
     assert ledger.partial == {}
     assert ledger.saves >= 1
@@ -572,8 +599,9 @@ async def test_a_failed_write_is_reported_and_its_dependents_land_then_get_relin
     assert second.created == 1 and second.relinked == 2
     rows = target.rows
     assert rows["target-decision_1"]["metadata"]["migration"]["origin_entity_id"] == "decision_1"
-    resent = [c for c in target.calls[len(target.calls) - 10 :] if c[0] == "POST"]
-    assert any(c[2]["related_to"] == ["target-task_1"] for c in resent if c[2].get("related_to"))  # type: ignore[index]
+    linked = [c for c in target.calls if c[0] == "POST" and c[1].endswith("/links")]
+    assert any(c[2]["related_to"] == ["target-task_1"] for c in linked)  # type: ignore[index]
+    assert all("content" not in c[2] and "metadata" not in c[2] for c in linked)  # type: ignore[operator]
     assert ledger.partial == {}
 
 
@@ -908,7 +936,7 @@ class _FailedStatuses(_Target):
         return await super()._request(method, path, *args, **kwargs)
 
 
-async def test_relink_status_failure_retains_restoration_for_the_next_run() -> None:
+async def test_linking_preserves_team_status_without_another_status_write() -> None:
     ledger = _Ledger()
     target = _FailedStatuses(fail={"epic_1"})
     plan = _epic_and_done_task()
@@ -916,20 +944,28 @@ async def test_relink_status_failure_retains_restoration_for_the_next_run() -> N
     target.rows["target-task_1"]["metadata"]["status"] = "doing"
     target.fail.clear()
     target.fail_status = True
-    failed = await _execute(target, ledger, plan)
-    assert failed.failures
-    assert target.rows["target-task_1"]["metadata"]["status"] == "todo"
-    assert ledger.partial["task_1"]["restore_status"] == "doing"
-    assert "task_1" not in ledger.statuses
-    target.fail_status = False
-    repaired = await _execute(target, ledger, plan)
-    assert repaired.failures == []
+    linked = await _execute(target, ledger, plan)
+    assert linked.failures == []
     assert target.rows["target-task_1"]["metadata"]["status"] == "doing"
     assert ledger.partial == {}
-    posts = len(target.posts())
     await _execute(target, ledger, plan)
     assert target.rows["target-task_1"]["metadata"]["status"] == "doing"
-    assert len(target.posts()) == posts
+
+
+async def test_a_legacy_status_restoration_without_revision_is_denied() -> None:
+    ledger = _Ledger()
+    target = _FailedStatuses()
+    plan = build_plan([_entity("task_1", "task", status="done")], [], project=PROJECT)
+    await _execute(target, ledger, plan)
+    target.rows["target-task_1"]["metadata"]["status"] = "doing"
+    ledger.statuses.clear()
+    ledger.partial["task_1"] = {"restore_status": "done", "missing": [], "digest": None}
+    old_calls = len(target.calls)
+    result = await _execute(target, ledger, plan)
+    assert result.failures and "no trustworthy saved revision" in result.failures[0]
+    assert ledger.partial["task_1"]["restore_status"] == "done"
+    assert target.rows["target-task_1"]["metadata"]["status"] == "doing"
+    assert len(target.calls) == old_calls
 
 
 async def test_queued_status_response_does_not_mark_the_ledger_applied() -> None:
@@ -1025,7 +1061,9 @@ async def test_relink_uses_a_distinct_key_for_the_resolved_links() -> None:
         for key, (body, _) in target.responses.items()
         if body["metadata"]["migration"]["origin_entity_id"] == "task_1"
     ]
-    assert len(task_keys) == 2
+    assert len(task_keys) == 1
+    links = [c for c in target.calls if c[1].endswith("/links")]
+    assert len(links) == 1 and links[0][2]["expected_revision"] == 2
 
 
 async def test_operation_namespace_qualifies_the_create_key() -> None:
@@ -1067,7 +1105,8 @@ async def test_unknown_create_keeps_its_body_when_a_dependency_lands_on_retry() 
         for body, _ in target.responses.values()
         if body["metadata"]["migration"]["origin_entity_id"] == "task_1"
     ]
-    assert len(stored) == 2 and stored[0] == original
+    assert stored == [original]
+    assert any(call[1].endswith("/links") for call in target.calls)
 
 
 async def test_create_intent_is_saved_before_any_target_write() -> None:
@@ -1124,7 +1163,7 @@ async def test_completed_status_retry_does_not_replace_a_newer_team_status() -> 
     assert len(target.status_keys) == 2 and len(set(target.status_keys)) == 1
 
 
-async def test_status_restoration_uses_a_different_key_from_initial_status() -> None:
+async def test_link_only_recovery_does_not_reuse_the_initial_status_operation() -> None:
     ledger = _Ledger()
     target = _IdempotentStatusTarget()
     target.fail = {"epic_1"}
@@ -1134,7 +1173,7 @@ async def test_status_restoration_uses_a_different_key_from_initial_status() -> 
     second = await _execute(target, ledger, plan)
     assert second.failures == []
     assert target.rows["target-task_1"]["metadata"]["status"] == "done"
-    assert len(set(target.status_keys)) == 2
+    assert len(target.status_keys) == 1
 
 
 async def test_interrupted_container_conflict_cannot_adopt_a_same_named_row() -> None:
@@ -1156,3 +1195,390 @@ async def test_interrupted_container_conflict_cannot_adopt_a_same_named_row() ->
     assert result.adopted == 0
     assert "epic_1" not in ledger.ids
     assert target.calls == []
+
+
+class _GuardedLinksTarget(_Target):
+    def __init__(self) -> None:
+        super().__init__()
+        self.link_requests: list[dict[str, Any]] = []
+        self.link_keys: list[str] = []
+        self.stored_declarations: dict[str, set[str]] = {}
+        self.edit_before_links = False
+        self.lose_link_ack = False
+        self.missing_link_endpoint = False
+
+    async def _request(self, method: str, path: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        import copy
+
+        if method != "POST" or not path.endswith("/links"):
+            return await super()._request(method, path, *args, **kwargs)
+        request = copy.deepcopy(kwargs["json"])
+        self.link_requests.append(request)
+        self.link_keys.append(kwargs["_idempotency_key"])
+        assert set(request) == {
+            "expected_revision",
+            "related_to",
+            "epic_id",
+            "parent_task_id",
+            "depends_on",
+        }
+        if self.missing_link_endpoint:
+            raise _ApiError(404)
+        target_id = path.split("/")[-2]
+        row = self.rows[target_id]
+        if self.edit_before_links:
+            self.edit_before_links = False
+            row["content"] = "teammate edit after comparison"
+            row["metadata"]["status"] = "doing"
+            row["revision"] += 1
+        metadata = row["metadata"]
+        requested_edges = set(request["related_to"])
+        existing_edges = self.stored_declarations.setdefault(target_id, set())
+        complete = (
+            requested_edges <= existing_edges
+            and set(request["depends_on"]) <= set(metadata.get("depends_on") or [])
+            and all(
+                not request.get(field) or metadata.get(field) == request[field]
+                for field in ("epic_id", "parent_task_id")
+            )
+        )
+        if complete:
+            return {"entity_id": target_id, "revision": row["revision"], "replayed": True}
+        if row["revision"] != request["expected_revision"]:
+            raise _ApiError(409)
+        result = await super()._request(method, path, *args, **kwargs)
+        existing_edges.update(requested_edges)
+        if self.lose_link_ack:
+            self.lose_link_ack = False
+            raise RuntimeError("lost link acknowledgement")
+        return result
+
+
+async def test_additive_links_refuse_an_edit_between_comparison_and_write() -> None:
+    ledger = _Ledger()
+    target = _GuardedLinksTarget()
+    target.fail = {"epic_1"}
+    plan = _epic_and_done_task()
+    await _execute(target, ledger, plan)
+    target.fail.clear()
+    target.edit_before_links = True
+    outcome = await _execute(target, ledger, plan)
+    assert outcome.failures and outcome.relinked == 0
+    row = target.rows["target-task_1"]
+    assert row["content"] == "teammate edit after comparison"
+    assert row["metadata"]["status"] == "doing"
+    assert "epic_id" not in row["metadata"]
+    assert ledger.partial["task_1"]["link_body"]["expected_revision"] == 2
+    assert len([c for c in target.calls if c[0] == "POST" and c[1] == "/entities"]) == 3
+
+
+async def test_unknown_link_replays_the_same_intent_without_touching_team_edits() -> None:
+    ledger = _Ledger()
+    target = _GuardedLinksTarget()
+    target.fail = {"epic_1"}
+    plan = _epic_and_done_task()
+    await _execute(target, ledger, plan)
+    target.fail.clear()
+    target.lose_link_ack = True
+    failed = await _execute(target, ledger, plan)
+    assert failed.failures
+    intent = ledger.partial["task_1"]["link_body"]
+    row = target.rows["target-task_1"]
+    assert row["metadata"]["epic_id"] == "target-epic_1"
+    row["content"] = "edited after completed link"
+    row["metadata"]["status"] = "doing"
+    row["revision"] += 1
+    calls = len(target.calls)
+    recovered = await _execute(target, ledger, plan)
+    assert recovered.failures == [] and recovered.relinked == 1
+    assert ledger.partial == {}
+    assert row["content"] == "edited after completed link"
+    assert row["metadata"]["status"] == "doing"
+    assert target.link_requests == [intent, intent]
+    assert len(set(target.link_keys)) == 1
+    assert target.calls[calls:] == []
+
+
+async def test_old_server_link_endpoint_requires_upgrade_without_full_rewrite() -> None:
+    ledger = _Ledger()
+    target = _GuardedLinksTarget()
+    target.fail = {"epic_1"}
+    plan = _epic_and_done_task()
+    await _execute(target, ledger, plan)
+    target.fail.clear()
+    target.missing_link_endpoint = True
+    result = await _execute(target, ledger, plan)
+    assert result.failures and any("upgrade" in failure for failure in result.failures)
+    assert target.rows["target-task_1"]["metadata"]["status"] == "done"
+    assert ledger.partial["task_1"]["link_body"]["expected_revision"] == 2
+    assert len([c for c in target.calls if c[0] == "POST" and c[1] == "/entities"]) == 3
+
+
+@pytest.mark.parametrize("revision", [None, 0, True, "1"])
+async def test_missing_or_coerced_revisions_cannot_authorize_additive_links(revision: Any) -> None:
+    ledger = _Ledger()
+    target = _GuardedLinksTarget()
+    target.fail = {"epic_1"}
+    plan = _epic_and_done_task()
+    await _execute(target, ledger, plan)
+    target.rows["target-task_1"]["revision"] = revision
+    target.fail.clear()
+    result = await _execute(target, ledger, plan)
+    assert result.failures and any("revision" in failure for failure in result.failures)
+    assert target.link_requests == []
+
+
+async def test_link_intent_is_saved_before_the_additive_request() -> None:
+    ledger = _Ledger()
+
+    class Target(_GuardedLinksTarget):
+        async def _request(
+            self, method: str, path: str, *args: Any, **kwargs: Any
+        ) -> dict[str, Any]:
+            if path.endswith("/links"):
+                assert ledger.partial["task_1"]["link_body"] == kwargs["json"]
+                assert ledger.saves > saves_before
+            return await super()._request(method, path, *args, **kwargs)
+
+    target = Target()
+    target.fail = {"epic_1"}
+    plan = _epic_and_done_task()
+    await _execute(target, ledger, plan)
+    saves_before = ledger.saves
+    target.fail.clear()
+    result = await _execute(target, ledger, plan)
+    assert result.failures == [] and ledger.partial == {}
+
+
+class _GuardedInitialStatusTarget(_IdempotentStatusTarget):
+    edit_before_status = False
+    status_requests: list[dict[str, Any]]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.status_requests = []
+
+    async def _request(self, method: str, path: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        import copy
+
+        if method == "PATCH":
+            self.status_requests.append(copy.deepcopy(kwargs["json"]))
+            if self.edit_before_status:
+                self.edit_before_status = False
+                row = self.rows[path.rsplit("/", 1)[-1]]
+                row["metadata"]["status"] = "doing"
+                row["content"] = "new team body"
+                row["revision"] += 1
+        return await super()._request(method, path, *args, **kwargs)
+
+
+async def test_initial_status_guard_refuses_a_team_edit_after_creation() -> None:
+    ledger = _Ledger()
+    target = _GuardedInitialStatusTarget()
+    target.edit_before_status = True
+    plan = build_plan([_entity("task_1", "task", status="done")], [], project=PROJECT)
+    result = await _execute(target, ledger, plan)
+    assert result.failures and result.statuses == 0 and ledger.statuses == {}
+    row = target.rows["target-task_1"]
+    assert row["metadata"]["status"] == "doing" and row["content"] == "new team body"
+    assert row["revision"] == 2
+    assert ledger.partial["task_1"]["status_intent"]["body"] == {
+        "status": "done",
+        "expected_revision": 1,
+    }
+    second = await _execute(target, ledger, plan)
+    assert second.failures and target.status_requests == [
+        {"status": "done", "expected_revision": 1},
+        {"status": "done", "expected_revision": 1},
+    ]
+    assert row["metadata"]["status"] == "doing" and row["revision"] == 2
+
+
+async def test_lost_create_receipt_does_not_adopt_an_edited_revision_for_status() -> None:
+    ledger = _Ledger()
+    target = _GuardedInitialStatusTarget()
+    target.lose_ack = True
+    plan = build_plan([_entity("task_1", "task", status="done")], [], project=PROJECT)
+    first = await _execute(target, ledger, plan)
+    assert first.failures and ledger.ids == {}
+    row = target.rows["target-task_1"]
+    row["metadata"]["status"] = "doing"
+    row["revision"] += 1
+    second = await _execute(target, ledger, plan)
+    assert second.failures and ledger.statuses == {}
+    assert target.status_requests == [{"status": "done", "expected_revision": 1}]
+    assert row["metadata"]["status"] == "doing" and row["revision"] == 2
+
+
+async def test_status_intent_is_saved_from_the_exact_create_receipt_before_patch() -> None:
+    ledger = _Ledger()
+
+    class Target(_Target):
+        async def _request(
+            self, method: str, path: str, *args: Any, **kwargs: Any
+        ) -> dict[str, Any]:
+            if method == "POST" and path == "/entities":
+                assert kwargs["params"] == {
+                    "sync": "true",
+                    "replay_interrupted": "false",
+                    "protect_ownership": "true",
+                }
+                response = await super()._request(method, path, *args, **kwargs)
+                self.rows[response["id"]]["revision"] = 7
+                return {**response, "revision": 7}
+            if method == "PATCH":
+                intent = ledger.partial["task_1"]["status_intent"]
+                assert intent["target_id"] == "target-task_1"
+                assert (
+                    intent["body"] == kwargs["json"] == {"status": "done", "expected_revision": 7}
+                )
+                assert intent["key"] == kwargs["_idempotency_key"]
+                assert ledger.saves >= 2
+            return await super()._request(method, path, *args, **kwargs)
+
+    target = Target()
+    result = await _execute(
+        target, ledger, build_plan([_entity("task_1", "task", status="done")], [], project=PROJECT)
+    )
+    assert result.failures == [] and ledger.partial == {} and ledger.statuses == {"task_1": "done"}
+    assert target.rows["target-task_1"]["revision"] == 8
+
+
+@pytest.mark.parametrize("revision", [None, 0, True, "1"])
+async def test_missing_or_coerced_create_revision_cannot_authorize_status(revision: Any) -> None:
+    ledger = _Ledger()
+
+    class Target(_Target):
+        async def _request(
+            self, method: str, path: str, *args: Any, **kwargs: Any
+        ) -> dict[str, Any]:
+            response = await super()._request(method, path, *args, **kwargs)
+            return {**response, "revision": revision} if method == "POST" else response
+
+    target = Target()
+    result = await _execute(
+        target, ledger, build_plan([_entity("task_1", "task", status="done")], [], project=PROJECT)
+    )
+    assert result.failures and ledger.ids == {} and ledger.statuses == {}
+    assert not any(call[0] == "PATCH" for call in target.calls)
+    assert "create_body" in ledger.partial["task_1"]
+
+
+@pytest.mark.parametrize("changed_status", ["blocked", "todo"])
+async def test_changed_source_status_cannot_replace_a_saved_status_intent(
+    changed_status: str,
+) -> None:
+    ledger = _Ledger()
+    target = _IdempotentStatusTarget()
+    target.lose_status_ack = True
+    original = build_plan([_entity("task_1", "task", status="done")], [], project=PROJECT)
+    first = await _execute(target, ledger, original)
+    assert first.failures
+    keys = target.status_keys.copy()
+    changed = build_plan([_entity("task_1", "task", status=changed_status)], [], project=PROJECT)
+    result = await _execute(target, ledger, changed)
+    assert result.failures and "source status" in result.failures[0]
+    assert target.status_keys == keys
+    assert ledger.partial["task_1"]["status_intent"]["body"]["status"] == "done"
+
+
+async def test_legacy_landed_task_without_status_revision_fails_without_target_read() -> None:
+    ledger = _Ledger()
+    ledger.ids["task_1"] = "target-task_1"
+    target = _Target()
+    target.rows["target-task_1"] = {"metadata": {"status": "doing"}, "revision": 4}
+    result = await _execute(
+        target, ledger, build_plan([_entity("task_1", "task", status="done")], [], project=PROJECT)
+    )
+    assert result.failures and "no trustworthy saved create revision" in result.failures[0]
+    assert target.calls == [] and target.rows["target-task_1"]["metadata"]["status"] == "doing"
+    retry = await _execute(
+        target, ledger, build_plan([_entity("task_1", "task", status="done")], [], project=PROJECT)
+    )
+    assert retry.failures and "no trustworthy saved create revision" in retry.failures[0]
+    assert target.calls == []
+
+
+async def test_saved_create_revision_recovers_status_after_initial_target_read_failure() -> None:
+    import json
+
+    class Target(_GuardedInitialStatusTarget):
+        fail_first_task_read = True
+
+        async def _request(
+            self, method: str, path: str, *args: Any, **kwargs: Any
+        ) -> dict[str, Any]:
+            if method == "GET" and path == "/entities/target-task_1" and self.fail_first_task_read:
+                self.fail_first_task_read = False
+                raise RuntimeError("first post-create read failed")
+            return await super()._request(method, path, *args, **kwargs)
+
+    target = Target()
+    target.fail = {"epic_1"}
+    plan = _epic_and_done_task()
+    first_ledger = _Ledger()
+    first = await _execute(target, first_ledger, plan)
+    assert first.failures
+    assert first_ledger.ids == {"task_1": "target-task_1"}
+    assert first_ledger.partial["task_1"]["created_revision"] == 1
+    assert "status_intent" not in first_ledger.partial["task_1"]
+    assert first_ledger.statuses == {}
+    # Reconstruct the next process's ledger from the saved JSON values.
+    saved = json.loads(
+        json.dumps(
+            {
+                "ids": first_ledger.ids,
+                "partial": first_ledger.partial,
+                "statuses": first_ledger.statuses,
+            }
+        )
+    )
+    resumed = _Ledger()
+    resumed.ids, resumed.partial, resumed.statuses = (
+        saved["ids"],
+        saved["partial"],
+        saved["statuses"],
+    )
+    target.fail.clear()
+    second = await _execute(target, resumed, plan)
+    assert second.failures == []
+    assert resumed.statuses == {"task_1": "done"}
+    assert target.status_requests == [{"status": "done", "expected_revision": 1}]
+    assert target.rows["target-task_1"]["metadata"]["status"] == "done"
+    assert second.unlinked  # No saved body cut means the missing links remain explicitly reported.
+
+
+@pytest.mark.parametrize("kind", ["decision", "epic", "task"])
+async def test_saved_complete_create_receipt_clears_empty_partial_without_target_io(
+    kind: str,
+) -> None:
+    import json
+
+    plan = build_plan([_entity("complete_1", kind, status="todo")], [], project=PROJECT)
+    target = _Target()
+    original = _Ledger()
+    first = await _execute(target, original, plan)
+    assert first.created == 1 and first.failures == []
+    # A sibling can save the create receipt before this row's final cleanup.
+    saved = json.loads(
+        json.dumps(
+            {
+                "ids": original.ids,
+                "statuses": original.statuses,
+                "partial": {"complete_1": {"missing": [], "digest": None, "created_revision": 1}},
+            }
+        )
+    )
+    resumed = _Ledger()
+    resumed.ids, resumed.statuses, resumed.partial = (
+        saved["ids"],
+        saved["statuses"],
+        saved["partial"],
+    )
+    before = json.loads(json.dumps(target.rows))
+    target.calls.clear()
+    second = await _execute(target, resumed, plan)
+    assert second.resumed == 1 and second.created == second.relinked == 0
+    assert second.failures == second.unlinked == []
+    assert resumed.partial == {} and target.calls == [] and target.rows == before
+    assert resumed.saves == 1
