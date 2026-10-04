@@ -57,13 +57,23 @@ def _route_fingerprint(route: dict[str, str]) -> str:
 
 
 async def _bind_route(
-    client: Any, route: dict[str, str], *, source_url: str, source_project: str
+    client: Any,
+    route: dict[str, str],
+    *,
+    source_url: str,
+    source_project: str,
+    require_graph: bool = False,
 ) -> dict[str, str]:
     identity = await client.get("/auth/replay-identity")
     if "migration_replay_policy_v1" not in identity.get("capabilities", []):
         raise RuntimeError(
             "upgrade the target server before migrating: it does not advertise "
             "protected migration retry handling"
+        )
+    if require_graph and "migration_graph_writes_v1" not in identity.get("capabilities", []):
+        raise RuntimeError(
+            "upgrade the target server before migrating graph data: it does not advertise "
+            "protected graph creation and additive link writes"
         )
     if (
         not identity.get("server_instance_id")
@@ -836,7 +846,11 @@ def to_team(
             "target_project_id": target_project_id,
         }
         route = await _bind_route(
-            target, route, source_url=source_surreal_url, source_project=project
+            target,
+            route,
+            source_url=source_surreal_url,
+            source_project=project,
+            require_graph=graph,
         )
         unbound_route = {key: route[key] for key in _ROUTE_KEYS}
         if graph and _graph_ledger_path(unbound_route).exists():

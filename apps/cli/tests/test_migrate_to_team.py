@@ -63,7 +63,7 @@ def _target(monkeypatch: pytest.MonkeyPatch, current: dict[str, Any]) -> MagicMo
     async def _get(path: str) -> dict[str, Any]:
         if path == "/auth/replay-identity":
             return {
-                "capabilities": ["migration_replay_policy_v1"],
+                "capabilities": ["migration_replay_policy_v1", "migration_graph_writes_v1"],
                 "server_instance_id": "server-a",
                 "user_id": "alice",
                 "organization_id": current["id"],
@@ -296,7 +296,7 @@ def test_a_dry_run_reports_adoption_without_touching_the_ledgers(
 async def test_bound_routes_separate_actor_server_and_source() -> None:
     client = MagicMock()
     identity = {
-        "capabilities": ["migration_replay_policy_v1"],
+        "capabilities": ["migration_replay_policy_v1", "migration_graph_writes_v1"],
         "server_instance_id": "server-a",
         "user_id": "alice",
         "organization_id": "team",
@@ -442,3 +442,29 @@ def test_old_server_is_refused_before_migration_writes(
     assert "upgrade the target server" in result.stdout
     client.remember_raw_memory.assert_not_awaited()
     assert not ledger_dir.exists()
+
+
+@pytest.mark.parametrize("graph", [False, True])
+def test_replay_only_server_allows_raw_but_refuses_graph_before_writes(
+    ledger_dir: Path, monkeypatch: pytest.MonkeyPatch, graph: bool
+) -> None:
+    client = _target(monkeypatch, TEAM)
+    original_get = client.get.side_effect
+
+    async def replay_only_identity(path: str) -> dict[str, Any]:
+        result = await original_get(path)
+        if path == "/auth/replay-identity":
+            result["capabilities"] = ["migration_replay_policy_v1"]
+        return result
+
+    client.get.side_effect = replay_only_identity
+    result = _run("--graph" if graph else "--no-graph")
+    if graph:
+        assert result.exit_code == 1
+        assert "upgrade the target server before migrating graph data" in result.stdout
+        client.remember_raw_memory.assert_not_awaited()
+        client.post.assert_not_called()
+        assert not ledger_dir.exists()
+    else:
+        assert result.exit_code == 0, result.stdout
+        assert client.remember_raw_memory.await_count == len(ROWS)
