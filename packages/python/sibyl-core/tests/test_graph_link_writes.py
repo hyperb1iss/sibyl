@@ -79,7 +79,7 @@ async def native_links(tmp_path):
                 ),
                 generate_embedding=False,
             )
-        yield client, manager, org
+        yield client, manager, org, registry
     finally:
         await client.close()
         if root.socket is not None:
@@ -120,7 +120,7 @@ def _edge(source="source", target="target"):
 
 @pytest.mark.asyncio
 async def test_native_links_add_topology_preserves_body_and_exact_replay(native_links):
-    client, manager, org = native_links
+    client, manager, org, _registry = native_links
     source, target, epic = await _snapshots(client, org, "source", "target", "epic")
     before = source.entity
     result = await add_entity_links_if_revision(
@@ -169,7 +169,7 @@ async def test_native_links_add_topology_preserves_body_and_exact_replay(native_
 
 @pytest.mark.asyncio
 async def test_native_links_stale_revision_has_no_partial_writes(native_links):
-    client, manager, org = native_links
+    client, manager, org, _registry = native_links
     source, target = await _snapshots(client, org, "source", "target")
     expected = source.entity.revision
     await manager.update("source", {"content": "new body", "metadata": {"status": "done"}})
@@ -194,7 +194,7 @@ async def test_native_links_stale_revision_has_no_partial_writes(native_links):
 
 @pytest.mark.asyncio
 async def test_native_links_changed_authorized_target_is_rejected(native_links):
-    client, manager, org = native_links
+    client, manager, org, _registry = native_links
     source, target = await _snapshots(client, org, "source", "target")
     await manager.update("target", {"content": "target changed"})
     with pytest.raises(EntityLinkConflictError, match="changed"):
@@ -214,7 +214,7 @@ async def test_native_links_changed_authorized_target_is_rejected(native_links):
 
 @pytest.mark.asyncio
 async def test_native_links_conflicting_existing_topology_is_not_replaced(native_links):
-    client, manager, org = native_links
+    client, manager, org, _registry = native_links
     await manager.update("source", {"metadata": {"parent_task_id": "other"}})
     source, target = await _snapshots(client, org, "source", "target")
     with pytest.raises(EntityLinkConflictError, match="topology"):
@@ -233,7 +233,7 @@ async def test_native_links_conflicting_existing_topology_is_not_replaced(native
 async def test_native_links_conflicting_existing_edge_is_not_repointed(native_links):
     from sibyl_core.services.graph_relationships import RelationshipManager
 
-    client, manager, org = native_links
+    client, manager, org, _registry = native_links
     await RelationshipManager(client, group_id=org, embedding_provider=None).create_direct_bulk(
         [
             Relationship(
@@ -282,13 +282,14 @@ async def test_links_invalid_revision_is_denied_before_io(revision):
 class _DeferredNativeCommit:
     """Test-only barrier around the unchanged native transaction body."""
 
-    def __init__(self, client, connection, transaction, *, omit_state=None):
+    def __init__(self, client, connection, transaction, *, registry, omit_state=None):
         import asyncio
 
         self.client = client
         self.connection = connection
         self.transaction = transaction
         self.omit_state = omit_state
+        self.registry = registry
         self.staged = asyncio.Event()
         self.release = asyncio.Event()
 
@@ -325,7 +326,7 @@ class _DeferredNativeCommit:
         self.staged.set()
         await self.release.wait()
         await self.connection.commit(self.transaction)
-        evidence = Path(os.environ["SIBYL_LINKS_TEST_REGISTRY"]).with_suffix(".responses.jsonl")
+        evidence = self.registry.with_suffix(".responses.jsonl")
         with evidence.open("a") as stream:
             stream.write(json.dumps({"query": body, "response": response}, default=str) + "\n")
         frames = response["result"]
@@ -335,7 +336,7 @@ class _DeferredNativeCommit:
         return {**response, "result": frames[1:]}
 
 
-async def _deferred(client, *, omit_state=None):
+async def _deferred(client, *, registry, omit_state=None):
     connection = AsyncWsSurrealConnection(os.environ["SIBYL_ARCHIVE_TEST_SURREAL_URL"])
     await connection.connect()
     await connection.signin(
@@ -346,7 +347,9 @@ async def _deferred(client, *, omit_state=None):
     )
     await connection.use(client.namespace, "graph")
     transaction = await connection.begin()
-    return _DeferredNativeCommit(client, connection, transaction, omit_state=omit_state)
+    return _DeferredNativeCommit(
+        client, connection, transaction, registry=registry, omit_state=omit_state
+    )
 
 
 @pytest.mark.asyncio
@@ -357,10 +360,10 @@ async def test_native_links_real_conflicts_in_both_commit_orders(native_links, w
 
     from surrealdb.errors import ServerError
 
-    client, manager, org = native_links
+    client, manager, org, registry = native_links
     source, target = await _snapshots(client, org, "source", "target")
-    links = await _deferred(client)
-    edit = await _deferred(client)
+    links = await _deferred(client, registry=registry)
+    edit = await _deferred(client, registry=registry)
     tasks = {}
     try:
         tasks["links"] = asyncio.create_task(
@@ -420,10 +423,10 @@ async def test_native_links_real_conflicts_in_both_commit_orders(native_links, w
 async def test_native_links_omitted_only_target_state_witness_allows_both_commits(native_links):
     import asyncio
 
-    client, manager, org = native_links
+    client, manager, org, registry = native_links
     source, target = await _snapshots(client, org, "source", "target")
-    links = await _deferred(client, omit_state=target.state_id)
-    edit = await _deferred(client)
+    links = await _deferred(client, registry=registry, omit_state=target.state_id)
+    edit = await _deferred(client, registry=registry)
     tasks = {}
     try:
         tasks["links"] = asyncio.create_task(
@@ -468,7 +471,7 @@ async def test_native_links_omitted_only_target_state_witness_allows_both_commit
 async def test_native_links_unrelated_edit_and_links_both_commit(native_links):
     import asyncio
 
-    client, manager, org = native_links
+    client, manager, org, registry = native_links
     await manager.create_direct(
         Entity(
             id="unrelated",
@@ -480,8 +483,8 @@ async def test_native_links_unrelated_edit_and_links_both_commit(native_links):
         generate_embedding=False,
     )
     source, target = await _snapshots(client, org, "source", "target")
-    links = await _deferred(client)
-    edit = await _deferred(client)
+    links = await _deferred(client, registry=registry)
+    edit = await _deferred(client, registry=registry)
     tasks = {}
     try:
         tasks["links"] = asyncio.create_task(
