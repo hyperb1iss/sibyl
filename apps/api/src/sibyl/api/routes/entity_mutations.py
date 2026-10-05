@@ -745,30 +745,33 @@ def _migration_origin(entity: Any) -> object:
     return migration.get("tool"), migration.get("origin_org")
 
 
-async def _shared_reason(runtime: Any, existing: Any, author: str | None) -> str | None:
-    """Why deleting this row would take someone else's work with it, if it would."""
-    modified_by = getattr(existing, "modified_by", None)
-    if modified_by and str(modified_by) != author:
-        return "someone other than its author has edited it"
-    relationships = await runtime.relationship_manager.get_for_entity(existing.id)
-    linked_ids = {
-        rel.target_id if rel.source_id == existing.id else rel.source_id for rel in relationships
-    } - {existing.id}
-    if not linked_ids:
+def _entity_category(entity: Any) -> object:
+    category = getattr(entity, "category", None)
+    if category:
+        return category
+    return (getattr(entity, "metadata", None) or {}).get("category")
+
+
+async def _shared_reason(runtime: Any, existing: Any) -> str | None:
+    """Why deleting this row would strand work outside its migration, if it would.
+
+    Only rows that link *to* this one depend on it: deleting a row removes its
+    own outgoing links with it and harms nothing they point at. Rows the same
+    author migrated from the same source are this row's own migration; the
+    undo walks them itself and keeps what they need.
+    """
+    relationships = await runtime.relationship_manager.get_for_entity(
+        existing.id, direction="incoming"
+    )
+    linking_ids = {rel.source_id for rel in relationships} - {existing.id}
+    if not linking_ids:
         return None
+    author = _entity_author(existing)
     origin = _migration_origin(existing)
-    for row in await runtime.entity_manager.get_many(sorted(linked_ids)):
-        if row.entity_type in _UNSHARING_TYPES or getattr(row, "category", None) in (
-            _DERIVED_CATEGORIES
-        ):
+    for row in await runtime.entity_manager.get_many(sorted(linking_ids)):
+        if row.entity_type in _UNSHARING_TYPES or _entity_category(row) in _DERIVED_CATEGORIES:
             continue
-        # Rows the same author migrated from the same source are this row's own
-        # migration; the undo walks them itself and keeps what they need.
-        if (
-            origin is not None
-            and _entity_author(row) == author
-            and _migration_origin(row) == origin
-        ):
+        if origin is not None and _entity_author(row) == author and _migration_origin(row) == origin:
             continue
         return "a row outside its migration links to it"
     return None
@@ -784,25 +787,12 @@ async def _check_delete(
     if_unshared: bool,
 ) -> None:
     """Raise unless the caller may delete this row under the conditions they named."""
-    author = _entity_author(existing)
-    # Deleting from a project takes a maintainer, except that an author may
-    # remove their own row (not a project) at a revision they name, while
-    # nobody else has written it or links to it: what a migration undo does,
-    # with the same access that wrote the row.
-    own_delete = (
-        expected_revision is not None
-        and if_unshared
-        and ctx.user is not None
-        and author is not None
-        and author == str(ctx.user.id)
-        and existing.entity_type != EntityType.PROJECT
-    )
     project_id = policy.entity_read_project_id(existing)
     await verify_entity_project_access(
         content_session,
         ctx,
         project_id,
-        required_role=ProjectRole.CONTRIBUTOR if own_delete else ProjectRole.MAINTAINER,
+        required_role=ProjectRole.MAINTAINER,
         require_existing_project=True,
     )
     # A project maintainer role does not extend over a co-member's private
@@ -815,7 +805,7 @@ async def _check_delete(
         raise revision_conflict(
             RevisionConflictError(existing.id, expected_revision, int(current_revision or 0))
         )
-    if if_unshared and (reason := await _shared_reason(runtime, existing, author)):
+    if if_unshared and (reason := await _shared_reason(runtime, existing)):
         raise HTTPException(
             status_code=409,
             detail=safe_error_payload(error="entity_shared", message=f"Not removed: {reason}."),
@@ -882,9 +872,8 @@ async def delete_entity(
     if_unshared: bool = Query(
         default=False,
         description=(
-            "Delete only while nobody but the entity's author has written it and no row "
-            "outside its own migration links to it. With expected_revision, the author "
-            "may delete it with contributor access."
+            "Delete only while no row outside the entity's own migration links to it. "
+            "Derived rows and the project itself do not count."
         ),
     ),
 ) -> None:

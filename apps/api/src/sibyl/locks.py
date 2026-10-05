@@ -65,6 +65,22 @@ async def entity_lock(
         yield token
 
 
+@contextlib.asynccontextmanager
+async def target_lock(org_id: str, entity_id: str | None) -> AsyncGenerator[str | None]:
+    """Hold the lock of a row a write is about to point at, when there is one.
+
+    A delete holds a row's own lock while it checks what links to it, so a
+    write that files something under that row (a task under an epic) while
+    holding the same lock cannot land between the check and the delete.
+    Yields None without an id; callers refuse a missing token otherwise.
+    """
+    if not entity_id:
+        yield None
+        return
+    async with entity_lock(org_id, entity_id, blocking=True) as token:
+        yield token
+
+
 def with_entity_lock(*, org_id_arg: str = "org_id", entity_id_arg: str = "entity_id"):
     """Decorator to wrap a function with entity locking."""
 

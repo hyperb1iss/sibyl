@@ -31,7 +31,7 @@ from sibyl.auth.dependencies import (
     require_org_role,
 )
 from sibyl.jobs.entities import serialize_memory_policy_context
-from sibyl.locks import entity_lock
+from sibyl.locks import entity_lock, target_lock
 from sibyl.persistence.auth_runtime import list_accessible_project_graph_ids
 from sibyl.services.work_item_workflow import WorkItemAction, transition_work_item
 from sibyl_core.auth import AuthOrganization, AuthUser, OrganizationRole, ProjectRole
@@ -222,9 +222,6 @@ async def create_task(
     auth: AuthContext = Depends(get_auth_context),
 ) -> TaskActionResponse:
     """Create a new task."""
-    from sibyl_core.models.entities import Relationship, RelationshipType
-    from sibyl_core.models.tasks import Task, TaskComplexity, TaskPriority, TaskStatus
-
     await verify_entity_project_access(
         None,
         auth,
@@ -248,6 +245,70 @@ async def create_task(
         return replayed
 
     runtime = await get_task_graph_runtime(str(org.id))
+    async with target_lock(str(org.id), request.epic_id) as epic_token:
+        if request.epic_id and not epic_token:
+            raise entity_locked()
+        task_id, task = await _create_task_under_epic(runtime, request, user)
+
+    log.info(
+        "create_task_success",
+        task_id=task_id,
+        project_id=request.project_id,
+    )
+
+    await broadcast_event(
+        WSEvent.ENTITY_CREATED,
+        entity_change_payload(task_id, "task"),
+        org_id=str(org.id),
+    )
+
+    response = TaskActionResponse(
+        success=True,
+        action="create",
+        task_id=task_id,
+        message="Task created successfully",
+        data={"project_id": request.project_id, "revision": task.revision},
+        mutation_receipt=mutation_receipt(
+            http_request,
+            applied=True,
+            revision=task.revision,
+            affected_records=[f"entity:{task_id}"],
+        ),
+    )
+    await save_idempotent_response(
+        http_request,
+        organization_id=org.id,
+        principal_id=str(user.id),
+        method="POST",
+        path="/tasks",
+        payload=idempotency_payload,
+        response=response,
+        status_code=200,
+        content_session=None,
+    )
+    return response
+
+
+# =============================================================================
+# Workflow Endpoints
+# =============================================================================
+
+
+async def _broadcast_task_update(
+    task_id: str, action: str, data: dict[str, Any], *, org_id: str | None = None
+) -> None:
+    """Broadcast task update event (scoped to org)."""
+    await broadcast_event(
+        WSEvent.ENTITY_UPDATED,
+        entity_change_payload(task_id, "task", action=action, **data),
+        org_id=org_id,
+    )
+
+
+async def _create_task_under_epic(runtime: Any, request: Any, user: Any) -> tuple[str, Any]:
+    """Write a task and its edges; the caller holds the epic's lock when there is one."""
+    from sibyl_core.models.entities import Relationship, RelationshipType
+    from sibyl_core.models.tasks import Task, TaskComplexity, TaskPriority, TaskStatus
 
     if request.epic_id:
         await _verify_epic_exists(runtime.entity_manager, request.epic_id)
@@ -306,60 +367,64 @@ async def create_task(
     await asyncio.gather(
         *(runtime.relationship_manager.create(relationship) for relationship in relationships)
     )
+    return task_id, task
 
-    log.info(
-        "create_task_success",
-        task_id=task_id,
-        project_id=request.project_id,
+
+async def _write_task_update(
+    runtime: Any, task_id: str, request: Any, update_data: dict[str, Any]
+) -> tuple[Any, dict[str, Any] | None]:
+    """Write a task update and its edges; the caller holds the epic's lock when one is named."""
+    from sibyl_core.models.entities import Relationship, RelationshipType
+
+    if request.epic_id:
+        await _verify_epic_exists(runtime.entity_manager, request.epic_id)
+    if request.expected_revision is None:
+        updated = await runtime.entity_manager.update(task_id, update_data)
+    else:
+        updated = await runtime.entity_manager.update(
+            task_id,
+            update_data,
+            expected_revision=request.expected_revision,
+        )
+    if not updated:
+        raise HTTPException(status_code=500, detail="Update failed")
+
+    # Create relationship manager if any relationship changes needed
+    needs_rel_mgr = (
+        request.epic_id is not None or request.add_depends_on or request.remove_depends_on
     )
+    relationship_manager = runtime.relationship_manager if needs_rel_mgr else None
 
-    await broadcast_event(
-        WSEvent.ENTITY_CREATED,
-        entity_change_payload(task_id, "task"),
-        org_id=str(org.id),
-    )
+    if request.epic_id is not None:
+        belongs_to_epic = Relationship(
+            id=f"rel_{task_id}_belongs_to_{request.epic_id}",
+            source_id=task_id,
+            target_id=request.epic_id,
+            relationship_type=RelationshipType.BELONGS_TO,
+        )
+        await relationship_manager.create(belongs_to_epic)
 
-    response = TaskActionResponse(
-        success=True,
-        action="create",
-        task_id=task_id,
-        message="Task created successfully",
-        data={"project_id": request.project_id, "revision": task.revision},
-        mutation_receipt=mutation_receipt(
-            http_request,
-            applied=True,
-            revision=task.revision,
-            affected_records=[f"entity:{task_id}"],
-        ),
-    )
-    await save_idempotent_response(
-        http_request,
-        organization_id=org.id,
-        principal_id=str(user.id),
-        method="POST",
-        path="/tasks",
-        payload=idempotency_payload,
-        response=response,
-        status_code=200,
-        content_session=None,
-    )
-    return response
+    # Handle dependency mutations
+    for dep_id in request.add_depends_on:
+        dep_rel = Relationship(
+            id=f"rel_{task_id}_depends_on_{dep_id}",
+            source_id=task_id,
+            target_id=dep_id,
+            relationship_type=RelationshipType.DEPENDS_ON,
+        )
+        await relationship_manager.create(dep_rel)
+    for dep_id in request.remove_depends_on:
+        await relationship_manager.delete_between(task_id, dep_id, RelationshipType.DEPENDS_ON)
 
-
-# =============================================================================
-# Workflow Endpoints
-# =============================================================================
-
-
-async def _broadcast_task_update(
-    task_id: str, action: str, data: dict[str, Any], *, org_id: str | None = None
-) -> None:
-    """Broadcast task update event (scoped to org)."""
-    await broadcast_event(
-        WSEvent.ENTITY_UPDATED,
-        entity_change_payload(task_id, "task", action=action, **data),
-        org_id=org_id,
-    )
+    epic_started: dict[str, Any] | None = None
+    if request.status:
+        epic_id = request.epic_id or updated.metadata.get("epic_id")
+        started = await _maybe_start_epic(runtime.entity_manager, task_id, epic_id, request.status)
+        if started is not None:
+            # The epic moved because of this write; a client that
+            # tracks its own writes needs that revision too.
+            epic_started = {"epic_id": epic_id, "revision": started}
+    return updated, epic_started
 
 
 async def _verify_epic_exists(entity_manager: Any, epic_id: str) -> None:
@@ -458,7 +523,7 @@ async def _maybe_start_epic(
     task_id: str,
     epic_id: str | None,
     task_status: str,
-) -> bool:
+) -> int | None:
     """Auto-start epic if task moves to forward-progress state.
 
     Args:
@@ -468,7 +533,7 @@ async def _maybe_start_epic(
         task_status: New task status
 
     Returns:
-        True if epic was auto-started
+        The epic's revision after the start, or None when it was not started
     """
     from datetime import UTC, datetime
 
@@ -477,7 +542,7 @@ async def _maybe_start_epic(
 
     forward_progress_states = {"doing", "review", "blocked"}
     if task_status not in forward_progress_states or not epic_id:
-        return False
+        return None
 
     try:
         epic = await entity_manager.get(epic_id)
@@ -487,16 +552,17 @@ async def _maybe_start_epic(
             epic_id=epic_id,
             task_id=task_id,
         )
-        return False
+        return None
     if not epic or epic.metadata.get("status") != "planning":
-        return False
+        return None
 
-    await entity_manager.update(
+    started = await entity_manager.update(
         epic_id,
         {"status": EpicStatus.IN_PROGRESS, "started_at": datetime.now(UTC)},
     )
     log.info("Epic auto-started", epic_id=epic_id, task_id=task_id, task_status=task_status)
-    return True
+    revision = getattr(started, "revision", None)
+    return revision if type(revision) is int else None
 
 
 @router.post("/{task_id}/start", response_model=TaskActionResponse)
@@ -885,7 +951,6 @@ async def update_task(
 
     # --- Sync path (?sync=true) — existing inline behaviour ---
     from sibyl.locks import LockAcquisitionError
-    from sibyl_core.models.entities import Relationship, RelationshipType
 
     try:
         async with entity_lock(group_id, task_id, blocking=True) as lock_token:
@@ -894,49 +959,14 @@ async def update_task(
 
             runtime = await get_task_graph_runtime(group_id)
 
-            if request.expected_revision is None:
-                updated = await runtime.entity_manager.update(task_id, update_data)
-            else:
-                updated = await runtime.entity_manager.update(
-                    task_id,
-                    update_data,
-                    expected_revision=request.expected_revision,
+            # Filing the task under an epic holds the epic's lock, so a
+            # concurrent delete of that epic cannot land in between.
+            async with target_lock(group_id, request.epic_id) as epic_token:
+                if request.epic_id and not epic_token:
+                    raise entity_locked()
+                updated, epic_started = await _write_task_update(
+                    runtime, task_id, request, update_data
                 )
-            if not updated:
-                raise HTTPException(status_code=500, detail="Update failed")
-
-            # Create relationship manager if any relationship changes needed
-            needs_rel_mgr = (
-                request.epic_id is not None or request.add_depends_on or request.remove_depends_on
-            )
-            relationship_manager = runtime.relationship_manager if needs_rel_mgr else None
-
-            if request.epic_id is not None:
-                belongs_to_epic = Relationship(
-                    id=f"rel_{task_id}_belongs_to_{request.epic_id}",
-                    source_id=task_id,
-                    target_id=request.epic_id,
-                    relationship_type=RelationshipType.BELONGS_TO,
-                )
-                await relationship_manager.create(belongs_to_epic)
-
-            # Handle dependency mutations
-            for dep_id in request.add_depends_on:
-                dep_rel = Relationship(
-                    id=f"rel_{task_id}_depends_on_{dep_id}",
-                    source_id=task_id,
-                    target_id=dep_id,
-                    relationship_type=RelationshipType.DEPENDS_ON,
-                )
-                await relationship_manager.create(dep_rel)
-            for dep_id in request.remove_depends_on:
-                await relationship_manager.delete_between(
-                    task_id, dep_id, RelationshipType.DEPENDS_ON
-                )
-
-            if request.status:
-                epic_id = request.epic_id or updated.metadata.get("epic_id")
-                await _maybe_start_epic(runtime.entity_manager, task_id, epic_id, request.status)
 
             await _broadcast_task_update(
                 task_id,
@@ -951,7 +981,11 @@ async def update_task(
                 action="update_task",
                 task_id=task_id,
                 message=f"Task updated: {', '.join(update_data.keys())}",
-                data={**update_data, "revision": updated_revision},
+                data={
+                    **update_data,
+                    "revision": updated_revision,
+                    **({"epic_started": epic_started} if epic_started else {}),
+                },
                 mutation_receipt=mutation_receipt(
                     http_request,
                     applied=True,

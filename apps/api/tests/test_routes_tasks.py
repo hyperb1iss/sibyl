@@ -800,3 +800,69 @@ async def test_task_update_lock_contention_has_retryable_code(raises) -> None:
         )
     assert exc.value.status_code == 409
     assert http_exception_payload(exc.value, "request-1")["error"] == "entity_locked"
+
+
+@pytest.mark.asyncio
+async def test_create_task_under_an_epic_holds_the_epics_lock_while_writing() -> None:
+    """A delete of the epic holds the same lock, so it cannot land mid-write."""
+    import contextlib
+
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    user = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000222"))
+    held: list[str] = []
+    writes_while_held: list[bool] = []
+
+    @contextlib.asynccontextmanager
+    async def recording_lock(org_id: str, entity_id: str | None):
+        held.append(entity_id or "")
+        try:
+            yield "token"
+        finally:
+            held.remove(entity_id or "")
+
+    async def create_direct(task):
+        writes_while_held.append("epic-1" in held)
+        return "task-123"
+
+    async def create_relationship(relationship):
+        writes_while_held.append("epic-1" in held)
+        return relationship.id
+
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(return_value=SimpleNamespace(entity_type=EntityType.EPIC)),
+            create_direct=create_direct,
+        ),
+        relationship_manager=SimpleNamespace(create=create_relationship),
+    )
+    with (
+        patch("sibyl.api.routes.tasks.verify_entity_project_access", AsyncMock()),
+        patch("sibyl.api.routes.tasks.get_task_graph_runtime", AsyncMock(return_value=runtime)),
+        patch("sibyl.api.routes.tasks.broadcast_event", AsyncMock()),
+        patch("sibyl.api.routes.tasks.target_lock", recording_lock),
+    ):
+        await create_task(
+            http_request=_request(),
+            request=CreateTaskRequest(title="Filed task", project_id="project-1", epic_id="epic-1"),
+            org=org,
+            user=user,
+            auth=SimpleNamespace(),
+        )
+
+    assert len(writes_while_held) == 3  # the task, its project edge, its epic edge
+    assert all(writes_while_held)
+
+
+@pytest.mark.parametrize(("status", "expected"), [("planning", 3), ("in_progress", None)])
+@pytest.mark.asyncio
+async def test_an_epic_start_reports_the_epics_new_revision(
+    status: str, expected: int | None
+) -> None:
+    from sibyl.api.routes.tasks import _maybe_start_epic
+
+    entity_manager = SimpleNamespace(
+        get=AsyncMock(return_value=SimpleNamespace(metadata={"status": status})),
+        update=AsyncMock(return_value=SimpleNamespace(revision=3)),
+    )
+
+    assert await _maybe_start_epic(entity_manager, "task-1", "epic-1", "doing") == expected

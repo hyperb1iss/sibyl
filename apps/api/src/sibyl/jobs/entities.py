@@ -1373,7 +1373,7 @@ async def update_task(
     Returns:
         Dict with update results
     """
-    from sibyl.locks import entity_lock
+    from sibyl.locks import entity_lock, target_lock
     from sibyl_core.models.entities import Relationship, RelationshipType
 
     add_depends_on = add_depends_on or []
@@ -1397,56 +1397,67 @@ async def update_task(
             runtime = await get_surreal_graph_runtime(group_id)
             entity_manager = runtime.entity_manager
 
-            # Perform the entity field update (skip if only dep changes)
-            if expected_revision is None:
-                updated = await entity_manager.update(task_id, updates)
-            else:
-                updated = await entity_manager.update(
-                    task_id,
-                    updates,
-                    expected_revision=expected_revision,
-                )
-            if not updated:
-                log.warning("update_task_no_changes", task_id=task_id)
-                return {"task_id": task_id, "success": False, "message": "No changes made"}
+            # Filing the task under an epic holds the epic's lock, so a
+            # concurrent delete of that epic cannot land in between.
+            async with target_lock(group_id, epic_id) as epic_token:
+                if epic_id and not epic_token:
+                    log.warning("update_task_epic_lock_failed", task_id=task_id, epic_id=epic_id)
+                    return {"task_id": task_id, "success": False, "message": "Lock contention"}
+                if epic_id and not await _entity_exists(entity_manager, epic_id):
+                    log.warning("update_task_epic_gone", task_id=task_id, epic_id=epic_id)
+                    return {"task_id": task_id, "success": False, "message": "Epic not found"}
+                # Perform the entity field update (skip if only dep changes)
+                if expected_revision is None:
+                    updated = await entity_manager.update(task_id, updates)
+                else:
+                    updated = await entity_manager.update(
+                        task_id,
+                        updates,
+                        expected_revision=expected_revision,
+                    )
+                if not updated:
+                    log.warning("update_task_no_changes", task_id=task_id)
+                    return {"task_id": task_id, "success": False, "message": "No changes made"}
 
-            # Create relationship manager if any relationship changes needed
-            needs_rel_mgr = epic_id is not None or add_depends_on or remove_depends_on
-            if needs_rel_mgr:
-                relationship_manager = runtime.relationship_manager
+                # Create relationship manager if any relationship changes needed
+                needs_rel_mgr = epic_id is not None or add_depends_on or remove_depends_on
+                if needs_rel_mgr:
+                    relationship_manager = runtime.relationship_manager
 
-            # Create BELONGS_TO relationship for epic (if epic_id was set/changed)
-            if epic_id is not None:
-                belongs_to_epic = Relationship(
-                    id=f"rel_{task_id}_belongs_to_{epic_id}",
-                    source_id=task_id,
-                    target_id=epic_id,
-                    relationship_type=RelationshipType.BELONGS_TO,
-                )
-                await relationship_manager.create(belongs_to_epic)
+                # Create BELONGS_TO relationship for epic (if epic_id was set/changed)
+                if epic_id is not None:
+                    belongs_to_epic = Relationship(
+                        id=f"rel_{task_id}_belongs_to_{epic_id}",
+                        source_id=task_id,
+                        target_id=epic_id,
+                        relationship_type=RelationshipType.BELONGS_TO,
+                    )
+                    await relationship_manager.create(belongs_to_epic)
 
-            # Handle dependency mutations
-            for dep_id in add_depends_on:
-                dep_rel = Relationship(
-                    id=f"rel_{task_id}_depends_on_{dep_id}",
-                    source_id=task_id,
-                    target_id=dep_id,
-                    relationship_type=RelationshipType.DEPENDS_ON,
-                )
-                await relationship_manager.create(dep_rel)
-            for dep_id in remove_depends_on:
-                await relationship_manager.delete_between(
-                    task_id, dep_id, RelationshipType.DEPENDS_ON
-                )
+                # Handle dependency mutations
+                for dep_id in add_depends_on:
+                    dep_rel = Relationship(
+                        id=f"rel_{task_id}_depends_on_{dep_id}",
+                        source_id=task_id,
+                        target_id=dep_id,
+                        relationship_type=RelationshipType.DEPENDS_ON,
+                    )
+                    await relationship_manager.create(dep_rel)
+                for dep_id in remove_depends_on:
+                    await relationship_manager.delete_between(
+                        task_id, dep_id, RelationshipType.DEPENDS_ON
+                    )
 
-            # Auto-start epic if task moves to forward-progress state
-            if new_status:
-                task_entity = updated or await entity_manager.get(task_id)
-                resolved_epic = epic_id or (
-                    task_entity.metadata.get("epic_id") if task_entity else None
-                )
-                if resolved_epic:
-                    await _maybe_start_epic_bg(entity_manager, task_id, resolved_epic, new_status)
+                # Auto-start epic if task moves to forward-progress state
+                if new_status:
+                    task_entity = updated or await entity_manager.get(task_id)
+                    resolved_epic = epic_id or (
+                        task_entity.metadata.get("epic_id") if task_entity else None
+                    )
+                    if resolved_epic:
+                        await _maybe_start_epic_bg(
+                            entity_manager, task_id, resolved_epic, new_status
+                        )
 
         # Broadcast outside the lock
         broadcast_data: dict[str, Any] = {
@@ -1470,6 +1481,15 @@ async def update_task(
     except Exception as e:
         log.exception("update_task_failed", task_id=task_id, error=str(e))
         raise
+
+
+async def _entity_exists(entity_manager: Any, entity_id: str) -> bool:
+    from sibyl_core.errors import EntityNotFoundError
+
+    try:
+        return await entity_manager.get(entity_id) is not None
+    except (EntityNotFoundError, KeyError):
+        return False
 
 
 async def _maybe_start_epic_bg(

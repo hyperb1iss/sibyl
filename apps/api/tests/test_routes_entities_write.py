@@ -2989,19 +2989,30 @@ async def _delete_with_guard(
     *,
     if_unshared: bool = False,
     linked: list[Any] | None = None,
+    outgoing: list[Any] | None = None,
     access: Any = None,
 ) -> tuple[Any, Any]:
     delete_mock = AsyncMock(return_value=True)
     access = access or AsyncMock()
     linked = linked or []
-    relationships = [SimpleNamespace(source_id=row.id, target_id=existing.id) for row in linked]
+    outgoing = outgoing or []
+    edges = [SimpleNamespace(source_id=row.id, target_id=existing.id) for row in linked] + [
+        SimpleNamespace(source_id=existing.id, target_id=row.id) for row in outgoing
+    ]
+
+    async def get_for_entity(entity_id: str, direction: str = "both") -> list[Any]:
+        if direction == "incoming":
+            return [edge for edge in edges if edge.target_id == entity_id]
+        return list(edges)
+
+    async def get_many(ids: list[str]) -> list[Any]:
+        return [row for row in linked + outgoing if row.id in ids]
+
     runtime = SimpleNamespace(
         entity_manager=SimpleNamespace(
-            get=AsyncMock(return_value=existing),
-            get_many=AsyncMock(return_value=linked),
-            delete=delete_mock,
+            get=AsyncMock(return_value=existing), get_many=get_many, delete=delete_mock
         ),
-        relationship_manager=SimpleNamespace(get_for_entity=AsyncMock(return_value=relationships)),
+        relationship_manager=SimpleNamespace(get_for_entity=get_for_entity),
     )
     with (
         patch("sibyl.locks.entity_lock", _locked_entity),
@@ -3057,18 +3068,17 @@ async def test_a_refused_caller_learns_nothing_about_the_revision() -> None:
 
 
 @pytest.mark.asyncio
-async def test_an_author_deleting_their_unshared_row_needs_only_contributor_access() -> None:
+async def test_an_unshared_delete_ignores_the_rows_own_migration() -> None:
     ctx = _ctx()
     me = str(ctx.user.id)
-    existing = _revisioned_decision(author=me, revision=4, modified_by=me)
+    existing = _revisioned_decision(author=me, revision=4)
     sibling = _revisioned_decision(author=me, revision=1, uuid="task_sibling")
 
-    delete_mock, access = await _delete_with_guard(
+    delete_mock, _access = await _delete_with_guard(
         existing, ctx, expected_revision=4, if_unshared=True, linked=[sibling]
     )
 
     delete_mock.assert_awaited_once()
-    assert access.await_args.kwargs["required_role"] == ProjectRole.CONTRIBUTOR
 
 
 @pytest.mark.parametrize(
@@ -3077,11 +3087,12 @@ async def test_an_author_deleting_their_unshared_row_needs_only_contributor_acce
         (False, 4, True, EntityType.DECISION),
         (True, None, True, EntityType.DECISION),
         (True, 4, False, EntityType.DECISION),
+        (True, 4, True, EntityType.DECISION),
         (True, 4, True, EntityType.PROJECT),
     ],
 )
 @pytest.mark.asyncio
-async def test_other_deletes_still_need_a_maintainer(
+async def test_every_delete_needs_a_maintainer(
     author_is_caller: bool, guard: int | None, unshared: bool, entity_type: Any
 ) -> None:
     ctx = _ctx()
@@ -3110,7 +3121,6 @@ def _own_native_task(author: str) -> Any:
 @pytest.mark.parametrize(
     ("case", "reason"),
     [
-        ("edited", "edited it"),
         ("teammate_link", "links to it"),
         ("own_native_link", "links to it"),
         ("other_migration_link", "links to it"),
@@ -3122,11 +3132,8 @@ async def test_an_unshared_delete_refuses_a_row_someone_else_depends_on(
 ) -> None:
     ctx = _ctx()
     me = str(ctx.user.id)
-    existing = _revisioned_decision(
-        author=me, revision=4, modified_by="teammate" if case == "edited" else me
-    )
+    existing = _revisioned_decision(author=me, revision=4)
     linked = {
-        "edited": [],
         "teammate_link": [_teammate_task()],
         "own_native_link": [_own_native_task(me)],
         "other_migration_link": [
@@ -3158,8 +3165,9 @@ async def test_derived_rows_and_the_project_do_not_make_a_row_shared() -> None:
         author="owner", revision=1, uuid="project_team", entity_type=EntityType.PROJECT
     )
     topic = _revisioned_decision(author="system", revision=1, uuid="topic_x", entity_type="topic")
-    fact = _revisioned_decision(author="system", revision=1, uuid="fact_x")
-    fact.category = "memory_fact_projection"
+    # A projected fact carries the author's principal; its category sits in metadata.
+    fact = _revisioned_decision(author=me, revision=1, uuid="fact_x", migration=None)
+    fact.metadata["category"] = "memory_fact_projection"
 
     delete_mock, _access = await _delete_with_guard(
         existing, ctx, expected_revision=4, if_unshared=True, linked=[project, topic, fact]
@@ -3225,3 +3233,17 @@ async def test_deletable_keeps_access_refusals_as_errors() -> None:
         await _deletable(existing, ctx, 999, [], access=refused)
 
     assert excinfo.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_rows_this_one_links_to_do_not_make_it_shared() -> None:
+    """Deleting a row takes its own outgoing links with it and harms nothing they point at."""
+    ctx = _ctx()
+    me = str(ctx.user.id)
+    existing = _revisioned_decision(author=me, revision=4, entity_type=EntityType.TASK)
+
+    delete_mock, _access = await _delete_with_guard(
+        existing, ctx, expected_revision=4, if_unshared=True, outgoing=[_teammate_task()]
+    )
+
+    delete_mock.assert_awaited_once()
