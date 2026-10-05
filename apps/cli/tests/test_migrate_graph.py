@@ -2148,3 +2148,35 @@ async def test_an_epic_the_migration_itself_started_is_still_undone(teammate_fir
         assert [line.split(":")[0] for line in outcome.kept_edited] == ["epic epic_1"]
     else:
         assert outcome.removed == 2 and target.rows == {}
+
+
+@pytest.mark.asyncio
+async def test_a_finished_undo_leaves_only_uncertain_rows_marked() -> None:
+    plan = build_plan([_entity(f"decision_{n}", "decision") for n in range(4)], [], project=PROJECT)
+
+    class Target(_UndoTarget):
+        async def _request(
+            self, method: str, path: str, *args: Any, **kwargs: Any
+        ) -> dict[str, Any]:
+            if method == "DELETE" and path.endswith("decision_3"):
+                raise RuntimeError("connection dropped")  # the delete may have landed
+            return await super()._request(method, path, *args, **kwargs)
+
+    target = Target()
+    ledger, revisions = await _migrate_with_revisions(target, plan)
+    target.rows["target-decision_2"]["revision"] += 1  # kept as edited
+    undoing: set[str] = set()
+    from sibyl_cli.migrate_graph import undo_plan
+
+    await undo_plan(
+        target,
+        structure=ledger.structure,
+        ids=ledger.ids,
+        revisions=revisions,
+        statuses=ledger.statuses,
+        partial=ledger.partial,
+        save=lambda: None,
+        undoing=undoing,
+    )
+
+    assert undoing == {"decision_3"}

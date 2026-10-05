@@ -1243,7 +1243,9 @@ async def undo_plan(
             save()
         await asyncio.gather(*(undo_one(origin) for origin in layers[layer]))
         if not dry_run:
-            marks.difference_update(o for o in marking if o in ids and o not in uncertain)
+            # Removed and kept rows are settled; only a delete whose answer was
+            # lost leaves its row marked for the next migration to check.
+            marks.difference_update(o for o in marking if o not in uncertain)
             save()
     if not dry_run:
         save()
