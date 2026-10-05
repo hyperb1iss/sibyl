@@ -323,18 +323,45 @@ async def automatically_review_reflection(
     organization_id: str, principal_id: str, candidate_id: str, resolver: SourceAuthorityResolver
 ) -> AutomaticReflectionResult:
     """Advance verified children; unresolved progress remains pending without redispatch."""
-    root = await _reflection_root(organization_id, principal_id, candidate_id, resolver)
+    try:
+        root = await _reflection_root(organization_id, principal_id, candidate_id, resolver)
+    except SourceUnavailableError:
+        from sibyl_core.services.reflection_retirement import retire_abstained_correction_chain
+
+        retired = await retire_abstained_correction_chain(
+            organization_id, principal_id, candidate_id, resolver
+        )
+        if not retired:
+            raise
+        return AutomaticReflectionResult(
+            None, "abstained", (), "ancestor_abstained", candidate_ids=retired
+        )
     adapter = _ReflectionAdapter(organization_id, principal_id, resolver)
     frontier = await advance_correction(adapter, root)
     if frontier.status == "abstained":
+        from sibyl_core.services.reflection_retirement import retire_abstained_correction_chain
+
+        # Root-first retirement leaves every interrupted descendant repairable
+        # through its protected origin, without reopening the archived root.
         for original in adapter.visited.values():
-            await _abstain(
-                original,
-                resolver,
-                frontier.reason or "evidence_abstention",
-                list(frontier.executions),
-            )
-        return AutomaticReflectionResult(None, "abstained", frontier.executions, frontier.reason)
+            if original.memory.id == root:
+                await _abstain(
+                    original,
+                    resolver,
+                    frontier.reason or "evidence_abstention",
+                    list(frontier.executions),
+                )
+            elif not await retire_abstained_correction_chain(
+                organization_id, principal_id, original.memory.id, resolver
+            ):
+                raise SourceUnavailableError()
+        return AutomaticReflectionResult(
+            None,
+            "abstained",
+            frontier.executions,
+            frontier.reason,
+            candidate_ids=tuple(adapter.visited),
+        )
     if frontier.status == "pending":
         return AutomaticReflectionResult(None, "pending", frontier.executions, frontier.reason)
     assert frontier.candidate is not None
