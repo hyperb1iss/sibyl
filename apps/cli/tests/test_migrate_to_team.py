@@ -558,3 +558,79 @@ async def test_undo_refuses_a_server_without_guarded_deletes() -> None:
     assert await migrate._bind_route(
         client, base, require_undo=True, **bind
     ) == await migrate._bind_route(client, base, **bind)
+
+
+def _local_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[tuple[str, str]]:
+    from sibyl_cli import local
+
+    env = tmp_path / ".env"
+    env.write_text(
+        "# SurrealDB\nSIBYL_SURREAL_USERNAME=root\nSIBYL_SURREAL_PASSWORD=generated-pw\n"
+    )
+    monkeypatch.setattr(local, "SIBYL_LOCAL_ENV", env)
+    tried: list[tuple[str, str]] = []
+    monkeypatch.setattr(migrate.httpx, "post", MagicMock(side_effect=AssertionError("no probe")))
+    return tried
+
+
+def _server_accepting(monkeypatch: pytest.MonkeyPatch, tried: list, accepted: tuple) -> None:
+    def post(url: str, *, auth: tuple[str, str], **_kwargs: Any) -> Any:
+        assert url == "http://localhost:8000/sql"
+        tried.append(auth)
+        return MagicMock(status_code=200 if auth == accepted else 401)
+
+    monkeypatch.setattr(migrate.httpx, "post", post)
+
+
+def test_a_sibyl_local_source_uses_its_generated_login(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    tried = _local_env(monkeypatch, tmp_path)
+    _server_accepting(monkeypatch, tried, ("root", "generated-pw"))
+
+    resolved = migrate._resolve_source_credentials("ws://localhost:8000/rpc", None, None)
+
+    assert resolved == ("root", "generated-pw") and tried == [("root", "generated-pw")]
+
+
+def test_a_dev_server_beside_an_old_local_install_still_takes_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    tried = _local_env(monkeypatch, tmp_path)
+    _server_accepting(monkeypatch, tried, ("root", "root"))
+
+    resolved = migrate._resolve_source_credentials("ws://localhost:8000/rpc", None, None)
+
+    assert resolved == ("root", "root")
+    assert tried == [("root", "generated-pw"), ("root", "root")]
+
+
+@pytest.mark.parametrize(
+    ("url", "user", "password"),
+    [
+        ("ws://localhost:8000/rpc", "admin", None),
+        ("ws://localhost:8000/rpc", None, "secret"),
+        ("ws://admin:secret@localhost:8000/rpc", None, None),
+        ("wss://db.example.com/rpc", None, None),
+    ],
+)
+def test_given_or_remote_sources_never_receive_the_local_login(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, url: str, user: Any, password: Any
+) -> None:
+    _local_env(monkeypatch, tmp_path)
+
+    assert migrate._resolve_source_credentials(url, user, password) == (user, password)
+
+
+def test_without_a_local_install_the_defaults_stand(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from sibyl_cli import local
+
+    monkeypatch.setattr(local, "SIBYL_LOCAL_ENV", tmp_path / "missing.env")
+    monkeypatch.setattr(migrate.httpx, "post", MagicMock(side_effect=AssertionError("no probe")))
+
+    assert migrate._resolve_source_credentials("ws://localhost:8000/rpc", None, None) == (
+        None,
+        None,
+    )

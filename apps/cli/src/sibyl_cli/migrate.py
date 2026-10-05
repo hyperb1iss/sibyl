@@ -19,6 +19,7 @@ import os
 import tempfile
 from pathlib import Path
 from typing import Annotated, Any
+from urllib.parse import urlsplit
 
 import httpx
 import typer
@@ -241,6 +242,60 @@ async def _resolve_target_org(client: Any) -> dict[str, Any]:
 
 
 _DEFAULT_SOURCE_CREDENTIAL = "root"
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def _local_install_credentials() -> tuple[str, str] | None:
+    """The SurrealDB login `sibyl local` generated on this machine, if there is one."""
+    from sibyl_cli.local import SIBYL_LOCAL_ENV
+
+    try:
+        text = SIBYL_LOCAL_ENV.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    values: dict[str, str] = {}
+    for line in text.splitlines():
+        key, separator, value = line.strip().partition("=")
+        if separator and not key.startswith("#"):
+            values[key.strip()] = value.strip().strip("\"'")
+    password = values.get("SIBYL_SURREAL_PASSWORD")
+    if not password:
+        return None
+    return values.get("SIBYL_SURREAL_USERNAME") or _DEFAULT_SOURCE_CREDENTIAL, password
+
+
+def _resolve_source_credentials(
+    surreal_url: str, username: str | None, password: str | None
+) -> tuple[str | None, str | None]:
+    """Find the login for a local source when none was given.
+
+    `sibyl local` generates a random SurrealDB password, so root:root fails
+    against it, while a development server usually takes root:root. For a
+    loopback source with no credentials in the arguments or the URL, the
+    generated login is tried first and root:root second; the first one the
+    server accepts is used. A remote source never receives the local login.
+    """
+    if username is not None or password is not None or surreal_url_credentials(surreal_url):
+        return username, password
+    base = surreal_http_base_url(surreal_url)
+    host = urlsplit(base).hostname if base else None
+    local = _local_install_credentials()
+    if host not in _LOOPBACK_HOSTS or local is None:
+        return username, password
+    for candidate in (local, (_DEFAULT_SOURCE_CREDENTIAL, _DEFAULT_SOURCE_CREDENTIAL)):
+        try:
+            response = httpx.post(
+                f"{base}/sql",
+                content="RETURN true;",
+                auth=candidate,
+                headers={"Accept": "application/json", "Content-Type": "text/plain"},
+                timeout=10.0,
+            )
+        except httpx.HTTPError:
+            return username, password
+        if response.status_code not in {401, 403}:
+            return candidate
+    return username, password
 
 
 def _source_credentials(
@@ -294,6 +349,12 @@ def _source_sql(
         # chained onto it.
         if isinstance(exc, httpx.HTTPStatusError):
             detail = f"HTTP {exc.response.status_code}"
+            if exc.response.status_code in {401, 403}:
+                detail += (
+                    "; pass the local SurrealDB login with --source-surreal-user and "
+                    "SIBYL_SOURCE_SURREAL_PASS (a `sibyl local` install keeps it in "
+                    "~/.sibyl/local/.env as SIBYL_SURREAL_PASSWORD)"
+                )
         else:
             detail = safe_error_detail(exc, base) or type(exc).__name__
         failure = RuntimeError(
@@ -906,10 +967,14 @@ def to_team(
 
     @run_async
     async def _run() -> None:
+        nonlocal source_surreal_user, source_surreal_pass
         try:
             migrate_graph.validate_project_scope(project)
         except ValueError as exc:
             raise RuntimeError(str(exc)) from exc
+        source_surreal_user, source_surreal_pass = _resolve_source_credentials(
+            source_surreal_url, source_surreal_user, source_surreal_pass
+        )
         if source_org:
             try:
                 org_id = migrate_graph.validate_organization_id(source_org)
