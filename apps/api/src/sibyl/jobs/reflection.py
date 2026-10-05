@@ -687,6 +687,8 @@ async def _drain_dream_candidate(
         )
         automatic_executions = list(automatic.executions)
         if automatic.candidate is None:
+            if automatic.status == "abstained" and handled_frontiers is not None:
+                handled_frontiers.update(automatic.candidate_ids)
             pending = automatic.status == "pending"
             return {
                 "candidate_id": candidate.id,
@@ -697,6 +699,7 @@ async def _drain_dream_candidate(
                 "dry_run": False,
                 "reason": automatic.reason,
                 "review_state": "pending" if pending else "archived",
+                "raw_review_state": candidate.review_state,
                 "promoted_id": None,
                 "raw_source_ids": [],
                 "policy_reasons": [],

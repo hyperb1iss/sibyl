@@ -1463,7 +1463,9 @@ async def test_promote_review_candidate_persists_native_record_and_marks_promote
         expected_revision=None,
         validation_promotion=None,
         validation_derivation=None,
+        require_active_reflection: bool = False,
     ) -> RawMemory:
+        assert require_active_reflection is True
         assert validation_promotion is None
         assert validation_derivation is None
         saved.append(memory)
@@ -1651,7 +1653,9 @@ async def test_promote_review_candidate_bounds_contradicted_source_for_as_of_rea
         expected_revision=None,
         validation_promotion=None,
         validation_derivation=None,
+        require_active_reflection: bool = False,
     ) -> RawMemory:
+        assert require_active_reflection is (memory.id == candidate.id)
         assert validation_promotion is None
         assert validation_derivation is None
         memories[memory.id] = memory
@@ -1767,7 +1771,9 @@ async def test_promote_review_candidate_skips_other_private_principal_invalidati
         expected_revision=None,
         validation_promotion=None,
         validation_derivation=None,
+        require_active_reflection: bool = False,
     ) -> RawMemory:
+        assert require_active_reflection is True
         assert validation_promotion is None
         assert validation_derivation is None
         memories[memory.id] = memory
@@ -1923,7 +1929,9 @@ async def test_promote_raw_memory_persists_native_record_and_marks_promoted(
         expected_revision=None,
         validation_promotion=None,
         validation_derivation=None,
+        require_active_reflection: bool = False,
     ) -> RawMemory:
+        assert require_active_reflection is False
         assert validation_promotion is None
         assert validation_derivation is None
         saved.append(memory)

@@ -935,6 +935,7 @@ async def save_raw_memory(
     publication_operation_id: str | None = None,
     validation_promotion: ValidatedPromotion | None = None,
     validation_derivation: dict[str, object] | None = None,
+    require_active_reflection: bool = False,
 ) -> RawMemory:
     from sibyl_core.services.procedure_artifact import publication_build_receipt_json
     from sibyl_core.services.validation_promotion import VALIDATION_PROMOTION_GUARD
@@ -1016,6 +1017,15 @@ async def save_raw_memory(
                         __VALIDATION_SOURCE_GUARD__
                         __VALIDATION_PROMOTION_GUARD__
                         __PUBLICATION_ADMISSION_GUARD__
+                        IF $require_active_reflection {
+                            LET $candidate = (SELECT review_state FROM raw_captures
+                                WHERE organization_id=$organization_id AND uuid=$uuid LIMIT 1)[0];
+                            LET $terminal = (SELECT VALUE id FROM reflection_supersessions
+                                WHERE organization_id=$organization_id AND draft_id=$uuid LIMIT 1);
+                            IF $candidate.review_state != 'promoted' AND array::len($terminal)>0 {
+                                THROW 'publication_source_observation_changed';
+                            };
+                        };
                         FOR $source IN $source_observations {
                             LET $observed = (SELECT * FROM raw_captures
                                 WHERE organization_id = $organization_id AND uuid = $source.uuid LIMIT 1)[0];
@@ -1109,6 +1119,7 @@ async def save_raw_memory(
                     .replace("__VALIDATION_SOURCE_GUARD__", validation_guard)
                     .replace("__VALIDATION_PROMOTION_GUARD__", VALIDATION_PROMOTION_GUARD),
                     **validation_params,
+                    require_active_reflection=require_active_reflection,
                     validation_binding=validation_promotion.binding.model_dump()
                     if validation_promotion
                     else None,
