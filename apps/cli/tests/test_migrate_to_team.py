@@ -468,3 +468,66 @@ def test_replay_only_server_allows_raw_but_refuses_graph_before_writes(
     else:
         assert result.exit_code == 0, result.stdout
         assert client.remember_raw_memory.await_count == len(ROWS)
+
+
+class _Captures:
+    """Raw captures on a team server; corrections address them by bare id."""
+
+    def __init__(self, ids: set[str]) -> None:
+        self.ids = set(ids)
+        self.sent: list[tuple[str, bool]] = []
+
+    async def correct_memory(
+        self, source_id: str, *, action: str, reason: str, preview: bool = False
+    ) -> dict[str, Any]:
+        assert action == "delete"
+        self.sent.append((source_id, preview))
+        if source_id not in self.ids:
+            raise SibylClientError("API error: not_found: memory_source_not_found", status_code=404)
+        if not preview:
+            self.ids.discard(source_id)
+        return {"allowed": True, "applied": not preview}
+
+
+async def test_raw_undo_deletes_each_replayed_capture_by_its_bare_id(tmp_path: Path) -> None:
+    target = _Captures({"cap-1", "cap-2"})
+    ledger = {"src-1": "cap-1", "src-2": "cap-2"}
+    path = tmp_path / "raw.json"
+
+    failures = await migrate._undo_raw(
+        target, ledger_file=path, route={"r": "1"}, ledger=ledger, dry_run=False
+    )
+
+    assert failures == [] and target.ids == set() and ledger == {}
+    assert {source_id for source_id, _ in target.sent} == {"cap-1", "cap-2"}
+    assert json.loads(path.read_text())["receipts"] == {}
+
+
+async def test_raw_undo_dry_run_previews_without_deleting(tmp_path: Path) -> None:
+    target = _Captures({"cap-1", "cap-2"})
+    ledger = {"src-1": "cap-1", "src-2": "cap-2"}
+    path = tmp_path / "raw.json"
+
+    failures = await migrate._undo_raw(
+        target, ledger_file=path, route={"r": "1"}, ledger=ledger, dry_run=True
+    )
+
+    assert failures == [] and target.ids == {"cap-1", "cap-2"}
+    assert ledger == {"src-1": "cap-1", "src-2": "cap-2"}
+    assert all(preview for _, preview in target.sent) and not path.exists()
+
+
+async def test_raw_undo_reports_captures_already_gone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    warnings: list[str] = []
+    monkeypatch.setattr(migrate, "warn", warnings.append)
+    target = _Captures({"cap-1"})
+    ledger = {"src-1": "cap-1", "src-2": "cap-2"}
+
+    failures = await migrate._undo_raw(
+        target, ledger_file=tmp_path / "raw.json", route={"r": "1"}, ledger=ledger, dry_run=False
+    )
+
+    assert failures == [] and target.ids == set() and ledger == {}
+    assert warnings == ["1 raw memories in the ledger were already gone from the team server"]

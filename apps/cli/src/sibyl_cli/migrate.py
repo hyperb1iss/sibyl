@@ -26,6 +26,7 @@ import typer
 from sibyl_cli import migrate_graph
 from sibyl_cli.client import SibylClientError, get_client
 from sibyl_cli.common import error, info, run_async, success, warn
+from sibyl_cli.memory_display import raw_memory_lookup_value
 from sibyl_core.backends.surreal.url_schemes import (
     redact_surreal_url,
     safe_error_detail,
@@ -722,8 +723,10 @@ async def _undo_raw(
     """Delete the raw captures this route replayed, through the memory lifecycle."""
     failures: list[str] = []
     removed = 0
+    gone = 0
     for origin, target_id in list(ledger.items()):
-        source_id = f"raw_memory:{target_id}"
+        # The corrections API takes the bare capture id, as `sibyl correct` sends it.
+        source_id = raw_memory_lookup_value(target_id)
         try:
             preview = await target.correct_memory(
                 source_id,
@@ -733,6 +736,7 @@ async def _undo_raw(
             )
         except SibylClientError as exc:
             if exc.status_code == 404:
+                gone += 1
                 if not dry_run:
                     ledger.pop(origin, None)
                 continue
@@ -756,6 +760,8 @@ async def _undo_raw(
     if not dry_run:
         _save_ledger(ledger_file, route, ledger)
     success(f"{'Would remove' if dry_run else 'Removed'} {removed} raw memories")
+    if gone:
+        warn(f"{gone} raw memories in the ledger were already gone from the team server")
     return failures
 
 
