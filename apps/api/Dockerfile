@@ -65,8 +65,12 @@ COPY --chown=sibyl:sibyl VERSION /app/VERSION
 
 # Install Playwright for crawl4ai (chromium headless)
 # Manual minimal deps instead of --with-deps (which pulls ~600MB of X11/GUI stuff)
+# The upgrade applies Debian security fixes the pinned base tag has not been
+# rebuilt with yet; base images refresh per architecture on their own
+# schedule, so without it a fixed package can still ship vulnerable.
 ENV PLAYWRIGHT_BROWSERS_PATH=/app/.playwright
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get upgrade -y --no-install-recommends \
+    && apt-get install -y --no-install-recommends \
     libpcre2-8-0 \
     libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
     libxkbcommon0 libatspi2.0-0 libxcomposite1 libxdamage1 libxfixes3 \
