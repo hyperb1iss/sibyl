@@ -39,6 +39,20 @@ from sibyl_core.migrate.archive_phase_receipts import (
     ArchivePhaseKey,
     phase_binding_json,
 )
+from sibyl_core.migrate.personal_archive_candidates import normalize_archive_candidates
+from sibyl_core.migrate.personal_archive_plan import (
+    ArchiveCredentialCeiling,
+    ArchiveDisposition,
+    CheckedArchivePlan,
+    canonical_json,
+    checked_plan_bytes,
+    checked_plan_digest,
+    preview_counts,
+)
+from sibyl_core.migrate.personal_archive_prepared import (
+    PreparedArchiveRow,
+    destination_semantic_digest,
+)
 from sibyl_core.services.archive_phase_store import (
     prepare_archive_phase_transaction,
     read_archive_apply_progress,
@@ -1040,3 +1054,109 @@ async def test_archive_apply_progress_native_raw_quarantine_normalized_counts(
     assert progress.state == "committed" and progress.token == token
     assert (progress.receipt.counts[0].created, progress.receipt.counts[0].quarantined) == (1, 1)
     assert len(progress.receipt.introduced) == 1
+
+
+async def test_archive_apply_progress_native_mapped_aliases_acknowledge_one_physical_guard(
+    phase_client, tmp_path
+):
+    parsed, plan = graph_fixtures.inputs(tmp_path / "existing", count=1)
+    installed = graph_fixtures.prepared(parsed, plan)
+    await commit(phase_client, graph_fixtures.phase(installed, url=phase_client._url)[2])
+    destination = graph_fixtures.graph_rows(installed)[0].row.destination_id
+    await phase_client.execute_query(
+        "UPDATE entity SET entity_type='project' WHERE uuid=$id;", id=destination
+    )
+    snapshot = await graph_fixtures.cut(phase_client, plan.organization_id, destination)
+    source_org, owner = str(uuid4()), str(uuid4())
+    fixtures = graph_fixtures.fixtures
+    records = [fixtures._entity(source_org, owner, entity_type="project") for _ in range(2)]
+    records[0]["name"], records[1]["name"] = "First source project", "Second source project"
+    archive = fixtures._parsed(
+        tmp_path / "aliases", source_org, graph=fixtures._graph(source_org, records)
+    )
+    mappings = fixtures._mapping(plan.actor_id, owner).model_copy(
+        update={"projects": {row["uuid"]: destination for row in records}}
+    )
+    candidates = normalize_archive_candidates(archive, mappings, actor_id=plan.actor_id)
+    rows = tuple(
+        candidate.initial_preview(
+            organization_id=plan.organization_id, actor_id=plan.actor_id, origin=archive.origin
+        ).model_copy(update={"witnesses": (graph_fixtures.witness(destination, snapshot),)})
+        for candidate in candidates
+    )
+    aliases = CheckedArchivePlan(
+        organization_id=plan.organization_id,
+        actor_id=plan.actor_id,
+        origin=archive.origin,
+        archive_sha256=archive.archive_sha256,
+        artifact_sha256=archive.artifact_sha256,
+        mappings=mappings,
+        credential=ArchiveCredentialCeiling(credential_kind="session"),
+        rows=rows,
+        counts=preview_counts(rows),
+    )
+    value = graph_fixtures.prepared(archive, aliases)
+    assert len(graph_fixtures.graph_rows(value)) == 2
+    assert all(
+        item.body is None and item.row.disposition is ArchiveDisposition.SKIPPED
+        for item in graph_fixtures.graph_rows(value)
+    )
+    key, token, tx = graph_fixtures.phase(value, url=phase_client._url)
+    assert len(tx.parameters["archive_graph_guards"]) == 1
+    assert (
+        await read_archive_apply_progress(phase_client.execute_query, key=key, prepared=value)
+    ).state == "missing"
+    await commit(phase_client, tx)
+    receipt = await read_archive_phase_receipt(phase_client.execute_query, key=key, token=token)
+    result = await read_archive_apply_progress(phase_client.execute_query, key=key, prepared=value)
+    assert result.state == "committed" and result.receipt == receipt
+    assert sum(count.skipped for count in result.receipt.counts) == 2
+    assert not result.receipt.introduced
+    assert snapshot == await graph_fixtures.cut(phase_client, plan.organization_id, destination)
+
+
+@pytest.mark.parametrize("malformation", ["duplicate_created", "missing_active"])
+async def test_archive_apply_progress_malformed_destinations_before_io(tmp_path, malformation):
+    value, _ = progress_inputs(tmp_path, count=2)
+    plan = value.plan
+    items = list(value.rows)
+    selected = raw_fixtures.raw_rows(value)
+    first, second = selected[:2]
+    body = second.body
+    destination = first.row.destination_id if malformation == "duplicate_created" else None
+    row = second.row.model_copy(
+        update={
+            "destination_id": destination,
+            "disposition": ArchiveDisposition.CREATED
+            if malformation == "duplicate_created"
+            else ArchiveDisposition.CONFLICTED,
+        }
+    )
+    if malformation == "duplicate_created":
+        body["source_id"] = destination
+        row = row.model_copy(update={"semantic_sha256": destination_semantic_digest(row, body)})
+    else:
+        body = None
+    items[items.index(second)] = PreparedArchiveRow(
+        row_json=canonical_json(row), body_json=None if body is None else canonical_json(body)
+    )
+    rows = tuple(item.row for item in items)
+    changed = plan.model_copy(update={"rows": rows, "counts": preview_counts(rows)})
+    malformed = replace(
+        value,
+        rows=tuple(items),
+        checked_plan_json=checked_plan_bytes(changed),
+        checked_plan_sha256=checked_plan_digest(changed),
+    )
+    # Local prepared validation succeeds: the reader must enforce its physical
+    # destination contract rather than pass this malformed selection to I/O.
+    assert malformed.plan == changed
+    key = ArchivePhaseKey(
+        binding=malformed.binding, store="content", action="apply", batch_sequence=0
+    )
+
+    async def execute(query, **params):
+        raise AssertionError("malformed physical destinations reached executor")
+
+    with pytest.raises(ValueError, match=r"repeats a create|omits an active"):
+        await read_archive_apply_progress(execute, key=key, prepared=malformed)
