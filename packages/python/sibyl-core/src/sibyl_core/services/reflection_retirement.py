@@ -1,19 +1,21 @@
 """Retire pending correction descendants of an already abstained ancestor.
 
-Retirement does not validate a candidate for publication. Protected origins
-establish the correction links, current authority establishes access, and the
-canonical save fences every observed source and ancestor against concurrent
-changes. Archived ancestors remain ineligible for ordinary validation.
+Terminal records leave candidate bytes intact because a published descendant
+may retain them as evidence. Protected origins establish historical correction
+links; current authority and a source-state witness guard terminal writes.
+Archived ancestors remain ineligible for ordinary validation.
 """
 
 import json
-from dataclasses import replace
+from collections.abc import Awaitable, Callable, Sequence
+from typing import Literal
 
 from pydantic import TypeAdapter
 
+from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
 from sibyl_core.memory_pipeline.observations import SourceKind
-from sibyl_core.services.content_models import RawMemory
-from sibyl_core.services.content_raw_persistence import get_raw_memory, save_raw_memory
+from sibyl_core.services.content_models import RawMemory, raw_memory_from_record
+from sibyl_core.services.content_raw_persistence import get_raw_memory
 from sibyl_core.services.memory_derivations import (
     load_raw_derivation,
     observation_from_record,
@@ -27,8 +29,93 @@ from sibyl_core.services.memory_source_validation import (
 from sibyl_core.services.observed_sources import load_authorized_source_snapshot
 from sibyl_core.services.source_observations import SourceUnavailableError
 from sibyl_core.services.source_state_store import RawSourceSnapshot
+from sibyl_core.services.validation_execution import _query
 from sibyl_core.services.validation_origin import load_validation_origin
 from sibyl_core.tasks.reflection_correction import ReflectionCorrectionResult
+
+_RETIREMENT_SNAPSHOT = """
+LET $snapshot = {
+    captures: (SELECT * FROM raw_captures WHERE organization_id=$org AND uuid IN $source_ids ORDER BY uuid),
+    states: (SELECT * OMIT validation_write_witness FROM source_states WHERE organization_id=$org AND source_kind='raw_capture' AND source_id IN $source_ids ORDER BY source_id),
+    derivations: (SELECT * FROM memory_derivations WHERE organization_id=$org AND target_kind='raw_capture' AND target_id IN $source_ids ORDER BY target_id),
+    retirements: (SELECT * FROM reflection_supersessions WHERE organization_id=$org AND draft_id IN $source_ids ORDER BY draft_id)
+};
+LET $snapshot_digest = crypto::sha256(type::string($snapshot));
+"""
+
+
+async def abstained_reflection_frontier(
+    organization_id: str, principal_id: str, candidate_id: str
+) -> str | None:
+    """Look up one terminal decision without walking the organization's ledger."""
+    rows = await _query(
+        "SELECT principal_id, archive_reason, superseded_by_candidate_id FROM reflection_supersessions "
+        "WHERE organization_id=$org AND draft_id=$draft LIMIT 1;",
+        org=organization_id,
+        draft=candidate_id,
+    )
+    if (
+        not rows
+        or rows[0]["principal_id"] != principal_id
+        or rows[0]["archive_reason"] not in {"abstained", "ancestor_abstained"}
+    ):
+        return None
+    frontier = rows[0]["superseded_by_candidate_id"]
+    if not isinstance(frontier, str) or not frontier:
+        raise SourceUnavailableError()
+    return frontier
+
+
+async def record_abstained_reflection(
+    memory: RawMemory,
+    *,
+    frontier_id: str,
+    reason: Literal["abstained", "ancestor_abstained"],
+    observations: Sequence[RawMemory],
+    authorize: Callable[[], Awaitable[None]],
+) -> None:
+    """Record terminal state beside an exact, freshly authorized source cut."""
+    observed = {item.id: item for item in (memory, *observations)}
+    if any(item.organization_id != memory.organization_id for item in observed.values()):
+        raise SourceUnavailableError()
+    params = {"org": memory.organization_id, "source_ids": sorted(observed)}
+    rows = await _query(
+        "RETURN {" + _RETIREMENT_SNAPSHOT + "RETURN {token:$snapshot_digest, data:$snapshot}; };",
+        **params,
+    )
+    if len(rows) != 1:
+        raise SourceUnavailableError()
+    snapshot = rows[0]["data"]
+    captures = {row["uuid"]: raw_memory_from_record(row) for row in snapshot["captures"]}
+    if captures != observed or {row["source_id"] for row in snapshot["states"]} != set(observed):
+        raise SourceUnavailableError()
+    await authorize()
+    try:
+        await _query(
+            "RETURN {"
+            + _RETIREMENT_SNAPSHOT
+            + "IF $snapshot_digest != $expected { THROW 'reflection_retirement_source_changed'; };"
+            + "LET $standing=(SELECT VALUE id FROM reflection_supersessions "
+            "WHERE organization_id=$org AND draft_id=$draft LIMIT 1);"
+            "IF array::len($standing)>0 { RETURN false; };"
+            "LET $source_states_to_fence=$snapshot.states;"
+            + SOURCE_STATE_WRITE_WITNESS
+            + "CREATE reflection_supersessions SET organization_id=$org, principal_id=$principal, "
+            "draft_id=$draft, superseded_by_candidate_id=$frontier, promoted_entity_id=NONE, "
+            "archive_reason=$reason, archived_at=time::now(); RETURN true; };",
+            **params,
+            expected=rows[0]["token"],
+            principal=memory.principal_id,
+            draft=memory.id,
+            frontier=frontier_id,
+            reason=reason,
+        )
+    except Exception as exc:
+        if "reflection_supersession_draft" in str(exc):
+            return
+        if "reflection_retirement_source_changed" in str(exc):
+            raise SourceUnavailableError() from exc
+        raise
 
 
 def _accessible(memory: RawMemory, authority: SourceReadAuthority) -> bool:
@@ -52,6 +139,8 @@ async def retire_abstained_correction_chain(
     principal_id: str,
     candidate_id: str,
     resolver: SourceAuthorityResolver,
+    *,
+    expected_root: str | None = None,
 ) -> tuple[str, ...]:
     """Repair verified pending descendants without reopening archived evidence."""
     authority = await resolver(organization_id, principal_id)
@@ -59,7 +148,6 @@ async def retire_abstained_correction_chain(
         raise SourceUnavailableError()
     chain: list[RawMemory] = []
     sources: dict[str, RawMemory] = {}
-    executions: list[str] = []
     seen: set[str] = set()
     while candidate_id not in seen:
         seen.add(candidate_id)
@@ -67,6 +155,10 @@ async def retire_abstained_correction_chain(
         if memory is None or not _accessible(memory, authority):
             raise SourceUnavailableError()
         chain.append(memory)
+        if await abstained_reflection_frontier(
+            organization_id, principal_id, memory.id
+        ) is not None and (expected_root is None or memory.id == expected_root):
+            break
         if memory.review_state == "archived":
             if memory.metadata.get("autonomy_outcome") != "abstained":
                 return ()
@@ -101,30 +193,27 @@ async def retire_abstained_correction_chain(
             ):
                 raise SourceUnavailableError()
             sources[snapshot.memory.id] = snapshot.memory
-        executions.append(origin["uuid"])
         candidate_id = origin["parent_id"]
     else:
         raise SourceUnavailableError()
+    if expected_root is not None and chain[-1].id != expected_root:
+        raise SourceUnavailableError()
     retired: list[str] = []
-    for index, memory in enumerate(chain[:-1]):
-        current_authority = await resolver(organization_id, principal_id)
-        if current_authority != authority or not await raw_derivation_current(memory, authority):
-            raise SourceUnavailableError()
-        await save_raw_memory(
-            replace(
-                memory,
-                review_state="archived",
-                metadata={
-                    **memory.metadata,
-                    "review_state": "archived",
-                    "autonomy_outcome": "abstained",
-                    "autonomy_recommended_action": "abstain",
-                    "automatic_validation_executions": executions,
-                    "archive_reason": "ancestor_abstained",
-                },
-            ),
-            expected_revision=memory.revision,
-            source_observations=[*chain[index:], *sources.values()],
+    for memory in chain[:-1]:
+
+        async def authorize(memory: RawMemory = memory) -> None:
+            current_authority = await resolver(organization_id, principal_id)
+            if current_authority != authority or not await raw_derivation_current(
+                memory, authority
+            ):
+                raise SourceUnavailableError()
+
+        await record_abstained_reflection(
+            memory,
+            frontier_id=chain[-1].id,
+            reason="ancestor_abstained",
+            observations=[*chain, *sources.values()],
+            authorize=authorize,
         )
         retired.append(memory.id)
-    return tuple(retired)
+    return tuple(retired or [candidate_id])
