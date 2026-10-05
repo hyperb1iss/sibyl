@@ -47,6 +47,7 @@ sibyl migrate to-team --target-context <context> --project <project_id> [options
 | `--source-surreal-user` | URL userinfo, else `root` | Local SurrealDB username                                        |
 | `--source-surreal-pass` | URL userinfo, else `root` | Local SurrealDB password (prefer `SIBYL_SOURCE_SURREAL_PASS`)   |
 | `--limit`               | none                      | Migrate at most N raw memories and N graph entities             |
+| `--undo`                | off                       | Remove what this migration wrote that nobody has changed since  |
 
 ### Before you start
 
@@ -112,6 +113,31 @@ work on it in the team server.
 
 `--limit N` migrates at most N new raw memories and N new graph entities. Repeat the command to
 advance through another batch; completed rows remain available for unfinished status and link work.
+
+### Undoing a migration
+
+Run the same command with `--undo` to take a migration back out of the team server. Pass the same
+`--target-context`, `--project`, and any `--target-project` or `--source-org` you migrated with, so
+the command finds the same ledger. Start with `--dry-run` to see what would go.
+
+```bash
+sibyl migrate to-team --target-context team --project project_abc123 --undo --dry-run
+sibyl migrate to-team --target-context team --project project_abc123 --undo
+```
+
+An undo removes only what the migration still owns:
+
+- A graph row goes only while it still sits at the revision the migration's own last write left it
+  at, and the server re-checks that revision as it deletes. A row anyone edited since, including
+  you, stays and is listed.
+- A row that a kept row links to stays too, so nothing kept is left pointing at a deleted row.
+- Epics and milestones you linked to rather than created (a teammate's of the same name) are never
+  removed.
+- Raw memories the migration replayed are deleted through the memory lifecycle, the same path as
+  `sibyl correct --action delete`.
+
+Rows that are already gone from the team server are reported and dropped from the ledger. Undoing
+needs a team server that advertises guarded deletes; the command checks before it deletes anything.
 
 ### Migrating as a team
 
