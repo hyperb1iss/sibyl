@@ -49,6 +49,14 @@ sibyl migrate to-team --target-context <context> --project <project_id> [options
 | `--limit`               | none                      | Migrate at most N raw memories and N graph entities             |
 | `--undo`                | off                       | Remove what this migration wrote that nobody has changed since  |
 
+### Reading your local Sibyl
+
+The command reads your project straight from the local SurrealDB at `ws://localhost:8000/rpc`. An
+install set up with `sibyl local` (or `sibyl up`) generates its own database password; the command
+finds it in `~/.sibyl/local/.env` and uses it without being asked. A development server that takes
+`root`/`root` works as before. For anything else, pass `--source-surreal-user` and set
+`SIBYL_SOURCE_SURREAL_PASS`.
+
 ### Before you start
 
 ```bash
@@ -117,27 +125,37 @@ advance through another batch; completed rows remain available for unfinished st
 ### Undoing a migration
 
 Run the same command with `--undo` to take a migration back out of the team server. Pass the same
-`--target-context`, `--project`, and any `--target-project` or `--source-org` you migrated with, so
-the command finds the same ledger. Start with `--dry-run` to see what would go.
+`--target-context`, `--project`, and any `--target-project` you migrated with, so the command finds
+the same ledger. Start with `--dry-run` to see what would go; it asks the server the same questions
+the real undo does.
 
 ```bash
 sibyl migrate to-team --target-context team --project project_abc123 --undo --dry-run
 sibyl migrate to-team --target-context team --project project_abc123 --undo
 ```
 
-An undo removes only what the migration still owns:
+An undo removes only what the migration created and still owns:
 
 - A graph row goes only while it still sits at the revision the migration's own last write left it
-  at, and the server re-checks that revision as it deletes. A row anyone edited since, including
-  you, stays and is listed.
+  at. A row anyone edited since, including you, stays and is listed.
+- A row stays while anything outside the migration depends on it: a teammate's task filed under a
+  migrated epic, a decision someone linked to it, or a row you created on the team server since.
+  The server checks this, and the revision, as it deletes.
 - A row that a kept row links to stays too, so nothing kept is left pointing at a deleted row.
-- Epics and milestones you linked to rather than created (a teammate's of the same name) are never
-  removed.
+- Rows the migration updated rather than created stay: a teammate's epic or milestone of the same
+  name that your tasks linked to, and a row of yours with the same title that was already on the
+  team server.
 - Raw memories the migration replayed are deleted through the memory lifecycle, the same path as
-  `sibyl correct --action delete`.
+  `sibyl correct --action delete`, and only while nobody has corrected them since.
 
-Rows that are already gone from the team server are reported and dropped from the ledger. Undoing
-needs a team server that advertises guarded deletes; the command checks before it deletes anything.
+The undo reads only the ledger, so it works even after the project changed on your instance or
+your local Sibyl is gone; pass `--source-org` in that case, since finding the organization
+automatically needs the local database. Rows that are already gone from the team server are
+reported and dropped from the ledger. Undoing needs a team server that advertises guarded deletes;
+the command checks before it deletes anything.
+
+Migrating again after an undo writes fresh rows for everything the undo removed. Rows the undo kept
+stay in the ledger and are not written twice.
 
 ### Migrating as a team
 
