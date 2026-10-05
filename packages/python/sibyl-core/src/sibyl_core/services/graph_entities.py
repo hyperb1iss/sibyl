@@ -393,32 +393,34 @@ class EntityManager(_EntityWorkItemManager):
     async def delete_many(self, entity_ids: Sequence[str]) -> set[str]:
         """Delete several entities and their edges in one transaction.
 
-        Returns the ids that existed. Ids with no row cost nothing extra, so a
-        caller sweeping every id a row could own pays one round trip instead of
-        one per candidate.
+        Returns the ids that existed. Each id gets the same statements a single
+        delete runs, compared with `=` so every one is served by an index:
+        `uuid IN $list` and `source_id IN $list` are not index-served on 3.x and
+        scan the whole table, which would make every delete grow with the graph.
+        One round trip still covers the whole set.
         """
         wanted = list(dict.fromkeys(entity_ids))
         if not wanted:
             return set()
-        rows = await _execute_graph_transaction(
-            self._client,
-            """
-            BEGIN TRANSACTION;
+        statements: list[str] = []
+        params: dict[str, object] = {"group_id": self._group_id}
+        for index, entity_id in enumerate(wanted):
+            name = f"uuid_{index}"
+            params[name] = entity_id
+            statements.append(
+                f"""
             DELETE FROM relates_to
-            WHERE group_id = $group_id
-              AND (source_id IN $uuids OR target_id IN $uuids)
+            WHERE group_id = $group_id AND (source_id = ${name} OR target_id = ${name})
             RETURN BEFORE;
             DELETE FROM mentions
-            WHERE group_id = $group_id
-              AND (source_id IN $uuids OR target_id IN $uuids)
+            WHERE group_id = $group_id AND (source_id = ${name} OR target_id = ${name})
             RETURN BEFORE;
-            DELETE FROM entity
-            WHERE group_id = $group_id AND uuid IN $uuids
-            RETURN BEFORE;
-            COMMIT TRANSACTION;
-            """,
-            group_id=self._group_id,
-            uuids=wanted,
+            DELETE FROM entity WHERE group_id = $group_id AND uuid = ${name} RETURN BEFORE;"""
+            )
+        rows = await _execute_graph_transaction(
+            self._client,
+            "BEGIN TRANSACTION;" + "".join(statements) + "\nCOMMIT TRANSACTION;",
+            **params,
         )
         requested = set(wanted)
         return {str(row["uuid"]) for row in rows if row.get("uuid") in requested}
