@@ -471,32 +471,60 @@ def test_replay_only_server_allows_raw_but_refuses_graph_before_writes(
 
 
 class _Captures:
-    """Raw captures on a team server; corrections address them by bare id."""
+    """Raw captures on a team server; corrections address them by bare id and revision."""
 
-    def __init__(self, ids: set[str]) -> None:
-        self.ids = set(ids)
+    def __init__(self, revisions: dict[str, int]) -> None:
+        self.revisions = dict(revisions)
         self.sent: list[tuple[str, bool]] = []
 
+    @property
+    def ids(self) -> set[str]:
+        return set(self.revisions)
+
     async def correct_memory(
-        self, source_id: str, *, action: str, reason: str, preview: bool = False
+        self,
+        source_id: str,
+        *,
+        action: str,
+        reason: str,
+        expected_revision: int | None = None,
+        preview: bool = False,
     ) -> dict[str, Any]:
         assert action == "delete"
         self.sent.append((source_id, preview))
-        if source_id not in self.ids:
+        if source_id not in self.revisions:
             raise SibylClientError("API error: not_found: memory_source_not_found", status_code=404)
+        if expected_revision != self.revisions[source_id]:
+            raise SibylClientError("API error: revision_conflict", status_code=409)
         if not preview:
-            self.ids.discard(source_id)
+            del self.revisions[source_id]
         return {"allowed": True, "applied": not preview}
 
 
+async def _raw_undo(
+    target: _Captures,
+    ledger: dict[str, str],
+    revisions: dict[str, int],
+    path: Path,
+    *,
+    dry_run: bool = False,
+) -> list[str]:
+    return await migrate._undo_raw(
+        target,
+        ledger_file=path,
+        route={"r": "1"},
+        ledger=ledger,
+        revisions=revisions,
+        dry_run=dry_run,
+    )
+
+
 async def test_raw_undo_deletes_each_replayed_capture_by_its_bare_id(tmp_path: Path) -> None:
-    target = _Captures({"cap-1", "cap-2"})
+    target = _Captures({"cap-1": 1, "cap-2": 1})
     ledger = {"src-1": "cap-1", "src-2": "cap-2"}
     path = tmp_path / "raw.json"
 
-    failures = await migrate._undo_raw(
-        target, ledger_file=path, route={"r": "1"}, ledger=ledger, dry_run=False
-    )
+    failures = await _raw_undo(target, ledger, {"src-1": 1, "src-2": 1}, path)
 
     assert failures == [] and target.ids == set() and ledger == {}
     assert {source_id for source_id, _ in target.sent} == {"cap-1", "cap-2"}
@@ -504,13 +532,11 @@ async def test_raw_undo_deletes_each_replayed_capture_by_its_bare_id(tmp_path: P
 
 
 async def test_raw_undo_dry_run_previews_without_deleting(tmp_path: Path) -> None:
-    target = _Captures({"cap-1", "cap-2"})
+    target = _Captures({"cap-1": 1, "cap-2": 1})
     ledger = {"src-1": "cap-1", "src-2": "cap-2"}
     path = tmp_path / "raw.json"
 
-    failures = await migrate._undo_raw(
-        target, ledger_file=path, route={"r": "1"}, ledger=ledger, dry_run=True
-    )
+    failures = await _raw_undo(target, ledger, {"src-1": 1, "src-2": 1}, path, dry_run=True)
 
     assert failures == [] and target.ids == {"cap-1", "cap-2"}
     assert ledger == {"src-1": "cap-1", "src-2": "cap-2"}
@@ -522,15 +548,37 @@ async def test_raw_undo_reports_captures_already_gone(
 ) -> None:
     warnings: list[str] = []
     monkeypatch.setattr(migrate, "warn", warnings.append)
-    target = _Captures({"cap-1"})
+    target = _Captures({"cap-1": 1})
     ledger = {"src-1": "cap-1", "src-2": "cap-2"}
 
-    failures = await migrate._undo_raw(
-        target, ledger_file=tmp_path / "raw.json", route={"r": "1"}, ledger=ledger, dry_run=False
-    )
+    failures = await _raw_undo(target, ledger, {"src-1": 1, "src-2": 1}, tmp_path / "raw.json")
 
     assert failures == [] and target.ids == set() and ledger == {}
     assert warnings == ["1 raw memories in the ledger were already gone from the team server"]
+
+
+async def test_raw_undo_keeps_captures_it_did_not_create_or_that_changed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    warnings: list[str] = []
+    monkeypatch.setattr(migrate, "warn", warnings.append)
+    # cap-edited was corrected after the migration; cap-adopted landed on an
+    # existing capture; cap-unrecorded came from a run that kept no revisions.
+    target = _Captures({"cap-edited": 2, "cap-adopted": 3, "cap-unrecorded": 1, "cap-fresh": 1})
+    ledger = {
+        "src-edited": "cap-edited",
+        "src-adopted": "cap-adopted",
+        "src-unrecorded": "cap-unrecorded",
+        "src-fresh": "cap-fresh",
+    }
+    revisions = {"src-edited": 1, "src-adopted": 3, "src-fresh": 1}
+
+    failures = await _raw_undo(target, ledger, revisions, tmp_path / "raw.json")
+
+    assert failures == []
+    assert target.ids == {"cap-edited", "cap-adopted", "cap-unrecorded"}
+    assert set(ledger) == {"src-edited", "src-adopted", "src-unrecorded"}
+    assert warnings[0] == "Kept 3 raw memories:"
 
 
 async def test_undo_refuses_a_server_without_guarded_deletes() -> None:
@@ -634,3 +682,27 @@ def test_without_a_local_install_the_defaults_stand(
         None,
         None,
     )
+
+
+def test_an_undo_moves_the_route_to_fresh_operation_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(migrate, "_LEDGER_DIR", tmp_path)
+    route = {
+        "source_org": "s",
+        "target_org_id": "t",
+        "target_user_id": "u",
+        "target_project_id": "p",
+    }
+    other = {**route, "target_project_id": "q"}
+    before = migrate._key_namespace(route)
+    # A route that was never undone keeps the keys earlier runs used.
+    assert before == migrate._route_fingerprint(route)
+
+    migrate._advance_epoch(route)
+    after = migrate._key_namespace(route)
+    migrate._advance_epoch(route)
+
+    assert after != before
+    assert migrate._key_namespace(route) not in {before, after}
+    assert migrate._key_namespace(other) == migrate._route_fingerprint(other)

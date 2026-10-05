@@ -588,6 +588,8 @@ async def execute_plan(
     log: Callable[[str], None] = lambda _message: None,
     operation_namespace: str = "",
     revisions: dict[str, int] | None = None,
+    structure: dict[str, dict[str, Any]] | None = None,
+    preexisting: set[str] | None = None,
 ) -> GraphOutcome:
     """Create the plan layer by layer.
 
@@ -600,13 +602,18 @@ async def execute_plan(
     writes = 0
     # The revision each row was left at by this migration's own last write:
     # an undo removes a row only while it still sits there.
-    landed = revisions if revisions is not None else {}
+    last_written = revisions if revisions is not None else {}
+    # What an undo needs without the source: each row's type, layer, and links.
+    shape = structure if structure is not None else {}
+    # Rows whose create landed on a row that already existed: the migration
+    # updated them rather than creating them, so an undo never removes them.
+    adopted = preexisting if preexisting is not None else set()
     intents_recorded = 0
     intents_saved = 0
 
     def remember(origin: str, revision: object) -> None:
-        if type(revision) is int and revision >= 1:
-            landed[origin] = revision
+        if origin not in adopted and type(revision) is int and revision >= 1:
+            last_written[origin] = revision
 
     async def persist_intent() -> None:
         """Put the intent just recorded on disk before its request is sent.
@@ -855,6 +862,15 @@ async def execute_plan(
             if created is None:
                 return
             target_id, revision = created
+            shape[origin] = {
+                "type": node.source.entity_type,
+                "layer": node.layer,
+                "links": _link_targets(node),
+            }
+            # A fresh row starts at revision 1; a higher one means the id
+            # already held a row (the author's own, or one with no author).
+            if type(revision) is int and revision > 1:
+                adopted.add(origin)
             remember(origin, revision)
             ids[origin] = target_id
             outcome.created += 1
@@ -910,7 +926,15 @@ async def execute_plan(
                 )
                 return
             current = await read(target_id)
-            if current is None or target_digest(current) != pending.get("digest"):
+            # The digest leaves out fields a teammate may change, such as task
+            # status; any write since the migration's own last one moves the
+            # revision, so a row the migration recorded must still sit there.
+            own = last_written.get(origin)
+            if (
+                current is None
+                or target_digest(current) != pending.get("digest")
+                or (own is not None and current.get("revision") != own)
+            ):
                 partial.pop(origin, None)
                 outcome.resumed += 1
                 outcome.unlinked.append(
@@ -955,6 +979,15 @@ async def execute_plan(
             )
         missing = pending["link_missing"]
         outcome.relinked += 1
+        if origin not in shape:
+            # Created by an older run that kept no record of it: an undo keeps
+            # it, and now knows what it links to so it keeps those rows too.
+            adopted.add(origin)
+            shape[origin] = {
+                "type": node.source.entity_type,
+                "layer": node.layer,
+                "links": _link_targets(node),
+            }
         remember(origin, revision)
         if missing:
             partial[origin] = {"missing": missing, "digest": None}
@@ -983,8 +1016,8 @@ class UndoOutcome:
 
 async def undo_plan(
     client: Any,
-    plan: GraphPlan,
     *,
+    structure: dict[str, dict[str, Any]],
     ids: dict[str, str],
     revisions: dict[str, int],
     statuses: dict[str, str],
@@ -996,36 +1029,41 @@ async def undo_plan(
 ) -> UndoOutcome:
     """Remove what a migration created, as long as nobody has touched it since.
 
+    Works from the ledger alone: `structure` records, for each row the
+    migration created, its type, plan layer, and the rows it links to, so an
+    undo follows what was migrated even after the source changed or is gone.
     A row goes only while it still carries this migration's provenance for its
-    origin and sits at the revision the migration's own last write left it
-    at; the server re-checks that revision under its lock and lets the row's
-    author delete it. Layers are taken newest first, and a row that something
-    kept still links to is kept too, so an undo never leaves a kept row
-    pointing at nothing. A row links only to rows in earlier layers, so the
+    origin, sits at the revision the migration's own last write left it at,
+    and nothing outside the migration depends on it; the server re-checks the
+    last two as it deletes. Layers are taken newest first, and a row that
+    something kept still links to is kept too, so an undo never leaves a kept
+    row pointing at nothing. A row links only to rows in earlier layers, so the
     rows of one layer are undone concurrently.
     """
     outcome = UndoOutcome()
     still_linked: set[str] = set()
     gate = asyncio.Semaphore(concurrency)
 
-    def keep(node: PlannedEntity, bucket: list[str], reason: str) -> None:
-        bucket.append(f"{node.source.entity_type} {node.source.uuid}: {reason}")
-        still_linked.update(_link_targets(node))
+    def label(origin: str) -> str:
+        return f"{(structure.get(origin) or {}).get('type') or 'row'} {origin}"
 
-    async def undo_one(node: PlannedEntity) -> None:
-        origin = node.source.uuid
+    def keep(origin: str, bucket: list[str], reason: str) -> None:
+        bucket.append(f"{label(origin)}: {reason}")
+        still_linked.update((structure.get(origin) or {}).get("links") or [])
+
+    async def undo_one(origin: str) -> None:
         target_id = ids.get(origin)
         if target_id is None:
             return
         if origin in still_linked:
-            keep(node, outcome.kept_linked, "a row that was kept still links to it")
+            keep(origin, outcome.kept_linked, "a row that was kept still links to it")
             return
         revision = revisions.get(origin)
-        if revision is None:
+        if revision is None or origin not in structure:
             keep(
-                node,
+                origin,
                 outcome.kept_unrecorded,
-                "no landing revision was recorded (an adopted container or an older run)",
+                "the migration did not create it, or an older run left no record of it",
             )
             return
         try:
@@ -1039,16 +1077,16 @@ async def undo_plan(
                 if not dry_run:
                     _forget(origin, ids, revisions, statuses, partial)
                 return
-            keep(node, outcome.failures, f"could not read it ({exc})")
+            keep(origin, outcome.failures, f"could not read it ({exc})")
             return
         provenance = ((current.get("metadata") or {}).get("migration") or {}).get(
             "origin_entity_id"
         )
         if provenance != origin:
-            keep(node, outcome.kept_unrecorded, "the row on the target is not this migration's")
+            keep(origin, outcome.kept_unrecorded, "the row on the target is not this migration's")
             return
         if current.get("revision") != revision:
-            keep(node, outcome.kept_edited, "changed on the team server since it was migrated")
+            keep(origin, outcome.kept_edited, "changed on the team server since it was migrated")
             return
         if dry_run:
             # The same checks the delete runs, so the dry run keeps what the undo would.
@@ -1062,9 +1100,9 @@ async def undo_plan(
             if check.get("deletable") is True:
                 outcome.removed += 1
             elif check.get("error") == "entity_shared":
-                keep(node, outcome.kept_shared, str(check.get("reason") or "shared"))
+                keep(origin, outcome.kept_shared, str(check.get("reason") or "shared"))
             else:
-                keep(node, outcome.kept_edited, "changed on the team server since it was migrated")
+                keep(origin, outcome.kept_edited, "changed on the team server since it was migrated")
             return
         try:
             async with gate:
@@ -1076,14 +1114,14 @@ async def undo_plan(
                 )
         except Exception as exc:
             if getattr(exc, "error_code", None) == "entity_shared":
-                keep(node, outcome.kept_shared, str(exc))
+                keep(origin, outcome.kept_shared, str(exc))
             elif getattr(exc, "status_code", None) == 409:
-                keep(node, outcome.kept_edited, "changed on the team server during the undo")
+                keep(origin, outcome.kept_edited, "changed on the team server during the undo")
             elif getattr(exc, "status_code", None) == 404:
                 outcome.gone += 1
                 _forget(origin, ids, revisions, statuses, partial)
             else:
-                keep(node, outcome.failures, f"delete failed ({exc})")
+                keep(origin, outcome.failures, f"delete failed ({exc})")
             return
         outcome.removed += 1
         _forget(origin, ids, revisions, statuses, partial)
@@ -1091,8 +1129,11 @@ async def undo_plan(
             save()
             log(f"  {outcome.removed} removed...")
 
-    for layer in reversed(plan.layers):
-        await asyncio.gather(*(undo_one(node) for node in reversed(layer)))
+    layers: dict[int, list[str]] = {}
+    for origin in ids:
+        layers.setdefault(int((structure.get(origin) or {}).get("layer") or 0), []).append(origin)
+    for layer in sorted(layers, reverse=True):
+        await asyncio.gather(*(undo_one(origin) for origin in layers[layer]))
     if not dry_run:
         save()
     return outcome

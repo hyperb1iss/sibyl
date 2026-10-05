@@ -159,6 +159,32 @@ def _save_ledger(path: Path, route: dict[str, str], ledger: dict[str, str]) -> N
     _save_migration_ledger(path, {"route": route, "receipts": ledger})
 
 
+def _raw_revisions_path(ledger_file: Path) -> Path:
+    return ledger_file.with_suffix(".raw-revisions.json")
+
+
+def _load_raw_revisions(ledger_file: Path, route: dict[str, str]) -> dict[str, int]:
+    """The revision each replayed capture had when it landed, for an undo to compare."""
+    try:
+        data = json.loads(_raw_revisions_path(ledger_file).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict) or data.get("route") != route:
+        return {}
+    revisions = data.get("revisions")
+    if not isinstance(revisions, dict):
+        return {}
+    return {str(k): v for k, v in revisions.items() if type(v) is int and v >= 1}
+
+
+def _save_raw_revisions(
+    ledger_file: Path, route: dict[str, str], revisions: dict[str, int]
+) -> None:
+    _save_migration_ledger(
+        _raw_revisions_path(ledger_file), {"route": route, "revisions": revisions}
+    )
+
+
 async def _adopt_legacy_ledger(
     client: Any,
     path: Path,
@@ -600,31 +626,73 @@ def _save_graph_ledger(
     statuses: dict[str, str],
     partial: dict[str, dict[str, Any]],
     revisions: dict[str, int] | None = None,
+    structure: dict[str, dict[str, Any]] | None = None,
+    preexisting: set[str] | None = None,
 ) -> None:
     payload: dict[str, Any] = {"route": route, "ids": ids, "statuses": statuses, "partial": partial}
     if revisions is not None:
         payload["revisions"] = revisions
+    if structure is not None:
+        payload["structure"] = structure
+    if preexisting is not None:
+        payload["preexisting"] = sorted(preexisting)
     _save_migration_ledger(path, payload)
 
 
-def _load_graph_revisions(path: Path, route: dict[str, str]) -> dict[str, int]:
-    """The revision each migrated row was left at, for an undo to compare against."""
-    if not path.exists():
-        return {}
+def _load_graph_extras(
+    path: Path, route: dict[str, str]
+) -> tuple[dict[str, int], dict[str, dict[str, Any]], set[str]]:
+    """What an undo needs beyond the receipts: revisions, row structure, adopted rows."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {}
+        return {}, {}, set()
     if not isinstance(data, dict) or data.get("route") != route:
-        return {}
-    revisions = data.get("revisions")
-    if not isinstance(revisions, dict):
-        return {}
-    return {
-        str(origin): revision
-        for origin, revision in revisions.items()
-        if type(revision) is int and revision >= 1
-    }
+        return {}, {}, set()
+    revisions = data.get("revisions") if isinstance(data.get("revisions"), dict) else {}
+    structure = data.get("structure") if isinstance(data.get("structure"), dict) else {}
+    preexisting = data.get("preexisting") if isinstance(data.get("preexisting"), list) else []
+    return (
+        {
+            str(origin): revision
+            for origin, revision in revisions.items()
+            if type(revision) is int and revision >= 1
+        },
+        {str(origin): shape for origin, shape in structure.items() if isinstance(shape, dict)},
+        {str(origin) for origin in preexisting},
+    )
+
+
+def _epoch_path(route: dict[str, str]) -> Path:
+    return _ledger_path(route).with_suffix(".epoch.json")
+
+
+def _key_namespace(route: dict[str, str]) -> str:
+    """The prefix of this route's operation keys.
+
+    The server keeps a completed write's receipt and replays it for the same
+    key, even after the row is gone. An undo therefore moves the route to a new
+    epoch first, so migrating again afterwards writes fresh rows instead of
+    replaying receipts for the ones the undo removed.
+    """
+    fingerprint = _route_fingerprint(route)
+    epoch = _load_epoch(route)
+    return fingerprint if not epoch else f"{fingerprint}:undo-{epoch}"
+
+
+def _load_epoch(route: dict[str, str]) -> int:
+    try:
+        data = json.loads(_epoch_path(route).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return 0
+    if not isinstance(data, dict) or data.get("route") != route:
+        return 0
+    epoch = data.get("epoch")
+    return epoch if type(epoch) is int and epoch > 0 else 0
+
+
+def _advance_epoch(route: dict[str, str]) -> None:
+    _save_migration_ledger(_epoch_path(route), {"route": route, "epoch": _load_epoch(route) + 1})
 
 
 def _report_graph_plan(plan: migrate_graph.GraphPlan, *, resumed: int, share_private: bool) -> None:
@@ -687,7 +755,7 @@ async def _migrate_graph(
     )
     ledger_file = _graph_ledger_path(route)
     ids, statuses, partial = _load_graph_ledger(ledger_file, route)
-    revisions = _load_graph_revisions(ledger_file, route)
+    revisions, structure, preexisting = _load_graph_extras(ledger_file, route)
     plan = migrate_graph.build_plan(
         entities, edges, project=project, share_private=share_private
     ).limited(limit, done=set(ids))
@@ -704,9 +772,13 @@ async def _migrate_graph(
         partial=partial,
         target_project_id=target_project_id,
         origin_org=organization_id,
-        operation_namespace=_route_fingerprint(route),
+        operation_namespace=_key_namespace(route),
         revisions=revisions,
-        save=lambda: _save_graph_ledger(ledger_file, route, ids, statuses, partial, revisions),
+        structure=structure,
+        preexisting=preexisting,
+        save=lambda: _save_graph_ledger(
+            ledger_file, route, ids, statuses, partial, revisions, structure, preexisting
+        ),
         log=info,
     )
     success(
@@ -724,42 +796,29 @@ async def _migrate_graph(
     return outcome.failures
 
 
-async def _undo_graph(
-    target: Any,
-    *,
-    route: dict[str, str],
-    organization_id: str,
-    project: str,
-    share_private: bool,
-    dry_run: bool,
-    surreal_url: str,
-    username: str | None,
-    password: str | None,
-) -> list[str]:
-    """Remove the graph rows this route's migration created and nobody has touched."""
+async def _undo_graph(target: Any, *, route: dict[str, str], dry_run: bool) -> list[str]:
+    """Remove the graph rows this route's migration created and nobody has touched.
+
+    Reads only the ledger, so it follows what was actually migrated even after
+    the source changed or is gone.
+    """
     ledger_file = _graph_ledger_path(route)
     ids, statuses, partial = _load_graph_ledger(ledger_file, route)
     if not ids:
         info("Graph: nothing to undo for this route")
         return []
-    revisions = _load_graph_revisions(ledger_file, route)
-    entities, edges = _read_source_graph(
-        surreal_url=surreal_url,
-        username=username,
-        password=password,
-        organization_id=organization_id,
-        project=project,
-    )
-    plan = migrate_graph.build_plan(entities, edges, project=project, share_private=share_private)
+    revisions, structure, preexisting = _load_graph_extras(ledger_file, route)
     outcome = await migrate_graph.undo_plan(
         target,
-        plan,
+        structure=structure,
         ids=ids,
         revisions=revisions,
         statuses=statuses,
         partial=partial,
         dry_run=dry_run,
-        save=lambda: _save_graph_ledger(ledger_file, route, ids, statuses, partial, revisions),
+        save=lambda: _save_graph_ledger(
+            ledger_file, route, ids, statuses, partial, revisions, structure, preexisting
+        ),
         log=info,
     )
     verb = "Would remove" if dry_run else "Removed"
@@ -789,20 +848,32 @@ async def _undo_raw(
     ledger_file: Path,
     route: dict[str, str],
     ledger: dict[str, str],
+    revisions: dict[str, int],
     dry_run: bool,
 ) -> list[str]:
-    """Delete the raw captures this route replayed, through the memory lifecycle."""
+    """Delete the raw captures this route replayed, through the memory lifecycle.
+
+    A capture goes only at the revision it landed at, so one corrected or
+    edited since stays; one that landed on an existing capture, or with no
+    recorded revision, was not created by this migration and stays too.
+    """
     failures: list[str] = []
     removed = 0
     gone = 0
+    kept: list[str] = []
     for origin, target_id in list(ledger.items()):
         # The corrections API takes the bare capture id, as `sibyl correct` sends it.
         source_id = raw_memory_lookup_value(target_id)
+        revision = revisions.get(origin)
+        if revision != 1:
+            kept.append(f"raw {origin}: the migration did not create it, or left no record of it")
+            continue
         try:
             preview = await target.correct_memory(
                 source_id,
                 action="delete",
                 reason="sibyl migrate to-team --undo",
+                expected_revision=revision,
                 preview=True,
             )
         except SibylClientError as exc:
@@ -810,6 +881,10 @@ async def _undo_raw(
                 gone += 1
                 if not dry_run:
                     ledger.pop(origin, None)
+                    revisions.pop(origin, None)
+                continue
+            if exc.status_code == 409:
+                kept.append(f"raw {origin}: changed on the team server since it was migrated")
                 continue
             failures.append(f"raw {origin}: {exc}")
             continue
@@ -821,18 +896,30 @@ async def _undo_raw(
             continue
         try:
             await target.correct_memory(
-                source_id, action="delete", reason="sibyl migrate to-team --undo"
+                source_id,
+                action="delete",
+                reason="sibyl migrate to-team --undo",
+                expected_revision=revision,
             )
         except SibylClientError as exc:
-            failures.append(f"raw {origin}: {exc}")
+            if exc.status_code == 409:
+                kept.append(f"raw {origin}: changed on the team server during the undo")
+            else:
+                failures.append(f"raw {origin}: {exc}")
             continue
         ledger.pop(origin, None)
+        revisions.pop(origin, None)
         removed += 1
     if not dry_run:
         _save_ledger(ledger_file, route, ledger)
+        _save_raw_revisions(ledger_file, route, revisions)
     success(f"{'Would remove' if dry_run else 'Removed'} {removed} raw memories")
     if gone:
         warn(f"{gone} raw memories in the ledger were already gone from the team server")
+    if kept:
+        warn(f"Kept {len(kept)} raw memories:")
+        for line in kept[:5]:
+            warn(f"  {line}")
     return failures
 
 
@@ -1080,26 +1167,24 @@ def to_team(
             target, ledger_file, route, target_org, persist=not dry_run
         )
         ledger = ledger or _load_ledger(ledger_file, route)
+        raw_revisions = _load_raw_revisions(ledger_file, route)
 
         if undo:
             failed_undo: list[str] = []
+            if not dry_run:
+                # Before the first delete, so even an interrupted undo leaves a
+                # later migration writing fresh rows.
+                _advance_epoch(route)
             if graph:
-                failed_undo.extend(
-                    await _undo_graph(
-                        target,
-                        route=route,
-                        organization_id=org_id,
-                        project=project,
-                        share_private=share_private,
-                        dry_run=dry_run,
-                        surreal_url=source_surreal_url,
-                        username=source_surreal_user,
-                        password=source_surreal_pass,
-                    )
-                )
+                failed_undo.extend(await _undo_graph(target, route=route, dry_run=dry_run))
             failed_undo.extend(
                 await _undo_raw(
-                    target, ledger_file=ledger_file, route=route, ledger=ledger, dry_run=dry_run
+                    target,
+                    ledger_file=ledger_file,
+                    route=route,
+                    ledger=ledger,
+                    revisions=raw_revisions,
+                    dry_run=dry_run,
                 )
             )
             if failed_undo:
@@ -1184,13 +1269,16 @@ def to_team(
                         capture_surface="migration",
                         _idempotency_key="migration-raw:"
                         + hashlib.sha256(
-                            f"{_route_fingerprint(route)}:{original_id}".encode()
+                            f"{_key_namespace(route)}:{original_id}".encode()
                         ).hexdigest(),
                     )
                 except Exception as exc:
                     failed.append(f"{original_id}: {exc}")
                     continue
                 ledger[original_id] = str(response.get("id") or response.get("uuid") or "ok")
+                if type(response.get("revision")) is int:
+                    raw_revisions[original_id] = response["revision"]
+                    _save_raw_revisions(ledger_file, route, raw_revisions)
                 _save_ledger(ledger_file, route, ledger)
                 migrated += 1
                 if migrated % 25 == 0:
