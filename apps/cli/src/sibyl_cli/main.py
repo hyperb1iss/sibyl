@@ -411,7 +411,11 @@ def health(
     async def check_health() -> None:
         try:
             async with get_client() as client:
+                readiness = await client.get("/health/ready")
                 data = await client.get("/health")
+                if readiness.get("status") != "ready":
+                    data = {**data, "status": "not_ready"}
+                data["dependencies"] = readiness.get("dependencies", [])
 
                 status = data.get("status", "unknown")
                 server = data.get("server_name", "sibyl")
@@ -441,6 +445,17 @@ def health(
                 if not healthy:
                     raise typer.Exit(1)
         except SibylClientError as e:
+            if json_output:
+                mark_pending_writes_reported()
+                print_json_result(
+                    {
+                        "status": "unhealthy",
+                        "error": e.error_code or "health_check_failed",
+                        "message": e.detail or str(e),
+                        "pending_writes": pending_write_status(),
+                    },
+                    succeeded=False,
+                )
             command_support.handle_client_error(e)
 
     check_health()

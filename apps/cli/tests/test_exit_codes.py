@@ -289,7 +289,12 @@ def test_health_exits_nonzero_on_an_unhealthy_server(json_flag: list[str]) -> No
 @pytest.mark.parametrize("json_flag", [[], ["--json"]])
 def test_health_exits_zero_on_a_healthy_server(json_flag: list[str]) -> None:
     client = _client()
-    client.get = AsyncMock(return_value={"status": "healthy", "server_name": "stub"})
+    client.get = AsyncMock(
+        side_effect=[
+            {"status": "ready", "dependencies": []},
+            {"status": "healthy", "server_name": "stub"},
+        ]
+    )
 
     with patch("sibyl_cli.main.get_client", return_value=client):
         result = CliRunner().invoke(main_app, ["health", *json_flag])
