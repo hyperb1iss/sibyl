@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
+import re
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -11,7 +14,7 @@ if TYPE_CHECKING:
 
 from sibyl_core.backends.surreal.records import normalize_records
 from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind, evidence_hash
-from sibyl_core.models.entities import Entity
+from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.runtime_ports import RuntimePortUnavailable, get_source_authority_resolver
 from sibyl_core.services.graph_client import SurrealGraphClient
 from sibyl_core.services.memory_derivations import observation_from_record, validate_observations
@@ -33,6 +36,40 @@ def graph_target_digest(entity) -> str:
     )
 
 
+def native_reflection_id(identifier: str) -> bool:
+    """Recognize generated reflection IDs without trusting mutable metadata."""
+    match = re.fullmatch(r"(.+)_v([23])_[0-9a-f]{64}", identifier)
+    return match is not None and match[1] in {kind.value for kind in EntityType}
+
+
+async def reflection_candidate_current(entity: Entity, read: GraphReadValidation | None) -> bool:
+    """An own-candidate terminal decision survives a crashed graph writer."""
+    from sibyl_core.services.memory_identity import IDENTITY_KEY
+    from sibyl_core.services.reflection_supersession import reflection_draft_retired
+
+    if not native_reflection_id(entity.id):
+        return True
+    identity = entity.metadata.get(IDENTITY_KEY)
+    if not isinstance(identity, dict):
+        return False
+    # Scope backfills can change current audience fields while preserving the
+    # original evidence identity. Authenticate that identity's bound candidate.
+    payload = json.dumps(identity, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    if entity.id != f"{identity.get('kind')}_v{identity.get('version')}_{digest}":
+        return False
+    candidate_id = identity.get("review_capture_id")
+    if candidate_id is None:
+        return True
+    if not isinstance(candidate_id, str) or entity.organization_id is None:
+        return False
+    return not await reflection_draft_retired(
+        entity.organization_id,
+        candidate_id,
+        execute_query=read.content_execute_query if read is not None else None,
+    )
+
+
 async def graph_association_current(
     entity, association, *, ancestors=frozenset(), read: GraphReadValidation | None = None
 ) -> bool:
@@ -49,6 +86,8 @@ async def graph_association_current(
 async def _graph_association_current(
     entity, association, *, ancestors=frozenset(), read: GraphReadValidation | None = None
 ) -> bool:
+    if not await reflection_candidate_current(entity, read):
+        return False
     if association is None:
         return not entity.derivation_required
     if association.get("active") is not True or association.get(
@@ -252,7 +291,15 @@ async def _graph_derivation_verdicts(
         identity = SourceIdentity(organization_id, SourceKind.GRAPH_ENTITY, target_id)
         if expected_publications is not None:
             if association is None:
-                return False if entity is not None and entity.derivation_required else None
+                if entity is not None:
+                    try:
+                        if entity.derivation_required or not await reflection_candidate_current(
+                            entity, read
+                        ):
+                            return False
+                    except Exception:
+                        return False
+                return None
             if (
                 target_id in duplicate_associations
                 or association.get("organization_id") != organization_id

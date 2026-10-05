@@ -699,6 +699,7 @@ async def _drain_dream_candidate(
                 "dry_run": False,
                 "reason": automatic.reason,
                 "review_state": "pending" if pending else "archived",
+                "raw_review_state": candidate.review_state,
                 "promoted_id": None,
                 "raw_source_ids": [],
                 "policy_reasons": [],

@@ -9,6 +9,7 @@ from sibyl_core.services.memory_source_validation import SourceReadAuthority
 from sibyl_core.services.reflection_validation import prepare_stored_reflection
 from sibyl_core.services.surreal_content import remember_raw_memory
 from sibyl_core.tasks.memory_progress import ProgressCriticOutput
+from tests.test_automatic_dream_validation import ordinary_graph as ordinary_graph  # noqa: PLC0414
 from tests.test_dream_source_checkpoints import dream_store as dream_store  # noqa: PLC0414
 
 
@@ -227,6 +228,8 @@ async def test_abstained_correction_chain_retires(corrected_chain, monkeypatch, 
         )
         assert drained["failed"] == 0
         assert drained["archived"] == 1
+        assert drained["candidates"][0]["review_state"] == "archived"
+        assert drained["candidates"][0]["raw_review_state"] == "pending"
     else:
         resumed = await resume()
         assert resumed.status == "abstained"
@@ -314,6 +317,23 @@ async def test_abstention_retirement_preserves_published_descendant_evidence(
         await retire_superseded_reflection_drafts(
             organization_id="dream-org", promoted_candidate_id=reviewed.candidate.id
         )
+    if record_promotion:
+        from sibyl_core.services.memory_reflection import preview_reflection_candidate_promotion
+
+        preview = await preview_reflection_candidate_promotion(
+            organization_id="dream-org",
+            principal_id="owner",
+            candidate_id=reviewed.candidate.id,
+            promote_to_scope="private",
+        )
+        assert preview.allowed
+        replay = await promote_reflection_candidate_review(
+            organization_id="dream-org",
+            principal_id="owner",
+            candidate_id=reviewed.candidate.id,
+            promote_to_scope="private",
+        )
+        assert replay.success
     prior_records = await dream_store.execute_query(
         "SELECT * FROM reflection_supersessions ORDER BY draft_id;"
     )
@@ -468,3 +488,252 @@ async def test_terminal_frontier_cannot_redirect_to_unrelated_root(corrected_cha
         await automatically_review_reflection("dream-org", "owner", parent.memory.id, resolver)
     assert await _query("SELECT * FROM raw_captures ORDER BY uuid;") == before
     no_dispatch.assert_not_called()
+
+
+@pytest.mark.parametrize("target", ["root", "child"])
+@pytest.mark.parametrize("entrypoint", ["preview", "promote"])
+async def test_abstained_ledger_blocks_manual_promotion(corrected_chain, target, entrypoint):
+    from sibyl_core.services.automatic_reflection import automatically_review_reflection
+    from sibyl_core.services.memory_reflection import (
+        preview_reflection_candidate_promotion,
+        promote_reflection_candidate_review,
+    )
+    from sibyl_core.services.reflection_retirement import _query
+
+    parent, resolver, child, _, _ = corrected_chain
+    await automatically_review_reflection("dream-org", "owner", parent.memory.id, resolver)
+    before = await _query("SELECT * FROM raw_captures ORDER BY uuid;")
+    candidate_id = parent.memory.id if target == "root" else child.id
+    operation = (
+        preview_reflection_candidate_promotion
+        if entrypoint == "preview"
+        else promote_reflection_candidate_review
+    )
+    result = await operation(
+        organization_id="dream-org",
+        principal_id="owner",
+        candidate_id=candidate_id,
+        promote_to_scope="private",
+    )
+    assert not (result.allowed if entrypoint == "preview" else result.success)
+    assert result.reason == "candidate_archived"
+    assert result.review_state == "archived"
+    assert await _query("SELECT * FROM raw_captures ORDER BY uuid;") == before
+
+
+@pytest.mark.parametrize(
+    "phase",
+    ["reservation", "graph_entry", "graph_created", "final_state", "graph_crash", "final_crash"],
+)
+async def test_terminalization_wins_inflight_promotion(
+    corrected_chain, monkeypatch, ordinary_graph, phase
+):
+    from sibyl_core.memory_pipeline.lifecycle import graph_metadata_recallable
+    from sibyl_core.services import memory_reflection
+    from sibyl_core.services.automatic_reflection import _abstain
+    from sibyl_core.services.reflection_retirement import _query
+
+    parent, resolver, _, _, _ = corrected_chain
+    terminal_cut = []
+
+    async def terminalize():
+        current = await prepare_stored_reflection("dream-org", "owner", parent.memory.id, resolver)
+        await _abstain(current, resolver, parent.memory.id)
+        terminal_cut.extend(await _query("SELECT * FROM raw_captures ORDER BY uuid;"))
+
+    save = memory_reflection.save_raw_memory
+    persist = memory_reflection.persist_reflection_candidate
+    create = ordinary_graph.entity_manager.create_direct_if_absent
+
+    async def racing_save(memory, **kwargs):
+        if (phase == "reservation" and not terminal_cut) or (
+            phase in {"final_state", "final_crash"} and memory.review_state == "promoted"
+        ):
+            await terminalize()
+            if phase == "final_crash":
+                raise RuntimeError("publication crash")
+        return await save(memory, **kwargs)
+
+    async def racing_persist(**kwargs):
+        if phase == "graph_entry":
+            await terminalize()
+        return await persist(**kwargs)
+
+    async def racing_create(*args, **kwargs):
+        result = await create(*args, **kwargs)
+        if phase in {"graph_created", "graph_crash"}:
+            await terminalize()
+            if phase == "graph_crash":
+                raise RuntimeError("publication crash")
+        return result
+
+    monkeypatch.setattr(memory_reflection, "save_raw_memory", racing_save)
+    monkeypatch.setattr(memory_reflection, "persist_reflection_candidate", racing_persist)
+    monkeypatch.setattr(ordinary_graph.entity_manager, "create_direct_if_absent", racing_create)
+
+    async def promote():
+        return await memory_reflection.promote_reflection_candidate_review(
+            organization_id="dream-org",
+            principal_id="owner",
+            candidate_id=parent.memory.id,
+            promote_to_scope="private",
+        )
+
+    if phase in {"graph_crash", "final_crash"}:
+        with pytest.raises(RuntimeError, match="publication crash"):
+            await promote()
+    else:
+        result = await promote()
+        assert not result.success
+        assert result.reason == "candidate_archived"
+        assert result.review_state == "archived"
+    assert terminal_cut
+    assert await _query("SELECT * FROM raw_captures ORDER BY uuid;") == terminal_cut
+    own_capture = next(row for row in terminal_cut if row["uuid"] == parent.memory.id)
+    graph_rows = await ordinary_graph.client.execute_query(
+        "SELECT attributes FROM entity WHERE uuid=$id;",
+        id=own_capture["metadata"].get("promoted_entity_id", "unreserved"),
+    )
+    if phase not in {"graph_crash", "final_crash"}:
+        assert all(not graph_metadata_recallable(row["attributes"]) for row in graph_rows)
+    if graph_rows:
+        await _assert_retired_graph_read_denied(
+            ordinary_graph, own_capture["metadata"]["promoted_entity_id"]
+        )
+
+
+async def _assert_retired_graph_read_denied(runtime, entity_id):
+    from sibyl_core.services.graph_derivations import load_graph_projection_source
+    from sibyl_core.services.source_observations import SourceUnavailableError
+
+    async def read():
+        return await load_graph_projection_source(
+            runtime.client, organization_id="dream-org", source_id=entity_id
+        )
+
+    with pytest.raises(SourceUnavailableError):
+        await read()
+    stored = await runtime.entity_manager.get(entity_id)
+    forged = {**stored.metadata["reflection_identity"], "review_capture_id": "unrelated"}
+    await runtime.entity_manager.update(
+        entity_id,
+        {"metadata": {"review_capture_id": "unrelated", "reflection_identity": forged}},
+    )
+    with pytest.raises(SourceUnavailableError):
+        await read()
+    await runtime.entity_manager.update(
+        entity_id, {"metadata": {"review_capture_id": None, "reflection_identity": None}}
+    )
+    with pytest.raises(SourceUnavailableError):
+        await read()
+
+
+@pytest.mark.parametrize("terminal", [False, True])
+async def test_legacy_publication_obeys_own_terminal_record(
+    corrected_chain, dream_store, ordinary_graph, monkeypatch, terminal
+):
+    from sibyl_core.migrate.scope_backfill import _recovered
+    from sibyl_core.models.entities import Entity, EntityType
+    from sibyl_core.services import memory_reflection
+    from sibyl_core.services.automatic_reflection import _abstain
+    from sibyl_core.services.graph_capture_availability import available_capture_projection_rows
+    from sibyl_core.services.graph_derivations import (
+        graph_publication_verdicts,
+        reflection_candidate_current,
+    )
+    from sibyl_core.services.graph_read_validation import GraphReadValidation
+
+    parent, resolver, _, _, _ = corrected_chain
+    create = ordinary_graph.entity_manager.create_direct_if_absent
+    created = None
+
+    async def historical_writer(entity, **kwargs):
+        nonlocal created
+        if terminal:
+            current = await prepare_stored_reflection(
+                "dream-org", "owner", parent.memory.id, resolver
+            )
+            await _abstain(current, resolver, parent.memory.id)
+        # Historical graph publications predate protected derivation records.
+        created, _ = await create(entity)
+        raise RuntimeError("historical publication boundary")
+
+    monkeypatch.setattr(ordinary_graph.entity_manager, "create_direct_if_absent", historical_writer)
+    with pytest.raises(RuntimeError, match="historical publication boundary"):
+        await memory_reflection.promote_reflection_candidate_review(
+            organization_id="dream-org",
+            principal_id="owner",
+            candidate_id=parent.memory.id,
+            promote_to_scope="private",
+        )
+    assert created is not None
+    assert not created.derivation_required
+
+    def reader():
+        return GraphReadValidation(
+            "dream-org",
+            content_execute_query=dream_store.execute_query,
+            graph_execute_query=ordinary_graph.client.execute_query,
+            source_authority_resolver=resolver,
+        )
+
+    verdicts = await graph_publication_verdicts(
+        "dream-org", {created.id: created}, client=ordinary_graph.client, read=reader()
+    )
+    assert verdicts[created.id] is (False if terminal else None)
+    available = await available_capture_projection_rows(
+        "dream-org", {created.id: created}, graph_client=ordinary_graph.client, read=reader()
+    )
+    assert (created.id in available) is not terminal
+
+    # Backfilled audience fields do not change the bound original candidate.
+    backfilled = created.model_copy(
+        update={"metadata": _recovered(created.metadata, "private", None, "new-owner")}
+    )
+    assert backfilled.metadata["principal_id"] == "new-owner"
+    assert await reflection_candidate_current(backfilled, reader()) is not terminal
+
+    legacy_child = Entity(
+        id="legacy-descendant",
+        entity_type=EntityType.PATTERN,
+        name="Legacy descendant",
+        content="Retained graph ancestry",
+        organization_id="dream-org",
+        metadata={"parent_entity_id": created.id},
+    )
+    legacy_child, _ = await create(legacy_child)
+    available = await available_capture_projection_rows(
+        "dream-org",
+        {legacy_child.id: legacy_child},
+        graph_client=ordinary_graph.client,
+        read=reader(),
+    )
+    assert (legacy_child.id in available) is not terminal
+
+    # Stripped mutable dependency hints cannot turn a native output into an
+    # unrelated legacy row and skip its own-candidate terminal proof.
+    await ordinary_graph.client.execute_query(
+        "UPDATE entity SET attributes={} WHERE uuid=$id;", id=created.id
+    )
+    stripped = created.model_copy(update={"metadata": {}})
+    assert not await available_capture_projection_rows(
+        "dream-org", {created.id: stripped}, graph_client=ordinary_graph.client, read=reader()
+    )
+
+
+async def test_nonnative_reflection_like_identifier_stays_ordinary():
+    from sibyl_core.models.entities import Entity, EntityType
+    from sibyl_core.services.graph_capture_availability import available_capture_projection_rows
+    from sibyl_core.services.graph_derivations import reflection_candidate_current
+
+    entity = Entity(
+        id="pattern_v2_legacy-title",
+        entity_type=EntityType.PATTERN,
+        name="Ordinary legacy pattern",
+        content="No native reflection identity",
+        organization_id="dream-org",
+    )
+    assert await reflection_candidate_current(entity, None)
+    assert await available_capture_projection_rows("dream-org", {entity.id: entity}) == {
+        entity.id: entity
+    }
