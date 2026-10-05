@@ -1102,7 +1102,9 @@ async def undo_plan(
             elif check.get("error") == "entity_shared":
                 keep(origin, outcome.kept_shared, str(check.get("reason") or "shared"))
             else:
-                keep(origin, outcome.kept_edited, "changed on the team server since it was migrated")
+                keep(
+                    origin, outcome.kept_edited, "changed on the team server since it was migrated"
+                )
             return
         try:
             async with gate:
