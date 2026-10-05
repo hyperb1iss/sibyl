@@ -298,6 +298,7 @@ async def _resolve_target_org(client: Any) -> dict[str, Any]:
 
 
 _DEFAULT_SOURCE_CREDENTIAL = "root"
+_UNDO_REFUSED = "undo refused: project maintainer access required"
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 # Where `sibyl local` publishes its SurrealDB (127.0.0.1:8000 in its compose file).
 _LOCAL_INSTALL_PORT = 8000
@@ -889,7 +890,7 @@ async def _undo_graph(target: Any, *, route: dict[str, str], dry_run: bool) -> l
             "The team server refused the deletes: undoing needs project maintainer access. "
             "Ask a maintainer of the project to grant it, then run the undo again."
         )
-        return ["undo refused: project maintainer access required"]
+        return [_UNDO_REFUSED]
     if outcome.unresolved:
         info(
             f"{outcome.unresolved} creates were sent without a confirmed answer; "
@@ -1281,17 +1282,22 @@ def to_team(
                 _advance_epoch(route)
             if graph:
                 failed_undo.extend(await _undo_graph(target, route=route, dry_run=dry_run))
-            failed_undo.extend(
-                await _undo_raw(
-                    target,
-                    ledger_file=ledger_file,
-                    route=route,
-                    ledger=ledger,
-                    revisions=raw_revisions,
-                    dry_run=dry_run,
-                    intents=raw_intents,
+            if _UNDO_REFUSED in failed_undo:
+                # A refused undo changes nothing, so it can run whole once
+                # access is granted instead of leaving the project half undone.
+                info("Raw memories were left in place too.")
+            else:
+                failed_undo.extend(
+                    await _undo_raw(
+                        target,
+                        ledger_file=ledger_file,
+                        route=route,
+                        ledger=ledger,
+                        revisions=raw_revisions,
+                        dry_run=dry_run,
+                        intents=raw_intents,
+                    )
                 )
-            )
             if failed_undo:
                 error(f"{len(failed_undo)} failures:")
                 for line in failed_undo[:10]:

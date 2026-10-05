@@ -814,3 +814,30 @@ def test_a_raw_write_retried_after_an_undo_keeps_its_original_key(
     assert second.exit_code == 0, second.stdout
     sent = [key for origin, key in keys if origin == "src-0"]
     assert len(sent) == 2 and sent[0] == sent[1]
+
+
+def test_a_refused_undo_leaves_the_raw_memories_too(
+    ledger_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = _target(monkeypatch, TEAM)
+    identity_get = client.get.side_effect
+
+    async def get(path: str) -> dict[str, Any]:
+        answer = await identity_get(path)
+        if path == "/auth/replay-identity":
+            answer["capabilities"] = [*answer["capabilities"], "migration_guarded_delete_v1"]
+        return answer
+
+    client.get = AsyncMock(side_effect=get)
+
+    async def refused_graph(*_args: Any, **_kwargs: Any) -> list[str]:
+        return [migrate._UNDO_REFUSED]
+
+    raw_undo = AsyncMock(return_value=[])
+    monkeypatch.setattr(migrate, "_undo_graph", refused_graph)
+    monkeypatch.setattr(migrate, "_undo_raw", raw_undo)
+
+    result = _run("--undo")
+
+    assert result.exit_code == 1
+    raw_undo.assert_not_awaited()
