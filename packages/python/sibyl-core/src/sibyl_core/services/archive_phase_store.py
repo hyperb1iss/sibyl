@@ -659,18 +659,23 @@ async def read_archive_apply_progress(
         )
         for kind in {row.kind for row in selected}
     }
-    created = {
+    created_rows = [
         (row.kind.value, row.destination_id)
         for row in selected
         if row.disposition is ArchiveDisposition.CREATED
-    }
+    ]
+    created = set(created_rows)
     active = [
         (row.kind, row.destination_id)
         for row in selected
         if row.disposition is not ArchiveDisposition.QUARANTINED
     ]
-    if len(set(active)) != len(active) or any(identity is None for _, identity in active):
-        raise ValueError("archive progress selection repeats or omits an active destination")
+    # A canonical mapped anchor may have several logical SKIPPED aliases.
+    # Counts retain those decisions; only physical introductions must be unique.
+    if len(created) != len(created_rows) or any(identity is None for _, identity in active):
+        raise ValueError(
+            "archive progress selection repeats a create or omits an active destination"
+        )
 
     result = await execute(
         _APPLY_PROGRESS_QUERY, org=key.binding.organization_id, run=key.binding.run_id
