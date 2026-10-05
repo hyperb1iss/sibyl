@@ -1126,6 +1126,61 @@ async def test_create_intent_is_saved_before_any_target_write() -> None:
     assert result.failures == [] and ledger.partial == {}
 
 
+async def test_every_write_finds_its_own_intent_on_disk() -> None:
+    import copy
+
+    ledger = _Ledger()
+    disk: dict[str, dict[str, Any]] = {}
+    entities = [_entity("epic_1", "epic")] + [
+        _entity(f"task_{n}", "task", status="done") for n in range(40)
+    ]
+    edges = [SourceEdge("BELONGS_TO", f"task_{n}", "epic_1") for n in range(40)]
+    plan = build_plan(entities, edges, project=PROJECT)
+
+    class Target(_Target):
+        async def _request(
+            self, method: str, path: str, *args: Any, **kwargs: Any
+        ) -> dict[str, Any]:
+            body = kwargs.get("json")
+            if method == "POST" and path == "/entities":
+                origin = body["metadata"]["migration"]["origin_entity_id"]
+                assert disk[origin]["create_body"] == body
+            if method == "PATCH":
+                origin = next(o for o, t in ledger.ids.items() if path.endswith(t))
+                assert disk[origin]["status_intent"]["body"] == body
+            return await super()._request(method, path, *args, **kwargs)
+
+    def save() -> None:
+        ledger.saves += 1
+        disk.clear()
+        disk.update(copy.deepcopy(ledger.partial))
+
+    result = await execute_plan(
+        Target(),
+        plan,
+        ids=ledger.ids,
+        statuses=ledger.statuses,
+        partial=ledger.partial,
+        target_project_id="project_target",
+        origin_org="org-src",
+        save=save,
+    )
+    assert result.failures == [] and result.created == 41 and result.statuses == 40
+
+
+async def test_rows_starting_together_share_one_intent_save() -> None:
+    ledger = _Ledger()
+    plan = build_plan(
+        [_entity(f"decision_{n}", "decision") for n in range(60)], [], project=PROJECT
+    )
+
+    result = await _execute(_Target(), ledger, plan)
+
+    assert result.created == 60 and result.failures == []
+    # One intent save for the layer and one when it finishes, not one per row.
+    assert ledger.saves == 2
+
+
 class _IdempotentStatusTarget(_IdempotentTarget):
     def __init__(self) -> None:
         super().__init__()

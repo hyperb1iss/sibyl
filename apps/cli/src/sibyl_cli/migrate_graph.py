@@ -601,10 +601,30 @@ async def execute_plan(
     # The revision each row was left at by this migration's own last write:
     # an undo removes a row only while it still sits there.
     landed = revisions if revisions is not None else {}
+    intents_recorded = 0
+    intents_saved = 0
 
     def remember(origin: str, revision: object) -> None:
         if type(revision) is int and revision >= 1:
             landed[origin] = revision
+
+    async def persist_intent() -> None:
+        """Put the intent just recorded on disk before its request is sent.
+
+        Rows that record intents in the same turn share one ledger write: the
+        first to resume saves everything recorded so far and the rest find
+        theirs already saved. One write per row would rewrite the whole ledger
+        for every row a layer starts, blocking the event loop long enough for
+        a pooled connection to go stale between assignment and send.
+        """
+        nonlocal intents_recorded, intents_saved
+        intents_recorded += 1
+        wanted = intents_recorded
+        await asyncio.sleep(0)
+        if intents_saved < wanted:
+            covered = intents_recorded
+            save()
+            intents_saved = covered
 
     async def read(target_id: str) -> dict[str, Any] | None:
         """The row as the team server holds it; None when it is gone."""
@@ -709,7 +729,7 @@ async def execute_plan(
                     ),
                 }
                 pending["status_intent"] = intent
-                save()
+                await persist_intent()
             if intent["target_id"] != target_id or intent["body"]["status"] != status:
                 raise RuntimeError(
                     "the source status or target changed after its intent was saved; "
@@ -830,7 +850,7 @@ async def execute_plan(
                     "missing": missing,
                     "digest": None,
                 }
-                save()
+                await persist_intent()
             created = await write(node, body)
             if created is None:
                 return
@@ -911,7 +931,7 @@ async def execute_plan(
             pending["link_key"] = operation_key(node, "links", topology)
             # A lost response retries this exact request. The server either finds
             # every binding already applied or enforces the saved revision.
-            save()
+            await persist_intent()
         async with gate:
             try:
                 response = await client._request(
