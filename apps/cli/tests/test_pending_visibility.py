@@ -228,7 +228,7 @@ def _health_client(payload: dict[str, Any]) -> MagicMock:
     client = MagicMock()
     client.__aenter__ = AsyncMock(return_value=client)
     client.__aexit__ = AsyncMock(return_value=False)
-    client.get = AsyncMock(return_value=payload)
+    client.get = AsyncMock(side_effect=[{"status": "ready", "dependencies": []}, payload])
     return client
 
 
@@ -442,8 +442,8 @@ def test_a_broken_stderr_cannot_change_the_exit_status(
         BrokenPipeError(),
     ):
 
-        def explode(*_args: object, **_kwargs: object) -> None:
-            raise boom
+        def explode(*_args: object, _boom: BaseException = boom, **_kwargs: object) -> None:
+            raise _boom
 
         monkeypatch.setattr(common, "_pending_writes_reported", False)
         monkeypatch.setattr(common.err_console, "print", explode)

@@ -360,9 +360,9 @@ def create_api_app() -> FastAPI:  # noqa: PLR0915
     async def readiness_check() -> JSONResponse:
         """Public readiness check - no auth required (probes run pre-auth).
 
-        Returns 200 when the serving dependencies (SurrealDB reachability)
-        are healthy, 503 with a structured body otherwise. Cheap by design:
-        a connect-only handshake that never touches the per-org query path.
+        Returns 200 when serving dependencies are healthy, or 503 with a
+        structured body otherwise. The storage probe reads at most one auth
+        record and never queries a per-org namespace.
         Wire k8s readinessProbe at this path.
         """
         from sibyl.api.readiness import check_readiness

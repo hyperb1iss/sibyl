@@ -4,8 +4,8 @@ Liveness (`/health`) only asserts the process is up. Readiness asks the
 harder question: can this process actually serve traffic? For Sibyl that
 means the SurrealDB runtime and active coordination broker are reachable.
 The database check connects a dedicated auth client against the static
-`sibyl_auth` namespace and returns the pooled connection without issuing a
-query, so it never touches a per-org namespace or the tenant query path.
+`sibyl_auth` namespace and reads at most one user identifier. It never
+queries a per-org namespace or returns auth records in the probe response.
 """
 
 from __future__ import annotations
@@ -53,25 +53,20 @@ class ReadinessReport:
 
 
 async def check_surreal_ready() -> DependencyStatus:
-    """Probe SurrealDB reachability with a connect-only handshake.
-
-    Builds the auth client (static namespace, never per-org) and checks out
-    a pooled connection. `connect()` performs the websocket handshake,
-    signin, and namespace selection without running a query, so it proves
-    the runtime can serve traffic without holding the tenant query path.
-    """
+    """Check connection and storage reads in the static auth namespace."""
     from sibyl.persistence.surreal.auth import build_surreal_auth_client
 
     started = time.perf_counter()
     client = build_surreal_auth_client()
     try:
         await client.connect()
+        await client.execute_query("SELECT id FROM users LIMIT 1;")
     except Exception as exc:
         log.warning("readiness_surreal_unreachable", error=str(exc))
         return DependencyStatus(
             name="surrealdb",
             ready=False,
-            detail="SurrealDB runtime unreachable",
+            detail="SurrealDB auth storage unavailable",
         )
     finally:
         try:

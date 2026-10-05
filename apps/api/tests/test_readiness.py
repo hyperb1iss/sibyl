@@ -151,8 +151,8 @@ def test_dead_required_broker_fails_readiness_but_not_liveness() -> None:
 
 
 @pytest.mark.asyncio
-async def test_check_surreal_ready_probes_connect_only() -> None:
-    """The probe connects (handshake) and closes without running a query."""
+async def test_check_surreal_ready_reads_auth_storage() -> None:
+    """A successful handshake alone does not establish storage readiness."""
     fake_client = AsyncMock()
 
     with patch(
@@ -166,7 +166,7 @@ async def test_check_surreal_ready_probes_connect_only() -> None:
     assert status.ready is True
     fake_client.connect.assert_awaited_once()
     fake_client.close.assert_awaited_once()
-    assert not fake_client.execute_query.await_count
+    fake_client.execute_query.assert_awaited_once_with("SELECT id FROM users LIMIT 1;")
 
 
 @pytest.mark.asyncio
@@ -183,7 +183,7 @@ async def test_check_surreal_ready_reports_unreachable_on_connect_failure() -> N
         status = await check_surreal_ready()
 
     assert status.ready is False
-    assert status.detail == "SurrealDB runtime unreachable"
+    assert status.detail == "SurrealDB auth storage unavailable"
     fake_client.close.assert_awaited_once()
 
 
@@ -318,3 +318,41 @@ def test_schema_bootstrap_unattempted_reports_not_ready() -> None:
     assert status is not None
     assert status.ready is False
     assert "not started" in (status.detail or "")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure", [ConnectionError("storage offline"), TimeoutError("query stalled")]
+)
+async def test_check_surreal_ready_rejects_storage_failure_after_connect(
+    failure: Exception,
+) -> None:
+    from sibyl.api.readiness import check_surreal_ready
+
+    fake_client = AsyncMock()
+    fake_client.execute_query.side_effect = failure
+    with patch(
+        "sibyl.persistence.surreal.auth.build_surreal_auth_client", return_value=fake_client
+    ):
+        status = await check_surreal_ready()
+
+    assert status.ready is False
+    assert status.detail == "SurrealDB auth storage unavailable"
+    fake_client.connect.assert_awaited_once()
+    fake_client.execute_query.assert_awaited_once()
+    fake_client.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_check_surreal_ready_accepts_empty_auth_store() -> None:
+    from sibyl.api.readiness import check_surreal_ready
+
+    fake_client = AsyncMock()
+    fake_client.execute_query.return_value = []
+    with patch(
+        "sibyl.persistence.surreal.auth.build_surreal_auth_client", return_value=fake_client
+    ):
+        status = await check_surreal_ready()
+
+    assert status.ready is True
+    fake_client.close.assert_awaited_once()
