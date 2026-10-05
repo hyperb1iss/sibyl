@@ -2944,3 +2944,84 @@ async def test_create_entities_bulk_never_replaces_another_members_row() -> None
     assert written.id != plain_id
     assert response.entities[0].id == written.id
     assert written.created_by == str(ctx.user.id)
+
+
+def _revisioned_decision(*, author: str, revision: int) -> Any:
+    return SimpleNamespace(
+        id="decision_migrated",
+        entity_type=EntityType.DECISION,
+        revision=revision,
+        created_by=author,
+        metadata={"project_id": "project_team", "memory_scope": "project", "principal_id": author},
+    )
+
+
+async def _delete_with_guard(
+    existing: Any, ctx: Any, expected_revision: int | None
+) -> tuple[Any, Any]:
+    delete_mock = AsyncMock(return_value=True)
+    access = AsyncMock()
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(get=AsyncMock(return_value=existing), delete=delete_mock)
+    )
+    with (
+        patch("sibyl.locks.entity_lock", _locked_entity),
+        patch(
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        patch("sibyl.api.routes.entity_mutations.verify_entity_project_access", access),
+        patch("sibyl.api.routes.entity_policy.require_entity_scope_visible", AsyncMock()),
+        patch(
+            "sibyl.api.routes.entity_mutations.retire_entity_passages",
+            AsyncMock(
+                return_value=SimpleNamespace(retired=0, complete=True, failed_passage_ids=[])
+            ),
+        ),
+        patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
+    ):
+        await delete_entity(
+            entity_id="decision_migrated",
+            request=_request(),
+            org=_org(),
+            ctx=ctx,
+            content_session=None,
+            expected_revision=expected_revision,
+        )
+    return delete_mock, access
+
+
+@pytest.mark.asyncio
+async def test_delete_with_a_stale_expected_revision_is_a_conflict_and_deletes_nothing() -> None:
+    ctx = _ctx()
+    existing = _revisioned_decision(author=str(ctx.user.id), revision=4)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await _delete_with_guard(existing, ctx, expected_revision=3)
+
+    assert excinfo.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_an_author_deleting_their_unchanged_row_needs_only_contributor_access() -> None:
+    ctx = _ctx()
+    existing = _revisioned_decision(author=str(ctx.user.id), revision=4)
+
+    delete_mock, access = await _delete_with_guard(existing, ctx, expected_revision=4)
+
+    delete_mock.assert_awaited_once()
+    assert access.await_args.kwargs["required_role"] == ProjectRole.CONTRIBUTOR
+
+
+@pytest.mark.parametrize(("author_is_caller", "guard"), [(False, 4), (True, None)])
+@pytest.mark.asyncio
+async def test_other_deletes_still_need_a_maintainer(
+    author_is_caller: bool, guard: int | None
+) -> None:
+    ctx = _ctx()
+    author = str(ctx.user.id) if author_is_caller else "someone-else"
+    existing = _revisioned_decision(author=author, revision=4)
+
+    _delete_mock, access = await _delete_with_guard(existing, ctx, expected_revision=guard)
+
+    assert access.await_args.kwargs["required_role"] == ProjectRole.MAINTAINER

@@ -10,6 +10,7 @@ from sibyl.api.decorators import handle_workflow_errors
 from sibyl.api.errors import (
     constraint_violation,
     entity_locked,
+    revision_conflict,
     safe_error_payload,
     sanitize_error_text,
     unprocessable_entity,
@@ -53,6 +54,7 @@ from sibyl_core.auth.memory_policy import (
     SERVER_OWNED_METADATA_KEYS,
 )
 from sibyl_core.embeddings.provenance import without_client_embedding_stamp
+from sibyl_core.errors import RevisionConflictError
 from sibyl_core.memory_pipeline.structure import strip_structure_metadata
 from sibyl_core.models.entities import EntityType
 from sibyl_core.projection import (
@@ -730,6 +732,14 @@ async def delete_entity(
     org: AuthOrganization = Depends(get_current_organization),
     ctx: AuthContext = Depends(get_auth_context),
     content_session: Any = Depends(get_content_read_session_dependency),
+    expected_revision: int | None = Query(
+        default=None,
+        ge=1,
+        description=(
+            "Delete only while the entity is still at this revision. Its author may then "
+            "delete it with the contributor access that wrote it."
+        ),
+    ),
 ) -> None:
     """Delete an entity."""
     from sibyl.locks import LockAcquisitionError, entity_lock
@@ -746,14 +756,29 @@ async def delete_entity(
             runtime = await policy.get_entity_graph_runtime(group_id)
 
             existing = await _existing_entity_or_404(runtime.entity_manager, entity_id)
+            # A direct call (not through FastAPI) passes the Query marker itself.
+            guard = expected_revision if type(expected_revision) is int else None
+            current_revision = getattr(existing, "revision", None)
+            if guard is not None and current_revision != guard:
+                raise revision_conflict(
+                    RevisionConflictError(entity_id, guard, int(current_revision or 0))
+                )
 
-            # Verify project access for entities with project_id (maintainer required to delete)
+            # Deleting from a project takes a maintainer, except that an author
+            # may remove a row nobody has changed since they wrote it (what a
+            # migration undo does), with the same access that wrote it.
+            own_unchanged = False
+            if guard is not None and ctx.user is not None:
+                author = (getattr(existing, "metadata", None) or {}).get("principal_id") or getattr(
+                    existing, "created_by", None
+                )
+                own_unchanged = author is not None and str(author) == str(ctx.user.id)
             project_id = policy.entity_read_project_id(existing)
             await verify_entity_project_access(
                 content_session,
                 ctx,
                 project_id,
-                required_role=ProjectRole.MAINTAINER,
+                required_role=ProjectRole.CONTRIBUTOR if own_unchanged else ProjectRole.MAINTAINER,
                 require_existing_project=True,
             )
             # A project maintainer role does not extend over a co-member's
