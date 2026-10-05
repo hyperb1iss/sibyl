@@ -531,10 +531,32 @@ def _save_graph_ledger(
     ids: dict[str, str],
     statuses: dict[str, str],
     partial: dict[str, dict[str, Any]],
+    revisions: dict[str, int] | None = None,
 ) -> None:
-    _save_migration_ledger(
-        path, {"route": route, "ids": ids, "statuses": statuses, "partial": partial}
-    )
+    payload: dict[str, Any] = {"route": route, "ids": ids, "statuses": statuses, "partial": partial}
+    if revisions is not None:
+        payload["revisions"] = revisions
+    _save_migration_ledger(path, payload)
+
+
+def _load_graph_revisions(path: Path, route: dict[str, str]) -> dict[str, int]:
+    """The revision each migrated row was left at, for an undo to compare against."""
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict) or data.get("route") != route:
+        return {}
+    revisions = data.get("revisions")
+    if not isinstance(revisions, dict):
+        return {}
+    return {
+        str(origin): revision
+        for origin, revision in revisions.items()
+        if type(revision) is int and revision >= 1
+    }
 
 
 def _report_graph_plan(plan: migrate_graph.GraphPlan, *, resumed: int, share_private: bool) -> None:
@@ -597,6 +619,7 @@ async def _migrate_graph(
     )
     ledger_file = _graph_ledger_path(route)
     ids, statuses, partial = _load_graph_ledger(ledger_file, route)
+    revisions = _load_graph_revisions(ledger_file, route)
     plan = migrate_graph.build_plan(
         entities, edges, project=project, share_private=share_private
     ).limited(limit, done=set(ids))
@@ -614,7 +637,8 @@ async def _migrate_graph(
         target_project_id=target_project_id,
         origin_org=organization_id,
         operation_namespace=_route_fingerprint(route),
-        save=lambda: _save_graph_ledger(ledger_file, route, ids, statuses, partial),
+        revisions=revisions,
+        save=lambda: _save_graph_ledger(ledger_file, route, ids, statuses, partial, revisions),
         log=info,
     )
     success(
@@ -630,6 +654,109 @@ async def _migrate_graph(
     for line in outcome.unlinked[:10]:
         warn(f"  {line}")
     return outcome.failures
+
+
+async def _undo_graph(
+    target: Any,
+    *,
+    route: dict[str, str],
+    organization_id: str,
+    project: str,
+    share_private: bool,
+    dry_run: bool,
+    surreal_url: str,
+    username: str | None,
+    password: str | None,
+) -> list[str]:
+    """Remove the graph rows this route's migration created and nobody has touched."""
+    ledger_file = _graph_ledger_path(route)
+    ids, statuses, partial = _load_graph_ledger(ledger_file, route)
+    if not ids:
+        info("Graph: nothing to undo for this route")
+        return []
+    revisions = _load_graph_revisions(ledger_file, route)
+    entities, edges = _read_source_graph(
+        surreal_url=surreal_url,
+        username=username,
+        password=password,
+        organization_id=organization_id,
+        project=project,
+    )
+    plan = migrate_graph.build_plan(entities, edges, project=project, share_private=share_private)
+    outcome = await migrate_graph.undo_plan(
+        target,
+        plan,
+        ids=ids,
+        revisions=revisions,
+        statuses=statuses,
+        partial=partial,
+        dry_run=dry_run,
+        save=lambda: _save_graph_ledger(ledger_file, route, ids, statuses, partial, revisions),
+        log=info,
+    )
+    verb = "Would remove" if dry_run else "Removed"
+    success(
+        f"{verb} {outcome.removed} graph entities"
+        + (f" ({outcome.gone} already gone)" if outcome.gone else "")
+    )
+    for label, kept in (
+        ("changed on the team server since migration", outcome.kept_edited),
+        ("still linked from a kept row", outcome.kept_linked),
+        ("not undoable by this run", outcome.kept_unrecorded),
+    ):
+        if kept:
+            warn(f"Kept {len(kept)} {label}:")
+            for line in kept[:5]:
+                warn(f"  {line}")
+    return outcome.failures
+
+
+async def _undo_raw(
+    target: Any,
+    *,
+    ledger_file: Path,
+    route: dict[str, str],
+    ledger: dict[str, str],
+    dry_run: bool,
+) -> list[str]:
+    """Delete the raw captures this route replayed, through the memory lifecycle."""
+    failures: list[str] = []
+    removed = 0
+    for origin, target_id in list(ledger.items()):
+        source_id = f"raw_memory:{target_id}"
+        try:
+            preview = await target.correct_memory(
+                source_id,
+                action="delete",
+                reason="sibyl migrate to-team --undo",
+                preview=True,
+            )
+        except SibylClientError as exc:
+            if exc.status_code == 404:
+                if not dry_run:
+                    ledger.pop(origin, None)
+                continue
+            failures.append(f"raw {origin}: {exc}")
+            continue
+        if not preview.get("allowed"):
+            failures.append(f"raw {origin}: the team server refused to delete it")
+            continue
+        if dry_run:
+            removed += 1
+            continue
+        try:
+            await target.correct_memory(
+                source_id, action="delete", reason="sibyl migrate to-team --undo"
+            )
+        except SibylClientError as exc:
+            failures.append(f"raw {origin}: {exc}")
+            continue
+        ledger.pop(origin, None)
+        removed += 1
+    if not dry_run:
+        _save_ledger(ledger_file, route, ledger)
+    success(f"{'Would remove' if dry_run else 'Removed'} {removed} raw memories")
+    return failures
 
 
 async def _resolve_target_project(client: Any, wanted: str) -> dict[str, Any] | None:
@@ -742,6 +869,14 @@ def to_team(
             "--share-private",
             help="Make your private memories in this project visible to the project "
             "on the target (by default they stay private to you)",
+        ),
+    ] = False,
+    undo: Annotated[
+        bool,
+        typer.Option(
+            "--undo",
+            help="Remove what this migration created on the target and nobody has "
+            "changed since (combine with --dry-run to preview)",
         ),
     ] = False,
 ) -> None:
@@ -863,6 +998,34 @@ def to_team(
             target, ledger_file, route, target_org, persist=not dry_run
         )
         ledger = ledger or _load_ledger(ledger_file, route)
+
+        if undo:
+            failed_undo: list[str] = []
+            if graph:
+                failed_undo.extend(
+                    await _undo_graph(
+                        target,
+                        route=route,
+                        organization_id=org_id,
+                        project=project,
+                        share_private=share_private,
+                        dry_run=dry_run,
+                        surreal_url=source_surreal_url,
+                        username=source_surreal_user,
+                        password=source_surreal_pass,
+                    )
+                )
+            failed_undo.extend(
+                await _undo_raw(
+                    target, ledger_file=ledger_file, route=route, ledger=ledger, dry_run=dry_run
+                )
+            )
+            if failed_undo:
+                error(f"{len(failed_undo)} failures:")
+                for line in failed_undo[:10]:
+                    error(f"  {line}")
+                raise typer.Exit(1)
+            return
 
         migrated = 0
         skipped = 0

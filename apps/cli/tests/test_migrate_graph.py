@@ -1582,3 +1582,149 @@ async def test_saved_complete_create_receipt_clears_empty_partial_without_target
     assert second.failures == second.unlinked == []
     assert resumed.partial == {} and target.calls == [] and target.rows == before
     assert resumed.saves == 1
+
+
+class _UndoTarget(_Target):
+    """Answers status receipts with their revision and honours guarded deletes."""
+
+    async def _request(self, method: str, path: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        if method == "DELETE":
+            self.calls.append((method, path, kwargs.get("params")))
+            target_id = path.rsplit("/", 1)[-1]
+            if target_id not in self.rows:
+                raise _ApiError(404)
+            expected = int((kwargs.get("params") or {})["expected_revision"])
+            if self.rows[target_id]["revision"] != expected:
+                raise _ApiError(409)
+            del self.rows[target_id]
+            return {}
+        response = await super()._request(method, path, *args, **kwargs)
+        if method == "PATCH":
+            target_id = path.rsplit("/", 1)[-1]
+            return {
+                "mutation_receipt": {"applied": True, "revision": self.rows[target_id]["revision"]}
+            }
+        return response
+
+
+async def _migrate_with_revisions(
+    target: _Target, plan: GraphPlan | None = None
+) -> tuple[_Ledger, dict[str, int]]:
+    ledger = _Ledger()
+    revisions: dict[str, int] = {}
+    await execute_plan(
+        target,
+        plan or _plan(),
+        ids=ledger.ids,
+        statuses=ledger.statuses,
+        partial=ledger.partial,
+        target_project_id="project_target",
+        origin_org="org-src",
+        save=lambda: None,
+        revisions=revisions,
+    )
+    return ledger, revisions
+
+
+async def _undo(
+    target: _Target,
+    ledger: _Ledger,
+    revisions: dict[str, int],
+    plan: GraphPlan | None = None,
+    *,
+    dry_run: bool = False,
+) -> Any:
+    from sibyl_cli.migrate_graph import undo_plan
+
+    return await undo_plan(
+        target,
+        plan or _plan(),
+        ids=ledger.ids,
+        revisions=revisions,
+        statuses=ledger.statuses,
+        partial=ledger.partial,
+        save=lambda: None,
+        dry_run=dry_run,
+    )
+
+
+@pytest.mark.asyncio
+async def test_revisions_track_the_migrations_last_write_to_each_row() -> None:
+    target = _UndoTarget()
+
+    _ledger, revisions = await _migrate_with_revisions(target)
+
+    for origin, target_id in _ledger.ids.items():
+        assert revisions[origin] == target.rows[target_id]["revision"], origin
+    assert revisions["task_1"] == 2
+
+
+@pytest.mark.asyncio
+async def test_undo_removes_untouched_rows_and_keeps_edited_ones_with_what_they_link_to() -> None:
+    target = _UndoTarget()
+    ledger, revisions = await _migrate_with_revisions(target)
+    edited = target.rows["target-decision_1"]
+    edited["content"] = "a teammate's revision"
+    edited["revision"] += 1
+
+    outcome = await _undo(target, ledger, revisions)
+
+    assert set(target.rows) == {"target-decision_1", "target-task_1", "target-epic_1"}
+    assert outcome.removed == 1
+    assert [line.split(":")[0] for line in outcome.kept_edited] == ["decision decision_1"]
+    assert {line.split(":")[0] for line in outcome.kept_linked} == {"task task_1", "epic epic_1"}
+    assert "task_2" not in ledger.ids and "task_2" not in revisions
+    assert set(ledger.ids) == {"decision_1", "task_1", "epic_1"}
+    deletes = [call[1] for call in target.calls if call[0] == "DELETE"]
+    assert deletes == ["/entities/target-task_2"]
+
+
+@pytest.mark.asyncio
+async def test_an_undo_of_untouched_rows_removes_everything_it_created() -> None:
+    target = _UndoTarget()
+    ledger, revisions = await _migrate_with_revisions(target)
+
+    outcome = await _undo(target, ledger, revisions)
+
+    assert outcome.removed == 4 and target.rows == {}
+    assert ledger.ids == {} and revisions == {}
+
+
+@pytest.mark.asyncio
+async def test_an_undo_dry_run_writes_nothing() -> None:
+    target = _UndoTarget()
+    ledger, revisions = await _migrate_with_revisions(target)
+    before = set(target.rows)
+
+    outcome = await _undo(target, ledger, revisions, dry_run=True)
+
+    assert outcome.removed == 4
+    assert set(target.rows) == before
+    assert not [call for call in target.calls if call[0] == "DELETE"]
+    assert len(ledger.ids) == 4
+
+
+@pytest.mark.asyncio
+async def test_an_undo_never_removes_a_teammates_adopted_container() -> None:
+    target = _UndoTarget(taken_containers={"epic_1": "team-epic"})
+    target.rows["team-epic"] = {"id": "team-epic", "revision": 7, "metadata": {}}
+    plan = _epic_and_done_task()
+    ledger, revisions = await _migrate_with_revisions(target, plan)
+
+    outcome = await _undo(target, ledger, revisions, plan)
+
+    assert "team-epic" in target.rows
+    assert "target-task_1" not in target.rows
+    assert any("epic_1" in line for line in outcome.kept_unrecorded)
+
+
+@pytest.mark.asyncio
+async def test_an_undo_leaves_a_row_that_is_no_longer_this_migrations() -> None:
+    target = _UndoTarget()
+    ledger, revisions = await _migrate_with_revisions(target)
+    target.rows["target-decision_1"]["metadata"]["migration"] = {"origin_entity_id": "someone_else"}
+
+    outcome = await _undo(target, ledger, revisions)
+
+    assert "target-decision_1" in target.rows
+    assert any("decision_1" in line for line in outcome.kept_unrecorded)

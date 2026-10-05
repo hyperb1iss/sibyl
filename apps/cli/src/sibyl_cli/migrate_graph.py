@@ -585,6 +585,7 @@ async def execute_plan(
     concurrency: int = 8,
     log: Callable[[str], None] = lambda _message: None,
     operation_namespace: str = "",
+    revisions: dict[str, int] | None = None,
 ) -> GraphOutcome:
     """Create the plan layer by layer.
 
@@ -595,6 +596,13 @@ async def execute_plan(
     outcome = GraphOutcome()
     gate = asyncio.Semaphore(concurrency)
     writes = 0
+    # The revision each row was left at by this migration's own last write:
+    # an undo removes a row only while it still sits there.
+    landed = revisions if revisions is not None else {}
+
+    def remember(origin: str, revision: object) -> None:
+        if type(revision) is int and revision >= 1:
+            landed[origin] = revision
 
     async def read(target_id: str) -> dict[str, Any] | None:
         """The row as the team server holds it; None when it is gone."""
@@ -714,8 +722,10 @@ async def execute_plan(
                     _buffer_pending=False,
                     _idempotency_key=intent["key"],
                 )
-                if (response.get("mutation_receipt") or {}).get("applied") is False:
+                receipt = response.get("mutation_receipt") or {}
+                if receipt.get("applied") is False:
                     raise RuntimeError("the server queued the status instead of applying it")
+                remember(origin, receipt.get("revision"))
         except Exception as exc:
             outcome.failures.append(f"task {origin}: status {status} not set ({exc})")
             return False
@@ -814,6 +824,7 @@ async def execute_plan(
             if created is None:
                 return
             target_id, revision = created
+            remember(origin, revision)
             ids[origin] = target_id
             outcome.created += 1
             partial[origin] = {
@@ -913,6 +924,7 @@ async def execute_plan(
             )
         missing = pending["link_missing"]
         outcome.relinked += 1
+        remember(origin, revision)
         if missing:
             partial[origin] = {"missing": missing, "digest": None}
             landed = await read(target_id)
@@ -925,3 +937,118 @@ async def execute_plan(
         save()
         log(f"  layer {index + 1}/{len(plan.layers)}: {len(ids)} entities on the target")
     return outcome
+
+
+@dataclass
+class UndoOutcome:
+    removed: int = 0
+    gone: int = 0
+    kept_edited: list[str] = field(default_factory=list)
+    kept_linked: list[str] = field(default_factory=list)
+    kept_unrecorded: list[str] = field(default_factory=list)
+    failures: list[str] = field(default_factory=list)
+
+
+async def undo_plan(
+    client: Any,
+    plan: GraphPlan,
+    *,
+    ids: dict[str, str],
+    revisions: dict[str, int],
+    statuses: dict[str, str],
+    partial: dict[str, dict[str, Any]],
+    save: Callable[[], None],
+    dry_run: bool = False,
+    log: Callable[[str], None] = lambda _message: None,
+) -> UndoOutcome:
+    """Remove what a migration created, as long as nobody has touched it since.
+
+    A row goes only while it still carries this migration's provenance for its
+    origin and sits at the revision the migration's own last write left it
+    at; the server re-checks that revision under its lock and lets the row's
+    author delete it. Rows are taken in reverse creation order, and a row that
+    something kept still links to is kept too, so an undo never leaves a kept
+    row pointing at nothing.
+    """
+    outcome = UndoOutcome()
+    still_linked: set[str] = set()
+
+    def keep(node: PlannedEntity, bucket: list[str], reason: str) -> None:
+        bucket.append(f"{node.source.entity_type} {node.source.uuid}: {reason}")
+        still_linked.update(_link_targets(node))
+
+    for node in reversed(plan.entities):
+        origin = node.source.uuid
+        target_id = ids.get(origin)
+        if target_id is None:
+            continue
+        if origin in still_linked:
+            keep(node, outcome.kept_linked, "a row that was kept still links to it")
+            continue
+        revision = revisions.get(origin)
+        if revision is None:
+            keep(
+                node,
+                outcome.kept_unrecorded,
+                "no landing revision was recorded (an adopted container or an older run)",
+            )
+            continue
+        try:
+            current = await client._request("GET", f"/entities/{target_id}", _buffer_pending=False)
+        except Exception as exc:
+            if getattr(exc, "status_code", None) == 404:
+                outcome.gone += 1
+                if not dry_run:
+                    _forget(origin, ids, revisions, statuses, partial)
+                continue
+            keep(node, outcome.failures, f"could not read it ({exc})")
+            continue
+        provenance = ((current.get("metadata") or {}).get("migration") or {}).get(
+            "origin_entity_id"
+        )
+        if provenance != origin:
+            keep(node, outcome.kept_unrecorded, "the row on the target is not this migration's")
+            continue
+        if current.get("revision") != revision:
+            keep(node, outcome.kept_edited, "changed on the team server since it was migrated")
+            continue
+        if dry_run:
+            outcome.removed += 1
+            continue
+        try:
+            await client._request(
+                "DELETE",
+                f"/entities/{target_id}",
+                params={"expected_revision": str(revision)},
+                _buffer_pending=False,
+            )
+        except Exception as exc:
+            if getattr(exc, "status_code", None) == 409:
+                keep(node, outcome.kept_edited, "changed on the team server during the undo")
+            elif getattr(exc, "status_code", None) == 404:
+                outcome.gone += 1
+                _forget(origin, ids, revisions, statuses, partial)
+            else:
+                keep(node, outcome.failures, f"delete failed ({exc})")
+            continue
+        outcome.removed += 1
+        _forget(origin, ids, revisions, statuses, partial)
+        if outcome.removed % _SAVE_EVERY == 0:
+            save()
+            log(f"  {outcome.removed} removed...")
+    if not dry_run:
+        save()
+    return outcome
+
+
+def _forget(
+    origin: str,
+    ids: dict[str, str],
+    revisions: dict[str, int],
+    statuses: dict[str, str],
+    partial: dict[str, dict[str, Any]],
+) -> None:
+    ids.pop(origin, None)
+    revisions.pop(origin, None)
+    statuses.pop(origin, None)
+    partial.pop(origin, None)
