@@ -531,3 +531,30 @@ async def test_raw_undo_reports_captures_already_gone(
 
     assert failures == [] and target.ids == set() and ledger == {}
     assert warnings == ["1 raw memories in the ledger were already gone from the team server"]
+
+
+async def test_undo_refuses_a_server_without_guarded_deletes() -> None:
+    client = MagicMock()
+    identity = {
+        "capabilities": ["migration_replay_policy_v1", "migration_graph_writes_v1"],
+        "server_instance_id": "server-a",
+        "user_id": "alice",
+        "organization_id": "team",
+    }
+    client.get = AsyncMock(side_effect=lambda _: dict(identity))
+    base = {
+        "source_org": "source",
+        "target_context": "team",
+        "target_org_id": "team",
+        "target_project_id": "project_target",
+    }
+    bind = {"source_url": "ws://localhost:8000/rpc", "source_project": "project_a"}
+
+    with pytest.raises(RuntimeError, match="before undoing a migration"):
+        await migrate._bind_route(client, base, require_undo=True, **bind)
+
+    identity["capabilities"].append("migration_guarded_delete_v1")
+    # The undo binds the same route the migration wrote its ledgers under.
+    assert await migrate._bind_route(
+        client, base, require_undo=True, **bind
+    ) == await migrate._bind_route(client, base, **bind)

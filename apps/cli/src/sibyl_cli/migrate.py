@@ -64,6 +64,7 @@ async def _bind_route(
     source_url: str,
     source_project: str,
     require_graph: bool = False,
+    require_undo: bool = False,
 ) -> dict[str, str]:
     identity = await client.get("/auth/replay-identity")
     if "migration_replay_policy_v1" not in identity.get("capabilities", []):
@@ -75,6 +76,11 @@ async def _bind_route(
         raise RuntimeError(
             "upgrade the target server before migrating graph data: it does not advertise "
             "protected graph creation and additive link writes"
+        )
+    if require_undo and "migration_guarded_delete_v1" not in identity.get("capabilities", []):
+        raise RuntimeError(
+            "upgrade the target server before undoing a migration: it does not advertise "
+            "deletes guarded by the revision the migration left"
         )
     if (
         not identity.get("server_instance_id")
@@ -992,6 +998,7 @@ def to_team(
             source_url=source_surreal_url,
             source_project=project,
             require_graph=graph,
+            require_undo=undo,
         )
         unbound_route = {key: route[key] for key in _ROUTE_KEYS}
         if graph and _graph_ledger_path(unbound_route).exists():
