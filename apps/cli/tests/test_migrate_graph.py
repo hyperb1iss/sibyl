@@ -7,6 +7,7 @@ selection and saved intents across partial failures and lost responses.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import pytest
@@ -1813,3 +1814,38 @@ async def test_a_large_layer_reports_row_level_progress() -> None:
     progress = [line for line in lines if "rows (" in line]
     assert [line.split(" of ")[0].strip() for line in progress] == ["250", "500"]
     assert all("of 600 rows" in line for line in progress)
+
+
+@pytest.mark.asyncio
+async def test_undo_runs_a_layer_concurrently_and_still_protects_kept_links() -> None:
+    entities = [_entity("epic_1", "epic")] + [_entity(f"task_{n}", "task") for n in range(12)]
+    edges = [SourceEdge("BELONGS_TO", f"task_{n}", "epic_1") for n in range(12)]
+    plan = build_plan(entities, edges, project=PROJECT)
+
+    class Target(_UndoTarget):
+        in_flight = 0
+        peak = 0
+        order: list[str] = []
+
+        async def _request(
+            self, method: str, path: str, *args: Any, **kwargs: Any
+        ) -> dict[str, Any]:
+            if method != "DELETE":
+                return await super()._request(method, path, *args, **kwargs)
+            Target.in_flight += 1
+            Target.peak = max(Target.peak, Target.in_flight)
+            await asyncio.sleep(0.001)
+            Target.in_flight -= 1
+            Target.order.append(path.rsplit("/", 1)[-1])
+            return await super()._request(method, path, *args, **kwargs)
+
+    target = Target()
+    ledger, revisions = await _migrate_with_revisions(target, plan)
+    # A teammate edits the last task; the epic it belongs to must stay with it.
+    target.rows["target-task_11"]["revision"] += 1
+
+    outcome = await _undo(target, ledger, revisions, plan)
+
+    assert outcome.removed == 11 and Target.peak > 1
+    assert set(target.rows) == {"target-task_11", "target-epic_1"}
+    assert [entry.split(":")[0] for entry in outcome.kept_linked] == ["epic epic_1"]

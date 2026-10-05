@@ -990,6 +990,7 @@ async def undo_plan(
     partial: dict[str, dict[str, Any]],
     save: Callable[[], None],
     dry_run: bool = False,
+    concurrency: int = 8,
     log: Callable[[str], None] = lambda _message: None,
 ) -> UndoOutcome:
     """Remove what a migration created, as long as nobody has touched it since.
@@ -997,25 +998,27 @@ async def undo_plan(
     A row goes only while it still carries this migration's provenance for its
     origin and sits at the revision the migration's own last write left it
     at; the server re-checks that revision under its lock and lets the row's
-    author delete it. Rows are taken in reverse creation order, and a row that
-    something kept still links to is kept too, so an undo never leaves a kept
-    row pointing at nothing.
+    author delete it. Layers are taken newest first, and a row that something
+    kept still links to is kept too, so an undo never leaves a kept row
+    pointing at nothing. A row links only to rows in earlier layers, so the
+    rows of one layer are undone concurrently.
     """
     outcome = UndoOutcome()
     still_linked: set[str] = set()
+    gate = asyncio.Semaphore(concurrency)
 
     def keep(node: PlannedEntity, bucket: list[str], reason: str) -> None:
         bucket.append(f"{node.source.entity_type} {node.source.uuid}: {reason}")
         still_linked.update(_link_targets(node))
 
-    for node in reversed(plan.entities):
+    async def undo_one(node: PlannedEntity) -> None:
         origin = node.source.uuid
         target_id = ids.get(origin)
         if target_id is None:
-            continue
+            return
         if origin in still_linked:
             keep(node, outcome.kept_linked, "a row that was kept still links to it")
-            continue
+            return
         revision = revisions.get(origin)
         if revision is None:
             keep(
@@ -1023,36 +1026,40 @@ async def undo_plan(
                 outcome.kept_unrecorded,
                 "no landing revision was recorded (an adopted container or an older run)",
             )
-            continue
+            return
         try:
-            current = await client._request("GET", f"/entities/{target_id}", _buffer_pending=False)
+            async with gate:
+                current = await client._request(
+                    "GET", f"/entities/{target_id}", _buffer_pending=False
+                )
         except Exception as exc:
             if getattr(exc, "status_code", None) == 404:
                 outcome.gone += 1
                 if not dry_run:
                     _forget(origin, ids, revisions, statuses, partial)
-                continue
+                return
             keep(node, outcome.failures, f"could not read it ({exc})")
-            continue
+            return
         provenance = ((current.get("metadata") or {}).get("migration") or {}).get(
             "origin_entity_id"
         )
         if provenance != origin:
             keep(node, outcome.kept_unrecorded, "the row on the target is not this migration's")
-            continue
+            return
         if current.get("revision") != revision:
             keep(node, outcome.kept_edited, "changed on the team server since it was migrated")
-            continue
+            return
         if dry_run:
             outcome.removed += 1
-            continue
+            return
         try:
-            await client._request(
-                "DELETE",
-                f"/entities/{target_id}",
-                params={"expected_revision": str(revision)},
-                _buffer_pending=False,
-            )
+            async with gate:
+                await client._request(
+                    "DELETE",
+                    f"/entities/{target_id}",
+                    params={"expected_revision": str(revision)},
+                    _buffer_pending=False,
+                )
         except Exception as exc:
             if getattr(exc, "status_code", None) == 409:
                 keep(node, outcome.kept_edited, "changed on the team server during the undo")
@@ -1061,12 +1068,15 @@ async def undo_plan(
                 _forget(origin, ids, revisions, statuses, partial)
             else:
                 keep(node, outcome.failures, f"delete failed ({exc})")
-            continue
+            return
         outcome.removed += 1
         _forget(origin, ids, revisions, statuses, partial)
         if outcome.removed % _SAVE_EVERY == 0:
             save()
             log(f"  {outcome.removed} removed...")
+
+    for layer in reversed(plan.layers):
+        await asyncio.gather(*(undo_one(node) for node in reversed(layer)))
     if not dry_run:
         save()
     return outcome
