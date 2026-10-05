@@ -269,6 +269,8 @@ async def _resolve_target_org(client: Any) -> dict[str, Any]:
 
 _DEFAULT_SOURCE_CREDENTIAL = "root"
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+# Where `sibyl local` publishes its SurrealDB (127.0.0.1:8000 in its compose file).
+_LOCAL_INSTALL_PORT = 8000
 
 
 def _local_install_credentials() -> tuple[str, str] | None:
@@ -297,16 +299,25 @@ def _resolve_source_credentials(
 
     `sibyl local` generates a random SurrealDB password, so root:root fails
     against it, while a development server usually takes root:root. For a
-    loopback source with no credentials in the arguments or the URL, the
-    generated login is tried first and root:root second; the first one the
-    server accepts is used. A remote source never receives the local login.
+    source at the local install's own address (loopback, port 8000) with no
+    credentials in the arguments or the URL, the generated login is tried
+    first and root:root second; the first one the server runs a query as is
+    used. Any other address never receives the local login.
     """
     if username is not None or password is not None or surreal_url_credentials(surreal_url):
         return username, password
     base = surreal_http_base_url(surreal_url)
-    host = urlsplit(base).hostname if base else None
+    parsed = urlsplit(base) if base else None
+    # Only the port the local install publishes: another loopback port can be
+    # a tunnel or forward to some other machine.
+    if (
+        parsed is None
+        or parsed.hostname not in _LOOPBACK_HOSTS
+        or parsed.port != _LOCAL_INSTALL_PORT
+    ):
+        return username, password
     local = _local_install_credentials()
-    if host not in _LOOPBACK_HOSTS or local is None:
+    if local is None:
         return username, password
     for candidate in (local, (_DEFAULT_SOURCE_CREDENTIAL, _DEFAULT_SOURCE_CREDENTIAL)):
         try:
@@ -319,9 +330,20 @@ def _resolve_source_credentials(
             )
         except httpx.HTTPError:
             return username, password
-        if response.status_code not in {401, 403}:
+        if _accepted(response):
             return candidate
     return username, password
+
+
+def _accepted(response: httpx.Response) -> bool:
+    """Whether the server ran the probe as this login, not merely answered."""
+    if response.status_code != 200:
+        return False
+    try:
+        results = response.json()
+    except ValueError:
+        return False
+    return isinstance(results, list) and bool(results) and results[0].get("status") == "OK"
 
 
 def _source_credentials(

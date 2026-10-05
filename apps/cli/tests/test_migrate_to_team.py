@@ -625,7 +625,11 @@ def _server_accepting(monkeypatch: pytest.MonkeyPatch, tried: list, accepted: tu
     def post(url: str, *, auth: tuple[str, str], **_kwargs: Any) -> Any:
         assert url == "http://localhost:8000/sql"
         tried.append(auth)
-        return MagicMock(status_code=200 if auth == accepted else 401)
+        if auth != accepted:
+            return MagicMock(status_code=401)
+        response = MagicMock(status_code=200)
+        response.json.return_value = [{"status": "OK", "result": True}]
+        return response
 
     monkeypatch.setattr(migrate.httpx, "post", post)
 
@@ -660,6 +664,9 @@ def test_a_dev_server_beside_an_old_local_install_still_takes_root(
         ("ws://localhost:8000/rpc", None, "secret"),
         ("ws://admin:secret@localhost:8000/rpc", None, None),
         ("wss://db.example.com/rpc", None, None),
+        # Another loopback port can be a tunnel to some other machine.
+        ("ws://localhost:9000/rpc", None, None),
+        ("ws://127.0.0.1:8601/rpc", None, None),
     ],
 )
 def test_given_or_remote_sources_never_receive_the_local_login(
@@ -706,3 +713,17 @@ def test_an_undo_moves_the_route_to_fresh_operation_keys(
     assert after != before
     assert migrate._key_namespace(route) not in {before, after}
     assert migrate._key_namespace(other) == migrate._route_fingerprint(other)
+
+
+def test_a_server_that_answers_without_running_the_probe_is_not_a_login(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _local_env(monkeypatch, tmp_path)
+    response = MagicMock(status_code=200)
+    response.json.return_value = [{"status": "ERR", "result": "IAM error"}]
+    monkeypatch.setattr(migrate.httpx, "post", MagicMock(return_value=response))
+
+    assert migrate._resolve_source_credentials("ws://localhost:8000/rpc", None, None) == (
+        None,
+        None,
+    )
