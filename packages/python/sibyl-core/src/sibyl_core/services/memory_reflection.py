@@ -1076,18 +1076,24 @@ async def _verify_promotion_sources(
         )
         if candidate is None or await _terminal_candidate_denial(candidate) is not None:
             if entity_id is not None:
-                stored = await runtime.entity_manager.get(entity_id)
-                await runtime.entity_manager.update(
-                    entity_id,
-                    {
-                        "metadata": pending_patch(
-                            stored.metadata,
-                            {RECONCILE_PENDING_KEY: True},
-                            authority=f"reflection_retirement:{reflection_candidate_id}",
-                        )
-                    },
-                    expected_revision=stored.revision,
-                )
+                try:
+                    stored = await runtime.entity_manager.get(entity_id)
+                except KeyError:
+                    return False
+                try:
+                    await runtime.entity_manager.update(
+                        entity_id,
+                        {
+                            "metadata": pending_patch(
+                                stored.metadata,
+                                {RECONCILE_PENDING_KEY: True},
+                                authority=f"reflection_retirement:{reflection_candidate_id}",
+                            )
+                        },
+                        expected_revision=stored.revision,
+                    )
+                except RevisionConflictError:
+                    return False
             return False
     if source_observations:
         from sibyl_core.services.promotion_observations import promotion_observations_current

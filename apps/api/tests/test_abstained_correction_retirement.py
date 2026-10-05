@@ -523,7 +523,16 @@ async def test_abstained_ledger_blocks_manual_promotion(corrected_chain, target,
 
 @pytest.mark.parametrize(
     "phase",
-    ["reservation", "graph_entry", "graph_created", "final_state", "graph_crash", "final_crash"],
+    [
+        "reservation",
+        "graph_entry",
+        "graph_created",
+        "final_state",
+        "graph_crash",
+        "final_crash",
+        "graph_missing",
+        "graph_conflict",
+    ],
 )
 async def test_terminalization_wins_inflight_promotion(
     corrected_chain, monkeypatch, ordinary_graph, phase
@@ -544,6 +553,13 @@ async def test_terminalization_wins_inflight_promotion(
     save = memory_reflection.save_raw_memory
     persist = memory_reflection.persist_reflection_candidate
     create = ordinary_graph.entity_manager.create_direct_if_absent
+    update = ordinary_graph.entity_manager.update
+
+    async def racing_update(entity_id, updates, **kwargs):
+        if phase == "graph_conflict":
+            monkeypatch.setattr(ordinary_graph.entity_manager, "update", update)
+            await update(entity_id, {"metadata": {"concurrent_marker": "retained"}})
+        return await update(entity_id, updates, **kwargs)
 
     async def racing_save(memory, **kwargs):
         if (phase == "reservation" and not terminal_cut) or (
@@ -561,8 +577,10 @@ async def test_terminalization_wins_inflight_promotion(
 
     async def racing_create(*args, **kwargs):
         result = await create(*args, **kwargs)
-        if phase in {"graph_created", "graph_crash"}:
+        if phase in {"graph_created", "graph_crash", "graph_missing", "graph_conflict"}:
             await terminalize()
+            if phase == "graph_missing":
+                await ordinary_graph.entity_manager.delete(result[0].id)
             if phase == "graph_crash":
                 raise RuntimeError("publication crash")
         return result
@@ -570,6 +588,7 @@ async def test_terminalization_wins_inflight_promotion(
     monkeypatch.setattr(memory_reflection, "save_raw_memory", racing_save)
     monkeypatch.setattr(memory_reflection, "persist_reflection_candidate", racing_persist)
     monkeypatch.setattr(ordinary_graph.entity_manager, "create_direct_if_absent", racing_create)
+    monkeypatch.setattr(ordinary_graph.entity_manager, "update", racing_update)
 
     async def promote():
         return await memory_reflection.promote_reflection_candidate_review(
@@ -594,7 +613,12 @@ async def test_terminalization_wins_inflight_promotion(
         "SELECT attributes FROM entity WHERE uuid=$id;",
         id=own_capture["metadata"].get("promoted_entity_id", "unreserved"),
     )
-    if phase not in {"graph_crash", "final_crash"}:
+    if phase == "graph_missing":
+        assert not graph_rows
+    if phase == "graph_conflict":
+        assert len(graph_rows) == 1
+        assert graph_rows[0]["attributes"]["concurrent_marker"] == "retained"
+    if phase not in {"graph_crash", "final_crash", "graph_conflict"}:
         assert all(not graph_metadata_recallable(row["attributes"]) for row in graph_rows)
     if graph_rows:
         await _assert_retired_graph_read_denied(
