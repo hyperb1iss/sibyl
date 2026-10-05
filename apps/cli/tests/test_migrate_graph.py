@@ -1728,3 +1728,33 @@ async def test_an_undo_leaves_a_row_that_is_no_longer_this_migrations() -> None:
 
     assert "target-decision_1" in target.rows
     assert any("decision_1" in line for line in outcome.kept_unrecorded)
+
+
+@pytest.mark.asyncio
+async def test_a_large_layer_reports_row_level_progress() -> None:
+    plan = build_plan(
+        [
+            _entity(f"d{n}", "decision", created=f"2026-01-01T00:{n // 60:02d}:{n % 60:02d}Z")
+            for n in range(600)
+        ],
+        [],
+        project=PROJECT,
+    )
+    lines: list[str] = []
+    ledger = _Ledger()
+
+    await execute_plan(
+        _Target(),
+        plan,
+        ids=ledger.ids,
+        statuses=ledger.statuses,
+        partial=ledger.partial,
+        target_project_id="project_target",
+        origin_org="org-src",
+        save=lambda: None,
+        log=lines.append,
+    )
+
+    progress = [line for line in lines if "rows (" in line]
+    assert [line.split(" of ")[0].strip() for line in progress] == ["250", "500"]
+    assert all("of 600 rows" in line for line in progress)

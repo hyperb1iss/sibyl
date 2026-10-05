@@ -33,6 +33,7 @@ import hashlib
 import heapq
 import json
 import re
+import time
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass, field
@@ -69,6 +70,7 @@ _MAX_NAME = 200
 # titles that agree this far mint the same id however they end.
 _ID_PART_CHARS = 100
 _SAVE_EVERY = 100
+_PROGRESS_EVERY = 250
 _PROJECT_ID = re.compile(r"^(project|proj)_[0-9a-z]+$")
 _ORGANIZATION_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
@@ -735,13 +737,22 @@ async def execute_plan(
         outcome.statuses += 1
         return True
 
+    total = len(plan.entities)
+    processed = 0
+    started = time.monotonic()
+
     async def create(node: PlannedEntity) -> None:
+        nonlocal processed
         # One row's trouble never stops the run: it is reported, and the
         # ledger keeps what is needed to finish it next time.
         try:
             await create_one(node)
         except Exception as exc:
             outcome.failures.append(f"{node.source.entity_type} {node.source.uuid}: {exc}")
+        processed += 1
+        if processed % _PROGRESS_EVERY == 0 and processed < total:
+            rate = processed / max(time.monotonic() - started, 0.001)
+            log(f"  {processed} of {total} rows ({rate:.0f} per second)")
 
     async def create_one(node: PlannedEntity) -> None:
         nonlocal writes
