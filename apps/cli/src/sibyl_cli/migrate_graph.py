@@ -398,6 +398,11 @@ def _link_targets(node: PlannedEntity) -> list[str]:
     return targets + [t for t in (node.epic, node.parent) if t]
 
 
+def _shape(node: PlannedEntity) -> dict[str, Any]:
+    """What an undo needs to know about a row without reading the source."""
+    return {"type": node.source.entity_type, "layer": node.layer, "links": _link_targets(node)}
+
+
 def _payload(
     node: PlannedEntity,
     *,
@@ -590,6 +595,7 @@ async def execute_plan(
     revisions: dict[str, int] | None = None,
     structure: dict[str, dict[str, Any]] | None = None,
     preexisting: set[str] | None = None,
+    undoing: set[str] | None = None,
 ) -> GraphOutcome:
     """Create the plan layer by layer.
 
@@ -614,6 +620,24 @@ async def execute_plan(
     def remember(origin: str, revision: object) -> None:
         if origin not in adopted and type(revision) is int and revision >= 1:
             last_written[origin] = revision
+
+    def note_epic_start(response: dict[str, Any]) -> None:
+        """Record an epic revision this migration's own status write moved.
+
+        A task moving forward auto-starts its epic on the server. When the
+        epic sat at the revision this migration last left it at, the start is
+        the migration's own write; otherwise someone else changed it and it
+        stays theirs.
+        """
+        started = (response.get("data") or {}).get("epic_started") or {}
+        revision = started.get("revision")
+        epic_origin = next((o for o, t in ids.items() if t == started.get("epic_id")), None)
+        if (
+            epic_origin is not None
+            and type(revision) is int
+            and last_written.get(epic_origin) == revision - 1
+        ):
+            remember(epic_origin, revision)
 
     async def persist_intent() -> None:
         """Put the intent just recorded on disk before its request is sent.
@@ -664,7 +688,9 @@ async def execute_plan(
             "depends_on": sorted(metadata.get("depends_on") or []),
         }
 
-    async def write(node: PlannedEntity, body: dict[str, Any]) -> tuple[str, int | None] | None:
+    async def write(
+        node: PlannedEntity, body: dict[str, Any], key: str
+    ) -> tuple[str, int | None] | None:
         origin = node.source.uuid
         kind = node.source.entity_type
         async with gate:
@@ -679,7 +705,7 @@ async def execute_plan(
                         "protect_ownership": "true",
                     },
                     _buffer_pending=False,
-                    _idempotency_key=operation_key(node, "create"),
+                    _idempotency_key=key,
                 )
             except Exception as exc:
                 if (
@@ -755,6 +781,7 @@ async def execute_plan(
                 if receipt.get("applied") is False:
                     raise RuntimeError("the server queued the status instead of applying it")
                 remember(origin, receipt.get("revision"))
+                note_epic_start(response)
         except Exception as exc:
             outcome.failures.append(f"task {origin}: status {status} not set ({exc})")
             return False
@@ -845,28 +872,30 @@ async def execute_plan(
                     )
                 body = pending["create_body"]
                 missing = pending["missing"]
+                # Older intents did not keep their key; theirs is the plain one.
+                key = pending.get("create_key") or operation_key(node, "create")
             else:
                 body, missing = _payload(
                     node, ids=ids, target_project_id=target_project_id, origin_org=origin_org
                 )
-                # Retry the same body even when a dependency lands after a lost
+                # Retry the same body under the same key even when a dependency
+                # lands, or an undo moves the route's keys, after a lost
                 # acknowledgement; new links belong to the later relink operation.
+                key = operation_key(node, "create")
                 partial[origin] = {
                     "create_body": body,
+                    "create_key": key,
+                    "shape": _shape(node),
                     "source_digest": source_digest,
                     "missing": missing,
                     "digest": None,
                 }
                 await persist_intent()
-            created = await write(node, body)
+            created = await write(node, body, key)
             if created is None:
                 return
             target_id, revision = created
-            shape[origin] = {
-                "type": node.source.entity_type,
-                "layer": node.layer,
-                "links": _link_targets(node),
-            }
+            shape[origin] = _shape(node)
             # A fresh row starts at revision 1; a higher one means the id
             # already held a row (the author's own, or one with no author).
             if type(revision) is int and revision > 1:
@@ -983,11 +1012,7 @@ async def execute_plan(
             # Created by an older run that kept no record of it: an undo keeps
             # it, and now knows what it links to so it keeps those rows too.
             adopted.add(origin)
-            shape[origin] = {
-                "type": node.source.entity_type,
-                "layer": node.layer,
-                "links": _link_targets(node),
-            }
+            shape[origin] = _shape(node)
         remember(origin, revision)
         if missing:
             partial[origin] = {"missing": missing, "digest": None}
@@ -995,6 +1020,18 @@ async def execute_plan(
             partial[origin]["digest"] = target_digest(landed) if landed else None
         else:
             partial.pop(origin, None)
+
+    # An undo marks rows before deleting them; one that stopped part way may
+    # have removed rows the ledger still lists. Check those before trusting it.
+    marked = undoing if undoing is not None else set()
+    for origin in sorted(marked & set(ids)):
+        if await read(ids[origin]) is None:
+            _forget(origin, ids, last_written, statuses, partial)
+            shape.pop(origin, None)
+            adopted.discard(origin)
+    if marked:
+        marked.clear()
+        save()
 
     for index, layer in enumerate(plan.layers):
         await asyncio.gather(*(create(node) for node in layer))
@@ -1012,6 +1049,10 @@ class UndoOutcome:
     kept_shared: list[str] = field(default_factory=list)
     kept_unrecorded: list[str] = field(default_factory=list)
     failures: list[str] = field(default_factory=list)
+    # Creates whose outcome was never confirmed; a real undo resolves them first.
+    unresolved: int = 0
+    # The server refused the caller's deletes outright (project maintainer access).
+    refused: bool = False
 
 
 async def undo_plan(
@@ -1026,6 +1067,7 @@ async def undo_plan(
     dry_run: bool = False,
     concurrency: int = 8,
     log: Callable[[str], None] = lambda _message: None,
+    undoing: set[str] | None = None,
 ) -> UndoOutcome:
     """Remove what a migration created, as long as nobody has touched it since.
 
@@ -1043,6 +1085,10 @@ async def undo_plan(
     outcome = UndoOutcome()
     still_linked: set[str] = set()
     gate = asyncio.Semaphore(concurrency)
+    # Rows marked before their delete is sent and unmarked once their fate is
+    # known, so a migration after an interrupted undo checks them first.
+    marks = undoing if undoing is not None else set()
+    uncertain: set[str] = set()
 
     def label(origin: str) -> str:
         return f"{(structure.get(origin) or {}).get('type') or 'row'} {origin}"
@@ -1053,7 +1099,7 @@ async def undo_plan(
 
     async def undo_one(origin: str) -> None:
         target_id = ids.get(origin)
-        if target_id is None:
+        if target_id is None or outcome.refused:
             return
         if origin in still_linked:
             keep(origin, outcome.kept_linked, "a row that was kept still links to it")
@@ -1090,13 +1136,20 @@ async def undo_plan(
             return
         if dry_run:
             # The same checks the delete runs, so the dry run keeps what the undo would.
-            async with gate:
-                check = await client._request(
-                    "GET",
-                    f"/entities/{target_id}/deletable",
-                    params={"expected_revision": str(revision)},
-                    _buffer_pending=False,
-                )
+            try:
+                async with gate:
+                    check = await client._request(
+                        "GET",
+                        f"/entities/{target_id}/deletable",
+                        params={"expected_revision": str(revision)},
+                        _buffer_pending=False,
+                    )
+            except Exception as exc:
+                if getattr(exc, "status_code", None) == 403:
+                    outcome.refused = True
+                else:
+                    keep(origin, outcome.failures, f"could not check it ({exc})")
+                return
             if check.get("deletable") is True:
                 outcome.removed += 1
             elif check.get("error") == "entity_shared":
@@ -1115,7 +1168,9 @@ async def undo_plan(
                     _buffer_pending=False,
                 )
         except Exception as exc:
-            if getattr(exc, "error_code", None) == "entity_shared":
+            if getattr(exc, "status_code", None) == 403:
+                outcome.refused = True
+            elif getattr(exc, "error_code", None) == "entity_shared":
                 keep(origin, outcome.kept_shared, str(exc))
             elif getattr(exc, "status_code", None) == 409:
                 keep(origin, outcome.kept_edited, "changed on the team server during the undo")
@@ -1123,6 +1178,8 @@ async def undo_plan(
                 outcome.gone += 1
                 _forget(origin, ids, revisions, statuses, partial)
             else:
+                # The delete may have landed with its answer lost.
+                uncertain.add(origin)
                 keep(origin, outcome.failures, f"delete failed ({exc})")
             return
         outcome.removed += 1
@@ -1131,11 +1188,63 @@ async def undo_plan(
             save()
             log(f"  {outcome.removed} removed...")
 
+    # A create whose answer was lost may have landed. Replay each under its
+    # own key (the server answers with the original receipt, or creates the
+    # row now), so the undo sees every row the migration wrote.
+    unconfirmed = {
+        origin: pending
+        for origin, pending in partial.items()
+        if origin not in ids and pending.get("create_key") and pending.get("create_body")
+    }
+    if dry_run:
+        outcome.unresolved = len(unconfirmed)
+    for origin, pending in unconfirmed.items() if not dry_run else ():
+        try:
+            receipt = await client._request(
+                "POST",
+                "/entities",
+                json=pending["create_body"],
+                params={
+                    "sync": "true",
+                    "replay_interrupted": "false",
+                    "protect_ownership": "true",
+                },
+                _buffer_pending=False,
+                _idempotency_key=pending["create_key"],
+            )
+        except Exception as exc:
+            # Unknown: keep what it would link to, so nothing kept is stranded.
+            still_linked.update((pending.get("shape") or {}).get("links") or [])
+            outcome.failures.append(f"{origin}: could not confirm an unfinished create ({exc})")
+            continue
+        target_id = str(receipt.get("id") or "")
+        if not target_id:
+            still_linked.update((pending.get("shape") or {}).get("links") or [])
+            outcome.failures.append(f"{origin}: an unfinished create returned no id")
+            continue
+        ids[origin] = target_id
+        if pending.get("shape"):
+            structure[origin] = pending["shape"]
+        if receipt.get("revision") == 1:
+            revisions[origin] = 1
+        partial[origin] = {"missing": pending.get("missing") or [], "digest": None}
+    if unconfirmed and not dry_run:
+        save()
+
     layers: dict[int, list[str]] = {}
     for origin in ids:
         layers.setdefault(int((structure.get(origin) or {}).get("layer") or 0), []).append(origin)
     for layer in sorted(layers, reverse=True):
+        if outcome.refused:
+            break
+        marking = [origin for origin in layers[layer] if origin in ids]
+        if not dry_run:
+            marks.update(marking)
+            save()
         await asyncio.gather(*(undo_one(origin) for origin in layers[layer]))
+        if not dry_run:
+            marks.difference_update(o for o in marking if o in ids and o not in uncertain)
+            save()
     if not dry_run:
         save()
     return outcome

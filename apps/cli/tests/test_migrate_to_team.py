@@ -727,3 +727,90 @@ def test_a_server_that_answers_without_running_the_probe_is_not_a_login(
         None,
         None,
     )
+
+
+async def test_raw_undo_first_resolves_a_write_whose_answer_was_lost(tmp_path: Path) -> None:
+    target = _Captures({"cap-1": 1})
+    sent: list[str] = []
+
+    async def remember_raw_memory(*, _idempotency_key: str, **request: Any) -> dict[str, Any]:
+        sent.append(_idempotency_key)
+        target.revisions["cap-lost"] = 1  # the original write had landed
+        return {"id": "cap-lost", "revision": 1}
+
+    target.remember_raw_memory = remember_raw_memory  # type: ignore[attr-defined]
+    ledger = {"src-1": "cap-1"}
+    intents = {"src-lost": {"key": "original-key", "request": {"title": "t", "raw_content": "c"}}}
+
+    failures = await migrate._undo_raw(
+        target,
+        ledger_file=tmp_path / "raw.json",
+        route={"r": "1"},
+        ledger=ledger,
+        revisions={"src-1": 1},
+        dry_run=False,
+        intents=intents,
+    )
+
+    assert failures == [] and sent == ["original-key"]
+    assert target.ids == set() and ledger == {} and intents == {}
+
+
+async def test_an_interrupted_raw_undo_leaves_an_accurate_ledger(tmp_path: Path) -> None:
+    target = _Captures({"cap-1": 1, "cap-2": 1, "cap-3": 1})
+    original = target.correct_memory
+    applied = 0
+
+    async def correct_memory(source_id: str, **kwargs: Any) -> dict[str, Any]:
+        nonlocal applied
+        if not kwargs.get("preview"):
+            applied += 1
+            if applied == 2:
+                raise RuntimeError("connection dropped")
+        return await original(source_id, **kwargs)
+
+    target.correct_memory = correct_memory  # type: ignore[method-assign]
+    path = tmp_path / "raw.json"
+    ledger = {"src-1": "cap-1", "src-2": "cap-2", "src-3": "cap-3"}
+
+    with pytest.raises(RuntimeError):
+        await migrate._undo_raw(
+            target,
+            ledger_file=path,
+            route={"r": "1"},
+            ledger=ledger,
+            revisions={"src-1": 1, "src-2": 1, "src-3": 1},
+            dry_run=False,
+        )
+
+    # What a later migration would trust: the deleted capture is no longer listed.
+    assert target.ids == {"cap-2", "cap-3"}
+    assert set(json.loads(path.read_text())["receipts"]) == {"src-2", "src-3"}
+
+
+def test_a_raw_write_retried_after_an_undo_keeps_its_original_key(
+    ledger_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = _target(monkeypatch, TEAM)
+    keys: list[tuple[str, str]] = []
+    lost = {"done": False}
+
+    async def remember_raw_memory(*, _idempotency_key: str, **request: Any) -> dict[str, Any]:
+        origin = request["provenance"]["migration"]["origin_raw_id"]
+        keys.append((origin, _idempotency_key))
+        if origin == "src-0" and not lost["done"]:
+            lost["done"] = True
+            raise RuntimeError("lost acknowledgement")
+        return {"id": f"target-{origin}", "revision": 1}
+
+    client.remember_raw_memory = AsyncMock(side_effect=remember_raw_memory)
+    first = _run("--no-graph")
+    assert first.exit_code != 0
+    raw_ledger = next(p for p in ledger_dir.iterdir() if p.name.count(".") == 1)
+    migrate._advance_epoch(json.loads(raw_ledger.read_text())["route"])
+
+    second = _run("--no-graph")
+
+    assert second.exit_code == 0, second.stdout
+    sent = [key for origin, key in keys if origin == "src-0"]
+    assert len(sent) == 2 and sent[0] == sent[1]

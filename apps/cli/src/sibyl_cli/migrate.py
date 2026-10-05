@@ -177,6 +177,36 @@ def _load_raw_revisions(ledger_file: Path, route: dict[str, str]) -> dict[str, i
     return {str(k): v for k, v in revisions.items() if type(v) is int and v >= 1}
 
 
+def _raw_intents_path(ledger_file: Path) -> Path:
+    return ledger_file.with_suffix(".raw-intents.json")
+
+
+def _load_raw_intents(ledger_file: Path, route: dict[str, str]) -> dict[str, dict[str, Any]]:
+    """Raw writes sent but not yet confirmed, with the key and body each was sent with."""
+    try:
+        data = json.loads(_raw_intents_path(ledger_file).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict) or data.get("route") != route:
+        return {}
+    intents = data.get("intents")
+    if not isinstance(intents, dict):
+        return {}
+    return {
+        str(origin): intent
+        for origin, intent in intents.items()
+        if isinstance(intent, dict)
+        and intent.get("key")
+        and isinstance(intent.get("request"), dict)
+    }
+
+
+def _save_raw_intents(
+    ledger_file: Path, route: dict[str, str], intents: dict[str, dict[str, Any]]
+) -> None:
+    _save_migration_ledger(_raw_intents_path(ledger_file), {"route": route, "intents": intents})
+
+
 def _save_raw_revisions(
     ledger_file: Path, route: dict[str, str], revisions: dict[str, int]
 ) -> None:
@@ -343,7 +373,12 @@ def _accepted(response: httpx.Response) -> bool:
         results = response.json()
     except ValueError:
         return False
-    return isinstance(results, list) and bool(results) and results[0].get("status") == "OK"
+    return (
+        isinstance(results, list)
+        and bool(results)
+        and isinstance(results[0], dict)
+        and results[0].get("status") == "OK"
+    )
 
 
 def _source_credentials(
@@ -650,6 +685,7 @@ def _save_graph_ledger(
     revisions: dict[str, int] | None = None,
     structure: dict[str, dict[str, Any]] | None = None,
     preexisting: set[str] | None = None,
+    undoing: set[str] | None = None,
 ) -> None:
     payload: dict[str, Any] = {"route": route, "ids": ids, "statuses": statuses, "partial": partial}
     if revisions is not None:
@@ -658,19 +694,21 @@ def _save_graph_ledger(
         payload["structure"] = structure
     if preexisting is not None:
         payload["preexisting"] = sorted(preexisting)
+    if undoing is not None:
+        payload["undoing"] = sorted(undoing)
     _save_migration_ledger(path, payload)
 
 
 def _load_graph_extras(
     path: Path, route: dict[str, str]
-) -> tuple[dict[str, int], dict[str, dict[str, Any]], set[str]]:
-    """What an undo needs beyond the receipts: revisions, row structure, adopted rows."""
+) -> tuple[dict[str, int], dict[str, dict[str, Any]], set[str], set[str]]:
+    """Beyond the receipts: revisions, row structure, adopted rows, rows an undo marked."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {}, {}, set()
+        return {}, {}, set(), set()
     if not isinstance(data, dict) or data.get("route") != route:
-        return {}, {}, set()
+        return {}, {}, set(), set()
     revisions = data.get("revisions") if isinstance(data.get("revisions"), dict) else {}
     structure = data.get("structure") if isinstance(data.get("structure"), dict) else {}
     preexisting = data.get("preexisting") if isinstance(data.get("preexisting"), list) else []
@@ -682,6 +720,7 @@ def _load_graph_extras(
         },
         {str(origin): shape for origin, shape in structure.items() if isinstance(shape, dict)},
         {str(origin) for origin in preexisting},
+        {str(origin) for origin in (data.get("undoing") or []) if isinstance(origin, str)},
     )
 
 
@@ -777,7 +816,7 @@ async def _migrate_graph(
     )
     ledger_file = _graph_ledger_path(route)
     ids, statuses, partial = _load_graph_ledger(ledger_file, route)
-    revisions, structure, preexisting = _load_graph_extras(ledger_file, route)
+    revisions, structure, preexisting, undoing = _load_graph_extras(ledger_file, route)
     plan = migrate_graph.build_plan(
         entities, edges, project=project, share_private=share_private
     ).limited(limit, done=set(ids))
@@ -798,8 +837,9 @@ async def _migrate_graph(
         revisions=revisions,
         structure=structure,
         preexisting=preexisting,
+        undoing=undoing,
         save=lambda: _save_graph_ledger(
-            ledger_file, route, ids, statuses, partial, revisions, structure, preexisting
+            ledger_file, route, ids, statuses, partial, revisions, structure, preexisting, undoing
         ),
         log=info,
     )
@@ -829,7 +869,7 @@ async def _undo_graph(target: Any, *, route: dict[str, str], dry_run: bool) -> l
     if not ids:
         info("Graph: nothing to undo for this route")
         return []
-    revisions, structure, preexisting = _load_graph_extras(ledger_file, route)
+    revisions, structure, preexisting, undoing = _load_graph_extras(ledger_file, route)
     outcome = await migrate_graph.undo_plan(
         target,
         structure=structure,
@@ -838,11 +878,23 @@ async def _undo_graph(target: Any, *, route: dict[str, str], dry_run: bool) -> l
         statuses=statuses,
         partial=partial,
         dry_run=dry_run,
+        undoing=undoing,
         save=lambda: _save_graph_ledger(
-            ledger_file, route, ids, statuses, partial, revisions, structure, preexisting
+            ledger_file, route, ids, statuses, partial, revisions, structure, preexisting, undoing
         ),
         log=info,
     )
+    if outcome.refused:
+        error(
+            "The team server refused the deletes: undoing needs project maintainer access. "
+            "Ask a maintainer of the project to grant it, then run the undo again."
+        )
+        return ["undo refused: project maintainer access required"]
+    if outcome.unresolved:
+        info(
+            f"{outcome.unresolved} creates were sent without a confirmed answer; "
+            "the undo checks them first and removes any that landed"
+        )
     verb = "Would remove" if dry_run else "Removed"
     success(
         f"{verb} {outcome.removed} graph entities"
@@ -872,6 +924,7 @@ async def _undo_raw(
     ledger: dict[str, str],
     revisions: dict[str, int],
     dry_run: bool,
+    intents: dict[str, dict[str, Any]] | None = None,
 ) -> list[str]:
     """Delete the raw captures this route replayed, through the memory lifecycle.
 
@@ -883,6 +936,30 @@ async def _undo_raw(
     removed = 0
     gone = 0
     kept: list[str] = []
+    intents = intents if intents is not None else {}
+    # A raw write sent without a confirmed answer may have landed. Replay it
+    # under its own key (the original receipt, or the capture created now) so
+    # the undo removes it too.
+    unconfirmed = {o: i for o, i in intents.items() if o not in ledger}
+    if dry_run and unconfirmed:
+        info(
+            f"{len(unconfirmed)} raw writes were sent without a confirmed answer; the undo checks them first"
+        )
+    for origin, intent in unconfirmed.items() if not dry_run else ():
+        try:
+            response = await target.remember_raw_memory(
+                **intent["request"], _idempotency_key=intent["key"]
+            )
+        except Exception as exc:
+            failures.append(f"raw {origin}: could not confirm an unfinished write ({exc})")
+            continue
+        ledger[origin] = str(response.get("id") or response.get("uuid") or "ok")
+        if type(response.get("revision")) is int:
+            revisions[origin] = response["revision"]
+        intents.pop(origin, None)
+        _save_raw_revisions(ledger_file, route, revisions)
+        _save_ledger(ledger_file, route, ledger)
+        _save_raw_intents(ledger_file, route, intents)
     for origin, target_id in list(ledger.items()):
         # The corrections API takes the bare capture id, as `sibyl correct` sends it.
         source_id = raw_memory_lookup_value(target_id)
@@ -932,6 +1009,10 @@ async def _undo_raw(
         ledger.pop(origin, None)
         revisions.pop(origin, None)
         removed += 1
+        # Saved per capture: a migration after an interrupted undo must not
+        # skip a capture the undo already removed.
+        _save_ledger(ledger_file, route, ledger)
+        _save_raw_revisions(ledger_file, route, revisions)
     if not dry_run:
         _save_ledger(ledger_file, route, ledger)
         _save_raw_revisions(ledger_file, route, revisions)
@@ -1190,6 +1271,7 @@ def to_team(
         )
         ledger = ledger or _load_ledger(ledger_file, route)
         raw_revisions = _load_raw_revisions(ledger_file, route)
+        raw_intents = _load_raw_intents(ledger_file, route)
 
         if undo:
             failed_undo: list[str] = []
@@ -1207,6 +1289,7 @@ def to_team(
                     ledger=ledger,
                     revisions=raw_revisions,
                     dry_run=dry_run,
+                    intents=raw_intents,
                 )
             )
             if failed_undo:
@@ -1278,26 +1361,35 @@ def to_team(
                         metadata["project_id"]
                     )
                     metadata["project_id"] = target_project_id
+                # A write sent before keeps its key and body, so a retry, even
+                # after an undo moved the route's keys, gets the original receipt.
+                intent = raw_intents.get(original_id) or {
+                    "key": "migration-raw:"
+                    + hashlib.sha256(f"{_key_namespace(route)}:{original_id}".encode()).hexdigest(),
+                    "request": {
+                        "title": title,
+                        "raw_content": raw_content,
+                        "source_id": str(row.get("source_id") or "") or f"migrated:{original_id}",
+                        "memory_scope": "project",
+                        "scope_key": target_project_id,
+                        "tags": list(row.get("tags") or []),
+                        "metadata": metadata,
+                        "provenance": provenance,
+                        "capture_surface": "migration",
+                    },
+                }
+                raw_intents[original_id] = intent
+                _save_raw_intents(ledger_file, route, raw_intents)
                 try:
                     response = await target.remember_raw_memory(
-                        title=title,
-                        raw_content=raw_content,
-                        source_id=str(row.get("source_id") or "") or f"migrated:{original_id}",
-                        memory_scope="project",
-                        scope_key=target_project_id,
-                        tags=list(row.get("tags") or []),
-                        metadata=metadata,
-                        provenance=provenance,
-                        capture_surface="migration",
-                        _idempotency_key="migration-raw:"
-                        + hashlib.sha256(
-                            f"{_key_namespace(route)}:{original_id}".encode()
-                        ).hexdigest(),
+                        **intent["request"], _idempotency_key=intent["key"]
                     )
                 except Exception as exc:
                     failed.append(f"{original_id}: {exc}")
                     continue
                 ledger[original_id] = str(response.get("id") or response.get("uuid") or "ok")
+                raw_intents.pop(original_id, None)
+                _save_raw_intents(ledger_file, route, raw_intents)
                 if type(response.get("revision")) is int:
                     raw_revisions[original_id] = response["revision"]
                     _save_raw_revisions(ledger_file, route, raw_revisions)

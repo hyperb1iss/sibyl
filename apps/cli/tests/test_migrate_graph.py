@@ -1993,3 +1993,158 @@ async def test_undo_follows_the_ledger_not_the_source() -> None:
     assert outcome.removed == 0
     assert [line.split(":")[0] for line in outcome.kept_linked] == ["epic epic_1"]
     assert set(target.rows) == {"target-task_1", "target-epic_1"}
+
+
+class _IdempotentUndoTarget(_IdempotentTarget, _UndoTarget):
+    """Replays create receipts by key and honours guarded deletes."""
+
+
+async def _run(
+    target: _Target,
+    ledger: _Ledger,
+    revisions: dict[str, int],
+    plan: GraphPlan,
+    *,
+    namespace: str = "",
+    undoing: set[str] | None = None,
+) -> Any:
+    return await execute_plan(
+        target,
+        plan,
+        ids=ledger.ids,
+        statuses=ledger.statuses,
+        partial=ledger.partial,
+        target_project_id="project_target",
+        origin_org="org-src",
+        save=lambda: None,
+        operation_namespace=namespace,
+        revisions=revisions,
+        structure=ledger.structure,
+        preexisting=ledger.preexisting,
+        undoing=undoing,
+    )
+
+
+def _one_decision() -> GraphPlan:
+    return build_plan([_entity("decision_1", "decision")], [], project=PROJECT)
+
+
+@pytest.mark.asyncio
+async def test_a_retried_create_keeps_its_key_after_the_route_moves_epochs() -> None:
+    target, ledger, revisions = _IdempotentTarget(), _Ledger(), {}
+    target.lose_ack = True
+    first = await _run(target, ledger, revisions, _one_decision(), namespace="epoch-0")
+    assert first.failures and "decision_1" not in ledger.ids
+
+    second = await _run(target, ledger, revisions, _one_decision(), namespace="epoch-1")
+
+    assert second.failures == [] and target.keys[0] == target.keys[1]
+    assert revisions["decision_1"] == 1 and ledger.preexisting == set()
+
+
+@pytest.mark.parametrize("landed", [True, False])
+@pytest.mark.asyncio
+async def test_undo_first_resolves_a_create_whose_answer_was_lost(landed: bool) -> None:
+    target, ledger, revisions = _IdempotentUndoTarget(), _Ledger(), {}
+    if landed:
+        target.lose_ack = True
+    else:
+        target.fail = {"decision_1"}
+    await _run(target, ledger, revisions, _one_decision())
+    assert "decision_1" not in ledger.ids
+    assert bool(target.rows) is landed
+    target.fail = set()
+
+    outcome = await _undo(target, ledger, revisions, _one_decision())
+
+    assert outcome.removed == 1 and outcome.failures == []
+    assert target.rows == {} and ledger.ids == {}
+
+
+@pytest.mark.asyncio
+async def test_a_migration_after_an_interrupted_undo_recreates_what_it_removed() -> None:
+    plan = build_plan(
+        [_entity("decision_1", "decision"), _entity("decision_2", "decision")], [], project=PROJECT
+    )
+    target, ledger, revisions = _UndoTarget(), _Ledger(), {}
+    await _run(target, ledger, revisions, plan)
+    # The undo marked both rows and deleted one before it stopped.
+    del target.rows["target-decision_1"]
+    undoing = {"decision_1", "decision_2"}
+
+    outcome = await _run(target, ledger, revisions, plan, undoing=undoing)
+
+    assert outcome.created == 1 and outcome.failures == []
+    assert set(target.rows) == {"target-decision_1", "target-decision_2"}
+    assert undoing == set()
+
+
+@pytest.mark.asyncio
+async def test_undo_stops_once_when_the_server_requires_a_maintainer() -> None:
+    plan = build_plan(
+        [_entity(f"decision_{n}", "decision") for n in range(20)], [], project=PROJECT
+    )
+
+    class Target(_UndoTarget):
+        deletes = 0
+
+        async def _request(
+            self, method: str, path: str, *args: Any, **kwargs: Any
+        ) -> dict[str, Any]:
+            if method == "DELETE":
+                Target.deletes += 1
+                raise _ApiError(403, "project_access_denied")
+            return await super()._request(method, path, *args, **kwargs)
+
+    target = Target()
+    ledger, revisions = await _migrate_with_revisions(target, plan)
+
+    outcome = await _undo(target, ledger, revisions, plan)
+
+    assert outcome.refused and outcome.removed == 0 and outcome.failures == []
+    assert Target.deletes <= 8 and len(target.rows) == 20
+
+
+class _EpicStartingTarget(_UndoTarget):
+    """Starts a task's epic when the task moves forward, as the server does."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.teammate_edits_epic_first = False
+
+    async def _request(self, method: str, path: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        response = await super()._request(method, path, *args, **kwargs)
+        body = kwargs.get("json") or {}
+        if method == "PATCH" and body.get("status") in {"doing", "review", "blocked"}:
+            task = self.rows[path.rsplit("/", 1)[-1]]
+            epic = self.rows.get(task["metadata"].get("epic_id") or "")
+            if epic is not None and epic["metadata"].get("status") != "in_progress":
+                if self.teammate_edits_epic_first:
+                    epic["revision"] += 1
+                epic["metadata"]["status"] = "in_progress"
+                epic["revision"] += 1
+                response = {
+                    **response,
+                    "data": {"epic_started": {"epic_id": epic["id"], "revision": epic["revision"]}},
+                }
+        return response
+
+
+@pytest.mark.parametrize("teammate_first", [False, True])
+@pytest.mark.asyncio
+async def test_an_epic_the_migration_itself_started_is_still_undone(teammate_first: bool) -> None:
+    plan = build_plan(
+        [_entity("epic_1", "epic"), _entity("task_1", "task", status="doing")],
+        [SourceEdge("BELONGS_TO", "task_1", "epic_1")],
+        project=PROJECT,
+    )
+    target = _EpicStartingTarget()
+    target.teammate_edits_epic_first = teammate_first
+    ledger, revisions = await _migrate_with_revisions(target, plan)
+
+    outcome = await _undo(target, ledger, revisions, plan)
+
+    if teammate_first:
+        assert [line.split(":")[0] for line in outcome.kept_edited] == ["epic epic_1"]
+    else:
+        assert outcome.removed == 2 and target.rows == {}

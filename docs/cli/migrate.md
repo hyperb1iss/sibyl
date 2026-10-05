@@ -127,7 +127,8 @@ advance through another batch; completed rows remain available for unfinished st
 Run the same command with `--undo` to take a migration back out of the team server. Pass the same
 `--target-context`, `--project`, and any `--target-project` you migrated with, so the command finds
 the same ledger. Start with `--dry-run` to see what would go; it asks the server the same questions
-the real undo does.
+the real undo does. Undoing deletes rows, so it needs project maintainer access on the team server;
+if you migrated as a contributor, ask a maintainer of the project to grant it for the undo.
 
 ```bash
 sibyl migrate to-team --target-context team --project project_abc123 --undo --dry-run
@@ -155,7 +156,9 @@ reported and dropped from the ledger. Undoing needs a team server that advertise
 the command checks before it deletes anything.
 
 Migrating again after an undo writes fresh rows for everything the undo removed. Rows the undo kept
-stay in the ledger and are not written twice.
+stay in the ledger and are not written twice. An undo that stops part way can be run again; it first
+checks any writes whose answer was lost, and a migration after it checks the rows the undo had
+started on before trusting the ledger.
 
 ### Migrating as a team
 
