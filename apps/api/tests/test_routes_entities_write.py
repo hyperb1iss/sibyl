@@ -12,7 +12,12 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from sibyl.api.routes.entity_bulk import create_entities_bulk, requeue_entity_background_jobs
-from sibyl.api.routes.entity_mutations import create_entity, delete_entity, update_entity
+from sibyl.api.routes.entity_mutations import (
+    check_entity_deletable,
+    create_entity,
+    delete_entity,
+    update_entity,
+)
 from sibyl.api.routes.entity_serialization import (
     bulk_create_metadata,
     entity_from_bulk_create,
@@ -2946,23 +2951,57 @@ async def test_create_entities_bulk_never_replaces_another_members_row() -> None
     assert written.created_by == str(ctx.user.id)
 
 
-def _revisioned_decision(*, author: str, revision: int) -> Any:
+_MIGRATION = {"tool": "sibyl migrate to-team", "origin_org": "org-source"}
+
+
+def _revisioned_decision(
+    *,
+    author: str,
+    revision: int,
+    uuid: str = "decision_migrated",
+    entity_type: Any = EntityType.DECISION,
+    migration: dict[str, Any] | None = _MIGRATION,
+    modified_by: str | None = None,
+) -> Any:
+    metadata: dict[str, Any] = {
+        "project_id": "project_team",
+        "memory_scope": "project",
+        "principal_id": author,
+    }
+    if migration is not None:
+        metadata["migration"] = dict(migration)
     return SimpleNamespace(
-        id="decision_migrated",
-        entity_type=EntityType.DECISION,
+        id=uuid,
+        name=uuid,
+        entity_type=entity_type,
+        category=None,
         revision=revision,
         created_by=author,
-        metadata={"project_id": "project_team", "memory_scope": "project", "principal_id": author},
+        modified_by=modified_by,
+        metadata=metadata,
     )
 
 
 async def _delete_with_guard(
-    existing: Any, ctx: Any, expected_revision: int | None
+    existing: Any,
+    ctx: Any,
+    expected_revision: int | None,
+    *,
+    if_unshared: bool = False,
+    linked: list[Any] | None = None,
+    access: Any = None,
 ) -> tuple[Any, Any]:
     delete_mock = AsyncMock(return_value=True)
-    access = AsyncMock()
+    access = access or AsyncMock()
+    linked = linked or []
+    relationships = [SimpleNamespace(source_id=row.id, target_id=existing.id) for row in linked]
     runtime = SimpleNamespace(
-        entity_manager=SimpleNamespace(get=AsyncMock(return_value=existing), delete=delete_mock)
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(return_value=existing),
+            get_many=AsyncMock(return_value=linked),
+            delete=delete_mock,
+        ),
+        relationship_manager=SimpleNamespace(get_for_entity=AsyncMock(return_value=relationships)),
     )
     with (
         patch("sibyl.locks.entity_lock", _locked_entity),
@@ -2979,14 +3018,17 @@ async def _delete_with_guard(
             ),
         ),
         patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.delete_project_record", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.log_audit_event", AsyncMock()),
     ):
         await delete_entity(
-            entity_id="decision_migrated",
+            entity_id=existing.id,
             request=_request(),
             org=_org(),
             ctx=ctx,
             content_session=None,
             expected_revision=expected_revision,
+            if_unshared=if_unshared,
         )
     return delete_mock, access
 
@@ -2997,31 +3039,189 @@ async def test_delete_with_a_stale_expected_revision_is_a_conflict_and_deletes_n
     existing = _revisioned_decision(author=str(ctx.user.id), revision=4)
 
     with pytest.raises(HTTPException) as excinfo:
-        await _delete_with_guard(existing, ctx, expected_revision=3)
+        await _delete_with_guard(existing, ctx, expected_revision=3, if_unshared=True)
 
     assert excinfo.value.status_code == 409
 
 
 @pytest.mark.asyncio
-async def test_an_author_deleting_their_unchanged_row_needs_only_contributor_access() -> None:
+async def test_a_refused_caller_learns_nothing_about_the_revision() -> None:
     ctx = _ctx()
-    existing = _revisioned_decision(author=str(ctx.user.id), revision=4)
+    existing = _revisioned_decision(author="someone-else", revision=4)
+    refused = AsyncMock(side_effect=HTTPException(status_code=404, detail="Entity not found"))
 
-    delete_mock, access = await _delete_with_guard(existing, ctx, expected_revision=4)
+    with pytest.raises(HTTPException) as excinfo:
+        await _delete_with_guard(existing, ctx, expected_revision=999, access=refused)
+
+    assert excinfo.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_an_author_deleting_their_unshared_row_needs_only_contributor_access() -> None:
+    ctx = _ctx()
+    me = str(ctx.user.id)
+    existing = _revisioned_decision(author=me, revision=4, modified_by=me)
+    sibling = _revisioned_decision(author=me, revision=1, uuid="task_sibling")
+
+    delete_mock, access = await _delete_with_guard(
+        existing, ctx, expected_revision=4, if_unshared=True, linked=[sibling]
+    )
 
     delete_mock.assert_awaited_once()
     assert access.await_args.kwargs["required_role"] == ProjectRole.CONTRIBUTOR
 
 
-@pytest.mark.parametrize(("author_is_caller", "guard"), [(False, 4), (True, None)])
+@pytest.mark.parametrize(
+    ("author_is_caller", "guard", "unshared", "entity_type"),
+    [
+        (False, 4, True, EntityType.DECISION),
+        (True, None, True, EntityType.DECISION),
+        (True, 4, False, EntityType.DECISION),
+        (True, 4, True, EntityType.PROJECT),
+    ],
+)
 @pytest.mark.asyncio
 async def test_other_deletes_still_need_a_maintainer(
-    author_is_caller: bool, guard: int | None
+    author_is_caller: bool, guard: int | None, unshared: bool, entity_type: Any
 ) -> None:
     ctx = _ctx()
     author = str(ctx.user.id) if author_is_caller else "someone-else"
-    existing = _revisioned_decision(author=author, revision=4)
+    existing = _revisioned_decision(author=author, revision=4, entity_type=entity_type)
 
-    _delete_mock, access = await _delete_with_guard(existing, ctx, expected_revision=guard)
+    _delete_mock, access = await _delete_with_guard(
+        existing, ctx, expected_revision=guard, if_unshared=unshared
+    )
 
     assert access.await_args.kwargs["required_role"] == ProjectRole.MAINTAINER
+
+
+def _teammate_task() -> Any:
+    return _revisioned_decision(
+        author="teammate", revision=1, uuid="task_teammate", entity_type=EntityType.TASK
+    )
+
+
+def _own_native_task(author: str) -> Any:
+    return _revisioned_decision(
+        author=author, revision=1, uuid="task_native", entity_type=EntityType.TASK, migration=None
+    )
+
+
+@pytest.mark.parametrize(
+    ("case", "reason"),
+    [
+        ("edited", "edited it"),
+        ("teammate_link", "links to it"),
+        ("own_native_link", "links to it"),
+        ("other_migration_link", "links to it"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_an_unshared_delete_refuses_a_row_someone_else_depends_on(
+    case: str, reason: str
+) -> None:
+    ctx = _ctx()
+    me = str(ctx.user.id)
+    existing = _revisioned_decision(
+        author=me, revision=4, modified_by="teammate" if case == "edited" else me
+    )
+    linked = {
+        "edited": [],
+        "teammate_link": [_teammate_task()],
+        "own_native_link": [_own_native_task(me)],
+        "other_migration_link": [
+            _revisioned_decision(
+                author=me,
+                revision=1,
+                uuid="task_other_source",
+                migration={"tool": "sibyl migrate to-team", "origin_org": "org-elsewhere"},
+            )
+        ],
+    }[case]
+
+    with pytest.raises(HTTPException) as excinfo:
+        await _delete_with_guard(
+            existing, ctx, expected_revision=4, if_unshared=True, linked=linked
+        )
+
+    assert excinfo.value.status_code == 409
+    assert excinfo.value.detail["error"] == "entity_shared"
+    assert reason in excinfo.value.detail["message"]
+
+
+@pytest.mark.asyncio
+async def test_derived_rows_and_the_project_do_not_make_a_row_shared() -> None:
+    ctx = _ctx()
+    me = str(ctx.user.id)
+    existing = _revisioned_decision(author=me, revision=4)
+    project = _revisioned_decision(
+        author="owner", revision=1, uuid="project_team", entity_type=EntityType.PROJECT
+    )
+    topic = _revisioned_decision(author="system", revision=1, uuid="topic_x", entity_type="topic")
+    fact = _revisioned_decision(author="system", revision=1, uuid="fact_x")
+    fact.category = "memory_fact_projection"
+
+    delete_mock, _access = await _delete_with_guard(
+        existing, ctx, expected_revision=4, if_unshared=True, linked=[project, topic, fact]
+    )
+
+    delete_mock.assert_awaited_once()
+
+
+async def _deletable(existing: Any, ctx: Any, revision: int, linked: list[Any], access: Any = None):
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(return_value=existing), get_many=AsyncMock(return_value=linked)
+        ),
+        relationship_manager=SimpleNamespace(
+            get_for_entity=AsyncMock(
+                return_value=[
+                    SimpleNamespace(source_id=r.id, target_id=existing.id) for r in linked
+                ]
+            )
+        ),
+    )
+    with (
+        patch(
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        patch(
+            "sibyl.api.routes.entity_mutations.verify_entity_project_access", access or AsyncMock()
+        ),
+        patch("sibyl.api.routes.entity_policy.require_entity_scope_visible", AsyncMock()),
+    ):
+        return await check_entity_deletable(
+            entity_id=existing.id,
+            org=_org(),
+            ctx=ctx,
+            content_session=None,
+            expected_revision=revision,
+        )
+
+
+@pytest.mark.asyncio
+async def test_deletable_answers_what_a_guarded_unshared_delete_would_do() -> None:
+    ctx = _ctx()
+    me = str(ctx.user.id)
+    existing = _revisioned_decision(author=me, revision=4)
+
+    assert await _deletable(existing, ctx, 4, []) == {"deletable": True}
+    shared = await _deletable(existing, ctx, 4, [_teammate_task()])
+    assert shared["deletable"] is False
+    assert shared["error"] == "entity_shared"
+    stale = await _deletable(existing, ctx, 3, [])
+    assert stale["deletable"] is False
+    assert stale["error"] == "revision_conflict"
+
+
+@pytest.mark.asyncio
+async def test_deletable_keeps_access_refusals_as_errors() -> None:
+    ctx = _ctx()
+    existing = _revisioned_decision(author="someone-else", revision=4)
+    refused = AsyncMock(side_effect=HTTPException(status_code=403, detail="Forbidden"))
+
+    with pytest.raises(HTTPException) as excinfo:
+        await _deletable(existing, ctx, 999, [], access=refused)
+
+    assert excinfo.value.status_code == 403

@@ -133,10 +133,13 @@ async def test_native_links_add_topology_preserves_body_and_exact_replay(native_
         epic_id="epic",
         parent_task_id="target",
         depends_on=["target"],
+        modified_by="user-linker",
     )
     assert not result.replayed and result.added_relationship_ids == [_edge().id]
     assert result.revision == before.revision + 1
     stored = await manager.get("source")
+    # A link write is an edit, so it names its writer like any other edit.
+    assert stored.modified_by == "user-linker"
     assert (stored.name, stored.description, stored.content) == (
         before.name,
         before.description,

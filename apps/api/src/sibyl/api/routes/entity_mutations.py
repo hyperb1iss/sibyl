@@ -616,6 +616,8 @@ async def update_entity(
 
             # Update timestamp
             update_data["updated_at"] = datetime.now(UTC)
+            if ctx.user is not None:
+                update_data["modified_by"] = str(ctx.user.id)
 
             # Perform update
             updated = await runtime.entity_manager.update(entity_id, update_data)
@@ -721,6 +723,146 @@ async def update_entity(
         ) from e
 
 
+# Rows that never count as someone's work linking to an entity: the project
+# itself and what the server derives from memories.
+_UNSHARING_TYPES = frozenset({EntityType.PROJECT, "topic", "passage"})
+_DERIVED_CATEGORIES = frozenset(
+    {"memory_projection", "passage_projection", "memory_fact_projection"}
+)
+
+
+def _entity_author(entity: Any) -> str | None:
+    author = (getattr(entity, "metadata", None) or {}).get("principal_id") or getattr(
+        entity, "created_by", None
+    )
+    return str(author) if author else None
+
+
+def _migration_origin(entity: Any) -> object:
+    migration = (getattr(entity, "metadata", None) or {}).get("migration")
+    if not isinstance(migration, dict):
+        return None
+    return migration.get("tool"), migration.get("origin_org")
+
+
+async def _shared_reason(runtime: Any, existing: Any, author: str | None) -> str | None:
+    """Why deleting this row would take someone else's work with it, if it would."""
+    modified_by = getattr(existing, "modified_by", None)
+    if modified_by and str(modified_by) != author:
+        return "someone other than its author has edited it"
+    relationships = await runtime.relationship_manager.get_for_entity(existing.id)
+    linked_ids = {
+        rel.target_id if rel.source_id == existing.id else rel.source_id for rel in relationships
+    } - {existing.id}
+    if not linked_ids:
+        return None
+    origin = _migration_origin(existing)
+    for row in await runtime.entity_manager.get_many(sorted(linked_ids)):
+        if row.entity_type in _UNSHARING_TYPES or getattr(row, "category", None) in (
+            _DERIVED_CATEGORIES
+        ):
+            continue
+        # Rows the same author migrated from the same source are this row's own
+        # migration; the undo walks them itself and keeps what they need.
+        if (
+            origin is not None
+            and _entity_author(row) == author
+            and _migration_origin(row) == origin
+        ):
+            continue
+        return "a row outside its migration links to it"
+    return None
+
+
+async def _check_delete(
+    runtime: Any,
+    existing: Any,
+    *,
+    ctx: AuthContext,
+    content_session: Any,
+    expected_revision: int | None,
+    if_unshared: bool,
+) -> None:
+    """Raise unless the caller may delete this row under the conditions they named."""
+    author = _entity_author(existing)
+    # Deleting from a project takes a maintainer, except that an author may
+    # remove their own row (not a project) at a revision they name, while
+    # nobody else has written it or links to it: what a migration undo does,
+    # with the same access that wrote the row.
+    own_delete = (
+        expected_revision is not None
+        and if_unshared
+        and ctx.user is not None
+        and author is not None
+        and author == str(ctx.user.id)
+        and existing.entity_type != EntityType.PROJECT
+    )
+    project_id = policy.entity_read_project_id(existing)
+    await verify_entity_project_access(
+        content_session,
+        ctx,
+        project_id,
+        required_role=ProjectRole.CONTRIBUTOR if own_delete else ProjectRole.MAINTAINER,
+        require_existing_project=True,
+    )
+    # A project maintainer role does not extend over a co-member's private
+    # memory, so deletion clears the same gate a read does.
+    await policy.require_entity_scope_visible(ctx, existing, project_id=project_id)
+
+    # Only a caller allowed to delete the row learns its revision.
+    current_revision = getattr(existing, "revision", None)
+    if expected_revision is not None and current_revision != expected_revision:
+        raise revision_conflict(
+            RevisionConflictError(existing.id, expected_revision, int(current_revision or 0))
+        )
+    if if_unshared and (reason := await _shared_reason(runtime, existing, author)):
+        raise HTTPException(
+            status_code=409,
+            detail=safe_error_payload(error="entity_shared", message=f"Not removed: {reason}."),
+        )
+
+
+@router.get(
+    "/{entity_id}/deletable",
+    dependencies=[Depends(require_org_role(*contracts.WRITE_ROLES))],
+)
+async def check_entity_deletable(
+    entity_id: str,
+    org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
+    content_session: Any = Depends(get_content_read_session_dependency),
+    expected_revision: int = Query(ge=1, description="The revision the delete would name."),
+) -> dict[str, Any]:
+    """Whether a guarded, unshared delete at this revision would go through, without deleting.
+
+    Runs the checks `DELETE ?expected_revision=N&if_unshared=true` runs, so a
+    dry run can report what an undo would keep. Access failures answer as they
+    would for the delete; a revision or sharing refusal answers 200 with its
+    reason.
+    """
+    _refuse_raw_memory_reference(entity_id)
+    runtime = await policy.get_entity_graph_runtime(str(org.id))
+    existing = await _existing_entity_or_404(runtime.entity_manager, entity_id)
+    try:
+        await _check_delete(
+            runtime,
+            existing,
+            ctx=ctx,
+            content_session=content_session,
+            expected_revision=expected_revision,
+            if_unshared=True,
+        )
+    except HTTPException as exc:
+        if exc.status_code != 409 or not isinstance(exc.detail, dict):
+            raise
+        return {
+            "deletable": False,
+            "error": exc.detail.get("error"),
+            "reason": exc.detail.get("message"),
+        }
+    return {"deletable": True}
+
+
 @router.delete(
     "/{entity_id}",
     status_code=204,
@@ -735,9 +877,14 @@ async def delete_entity(
     expected_revision: int | None = Query(
         default=None,
         ge=1,
+        description="Delete only while the entity is still at this revision.",
+    ),
+    if_unshared: bool = Query(
+        default=False,
         description=(
-            "Delete only while the entity is still at this revision. Its author may then "
-            "delete it with the contributor access that wrote it."
+            "Delete only while nobody but the entity's author has written it and no row "
+            "outside its own migration links to it. With expected_revision, the author "
+            "may delete it with contributor access."
         ),
     ),
 ) -> None:
@@ -756,34 +903,15 @@ async def delete_entity(
             runtime = await policy.get_entity_graph_runtime(group_id)
 
             existing = await _existing_entity_or_404(runtime.entity_manager, entity_id)
-            # A direct call (not through FastAPI) passes the Query marker itself.
-            guard = expected_revision if type(expected_revision) is int else None
-            current_revision = getattr(existing, "revision", None)
-            if guard is not None and current_revision != guard:
-                raise revision_conflict(
-                    RevisionConflictError(entity_id, guard, int(current_revision or 0))
-                )
-
-            # Deleting from a project takes a maintainer, except that an author
-            # may remove a row nobody has changed since they wrote it (what a
-            # migration undo does), with the same access that wrote it.
-            own_unchanged = False
-            if guard is not None and ctx.user is not None:
-                author = (getattr(existing, "metadata", None) or {}).get("principal_id") or getattr(
-                    existing, "created_by", None
-                )
-                own_unchanged = author is not None and str(author) == str(ctx.user.id)
-            project_id = policy.entity_read_project_id(existing)
-            await verify_entity_project_access(
-                content_session,
-                ctx,
-                project_id,
-                required_role=ProjectRole.CONTRIBUTOR if own_unchanged else ProjectRole.MAINTAINER,
-                require_existing_project=True,
+            # A direct call (not through FastAPI) passes the Query markers themselves.
+            await _check_delete(
+                runtime,
+                existing,
+                ctx=ctx,
+                content_session=content_session,
+                expected_revision=expected_revision if type(expected_revision) is int else None,
+                if_unshared=if_unshared is True,
             )
-            # A project maintainer role does not extend over a co-member's
-            # private memory, so deletion clears the same gate a read does.
-            await policy.require_entity_scope_visible(ctx, existing, project_id=project_id)
 
             # Spans first, parent second. Spans are derived, so retiring them
             # while the memory still exists costs nothing that a reprojection

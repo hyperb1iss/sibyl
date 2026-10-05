@@ -8,7 +8,7 @@ selection and saved intents across partial failures and lost responses.
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
@@ -395,9 +395,10 @@ def test_a_zero_limit_keeps_completed_rows_for_status_and_link_recovery() -> Non
 
 
 class _ApiError(Exception):
-    def __init__(self, status_code: int) -> None:
+    def __init__(self, status_code: int, error_code: str | None = None) -> None:
         super().__init__(f"HTTP {status_code}")
         self.status_code = status_code
+        self.error_code = error_code
 
 
 class _Target:
@@ -1641,17 +1642,40 @@ async def test_saved_complete_create_receipt_clears_empty_partial_without_target
 
 
 class _UndoTarget(_Target):
-    """Answers status receipts with their revision and honours guarded deletes."""
+    """Answers status receipts with their revision and honours guarded deletes.
+
+    Target ids in `shared` stand for rows someone outside the migration
+    depends on; the server refuses an unshared delete of them.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.shared: set[str] = set()
+
+    def _refusal(self, target_id: str, params: dict[str, Any]) -> _ApiError | None:
+        if target_id not in self.rows:
+            return _ApiError(404)
+        if self.rows[target_id]["revision"] != int(params["expected_revision"]):
+            return _ApiError(409, "revision_conflict")
+        if target_id in self.shared:
+            return _ApiError(409, "entity_shared")
+        return None
 
     async def _request(self, method: str, path: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        params = kwargs.get("params") or {}
+        if method == "GET" and path.endswith("/deletable"):
+            refusal = self._refusal(path.split("/")[-2], params)
+            if refusal is None:
+                return {"deletable": True}
+            if refusal.status_code == 404:
+                raise refusal
+            return {"deletable": False, "error": refusal.error_code, "reason": "refused"}
         if method == "DELETE":
-            self.calls.append((method, path, kwargs.get("params")))
+            self.calls.append((method, path, params))
+            assert params.get("if_unshared") == "true"
             target_id = path.rsplit("/", 1)[-1]
-            if target_id not in self.rows:
-                raise _ApiError(404)
-            expected = int((kwargs.get("params") or {})["expected_revision"])
-            if self.rows[target_id]["revision"] != expected:
-                raise _ApiError(409)
+            if (refusal := self._refusal(target_id, params)) is not None:
+                raise refusal
             del self.rows[target_id]
             return {}
         response = await super()._request(method, path, *args, **kwargs)
@@ -1825,7 +1849,7 @@ async def test_undo_runs_a_layer_concurrently_and_still_protects_kept_links() ->
     class Target(_UndoTarget):
         in_flight = 0
         peak = 0
-        order: list[str] = []
+        order: ClassVar[list[str]] = []
 
         async def _request(
             self, method: str, path: str, *args: Any, **kwargs: Any
@@ -1849,3 +1873,27 @@ async def test_undo_runs_a_layer_concurrently_and_still_protects_kept_links() ->
     assert outcome.removed == 11 and Target.peak > 1
     assert set(target.rows) == {"target-task_11", "target-epic_1"}
     assert [entry.split(":")[0] for entry in outcome.kept_linked] == ["epic epic_1"]
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+@pytest.mark.asyncio
+async def test_undo_keeps_a_row_someone_outside_the_migration_depends_on(dry_run: bool) -> None:
+    plan = build_plan(
+        [_entity("epic_1", "epic"), _entity("task_1", "task"), _entity("task_2", "task")],
+        [
+            SourceEdge("BELONGS_TO", "task_1", "epic_1"),
+            SourceEdge("BELONGS_TO", "task_2", "epic_1"),
+        ],
+        project=PROJECT,
+    )
+    target = _UndoTarget()
+    ledger, revisions = await _migrate_with_revisions(target, plan)
+    # A teammate filed a task under the migrated epic.
+    target.shared = {"target-epic_1"}
+
+    outcome = await _undo(target, ledger, revisions, plan, dry_run=dry_run)
+
+    assert outcome.removed == 2
+    assert [line.split(":")[0] for line in outcome.kept_shared] == ["epic epic_1"]
+    assert ("target-epic_1" in target.rows) and ("epic_1" in ledger.ids)
+    assert len(target.rows) == (3 if dry_run else 1)

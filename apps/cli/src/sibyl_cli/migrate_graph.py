@@ -976,6 +976,7 @@ class UndoOutcome:
     gone: int = 0
     kept_edited: list[str] = field(default_factory=list)
     kept_linked: list[str] = field(default_factory=list)
+    kept_shared: list[str] = field(default_factory=list)
     kept_unrecorded: list[str] = field(default_factory=list)
     failures: list[str] = field(default_factory=list)
 
@@ -1050,18 +1051,33 @@ async def undo_plan(
             keep(node, outcome.kept_edited, "changed on the team server since it was migrated")
             return
         if dry_run:
-            outcome.removed += 1
+            # The same checks the delete runs, so the dry run keeps what the undo would.
+            async with gate:
+                check = await client._request(
+                    "GET",
+                    f"/entities/{target_id}/deletable",
+                    params={"expected_revision": str(revision)},
+                    _buffer_pending=False,
+                )
+            if check.get("deletable") is True:
+                outcome.removed += 1
+            elif check.get("error") == "entity_shared":
+                keep(node, outcome.kept_shared, str(check.get("reason") or "shared"))
+            else:
+                keep(node, outcome.kept_edited, "changed on the team server since it was migrated")
             return
         try:
             async with gate:
                 await client._request(
                     "DELETE",
                     f"/entities/{target_id}",
-                    params={"expected_revision": str(revision)},
+                    params={"expected_revision": str(revision), "if_unshared": "true"},
                     _buffer_pending=False,
                 )
         except Exception as exc:
-            if getattr(exc, "status_code", None) == 409:
+            if getattr(exc, "error_code", None) == "entity_shared":
+                keep(node, outcome.kept_shared, str(exc))
+            elif getattr(exc, "status_code", None) == 409:
                 keep(node, outcome.kept_edited, "changed on the team server during the undo")
             elif getattr(exc, "status_code", None) == 404:
                 outcome.gone += 1

@@ -770,6 +770,10 @@ async def _undo_graph(
     for label, kept in (
         ("changed on the team server since migration", outcome.kept_edited),
         ("still linked from a kept row", outcome.kept_linked),
+        (
+            "that someone else edited or that a row outside this migration links to",
+            outcome.kept_shared,
+        ),
         ("not undoable by this run", outcome.kept_unrecorded),
     ):
         if kept:
