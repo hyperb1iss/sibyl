@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime
 from typing import TYPE_CHECKING, cast
 from uuid import uuid4
+
+import structlog
 
 from sibyl_core.auth.memory_policy import (
     EVAL_CONSOLIDATION_METADATA_KEY,
@@ -15,6 +18,7 @@ from sibyl_core.auth.memory_policy import (
 )
 from sibyl_core.backends.surreal import SurrealContentClient
 from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
+from sibyl_core.config import settings
 from sibyl_core.embeddings.provenance import EMBEDDING_STAMP_KEY
 from sibyl_core.embeddings.providers import (
     EmbeddingProvider,
@@ -49,6 +53,8 @@ if TYPE_CHECKING:
     from sibyl_core.services.operational_capture import OperationalSourceWrite
     from sibyl_core.services.validation_candidate import ValidationCandidateWrite
     from sibyl_core.services.validation_promotion import ValidatedPromotion
+
+log = structlog.get_logger()
 
 _RAW_MEMORY_EMBEDDING_AUTO = object()
 
@@ -226,9 +232,51 @@ def _raw_memory_from_write(write: RawMemoryWrite, *, captured_at: datetime) -> R
     )
 
 
+def _raw_memory_embedding_timeout_seconds() -> float:
+    """The write path's embedding budget: the same bound the graph path uses."""
+    return float(settings.graph_embedding_timeout_seconds)
+
+
+async def _embed_raw_texts(
+    embedding_provider: EmbeddingProvider,
+    texts: Sequence[str],
+    *,
+    timeout_seconds: float | None,
+) -> list[list[float]] | None:
+    """Embed raw capture text, or return None when the provider ran past its budget.
+
+    The graph write path bounds its provider call; the raw path held the
+    request, the idempotency lease and a content socket for as long as the
+    provider felt like taking (the SDK default is minutes). A capture stored
+    without a vector is still lexically searchable and is exactly what the
+    embedding repair sweep walks, so a timeout degrades to that instead of
+    failing the remember.
+    """
+    started = time.perf_counter()
+    try:
+        if timeout_seconds is not None and timeout_seconds > 0:
+            return await asyncio.wait_for(
+                embedding_provider.embed_texts(texts, input_kind="document"),
+                timeout=timeout_seconds,
+            )
+        return await embedding_provider.embed_texts(texts, input_kind="document")
+    except TimeoutError:
+        log.warning(
+            "raw_memory_embedding_timeout",
+            provider=embedding_provider.metadata.provider,
+            model=embedding_provider.metadata.model,
+            items=len(texts),
+            timeout_seconds=timeout_seconds,
+            elapsed_ms=round((time.perf_counter() - started) * 1000, 2),
+        )
+        return None
+
+
 async def _raw_memory_with_embedding(
     memory: RawMemory,
     embedding_provider: EmbeddingProvider | None,
+    *,
+    timeout_seconds: float | None = None,
 ) -> RawMemory:
     if (
         embedding_provider is None
@@ -236,15 +284,18 @@ async def _raw_memory_with_embedding(
         or not models.raw_memory_recallable(memory)
     ):
         return memory
-    embeddings = await embedding_provider.embed_texts(
+    embeddings = await _embed_raw_texts(
+        embedding_provider,
         [
             models.raw_memory_embedding_text(
                 title=memory.title,
                 raw_content=memory.raw_content,
             )
         ],
-        input_kind="document",
+        timeout_seconds=timeout_seconds,
     )
+    if embeddings is None:
+        return memory
     memory.embedding = models.embedding_vector_from_batch(
         embeddings,
         embedding_provider.metadata.dimensions,
@@ -260,6 +311,8 @@ async def _raw_memory_with_embedding(
 async def _raw_memories_with_embeddings(
     memories: Sequence[RawMemory],
     embedding_provider: EmbeddingProvider | None,
+    *,
+    timeout_seconds: float | None = None,
 ) -> list[RawMemory]:
     if embedding_provider is None:
         return list(memories)
@@ -271,9 +324,8 @@ async def _raw_memories_with_embeddings(
     if not pending:
         return list(memories)
 
-    if not pending:
-        return list(memories)
-    embeddings = await embedding_provider.embed_texts(
+    embeddings = await _embed_raw_texts(
+        embedding_provider,
         [
             models.raw_memory_embedding_text(
                 title=memory.title,
@@ -281,8 +333,10 @@ async def _raw_memories_with_embeddings(
             )
             for memory in pending
         ],
-        input_kind="document",
+        timeout_seconds=timeout_seconds,
     )
+    if embeddings is None:
+        return list(memories)
     if len(embeddings) != len(pending):
         raise ValueError(
             f"embedding provider returned {len(embeddings)} vectors for {len(pending)} raw memories"
@@ -335,7 +389,11 @@ async def _raw_memory_with_save_embedding(
         if embedding_provider is _RAW_MEMORY_EMBEDDING_AUTO
         else cast("EmbeddingProvider | None", embedding_provider)
     )
-    return await _raw_memory_with_embedding(_raw_memory_without_embedding(memory), provider)
+    return await _raw_memory_with_embedding(
+        _raw_memory_without_embedding(memory),
+        provider,
+        timeout_seconds=_raw_memory_embedding_timeout_seconds(),
+    )
 
 
 _PROJECTION_STAMP_KEY = "projected_capture_id"
@@ -478,14 +536,19 @@ async def remember_raw_memory(
         if embedding_provider is _RAW_MEMORY_EMBEDDING_AUTO
         else cast("EmbeddingProvider | None", embedding_provider)
     )
+    embedding_timeout = _raw_memory_embedding_timeout_seconds()
     if operational_write is None:
-        memory = await _raw_memory_with_embedding(memory, provider)
+        memory = await _raw_memory_with_embedding(
+            memory, provider, timeout_seconds=embedding_timeout
+        )
     async with content_client.surreal_content_client() as client:
         if operational_write is not None:
             from sibyl_core.services.operational_capture import write_operational_source
 
             async def prepare_operational_record() -> dict[str, object]:
-                embedded = await _raw_memory_with_embedding(memory, provider)
+                embedded = await _raw_memory_with_embedding(
+                    memory, provider, timeout_seconds=embedding_timeout
+                )
                 return models.raw_memory_record(embedded)
 
             record = await write_operational_source(
@@ -597,7 +660,9 @@ async def remember_raw_memories(
         if embedding_provider is _RAW_MEMORY_EMBEDDING_AUTO
         else cast("EmbeddingProvider | None", embedding_provider)
     )
-    memories = await _raw_memories_with_embeddings(memories, provider)
+    memories = await _raw_memories_with_embeddings(
+        memories, provider, timeout_seconds=_raw_memory_embedding_timeout_seconds()
+    )
     async with content_client.surreal_content_client() as client:
         records = await replace_raw_memory_records_bulk(
             client,

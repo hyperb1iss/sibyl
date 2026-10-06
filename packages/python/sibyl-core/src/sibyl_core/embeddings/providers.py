@@ -167,9 +167,10 @@ class OpenAIEmbeddingProvider:
         del input_kind
         if not texts:
             return []
-        prepared = [
-            _prepare_openai_embedding_text(text, model=self.metadata.model) for text in texts
-        ]
+        # Tokenizing runs off the event loop: the first call loads the BPE
+        # (hundreds of milliseconds) and a 50 KB body encodes in the hundreds
+        # of milliseconds too, both of which stalled every other request.
+        prepared = await asyncio.to_thread(self._prepare_texts, list(texts))
         embeddings: list[list[float]] = []
         for input_batch in _openai_embedding_batches(
             [text for text, _token_count in prepared],
@@ -183,6 +184,9 @@ class OpenAIEmbeddingProvider:
             self._record_usage(result, input_count=len(input_batch))
             embeddings.extend([list(item.embedding) for item in result.data])
         return embeddings
+
+    def _prepare_texts(self, texts: list[str]) -> list[tuple[str, int]]:
+        return [_prepare_openai_embedding_text(text, model=self.metadata.model) for text in texts]
 
     def usage_snapshot(self) -> dict[str, str | int | float]:
         with self._usage_lock:
