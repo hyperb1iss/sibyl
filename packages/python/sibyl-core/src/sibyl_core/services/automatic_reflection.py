@@ -12,6 +12,7 @@ from sibyl_core.services.automatic_correction import advance_correction
 from sibyl_core.services.content_models import RawMemory
 from sibyl_core.services.content_raw_persistence import (
     remember_reflection_candidate_review,
+    save_raw_memory,
 )
 from sibyl_core.services.memory_source_validation import SourceAuthorityResolver
 from sibyl_core.services.reflection_validation import (
@@ -56,21 +57,26 @@ async def _current(
 async def _abstain(
     original: AuthorizedReflection,
     resolver: SourceAuthorityResolver,
-    frontier_id: str,
+    reason: str,
+    executions: list[str],
 ) -> None:
-    from sibyl_core.services.reflection_retirement import record_abstained_reflection
-
     current = await _current(original, resolver)
-
-    async def authorize() -> None:
-        await _current(current, resolver)
-
-    await record_abstained_reflection(
-        current.memory,
-        frontier_id=frontier_id,
-        reason="abstained",
-        observations=current.sources,
-        authorize=authorize,
+    memory = current.memory
+    await save_raw_memory(
+        replace(
+            memory,
+            review_state="archived",
+            metadata={
+                **memory.metadata,
+                "review_state": "archived",
+                "autonomy_outcome": "abstained",
+                "autonomy_recommended_action": "abstain",
+                "automatic_validation_executions": executions,
+                "archive_reason": reason,
+            },
+        ),
+        expected_revision=memory.revision,
+        source_observations=[memory, *current.sources],
     )
 
 
@@ -317,51 +323,18 @@ async def automatically_review_reflection(
     organization_id: str, principal_id: str, candidate_id: str, resolver: SourceAuthorityResolver
 ) -> AutomaticReflectionResult:
     """Advance verified children; unresolved progress remains pending without redispatch."""
-    try:
-        root = await _reflection_root(organization_id, principal_id, candidate_id, resolver)
-    except SourceUnavailableError:
-        from sibyl_core.services.reflection_retirement import retire_abstained_correction_chain
-
-        retired = await retire_abstained_correction_chain(
-            organization_id, principal_id, candidate_id, resolver
-        )
-        if not retired:
-            raise
-        return AutomaticReflectionResult(
-            None, "abstained", (), "ancestor_abstained", candidate_ids=retired
-        )
-    from sibyl_core.services.reflection_retirement import (
-        abstained_reflection_frontier,
-        retire_abstained_correction_chain,
-    )
-
-    terminal_frontier = await abstained_reflection_frontier(organization_id, principal_id, root)
-    if terminal_frontier is not None:
-        retired = await retire_abstained_correction_chain(
-            organization_id,
-            principal_id,
-            terminal_frontier if candidate_id == root else candidate_id,
-            resolver,
-            expected_root=root,
-        )
-        if not retired:
-            raise SourceUnavailableError()
-        return AutomaticReflectionResult(
-            None, "abstained", (), "ancestor_abstained", candidate_ids=retired
-        )
+    root = await _reflection_root(organization_id, principal_id, candidate_id, resolver)
     adapter = _ReflectionAdapter(organization_id, principal_id, resolver)
     frontier = await advance_correction(adapter, root)
     if frontier.status == "abstained":
-        assert frontier.candidate is not None
         for original in adapter.visited.values():
-            await _abstain(original, resolver, frontier.candidate.memory.id)
-        return AutomaticReflectionResult(
-            None,
-            "abstained",
-            frontier.executions,
-            frontier.reason,
-            candidate_ids=tuple(adapter.visited),
-        )
+            await _abstain(
+                original,
+                resolver,
+                frontier.reason or "evidence_abstention",
+                list(frontier.executions),
+            )
+        return AutomaticReflectionResult(None, "abstained", frontier.executions, frontier.reason)
     if frontier.status == "pending":
         return AutomaticReflectionResult(None, "pending", frontier.executions, frontier.reason)
     assert frontier.candidate is not None

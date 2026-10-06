@@ -27,7 +27,6 @@ from uuid import NAMESPACE_URL, uuid5
 
 import structlog
 
-from sibyl_core.backends.surreal.schema_version import SurrealExecute
 from sibyl_core.services import content_client
 from sibyl_core.services.content_models import RawMemory
 from sibyl_core.services.content_raw_persistence import get_raw_memory
@@ -67,26 +66,6 @@ def correction_parent_id(memory: RawMemory) -> str | None:
     if memory.id != str(uuid5(NAMESPACE_URL, "sibyl:validation-correction:" + execution_id)):
         return None
     return parent_id
-
-
-async def reflection_draft_retired(
-    organization_id: str,
-    candidate_id: str,
-    *,
-    execute_query: SurrealExecute | None = None,
-) -> bool:
-    """Read terminal state for one candidate without changing its evidence."""
-    from sibyl_core.services.validation_execution import _read_query
-
-    return bool(
-        await _read_query(
-            "SELECT draft_id FROM reflection_supersessions "
-            "WHERE organization_id=$org AND draft_id=$draft LIMIT 1;",
-            execute_query=execute_query,
-            org=organization_id,
-            draft=candidate_id,
-        )
-    )
 
 
 async def superseded_draft_ids(organization_id: str) -> list[str]:
