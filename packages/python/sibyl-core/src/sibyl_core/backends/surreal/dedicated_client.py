@@ -929,8 +929,10 @@ class DedicatedSurrealClient:
                         slot_held = False
                         backoff_started = query_start()
                         await asyncio.sleep(delay)
+                        reacquire_started = query_start()
                         connection = await self._available.get()
                         slot_held = True
+                        pool_wait += elapsed_ms(reacquire_started)
                         off_socket_ms += elapsed_ms(backoff_started)
                         continue
                     if not _is_transient_connection_error(exc):

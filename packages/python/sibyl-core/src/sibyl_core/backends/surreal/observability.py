@@ -70,7 +70,9 @@ def _primary_statement(query: str) -> str:
 
 
 @cached_by_query_text
-def _query_tables(query: str) -> list[str]:
+def _query_tables(query: str) -> tuple[str, ...]:
+    # A tuple, so a memoised result handed to a caller cannot be mutated in
+    # place and poison every later receipt for the same text.
     tokens = _query_tokens(query)
     tables: set[str] = set()
     for index, token in enumerate(tokens[:-1]):
@@ -80,7 +82,7 @@ def _query_tables(query: str) -> list[str]:
         if table.upper() in _NON_TABLE_TOKENS:
             continue
         tables.add(table)
-    return sorted(tables)[:8]
+    return tuple(sorted(tables)[:8])
 
 
 @cached_by_query_text
@@ -181,7 +183,7 @@ def log_query(
         "retry_count": retry_count,
         "statement": statement,
         "statement_count": _statement_count(query),
-        "tables": _query_tables(query),
+        "tables": list(_query_tables(query)),
         "query_hash": query_hash,
     }
     if pool_wait_ms > 0:

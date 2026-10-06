@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -923,7 +924,10 @@ async def test_write_after_an_idle_gap_is_preflighted(monkeypatch):
     await client.execute_query("SELECT * FROM entity LIMIT 1;")
 
     idle_until = time.monotonic() + dedicated_client_module._WRITE_PREFLIGHT_IDLE_SECONDS + 1.0
-    monkeypatch.setattr(dedicated_client_module.time, "monotonic", lambda: idle_until)
+    # Replace the module's clock only; asyncio keeps the real one.
+    monkeypatch.setattr(
+        dedicated_client_module, "time", SimpleNamespace(monotonic=lambda: idle_until)
+    )
 
     await client.execute_query("UPDATE entity SET updated_at = time::now();")
 

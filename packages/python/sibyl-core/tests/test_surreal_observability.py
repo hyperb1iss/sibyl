@@ -291,7 +291,7 @@ def test_query_text_helpers_are_memoised_for_templates() -> None:
     second = observability._query_tables(query)
     info = observability._query_tables.cache_info()
 
-    assert first == second == ["entity"]
+    assert first == second == ("entity",)
     assert (info.hits, info.misses) == (1, 1)
 
 
@@ -299,7 +299,7 @@ def test_huge_query_text_bypasses_the_memo() -> None:
     observability._query_tables.cache_clear()
     huge = "SELECT * FROM entity WHERE name IN [" + ",".join(["'x'"] * 2000) + "];"
 
-    assert observability._query_tables(huge) == ["entity"]
-    assert observability._query_tables(huge) == ["entity"]
+    assert observability._query_tables(huge) == ("entity",)
+    assert observability._query_tables(huge) == ("entity",)
     info = observability._query_tables.cache_info()
     assert (info.hits, info.misses, info.currsize) == (0, 0, 0)

@@ -252,13 +252,13 @@ async def test_rollup_persistence_failure_warns_once_per_class_and_counts(
 
     previous_config = structlog.get_config()
     structlog.configure(wrapper_class=structlog.make_filtering_bound_logger(logging.DEBUG))
-
-    with capture_logs() as entries:
-        first = await telemetry_service.persist_runtime_rollup(bucket=60)
-        monkeypatch.setattr(telemetry_service, "_last_persisted_bucket", None)
-        second = await telemetry_service.persist_runtime_rollup(bucket=60)
-
-    structlog.configure(**previous_config)
+    try:
+        with capture_logs() as entries:
+            first = await telemetry_service.persist_runtime_rollup(bucket=60)
+            monkeypatch.setattr(telemetry_service, "_last_persisted_bucket", None)
+            second = await telemetry_service.persist_runtime_rollup(bucket=60)
+    finally:
+        structlog.configure(**previous_config)
 
     assert first is None
     assert second is None
