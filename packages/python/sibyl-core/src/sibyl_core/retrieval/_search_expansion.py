@@ -457,11 +457,14 @@ async def _community_ids_for_entities(
     limit: int,
     relationship_ids_available: _RelationshipBatchGuard | None = None,
 ) -> list[str]:
+    # With several seeds the planner prefers the constant `name` equality and
+    # walks every BELONGS_TO edge of the namespace; the hint keeps one point
+    # lookup per seed on the source index, which is part of the base schema.
     rows = await _execute_query_records(
         client,
         """
         SELECT target_id AS uuid, uuid AS relationship_id
-        FROM relates_to
+        FROM relates_to WITH INDEX idx_relates_source
         WHERE source_id IN $source_uuids
           AND name = "BELONGS_TO"
           AND group_id = $group_id

@@ -177,11 +177,15 @@ class _EntitySearchManager:
         return [rows_by_id[entity_id] for entity_id in ordered_ids if entity_id in rows_by_id]
 
     async def get_notes_for_task(self, task_id: str, limit: int = 50) -> list[Entity]:
+        # Among several usable equalities the 3.x planner picks the type
+        # index and walks every note; the hint keeps the lookup on the task
+        # index (part of the base graph schema), which holds only this task's
+        # notes.
         rows = normalize_records(
             await self._client.execute_query(
                 """
                 SELECT *
-                FROM entity
+                FROM entity WITH INDEX idx_entity_task
                 WHERE group_id = $group_id
                   AND entity_type = 'note'
                   AND task_id = $task_id

@@ -707,68 +707,34 @@ class _EntityWorkItemManager(_EntitySearchManager):
             return {}
 
         epic_id_list = sorted(epic_ids)
-        where_clauses = [
-            "group_id = $group_id",
-            "entity_type = 'task'",
-            "parent_task_id IN $epic_ids",
+        # One equality per epic binds the (entity_type, parent_task_id, ...)
+        # compound index exactly. An `IN` list over the epics made the planner
+        # walk every task of the type, and hinting the single-column parent
+        # index turned the grouped read into a table scan. Values that older
+        # rows kept only in attributes were promoted into parent_task_id by
+        # migrations 7 and 36, so no attribute-level read remains.
+        project_clause = " AND project_id = $project_id" if project_id is not None else ""
+        statements = [
+            "SELECT status, count() AS task_count FROM entity "
+            "WHERE group_id = $group_id AND entity_type = 'task' "
+            f"AND parent_task_id = $epic_{index}{project_clause} GROUP BY status;"
+            for index in range(len(epic_id_list))
         ]
         params: dict[str, Any] = {
             "group_id": self._group_id,
-            "epic_ids": epic_id_list,
+            **{f"epic_{index}": epic_id for index, epic_id in enumerate(epic_id_list)},
         }
         if project_id is not None:
-            where_clauses.append("project_id = $project_id")
             params["project_id"] = project_id
-
-        rows = normalize_records(
-            await self._client.execute_query(
-                """
-                SELECT parent_task_id AS epic_id, status, count() AS task_count
-                FROM entity
-                WHERE """
-                + " AND ".join(where_clauses)
-                + """
-                GROUP BY parent_task_id, status;
-                """,
-                **params,
-            )
-        )
-        legacy_where_clauses = [
-            "group_id = $group_id",
-            "entity_type = 'task'",
-            _surreal_indexed_field_missing("parent_task_id"),
-            "(attributes.parent_task_id IN $epic_ids OR attributes.epic_id IN $epic_ids)",
-        ]
-        if project_id is not None:
-            legacy_where_clauses.append(
-                "(project_id = $project_id OR attributes.project_id = $project_id)"
-            )
-        rows.extend(
-            normalize_records(
-                await self._client.execute_query(
-                    """
-                    SELECT attributes.epic_id AS epic_id,
-                           attributes.status AS status,
-                           count() AS task_count
-                    FROM entity
-                    WHERE """
-                    + " AND ".join(legacy_where_clauses)
-                    + """
-                    GROUP BY attributes.epic_id, attributes.status;
-                    """,
-                    **params,
+        results = await self._client.execute_query_batch("\n".join(statements), **params)
+        if not isinstance(results, list) or len(results) != len(statements):
+            raise RuntimeError("epic progress returned an unexpected statement set")
+        for epic_id, result in zip(epic_id_list, results, strict=True):
+            counters = progress[epic_id]
+            for row in normalize_records(result):
+                _count_task_status(
+                    counters, row.get("status"), count=_int_value(row.get("task_count"))
                 )
-            )
-        )
-
-        for row in rows:
-            epic_ref = row.get("epic_id")
-            if epic_ref is None:
-                continue
-            counters = progress.get(str(epic_ref))
-            if counters is None:
-                continue
-            _count_task_status(counters, row.get("status"), count=_int_value(row.get("task_count")))
 
         return {
             epic_id: _finalize_task_progress(counters) for epic_id, counters in progress.items()
