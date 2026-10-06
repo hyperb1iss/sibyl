@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import time
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -850,3 +852,183 @@ async def test_ping_pool_skips_busy_slots_instead_of_waiting(monkeypatch) -> Non
 
     tracker.release.set()
     await query
+
+
+def _install_recording_surreal(monkeypatch):
+    clients: list[object] = []
+
+    class FakeAsyncSurreal:
+        def __init__(self, url: str) -> None:
+            self.queries: list[str] = []
+            clients.append(self)
+
+        async def signin(self, credentials: dict[str, str]) -> None:
+            return None
+
+        async def use(self, namespace: str, database: str) -> None:
+            return None
+
+        async def query_raw(self, query: str, _params: object | None = None) -> object:
+            self.queries.append(query)
+            return {"result": [{"status": "OK", "result": [{"ok": True}]}]}
+
+        async def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("surrealdb.AsyncSurreal", FakeAsyncSurreal)
+    return clients
+
+
+def _remote_pool_client(pool_size: int = 1) -> DedicatedSurrealClient:
+    return DedicatedSurrealClient(
+        url="ws://localhost:8000/rpc",
+        username="root",
+        password="root",
+        namespace="org_preflight",
+        database="graph",
+        pool_size=pool_size,
+    )
+
+
+async def test_write_on_a_fresh_socket_skips_the_preflight(monkeypatch):
+    # The handshake just signed in and selected a namespace; a liveness probe
+    # right after it would only repeat that proof.
+    clients = _install_recording_surreal(monkeypatch)
+    client = _remote_pool_client()
+
+    await client.execute_query("UPDATE entity SET updated_at = time::now();")
+
+    assert clients[0].queries == ["UPDATE entity SET updated_at = time::now();"]
+
+
+async def test_write_after_a_recent_answer_skips_the_preflight(monkeypatch):
+    # A busy socket proves itself with every answered query, so back-to-back
+    # traffic never pays the extra round trip.
+    clients = _install_recording_surreal(monkeypatch)
+    client = _remote_pool_client()
+
+    await client.execute_query("SELECT * FROM entity LIMIT 1;")
+    await client.execute_query("UPDATE entity SET updated_at = time::now();")
+
+    assert clients[0].queries == [
+        "SELECT * FROM entity LIMIT 1;",
+        "UPDATE entity SET updated_at = time::now();",
+    ]
+
+
+async def test_write_after_an_idle_gap_is_preflighted(monkeypatch):
+    # Once the socket has been quiet past the window, a keepalive or proxy may
+    # have closed it, so the write is preceded by a probe again.
+    clients = _install_recording_surreal(monkeypatch)
+    client = _remote_pool_client()
+    await client.execute_query("SELECT * FROM entity LIMIT 1;")
+
+    idle_until = time.monotonic() + dedicated_client_module._WRITE_PREFLIGHT_IDLE_SECONDS + 1.0
+    # Replace the module's clock only; asyncio keeps the real one.
+    monkeypatch.setattr(
+        dedicated_client_module, "time", SimpleNamespace(monotonic=lambda: idle_until)
+    )
+
+    await client.execute_query("UPDATE entity SET updated_at = time::now();")
+
+    assert clients[0].queries == [
+        "SELECT * FROM entity LIMIT 1;",
+        "RETURN true;",
+        "UPDATE entity SET updated_at = time::now();",
+    ]
+
+
+async def test_pool_wait_is_reported_apart_from_query_time(monkeypatch):
+    # The second query parks on the single slot for the first query's whole
+    # duration; that wait is pool pressure and must not read as a slow query.
+    receipts: list[dict[str, object]] = []
+
+    def fake_log_query(query: str, **fields: object) -> None:
+        receipts.append({"query": query, **fields})
+
+    monkeypatch.setattr(dedicated_client_module, "log_query", fake_log_query)
+
+    class FakeAsyncSurreal:
+        def __init__(self, url: str) -> None:
+            return None
+
+        async def signin(self, credentials: dict[str, str]) -> None:
+            return None
+
+        async def use(self, namespace: str, database: str) -> None:
+            return None
+
+        async def query_raw(self, query: str, _params: object | None = None) -> object:
+            await asyncio.sleep(0.05)
+            return {"result": [{"status": "OK", "result": []}]}
+
+        async def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("surrealdb.AsyncSurreal", FakeAsyncSurreal)
+    client = _remote_pool_client(pool_size=1)
+
+    await asyncio.gather(
+        client.execute_query("SELECT * FROM entity LIMIT 1;"),
+        client.execute_query("SELECT * FROM entity LIMIT 2;"),
+    )
+
+    waits = sorted(float(receipt["pool_wait_ms"]) for receipt in receipts)
+    elapsed = [float(receipt["elapsed"]) for receipt in receipts]
+    assert waits[0] < 20.0
+    assert waits[1] >= 40.0
+    assert all(40.0 <= value < 100.0 for value in elapsed)
+
+
+async def test_conflict_backoff_hands_the_slot_back(monkeypatch):
+    # While a conflicting write sleeps before its retry, another query on the
+    # same single-slot pool must be able to run.
+    queries: list[str] = []
+    other_done = asyncio.Event()
+    conflicts = {"left": 1}
+
+    class FakeAsyncSurreal:
+        def __init__(self, url: str) -> None:
+            return None
+
+        async def signin(self, credentials: dict[str, str]) -> None:
+            return None
+
+        async def use(self, namespace: str, database: str) -> None:
+            return None
+
+        async def query_raw(self, query: str, _params: object | None = None) -> object:
+            queries.append(query)
+            if query.startswith("UPDATE") and conflicts["left"]:
+                conflicts["left"] -= 1
+                raise RuntimeError(
+                    "Transaction conflict: Resource busy. This transaction can be retried"
+                )
+            return {"result": [{"status": "OK", "result": [{"ok": True}]}]}
+
+        async def close(self) -> None:
+            return None
+
+    async def backoff_until_other_finishes(_seconds: float) -> None:
+        await other_done.wait()
+
+    # The pool calls the stdlib sleep directly, so the patch is global for the
+    # test; keep the real one for this test's own yield.
+    real_sleep = asyncio.sleep
+    monkeypatch.setattr("surrealdb.AsyncSurreal", FakeAsyncSurreal)
+    monkeypatch.setattr(dedicated_client_module.asyncio, "sleep", backoff_until_other_finishes)
+    client = _remote_pool_client(pool_size=1)
+
+    async def other_query() -> None:
+        await client.execute_query("SELECT * FROM entity LIMIT 1;")
+        other_done.set()
+
+    write = asyncio.create_task(client.execute_query("UPDATE entity SET n = 1;"))
+    await real_sleep(0)
+    await asyncio.wait_for(other_query(), timeout=2.0)
+    assert await asyncio.wait_for(write, timeout=2.0) == [{"ok": True}]
+    assert queries == [
+        "UPDATE entity SET n = 1;",
+        "SELECT * FROM entity LIMIT 1;",
+        "UPDATE entity SET n = 1;",
+    ]

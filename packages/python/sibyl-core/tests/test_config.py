@@ -133,11 +133,25 @@ def test_validation_errors_never_print_a_secret() -> None:
 
 
 def test_surreal_client_pool_size_uses_default_for_each_client_kind() -> None:
+    # Graph pools are per org and follow the base size; the auth and content
+    # pools are shared by every org in the process and start larger.
     config = CoreConfig(_env_file=None, surreal_pool_size=12)
+
+    assert config.surreal_client_pool_size("auth") == 16
+    assert config.surreal_client_pool_size("content") == 32
+    assert config.surreal_client_pool_size("graph") == 12
+
+
+def test_surreal_shared_client_pool_sizes_follow_base_size_when_unset() -> None:
+    config = CoreConfig(
+        _env_file=None,
+        surreal_pool_size=12,
+        surreal_auth_pool_size=None,
+        surreal_content_pool_size=None,
+    )
 
     assert config.surreal_client_pool_size("auth") == 12
     assert config.surreal_client_pool_size("content") == 12
-    assert config.surreal_client_pool_size("graph") == 12
 
 
 def test_surreal_client_pool_size_prefers_client_kind_override() -> None:

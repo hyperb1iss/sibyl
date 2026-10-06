@@ -102,6 +102,10 @@ READ_LIKE_POST_PATHS = (
     "/rag/code-examples",
     "/context/pack",
     "/memory/raw/recall",
+    # The server only runs a single read-only SELECT here, so a rejected or
+    # offline debug query must fail now, not park in the queue where one bad
+    # query blocks every later one behind a pending_dependency.
+    "/admin/debug/query",
 )
 
 

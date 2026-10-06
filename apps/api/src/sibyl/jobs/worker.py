@@ -119,9 +119,19 @@ async def startup(ctx: dict[str, Any]) -> None:
     install_db_config_source()
     install_core_runtime_ports()
 
+    # The worker holds the same shared pools and per-org graph clients as the
+    # API, so it runs the same health sweep: dead sockets are dropped between
+    # jobs and evicted org clients are closed once idle.
+    from sibyl.services.surreal_connectivity import start_surreal_connectivity_monitor
+
+    start_surreal_connectivity_monitor()
+
 
 async def shutdown(ctx: dict[str, Any]) -> None:  # noqa: ARG001
     """Worker shutdown - cleanup resources."""
+    from sibyl.services.surreal_connectivity import stop_surreal_connectivity_monitor
+
+    await stop_surreal_connectivity_monitor()
     log.info("Job worker shutting down")
 
 

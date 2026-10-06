@@ -22,7 +22,9 @@ interface LogsInput {
 ```
 
 The `limit` argument is clamped to the range 1-500 regardless of the value supplied. The ring buffer
-retains the most recent entries only; older entries are dropped as new ones arrive.
+retains the most recent entries only; older entries are dropped as new ones arrive. Entries below
+the configured log level never reach the buffer, so `level: "debug"` returns entries only when the
+server runs with `SIBYL_LOG_LEVEL=DEBUG` (the `moon run dev` stack does by default).
 
 ## Response Schema
 

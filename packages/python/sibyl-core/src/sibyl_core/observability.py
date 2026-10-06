@@ -224,6 +224,7 @@ class TelemetryRegistry:
         retry_count: int = 0,
         status: str = "ok",
         slow: bool = False,
+        pool_wait_ms: float = 0.0,
     ) -> None:
         event_status = "slow" if slow and status == "ok" else status
         labels = {
@@ -234,6 +235,12 @@ class TelemetryRegistry:
         }
         self.increment("sibyl_surreal_queries_total", labels=labels)
         self.observe("sibyl_surreal_query_duration_ms", elapsed_ms, labels=labels)
+        if pool_wait_ms > 0:
+            self.observe(
+                "sibyl_surreal_pool_wait_ms",
+                pool_wait_ms,
+                labels={"client": client, "database": database},
+            )
         if retry_count:
             self.increment("sibyl_surreal_query_retries_total", retry_count, labels=labels)
         self.record_event(

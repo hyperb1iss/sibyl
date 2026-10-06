@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 from sibyl_core.backends.surreal import SurrealAuthClient, SurrealContentClient
+from sibyl_core.backends.surreal import dedicated_client as dedicated_client_module
 from sibyl_core.backends.surreal.connection import _can_retry_raw_query
 from sibyl_core.services.graph import SurrealGraphClient
 
@@ -493,6 +494,8 @@ async def test_surreal_content_client_preflights_stale_write_socket(monkeypatch)
             self.closed = True
 
     monkeypatch.setattr("surrealdb.AsyncSurreal", FakeAsyncSurreal)
+    # A socket that answered moments ago is trusted; this one has sat idle.
+    monkeypatch.setattr(dedicated_client_module, "_WRITE_PREFLIGHT_IDLE_SECONDS", 0.0)
     client = SurrealContentClient(
         url="ws://localhost:8000/rpc",
         username="root",
@@ -546,6 +549,7 @@ async def test_surreal_content_client_does_not_retry_closed_write(monkeypatch) -
             self.closed = True
 
     monkeypatch.setattr("surrealdb.AsyncSurreal", FakeAsyncSurreal)
+    monkeypatch.setattr(dedicated_client_module, "_WRITE_PREFLIGHT_IDLE_SECONDS", 0.0)
     client = SurrealContentClient(
         url="ws://localhost:8000/rpc",
         username="root",

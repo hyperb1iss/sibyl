@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections import OrderedDict
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -53,6 +54,12 @@ _prepared_groups: set[str] = set()
 _prepare_locks: WeakValueDictionary[tuple[str, str], asyncio.Lock] = WeakValueDictionary()
 _client_lock = asyncio.Lock()
 _clients: OrderedDict[str, SurrealGraphClient] = OrderedDict()
+# Clients evicted from the LRU wait here until they have been idle long enough
+# to close. Closing drains a pool behind its in-flight queries, so doing it in
+# the evicting request would charge one org's tail latency to another, and a
+# request still holding the evicted client keeps working meanwhile.
+_retired: list[tuple[SurrealGraphClient, float]] = []
+RETIRED_CLIENT_IDLE_SECONDS = 60.0
 
 
 @dataclass
@@ -154,28 +161,46 @@ def validate_native_embedding_dimensions(
 
 
 async def get_surreal_graph_client(group_id: str) -> SurrealGraphClient:
-    evicted: list[SurrealGraphClient] = []
     async with _client_lock:
         client = _clients.get(group_id)
         if client is None:
             client = _new_graph_client(group_id)
             _clients[group_id] = client
+            retired_at = time.monotonic()
             while len(_clients) > settings.surreal_graph_client_cache_size:
                 evicted_group_id, evicted_client = _clients.popitem(last=False)
                 mark_graph_schema_dirty(evicted_group_id)
-                evicted.append(evicted_client)
+                _retired.append((evicted_client, retired_at))
         else:
             _clients.move_to_end(group_id)
-    if evicted:
-        await asyncio.gather(*(client.close() for client in evicted), return_exceptions=True)
-        return client
     return client
+
+
+async def reap_retired_graph_clients(*, idle_seconds: float = RETIRED_CLIENT_IDLE_SECONDS) -> int:
+    """Close evicted clients that have been idle for the whole window.
+
+    Called from the pool health sweep. A retired client still in use keeps
+    its sockets until it goes quiet, so no request ever waits on a close.
+    """
+    now = time.monotonic()
+    async with _client_lock:
+        due = [
+            client
+            for client, retired_at in _retired
+            if now - retired_at >= idle_seconds and client.idle_seconds >= idle_seconds
+        ]
+        _retired[:] = [entry for entry in _retired if entry[0] not in due]
+    if due:
+        await asyncio.gather(*(client.close() for client in due), return_exceptions=True)
+    return len(due)
 
 
 async def close_graph_clients() -> None:
     async with _client_lock:
         clients = list(_clients.values())
+        clients.extend(client for client, _ in _retired)
         _clients.clear()
+        _retired.clear()
         _prepared_groups.clear()
     await asyncio.gather(*(client.close() for client in clients), return_exceptions=True)
 
@@ -207,11 +232,13 @@ def _namespace_for_group(prefix: str, group_id: str) -> str:
 
 
 __all__ = [
+    "RETIRED_CLIENT_IDLE_SECONDS",
     "SurrealGraphClient",
     "background_graph_client",
     "close_graph_clients",
     "get_surreal_graph_client",
     "mark_graph_schema_dirty",
     "prepare_graph_schema",
+    "reap_retired_graph_clients",
     "validate_native_embedding_dimensions",
 ]

@@ -161,3 +161,48 @@ async def test_sweep_survives_a_client_that_cannot_connect_at_all() -> None:
         raise SurrealConnectTimeout(url="ws://localhost:8612/rpc", attempt=3, timeout_seconds=3.0)
 
     await surreal_connectivity._sweep_client("content", factory)
+
+
+@pytest.mark.asyncio
+async def test_surreal_connectivity_monitor_reaps_retired_graph_clients(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sibyl_core.services import graph_client as graph_client_module
+
+    auth = FakeDedicatedClient()
+    content = FakeDedicatedClient()
+    closed: list[str] = []
+
+    class FakeGraphClient:
+        idle_seconds = 1e9
+
+        def __init__(self, group_id: str) -> None:
+            self.group_id = group_id
+
+        async def close(self) -> None:
+            closed.append(self.group_id)
+
+    async def auth_client() -> FakeDedicatedClient:
+        return auth
+
+    async def content_client() -> FakeDedicatedClient:
+        return content
+
+    monkeypatch.setattr(surreal_connectivity, "_auth_client", auth_client)
+    monkeypatch.setattr(surreal_connectivity, "_content_client", content_client)
+    monkeypatch.setattr(surreal_connectivity, "_health_interval_seconds", lambda: 0.001)
+    monkeypatch.setattr(surreal_connectivity, "_monitor_task", None)
+    monkeypatch.setattr(graph_client_module, "RETIRED_CLIENT_IDLE_SECONDS", 0.0)
+    graph_client_module._retired.append((FakeGraphClient("org-old"), 0.0))  # type: ignore[arg-type]
+
+    surreal_connectivity.start_surreal_connectivity_monitor()
+    try:
+        for _ in range(50):
+            if closed:
+                break
+            await asyncio.sleep(0.001)
+    finally:
+        await surreal_connectivity.stop_surreal_connectivity_monitor()
+        graph_client_module._retired.clear()
+
+    assert closed == ["org-old"]

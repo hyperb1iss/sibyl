@@ -57,9 +57,9 @@ SurrealDB is the default and only runtime store. These settings apply to every S
 
 | Variable                                | Default     | Description                                          |
 | --------------------------------------- | ----------- | ---------------------------------------------------- |
-| `SIBYL_SURREAL_POOL_SIZE`               | `8`         | Concurrent connections per dedicated client (1-256)  |
-| `SIBYL_SURREAL_AUTH_POOL_SIZE`          | (pool size) | Override for the auth client pool                    |
-| `SIBYL_SURREAL_CONTENT_POOL_SIZE`       | (pool size) | Override for the content client pool                 |
+| `SIBYL_SURREAL_POOL_SIZE`               | `8`         | Concurrent connections per org graph client (1-256)  |
+| `SIBYL_SURREAL_AUTH_POOL_SIZE`          | `16`        | Auth pool, shared by every org in a process          |
+| `SIBYL_SURREAL_CONTENT_POOL_SIZE`       | `32`        | Content pool, shared by every org in a process       |
 | `SIBYL_SURREAL_GRAPH_POOL_SIZE`         | (pool size) | Override for org graph client pools                  |
 | `SIBYL_SURREAL_GRAPH_CLIENT_CACHE_SIZE` | `64`        | Org-scoped graph clients kept open per process (LRU) |
 | `SIBYL_ALLOW_EMBEDDED_SINGLE_WRITER`    | `false`     | Allow file-backed embedded storage in production     |

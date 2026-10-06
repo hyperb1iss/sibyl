@@ -521,6 +521,10 @@ main() {
   local worker_command="${SIBYL_DEV_WORKER_COMMAND:-uv run --directory apps/api arq sibyl.jobs.worker.WorkerSettings --watch src}"
   local extra_commands=()
 
+  # Dev introspection (`sibyl logs tail -l debug`) reads debug receipts from
+  # the ring buffer, and the logger now filters at the configured level, so
+  # the dev stack runs at DEBUG unless the operator picks a level.
+  export SIBYL_LOG_LEVEL="${SIBYL_LOG_LEVEL:-DEBUG}"
   printf -v api_reload_dir "%q" "$repo_root/apps/api/src"
   printf -v forwarded_allow_ips "%q" "$(resolve_forwarded_allow_ips)"
   default_api_command="uv run --directory apps/api python -m uvicorn sibyl.main:create_dev_app --factory --host ${SIBYL_SERVER_HOST} --port ${SIBYL_SERVER_PORT} --reload --reload-dir $api_reload_dir --timeout-graceful-shutdown 5 --log-level warning --forwarded-allow-ips $forwarded_allow_ips"

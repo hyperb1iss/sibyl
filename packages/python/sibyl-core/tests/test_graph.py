@@ -581,6 +581,8 @@ async def test_graph_client_cache_evicts_oldest_client(
     closed: list[str] = []
 
     class FakeNativeGraphClient:
+        idle_seconds = 1e9
+
         def __init__(self, *, group_id: str, **_: object) -> None:
             self.group_id = group_id
 
@@ -595,11 +597,82 @@ async def test_graph_client_cache_evicts_oldest_client(
     graph_client_module._prepared_groups.update({"org-a", "org-b"})
     await graph_module.get_surreal_graph_client("org-c")
 
-    assert closed == ["org-a"]
+    # Eviction retires the client; the health sweep closes it once idle.
+    assert closed == []
+    assert [client.group_id for client, _ in graph_client_module._retired] == ["org-a"]
     assert list(graph_client_module._clients) == ["org-b", "org-c"]
     assert "org-a" not in graph_client_module._prepared_groups
 
+    assert await graph_client_module.reap_retired_graph_clients(idle_seconds=0.0) == 1
+    assert closed == ["org-a"]
+    assert graph_client_module._retired == []
+
     await graph_module.close_graph_clients()
+
+
+@pytest.mark.asyncio
+async def test_graph_client_eviction_never_waits_on_the_victim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The victim's close drains behind its in-flight queries; the org that
+    # caused the eviction must not pay for that.
+    await graph_module.close_graph_clients()
+    release_victim = asyncio.Event()
+    closed: list[str] = []
+
+    class FakeNativeGraphClient:
+        def __init__(self, *, group_id: str, **_: object) -> None:
+            self.group_id = group_id
+            self.idle_seconds = 0.0
+
+        async def close(self) -> None:
+            await release_victim.wait()
+            closed.append(self.group_id)
+
+    monkeypatch.setattr(graph_client_module, "SurrealGraphClient", FakeNativeGraphClient)
+    monkeypatch.setattr(graph_client_module.settings, "surreal_graph_client_cache_size", 1)
+
+    victim = await graph_module.get_surreal_graph_client("org-busy")
+    newcomer = await asyncio.wait_for(graph_module.get_surreal_graph_client("org-new"), timeout=1.0)
+    assert newcomer.group_id == "org-new"
+
+    # Still in use: a sweep leaves it alone until it has been idle long enough.
+    assert await graph_client_module.reap_retired_graph_clients(idle_seconds=30.0) == 0
+    victim.idle_seconds = 31.0
+    retired_at = graph_client_module._retired[0][1]
+    graph_client_module._retired[0] = (victim, retired_at - 31.0)
+    release_victim.set()
+    assert await graph_client_module.reap_retired_graph_clients(idle_seconds=30.0) == 1
+    assert closed == ["org-busy"]
+
+    await graph_module.close_graph_clients()
+
+
+@pytest.mark.asyncio
+async def test_close_graph_clients_closes_retired_clients_too(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await graph_module.close_graph_clients()
+    closed: list[str] = []
+
+    class FakeNativeGraphClient:
+        idle_seconds = 0.0
+
+        def __init__(self, *, group_id: str, **_: object) -> None:
+            self.group_id = group_id
+
+        async def close(self) -> None:
+            closed.append(self.group_id)
+
+    monkeypatch.setattr(graph_client_module, "SurrealGraphClient", FakeNativeGraphClient)
+    monkeypatch.setattr(graph_client_module.settings, "surreal_graph_client_cache_size", 1)
+
+    await graph_module.get_surreal_graph_client("org-a")
+    await graph_module.get_surreal_graph_client("org-b")
+    await graph_module.close_graph_clients()
+
+    assert sorted(closed) == ["org-a", "org-b"]
+    assert graph_client_module._retired == []
 
 
 @pytest.mark.asyncio

@@ -114,19 +114,30 @@ class CoreConfig(BaseSettings):
         default=8,
         ge=1,
         le=256,
-        description="Default concurrent SurrealDB connections per dedicated client.",
+        description=(
+            "Concurrent SurrealDB connections per dedicated client. Graph clients are "
+            "per organization, so this is the per-org graph pool unless overridden."
+        ),
     )
+    # The auth and content clients are one pool per process shared by every
+    # organization, so they start larger than a per-org graph pool.
     surreal_auth_pool_size: int | None = Field(
-        default=None,
+        default=16,
         ge=1,
         le=256,
-        description="Override SurrealDB auth client pool size; defaults to surreal_pool_size.",
+        description=(
+            "SurrealDB auth client pool size, shared by all organizations in the process; "
+            "unset falls back to surreal_pool_size."
+        ),
     )
     surreal_content_pool_size: int | None = Field(
-        default=None,
+        default=32,
         ge=1,
         le=256,
-        description="Override SurrealDB content client pool size; defaults to surreal_pool_size.",
+        description=(
+            "SurrealDB content client pool size, shared by all organizations in the "
+            "process; unset falls back to surreal_pool_size."
+        ),
     )
     surreal_graph_pool_size: int | None = Field(
         default=None,

@@ -227,6 +227,7 @@ def test_read_like_posts_are_not_buffered() -> None:
         "/rag/code-examples",
         "/context/pack",
         "/memory/raw/recall",
+        "/admin/debug/query",
     ):
         assert client_transport._should_buffer_request("POST", path) is False, path
 

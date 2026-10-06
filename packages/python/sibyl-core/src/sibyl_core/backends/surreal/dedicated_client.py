@@ -8,6 +8,7 @@ import logging
 import os
 import random
 import sys
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -22,6 +23,7 @@ from sibyl_core.backends.surreal.connection import (
     _can_retry_raw_query,
     _is_transient_connection_error,
     _query_tokens,
+    cached_by_query_text,
     detach_url_secrets,
     withhold_url_secrets_in_envelope,
 )
@@ -52,6 +54,12 @@ _MAX_TRANSACTION_CONFLICT_RETRIES = 8
 _TRANSACTION_CONFLICT_RETRY_BASE_SECONDS = 0.05
 _TRANSACTION_CONFLICT_RETRY_MAX_SECONDS = 1.0
 _DEFAULT_POOL_SIZE = 4
+# A write is preceded by a liveness probe only when its socket has not proven
+# itself recently. A handshake or any answered query counts as proof, so a busy
+# connection never pays the extra round trip; one that sat idle long enough
+# for a keepalive or proxy to have silently closed it is probed first, so the
+# write itself is never the statement that discovers the dead socket.
+_WRITE_PREFLIGHT_IDLE_SECONDS = 5.0
 
 
 def _connect_timeout_seconds(url: str) -> float | None:
@@ -333,6 +341,11 @@ def _can_replay_query(query: str, response: object = None) -> bool:
         # implicit transaction containing semicolons inside strings or blocks.
         if isinstance(results, list) and len(results) == 1:
             return True
+    return _query_text_is_atomic(query)
+
+
+@cached_by_query_text
+def _query_text_is_atomic(query: str) -> bool:
     statements = [part.strip().upper() for part in query.split(";") if part.strip()]
     if len(statements) == 1:
         return True
@@ -384,6 +397,16 @@ class _PooledConnection:
         self._database = database
         self._client: SurrealClient | None = None
         self._connect_lock = asyncio.Lock()
+        self._verified_at: float | None = None
+
+    def mark_verified(self) -> None:
+        """Record that the server just answered on this socket."""
+        self._verified_at = time.monotonic()
+
+    def verified_within(self, seconds: float) -> bool:
+        """Whether the server answered on this socket inside the last window."""
+        verified_at = self._verified_at
+        return verified_at is not None and time.monotonic() - verified_at < seconds
 
     async def connect(self, *, attempt: int = 1) -> SurrealClient:
         if self._client is not None:
@@ -455,6 +478,9 @@ class _PooledConnection:
             if connect_failure is not None:
                 raise connect_failure
             self._client = client
+            # The handshake just signed in and selected a namespace, which is
+            # all the proof a preflight would gather.
+            self.mark_verified()
             return client
 
     def _log_connect_error(
@@ -497,6 +523,7 @@ class _PooledConnection:
             raise connect_failure
         session = _EmbeddedNamespaceSession(engine, self._namespace, self._database)
         self._client = session
+        self.mark_verified()
         return session
 
     async def _handshake(self, client: SurrealClient) -> None:
@@ -525,6 +552,7 @@ class _PooledConnection:
     async def _close_locked(self) -> None:
         client = self._client
         self._client = None
+        self._verified_at = None
         if client is not None:
             try:
                 await client.close()
@@ -585,6 +613,7 @@ class DedicatedSurrealClient:
         for connection in self._pool:
             self._available.put_nowait(connection)
         self._close_lock = asyncio.Lock()
+        self._last_used_at = time.monotonic()
 
     @property
     def namespace(self) -> str:
@@ -597,6 +626,11 @@ class DedicatedSurrealClient:
     @property
     def supports_live_queries(self) -> bool:
         return is_websocket_surreal_url(self._url)
+
+    @property
+    def idle_seconds(self) -> float:
+        """Seconds since a query last started on this client."""
+        return time.monotonic() - self._last_used_at
 
     def _new_connection(self) -> _PooledConnection:
         return _PooledConnection(
@@ -768,6 +802,7 @@ class DedicatedSurrealClient:
                 try:
                     client = await connection.connect()
                     await self._send_query(client, "RETURN true;", params={}, raw=False)
+                    connection.mark_verified()
                 except Exception as exc:
                     failures.append(type(exc).__name__)
                     reaped += 1
@@ -803,12 +838,21 @@ class DedicatedSurrealClient:
         query_label: str | None,
         query_origin: str | None,
     ) -> object:
-        started_at = query_start()
         connection_retry_count = 0
         transaction_retry_count = 0
         result: object = None
         can_retry = _can_retry_raw_query(query) if raw else _can_retry_query(query)
+        # Time parked on the queue is pool pressure, not query time, and is
+        # reported on its own so a saturated pool never reads as slow queries.
+        wait_started = query_start()
         connection = await self._available.get()
+        pool_wait = elapsed_ms(wait_started)
+        slot_held = True
+        self._last_used_at = time.monotonic()
+        started_at = query_start()
+        # Backoff sleeps and re-checkouts happen inside the timed window and
+        # are subtracted so elapsed stays the socket time.
+        off_socket_ms = 0.0
         try:
             while True:
                 transaction_retry_allowed = _can_replay_query(query)
@@ -819,12 +863,17 @@ class DedicatedSurrealClient:
                                 client = await connection.connect(
                                     attempt=connection_retry_count + 1
                                 )
+                                # A fresh handshake or a recent answer already
+                                # proved this socket; only an idle one is probed.
+                                if connection.verified_within(_WRITE_PREFLIGHT_IDLE_SECONDS):
+                                    break
                                 await self._send_query(
                                     client,
                                     "RETURN true;",
                                     params={},
                                     raw=False,
                                 )
+                                connection.mark_verified()
                                 break
                             except Exception as exc:
                                 if not _is_transient_connection_error(exc):
@@ -841,6 +890,8 @@ class DedicatedSurrealClient:
                                 )
                     client = await connection.connect(attempt=connection_retry_count + 1)
                     response = await self._send_query(client, query, params=params, raw=True)
+                    # Any envelope, OK or ERR, came back over this socket.
+                    connection.mark_verified()
                     transaction_retry_allowed = _can_replay_query(query, response)
                     if raw:
                         # Raw callers retain statement envelopes, but an atomic
@@ -872,7 +923,17 @@ class DedicatedSurrealClient:
                             delay,
                             _loggable(exc, self._url),
                         )
+                        # Hand the slot back while backing off: a conflict storm
+                        # is exactly when the rest of the namespace needs it.
+                        self._available.put_nowait(connection)
+                        slot_held = False
+                        backoff_started = query_start()
                         await asyncio.sleep(delay)
+                        reacquire_started = query_start()
+                        connection = await self._available.get()
+                        slot_held = True
+                        pool_wait += elapsed_ms(reacquire_started)
+                        off_socket_ms += elapsed_ms(backoff_started)
                         continue
                     if not _is_transient_connection_error(exc):
                         raise
@@ -893,27 +954,30 @@ class DedicatedSurrealClient:
                 namespace=self._namespace,
                 database=self._database,
                 raw=raw,
-                elapsed=elapsed_ms(started_at),
+                elapsed=max(0.0, elapsed_ms(started_at) - off_socket_ms),
                 param_keys=sorted(params),
                 query_label=query_label,
                 query_origin=query_origin,
                 retry_count=connection_retry_count + transaction_retry_count,
                 error=exc,
+                pool_wait_ms=pool_wait,
             )
             raise
         finally:
-            self._available.put_nowait(connection)
+            if slot_held:
+                self._available.put_nowait(connection)
         log_query(
             query,
             client_kind=self._client_kind,
             namespace=self._namespace,
             database=self._database,
             raw=raw,
-            elapsed=elapsed_ms(started_at),
+            elapsed=max(0.0, elapsed_ms(started_at) - off_socket_ms),
             param_keys=sorted(params),
             query_label=query_label,
             query_origin=query_origin,
             retry_count=connection_retry_count + transaction_retry_count,
+            pool_wait_ms=pool_wait,
         )
         return result
 
