@@ -645,6 +645,25 @@ DEFINE INDEX IF NOT EXISTS idx_raw_captures_source_lookup
     ON raw_captures FIELDS source_id, organization_id, memory_scope, scope_key;
 """
 
+# Recall, memory listing and the embedding coverage probe read one scope
+# (organization, memory_scope, then principal or scope key) ordered by
+# captured_at. The scope index ends at scope_key, which private captures leave
+# empty, so the planner matched every private capture of the organization and
+# sorted it in memory on each call. These indexes end in the order the readers
+# use, so the scan streams in index order and the limit bounds it. The review
+# and listing indexes do the same for the reflection review page and the
+# capture list.
+CONTENT_RAW_CAPTURE_RECENT_INDEX_MIGRATION_DEFINITIONS = """
+DEFINE INDEX IF NOT EXISTS idx_raw_captures_private_recent
+    ON raw_captures FIELDS organization_id, memory_scope, principal_id, captured_at, uuid;
+DEFINE INDEX IF NOT EXISTS idx_raw_captures_scoped_recent
+    ON raw_captures FIELDS organization_id, memory_scope, scope_key, captured_at, uuid;
+DEFINE INDEX IF NOT EXISTS idx_raw_captures_surface_review
+    ON raw_captures FIELDS organization_id, capture_surface, review_state, captured_at, uuid;
+DEFINE INDEX IF NOT EXISTS idx_raw_captures_org_created
+    ON raw_captures FIELDS organization_id, created_at, uuid;
+"""
+
 CONTENT_LIFECYCLE_REVIEW_SPLIT_MIGRATION_DEFINITIONS = f"""
 UPDATE raw_captures SET
     metadata.lifecycle_state = 'active',
@@ -1228,6 +1247,13 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             version=54,
             name="content_raw_capture_uuid_index_rebuild",
             statements=(RAW_CAPTURE_UUID_INDEX_REBUILD,),
+        ),
+        SchemaMigration(
+            version=54,
+            name="content_raw_capture_recent_indexes",
+            statements=tuple(
+                split_statements(CONTENT_RAW_CAPTURE_RECENT_INDEX_MIGRATION_DEFINITIONS)
+            ),
         ),
     )
 

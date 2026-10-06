@@ -319,10 +319,13 @@ async def _recall_raw_memory_lexical(
         project_id=project_id,
         filters=filters,
     )
+    # The order is the tail of the scope's recent-first index, so the scan
+    # streams newest first and stops at the limit instead of sorting the
+    # whole scope in memory.
     rows = await content_client.select_many(
         client,
         f"SELECT {_RAW_MEMORY_RECALL_FIELDS} FROM raw_captures "
-        f"WHERE {where_clause} ORDER BY captured_at DESC LIMIT $limit;",
+        f"WHERE {where_clause} ORDER BY captured_at DESC, uuid DESC LIMIT $limit;",
         **params,
         limit=max(limit * 4, limit),
     )
@@ -458,25 +461,30 @@ async def _eligible_rows_present(
     extra_clause: str,
     page_size: int,
 ) -> bool | None:
-    """Walk one side of the scope in uuid order until an eligible row appears.
+    """Walk one side of the scope, newest first, until an eligible row appears.
 
     Returns True on the first recall-eligible row, False when the side is
     exhausted, and None when the walk hit its row cap without a verdict.
     """
-    cursor = ""
     seen = 0
     while seen < _COVERAGE_ROW_CAP:
         # Never read past the cap: the last page is clamped to what remains.
         page = min(page_size, _COVERAGE_ROW_CAP - seen)
+        # The order is the tail of the scope's recent-first index, so each
+        # page streams from the index; a uuid cursor made the planner walk
+        # the whole organization through the uuid index instead. The offset
+        # re-reads at most the capped rows already seen, so the walk stays
+        # bounded by the cap rather than by the organization.
         rows = await with_timeout(
             content_client.select_many_raw(
                 client,
                 f"SELECT {_RAW_MEMORY_RECALL_FIELDS} FROM raw_captures "
-                f"WHERE {where_clause}{extra_clause} AND uuid > $coverage_cursor "
-                "ORDER BY uuid ASC LIMIT $coverage_limit;",
+                f"WHERE {where_clause}{extra_clause} "
+                "ORDER BY captured_at DESC, uuid DESC "
+                "LIMIT $coverage_limit START $coverage_offset;",
                 **params,
-                coverage_cursor=cursor,
                 coverage_limit=page,
+                coverage_offset=seen,
             ),
             timeout_seconds=content_client.DIRECT_SEARCH_QUERY_TIMEOUT_SECONDS,
             operation_name="surreal_raw_memory_embedding_coverage",
@@ -490,7 +498,6 @@ async def _eligible_rows_present(
         if len(rows) < page:
             return False
         seen += len(rows)
-        cursor = str(rows[-1]["uuid"])
     return None
 
 
@@ -516,7 +523,7 @@ async def _raw_memory_scope_lacks_embeddings(
     Eligibility is judged exactly as recall judges it, through the lifecycle
     and as-of filters, so an archived or not-yet-valid row can neither mask a
     missing vector nor raise the report on its own. Each side of the scope is
-    walked in uuid order to a fixed row cap. True means vectors are missing,
+    walked newest first to a fixed row cap. True means vectors are missing,
     False means coverage is fine or the scope is empty, and None means the
     walk hit its cap without a verdict, which the lane reports as unknown
     rather than asserting either way.
@@ -1107,7 +1114,7 @@ async def list_raw_memories_for_scope(
         rows = await content_client.select_many(
             client,
             f"SELECT * FROM raw_captures WHERE {where_clause} "
-            "ORDER BY captured_at DESC LIMIT $limit;",
+            "ORDER BY captured_at DESC, uuid DESC LIMIT $limit;",
             **params,
             limit=query_limit,
         )
