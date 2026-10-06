@@ -12,7 +12,12 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from sibyl.api.routes.entity_bulk import create_entities_bulk, requeue_entity_background_jobs
-from sibyl.api.routes.entity_mutations import create_entity, delete_entity, update_entity
+from sibyl.api.routes.entity_mutations import (
+    check_entity_deletable,
+    create_entity,
+    delete_entity,
+    update_entity,
+)
 from sibyl.api.routes.entity_serialization import (
     bulk_create_metadata,
     entity_from_bulk_create,
@@ -2944,3 +2949,364 @@ async def test_create_entities_bulk_never_replaces_another_members_row() -> None
     assert written.id != plain_id
     assert response.entities[0].id == written.id
     assert written.created_by == str(ctx.user.id)
+
+
+_MIGRATION = {
+    "tool": "sibyl migrate to-team",
+    "origin_org": "org-source",
+    "origin_project": "project_source",
+}
+
+
+def _revisioned_decision(
+    *,
+    author: str,
+    revision: int,
+    uuid: str = "decision_migrated",
+    entity_type: Any = EntityType.DECISION,
+    migration: dict[str, Any] | None = _MIGRATION,
+    modified_by: str | None = None,
+) -> Any:
+    metadata: dict[str, Any] = {
+        "project_id": "project_team",
+        "memory_scope": "project",
+        "principal_id": author,
+    }
+    if migration is not None:
+        metadata["migration"] = dict(migration)
+    return SimpleNamespace(
+        id=uuid,
+        name=uuid,
+        entity_type=entity_type,
+        category=None,
+        revision=revision,
+        created_by=author,
+        modified_by=modified_by,
+        metadata=metadata,
+    )
+
+
+async def _delete_with_guard(
+    existing: Any,
+    ctx: Any,
+    expected_revision: int | None,
+    *,
+    if_unshared: bool = False,
+    linked: list[Any] | None = None,
+    outgoing: list[Any] | None = None,
+    access: Any = None,
+) -> tuple[Any, Any]:
+    delete_mock = AsyncMock(return_value=True)
+    access = access or AsyncMock()
+    linked = linked or []
+    outgoing = outgoing or []
+    edges = [SimpleNamespace(source_id=row.id, target_id=existing.id) for row in linked] + [
+        SimpleNamespace(source_id=existing.id, target_id=row.id) for row in outgoing
+    ]
+
+    async def get_for_entity(entity_id: str, direction: str = "both") -> list[Any]:
+        if direction == "incoming":
+            return [edge for edge in edges if edge.target_id == entity_id]
+        return list(edges)
+
+    async def get_many(ids: list[str]) -> list[Any]:
+        return [row for row in linked + outgoing if row.id in ids]
+
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(return_value=existing), get_many=get_many, delete=delete_mock
+        ),
+        relationship_manager=SimpleNamespace(get_for_entity=get_for_entity),
+    )
+    with (
+        patch("sibyl.locks.entity_lock", _locked_entity),
+        patch(
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        patch("sibyl.api.routes.entity_mutations.verify_entity_project_access", access),
+        patch("sibyl.api.routes.entity_policy.require_entity_scope_visible", AsyncMock()),
+        patch(
+            "sibyl.api.routes.entity_mutations.retire_entity_passages",
+            AsyncMock(
+                return_value=SimpleNamespace(retired=0, complete=True, failed_passage_ids=[])
+            ),
+        ),
+        patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.delete_project_record", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.log_audit_event", AsyncMock()),
+    ):
+        await delete_entity(
+            entity_id=existing.id,
+            request=_request(),
+            org=_org(),
+            ctx=ctx,
+            content_session=None,
+            expected_revision=expected_revision,
+            if_unshared=if_unshared,
+        )
+    return delete_mock, access
+
+
+@pytest.mark.asyncio
+async def test_delete_with_a_stale_expected_revision_is_a_conflict_and_deletes_nothing() -> None:
+    ctx = _ctx()
+    existing = _revisioned_decision(author=str(ctx.user.id), revision=4)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await _delete_with_guard(existing, ctx, expected_revision=3, if_unshared=True)
+
+    assert excinfo.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_a_refused_caller_learns_nothing_about_the_revision() -> None:
+    ctx = _ctx()
+    existing = _revisioned_decision(author="someone-else", revision=4)
+    refused = AsyncMock(side_effect=HTTPException(status_code=404, detail="Entity not found"))
+
+    with pytest.raises(HTTPException) as excinfo:
+        await _delete_with_guard(existing, ctx, expected_revision=999, access=refused)
+
+    assert excinfo.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_an_unshared_delete_ignores_the_rows_own_migration() -> None:
+    ctx = _ctx()
+    me = str(ctx.user.id)
+    existing = _revisioned_decision(author=me, revision=4)
+    sibling = _revisioned_decision(author=me, revision=1, uuid="task_sibling")
+
+    delete_mock, _access = await _delete_with_guard(
+        existing, ctx, expected_revision=4, if_unshared=True, linked=[sibling]
+    )
+
+    delete_mock.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    ("author_is_caller", "guard", "unshared", "entity_type"),
+    [
+        (False, 4, True, EntityType.DECISION),
+        (True, None, True, EntityType.DECISION),
+        (True, 4, False, EntityType.DECISION),
+        (True, 4, True, EntityType.DECISION),
+        (True, 4, True, EntityType.PROJECT),
+    ],
+)
+@pytest.mark.asyncio
+async def test_every_delete_needs_a_maintainer(
+    author_is_caller: bool, guard: int | None, unshared: bool, entity_type: Any
+) -> None:
+    ctx = _ctx()
+    author = str(ctx.user.id) if author_is_caller else "someone-else"
+    existing = _revisioned_decision(author=author, revision=4, entity_type=entity_type)
+
+    _delete_mock, access = await _delete_with_guard(
+        existing, ctx, expected_revision=guard, if_unshared=unshared
+    )
+
+    assert access.await_args.kwargs["required_role"] == ProjectRole.MAINTAINER
+
+
+def _teammate_task() -> Any:
+    return _revisioned_decision(
+        author="teammate", revision=1, uuid="task_teammate", entity_type=EntityType.TASK
+    )
+
+
+def _own_native_task(author: str) -> Any:
+    return _revisioned_decision(
+        author=author, revision=1, uuid="task_native", entity_type=EntityType.TASK, migration=None
+    )
+
+
+@pytest.mark.parametrize(
+    ("case", "reason"),
+    [
+        ("teammate_link", "links to it"),
+        ("own_native_link", "links to it"),
+        ("other_migration_link", "links to it"),
+        ("other_project_link", "links to it"),
+        ("unrecorded_project_link", "links to it"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_an_unshared_delete_refuses_a_row_someone_else_depends_on(
+    case: str, reason: str
+) -> None:
+    ctx = _ctx()
+    me = str(ctx.user.id)
+    existing = _revisioned_decision(author=me, revision=4)
+    linked = {
+        "teammate_link": [_teammate_task()],
+        "own_native_link": [_own_native_task(me)],
+        "other_migration_link": [
+            _revisioned_decision(
+                author=me,
+                revision=1,
+                uuid="task_other_source",
+                migration={**_MIGRATION, "origin_org": "org-elsewhere"},
+            )
+        ],
+        # The same personal org, another of its projects: another migration.
+        "other_project_link": [
+            _revisioned_decision(
+                author=me,
+                revision=1,
+                uuid="task_other_project",
+                migration={**_MIGRATION, "origin_project": "project_elsewhere"},
+            )
+        ],
+        # Migrated before the source project was recorded: no migration claims it.
+        "unrecorded_project_link": [
+            _revisioned_decision(
+                author=me,
+                revision=1,
+                uuid="task_unrecorded",
+                migration={"tool": "sibyl migrate to-team", "origin_org": "org-source"},
+            )
+        ],
+    }[case]
+
+    with pytest.raises(HTTPException) as excinfo:
+        await _delete_with_guard(
+            existing, ctx, expected_revision=4, if_unshared=True, linked=linked
+        )
+
+    assert excinfo.value.status_code == 409
+    assert excinfo.value.detail["error"] == "entity_shared"
+    assert reason in excinfo.value.detail["message"]
+
+
+@pytest.mark.asyncio
+async def test_derived_rows_and_the_project_do_not_make_a_row_shared() -> None:
+    ctx = _ctx()
+    me = str(ctx.user.id)
+    existing = _revisioned_decision(author=me, revision=4)
+    project = _revisioned_decision(
+        author="owner", revision=1, uuid="project_team", entity_type=EntityType.PROJECT
+    )
+    topic = _revisioned_decision(author="system", revision=1, uuid="topic_x", entity_type="topic")
+    # A projected fact carries the author's principal; its category sits in metadata.
+    fact = _revisioned_decision(author=me, revision=1, uuid="fact_x", migration=None)
+    fact.metadata["category"] = "memory_fact_projection"
+
+    delete_mock, _access = await _delete_with_guard(
+        existing, ctx, expected_revision=4, if_unshared=True, linked=[project, topic, fact]
+    )
+
+    delete_mock.assert_awaited_once()
+
+
+async def _deletable(existing: Any, ctx: Any, revision: int, linked: list[Any], access: Any = None):
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(return_value=existing), get_many=AsyncMock(return_value=linked)
+        ),
+        relationship_manager=SimpleNamespace(
+            get_for_entity=AsyncMock(
+                return_value=[
+                    SimpleNamespace(source_id=r.id, target_id=existing.id) for r in linked
+                ]
+            )
+        ),
+    )
+    with (
+        patch(
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        patch(
+            "sibyl.api.routes.entity_mutations.verify_entity_project_access", access or AsyncMock()
+        ),
+        patch("sibyl.api.routes.entity_policy.require_entity_scope_visible", AsyncMock()),
+    ):
+        return await check_entity_deletable(
+            entity_id=existing.id,
+            org=_org(),
+            ctx=ctx,
+            content_session=None,
+            expected_revision=revision,
+        )
+
+
+@pytest.mark.asyncio
+async def test_deletable_answers_what_a_guarded_unshared_delete_would_do() -> None:
+    ctx = _ctx()
+    me = str(ctx.user.id)
+    existing = _revisioned_decision(author=me, revision=4)
+
+    assert await _deletable(existing, ctx, 4, []) == {"deletable": True}
+    shared = await _deletable(existing, ctx, 4, [_teammate_task()])
+    assert shared["deletable"] is False
+    assert shared["error"] == "entity_shared"
+    stale = await _deletable(existing, ctx, 3, [])
+    assert stale["deletable"] is False
+    assert stale["error"] == "revision_conflict"
+
+
+@pytest.mark.asyncio
+async def test_deletable_keeps_access_refusals_as_errors() -> None:
+    ctx = _ctx()
+    existing = _revisioned_decision(author="someone-else", revision=4)
+    refused = AsyncMock(side_effect=HTTPException(status_code=403, detail="Forbidden"))
+
+    with pytest.raises(HTTPException) as excinfo:
+        await _deletable(existing, ctx, 999, [], access=refused)
+
+    assert excinfo.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_rows_this_one_links_to_do_not_make_it_shared() -> None:
+    """Deleting a row takes its own outgoing links with it and harms nothing they point at."""
+    ctx = _ctx()
+    me = str(ctx.user.id)
+    existing = _revisioned_decision(author=me, revision=4, entity_type=EntityType.TASK)
+
+    delete_mock, _access = await _delete_with_guard(
+        existing, ctx, expected_revision=4, if_unshared=True, outgoing=[_teammate_task()]
+    )
+
+    delete_mock.assert_awaited_once()
+
+
+@pytest.mark.parametrize("sync", [True, False])
+@pytest.mark.asyncio
+async def test_a_synchronous_create_refuses_a_missing_epic(sync: bool) -> None:
+    entity = EntityCreate(
+        name="Filed under nothing",
+        content="c",
+        entity_type=EntityType.TASK,
+        metadata={"project_id": "project-1", "epic_id": "epic-gone"},
+    )
+    add_result = SimpleNamespace(success=True, id="task_new", message="queued")
+    runtime = SimpleNamespace(entity_manager=SimpleNamespace(get=AsyncMock(return_value=None)))
+
+    with (
+        patch("sibyl_core.tools.core.add", AsyncMock(return_value=add_result)) as add,
+        patch(
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        patch("sibyl.api.routes.entity_mutations.verify_entity_project_access", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
+    ):
+        call = create_entity(
+            request=_request(),
+            entity=entity,
+            org=_org(),
+            ctx=_ctx(),
+            content_session=None,
+            sync=sync,
+        )
+        if sync:
+            with pytest.raises(HTTPException) as excinfo:
+                await call
+            assert excinfo.value.status_code == 404
+        else:
+            await call
+
+    assert add.await_count == (0 if sync else 1)

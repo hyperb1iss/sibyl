@@ -10,6 +10,7 @@ from sibyl.api.decorators import handle_workflow_errors
 from sibyl.api.errors import (
     constraint_violation,
     entity_locked,
+    revision_conflict,
     safe_error_payload,
     sanitize_error_text,
     unprocessable_entity,
@@ -53,6 +54,7 @@ from sibyl_core.auth.memory_policy import (
     SERVER_OWNED_METADATA_KEYS,
 )
 from sibyl_core.embeddings.provenance import without_client_embedding_stamp
+from sibyl_core.errors import RevisionConflictError
 from sibyl_core.memory_pipeline.structure import strip_structure_metadata
 from sibyl_core.models.entities import EntityType
 from sibyl_core.projection import (
@@ -291,6 +293,10 @@ async def create_entity(
     # which response shape it returns, so both have to agree: a pending response
     # would drop the rehearsal receipt the caller asked for.
     is_sync = entity.entity_type.value == "project" or sync or bool(entity.probes)
+    if epic and is_sync:
+        # Refuse to file a row under an epic that is not there.
+        runtime = await policy.get_entity_graph_runtime(group_id)
+        await _existing_entity_or_404(runtime.entity_manager, epic)
 
     result = await _add_with_structure(
         title=entity.name,
@@ -614,6 +620,8 @@ async def update_entity(
 
             # Update timestamp
             update_data["updated_at"] = datetime.now(UTC)
+            if ctx.user is not None:
+                update_data["modified_by"] = str(ctx.user.id)
 
             # Perform update
             updated = await runtime.entity_manager.update(entity_id, update_data)
@@ -719,6 +727,151 @@ async def update_entity(
         ) from e
 
 
+# Rows that never count as someone's work linking to an entity: the project
+# itself and what the server derives from memories.
+_UNSHARING_TYPES = frozenset({EntityType.PROJECT, "topic", "passage"})
+_DERIVED_CATEGORIES = frozenset(
+    {"memory_projection", "passage_projection", "memory_fact_projection"}
+)
+
+
+def _entity_author(entity: Any) -> str | None:
+    author = (getattr(entity, "metadata", None) or {}).get("principal_id") or getattr(
+        entity, "created_by", None
+    )
+    return str(author) if author else None
+
+
+def _migration_origin(entity: Any) -> object:
+    """Which migration wrote the row: tool, source org and project, and target project.
+
+    A row without a recorded source project (written before it was recorded)
+    belongs to no migration here, so it always counts as someone's work.
+    """
+    metadata = getattr(entity, "metadata", None) or {}
+    migration = metadata.get("migration")
+    if not isinstance(migration, dict) or not migration.get("origin_project"):
+        return None
+    return (
+        migration.get("tool"),
+        migration.get("origin_org"),
+        migration.get("origin_project"),
+        metadata.get("project_id"),
+    )
+
+
+def _entity_category(entity: Any) -> object:
+    category = getattr(entity, "category", None)
+    if category:
+        return category
+    return (getattr(entity, "metadata", None) or {}).get("category")
+
+
+async def _shared_reason(runtime: Any, existing: Any) -> str | None:
+    """Why deleting this row would strand work outside its migration, if it would.
+
+    Only rows that link *to* this one depend on it: deleting a row removes its
+    own outgoing links with it and harms nothing they point at. Rows the same
+    author migrated from the same source are this row's own migration; the
+    undo walks them itself and keeps what they need.
+    """
+    relationships = await runtime.relationship_manager.get_for_entity(
+        existing.id, direction="incoming"
+    )
+    linking_ids = {rel.source_id for rel in relationships} - {existing.id}
+    if not linking_ids:
+        return None
+    author = _entity_author(existing)
+    origin = _migration_origin(existing)
+    for row in await runtime.entity_manager.get_many(sorted(linking_ids)):
+        if row.entity_type in _UNSHARING_TYPES or _entity_category(row) in _DERIVED_CATEGORIES:
+            continue
+        if (
+            origin is not None
+            and _entity_author(row) == author
+            and _migration_origin(row) == origin
+        ):
+            continue
+        return "a row outside its migration links to it"
+    return None
+
+
+async def _check_delete(
+    runtime: Any,
+    existing: Any,
+    *,
+    ctx: AuthContext,
+    content_session: Any,
+    expected_revision: int | None,
+    if_unshared: bool,
+) -> None:
+    """Raise unless the caller may delete this row under the conditions they named."""
+    project_id = policy.entity_read_project_id(existing)
+    await verify_entity_project_access(
+        content_session,
+        ctx,
+        project_id,
+        required_role=ProjectRole.MAINTAINER,
+        require_existing_project=True,
+    )
+    # A project maintainer role does not extend over a co-member's private
+    # memory, so deletion clears the same gate a read does.
+    await policy.require_entity_scope_visible(ctx, existing, project_id=project_id)
+
+    # Only a caller allowed to delete the row learns its revision.
+    current_revision = getattr(existing, "revision", None)
+    if expected_revision is not None and current_revision != expected_revision:
+        raise revision_conflict(
+            RevisionConflictError(existing.id, expected_revision, int(current_revision or 0))
+        )
+    if if_unshared and (reason := await _shared_reason(runtime, existing)):
+        raise HTTPException(
+            status_code=409,
+            detail=safe_error_payload(error="entity_shared", message=f"Not removed: {reason}."),
+        )
+
+
+@router.get(
+    "/{entity_id}/deletable",
+    dependencies=[Depends(require_org_role(*contracts.WRITE_ROLES))],
+)
+async def check_entity_deletable(
+    entity_id: str,
+    org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
+    content_session: Any = Depends(get_content_read_session_dependency),
+    expected_revision: int = Query(ge=1, description="The revision the delete would name."),
+) -> dict[str, Any]:
+    """Whether a guarded, unshared delete at this revision would go through, without deleting.
+
+    Runs the checks `DELETE ?expected_revision=N&if_unshared=true` runs, so a
+    dry run can report what an undo would keep. Access failures answer as they
+    would for the delete; a revision or sharing refusal answers 200 with its
+    reason.
+    """
+    _refuse_raw_memory_reference(entity_id)
+    runtime = await policy.get_entity_graph_runtime(str(org.id))
+    existing = await _existing_entity_or_404(runtime.entity_manager, entity_id)
+    try:
+        await _check_delete(
+            runtime,
+            existing,
+            ctx=ctx,
+            content_session=content_session,
+            expected_revision=expected_revision,
+            if_unshared=True,
+        )
+    except HTTPException as exc:
+        if exc.status_code != 409 or not isinstance(exc.detail, dict):
+            raise
+        return {
+            "deletable": False,
+            "error": exc.detail.get("error"),
+            "reason": exc.detail.get("message"),
+        }
+    return {"deletable": True}
+
+
 @router.delete(
     "/{entity_id}",
     status_code=204,
@@ -730,6 +883,18 @@ async def delete_entity(
     org: AuthOrganization = Depends(get_current_organization),
     ctx: AuthContext = Depends(get_auth_context),
     content_session: Any = Depends(get_content_read_session_dependency),
+    expected_revision: int | None = Query(
+        default=None,
+        ge=1,
+        description="Delete only while the entity is still at this revision.",
+    ),
+    if_unshared: bool = Query(
+        default=False,
+        description=(
+            "Delete only while no row outside the entity's own migration links to it. "
+            "Derived rows and the project itself do not count."
+        ),
+    ),
 ) -> None:
     """Delete an entity."""
     from sibyl.locks import LockAcquisitionError, entity_lock
@@ -746,19 +911,15 @@ async def delete_entity(
             runtime = await policy.get_entity_graph_runtime(group_id)
 
             existing = await _existing_entity_or_404(runtime.entity_manager, entity_id)
-
-            # Verify project access for entities with project_id (maintainer required to delete)
-            project_id = policy.entity_read_project_id(existing)
-            await verify_entity_project_access(
-                content_session,
-                ctx,
-                project_id,
-                required_role=ProjectRole.MAINTAINER,
-                require_existing_project=True,
+            # A direct call (not through FastAPI) passes the Query markers themselves.
+            await _check_delete(
+                runtime,
+                existing,
+                ctx=ctx,
+                content_session=content_session,
+                expected_revision=expected_revision if type(expected_revision) is int else None,
+                if_unshared=if_unshared is True,
             )
-            # A project maintainer role does not extend over a co-member's
-            # private memory, so deletion clears the same gate a read does.
-            await policy.require_entity_scope_visible(ctx, existing, project_id=project_id)
 
             # Spans first, parent second. Spans are derived, so retiring them
             # while the memory still exists costs nothing that a reprojection

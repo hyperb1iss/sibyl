@@ -800,3 +800,18 @@ async def test_task_update_lock_contention_has_retryable_code(raises) -> None:
         )
     assert exc.value.status_code == 409
     assert http_exception_payload(exc.value, "request-1")["error"] == "entity_locked"
+
+
+@pytest.mark.parametrize(("status", "expected"), [("planning", 3), ("in_progress", None)])
+@pytest.mark.asyncio
+async def test_an_epic_start_reports_the_epics_new_revision(
+    status: str, expected: int | None
+) -> None:
+    from sibyl.api.routes.tasks import _maybe_start_epic
+
+    entity_manager = SimpleNamespace(
+        get=AsyncMock(return_value=SimpleNamespace(metadata={"status": status})),
+        update=AsyncMock(return_value=SimpleNamespace(revision=3)),
+    )
+
+    assert await _maybe_start_epic(entity_manager, "task-1", "epic-1", "doing") == expected

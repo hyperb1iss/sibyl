@@ -1397,6 +1397,11 @@ async def update_task(
             runtime = await get_surreal_graph_runtime(group_id)
             entity_manager = runtime.entity_manager
 
+            # Checked again here, since the epic may have gone since the request.
+            if epic_id and not await _entity_exists(entity_manager, epic_id):
+                log.warning("update_task_epic_gone", task_id=task_id, epic_id=epic_id)
+                return {"task_id": task_id, "success": False, "message": "Epic not found"}
+
             # Perform the entity field update (skip if only dep changes)
             if expected_revision is None:
                 updated = await entity_manager.update(task_id, updates)
@@ -1470,6 +1475,15 @@ async def update_task(
     except Exception as e:
         log.exception("update_task_failed", task_id=task_id, error=str(e))
         raise
+
+
+async def _entity_exists(entity_manager: Any, entity_id: str) -> bool:
+    from sibyl_core.errors import EntityNotFoundError
+
+    try:
+        return await entity_manager.get(entity_id) is not None
+    except (EntityNotFoundError, KeyError):
+        return False
 
 
 async def _maybe_start_epic_bg(

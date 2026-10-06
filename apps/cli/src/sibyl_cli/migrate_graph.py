@@ -33,6 +33,7 @@ import hashlib
 import heapq
 import json
 import re
+import time
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass, field
@@ -69,6 +70,7 @@ _MAX_NAME = 200
 # titles that agree this far mint the same id however they end.
 _ID_PART_CHARS = 100
 _SAVE_EVERY = 100
+_PROGRESS_EVERY = 250
 _PROJECT_ID = re.compile(r"^(project|proj)_[0-9a-z]+$")
 _ORGANIZATION_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
@@ -396,12 +398,18 @@ def _link_targets(node: PlannedEntity) -> list[str]:
     return targets + [t for t in (node.epic, node.parent) if t]
 
 
+def _shape(node: PlannedEntity) -> dict[str, Any]:
+    """What an undo needs to know about a row without reading the source."""
+    return {"type": node.source.entity_type, "layer": node.layer, "links": _link_targets(node)}
+
+
 def _payload(
     node: PlannedEntity,
     *,
     ids: Mapping[str, str],
     target_project_id: str,
     origin_org: str,
+    origin_project: str = "",
 ) -> tuple[dict[str, Any], list[str]]:
     """The create body for one entity, plus link targets that are not on the target yet."""
     source = node.source
@@ -423,6 +431,9 @@ def _payload(
     migration: dict[str, Any] = {
         "tool": "sibyl migrate to-team",
         "origin_org": origin_org,
+        # With the org, names the migration: the server counts rows of the same
+        # source project as one migration, and no others.
+        **({"origin_project": origin_project} if origin_project else {}),
         "origin_entity_id": source.uuid,
         "origin_created_at": source.created_at,
         "origin_updated_at": source.updated_at,
@@ -585,6 +596,11 @@ async def execute_plan(
     concurrency: int = 8,
     log: Callable[[str], None] = lambda _message: None,
     operation_namespace: str = "",
+    revisions: dict[str, int] | None = None,
+    structure: dict[str, dict[str, Any]] | None = None,
+    preexisting: set[str] | None = None,
+    undoing: set[str] | None = None,
+    origin_project: str = "",
 ) -> GraphOutcome:
     """Create the plan layer by layer.
 
@@ -595,6 +611,56 @@ async def execute_plan(
     outcome = GraphOutcome()
     gate = asyncio.Semaphore(concurrency)
     writes = 0
+    # The revision each row was left at by this migration's own last write:
+    # an undo removes a row only while it still sits there.
+    last_written = revisions if revisions is not None else {}
+    # What an undo needs without the source: each row's type, layer, and links.
+    shape = structure if structure is not None else {}
+    # Rows whose create landed on a row that already existed: the migration
+    # updated them rather than creating them, so an undo never removes them.
+    adopted = preexisting if preexisting is not None else set()
+    intents_recorded = 0
+    intents_saved = 0
+
+    def remember(origin: str, revision: object) -> None:
+        if origin not in adopted and type(revision) is int and revision >= 1:
+            last_written[origin] = revision
+
+    def note_epic_start(response: dict[str, Any]) -> None:
+        """Record an epic revision this migration's own status write moved.
+
+        A task moving forward auto-starts its epic on the server. When the
+        epic sat at the revision this migration last left it at, the start is
+        the migration's own write; otherwise someone else changed it and it
+        stays theirs.
+        """
+        started = (response.get("data") or {}).get("epic_started") or {}
+        revision = started.get("revision")
+        epic_origin = next((o for o, t in ids.items() if t == started.get("epic_id")), None)
+        if (
+            epic_origin is not None
+            and type(revision) is int
+            and last_written.get(epic_origin) == revision - 1
+        ):
+            remember(epic_origin, revision)
+
+    async def persist_intent() -> None:
+        """Put the intent just recorded on disk before its request is sent.
+
+        Rows that record intents in the same turn share one ledger write: the
+        first to resume saves everything recorded so far and the rest find
+        theirs already saved. One write per row would rewrite the whole ledger
+        for every row a layer starts, blocking the event loop long enough for
+        a pooled connection to go stale between assignment and send.
+        """
+        nonlocal intents_recorded, intents_saved
+        intents_recorded += 1
+        wanted = intents_recorded
+        await asyncio.sleep(0)
+        if intents_saved < wanted:
+            covered = intents_recorded
+            save()
+            intents_saved = covered
 
     async def read(target_id: str) -> dict[str, Any] | None:
         """The row as the team server holds it; None when it is gone."""
@@ -627,7 +693,9 @@ async def execute_plan(
             "depends_on": sorted(metadata.get("depends_on") or []),
         }
 
-    async def write(node: PlannedEntity, body: dict[str, Any]) -> tuple[str, int | None] | None:
+    async def write(
+        node: PlannedEntity, body: dict[str, Any], key: str
+    ) -> tuple[str, int | None] | None:
         origin = node.source.uuid
         kind = node.source.entity_type
         async with gate:
@@ -642,7 +710,7 @@ async def execute_plan(
                         "protect_ownership": "true",
                     },
                     _buffer_pending=False,
-                    _idempotency_key=operation_key(node, "create"),
+                    _idempotency_key=key,
                 )
             except Exception as exc:
                 if (
@@ -699,7 +767,7 @@ async def execute_plan(
                     ),
                 }
                 pending["status_intent"] = intent
-                save()
+                await persist_intent()
             if intent["target_id"] != target_id or intent["body"]["status"] != status:
                 raise RuntimeError(
                     "the source status or target changed after its intent was saved; "
@@ -714,8 +782,11 @@ async def execute_plan(
                     _buffer_pending=False,
                     _idempotency_key=intent["key"],
                 )
-                if (response.get("mutation_receipt") or {}).get("applied") is False:
+                receipt = response.get("mutation_receipt") or {}
+                if receipt.get("applied") is False:
                     raise RuntimeError("the server queued the status instead of applying it")
+                remember(origin, receipt.get("revision"))
+                note_epic_start(response)
         except Exception as exc:
             outcome.failures.append(f"task {origin}: status {status} not set ({exc})")
             return False
@@ -725,13 +796,22 @@ async def execute_plan(
         outcome.statuses += 1
         return True
 
+    total = len(plan.entities)
+    processed = 0
+    started = time.monotonic()
+
     async def create(node: PlannedEntity) -> None:
+        nonlocal processed
         # One row's trouble never stops the run: it is reported, and the
         # ledger keeps what is needed to finish it next time.
         try:
             await create_one(node)
         except Exception as exc:
             outcome.failures.append(f"{node.source.entity_type} {node.source.uuid}: {exc}")
+        processed += 1
+        if processed % _PROGRESS_EVERY == 0 and processed < total:
+            rate = processed / max(time.monotonic() - started, 0.001)
+            log(f"  {processed} of {total} rows ({rate:.0f} per second)")
 
     async def create_one(node: PlannedEntity) -> None:
         nonlocal writes
@@ -797,23 +877,39 @@ async def execute_plan(
                     )
                 body = pending["create_body"]
                 missing = pending["missing"]
+                # Older intents did not keep their key; theirs is the plain one.
+                key = pending.get("create_key") or operation_key(node, "create")
             else:
                 body, missing = _payload(
-                    node, ids=ids, target_project_id=target_project_id, origin_org=origin_org
+                    node,
+                    ids=ids,
+                    target_project_id=target_project_id,
+                    origin_org=origin_org,
+                    origin_project=origin_project,
                 )
-                # Retry the same body even when a dependency lands after a lost
+                # Retry the same body under the same key even when a dependency
+                # lands, or an undo moves the route's keys, after a lost
                 # acknowledgement; new links belong to the later relink operation.
+                key = operation_key(node, "create")
                 partial[origin] = {
                     "create_body": body,
+                    "create_key": key,
+                    "shape": _shape(node),
                     "source_digest": source_digest,
                     "missing": missing,
                     "digest": None,
                 }
-                save()
-            created = await write(node, body)
+                await persist_intent()
+            created = await write(node, body, key)
             if created is None:
                 return
             target_id, revision = created
+            shape[origin] = _shape(node)
+            # A fresh row starts at revision 1; a higher one means the id
+            # already held a row (the author's own, or one with no author).
+            if type(revision) is int and revision > 1:
+                adopted.add(origin)
+            remember(origin, revision)
             ids[origin] = target_id
             outcome.created += 1
             partial[origin] = {
@@ -851,7 +947,11 @@ async def execute_plan(
         target_id = ids[origin]
         if "link_body" not in pending:
             body, missing = _payload(
-                node, ids=ids, target_project_id=target_project_id, origin_org=origin_org
+                node,
+                ids=ids,
+                target_project_id=target_project_id,
+                origin_org=origin_org,
+                origin_project=origin_project,
             )
             if set(missing) >= set(pending.get("missing") or []):
                 outcome.resumed += 1
@@ -868,7 +968,15 @@ async def execute_plan(
                 )
                 return
             current = await read(target_id)
-            if current is None or target_digest(current) != pending.get("digest"):
+            # The digest leaves out fields a teammate may change, such as task
+            # status; any write since the migration's own last one moves the
+            # revision, so a row the migration recorded must still sit there.
+            own = last_written.get(origin)
+            if (
+                current is None
+                or target_digest(current) != pending.get("digest")
+                or (own is not None and current.get("revision") != own)
+            ):
                 partial.pop(origin, None)
                 outcome.resumed += 1
                 outcome.unlinked.append(
@@ -889,7 +997,7 @@ async def execute_plan(
             pending["link_key"] = operation_key(node, "links", topology)
             # A lost response retries this exact request. The server either finds
             # every binding already applied or enforces the saved revision.
-            save()
+            await persist_intent()
         async with gate:
             try:
                 response = await client._request(
@@ -913,6 +1021,12 @@ async def execute_plan(
             )
         missing = pending["link_missing"]
         outcome.relinked += 1
+        if origin not in shape:
+            # Created by an older run that kept no record of it: an undo keeps
+            # it, and now knows what it links to so it keeps those rows too.
+            adopted.add(origin)
+            shape[origin] = _shape(node)
+        remember(origin, revision)
         if missing:
             partial[origin] = {"missing": missing, "digest": None}
             landed = await read(target_id)
@@ -920,8 +1034,332 @@ async def execute_plan(
         else:
             partial.pop(origin, None)
 
+    # An undo marks rows before deleting them; one that stopped part way may
+    # have removed rows the ledger still lists. Check those before trusting it.
+    marked = undoing if undoing is not None else set()
+    for origin in sorted(marked & set(ids)):
+        if await read(ids[origin]) is None:
+            _forget(origin, ids, last_written, statuses, partial)
+            shape.pop(origin, None)
+            adopted.discard(origin)
+    if marked:
+        marked.clear()
+        save()
+
     for index, layer in enumerate(plan.layers):
         await asyncio.gather(*(create(node) for node in layer))
         save()
         log(f"  layer {index + 1}/{len(plan.layers)}: {len(ids)} entities on the target")
     return outcome
+
+
+@dataclass
+class UndoOutcome:
+    removed: int = 0
+    gone: int = 0
+    kept_edited: list[str] = field(default_factory=list)
+    kept_linked: list[str] = field(default_factory=list)
+    kept_shared: list[str] = field(default_factory=list)
+    kept_unrecorded: list[str] = field(default_factory=list)
+    failures: list[str] = field(default_factory=list)
+    # Creates whose outcome was never confirmed; a real undo resolves them first.
+    unresolved: int = 0
+    # Unconfirmed creates from a run that kept no key; they cannot be resolved.
+    unresolved_unkeyed: int = 0
+    # The server refused the caller's deletes outright (project maintainer access).
+    refused: bool = False
+
+
+# A revision no row reaches. The access check runs before the revision check,
+# so a caller without maintainer access still gets its 403, and anyone else is
+# turned away at the revision instead of running the full sharing scan.
+_UNREACHABLE_REVISION = "2147483647"
+
+
+async def access_refused(client: Any, project_id: str) -> bool:
+    """Whether the team server refuses this caller the deletes an undo needs."""
+    try:
+        await client._request(
+            "GET",
+            f"/entities/{project_id}/deletable",
+            params={"expected_revision": _UNREACHABLE_REVISION},
+            _buffer_pending=False,
+        )
+    except Exception as exc:
+        return getattr(exc, "status_code", None) == 403
+    return False
+
+
+async def undo_plan(
+    client: Any,
+    *,
+    structure: dict[str, dict[str, Any]],
+    ids: dict[str, str],
+    revisions: dict[str, int],
+    statuses: dict[str, str],
+    partial: dict[str, dict[str, Any]],
+    save: Callable[[], None],
+    dry_run: bool = False,
+    concurrency: int = 8,
+    log: Callable[[str], None] = lambda _message: None,
+    undoing: set[str] | None = None,
+    project_id: str | None = None,
+) -> UndoOutcome:
+    """Remove what a migration created, as long as nobody has touched it since.
+
+    Works from the ledger alone: `structure` records, for each row the
+    migration created, its type, plan layer, and the rows it links to, so an
+    undo follows what was migrated even after the source changed or is gone.
+    A row goes only while it still carries this migration's provenance for its
+    origin, sits at the revision the migration's own last write left it at,
+    and nothing outside the migration depends on it; the server re-checks the
+    last two as it deletes. Layers are taken newest first, and a row that
+    something kept still links to is kept too, so an undo never leaves a kept
+    row pointing at nothing. A row links only to rows in earlier layers, so the
+    rows of one layer are undone concurrently.
+    """
+    outcome = UndoOutcome()
+    still_linked: set[str] = set()
+    gate = asyncio.Semaphore(concurrency)
+    # Rows marked before their delete is sent and unmarked once their fate is
+    # known, so a migration after an interrupted undo checks them first.
+    marks = undoing if undoing is not None else set()
+    uncertain: set[str] = set()
+
+    def label(origin: str) -> str:
+        return f"{(structure.get(origin) or {}).get('type') or 'row'} {origin}"
+
+    def keep(origin: str, bucket: list[str], reason: str) -> None:
+        bucket.append(f"{label(origin)}: {reason}")
+        still_linked.update((structure.get(origin) or {}).get("links") or [])
+
+    async def classify(origin: str) -> None:
+        """Phase one, read only: is this row still the migration's, as it left it?"""
+        target_id = ids[origin]
+        revision = revisions.get(origin)
+        if revision is None or origin not in structure:
+            keep(
+                origin,
+                outcome.kept_unrecorded,
+                "the migration did not create it, or an older run left no record of it",
+            )
+            kept_rows[origin] = None
+            return
+        try:
+            async with gate:
+                current = await client._request(
+                    "GET", f"/entities/{target_id}", _buffer_pending=False
+                )
+        except Exception as exc:
+            if getattr(exc, "status_code", None) == 404:
+                outcome.gone += 1
+                if not dry_run:
+                    _forget(origin, ids, revisions, statuses, partial)
+                return
+            keep(origin, outcome.failures, f"could not read it ({exc})")
+            kept_rows[origin] = None
+            return
+        provenance = ((current.get("metadata") or {}).get("migration") or {}).get(
+            "origin_entity_id"
+        )
+        if provenance != origin:
+            keep(origin, outcome.kept_unrecorded, "the row on the target is not this migration's")
+            kept_rows[origin] = current
+        elif current.get("revision") != revision:
+            keep(origin, outcome.kept_edited, "changed on the team server since it was migrated")
+            kept_rows[origin] = current
+        else:
+            candidates.add(origin)
+
+    async def protect_current_links(origin: str, current: dict[str, Any] | None) -> None:
+        """A kept row keeps every migrated row it points at now.
+
+        Links added on the team server after the migration (a teammate moving
+        a migrated task under another migrated epic, or adding a dependency)
+        are not in the plan, and the server does not count links between rows
+        of the same migration as sharing, so the undo reads them itself.
+        """
+        target_ids = {t: o for o, t in ids.items()}
+        metadata = (current or {}).get("metadata") or {}
+        pointed = [metadata.get("epic_id"), metadata.get("parent_task_id")]
+        pointed += list(metadata.get("depends_on") or [])
+        async with gate:
+            related = await client._request(
+                "POST",
+                "/search/explore",
+                json={"mode": "related", "entity_id": ids[origin], "limit": 1000},
+                _buffer_pending=False,
+            )
+        pointed += [
+            row.get("id")
+            for row in related.get("entities") or []
+            if row.get("direction") == "outgoing"
+        ]
+        still_linked.update(target_ids[t] for t in pointed if t in target_ids)
+
+    async def undo_one(origin: str) -> None:
+        """Phase two: remove one row the first phase found unchanged."""
+        target_id = ids.get(origin)
+        if target_id is None or outcome.refused or origin not in candidates:
+            return
+        if origin in still_linked:
+            keep(origin, outcome.kept_linked, "a row that was kept still links to it")
+            return
+        revision = revisions[origin]
+        if dry_run:
+            # The same checks the delete runs, so the dry run keeps what the undo would.
+            try:
+                async with gate:
+                    check = await client._request(
+                        "GET",
+                        f"/entities/{target_id}/deletable",
+                        params={"expected_revision": str(revision)},
+                        _buffer_pending=False,
+                    )
+            except Exception as exc:
+                if getattr(exc, "status_code", None) == 403:
+                    outcome.refused = True
+                else:
+                    keep(origin, outcome.failures, f"could not check it ({exc})")
+                return
+            if check.get("deletable") is True:
+                outcome.removed += 1
+            elif check.get("error") == "entity_shared":
+                keep(origin, outcome.kept_shared, str(check.get("reason") or "shared"))
+            else:
+                keep(
+                    origin, outcome.kept_edited, "changed on the team server since it was migrated"
+                )
+            return
+        try:
+            async with gate:
+                await client._request(
+                    "DELETE",
+                    f"/entities/{target_id}",
+                    params={"expected_revision": str(revision), "if_unshared": "true"},
+                    _buffer_pending=False,
+                )
+        except Exception as exc:
+            if getattr(exc, "status_code", None) == 403:
+                outcome.refused = True
+            elif getattr(exc, "error_code", None) == "entity_shared":
+                keep(origin, outcome.kept_shared, str(exc))
+            elif getattr(exc, "status_code", None) == 409:
+                keep(origin, outcome.kept_edited, "changed on the team server during the undo")
+            elif getattr(exc, "status_code", None) == 404:
+                outcome.gone += 1
+                _forget(origin, ids, revisions, statuses, partial)
+            else:
+                # The delete may have landed with its answer lost.
+                uncertain.add(origin)
+                keep(origin, outcome.failures, f"delete failed ({exc})")
+            return
+        outcome.removed += 1
+        _forget(origin, ids, revisions, statuses, partial)
+        if outcome.removed % _SAVE_EVERY == 0:
+            save()
+            log(f"  {outcome.removed} removed...")
+
+    # Undoing deletes, which takes a project maintainer. Ask before anything
+    # else, so a refused undo writes nothing (not even a replayed create).
+    if project_id and await access_refused(client, project_id):
+        outcome.refused = True
+        return outcome
+
+    # A create whose answer was lost may have landed. Replay each under its
+    # own key (the server answers with the original receipt, or creates the
+    # row now), so the undo sees every row the migration wrote.
+    unconfirmed = {
+        origin: pending
+        for origin, pending in partial.items()
+        if origin not in ids and pending.get("create_key") and pending.get("create_body")
+    }
+    # Intents from before keys were kept cannot be replayed safely; say so.
+    outcome.unresolved_unkeyed = sum(
+        1
+        for origin, pending in partial.items()
+        if origin not in ids and pending.get("create_body") and not pending.get("create_key")
+    )
+    if dry_run:
+        outcome.unresolved = len(unconfirmed)
+    for origin, pending in unconfirmed.items() if not dry_run else ():
+        try:
+            receipt = await client._request(
+                "POST",
+                "/entities",
+                json=pending["create_body"],
+                params={
+                    "sync": "true",
+                    "replay_interrupted": "false",
+                    "protect_ownership": "true",
+                },
+                _buffer_pending=False,
+                _idempotency_key=pending["create_key"],
+            )
+        except Exception as exc:
+            # Unknown: keep what it would link to, so nothing kept is stranded.
+            still_linked.update((pending.get("shape") or {}).get("links") or [])
+            outcome.failures.append(f"{origin}: could not confirm an unfinished create ({exc})")
+            continue
+        target_id = str(receipt.get("id") or "")
+        if not target_id:
+            still_linked.update((pending.get("shape") or {}).get("links") or [])
+            outcome.failures.append(f"{origin}: an unfinished create returned no id")
+            continue
+        ids[origin] = target_id
+        if pending.get("shape"):
+            structure[origin] = pending["shape"]
+        if receipt.get("revision") == 1:
+            revisions[origin] = 1
+        partial[origin] = {"missing": pending.get("missing") or [], "digest": None}
+    if unconfirmed and not dry_run:
+        save()
+
+    # Phase one: classify every row before deleting any, and protect what the
+    # kept ones point at now, so no layer is undone before the rows that keep
+    # it are known.
+    candidates: set[str] = set()
+    kept_rows: dict[str, dict[str, Any] | None] = {}
+    await asyncio.gather(*(classify(origin) for origin in list(ids)))
+    try:
+        await asyncio.gather(
+            *(protect_current_links(origin, current) for origin, current in kept_rows.items())
+        )
+    except Exception as exc:
+        outcome.failures.append(
+            f"could not read what a kept row links to ({exc}); nothing was removed"
+        )
+        return outcome
+
+    layers: dict[int, list[str]] = {}
+    for origin in ids:
+        layers.setdefault(int((structure.get(origin) or {}).get("layer") or 0), []).append(origin)
+    for layer in sorted(layers, reverse=True):
+        if outcome.refused:
+            break
+        marking = [origin for origin in layers[layer] if origin in candidates]
+        if not dry_run:
+            marks.update(marking)
+            save()
+        await asyncio.gather(*(undo_one(origin) for origin in layers[layer]))
+        if not dry_run:
+            # Removed and kept rows are settled; only a delete whose answer was
+            # lost leaves its row marked for the next migration to check.
+            marks.difference_update(o for o in marking if o not in uncertain)
+            save()
+    if not dry_run:
+        save()
+    return outcome
+
+
+def _forget(
+    origin: str,
+    ids: dict[str, str],
+    revisions: dict[str, int],
+    statuses: dict[str, str],
+    partial: dict[str, dict[str, Any]],
+) -> None:
+    ids.pop(origin, None)
+    revisions.pop(origin, None)
+    statuses.pop(origin, None)
+    partial.pop(origin, None)

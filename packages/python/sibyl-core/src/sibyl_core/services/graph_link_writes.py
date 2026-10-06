@@ -107,6 +107,7 @@ LET $result = {
             attributes.epic_id = $epic_id,
             attributes.parent_task_id = $parent_task_id,
             attributes.depends_on = $depends_on,
+            modified_by = $modified_by ?? modified_by,
             revision += 1, updated_at = time::now(), attributes.updated_at = time::now()
             RETURN NONE;
         LET $existing = $existing.filter(|$entry| $entry.stored = NONE);
@@ -212,6 +213,7 @@ async def add_entity_links_if_revision(
     epic_id: str | None = None,
     parent_task_id: str | None = None,
     depends_on: Sequence[str] = (),
+    modified_by: str | None = None,
 ) -> EntityLinksResult:
     """Atomically add authorized links, or confirm an exact read-only replay."""
     if (
@@ -284,6 +286,7 @@ async def add_entity_links_if_revision(
         epic_id=epic_id or current_epic,
         parent_task_id=parent_task_id or current_parent,
         depends_on=merged_dependencies,
+        modified_by=modified_by,
     )
     if len(rows) != 1:
         raise RuntimeError("Entity link transaction returned an invalid native cardinality")

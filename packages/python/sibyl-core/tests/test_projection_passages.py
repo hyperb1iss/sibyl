@@ -555,6 +555,71 @@ async def test_a_span_that_cannot_be_deleted_is_named_to_the_caller() -> None:
     assert entity_manager.existing == {1}
 
 
+class _BulkEntityManager(_ReprojectEntityManager):
+    """Deletes a whole candidate range in one call, as the graph store does."""
+
+    def __init__(self, existing_indices: set[int], *, bulk_fails: bool = False) -> None:
+        super().__init__(existing_indices)
+        self.bulk_calls: list[list[str]] = []
+        self.bulk_fails = bulk_fails
+
+    async def delete_many(self, entity_ids: list[str]) -> set[str]:
+        self.bulk_calls.append(list(entity_ids))
+        if self.bulk_fails:
+            raise RuntimeError("transaction aborted")
+        removed: set[str] = set()
+        for index in sorted(self.existing):
+            passage_id = passage_entity_id(_SOURCE_ID, index)
+            if passage_id in entity_ids:
+                self.existing.discard(index)
+                removed.add(passage_id)
+        return removed
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_memory_retires_its_spans_in_one_round_trip() -> None:
+    """Sweeping every index one delete at a time cost seconds per deleted row."""
+    entity_manager = _BulkEntityManager(existing_indices={0, 2, 5})
+
+    retirement = await retire_entity_passages(entity_manager=entity_manager, source_id=_SOURCE_ID)
+
+    assert retirement.retired == 3 and retirement.complete
+    assert entity_manager.existing == set() and entity_manager.deleted == []
+    assert entity_manager.bulk_calls == [
+        [passage_entity_id(_SOURCE_ID, i) for i in range(MAX_PASSAGES_PER_SOURCE)]
+    ]
+
+
+@pytest.mark.asyncio
+async def test_reprojection_bulk_retirement_spares_the_spans_just_written() -> None:
+    entity_manager = _BulkEntityManager(existing_indices={0, 1, 2, 3, 4, 5})
+
+    result = await reproject_entity_passages(
+        entity_manager=entity_manager,
+        relationship_manager=_RecordingRelationshipManager(),
+        source=_source(content=_prose(sections=6)),
+        group_id=_GROUP,
+        created_source_id=_SOURCE_ID,
+    )
+
+    assert 2 <= result.passages < 6
+    (call,) = entity_manager.bulk_calls
+    written = {passage_entity_id(_SOURCE_ID, i) for i in range(result.passages)}
+    assert written.isdisjoint(call)
+    assert entity_manager.existing == set(range(result.passages))
+
+
+@pytest.mark.asyncio
+async def test_a_failed_bulk_retirement_falls_back_to_naming_each_span() -> None:
+    entity_manager = _BulkEntityManager(existing_indices={0, 1, 2}, bulk_fails=True)
+
+    retirement = await retire_entity_passages(entity_manager=entity_manager, source_id=_SOURCE_ID)
+
+    assert retirement.retired == 3 and retirement.complete
+    assert len(entity_manager.bulk_calls) == 1
+    assert entity_manager.deleted == [passage_entity_id(_SOURCE_ID, i) for i in range(3)]
+
+
 @pytest.mark.asyncio
 async def test_reprojection_reports_a_stranded_stale_span_as_an_error() -> None:
     """A stale span left standing means the reprojection did not fully happen."""

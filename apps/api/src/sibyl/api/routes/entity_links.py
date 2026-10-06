@@ -122,6 +122,7 @@ async def add_entity_links(
             epic_id=links.epic_id,
             parent_task_id=links.parent_task_id,
             depends_on=links.depends_on,
+            modified_by=str(ctx.user.id) if ctx.user is not None else None,
         )
     except EntityLinkConflictError as exc:
         raise HTTPException(

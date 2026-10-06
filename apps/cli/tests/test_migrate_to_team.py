@@ -468,3 +468,438 @@ def test_replay_only_server_allows_raw_but_refuses_graph_before_writes(
     else:
         assert result.exit_code == 0, result.stdout
         assert client.remember_raw_memory.await_count == len(ROWS)
+
+
+class _Captures:
+    """Raw captures on a team server; corrections address them by bare id and revision."""
+
+    def __init__(self, revisions: dict[str, int]) -> None:
+        self.revisions = dict(revisions)
+        self.sent: list[tuple[str, bool]] = []
+
+    @property
+    def ids(self) -> set[str]:
+        return set(self.revisions)
+
+    async def correct_memory(
+        self,
+        source_id: str,
+        *,
+        action: str,
+        reason: str,
+        expected_revision: int | None = None,
+        preview: bool = False,
+    ) -> dict[str, Any]:
+        assert action == "delete"
+        self.sent.append((source_id, preview))
+        if source_id not in self.revisions:
+            raise SibylClientError("API error: not_found: memory_source_not_found", status_code=404)
+        if expected_revision != self.revisions[source_id]:
+            raise SibylClientError("API error: revision_conflict", status_code=409)
+        if not preview:
+            del self.revisions[source_id]
+        return {"allowed": True, "applied": not preview}
+
+
+async def _raw_undo(
+    target: _Captures,
+    ledger: dict[str, str],
+    revisions: dict[str, int],
+    path: Path,
+    *,
+    dry_run: bool = False,
+) -> list[str]:
+    return await migrate._undo_raw(
+        target,
+        ledger_file=path,
+        route={"r": "1"},
+        ledger=ledger,
+        revisions=revisions,
+        dry_run=dry_run,
+    )
+
+
+async def test_raw_undo_deletes_each_replayed_capture_by_its_bare_id(tmp_path: Path) -> None:
+    target = _Captures({"cap-1": 1, "cap-2": 1})
+    ledger = {"src-1": "cap-1", "src-2": "cap-2"}
+    path = tmp_path / "raw.json"
+
+    failures = await _raw_undo(target, ledger, {"src-1": 1, "src-2": 1}, path)
+
+    assert failures == [] and target.ids == set() and ledger == {}
+    assert {source_id for source_id, _ in target.sent} == {"cap-1", "cap-2"}
+    assert json.loads(path.read_text())["receipts"] == {}
+
+
+async def test_raw_undo_dry_run_previews_without_deleting(tmp_path: Path) -> None:
+    target = _Captures({"cap-1": 1, "cap-2": 1})
+    ledger = {"src-1": "cap-1", "src-2": "cap-2"}
+    path = tmp_path / "raw.json"
+
+    failures = await _raw_undo(target, ledger, {"src-1": 1, "src-2": 1}, path, dry_run=True)
+
+    assert failures == [] and target.ids == {"cap-1", "cap-2"}
+    assert ledger == {"src-1": "cap-1", "src-2": "cap-2"}
+    assert all(preview for _, preview in target.sent) and not path.exists()
+
+
+async def test_raw_undo_reports_captures_already_gone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    warnings: list[str] = []
+    monkeypatch.setattr(migrate, "warn", warnings.append)
+    target = _Captures({"cap-1": 1})
+    ledger = {"src-1": "cap-1", "src-2": "cap-2"}
+
+    failures = await _raw_undo(target, ledger, {"src-1": 1, "src-2": 1}, tmp_path / "raw.json")
+
+    assert failures == [] and target.ids == set() and ledger == {}
+    assert warnings == ["1 raw memories in the ledger were already gone from the team server"]
+
+
+async def test_raw_undo_keeps_captures_it_did_not_create_or_that_changed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    warnings: list[str] = []
+    monkeypatch.setattr(migrate, "warn", warnings.append)
+    # cap-edited was corrected after the migration; cap-adopted landed on an
+    # existing capture; cap-unrecorded came from a run that kept no revisions.
+    target = _Captures({"cap-edited": 2, "cap-adopted": 3, "cap-unrecorded": 1, "cap-fresh": 1})
+    ledger = {
+        "src-edited": "cap-edited",
+        "src-adopted": "cap-adopted",
+        "src-unrecorded": "cap-unrecorded",
+        "src-fresh": "cap-fresh",
+    }
+    revisions = {"src-edited": 1, "src-adopted": 3, "src-fresh": 1}
+
+    failures = await _raw_undo(target, ledger, revisions, tmp_path / "raw.json")
+
+    assert failures == []
+    assert target.ids == {"cap-edited", "cap-adopted", "cap-unrecorded"}
+    assert set(ledger) == {"src-edited", "src-adopted", "src-unrecorded"}
+    assert warnings[0] == "Kept 3 raw memories:"
+
+
+async def test_undo_refuses_a_server_without_guarded_deletes() -> None:
+    client = MagicMock()
+    identity = {
+        "capabilities": ["migration_replay_policy_v1", "migration_graph_writes_v1"],
+        "server_instance_id": "server-a",
+        "user_id": "alice",
+        "organization_id": "team",
+    }
+    client.get = AsyncMock(side_effect=lambda _: dict(identity))
+    base = {
+        "source_org": "source",
+        "target_context": "team",
+        "target_org_id": "team",
+        "target_project_id": "project_target",
+    }
+    bind = {"source_url": "ws://localhost:8000/rpc", "source_project": "project_a"}
+
+    with pytest.raises(RuntimeError, match="before undoing a migration"):
+        await migrate._bind_route(client, base, require_undo=True, **bind)
+
+    identity["capabilities"].append("migration_guarded_delete_v1")
+    # The undo binds the same route the migration wrote its ledgers under.
+    assert await migrate._bind_route(
+        client, base, require_undo=True, **bind
+    ) == await migrate._bind_route(client, base, **bind)
+
+
+def _local_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[tuple[str, str]]:
+    from sibyl_cli import local
+
+    env = tmp_path / ".env"
+    env.write_text(
+        "# SurrealDB\nSIBYL_SURREAL_USERNAME=root\nSIBYL_SURREAL_PASSWORD=generated-pw\n"
+    )
+    monkeypatch.setattr(local, "SIBYL_LOCAL_ENV", env)
+    tried: list[tuple[str, str]] = []
+    monkeypatch.setattr(migrate.httpx, "post", MagicMock(side_effect=AssertionError("no probe")))
+    return tried
+
+
+def _server_accepting(monkeypatch: pytest.MonkeyPatch, tried: list, accepted: tuple) -> None:
+    def post(url: str, *, auth: tuple[str, str], **_kwargs: Any) -> Any:
+        assert url == "http://localhost:8000/sql"
+        tried.append(auth)
+        if auth != accepted:
+            return MagicMock(status_code=401)
+        response = MagicMock(status_code=200)
+        response.json.return_value = [{"status": "OK", "result": True}]
+        return response
+
+    monkeypatch.setattr(migrate.httpx, "post", post)
+
+
+def test_a_sibyl_local_source_uses_its_generated_login(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    tried = _local_env(monkeypatch, tmp_path)
+    _server_accepting(monkeypatch, tried, ("root", "generated-pw"))
+
+    resolved = migrate._resolve_source_credentials("ws://localhost:8000/rpc", None, None)
+
+    assert resolved == ("root", "generated-pw") and tried == [("root", "generated-pw")]
+
+
+def test_a_dev_server_beside_an_old_local_install_still_takes_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    tried = _local_env(monkeypatch, tmp_path)
+    _server_accepting(monkeypatch, tried, ("root", "root"))
+
+    resolved = migrate._resolve_source_credentials("ws://localhost:8000/rpc", None, None)
+
+    assert resolved == ("root", "root")
+    assert tried == [("root", "generated-pw"), ("root", "root")]
+
+
+@pytest.mark.parametrize(
+    ("url", "user", "password"),
+    [
+        ("ws://localhost:8000/rpc", "admin", None),
+        ("ws://localhost:8000/rpc", None, "secret"),
+        ("ws://admin:secret@localhost:8000/rpc", None, None),
+        ("wss://db.example.com/rpc", None, None),
+        # Another loopback port can be a tunnel to some other machine.
+        ("ws://localhost:9000/rpc", None, None),
+        ("ws://127.0.0.1:8601/rpc", None, None),
+    ],
+)
+def test_given_or_remote_sources_never_receive_the_local_login(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, url: str, user: Any, password: Any
+) -> None:
+    _local_env(monkeypatch, tmp_path)
+
+    assert migrate._resolve_source_credentials(url, user, password) == (user, password)
+
+
+def test_without_a_local_install_the_defaults_stand(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from sibyl_cli import local
+
+    monkeypatch.setattr(local, "SIBYL_LOCAL_ENV", tmp_path / "missing.env")
+    monkeypatch.setattr(migrate.httpx, "post", MagicMock(side_effect=AssertionError("no probe")))
+
+    assert migrate._resolve_source_credentials("ws://localhost:8000/rpc", None, None) == (
+        None,
+        None,
+    )
+
+
+def test_an_undo_moves_the_route_to_fresh_operation_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(migrate, "_LEDGER_DIR", tmp_path)
+    route = {
+        "source_org": "s",
+        "target_org_id": "t",
+        "target_user_id": "u",
+        "target_project_id": "p",
+    }
+    other = {**route, "target_project_id": "q"}
+    before = migrate._key_namespace(route)
+    # A route that was never undone keeps the keys earlier runs used.
+    assert before == migrate._route_fingerprint(route)
+
+    migrate._advance_epoch(route)
+    after = migrate._key_namespace(route)
+    migrate._advance_epoch(route)
+
+    assert after != before
+    assert migrate._key_namespace(route) not in {before, after}
+    assert migrate._key_namespace(other) == migrate._route_fingerprint(other)
+
+
+def test_a_server_that_answers_without_running_the_probe_is_not_a_login(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _local_env(monkeypatch, tmp_path)
+    response = MagicMock(status_code=200)
+    response.json.return_value = [{"status": "ERR", "result": "IAM error"}]
+    monkeypatch.setattr(migrate.httpx, "post", MagicMock(return_value=response))
+
+    assert migrate._resolve_source_credentials("ws://localhost:8000/rpc", None, None) == (
+        None,
+        None,
+    )
+
+
+async def test_raw_undo_first_resolves_a_write_whose_answer_was_lost(tmp_path: Path) -> None:
+    target = _Captures({"cap-1": 1})
+    sent: list[str] = []
+
+    async def remember_raw_memory(*, _idempotency_key: str, **request: Any) -> dict[str, Any]:
+        sent.append(_idempotency_key)
+        target.revisions["cap-lost"] = 1  # the original write had landed
+        return {"id": "cap-lost", "revision": 1}
+
+    target.remember_raw_memory = remember_raw_memory  # type: ignore[attr-defined]
+    ledger = {"src-1": "cap-1"}
+    intents = {"src-lost": {"key": "original-key", "request": {"title": "t", "raw_content": "c"}}}
+
+    failures = await migrate._undo_raw(
+        target,
+        ledger_file=tmp_path / "raw.json",
+        route={"r": "1"},
+        ledger=ledger,
+        revisions={"src-1": 1},
+        dry_run=False,
+        intents=intents,
+    )
+
+    assert failures == [] and sent == ["original-key"]
+    assert target.ids == set() and ledger == {} and intents == {}
+
+
+async def test_an_interrupted_raw_undo_leaves_an_accurate_ledger(tmp_path: Path) -> None:
+    target = _Captures({"cap-1": 1, "cap-2": 1, "cap-3": 1})
+    original = target.correct_memory
+    applied = 0
+
+    async def correct_memory(source_id: str, **kwargs: Any) -> dict[str, Any]:
+        nonlocal applied
+        if not kwargs.get("preview"):
+            applied += 1
+            if applied == 2:
+                raise RuntimeError("connection dropped")
+        return await original(source_id, **kwargs)
+
+    target.correct_memory = correct_memory  # type: ignore[method-assign]
+    path = tmp_path / "raw.json"
+    ledger = {"src-1": "cap-1", "src-2": "cap-2", "src-3": "cap-3"}
+
+    with pytest.raises(RuntimeError):
+        await migrate._undo_raw(
+            target,
+            ledger_file=path,
+            route={"r": "1"},
+            ledger=ledger,
+            revisions={"src-1": 1, "src-2": 1, "src-3": 1},
+            dry_run=False,
+        )
+
+    # What a later migration would trust: the deleted capture is no longer listed.
+    assert target.ids == {"cap-2", "cap-3"}
+    assert set(json.loads(path.read_text())["receipts"]) == {"src-2", "src-3"}
+
+
+def test_a_raw_write_retried_after_an_undo_keeps_its_original_key(
+    ledger_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = _target(monkeypatch, TEAM)
+    keys: list[tuple[str, str]] = []
+    lost = {"done": False}
+
+    async def remember_raw_memory(*, _idempotency_key: str, **request: Any) -> dict[str, Any]:
+        origin = request["provenance"]["migration"]["origin_raw_id"]
+        keys.append((origin, _idempotency_key))
+        if origin == "src-0" and not lost["done"]:
+            lost["done"] = True
+            raise RuntimeError("lost acknowledgement")
+        return {"id": f"target-{origin}", "revision": 1}
+
+    client.remember_raw_memory = AsyncMock(side_effect=remember_raw_memory)
+    first = _run("--no-graph")
+    assert first.exit_code != 0
+    raw_ledger = next(p for p in ledger_dir.iterdir() if p.name.count(".") == 1)
+    migrate._advance_epoch(json.loads(raw_ledger.read_text())["route"])
+
+    second = _run("--no-graph")
+
+    assert second.exit_code == 0, second.stdout
+    sent = [key for origin, key in keys if origin == "src-0"]
+    assert len(sent) == 2 and sent[0] == sent[1]
+
+
+def test_a_refused_undo_leaves_the_raw_memories_too(
+    ledger_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = _target(monkeypatch, TEAM)
+    identity_get = client.get.side_effect
+
+    async def get(path: str) -> dict[str, Any]:
+        answer = await identity_get(path)
+        if path == "/auth/replay-identity":
+            answer["capabilities"] = [*answer["capabilities"], "migration_guarded_delete_v1"]
+        return answer
+
+    client.get = AsyncMock(side_effect=get)
+
+    async def refused_graph(*_args: Any, **_kwargs: Any) -> list[str]:
+        return [migrate._UNDO_REFUSED]
+
+    raw_undo = AsyncMock(return_value=[])
+    monkeypatch.setattr(migrate, "_undo_graph", refused_graph)
+    monkeypatch.setattr(migrate, "_undo_raw", raw_undo)
+
+    result = _run("--undo")
+
+    assert result.exit_code == 1
+    raw_undo.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("status", "dropped"),
+    [
+        (422, True),
+        (400, True),
+        (404, False),
+        (425, False),
+        (503, False),
+        (408, False),
+        (429, False),
+    ],
+)
+async def test_a_raw_write_the_server_refused_is_not_retried_forever(
+    tmp_path: Path, status: int, dropped: bool
+) -> None:
+    target = _Captures({})
+
+    async def remember_raw_memory(**_kwargs: Any) -> dict[str, Any]:
+        raise SibylClientError("API error", status_code=status)
+
+    target.remember_raw_memory = remember_raw_memory  # type: ignore[attr-defined]
+    intents = {"src-x": {"key": "k", "request": {"title": "t", "raw_content": "c"}}}
+
+    failures = await migrate._undo_raw(
+        target,
+        ledger_file=tmp_path / "raw.json",
+        route={"r": "1"},
+        ledger={},
+        revisions={},
+        dry_run=False,
+        intents=intents,
+    )
+
+    assert (intents == {}) is dropped
+    assert (failures == []) is dropped
+
+
+def test_a_refused_undo_stops_before_moving_the_routes_keys(
+    ledger_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = _target(monkeypatch, TEAM)
+    identity_get = client.get.side_effect
+
+    async def get(path: str) -> dict[str, Any]:
+        answer = await identity_get(path)
+        if path == "/auth/replay-identity":
+            answer["capabilities"] = [*answer["capabilities"], "migration_guarded_delete_v1"]
+        return answer
+
+    client.get = AsyncMock(side_effect=get)
+    client._request = AsyncMock(side_effect=SibylClientError("forbidden", status_code=403))
+    graph_undo = AsyncMock(return_value=[])
+    monkeypatch.setattr(migrate, "_undo_graph", graph_undo)
+
+    result = _run("--undo")
+
+    assert result.exit_code == 1
+    assert "maintainer" in result.stdout
+    graph_undo.assert_not_awaited()
+    assert not list(ledger_dir.glob("*.epoch.json"))

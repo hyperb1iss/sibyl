@@ -47,6 +47,15 @@ sibyl migrate to-team --target-context <context> --project <project_id> [options
 | `--source-surreal-user` | URL userinfo, else `root` | Local SurrealDB username                                        |
 | `--source-surreal-pass` | URL userinfo, else `root` | Local SurrealDB password (prefer `SIBYL_SOURCE_SURREAL_PASS`)   |
 | `--limit`               | none                      | Migrate at most N raw memories and N graph entities             |
+| `--undo`                | off                       | Remove what this migration wrote that nobody has changed since  |
+
+### Reading your local Sibyl
+
+The command reads your project straight from the local SurrealDB at `ws://localhost:8000/rpc`. An
+install set up with `sibyl local` (or `sibyl up`) generates its own database password; the command
+finds it in `~/.sibyl/local/.env` and uses it without being asked. A development server that takes
+`root`/`root` works as before. For anything else, pass `--source-surreal-user` and set
+`SIBYL_SOURCE_SURREAL_PASS`.
 
 ### Before you start
 
@@ -112,6 +121,55 @@ work on it in the team server.
 
 `--limit N` migrates at most N new raw memories and N new graph entities. Repeat the command to
 advance through another batch; completed rows remain available for unfinished status and link work.
+
+### Undoing a migration
+
+Run the same command with `--undo` to take a migration back out of the team server. Pass the same
+`--target-context`, `--project`, and any `--target-project` you migrated with, so the command finds
+the same ledger. Start with `--dry-run` to see what would go; it asks the server the same questions
+the real undo does. Undoing deletes rows, so it needs project maintainer access on the team server;
+if you migrated as a contributor, ask a maintainer of the project to grant it for the undo.
+
+```bash
+sibyl migrate to-team --target-context team --project project_abc123 --undo --dry-run
+sibyl migrate to-team --target-context team --project project_abc123 --undo
+```
+
+An undo removes only what the migration created and still owns:
+
+- A graph row goes only while it still sits at the revision the migration's own last write left it
+  at. A row anyone edited since, including you, stays and is listed.
+- A row stays while anything outside the migration depends on it: a teammate's task filed under a
+  migrated epic, a decision someone linked to it, or a row you created on the team server since. The
+  server checks this, and the revision, as it deletes.
+- A row that a kept row links to stays too, including links added on the team server after the
+  migration, so nothing kept is left pointing at a deleted row.
+- Rows the migration updated rather than created stay: a teammate's epic or milestone of the same
+  name that your tasks linked to, and a row of yours with the same title that was already on the
+  team server.
+- Raw memories the migration replayed are deleted through the memory lifecycle, the same path as
+  `sibyl correct --action delete`, and only while nobody has corrected them since.
+
+The undo reads only the ledger, so it works even after the project changed on your instance or your
+local Sibyl is gone; pass `--source-org` in that case, since finding the organization automatically
+needs the local database. Rows that are already gone from the team server are reported and dropped
+from the ledger. Undoing needs a team server that advertises guarded deletes; the command checks
+before it deletes anything.
+
+Run the undo while nobody is working in the migrated rows. The checks above see what the team server
+has written by the time the undo reaches a row; a write still queued in the background, or a
+teammate linking to a row in the same moment the undo removes it, can leave that link pointing at
+nothing, as with any delete.
+
+A ledger written by a build from before migrated rows recorded their source project shows a cautious
+dry run: rows linked from inside the same migration can be reported as kept because "a row outside
+its migration links to it". The real undo removes the linking rows first and then their targets, so
+it removes more than such a dry run predicts.
+
+Migrating again after an undo writes fresh rows for everything the undo removed. Rows the undo kept
+stay in the ledger and are not written twice. An undo that stops part way can be run again; it first
+checks any writes whose answer was lost, and a migration after it checks the rows the undo had
+started on before trusting the ledger.
 
 ### Migrating as a team
 

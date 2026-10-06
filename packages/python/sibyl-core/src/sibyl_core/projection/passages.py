@@ -715,6 +715,21 @@ async def _retire_passages_except(
         return retired, tuple(failed)
 
     candidates = [index for index in range(MAX_PASSAGES_PER_SOURCE) if index not in kept_indices]
+    delete_many = getattr(entity_manager, "delete_many", None)
+    if callable(delete_many) and candidates:
+        # One transaction for the whole range; it either removes every span or
+        # none, so a failure falls through to the per-index sweep, which can
+        # name exactly which spans it could not take down.
+        try:
+            removed = await delete_many([passage_entity_id(source_id, i) for i in candidates])
+        except Exception as exc:
+            log.warning(
+                "passage_retire_bulk_failed",
+                source_id=source_id,
+                error_type=type(exc).__name__,
+            )
+        else:
+            return PassageRetirement(source_id=source_id, retired=len(removed))
     retired, failed = await _sweep(candidates)
     if failed:
         # A blip is the common case and a second pass is nearly free, since only

@@ -1465,6 +1465,7 @@ async def test_replay_identity_is_stable_across_sessions_and_roles(monkeypatch) 
     assert first["server_instance_id"] == instance
     assert "migration_replay_policy_v1" in first["capabilities"]
     assert "migration_graph_writes_v1" in first["capabilities"]
+    assert "migration_guarded_delete_v1" in first["capabilities"]
     assert first["user_id"] == str(ctx.user.id)
     assert first["organization_id"] == str(ctx.organization.id)
     assert first["credential"]["kind"] == "session"
