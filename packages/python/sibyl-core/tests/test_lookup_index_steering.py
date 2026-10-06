@@ -15,6 +15,9 @@ import re
 from typing import Any
 from unittest.mock import AsyncMock
 
+from sibyl_core.backends.surreal.schema import GRAPH_SCHEMA_MIGRATIONS
+from sibyl_core.backends.surreal.schema_version import GRAPH_SCHEMA_CURRENT_VERSION
+from sibyl_core.models.entities import EntityType
 from sibyl_core.retrieval import _search_expansion
 from sibyl_core.services.graph_entities import EntityManager
 
@@ -102,3 +105,26 @@ async def test_epic_progress_without_epics_issues_no_query() -> None:
 
     assert await manager._epic_progress_map(set()) == {}
     manager._client.execute_query_batch.assert_not_awaited()  # type: ignore[union-attr]
+
+
+def test_migration_37_defines_the_entity_name_index() -> None:
+    assert GRAPH_SCHEMA_CURRENT_VERSION >= 37
+    migration = next(item for item in GRAPH_SCHEMA_MIGRATIONS if item.version == 37)
+    assert migration.name == "entity_name_index"
+    assert migration.statements == (
+        "DEFINE INDEX IF NOT EXISTS idx_entity_name ON entity FIELDS name;",
+    )
+
+
+async def test_exact_name_search_hints_the_name_index() -> None:
+    client = _RecordingClient()
+    manager = EntityManager(client, group_id="org")  # type: ignore[arg-type]
+
+    await manager.search_exact_name("Sibyl", entity_types=[EntityType.PROJECT], limit=3)
+
+    query, params = client.calls[0]
+    assert "FROM entity WITH INDEX idx_entity_name" in query
+    assert "AND name = $name_query" in query
+    assert "AND entity_type IN $entity_types" in query
+    assert params["name_query"] == "Sibyl"
+    assert params["entity_types"] == ["project"]

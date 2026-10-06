@@ -639,12 +639,15 @@ class _EntitySearchManager:
     ) -> list[tuple[Entity, float]]:
         type_values = [entity_type.value for entity_type in entity_types or ()]
         type_clause = "AND entity_type IN $entity_types" if type_values else ""
+        # The name index (graph migration 37) turns this from a table scan
+        # into a point lookup; the hint matters when a type filter is present,
+        # since the planner otherwise prefers the broader type index.
         rows = normalize_records(
             await self._client.execute_query(
                 "SELECT "
                 + _ENTITY_SEARCH_FIELDS
                 + """
-                FROM entity
+                FROM entity WITH INDEX idx_entity_name
                 WHERE group_id = $group_id
                   AND name = $name_query
                 """

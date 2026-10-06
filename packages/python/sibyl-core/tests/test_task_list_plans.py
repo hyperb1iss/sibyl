@@ -87,9 +87,8 @@ async def test_tag_filters_still_restart_from_the_first_row() -> None:
 
 
 def test_migration_36_promotes_attribute_only_work_item_columns() -> None:
-    assert GRAPH_SCHEMA_CURRENT_VERSION == 36
-    migration = GRAPH_SCHEMA_MIGRATIONS[-1]
-    assert migration.version == 36
+    assert GRAPH_SCHEMA_CURRENT_VERSION >= 36
+    migration = next(item for item in GRAPH_SCHEMA_MIGRATIONS if item.version == 36)
     assert migration.name == "entity_work_item_column_canonicalization"
     columns = []
     for statement in migration.statements:
@@ -99,7 +98,9 @@ def test_migration_36_promotes_attribute_only_work_item_columns() -> None:
         assert f"type::is::string(attributes.{match.group(1)})" in statement
     assert columns == ["project_id", "epic_id", "status", "priority", "complexity", "feature"]
     assert migration.action is canonicalize_entity_work_item_columns
-    rendered = _graph_schema_migrations(url="ws://example/rpc")[-1]
+    rendered = next(
+        item for item in _graph_schema_migrations(url="ws://example/rpc") if item.version == 36
+    )
     assert all("type::is_string(" in statement for statement in rendered.statements)
 
 

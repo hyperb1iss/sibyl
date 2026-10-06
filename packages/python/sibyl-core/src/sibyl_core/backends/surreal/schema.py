@@ -430,6 +430,13 @@ WHERE ({column} = NONE OR {column} = '')
 )
 
 
+# Exact-name search (`name = $name`) had no index and scanned the whole
+# entity table on every /api/search that lacked an exact fulltext hit.
+ENTITY_NAME_INDEX_DEFINITIONS = """
+DEFINE INDEX IF NOT EXISTS idx_entity_name ON entity FIELDS name;
+"""
+
+
 GRAPH_INDEX_PRUNE_DEFINITIONS = """
 REMOVE INDEX IF EXISTS idx_entity_group ON TABLE entity;
 REMOVE INDEX IF EXISTS idx_entity_epic ON TABLE entity;
@@ -970,6 +977,11 @@ GRAPH_SCHEMA_MIGRATIONS = (
         statements=tuple(split_statements(ENTITY_WORK_ITEM_COLUMN_CANONICALIZATION_DEFINITIONS)),
         action=canonicalize_entity_work_item_columns,
     ),
+    SchemaMigration(
+        version=37,
+        name="entity_name_index",
+        statements=tuple(split_statements(ENTITY_NAME_INDEX_DEFINITIONS)),
+    ),
 )
 
 
@@ -1482,6 +1494,7 @@ __all__ = [
     "ENTITY_LABELS_ELEMENT_INDEX_DEFINITIONS",
     "ENTITY_MEMORY_SCOPE_COLUMN_DEFINITIONS",
     "ENTITY_MISLED_USAGE_SIGNAL_DEFINITIONS",
+    "ENTITY_NAME_INDEX_DEFINITIONS",
     "ENTITY_REQUIRED_FIELD_OPTIONAL_DEFINITIONS",
     "ENTITY_REQUIRED_FIELD_REPAIR_DEFINITIONS",
     "ENTITY_RETRIEVAL_KEYS_COLUMN_DEFINITIONS",
