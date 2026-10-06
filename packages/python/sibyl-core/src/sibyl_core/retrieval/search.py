@@ -40,6 +40,7 @@ from sibyl_core.retrieval._search_plan import (
 from sibyl_core.retrieval.candidates import RetrievalCandidate
 from sibyl_core.retrieval.identifier_query import identifier_probe_tokens
 from sibyl_core.retrieval.temporal import resolve_temporal_reference
+from sibyl_core.services.graph_read_availability import GraphReadMemo
 from sibyl_core.services.surreal_content import recall_raw_memory_with_sources
 
 if TYPE_CHECKING:
@@ -76,17 +77,24 @@ async def context_search(
     embedding_provider: EmbeddingProvider | None = None,
     raw_memory_recall_fn: source_stage.RawMemoryRecallFn = recall_raw_memory_with_sources,
     distinct_key: fusion_stage.DistinctKey | None = None,
+    read_memo: GraphReadMemo | None = None,
 ) -> SearchResponse:
     """Search context-pack candidates through native SurrealDB paths.
 
     ``distinct_key`` names the rows the caller will fold into one item. The
     fused cut then counts ``limit`` distinct items, so a response can carry
     more than ``limit`` rows when several of them share a key.
+
+    ``read_memo`` lets the caller share availability verdicts across the
+    whole request; the search creates its own when none is supplied, so its
+    two gate passes still settle each row once.
     """
 
     from sibyl_core.tools.responses import SearchResponse
 
     search_started_at = time.perf_counter()
+    if read_memo is None:
+        read_memo = GraphReadMemo(plan.organization_id)
     stage_timings_ms: dict[str, float] = {}
     stage_started_at = time.perf_counter()
     limit = max(1, min(limit, MAX_RETRIEVAL_LIMIT))
@@ -223,6 +231,7 @@ async def context_search(
         group_id=search_plan.organization_id,
         plan=search_plan,
         source_lists=direct_lists,
+        memo=read_memo,
     )
     stage_timings_ms["candidate_filtering"] = _elapsed_ms(stage_started_at)
 
@@ -275,6 +284,7 @@ async def context_search(
                 ],
             )
         ],
+        memo=read_memo,
     )
     filtered_lists = [*direct_lists, *expansion_lists]
     supersession_metadata = lifecycle_stage._merged_supersession_metadata(

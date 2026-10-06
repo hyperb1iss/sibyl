@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -22,6 +23,7 @@ from sibyl_core.services.eval_publication_guards import unavailable_publication_
 from sibyl_core.services.graph_capture_availability import available_capture_projection_rows
 from sibyl_core.services.graph_entities import EntityManager
 from sibyl_core.services.graph_read_availability import (
+    GraphReadMemo,
     available_graph_entities,
     available_graph_relationships,
 )
@@ -40,6 +42,7 @@ async def _superseded_candidate_uuids(
     *,
     group_id: str,
     uuids: Sequence[str],
+    memo: GraphReadMemo | None = None,
 ) -> tuple[set[str], int]:
     """Resolve every inbound supersession edge for the candidate set.
 
@@ -48,10 +51,40 @@ async def _superseded_candidate_uuids(
     inbound declarations. Returning a partial edge set would make a retired
     row look current, while treating a safety limit as an error would turn a
     dense but valid history into an availability failure.
+
+    A memo keeps the inbound edges per target, so a request that checks the
+    same id again resolves it from the rows it already read. The resolution
+    itself still runs over the whole requested set: a cycle between two
+    candidates is settled by the newest edge between them, and that needs
+    both ends' edges on the table.
     """
 
     if not uuids:
         return set(), 0
+    if memo is None:
+        rows = await _supersession_edge_rows(client, group_id=group_id, uuids=uuids)
+        return _resolve_superseded(rows), len(rows)
+    memo._check_org(group_id)
+
+    async def load(missing: list[str]) -> dict[str, tuple[dict[str, object], ...]]:
+        by_target: dict[str, list[dict[str, object]]] = {}
+        for row in await _supersession_edge_rows(client, group_id=group_id, uuids=missing):
+            target = _string_value(row.get("target_id"))
+            if target:
+                by_target.setdefault(target, []).append(row)
+        return {target: tuple(rows) for target, rows in by_target.items()}
+
+    edges_by_target = await memo.once("supersession_edges", list(uuids), load, missing=())
+    rows = [row for edges in edges_by_target.values() for row in edges]
+    return _resolve_superseded(rows), len(rows)
+
+
+async def _supersession_edge_rows(
+    client: Any,
+    *,
+    group_id: str,
+    uuids: Sequence[str],
+) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for batch_start in range(0, len(uuids), _SUPERSESSION_LOOKUP_BATCH_SIZE):
         batch = list(uuids[batch_start : batch_start + _SUPERSESSION_LOOKUP_BATCH_SIZE])
@@ -138,7 +171,7 @@ async def _superseded_candidate_uuids(
             if next_key > upper_key:
                 raise RuntimeError("supersession edge cursor advanced beyond its snapshot")
             after_key = next_key
-    return _resolve_superseded(rows), len(rows)
+    return rows
 
 
 def _supersession_edge_cursor(row: Mapping[str, object]) -> tuple[object, str, tuple[str, str]]:
@@ -214,19 +247,10 @@ def _edge_sort_key(value: object) -> str:
     return _string_value(value) or ""
 
 
-async def _available_edge_endpoints(
-    client: Any, group_id: str, candidates: Sequence[RetrievalCandidate], plan: RetrievalPlan | None
-) -> tuple[dict[str, tuple[str, str]], dict[str, RetrievalCandidate]]:
-    edge_ids = list(
-        dict.fromkeys(
-            candidate.id
-            for candidate in candidates
-            if candidate.kind == CandidateKind.EDGE or candidate.type in {"claim", "relationship"}
-        )
-    )
-    if not edge_ids:
-        return {}, {}
-    rows = []
+async def _edge_rows_by_uuid(
+    client: Any, group_id: str, edge_ids: list[str]
+) -> dict[str, dict[str, object]]:
+    rows: list[dict[str, object]] = []
     for offset in range(0, len(edge_ids), 512):
         rows.extend(
             await _execute_query_records(
@@ -236,16 +260,51 @@ async def _available_edge_endpoints(
                 ids=edge_ids[offset : offset + 512],
             )
         )
+    return {uuid: row for row in rows if (uuid := _string_value(row.get("uuid")))}
+
+
+async def _available_edge_endpoints(
+    client: Any,
+    group_id: str,
+    candidates: Sequence[RetrievalCandidate],
+    plan: RetrievalPlan | None,
+    *,
+    memo: GraphReadMemo | None = None,
+) -> tuple[dict[str, tuple[str, str]], dict[str, RetrievalCandidate]]:
+    if memo is None:
+        memo = GraphReadMemo(group_id)
+    edge_ids = list(
+        dict.fromkeys(
+            candidate.id
+            for candidate in candidates
+            if candidate.kind == CandidateKind.EDGE or candidate.type in {"claim", "relationship"}
+        )
+    )
+    if not edge_ids:
+        return {}, {}
+    source_visible = (
+        (lambda row: _source_candidate_allowed(row, plan)) if plan is not None else None
+    )
+    runtime = GraphRuntime(
+        client,
+        EntityManager(client, group_id=group_id),
+        RelationshipManager(client, group_id=group_id),
+    )
+    rows_by_uuid = await memo.once(
+        "edge_row",
+        edge_ids,
+        lambda missing: _edge_rows_by_uuid(client, group_id, missing),
+        missing=None,
+    )
+    rows = [row for row in rows_by_uuid.values() if row is not None]
     from sibyl_core.services.graph_records import relationship_from_surreal_row
 
     current_relationships = await available_graph_relationships(
         group_id,
         edge_ids,
-        runtime=GraphRuntime(
-            client,
-            EntityManager(client, group_id=group_id),
-            RelationshipManager(client, group_id=group_id),
-        ),
+        runtime=runtime,
+        source_visible=source_visible,
+        memo=memo,
     )
     rows = [
         row
@@ -271,14 +330,9 @@ async def _available_edge_endpoints(
     entities = await available_graph_entities(
         group_id,
         list({endpoint for pair in endpoints.values() for endpoint in pair}),
-        runtime=GraphRuntime(
-            client,
-            EntityManager(client, group_id=group_id),
-            RelationshipManager(client, group_id=group_id),
-        ),
-        source_visible=(lambda row: _source_candidate_allowed(row, plan))
-        if plan is not None
-        else None,
+        runtime=runtime,
+        source_visible=source_visible,
+        memo=memo,
     )
     allowed = set()
     if plan is not None:
@@ -310,8 +364,10 @@ async def _available_edge_endpoints(
                 current, plan=plan, requested_types=set(), facet=None
             ):
                 available_edges[identifier] = current
-    unavailable = await unavailable_publication_ids(
-        group_id, {key: candidate.metadata for key, candidate in available_edges.items()}
+    unavailable = await memo.unavailable_publication_ids(
+        group_id,
+        {key: candidate.metadata for key, candidate in available_edges.items()},
+        load=unavailable_publication_ids,
     )
     return endpoints, {
         key: candidate for key, candidate in available_edges.items() if key not in unavailable
@@ -324,6 +380,7 @@ async def _apply_supersession_gate(
     group_id: str,
     source_lists: Sequence[tuple[RetrievalSignal, list[RetrievalCandidate]]],
     plan: RetrievalPlan | None = None,
+    memo: GraphReadMemo | None = None,
 ) -> tuple[list[tuple[RetrievalSignal, list[RetrievalCandidate]]], dict[str, Any]]:
     """Drop rows a writer has already retired, before anything is fused.
 
@@ -335,37 +392,47 @@ async def _apply_supersession_gate(
     covers the reflection-promotion case, where the replacement exists and the
     edge is the only record of it. Because the successor carries neither
     signal, this is also what makes the newer row win whenever both match.
+
+    The capture-ancestry, publication-ledger and edge proofs answer different
+    questions about disjoint inputs, so they run together; the supersession
+    lookup waits for them because its id set is what survived. A memo shared
+    across the gate's passes settles each id once for the whole request.
     """
 
+    if memo is None:
+        memo = GraphReadMemo(group_id)
     source_rows = {
         candidate.id: candidate
         for _signal, candidates in source_lists
         for candidate in candidates
         if candidate.kind != CandidateKind.EDGE and candidate.type not in {"claim", "relationship"}
     }
-    available_sources = await available_capture_projection_rows(
-        group_id,
-        source_rows,
-        graph_client=client,
-        source_visible=(lambda row: _source_candidate_allowed(row, plan))
-        if plan is not None
-        else None,
-    )
-    unavailable_publications = await unavailable_publication_ids(
-        group_id,
-        {
-            candidate.id: candidate.metadata
-            for _signal, candidates in source_lists
-            for candidate in candidates
-            if candidate.kind != CandidateKind.EDGE
-            and candidate.type not in {"claim", "relationship"}
-        },
-    )
-    edge_endpoints, available_edges = await _available_edge_endpoints(
-        client,
-        group_id,
-        [candidate for _, candidates in source_lists for candidate in candidates],
-        plan,
+    (
+        available_sources,
+        unavailable_publications,
+        (edge_endpoints, available_edges),
+    ) = await asyncio.gather(
+        memo.available_capture_projection_rows(
+            group_id,
+            source_rows,
+            load=available_capture_projection_rows,
+            graph_client=client,
+            source_visible=(lambda row: _source_candidate_allowed(row, plan))
+            if plan is not None
+            else None,
+        ),
+        memo.unavailable_publication_ids(
+            group_id,
+            {candidate.id: candidate.metadata for candidate in source_rows.values()},
+            load=unavailable_publication_ids,
+        ),
+        _available_edge_endpoints(
+            client,
+            group_id,
+            [candidate for _, candidates in source_lists for candidate in candidates],
+            plan,
+            memo=memo,
+        ),
     )
     lifecycle_dropped = 0
     surviving: list[tuple[RetrievalSignal, list[RetrievalCandidate]]] = []
@@ -420,6 +487,7 @@ async def _apply_supersession_gate(
                 client,
                 group_id=group_id,
                 uuids=node_uuids,
+                memo=memo,
             )
         except Exception as exc:
             error_type = type(exc).__name__
