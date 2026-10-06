@@ -2108,7 +2108,7 @@ class TestSurrealContentHelpers:
         assert provider.input_kinds == ["document"]
         assert provider.texts == ["Title: First\n\nfirst body", "Title: Second\n\nsecond body"]
         query, params = fake_client.calls[0]
-        assert "BEGIN TRANSACTION" in query
+        assert query.strip().startswith("RETURN {"), "one block statement on every engine"
         assert "INSERT INTO raw_captures" in query
         assert len(params["rows"]) == 2
         assert [row["source_id"] for row in params["rows"]] == [

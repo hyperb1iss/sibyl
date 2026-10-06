@@ -40,8 +40,28 @@ def _raw_record(
     )
 
 
+_ONE_RESULT = {"result": [{"status": "OK", "result": [], "time": "0"}]}
+
+
+def _is_one_block_statement(query: str) -> bool:
+    """One RETURN block, no BEGIN/COMMIT: a single result on server and embedded.
+
+    The server answers a BEGIN/COMMIT block with one entry per statement and
+    the embedded engine collapses it, so only a single-statement shape reads
+    the same on both.
+    """
+    stripped = query.strip()
+    return (
+        stripped.startswith("RETURN {")
+        and stripped.endswith("};")
+        and "BEGIN" not in stripped
+        and "COMMIT" not in stripped
+    )
+
+
 def test_raw_memory_bulk_upsert_is_one_replayable_unit() -> None:
-    assert _can_replay_query(_RAW_MEMORY_BULK_UPSERT_QUERY) is True
+    assert _is_one_block_statement(_RAW_MEMORY_BULK_UPSERT_QUERY)
+    assert _can_replay_query(_RAW_MEMORY_BULK_UPSERT_QUERY, _ONE_RESULT) is True
 
 
 def test_raw_memory_bulk_upsert_with_derivations_is_one_replayable_unit() -> None:
@@ -50,9 +70,10 @@ def test_raw_memory_bulk_upsert_with_derivations_is_one_replayable_unit() -> Non
     )
     assert STORE_RAW_DERIVATIONS.strip() in with_derivations
     assert with_derivations.index(STORE_RAW_DERIVATIONS.strip()) < with_derivations.index(
-        "COMMIT TRANSACTION;"
+        _RAW_MEMORY_BULK_RETURN
     )
-    assert _can_replay_query(with_derivations) is True
+    assert _is_one_block_statement(with_derivations)
+    assert _can_replay_query(with_derivations, _ONE_RESULT) is True
 
 
 @pytest.mark.asyncio

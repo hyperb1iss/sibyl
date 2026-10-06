@@ -13,6 +13,8 @@ from sibyl_core.services.content_models import RawMemory, raw_memory_record
 from sibyl_core.services.content_raw_persistence import replace_raw_memory_records_bulk
 from sibyl_core.services.graph import EntityManager, SurrealGraphClient, prepare_graph_schema
 from sibyl_core.services.usage import (
+    _GRAPH_ENTITY_STAMP_QUERY,
+    _RAW_CAPTURE_STAMP_QUERY,
     MemoryUsageEvent,
     MemoryUsageItemKind,
     MemoryUsageSignal,
@@ -288,14 +290,31 @@ async def test_record_memory_usage_stamps_a_batch_with_one_write_per_store() -> 
     }
     assert all(stamp.retrieval_count == 1 for stamp in result.stamps)
 
-    content_statements = [query.lstrip().split(None, 1)[0] for query, _ in content_client.calls]
-    assert content_statements == ["INSERT", "RETURN", "BEGIN"], content_statements
+    content_statements = [
+        "insert"
+        if query.lstrip().startswith("INSERT")
+        else "aggregate"
+        if query.lstrip().startswith("RETURN $targets.map")
+        else "stamp"
+        for query, _ in content_client.calls
+    ]
+    assert content_statements == ["insert", "aggregate", "stamp"], content_statements
     raw_write = content_client.calls[2]
     assert [stamp["item_id"] for stamp in raw_write[1]["stamps"]] == raw_ids
     assert len(graph_client.calls) == 1
     assert [stamp["item_id"] for stamp in graph_client.calls[0][1]["stamps"]] == graph_ids
     for query, _ in [*content_client.calls, *graph_client.calls]:
         assert "revision" not in query
+
+
+def test_stamp_statements_are_single_block_statements() -> None:
+    """One result on every engine: the server answers BEGIN/COMMIT per statement."""
+    for query in (_RAW_CAPTURE_STAMP_QUERY, _GRAPH_ENTITY_STAMP_QUERY):
+        stripped = query.strip()
+        assert stripped.startswith("RETURN {")
+        assert stripped.endswith("};")
+        assert "BEGIN" not in stripped
+        assert "COMMIT" not in stripped
 
 
 @pytest.mark.asyncio

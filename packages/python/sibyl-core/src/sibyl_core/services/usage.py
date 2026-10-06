@@ -130,8 +130,14 @@ RETURN $targets.map(|$t| {
 # turned a read into a conflicting write on the hottest rows in the store.
 # The snapshot fold protects itself by never overwriting a key that exists at
 # write time, which covers a stamp landing in its window.
+#
+# Each stamp statement is one RETURN block rather than a BEGIN/COMMIT
+# transaction: a statement runs in its own transaction, and the response then
+# carries exactly one result on every engine. The server answers BEGIN/COMMIT
+# with one entry per statement while the embedded engine collapses it, so a
+# RETURN inside a transaction read the rows on one engine and NONE on the other.
 _RAW_CAPTURE_STAMP_QUERY = """
-BEGIN TRANSACTION;
+RETURN {
 FOR $stamp IN $stamps {
     UPDATE (SELECT VALUE id FROM raw_captures WHERE uuid = $stamp.item_id) SET
         last_recalled_at = IF last_recalled_at != NONE
@@ -160,11 +166,11 @@ FOR $stamp IN $stamps {
 RETURN $stamps.map(|$s| (SELECT uuid, organization_id, retrieval_count, citation_count,
     misled_count, last_recalled_at, last_used_at
     FROM raw_captures WHERE uuid = $s.item_id LIMIT 1)[0]);
-COMMIT TRANSACTION;
+};
 """
 
 _GRAPH_ENTITY_STAMP_QUERY = """
-BEGIN TRANSACTION;
+RETURN {
 FOR $stamp IN $stamps {
     UPDATE entity SET
         last_recalled_at = IF last_recalled_at != NONE
@@ -194,7 +200,7 @@ FOR $stamp IN $stamps {
 RETURN $stamps.map(|$s| (SELECT uuid, group_id, retrieval_count, citation_count,
     misled_count, last_recalled_at, last_used_at
     FROM entity WHERE uuid = $s.item_id LIMIT 1)[0]);
-COMMIT TRANSACTION;
+};
 """
 
 

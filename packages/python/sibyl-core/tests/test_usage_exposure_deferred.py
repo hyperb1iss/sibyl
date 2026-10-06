@@ -26,12 +26,12 @@ class _RecordingContentClient:
 
     async def execute_query(self, query: str, **params: Any) -> Any:
         self.calls.append((query, params))
-        statement = query.lstrip().split(None, 1)[0]
-        if statement == "INSERT":
+        kind = _statement_kind(query)
+        if kind == "insert":
             return list(params["rows"])
         if self.fail_stamps:
             raise RuntimeError("content store unavailable")
-        if statement == "RETURN":
+        if kind == "aggregate":
             return [
                 {
                     "item_kind": target["item_kind"],
@@ -44,7 +44,7 @@ class _RecordingContentClient:
                 }
                 for target in params["targets"]
             ]
-        if statement == "BEGIN":
+        if kind == "stamp":
             return [
                 {
                     "uuid": stamp["item_id"],
@@ -57,7 +57,23 @@ class _RecordingContentClient:
 
     @property
     def statements(self) -> list[str]:
-        return [query.lstrip().split(None, 1)[0] for query, _ in self.calls]
+        return [_statement_kind(query) for query, _ in self.calls]
+
+
+def _statement_kind(query: str) -> str:
+    """Classify a usage statement by what it does, not by its leading keyword.
+
+    Every stamp statement is a RETURN block now (one result on every engine),
+    so the first word no longer tells the aggregate read from the stamp write.
+    """
+    stripped = query.lstrip()
+    if stripped.startswith("INSERT INTO memory_usage_events"):
+        return "insert"
+    if stripped.startswith("RETURN $targets.map"):
+        return "aggregate"
+    if "FOR $stamp IN $stamps" in stripped:
+        return "stamp"
+    raise AssertionError(f"unexpected usage statement: {query[:60]}")
 
 
 def _raw_result(index: int) -> SearchResult:
@@ -91,7 +107,7 @@ async def test_recall_pays_one_write_and_the_stamp_runs_after_the_response() -> 
             project_id=None,
             source_surface="search",
         )
-        assert content_client.statements == ["INSERT"], "the request path writes once"
+        assert content_client.statements == ["insert"], "the request path writes once"
         assert len(content_client.calls[0][1]["rows"]) == 5
         assert summary["stamped_count"] == 5
         assert summary["coverage_complete"] is True
@@ -99,7 +115,7 @@ async def test_recall_pays_one_write_and_the_stamp_runs_after_the_response() -> 
 
         assert await drain_pending_exposure_stamps() == 1
 
-    assert content_client.statements == ["INSERT", "RETURN", "BEGIN"]
+    assert content_client.statements == ["insert", "aggregate", "stamp"]
     aggregate_targets = content_client.calls[1][1]["targets"]
     assert [target["item_id"] for target in aggregate_targets] == [f"raw-{i}" for i in range(5)]
     stamp_query, stamp_params = content_client.calls[2]
@@ -133,7 +149,7 @@ async def test_a_failed_stamp_never_fails_the_recall() -> None:
 
         assert await drain_pending_exposure_stamps() == 1
 
-    assert content_client.statements == ["INSERT", "RETURN"], "the stamp failed after the insert"
+    assert content_client.statements == ["insert", "aggregate"], "the stamp failed after the insert"
     assert all(result.metadata["usage_exposure"]["status"] == "stamped" for result in results)
 
 
@@ -216,7 +232,7 @@ async def test_graph_targets_share_the_single_event_insert() -> None:
             project_id=None,
             source_surface="search",
         )
-        assert content_client.statements == ["INSERT"]
+        assert content_client.statements == ["insert"]
         kinds = [row["item_kind"] for row in content_client.calls[0][1]["rows"]]
         assert kinds == [
             MemoryUsageItemKind.RAW_CAPTURE.value,
@@ -225,7 +241,7 @@ async def test_graph_targets_share_the_single_event_insert() -> None:
         assert summary["stamped_count"] == 2
         assert await drain_pending_exposure_stamps() == 1
 
-    assert content_client.statements == ["INSERT", "RETURN", "BEGIN"]
+    assert content_client.statements == ["insert", "aggregate", "stamp"]
     graph_client.execute_query.assert_awaited_once()
     graph_query = graph_client.execute_query.await_args.args[0]
     assert "UPDATE entity SET" in graph_query
@@ -253,7 +269,7 @@ async def test_an_embedded_store_stamps_inline_so_nothing_is_pending_at_exit() -
             project_id=None,
             source_surface="search",
         )
-        assert content_client.statements == ["INSERT", "RETURN", "BEGIN"]
+        assert content_client.statements == ["insert", "aggregate", "stamp"]
         assert await drain_pending_exposure_stamps() == 0
 
     assert summary["stamped_count"] == 3

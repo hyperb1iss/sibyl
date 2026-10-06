@@ -59,7 +59,7 @@ log = structlog.get_logger()
 _RAW_MEMORY_EMBEDDING_AUTO = object()
 
 _RAW_MEMORY_BULK_UPSERT_QUERY = """
-BEGIN TRANSACTION;
+RETURN {
 LET $ids = $rows.map(|$row| $row.uuid);
 LET $organizations = object::from_entries($rows.map(|$row| [$row.uuid, $row.organization_id]));
 LET $foreign = (SELECT VALUE uuid FROM raw_captures WHERE uuid IN $ids
@@ -111,16 +111,20 @@ LET $saved = (INSERT INTO raw_captures $rows ON DUPLICATE KEY UPDATE
     misled_count = $input.misled_count ?? misled_count ?? 0,
     created_at = $input.created_at RETURN AFTER);
 RETURN $saved;
-COMMIT TRANSACTION;
+};
 """
-# RETURN sits inside the transaction on purpose. A RETURN after COMMIT made
-# the statement list end on something other than COMMIT, which the dedicated
-# client reads as "not one atomic unit" and refuses to replay: a commit that
-# lost a race on raw_captures (one table for every organization, with two
-# FULLTEXT indexes and an HNSW index rewritten by each insert) then surfaced
-# as a failed remember instead of a retried one. Inside the transaction the
-# RETURN collapses the response to that single value, so the whole write is
-# replayable and the saved rows still come back as the only statement result.
+# The whole write is one RETURN block statement, like save_raw_memory below,
+# rather than a BEGIN/COMMIT transaction. A statement runs in its own
+# transaction, so the guards, the insert and the derivation splice are still
+# atomic, and the response carries exactly one result on every engine: the
+# server (3.x) answers a BEGIN/COMMIT block with one entry per statement,
+# while the embedded engine the unit tests run collapses it to one, so a
+# RETURN placed inside the transaction read the saved rows on one engine and
+# COMMIT's empty result on the other. One statement is also what the
+# dedicated client replays after a lost commit race on raw_captures (one
+# table for every organization, with two FULLTEXT indexes and an HNSW index
+# rewritten by each insert); a trailing RETURN after COMMIT had made the
+# write non-replayable and surfaced the race as a failed remember.
 _RAW_MEMORY_BULK_RETURN = "RETURN $saved;"
 
 _RAW_PROMOTION_VISIBLE_SCOPES = (
