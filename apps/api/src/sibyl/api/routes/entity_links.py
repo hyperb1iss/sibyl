@@ -5,11 +5,13 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from sibyl.api.errors import entity_locked
 from sibyl.api.routes import entity_contracts as contracts, entity_policy as policy
 from sibyl.api.schemas.entities import EntityLinksRequest, EntityLinksResponse
 from sibyl.auth.authorization import verify_entity_project_access
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
+from sibyl.locks import target_lock
 from sibyl.persistence.content_runtime import get_content_read_session_dependency
 from sibyl_core.auth import AuthOrganization, ProjectRole
 from sibyl_core.models.entities import EntityType, Relationship, RelationshipType
@@ -36,6 +38,21 @@ async def add_entity_links(
     content_session: object = Depends(get_content_read_session_dependency),
 ) -> EntityLinksResponse:
     """Fill missing links without replacing stored content or existing topology."""
+    # Filing a task under an epic holds the epic's lock from loading the
+    # targets through the write, so a delete of that epic cannot land between.
+    async with target_lock(str(org.id), links.epic_id) as epic_token:
+        if links.epic_id and not epic_token:
+            raise entity_locked()
+        return await _add_entity_links(entity_id, links, org, ctx, content_session)
+
+
+async def _add_entity_links(
+    entity_id: str,
+    links: EntityLinksRequest,
+    org: AuthOrganization,
+    ctx: AuthContext,
+    content_session: object,
+) -> EntityLinksResponse:
     group_id = str(org.id)
     runtime = await policy.get_entity_graph_runtime(group_id)
     source = await load_entity_link_snapshot(runtime.client, entity_id, group_id=group_id)

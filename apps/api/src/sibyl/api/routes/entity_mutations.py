@@ -179,6 +179,112 @@ def _resolved_update_structure(
     return resolved
 
 
+async def _create_with_structure(
+    entity: EntityCreate,
+    *,
+    group_id: str,
+    content: str,
+    merged_metadata: dict[str, Any],
+    project: Any,
+    epic: Any,
+    priority: Any,
+    assignees: Any,
+    technologies: Any,
+    depends_on: Any,
+    is_sync: bool,
+    protect_ownership: bool,
+    declared_memory_scope: Any,
+    authorized_scope_key: Any,
+    authorized_principal_id: Any,
+    reader_scope: Any,
+) -> Any:
+    """Write an entity; a synchronous write filed under an epic holds the epic's lock.
+
+    The lock is the one a delete holds through its checks, and the epic is
+    checked again under it, so a delete of that epic cannot land in between
+    and leave the new row pointing at nothing. An asynchronous write runs in a
+    job after the response and is not covered.
+    """
+    from sibyl.locks import target_lock
+
+    async with target_lock(group_id, epic if is_sync else None) as epic_token:
+        if epic and is_sync:
+            if not epic_token:
+                raise entity_locked()
+            runtime = await policy.get_entity_graph_runtime(group_id)
+            await _existing_entity_or_404(runtime.entity_manager, epic)
+        return await _write_with_structure(
+            entity,
+            content=content,
+            merged_metadata=merged_metadata,
+            project=project,
+            epic=epic,
+            priority=priority,
+            assignees=assignees,
+            technologies=technologies,
+            depends_on=depends_on,
+            is_sync=is_sync,
+            protect_ownership=protect_ownership,
+            declared_memory_scope=declared_memory_scope,
+            authorized_scope_key=authorized_scope_key,
+            authorized_principal_id=authorized_principal_id,
+            reader_scope=reader_scope,
+        )
+
+
+async def _write_with_structure(
+    entity: EntityCreate,
+    *,
+    content: str,
+    merged_metadata: dict[str, Any],
+    project: Any,
+    epic: Any,
+    priority: Any,
+    assignees: Any,
+    technologies: Any,
+    depends_on: Any,
+    is_sync: bool,
+    protect_ownership: bool,
+    declared_memory_scope: Any,
+    authorized_scope_key: Any,
+    authorized_principal_id: Any,
+    reader_scope: Any,
+) -> Any:
+    return await _add_with_structure(
+        title=entity.name,
+        content=content,
+        entity_type=entity.entity_type.value,
+        category=entity.category,
+        languages=entity.languages,
+        tags=entity.tags,
+        related_to=entity.related_to,
+        metadata=merged_metadata,
+        # Task-specific fields
+        project=project,
+        epic=epic,
+        priority=priority,
+        assignees=assignees,
+        technologies=technologies,
+        depends_on=depends_on,
+        # Sync for projects, async for everything else
+        sync=is_sync,
+        protect_ownership=protect_ownership,
+        skip_conflicts=entity.skip_conflicts,
+        generate_embeddings=not entity.defer_embeddings,
+        memory_scope=str(declared_memory_scope) if declared_memory_scope is not None else None,
+        scope_key=authorized_scope_key,
+        principal_id=authorized_principal_id,
+        accessible_projects=reader_scope.accessible_projects if reader_scope else None,
+        allowed_memory_scope_keys=reader_scope.memory_grants if reader_scope else None,
+        retrieval_keys=entity.retrieval_keys,
+        spans=[span.model_dump(exclude_none=True) for span in entity.spans]
+        if entity.spans is not None
+        else None,
+        atomic=entity.atomic,
+        probes=list(entity.probes) if entity.probes is not None else None,
+    )
+
+
 @router.post(
     "",
     response_model=EntityResponse,
@@ -294,38 +400,23 @@ async def create_entity(
     # would drop the rehearsal receipt the caller asked for.
     is_sync = entity.entity_type.value == "project" or sync or bool(entity.probes)
 
-    result = await _add_with_structure(
-        title=entity.name,
+    result = await _create_with_structure(
+        entity,
+        group_id=group_id,
         content=content,
-        entity_type=entity.entity_type.value,
-        category=entity.category,
-        languages=entity.languages,
-        tags=entity.tags,
-        related_to=entity.related_to,
-        metadata=merged_metadata,
-        # Task-specific fields
+        merged_metadata=merged_metadata,
         project=project,
         epic=epic,
         priority=priority,
         assignees=assignees,
         technologies=technologies,
         depends_on=depends_on,
-        # Sync for projects, async for everything else
-        sync=is_sync,
+        is_sync=is_sync,
         protect_ownership=protect_ownership is True,
-        skip_conflicts=entity.skip_conflicts,
-        generate_embeddings=not entity.defer_embeddings,
-        memory_scope=str(declared_memory_scope) if declared_memory_scope is not None else None,
-        scope_key=authorized_scope_key,
-        principal_id=authorized_principal_id,
-        accessible_projects=reader_scope.accessible_projects if reader_scope else None,
-        allowed_memory_scope_keys=reader_scope.memory_grants if reader_scope else None,
-        retrieval_keys=entity.retrieval_keys,
-        spans=[span.model_dump(exclude_none=True) for span in entity.spans]
-        if entity.spans is not None
-        else None,
-        atomic=entity.atomic,
-        probes=list(entity.probes) if entity.probes is not None else None,
+        declared_memory_scope=declared_memory_scope,
+        authorized_scope_key=authorized_scope_key,
+        authorized_principal_id=authorized_principal_id,
+        reader_scope=reader_scope,
     )
 
     if not result.success or not result.id:
@@ -771,7 +862,11 @@ async def _shared_reason(runtime: Any, existing: Any) -> str | None:
     for row in await runtime.entity_manager.get_many(sorted(linking_ids)):
         if row.entity_type in _UNSHARING_TYPES or _entity_category(row) in _DERIVED_CATEGORIES:
             continue
-        if origin is not None and _entity_author(row) == author and _migration_origin(row) == origin:
+        if (
+            origin is not None
+            and _entity_author(row) == author
+            and _migration_origin(row) == origin
+        ):
             continue
         return "a row outside its migration links to it"
     return None
