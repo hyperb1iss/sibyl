@@ -34,22 +34,34 @@ class _FakeContentClient:
             for row in cast("list[dict[str, object]]", params["rows"]):
                 self.events.setdefault(str(row["uuid"]), row)
             return list(self.events.values())
-        if "UPDATE raw_captures SET" in query:
-            stamp = self._stamp_for_item(
-                organization_id=str(params["organization_id"]),
-                item_kind=MemoryUsageItemKind.RAW_CAPTURE.value,
-                item_id=str(params["item_id"]),
-            )
-            self.raw_stamps[str(params["item_id"])] = stamp
-            return [stamp]
-        if "FROM memory_usage_events" in query:
+        if query.lstrip().startswith("RETURN $targets.map"):
             return [
-                row
-                for row in self.events.values()
-                if row["organization_id"] == params["organization_id"]
-                and row["item_kind"] == params["item_kind"]
-                and row["item_id"] == params["item_id"]
+                {
+                    "item_kind": target["item_kind"],
+                    "item_id": target["item_id"],
+                    **self._stamp_for_item(
+                        organization_id=str(target["organization_id"]),
+                        item_kind=str(target["item_kind"]),
+                        item_id=str(target["item_id"]),
+                    ),
+                }
+                for target in cast("list[dict[str, object]]", params["targets"])
             ]
+        if "UPDATE (SELECT VALUE id FROM raw_captures" in query:
+            rows = []
+            for stamp in cast("list[dict[str, object]]", params["stamps"]):
+                item_id = str(stamp["item_id"])
+                previous = self.raw_stamps.get(item_id, {})
+                merged = _merge_stamp(previous, stamp)
+                self.raw_stamps[item_id] = merged
+                rows.append(
+                    {
+                        "uuid": item_id,
+                        "organization_id": params["organization_id"],
+                        **merged,
+                    }
+                )
+            return rows
         raise AssertionError(f"unexpected content query: {query}")
 
     def _stamp_for_item(
@@ -92,36 +104,48 @@ class _FakeContentClient:
 class _FakeGraphClient:
     def __init__(self) -> None:
         self.entity_stamps: dict[str, dict[str, object]] = {}
+        self.calls: list[tuple[str, dict[str, object]]] = []
 
     async def execute_query(self, query: str, **params: object) -> object:
+        self.calls.append((query, params))
         if "UPDATE entity SET" not in query:
             raise AssertionError(f"unexpected graph query: {query}")
-        item_id = str(params["item_id"])
-        previous = self.entity_stamps.get(item_id, {})
-        stamp = {
-            "retrieval_count": max(
-                int(previous.get("retrieval_count") or 0),
-                int(params["retrieval_count"] or 0),
-            ),
-            "citation_count": max(
-                int(previous.get("citation_count") or 0),
-                int(params["citation_count"] or 0),
-            ),
-            "misled_count": max(
-                int(previous.get("misled_count") or 0),
-                int(params["misled_count"] or 0),
-            ),
-            "last_recalled_at": _max_datetime(
-                coerce_datetime(previous.get("last_recalled_at")),
-                coerce_datetime(params["last_recalled_at"]),
-            ),
-            "last_used_at": _max_datetime(
-                coerce_datetime(previous.get("last_used_at")),
-                coerce_datetime(params["last_used_at"]),
-            ),
-        }
-        self.entity_stamps[item_id] = stamp
-        return [stamp]
+        rows = []
+        for stamp in cast("list[dict[str, object]]", params["stamps"]):
+            item_id = str(stamp["item_id"])
+            merged = _merge_stamp(self.entity_stamps.get(item_id, {}), stamp)
+            self.entity_stamps[item_id] = merged
+            rows.append({"uuid": item_id, "group_id": params["organization_id"], **merged})
+        return rows
+
+
+def _merge_stamp(
+    previous: dict[str, object],
+    stamp: dict[str, object],
+) -> dict[str, object]:
+    """Mirror the monotonic merge the stamp statements perform."""
+    return {
+        "retrieval_count": max(
+            int(previous.get("retrieval_count") or 0),
+            int(stamp["retrieval_count"] or 0),
+        ),
+        "citation_count": max(
+            int(previous.get("citation_count") or 0),
+            int(stamp["citation_count"] or 0),
+        ),
+        "misled_count": max(
+            int(previous.get("misled_count") or 0),
+            int(stamp["misled_count"] or 0),
+        ),
+        "last_recalled_at": _max_datetime(
+            coerce_datetime(previous.get("last_recalled_at")),
+            coerce_datetime(stamp["last_recalled_at"]),
+        ),
+        "last_used_at": _max_datetime(
+            coerce_datetime(previous.get("last_used_at")),
+            coerce_datetime(stamp["last_used_at"]),
+        ),
+    }
 
 
 def _max_datetime(current: datetime | None, candidate: datetime | None) -> datetime | None:
@@ -208,6 +232,70 @@ async def test_record_memory_usage_recomputes_stamps_from_unique_events() -> Non
     assert graph_stamp["citation_count"] == 0
     assert graph_stamp["misled_count"] == 0
     assert graph_stamp["last_recalled_at"] == (base + timedelta(minutes=1)).replace(tzinfo=None)
+
+
+@pytest.mark.asyncio
+async def test_record_memory_usage_stamps_a_batch_with_one_write_per_store() -> None:
+    """K returned rows cost one event insert, one aggregate read, one write per store.
+
+    The stamp statements leave revision alone: a stamp is telemetry derived
+    from the events table, recomputed monotonically on every stamp, so it
+    has nothing to announce to a writer's revision fence.
+    """
+    content_client = _FakeContentClient()
+    graph_client = _FakeGraphClient()
+    base = datetime(2026, 10, 6, 12, 0, tzinfo=UTC)
+    raw_ids = ["raw-a", "raw-b", "raw-c"]
+    graph_ids = ["entity-a", "entity-b"]
+
+    result = await record_memory_usage(
+        content_client,
+        [
+            *(
+                MemoryUsageEvent(
+                    organization_id="org-a",
+                    session_key="session-a",
+                    message_key="message-a",
+                    source_surface="search",
+                    item_kind=MemoryUsageItemKind.RAW_CAPTURE,
+                    item_id=item_id,
+                    signal_type=MemoryUsageSignal.EXPOSURE,
+                    event_at=base,
+                )
+                for item_id in raw_ids
+            ),
+            *(
+                MemoryUsageEvent(
+                    organization_id="org-a",
+                    session_key="session-a",
+                    message_key="message-a",
+                    source_surface="search",
+                    item_kind=MemoryUsageItemKind.GRAPH_ENTITY,
+                    item_id=item_id,
+                    signal_type=MemoryUsageSignal.EXPOSURE,
+                    event_at=base,
+                )
+                for item_id in graph_ids
+            ),
+        ],
+        graph_client=graph_client,
+    )
+
+    assert result.events_processed == 5
+    assert {(stamp.item_kind, stamp.item_id) for stamp in result.stamps} == {
+        *((MemoryUsageItemKind.RAW_CAPTURE, item_id) for item_id in raw_ids),
+        *((MemoryUsageItemKind.GRAPH_ENTITY, item_id) for item_id in graph_ids),
+    }
+    assert all(stamp.retrieval_count == 1 for stamp in result.stamps)
+
+    content_statements = [query.lstrip().split(None, 1)[0] for query, _ in content_client.calls]
+    assert content_statements == ["INSERT", "RETURN", "BEGIN"], content_statements
+    raw_write = content_client.calls[2]
+    assert [stamp["item_id"] for stamp in raw_write[1]["stamps"]] == raw_ids
+    assert len(graph_client.calls) == 1
+    assert [stamp["item_id"] for stamp in graph_client.calls[0][1]["stamps"]] == graph_ids
+    for query, _ in [*content_client.calls, *graph_client.calls]:
+        assert "revision" not in query
 
 
 @pytest.mark.asyncio
@@ -633,13 +721,15 @@ async def test_raw_capture_stamp_update_is_monotonic() -> None:
 
 
 @pytest.mark.asyncio
-async def test_graph_entity_stamp_announces_itself_with_a_revision_bump() -> None:
-    """A stamp is a write, and every fence downstream reads revision to see it.
+async def test_graph_entity_stamp_leaves_revision_alone() -> None:
+    """A stamp is telemetry, so it does not invalidate anyone's revision fence.
 
-    The snapshot fold and any caller holding expected_revision decide whether
-    their own stale read is still good by comparing the revision they saw. A
-    stamp that changed the recall fields without touching revision made both
-    of them accept a row that had moved on.
+    Bumping revision on every recall turned reads into conflicting writes on
+    the most popular rows and failed the expected_revision of whoever was
+    editing one. The recall fields are derived from the events table and
+    recomputed monotonically on every stamp, so a stale copy carried back by
+    a writer is repaired by the next stamp instead; the snapshot fold covers
+    its own window by never overwriting a key that exists when it writes.
     """
     organization_id = "org-usage-revision"
     graph_client = SurrealGraphClient(group_id=organization_id, url="memory://")
@@ -673,18 +763,28 @@ async def test_graph_entity_stamp_announces_itself_with_a_revision_bump() -> Non
         )
 
         after = await _entity_revision(graph_client, organization_id, "entity-revision")
-        assert after == before + 1
+        assert after == before
+        rows = normalize_records(
+            await graph_client.execute_query(
+                """
+                SELECT retrieval_count FROM entity
+                WHERE group_id = $organization_id AND uuid = "entity-revision" LIMIT 1;
+                """,
+                organization_id=organization_id,
+            )
+        )
+        assert rows[0]["retrieval_count"] == 7
     finally:
         await graph_client.close()
 
 
 @pytest.mark.asyncio
-async def test_raw_capture_stamp_announces_itself_with_a_revision_bump() -> None:
+async def test_raw_capture_stamp_leaves_revision_alone() -> None:
     """Same contract on the raw side, where expected_revision guards a full save.
 
-    A raw memory is saved by rewriting its whole metadata bag, so a stamp that
-    landed unannounced between the caller's read and that write was erased by
-    it, with the caller's revision check none the wiser.
+    A full save carries the counters it read; the next stamp raises them back
+    to the event-derived values, so the recall is never lost, while the save
+    itself is no longer refused because someone recalled the row meanwhile.
     """
     organization_id = "org-usage-raw-revision"
     content_client = SurrealContentClient(url="memory://")
@@ -740,7 +840,7 @@ async def test_raw_capture_stamp_announces_itself_with_a_revision_bump() -> None
             )
         )
         assert rows[0]["retrieval_count"] == 1
-        assert rows[0]["revision"] == 2
+        assert rows[0]["revision"] == 1
     finally:
         await content_client.close()
 

@@ -53,6 +53,7 @@ from sibyl_core.tools.responses import (
     SearchResponse,
     SearchResult,
 )
+from sibyl_core.tools.usage_exposure import drain_pending_exposure_stamps
 from tests.test_reflection_identity import runtime as _synthesis_runtime
 
 synthesis_runtime = _synthesis_runtime
@@ -60,6 +61,23 @@ synthesis_runtime = _synthesis_runtime
 # =============================================================================
 # Mock Fixtures and Helpers
 # =============================================================================
+
+
+def _fake_record_memory_usage_events(recorded_events: list[Any]) -> Any:
+    """Stand in for the event insert: remember the events, return their rows."""
+
+    async def record(content_client: object, events: list[Any]) -> tuple[dict[str, Any], ...]:
+        recorded_events.extend(events)
+        return tuple(
+            {
+                "organization_id": event.organization_id,
+                "item_kind": str(event.item_kind),
+                "item_id": event.item_id,
+            }
+            for event in events
+        )
+
+    return record
 
 
 @dataclass
@@ -1792,28 +1810,7 @@ class TestSearchTool:
         mock_entity_manager = AsyncMock()
         mock_entity_manager.list_by_type = AsyncMock(return_value=[pattern])
         recorded_events: list[Any] = []
-
-        async def fake_record_memory_usage(
-            content_client: object,
-            events: list[Any],
-            *,
-            graph_client: object | None = None,
-        ) -> MemoryUsageWriteResult:
-            recorded_events.extend(events)
-            return MemoryUsageWriteResult(
-                events_processed=len(events),
-                stamps=tuple(
-                    MemoryUsageStamp(
-                        item_kind=MemoryUsageItemKind(str(event.item_kind)),
-                        item_id=event.item_id,
-                        retrieval_count=1,
-                        citation_count=0,
-                        last_recalled_at=datetime.now(UTC),
-                        last_used_at=None,
-                    )
-                    for event in events
-                ),
-            )
+        stamp_memory_usage = AsyncMock(return_value=())
 
         with (
             patch(
@@ -1823,9 +1820,10 @@ class TestSearchTool:
             patch("sibyl_core.tools.usage_exposure.get_shared_surreal_content_client", AsyncMock()),
             patch("sibyl_core.tools.usage_exposure.get_surreal_graph_client", AsyncMock()),
             patch(
-                "sibyl_core.tools.usage_exposure.record_memory_usage",
-                AsyncMock(side_effect=fake_record_memory_usage),
+                "sibyl_core.tools.usage_exposure.record_memory_usage_events",
+                AsyncMock(side_effect=_fake_record_memory_usage_events(recorded_events)),
             ),
+            patch("sibyl_core.tools.usage_exposure.stamp_memory_usage", stamp_memory_usage),
         ):
             response = await search(
                 query="",
@@ -1836,6 +1834,7 @@ class TestSearchTool:
                 include_raw_memory=False,
                 limit=1,
             )
+            assert await drain_pending_exposure_stamps() == 1
 
         summary = response.filters["usage_exposure"]
         assert summary["source_surface"] == "search"
@@ -1846,6 +1845,10 @@ class TestSearchTool:
         assert response.results[0].metadata["cite_id"] == "pattern_exposed"
         assert recorded_events[0].item_kind == MemoryUsageItemKind.GRAPH_ENTITY
         assert recorded_events[0].item_id == "pattern_exposed"
+        stamp_memory_usage.assert_awaited_once()
+        assert [target.item_id for target in stamp_memory_usage.await_args.args[1]] == [
+            "pattern_exposed"
+        ]
 
     @pytest.mark.asyncio
     async def test_search_exposure_accounts_for_document_exclusions(self) -> None:
@@ -1905,29 +1908,7 @@ class TestSearchTool:
             ),
         ]
         recorded_events: list[Any] = []
-
-        async def fake_record_memory_usage(
-            content_client: object,
-            events: list[Any],
-            *,
-            graph_client: object | None = None,
-        ) -> MemoryUsageWriteResult:
-            assert graph_client is None
-            recorded_events.extend(events)
-            return MemoryUsageWriteResult(
-                events_processed=len(events),
-                stamps=tuple(
-                    MemoryUsageStamp(
-                        item_kind=MemoryUsageItemKind(str(event.item_kind)),
-                        item_id=event.item_id,
-                        retrieval_count=1,
-                        citation_count=0,
-                        last_recalled_at=datetime.now(UTC),
-                        last_used_at=None,
-                    )
-                    for event in events
-                ),
-            )
+        stamp_memory_usage = AsyncMock(return_value=())
 
         with (
             patch("sibyl_core.tools.usage_exposure.get_shared_surreal_content_client", AsyncMock()),
@@ -1936,9 +1917,10 @@ class TestSearchTool:
                 AsyncMock(side_effect=RuntimeError("graph down")),
             ),
             patch(
-                "sibyl_core.tools.usage_exposure.record_memory_usage",
-                AsyncMock(side_effect=fake_record_memory_usage),
+                "sibyl_core.tools.usage_exposure.record_memory_usage_events",
+                AsyncMock(side_effect=_fake_record_memory_usage_events(recorded_events)),
             ),
+            patch("sibyl_core.tools.usage_exposure.stamp_memory_usage", stamp_memory_usage),
         ):
             summary = await annotate_search_result_exposures(
                 results,
@@ -1946,13 +1928,15 @@ class TestSearchTool:
                 principal_id="user-123",
                 project_id="project-123",
             )
+            assert await drain_pending_exposure_stamps() == 1
 
         assert summary["returned_count"] == 2
         assert summary["stamped_count"] == 1
         assert summary["excluded_count"] == 1
         assert summary["coverage_complete"] is True
+        assert [event.item_id for event in recorded_events] == ["raw-1"]
         assert recorded_events[0].item_kind == MemoryUsageItemKind.RAW_CAPTURE
-        assert recorded_events[0].item_id == "raw-1"
+        assert stamp_memory_usage.await_args.kwargs["graph_client"] is None
         assert results[0].metadata["usage_exposure"]["status"] == "stamped"
         assert results[1].metadata["usage_exposure"]["status"] == "excluded"
         assert results[1].metadata["usage_exposure"]["reason"] == "recording_failed"

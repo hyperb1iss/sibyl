@@ -47,6 +47,15 @@ class MemoryUsageEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class MemoryUsageTarget:
+    """One stamped row: the organization it lives in, its kind, and its id."""
+
+    organization_id: str
+    item_kind: MemoryUsageItemKind
+    item_id: str
+
+
+@dataclass(frozen=True, slots=True)
 class MemoryUsageStamp:
     item_kind: MemoryUsageItemKind
     item_id: str
@@ -80,121 +89,185 @@ INSERT INTO memory_usage_events $rows ON DUPLICATE KEY UPDATE
     created_at = created_at;
 """
 
+# One statement reads the aggregates for every target. Each lookup is an
+# equality probe on idx_memory_usage_events_item (organization, kind, item,
+# signal, event_at), so the cost is the matched events, not the table. The
+# closure body may reference nothing but its own argument on at least one
+# engine, so the organization travels inside each target.
+_USAGE_AGGREGATES_QUERY = """
+RETURN $targets.map(|$t| {
+    item_kind: $t.item_kind,
+    item_id: $t.item_id,
+    retrieval_count: (SELECT count() AS total FROM memory_usage_events
+        WHERE organization_id = $t.organization_id AND item_kind = $t.item_kind
+            AND item_id = $t.item_id AND signal_type = "exposure"
+        GROUP ALL)[0].total ?? 0,
+    citation_count: (SELECT count() AS total FROM memory_usage_events
+        WHERE organization_id = $t.organization_id AND item_kind = $t.item_kind
+            AND item_id = $t.item_id AND signal_type = "citation"
+        GROUP ALL)[0].total ?? 0,
+    misled_count: (SELECT count() AS total FROM memory_usage_events
+        WHERE organization_id = $t.organization_id AND item_kind = $t.item_kind
+            AND item_id = $t.item_id AND signal_type = "misled"
+        GROUP ALL)[0].total ?? 0,
+    last_recalled_at: (SELECT VALUE event_at FROM memory_usage_events
+        WHERE organization_id = $t.organization_id AND item_kind = $t.item_kind
+            AND item_id = $t.item_id AND signal_type = "exposure"
+        ORDER BY event_at DESC LIMIT 1)[0],
+    last_used_at: (SELECT VALUE event_at FROM memory_usage_events
+        WHERE organization_id = $t.organization_id AND item_kind = $t.item_kind
+            AND item_id = $t.item_id AND signal_type = "citation"
+        ORDER BY event_at DESC LIMIT 1)[0]
+});
+"""
+
+# A stamp is telemetry, not an edit, so it leaves revision alone. The counts
+# and timestamps it writes are derived from the append-only events table and
+# recomputed monotonically (max) on every stamp, so a writer that carries a
+# stale copy back onto the row is corrected by the next stamp rather than
+# fenced out by this one. Bumping revision here made every recall invalidate
+# the expected_revision of whoever was editing the same popular row, and
+# turned a read into a conflicting write on the hottest rows in the store.
+# The snapshot fold protects itself by never overwriting a key that exists at
+# write time, which covers a stamp landing in its window.
 _RAW_CAPTURE_STAMP_QUERY = """
 BEGIN TRANSACTION;
-LET $exposure_events = (
-    SELECT event_at
-    FROM memory_usage_events
+FOR $stamp IN $stamps {
+    UPDATE (SELECT VALUE id FROM raw_captures WHERE uuid = $stamp.item_id) SET
+        last_recalled_at = IF last_recalled_at != NONE
+            AND ($stamp.last_recalled_at = NONE
+                OR last_recalled_at > $stamp.last_recalled_at)
+            THEN last_recalled_at ELSE $stamp.last_recalled_at END,
+        last_used_at = IF last_used_at != NONE
+            AND ($stamp.last_used_at = NONE OR last_used_at > $stamp.last_used_at)
+            THEN last_used_at ELSE $stamp.last_used_at END,
+        retrieval_count = math::max([retrieval_count ?? 0, $stamp.retrieval_count]),
+        citation_count = math::max([citation_count ?? 0, $stamp.citation_count]),
+        misled_count = math::max([misled_count ?? 0, $stamp.misled_count]),
+        metadata.last_recalled_at = IF last_recalled_at != NONE
+            AND ($stamp.last_recalled_at = NONE
+                OR last_recalled_at > $stamp.last_recalled_at)
+            THEN last_recalled_at ELSE $stamp.last_recalled_at END,
+        metadata.last_used_at = IF last_used_at != NONE
+            AND ($stamp.last_used_at = NONE OR last_used_at > $stamp.last_used_at)
+            THEN last_used_at ELSE $stamp.last_used_at END,
+        metadata.retrieval_count = math::max([retrieval_count ?? 0, $stamp.retrieval_count]),
+        metadata.citation_count = math::max([citation_count ?? 0, $stamp.citation_count]),
+        metadata.misled_count = math::max([misled_count ?? 0, $stamp.misled_count])
     WHERE organization_id = $organization_id
-        AND item_kind = "raw_capture"
-        AND item_id = $item_id
-        AND signal_type = "exposure"
-);
-LET $citation_events = (
-    SELECT event_at
-    FROM memory_usage_events
-    WHERE organization_id = $organization_id
-        AND item_kind = "raw_capture"
-        AND item_id = $item_id
-        AND signal_type = "citation"
-);
-LET $misled_events = (
-    SELECT event_at
-    FROM memory_usage_events
-    WHERE organization_id = $organization_id
-        AND item_kind = "raw_capture"
-        AND item_id = $item_id
-        AND signal_type = "misled"
-);
-LET $last_recalled_at = (
-    SELECT VALUE event_at
-    FROM memory_usage_events
-    WHERE organization_id = $organization_id
-        AND item_kind = "raw_capture"
-        AND item_id = $item_id
-        AND signal_type = "exposure"
-    ORDER BY event_at DESC
-    LIMIT 1
-)[0];
-LET $last_used_at = (
-    SELECT VALUE event_at
-    FROM memory_usage_events
-    WHERE organization_id = $organization_id
-        AND item_kind = "raw_capture"
-        AND item_id = $item_id
-        AND signal_type = "citation"
-    ORDER BY event_at DESC
-    LIMIT 1
-)[0];
-LET $retrieval_count = array::len($exposure_events);
-LET $citation_count = array::len($citation_events);
-LET $misled_count = array::len($misled_events);
-UPDATE raw_captures SET
-    last_recalled_at = IF last_recalled_at != NONE
-        AND ($last_recalled_at = NONE OR last_recalled_at > $last_recalled_at)
-        THEN last_recalled_at ELSE $last_recalled_at END,
-    last_used_at = IF last_used_at != NONE
-        AND ($last_used_at = NONE OR last_used_at > $last_used_at)
-        THEN last_used_at ELSE $last_used_at END,
-    retrieval_count = math::max([retrieval_count ?? 0, $retrieval_count]),
-    citation_count = math::max([citation_count ?? 0, $citation_count]),
-    misled_count = math::max([misled_count ?? 0, $misled_count]),
-    metadata.last_recalled_at = IF last_recalled_at != NONE
-        AND ($last_recalled_at = NONE OR last_recalled_at > $last_recalled_at)
-        THEN last_recalled_at ELSE $last_recalled_at END,
-    metadata.last_used_at = IF last_used_at != NONE
-        AND ($last_used_at = NONE OR last_used_at > $last_used_at)
-        THEN last_used_at ELSE $last_used_at END,
-    metadata.retrieval_count = math::max([retrieval_count ?? 0, $retrieval_count]),
-    metadata.citation_count = math::max([citation_count ?? 0, $citation_count]),
-    metadata.misled_count = math::max([misled_count ?? 0, $misled_count]),
-    -- Same reason the graph stamp bumps: a caller holding expected_revision
-    -- rewrites the whole metadata bag, so an unannounced stamp lands inside
-    -- the window its fence was supposed to close.
-    revision = (revision ?? 0) + 1
-WHERE organization_id = $organization_id
-    AND uuid = $item_id
-RETURN AFTER;
+    RETURN NONE;
+};
+RETURN $stamps.map(|$s| (SELECT uuid, organization_id, retrieval_count, citation_count,
+    misled_count, last_recalled_at, last_used_at
+    FROM raw_captures WHERE uuid = $s.item_id LIMIT 1)[0]);
 COMMIT TRANSACTION;
 """
 
-_EVENTS_FOR_ITEM_QUERY = """
-SELECT signal_type, event_at
-FROM memory_usage_events
-WHERE organization_id = $organization_id
-    AND item_kind = $item_kind
-    AND item_id = $item_id;
+_GRAPH_ENTITY_STAMP_QUERY = """
+BEGIN TRANSACTION;
+FOR $stamp IN $stamps {
+    UPDATE entity SET
+        last_recalled_at = IF last_recalled_at != NONE
+            AND ($stamp.last_recalled_at = NONE
+                OR last_recalled_at > $stamp.last_recalled_at)
+            THEN last_recalled_at ELSE $stamp.last_recalled_at END,
+        last_used_at = IF last_used_at != NONE
+            AND ($stamp.last_used_at = NONE OR last_used_at > $stamp.last_used_at)
+            THEN last_used_at ELSE $stamp.last_used_at END,
+        retrieval_count = math::max([retrieval_count ?? 0, $stamp.retrieval_count]),
+        citation_count = math::max([citation_count ?? 0, $stamp.citation_count]),
+        misled_count = math::max([misled_count ?? 0, $stamp.misled_count]),
+        attributes.last_recalled_at = IF last_recalled_at != NONE
+            AND ($stamp.last_recalled_at = NONE
+                OR last_recalled_at > $stamp.last_recalled_at)
+            THEN last_recalled_at ELSE $stamp.last_recalled_at END,
+        attributes.last_used_at = IF last_used_at != NONE
+            AND ($stamp.last_used_at = NONE OR last_used_at > $stamp.last_used_at)
+            THEN last_used_at ELSE $stamp.last_used_at END,
+        attributes.retrieval_count = math::max([retrieval_count ?? 0, $stamp.retrieval_count]),
+        attributes.citation_count = math::max([citation_count ?? 0, $stamp.citation_count]),
+        attributes.misled_count = math::max([misled_count ?? 0, $stamp.misled_count])
+    WHERE group_id = $organization_id
+        AND uuid = $stamp.item_id
+    RETURN NONE;
+};
+RETURN $stamps.map(|$s| (SELECT uuid, group_id, retrieval_count, citation_count,
+    misled_count, last_recalled_at, last_used_at
+    FROM entity WHERE uuid = $s.item_id LIMIT 1)[0]);
+COMMIT TRANSACTION;
 """
 
-_GRAPH_ENTITY_STAMP_QUERY = """
-UPDATE entity SET
-    last_recalled_at = IF last_recalled_at != NONE
-        AND ($last_recalled_at = NONE OR last_recalled_at > $last_recalled_at)
-        THEN last_recalled_at ELSE $last_recalled_at END,
-    last_used_at = IF last_used_at != NONE
-        AND ($last_used_at = NONE OR last_used_at > $last_used_at)
-        THEN last_used_at ELSE $last_used_at END,
-    retrieval_count = math::max([retrieval_count ?? 0, $retrieval_count]),
-    citation_count = math::max([citation_count ?? 0, $citation_count]),
-    misled_count = math::max([misled_count ?? 0, $misled_count]),
-    attributes.last_recalled_at = IF last_recalled_at != NONE
-        AND ($last_recalled_at = NONE OR last_recalled_at > $last_recalled_at)
-        THEN last_recalled_at ELSE $last_recalled_at END,
-    attributes.last_used_at = IF last_used_at != NONE
-        AND ($last_used_at = NONE OR last_used_at > $last_used_at)
-        THEN last_used_at ELSE $last_used_at END,
-    attributes.retrieval_count = math::max([retrieval_count ?? 0, $retrieval_count]),
-    attributes.citation_count = math::max([citation_count ?? 0, $citation_count]),
-    attributes.misled_count = math::max([misled_count ?? 0, $misled_count]),
-    -- A stamp is a real write, so it announces itself like one. Readers that
-    -- fence a later write on the revision they read (the snapshot fold, any
-    -- caller holding expected_revision) accept a stale read otherwise, and
-    -- overwrite the stamped values with whatever their read was carrying.
-    revision = (revision ?? 0) + 1
-WHERE group_id = $organization_id
-    AND uuid = $item_id
-RETURN AFTER;
-"""
+
+async def record_memory_usage_events(
+    content_client: UsageContentClient,
+    events: Sequence[MemoryUsageEvent],
+) -> tuple[Mapping[str, object], ...]:
+    """Append the deduplicated usage events in one statement and return them."""
+    rows = _dedupe_event_records(_event_record(event) for event in events)
+    if rows:
+        await content_client.execute_query(_EVENT_INSERT_QUERY, rows=list(rows))
+    return rows
+
+
+def usage_targets_for_events(
+    rows: Iterable[Mapping[str, object]],
+) -> tuple[MemoryUsageTarget, ...]:
+    """The distinct rows a batch of events refers to, in first-seen order."""
+    return tuple(MemoryUsageTarget(*parts) for parts in _unique_targets(rows))
+
+
+async def stamp_memory_usage(
+    content_client: UsageContentClient,
+    targets: Sequence[MemoryUsageTarget],
+    *,
+    graph_client: UsageGraphClient | None = None,
+) -> tuple[MemoryUsageStamp, ...]:
+    """Recompute and write the usage stamps for a batch of rows.
+
+    One aggregate read covers every target, then one write per organization
+    and store: raw captures through the content client, graph entities
+    through the graph client. A graph target without a graph client keeps
+    its aggregate as the stamp, the same as before.
+    """
+    unique = tuple(dict.fromkeys(targets))
+    if not unique:
+        return ()
+    aggregates = await _usage_aggregates(content_client, unique)
+
+    stamps: list[MemoryUsageStamp] = []
+    by_organization: dict[str, list[MemoryUsageTarget]] = {}
+    for target in unique:
+        by_organization.setdefault(target.organization_id, []).append(target)
+    for organization_id, organization_targets in by_organization.items():
+        raw_stamps = [
+            aggregates[(target.item_kind, target.item_id)]
+            for target in organization_targets
+            if target.item_kind is MemoryUsageItemKind.RAW_CAPTURE
+        ]
+        graph_stamps = [
+            aggregates[(target.item_kind, target.item_id)]
+            for target in organization_targets
+            if target.item_kind is MemoryUsageItemKind.GRAPH_ENTITY
+        ]
+        if raw_stamps:
+            stamps.extend(
+                await _stamp_raw_captures(
+                    content_client,
+                    organization_id=organization_id,
+                    stamps=raw_stamps,
+                )
+            )
+        if graph_stamps and graph_client is not None:
+            stamps.extend(
+                await _stamp_graph_entities(
+                    graph_client,
+                    organization_id=organization_id,
+                    stamps=graph_stamps,
+                )
+            )
+        elif graph_stamps:
+            stamps.extend(graph_stamps)
+    return tuple(stamps)
 
 
 async def record_memory_usage(
@@ -203,44 +276,15 @@ async def record_memory_usage(
     *,
     graph_client: UsageGraphClient | None = None,
 ) -> MemoryUsageWriteResult:
-    rows = list(_dedupe_event_records(_event_record(event) for event in events))
+    rows = await record_memory_usage_events(content_client, events)
     if not rows:
         return MemoryUsageWriteResult(events_processed=0, stamps=())
-
-    await content_client.execute_query(_EVENT_INSERT_QUERY, rows=rows)
-    stamps: list[MemoryUsageStamp] = []
-    for organization_id, item_kind, item_id in _unique_targets(rows):
-        if item_kind is MemoryUsageItemKind.RAW_CAPTURE:
-            stamp = await _stamp_raw_capture(
-                content_client,
-                organization_id=organization_id,
-                item_id=item_id,
-            )
-            stamps.append(stamp)
-        elif graph_client is not None:
-            content_stamp = await _usage_stamp_for_item(
-                content_client,
-                organization_id=organization_id,
-                item_kind=item_kind,
-                item_id=item_id,
-            )
-            stamp = await _stamp_graph_entity(
-                graph_client,
-                organization_id=organization_id,
-                stamp=content_stamp,
-            )
-            stamps.append(stamp)
-        else:
-            stamps.append(
-                await _usage_stamp_for_item(
-                    content_client,
-                    organization_id=organization_id,
-                    item_kind=item_kind,
-                    item_id=item_id,
-                )
-            )
-
-    return MemoryUsageWriteResult(events_processed=len(rows), stamps=tuple(stamps))
+    stamps = await stamp_memory_usage(
+        content_client,
+        usage_targets_for_events(rows),
+        graph_client=graph_client,
+    )
+    return MemoryUsageWriteResult(events_processed=len(rows), stamps=stamps)
 
 
 def _event_record(event: MemoryUsageEvent) -> dict[str, object]:
@@ -278,62 +322,73 @@ def _event_record(event: MemoryUsageEvent) -> dict[str, object]:
     }
 
 
-async def _usage_stamp_for_item(
+async def _usage_aggregates(
     content_client: UsageContentClient,
-    *,
-    organization_id: str,
-    item_kind: MemoryUsageItemKind,
-    item_id: str,
-) -> MemoryUsageStamp:
+    targets: Sequence[MemoryUsageTarget],
+) -> dict[tuple[MemoryUsageItemKind, str], MemoryUsageStamp]:
     rows = normalize_records(
         await content_client.execute_query(
-            _EVENTS_FOR_ITEM_QUERY,
-            organization_id=organization_id,
-            item_kind=item_kind.value,
-            item_id=item_id,
+            _USAGE_AGGREGATES_QUERY,
+            targets=[
+                {
+                    "organization_id": target.organization_id,
+                    "item_kind": target.item_kind.value,
+                    "item_id": target.item_id,
+                }
+                for target in targets
+            ],
         )
     )
-    retrieval_count = 0
-    citation_count = 0
-    misled_count = 0
-    last_recalled_at: datetime | None = None
-    last_used_at: datetime | None = None
+    aggregates: dict[tuple[MemoryUsageItemKind, str], MemoryUsageStamp] = {}
     for row in rows:
-        signal = str(row.get("signal_type") or "")
-        event_at = coerce_datetime(row.get("event_at"))
-        if signal == MemoryUsageSignal.EXPOSURE.value:
-            retrieval_count += 1
-            last_recalled_at = _max_datetime(last_recalled_at, event_at)
-        elif signal == MemoryUsageSignal.CITATION.value:
-            citation_count += 1
-            last_used_at = _max_datetime(last_used_at, event_at)
-        elif signal == MemoryUsageSignal.MISLED.value:
-            misled_count += 1
-    return MemoryUsageStamp(
-        item_kind=item_kind,
-        item_id=item_id,
-        retrieval_count=retrieval_count,
-        citation_count=citation_count,
-        last_recalled_at=last_recalled_at,
-        last_used_at=last_used_at,
-        misled_count=misled_count,
-    )
+        item_kind = MemoryUsageItemKind(str(row.get("item_kind") or ""))
+        item_id = str(row.get("item_id") or "")
+        aggregates[(item_kind, item_id)] = _stamp_from_row(item_kind, item_id, row)
+    for target in targets:
+        aggregates.setdefault(
+            (target.item_kind, target.item_id),
+            _stamp_from_row(target.item_kind, target.item_id, {}),
+        )
+    return aggregates
 
 
-async def _stamp_raw_capture(
+async def _stamp_raw_captures(
     content_client: UsageContentClient,
     *,
     organization_id: str,
-    item_id: str,
-) -> MemoryUsageStamp:
-    return _stamp_from_rows(
-        MemoryUsageItemKind.RAW_CAPTURE,
-        item_id,
+    stamps: Sequence[MemoryUsageStamp],
+) -> list[MemoryUsageStamp]:
+    rows = normalize_records(
         await content_client.execute_query(
             _RAW_CAPTURE_STAMP_QUERY,
             organization_id=organization_id,
-            item_id=item_id,
-        ),
+            stamps=[_stamp_parameters(stamp) for stamp in stamps],
+        )
+    )
+    return _stamps_from_rows(
+        MemoryUsageItemKind.RAW_CAPTURE,
+        stamps,
+        [row for row in rows if row.get("organization_id") == organization_id],
+    )
+
+
+async def _stamp_graph_entities(
+    graph_client: UsageGraphClient,
+    *,
+    organization_id: str,
+    stamps: Sequence[MemoryUsageStamp],
+) -> list[MemoryUsageStamp]:
+    rows = normalize_records(
+        await graph_client.execute_query(
+            _GRAPH_ENTITY_STAMP_QUERY,
+            organization_id=organization_id,
+            stamps=[_stamp_parameters(stamp) for stamp in stamps],
+        )
+    )
+    return _stamps_from_rows(
+        MemoryUsageItemKind.GRAPH_ENTITY,
+        stamps,
+        [row for row in rows if row.get("group_id") == organization_id],
     )
 
 
@@ -343,20 +398,24 @@ async def _stamp_graph_entity(
     organization_id: str,
     stamp: MemoryUsageStamp,
 ) -> MemoryUsageStamp:
-    return _stamp_from_rows(
-        MemoryUsageItemKind.GRAPH_ENTITY,
-        stamp.item_id,
-        await graph_client.execute_query(
-            _GRAPH_ENTITY_STAMP_QUERY,
-            organization_id=organization_id,
-            item_id=stamp.item_id,
-            last_recalled_at=stamp.last_recalled_at,
-            last_used_at=stamp.last_used_at,
-            retrieval_count=stamp.retrieval_count,
-            citation_count=stamp.citation_count,
-            misled_count=stamp.misled_count,
-        ),
+    """Stamp one graph entity with a stamp computed elsewhere."""
+    stamped = await _stamp_graph_entities(
+        graph_client,
+        organization_id=organization_id,
+        stamps=[stamp],
     )
+    return stamped[0]
+
+
+def _stamp_parameters(stamp: MemoryUsageStamp) -> dict[str, object]:
+    return {
+        "item_id": stamp.item_id,
+        "retrieval_count": stamp.retrieval_count,
+        "citation_count": stamp.citation_count,
+        "misled_count": stamp.misled_count,
+        "last_recalled_at": stamp.last_recalled_at,
+        "last_used_at": stamp.last_used_at,
+    }
 
 
 def _dedupe_event_records(rows: Iterable[Mapping[str, object]]) -> tuple[Mapping[str, object], ...]:
@@ -366,13 +425,24 @@ def _dedupe_event_records(rows: Iterable[Mapping[str, object]]) -> tuple[Mapping
     return tuple(rows_by_uuid.values())
 
 
-def _stamp_from_rows(
+def _stamps_from_rows(
+    item_kind: MemoryUsageItemKind,
+    stamps: Sequence[MemoryUsageStamp],
+    rows: Sequence[Mapping[str, object]],
+) -> list[MemoryUsageStamp]:
+    """The row each stamp landed on, or a zero stamp when the row is gone."""
+    rows_by_uuid = {str(row.get("uuid") or ""): row for row in rows}
+    return [
+        _stamp_from_row(item_kind, stamp.item_id, rows_by_uuid.get(stamp.item_id, {}))
+        for stamp in stamps
+    ]
+
+
+def _stamp_from_row(
     item_kind: MemoryUsageItemKind,
     item_id: str,
-    result: object,
+    row: Mapping[str, object],
 ) -> MemoryUsageStamp:
-    rows = normalize_records(result)
-    row = rows[0] if rows else {}
     return MemoryUsageStamp(
         item_kind=item_kind,
         item_id=item_id,
@@ -420,14 +490,6 @@ def _usage_event_uuid(
     return sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _max_datetime(current: datetime | None, candidate: datetime | None) -> datetime | None:
-    if candidate is None:
-        return current
-    if current is None:
-        return candidate
-    return max(current, candidate)
-
-
 def _required_text(value: object, field_name: str) -> str:
     text = str(value or "").strip()
     if not text:
@@ -458,6 +520,10 @@ __all__ = [
     "MemoryUsageItemKind",
     "MemoryUsageSignal",
     "MemoryUsageStamp",
+    "MemoryUsageTarget",
     "MemoryUsageWriteResult",
     "record_memory_usage",
+    "record_memory_usage_events",
+    "stamp_memory_usage",
+    "usage_targets_for_events",
 ]

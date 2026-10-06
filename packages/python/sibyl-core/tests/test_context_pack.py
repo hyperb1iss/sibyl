@@ -17,11 +17,7 @@ from sibyl_core.models.context import (
     ContextLayer,
     ContextRelatedItem,
 )
-from sibyl_core.services.usage import (
-    MemoryUsageItemKind,
-    MemoryUsageStamp,
-    MemoryUsageWriteResult,
-)
+from sibyl_core.services.usage import MemoryUsageItemKind
 from sibyl_core.tools.context import (
     FACET_TYPES,
     compile_context,
@@ -34,6 +30,7 @@ from sibyl_core.tools.context import (
     context_pack_to_markdown,
 )
 from sibyl_core.tools.responses import SearchResponse, SearchResult
+from sibyl_core.tools.usage_exposure import drain_pending_exposure_stamps
 
 
 def _result(
@@ -197,27 +194,21 @@ async def test_compile_context_accounts_for_exposed_items(
 ) -> None:
     recorded_events: list[Any] = []
 
-    async def fake_record_memory_usage(
+    async def fake_record_memory_usage_events(
         content_client: object,
         events: list[Any],
-        *,
-        graph_client: object | None = None,
-    ) -> MemoryUsageWriteResult:
+    ) -> tuple[dict[str, object], ...]:
         recorded_events.extend(events)
-        return MemoryUsageWriteResult(
-            events_processed=len(events),
-            stamps=tuple(
-                MemoryUsageStamp(
-                    item_kind=MemoryUsageItemKind(str(event.item_kind)),
-                    item_id=event.item_id,
-                    retrieval_count=1,
-                    citation_count=0,
-                    last_recalled_at=datetime.now(UTC),
-                    last_used_at=None,
-                )
-                for event in events
-            ),
+        return tuple(
+            {
+                "organization_id": event.organization_id,
+                "item_kind": str(event.item_kind),
+                "item_id": event.item_id,
+            }
+            for event in events
         )
+
+    stamp_memory_usage = AsyncMock(return_value=())
 
     responses = {
         ContextFacet.DECISIONS: [_result("decision-1", "decision", "Use context packs")],
@@ -237,9 +228,10 @@ async def test_compile_context_accounts_for_exposed_items(
         patch("sibyl_core.tools.usage_exposure.get_shared_surreal_content_client", AsyncMock()),
         patch("sibyl_core.tools.usage_exposure.get_surreal_graph_client", AsyncMock()),
         patch(
-            "sibyl_core.tools.usage_exposure.record_memory_usage",
-            AsyncMock(side_effect=fake_record_memory_usage),
+            "sibyl_core.tools.usage_exposure.record_memory_usage_events",
+            AsyncMock(side_effect=fake_record_memory_usage_events),
         ),
+        patch("sibyl_core.tools.usage_exposure.stamp_memory_usage", stamp_memory_usage),
     ):
         pack = await compile_context(
             "ship context receipts",
@@ -248,6 +240,13 @@ async def test_compile_context_accounts_for_exposed_items(
             organization_id="org-123",
             principal_id="user-123",
         )
+        assert await drain_pending_exposure_stamps() == 1
+
+    stamp_memory_usage.assert_awaited_once()
+    stamped_targets = stamp_memory_usage.await_args.args[1]
+    assert [(target.item_kind, target.item_id) for target in stamped_targets] == [
+        (MemoryUsageItemKind.GRAPH_ENTITY, "decision-1")
+    ]
 
     summary = pack.usage_metadata["usage_exposure"]
     assert summary["source_surface"] == "context_pack"

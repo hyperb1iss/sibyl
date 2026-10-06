@@ -41,6 +41,7 @@ class RuntimeServices:
         await self._recover_stuck_sources()
 
     async def shutdown(self) -> None:
+        await self._drain_deferred_usage_stamps()
         await self._shutdown_live_queries()
         await self._shutdown_scheduler()
         await self._shutdown_broker()
@@ -48,6 +49,18 @@ class RuntimeServices:
         await self._close_shared_surreal_clients()
         await self._shutdown_pubsub()
         await self._shutdown_locks()
+
+    async def _drain_deferred_usage_stamps(self) -> None:
+        """Let scheduled exposure stamps land before their clients close."""
+        try:
+            from sibyl_core.tools.usage_exposure import drain_pending_exposure_stamps
+
+            drained = await drain_pending_exposure_stamps()
+        except Exception as e:
+            self._log.warning("Deferred usage stamps not drained", error=str(e))
+            return
+        if drained:
+            self._log.info("Deferred usage stamps drained", count=drained)
 
     async def _startup_broker(self) -> None:
         try:
