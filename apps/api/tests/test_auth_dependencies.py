@@ -423,7 +423,9 @@ async def test_user_only_mutation_checks_server_instance(monkeypatch, cached, ma
             await dependencies.get_current_user(request)
         assert exc.value.status_code == 409
         assert exc.value.detail["error"] == "replay_identity_mismatch"
-    lookup.assert_awaited_once()
+    # A match is served from the cached identity; a mismatch re-reads it once
+    # (a restore in another process may have replaced it) before refusing.
+    assert lookup.await_count == (1 if matches else 2)
 
 
 def _api_key_request(token: str) -> Request:

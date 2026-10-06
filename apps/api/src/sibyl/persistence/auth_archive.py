@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 import structlog
 
 from sibyl.persistence.surreal.auth import build_surreal_auth_client
+from sibyl.persistence.surreal.auth_runtime import reset_server_instance_id_cache
 from sibyl_core.backends.surreal import bootstrap_auth_schema
 from sibyl_core.backends.surreal.auth_schema import backfill_api_key_scope_restrictions
 from sibyl_core.backends.surreal.records import (
@@ -595,6 +596,7 @@ async def _finalize_auth_restore(
             instance_id=source_instance_id,
         )
         _raise_on_error(identity_result, query="restore_auth_archive_payload:identity")
+        reset_server_instance_id_cache()
 
 
 async def restore_auth_archive_payload(
@@ -637,6 +639,7 @@ async def restore_auth_archive_payload(
                     instance_id=str(uuid4()),
                 )
                 _raise_on_error(identity_result, query="restore_auth_archive_payload:new_identity")
+                reset_server_instance_id_cache()
             await _clean_auth_archive_rows(client, organization_id)
 
         for table in AUTH_ARCHIVE_TABLES:

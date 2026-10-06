@@ -27,6 +27,7 @@ from sibyl.persistence.surreal.auth_runtime._common import (
     _SurrealRepository,
 )
 from sibyl_core.auth import (
+    AuthContext,
     ProjectRole,
     ProjectVisibility,
 )
@@ -1286,15 +1287,29 @@ async def list_accessible_project_graph_ids(
 
 
 async def resolve_project_graph_grants(
-    *, user_id: str, org_id: str, scopes=None, api_key_project_ids=None
+    *,
+    user_id: str,
+    org_id: str,
+    scopes=None,
+    api_key_project_ids=None,
+    authority: AuthContext | None = None,
 ) -> tuple[frozenset[str], frozenset[str]]:
-    """Resolve read and write grants from one request-time authorization snapshot."""
-    try:
-        ctx = await _resolve_auth_context_from_claims(
-            {"sub": user_id, "org": org_id, "scopes": list(scopes or [])}
-        )
-    except Exception:
-        return frozenset(), frozenset()
+    """Resolve read and write grants from one request-time authorization snapshot.
+
+    ``authority`` is the principal's already-resolved AuthContext, when the
+    caller holds one for this same principal; it saves re-running the
+    resolver query. Any other principal's context is ignored.
+    """
+    ctx = authority
+    if ctx is not None and (ctx.user_id != user_id or ctx.organization_id != org_id):
+        ctx = None
+    if ctx is None:
+        try:
+            ctx = await _resolve_auth_context_from_claims(
+                {"sub": user_id, "org": org_id, "scopes": list(scopes or [])}
+            )
+        except Exception:
+            return frozenset(), frozenset()
     if ctx.organization is None:
         return frozenset(), frozenset()
     records, payload = await _load_project_access_records(ctx)

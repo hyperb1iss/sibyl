@@ -103,6 +103,7 @@ async def test_accessible_projects_intersects_with_api_key_scope() -> None:
         org_id=ctx.org_id,
         scopes=ctx.scopes,
         api_key_project_ids=ctx.api_key_project_ids,
+        authority=None,
     )
 
 

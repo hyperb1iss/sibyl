@@ -12,6 +12,7 @@ from sibyl.auth.api_key_common import ApiKeyAuth
 from sibyl.auth.context import AuthContext
 from sibyl.auth.http import select_access_token
 from sibyl.auth.jwt import JwtError, verify_access_token
+from sibyl.auth.middleware import JWT_CHECKED_STATE_ATTR
 from sibyl.config import settings
 from sibyl.persistence.auth_runtime import (
     InvalidAuthClaimsError,
@@ -19,6 +20,7 @@ from sibyl.persistence.auth_runtime import (
     authenticate_api_key,
     get_server_instance_id,
     get_user_by_id,
+    reset_server_instance_id_cache,
     resolve_auth_context,
     validate_access_session,
 )
@@ -123,8 +125,12 @@ async def resolve_claims(
         cookie_token=request.cookies.get("sibyl_access_token"),
     )
     if token:
-        verified_claims = claims
-        if verified_claims is None:
+        verified_claims = None if token.startswith("sk_") else claims
+        if (
+            verified_claims is None
+            and not token.startswith("sk_")
+            and not getattr(request.state, JWT_CHECKED_STATE_ATTR, False)
+        ):
             try:
                 verified_claims = verify_access_token(token)
             except JwtError:
@@ -233,14 +239,21 @@ async def _validate_replay_server_instance(request: Request) -> None:
     if getattr(request.state, "replay_server_instance_validated", False):
         return
     if expected != await get_server_instance_id():
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "error": "replay_identity_mismatch",
-                "message": "The server data instance changed. The write was not applied.",
-                "remediation": "Verify the destination before recovering this pending write.",
-            },
-        )
+        # The identity is cached per process and a full archive restore in
+        # another process replaces it. A mismatch is the one signal that the
+        # cache may be stale, so re-read it once before refusing the replay:
+        # a client stamped with the restored identity is accepted and the
+        # cache heals, while a genuinely foreign stamp still gets the 409.
+        reset_server_instance_id_cache()
+        if expected != await get_server_instance_id():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error": "replay_identity_mismatch",
+                    "message": "The server data instance changed. The write was not applied.",
+                    "remediation": "Verify the destination before recovering this pending write.",
+                },
+            )
     request.state.replay_server_instance_validated = True
 
 

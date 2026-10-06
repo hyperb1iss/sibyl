@@ -35,6 +35,7 @@ from mcp.server.auth.provider import (
     TokenError,
 )
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
+from pydantic import SkipValidation
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 
@@ -60,6 +61,21 @@ from sibyl.persistence.auth_runtime import (
 type JwtClaims = dict[str, object]
 
 OAUTH_SCOPE = "mcp"
+
+
+class SibylAccessToken(AccessToken):
+    """SDK access token that carries the credential the provider resolved.
+
+    The SDK verifies the bearer once per HTTP request and hands this object
+    to tool handlers through ``get_access_token()``. Keeping the resolved
+    credential on it lets the tool context reuse that result instead of
+    running the API-key KDF and scope reads, or the JWT verify, a second
+    time per tool call. Validation is skipped because the values are the
+    provider's own output, not wire input.
+    """
+
+    api_key_auth: SkipValidation[ApiKeyAuth | None] = None
+    jwt_claims: SkipValidation[dict[str, object] | None] = None
 
 
 def _require_jwt_secret() -> str:
@@ -394,7 +410,12 @@ class SibylMcpOAuthProvider(
             scopes = sorted(effective_api_key_scopes(auth.scopes))
             if OAUTH_SCOPE not in scopes:
                 return None
-            return AccessToken(token=token, client_id=f"api_key:{auth.api_key_id}", scopes=scopes)
+            return SibylAccessToken(
+                token=token,
+                client_id=f"api_key:{auth.api_key_id}",
+                scopes=scopes,
+                api_key_auth=auth,
+            )
 
         try:
             claims = verify_access_token(token)
@@ -417,8 +438,12 @@ class SibylMcpOAuthProvider(
         exp = claims.get("exp")
         expires_at = exp if isinstance(exp, int) else None
         scopes = _parse_scopes_from_claims(claims)
-        return AccessToken(
-            token=token, client_id=f"user:{user_id}", scopes=scopes, expires_at=expires_at
+        return SibylAccessToken(
+            token=token,
+            client_id=f"user:{user_id}",
+            scopes=scopes,
+            expires_at=expires_at,
+            jwt_claims=claims,
         )
 
     async def revoke_token(self, token: AccessToken | RefreshToken) -> None:

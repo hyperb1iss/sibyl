@@ -93,7 +93,11 @@ async def test_project_grants_share_one_resolution_and_return_independent_sets(m
         context.get_accessible_projects(ctx), context.get_writable_projects(ctx)
     )
     resolver.assert_awaited_once_with(
-        user_id="user", org_id="org", scopes=["mcp"], api_key_project_ids=["target"]
+        user_id="user",
+        org_id="org",
+        scopes=["mcp"],
+        api_key_project_ids=["target"],
+        authority=None,
     )
     assert readable == {"reference", "target"}
     assert writable == {"target"}

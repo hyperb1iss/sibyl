@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
+import time
+from collections import OrderedDict
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException
 
+from sibyl.auth.api_key_cache import (
+    api_key_digest,
+    api_key_hash_fingerprint,
+    verified_api_key_cache,
+)
 from sibyl.auth.api_key_common import (
     ApiKeyAuth,
     api_key_prefix,
@@ -36,37 +45,97 @@ from sibyl_core.backends.surreal.records import (
     utcnow as _utcnow,
 )
 
+logger = logging.getLogger(__name__)
+
+# last_used_at is a coarse "seen recently" marker that only the key list
+# reads, so one write per key per window is its whole contract. Writing it
+# inline on every authentication made each request pay a non-retryable UPDATE
+# (plus its preflight round trip) against one hot row per agent.
+LAST_USED_WRITE_INTERVAL_SECONDS = 60.0
+# Window starts are kept per key id in opening order; closed windows are
+# dropped as new ones open, and the bound covers a burst of more distinct
+# keys than that at the cost of one early write for the evicted key.
+LAST_USED_WINDOW_MAX_KEYS = 4096
+_monotonic = time.monotonic
+_last_used_written_at: OrderedDict[str, float] = OrderedDict()
+_last_used_writes: set[asyncio.Task[None]] = set()
+
 
 async def authenticate_api_key(raw_key: str):
+    digest = api_key_digest(raw_key)
     async with _auth_client_scope() as client:
         repo = _SurrealRepository(client)
         candidates = await repo.select_many(
             "SELECT * FROM api_keys WHERE key_prefix = $key_prefix ORDER BY created_at DESC;",
             key_prefix=api_key_prefix(raw_key),
         )
-        now = _utcnow()
         for candidate in candidates:
             if not _key_is_current(candidate):
                 continue
-            if not verify_api_key(
-                raw_key,
-                salt_hex=str(candidate.get("key_salt") or ""),
-                hash_hex=str(candidate.get("key_hash") or ""),
-            ):
+            if not await _candidate_matches(raw_key, digest, candidate):
                 continue
             api_key_id = _coerce_uuid(candidate.get("uuid"), field_name="api_key.uuid")
+            _schedule_last_used_write(api_key_id)
+            return await _resolve_key_scopes(repo, candidate)
+    return None
+
+
+def _schedule_last_used_write(api_key_id: UUID) -> bool:
+    """Queue one last_used_at write per key per window, off the request path."""
+    key = str(api_key_id)
+    now = _monotonic()
+    written_at = _last_used_written_at.get(key)
+    if written_at is not None and now - written_at < LAST_USED_WRITE_INTERVAL_SECONDS:
+        return False
+    _last_used_written_at[key] = now
+    _last_used_written_at.move_to_end(key)
+    _expire_last_used_windows(now)
+    task = asyncio.create_task(_write_last_used(key))
+    _last_used_writes.add(task)
+    task.add_done_callback(_last_used_writes.discard)
+    return True
+
+
+def _expire_last_used_windows(now: float) -> None:
+    """Drop closed windows, oldest first, and keep the map bounded."""
+    while _last_used_written_at:
+        _oldest_key, oldest_at = next(iter(_last_used_written_at.items()))
+        if (
+            now - oldest_at < LAST_USED_WRITE_INTERVAL_SECONDS
+            and len(_last_used_written_at) <= LAST_USED_WINDOW_MAX_KEYS
+        ):
+            break
+        _last_used_written_at.popitem(last=False)
+
+
+async def _write_last_used(api_key_id: str) -> None:
+    now = _utcnow()
+    try:
+        async with _auth_client_scope() as client:
             await client.execute_query(
                 """
                 UPDATE api_keys
                 SET last_used_at = $last_used_at, updated_at = $updated_at
                 WHERE uuid = $api_key_id AND revoked_at = NONE;
                 """,
-                api_key_id=str(api_key_id),
+                api_key_id=api_key_id,
                 last_used_at=now,
                 updated_at=now,
             )
-            return await _resolve_key_scopes(repo, candidate)
-    return None
+    except Exception as exc:
+        # The marker is advisory; a dropped write costs one coarse window.
+        logger.warning("Dropped api_keys.last_used_at write key=%s error=%s", api_key_id, exc)
+
+
+async def drain_last_used_writes() -> None:
+    """Wait for every queued last_used_at write to settle."""
+    if _last_used_writes:
+        await asyncio.gather(*list(_last_used_writes), return_exceptions=True)
+
+
+def reset_last_used_writes() -> None:
+    """Forget the write windows so the next authentication writes again."""
+    _last_used_written_at.clear()
 
 
 async def resolve_api_key_authority(
@@ -90,6 +159,35 @@ async def resolve_api_key_authority(
         if candidate is None or not _key_is_current(candidate):
             return None
         return await _resolve_key_scopes(repo, candidate)
+
+
+async def _candidate_matches(raw_key: str, digest: str, candidate: SurrealRecord) -> bool:
+    """Check the presented key against one current api_keys row.
+
+    The argon2id verify costs ~20 ms of CPU and a 64 MiB allocation, so a key
+    that already verified against this exact stored hash is accepted from the
+    process-local cache. The row itself was just read, so revocation, expiry
+    and scope changes are honored on every call; only the KDF is skipped.
+    """
+    salt_hex = str(candidate.get("key_salt") or "")
+    hash_hex = str(candidate.get("key_hash") or "")
+    row_id = str(candidate.get("uuid") or "")
+    fingerprint = api_key_hash_fingerprint(salt_hex=salt_hex, hash_hex=hash_hex)
+    cached = verified_api_key_cache.get(digest)
+    if (
+        cached is not None
+        and cached.api_key_id == row_id
+        and cached.hash_fingerprint == fingerprint
+    ):
+        return True
+    # argon2-cffi releases the GIL, so a worker thread keeps the event loop
+    # serving other requests for the whole hash instead of stalling them.
+    verified = await asyncio.to_thread(
+        verify_api_key, raw_key, salt_hex=salt_hex, hash_hex=hash_hex
+    )
+    if verified:
+        verified_api_key_cache.store(digest, api_key_id=row_id, hash_fingerprint=fingerprint)
+    return verified
 
 
 def _key_is_current(candidate: SurrealRecord) -> bool:
@@ -436,6 +534,7 @@ async def revoke_api_key_for_user(
             raise HTTPException(status_code=403, detail="Forbidden")
         updated = {**record, "revoked_at": _utcnow(), "updated_at": _utcnow()}
         await repo.replace_record("api_keys", uuid=api_key_id, record=updated)
+        verified_api_key_cache.invalidate_key(api_key_id)
         await _log_audit_event(
             client,
             action="auth.api_key.revoke",

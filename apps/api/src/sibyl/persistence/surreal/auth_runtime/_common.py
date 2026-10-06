@@ -476,15 +476,35 @@ async def _auth_client_scope() -> AsyncIterator[SurrealAuthClient]:
         yield client
 
 
+_server_identity_cache: dict[str, str] = {}
+
+
 async def get_server_instance_id() -> str:
-    """Read the data-instance identity created by the auth schema migration."""
+    """Read the data-instance identity created by the auth schema migration.
+
+    The identity only changes when a full archive restore replaces the data
+    instance, so it is cached per process. The restoring process resets
+    this cache itself; a serving process learns of the change on the first
+    replay whose stamp no longer matches, which resets and re-reads once
+    (see ``_validate_replay_server_instance``).
+    """
+    cached = _server_identity_cache.get("instance_id")
+    if cached is not None:
+        return cached
     async with _auth_client_scope() as client:
         rows = _normalize_records(
             await client.execute_query("SELECT instance_id FROM server_identity:singleton;")
         )
     if not rows or not isinstance(rows[0].get("instance_id"), str):
         raise RuntimeError("Server replay identity is missing; auth schema migration is required")
-    return str(UUID(str(rows[0]["instance_id"])))
+    instance_id = str(UUID(str(rows[0]["instance_id"])))
+    _server_identity_cache["instance_id"] = instance_id
+    return instance_id
+
+
+def reset_server_instance_id_cache() -> None:
+    """Forget the cached identity so the next read goes to the store."""
+    _server_identity_cache.clear()
 
 
 class _SurrealRepository:
