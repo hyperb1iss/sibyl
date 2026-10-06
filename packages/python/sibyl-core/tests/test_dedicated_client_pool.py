@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from sibyl_core.backends.surreal import dedicated_client as dedicated_client_module
-from sibyl_core.backends.surreal.dedicated_client import DedicatedSurrealClient
+from sibyl_core.backends.surreal.dedicated_client import DedicatedSurrealClient, PoolHealth
 
 
 class _ConcurrencyTracker:
@@ -187,7 +187,6 @@ async def test_live_table_rejects_non_websocket_urls() -> None:
 @pytest.mark.asyncio
 async def test_close_closes_every_pooled_connection(monkeypatch) -> None:
     tracker = _ConcurrencyTracker()
-    tracker.release.set()
     clients = _install_overlap_surreal(monkeypatch, tracker)
 
     client = DedicatedSurrealClient(
@@ -199,7 +198,14 @@ async def test_close_closes_every_pooled_connection(monkeypatch) -> None:
         pool_size=3,
     )
 
-    await asyncio.gather(*(client.execute_query("SELECT * FROM entity;") for _ in range(3)))
+    # Three queries in flight at once open all three slots.
+    reads = [asyncio.create_task(client.execute_query("SELECT * FROM entity;")) for _ in range(3)]
+    for _ in range(200):
+        if tracker.in_flight >= 3:
+            break
+        await asyncio.sleep(0.005)
+    tracker.release.set()
+    await asyncio.gather(*reads)
     assert len(clients) == 3
 
     await client.close()
@@ -459,6 +465,7 @@ async def test_ping_drops_transient_failed_connection(monkeypatch) -> None:
         database="graph",
         pool_size=1,
     )
+    await client.warm_pool()
 
     health = await client.ping_pool()
 
@@ -779,7 +786,7 @@ def _install_flaky_surreal(monkeypatch, *, fail_pings: bool) -> list[Any]:
 
 @pytest.mark.asyncio
 async def test_ping_pool_checks_every_idle_slot(monkeypatch) -> None:
-    _install_flaky_surreal(monkeypatch, fail_pings=False)
+    clients = _install_flaky_surreal(monkeypatch, fail_pings=False)
     client = DedicatedSurrealClient(
         url="ws://localhost:8000/rpc",
         username="root",
@@ -789,11 +796,19 @@ async def test_ping_pool_checks_every_idle_slot(monkeypatch) -> None:
         pool_size=4,
     )
 
+    # A slot that never connected has no socket to lose, so a sweep spends
+    # no handshake on it.
+    cold = await client.ping_pool()
+    assert cold == PoolHealth(checked=0, reaped=0, failures=())
+    assert clients == []
+
+    await client.warm_pool()
     health = await client.ping_pool()
 
     assert health.checked == 4
     assert health.reaped == 0
     assert health.failures == ()
+    assert len(clients) == 4
 
 
 @pytest.mark.asyncio
@@ -1087,3 +1102,46 @@ async def test_conflict_raised_as_exception_is_retried_only_for_one_statement(
         with pytest.raises(SurrealError, match="can be retried"):
             await client.execute_query(query)
         assert len(calls) == 1, "a non-atomic query is never re-sent"
+
+
+@pytest.mark.asyncio
+async def test_sequential_queries_reuse_the_socket_they_warmed(monkeypatch) -> None:
+    """A pool opens sockets for concurrency, not for each query in a row."""
+    clients: list[Any] = []
+
+    class FakeAsyncSurreal:
+        def __init__(self, url: str) -> None:
+            self.url = url
+            clients.append(self)
+
+        async def signin(self, credentials: dict[str, str]) -> None:
+            self.credentials = credentials
+
+        async def use(self, namespace: str, database: str) -> None:
+            self.namespace = namespace
+
+        async def query_raw(self, query: str, params: object | None = None) -> dict[str, object]:
+            await asyncio.sleep(0)
+            return {"result": [{"status": "OK", "result": [{"ok": True}]}]}
+
+        async def close(self) -> None:
+            pass
+
+    monkeypatch.setattr("surrealdb.AsyncSurreal", FakeAsyncSurreal)
+    client = DedicatedSurrealClient(
+        url="ws://localhost:8000/rpc",
+        username="root",
+        password="root",
+        namespace="org_sequential",
+        database="graph",
+        pool_size=4,
+    )
+    try:
+        for _ in range(6):
+            await client.execute_query("SELECT * FROM entity;")
+        assert len(clients) == 1, "six sequential queries must ride one socket"
+        burst = await asyncio.gather(*(client.execute_query("RETURN 1;") for _ in range(4)))
+        assert len(burst) == 4
+        assert len(clients) == 4, "a burst still gets every slot"
+    finally:
+        await client.close()

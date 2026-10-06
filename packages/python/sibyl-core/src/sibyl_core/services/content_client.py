@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Iterable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from typing import cast
+from weakref import WeakKeyDictionary
 
 from sibyl_core.backends.surreal import SurrealContentClient
 from sibyl_core.backends.surreal import records as _surreal_records
+from sibyl_core.backends.surreal.schema_embedding_states import CONTENT_SCHEMA_RECORD_NAME
+from sibyl_core.backends.surreal.schema_version import schema_version_record_id
 from sibyl_core.config import settings
 from sibyl_core.runtime_ports import RuntimePortUnavailable, get_content_port
 from sibyl_core.services import content_models as models
@@ -35,6 +38,12 @@ class _SharedContentClientState:
 _shared_content_client_state = _SharedContentClientState()
 
 _shared_content_client_lock = asyncio.Lock()
+
+# The highest content schema version each client has read. Versions only
+# move up, so a version once read vouches for every requirement at or below
+# it for the life of the client, and the scheduled passes stop re-reading the
+# version record for every organization every minute.
+_schema_versions: WeakKeyDictionary[SurrealContentClient, int] = WeakKeyDictionary()
 
 _UPSERT_RECORD = {
     "crawl_sources": (
@@ -125,6 +134,30 @@ async def select_many(
     if error is not None:
         raise RuntimeError(error)
     return normalize_records(result)
+
+
+async def content_schema_version_at_least(client: SurrealContentClient, required: int) -> bool:
+    """Whether the content schema has reached ``required``, asking the database only until it has.
+
+    Reads the version record by id, which a namespace without the version
+    table answers with no rows rather than an error.
+    """
+    try:
+        known = _schema_versions.get(client)
+    except TypeError:
+        # A stand-in client that cannot be weakly referenced is asked every time.
+        known = None
+    if known is not None and known >= required:
+        return True
+    rows = await select_many(
+        client, f"SELECT version FROM [{schema_version_record_id(CONTENT_SCHEMA_RECORD_NAME)}];"
+    )
+    version = rows[0].get("version") if rows else None
+    if not isinstance(version, int | float):
+        return False
+    with suppress(TypeError):
+        _schema_versions[client] = max(int(version), known or 0)
+    return version >= required
 
 
 def normalize_raw_statement_records(

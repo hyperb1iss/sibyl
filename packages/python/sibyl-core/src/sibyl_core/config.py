@@ -150,6 +150,15 @@ class CoreConfig(BaseSettings):
         ge=1,
         description="Maximum org-scoped native graph clients kept open per process.",
     )
+    surreal_background_client_idle_seconds: float = Field(
+        default=300.0,
+        ge=0.0,
+        description=(
+            "How long an organization's background graph pool stays open after its "
+            "last background operation, so the next scheduled pass reuses its sockets "
+            "instead of handshaking again; 0 closes it as soon as the last user leaves."
+        ),
+    )
     allow_embedded_single_writer: bool = Field(
         default=False,
         description="Allow embedded SurrealDB storage in production for explicit single-writer mode",
@@ -402,6 +411,15 @@ class CoreConfig(BaseSettings):
         description=(
             "How long a plane that finished a full sweep for the configured model skips "
             "its table walk. Imports and dimension rebuilds reopen the plane at once."
+        ),
+    )
+    lifecycle_repair_concurrency: int = Field(
+        default=4,
+        ge=1,
+        le=64,
+        description=(
+            "Organizations the scheduled lifecycle repair pass works on at once. Each "
+            "organization still gets its full pass; this only overlaps their waits."
         ),
     )
 

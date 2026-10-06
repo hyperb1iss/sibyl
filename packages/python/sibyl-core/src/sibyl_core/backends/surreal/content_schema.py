@@ -145,7 +145,7 @@ CONTENT_TABLES = (
     *RAW_LEXICAL_TABLES,
     RAW_LEXICAL_STATE_TABLE,
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 52
+CONTENT_SCHEMA_CURRENT_VERSION = 53
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -1198,6 +1198,19 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
                 render_surreal_compatible_sql(
                     source_derivation_event(SourceKind.RAW_CAPTURE), url=url
                 ),
+            ),
+        ),
+        SchemaMigration(
+            version=53,
+            name="content_raw_source_validation_pending_index",
+            # The lifecycle tick asks once per minute which organizations
+            # have captures awaiting a source check. Led by the pending flag,
+            # this index answers that for every organization in one read of
+            # only the pending rows; the organization-led index from version
+            # 29 still serves each organization's own repair walk.
+            statements=(
+                "DEFINE INDEX IF NOT EXISTS idx_raw_captures_validation_pending "
+                "ON raw_captures FIELDS metadata.source_validation_pending, organization_id",
             ),
         ),
     )

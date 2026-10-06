@@ -42,6 +42,7 @@ from sibyl_core.services.embedding_sweep import (
     mark_plane_for_reembed,
     run_embedding_sweep,
 )
+from sibyl_core.services.graph_client import graph_schema_fact, remember_graph_schema_fact
 from sibyl_core.services.graph_embeddings import _embed_texts_with_timeout
 from sibyl_core.services.graph_records import (
     entity_from_surreal_row,
@@ -53,6 +54,41 @@ if TYPE_CHECKING:
 
 GRAPH_EMBEDDING_PLANE = GRAPH_EMBEDDING_STATE_PLANE
 _AUTO = object()
+_SWEEP_READY_FACT = "embedding_sweep_schema_ready"
+_DIMENSION_FACT = "embedding_dimension"
+
+
+async def graph_sweep_schema_ready(client: Any) -> bool:
+    """Whether the namespace has taken the sweep's upgrade snapshot.
+
+    Schema versions only move up, so a namespace once found ready is
+    remembered for the process (until its schema is marked dirty) instead of
+    being asked again by every pass of every minute.
+    """
+    group_id = str(client.group_id)
+    if graph_schema_fact(group_id, _SWEEP_READY_FACT) is True:
+        return True
+    ready = await embedding_sweep_schema_ready(client.execute_query, graph=True)
+    if ready:
+        remember_graph_schema_fact(group_id, _SWEEP_READY_FACT, True)
+    return ready
+
+
+async def recorded_graph_embedding_dimension(client: Any) -> int | None:
+    """The embedding dimension the namespace's schema version record names.
+
+    Remembered until the schema is marked dirty: a rebuild changes it only
+    through a migration, which marks the schema dirty on its way.
+    """
+    group_id = str(client.group_id)
+    known = graph_schema_fact(group_id, _DIMENSION_FACT)
+    if isinstance(known, int):
+        return known
+    recorded = await get_schema_embedding_dimension(client.execute_query)
+    if recorded is not None:
+        remember_graph_schema_fact(group_id, _DIMENSION_FACT, recorded)
+    return recorded
+
 
 type EvidenceSource = Callable[[], Awaitable[LegacyEvidence]]
 
@@ -140,7 +176,7 @@ async def graph_embedding_plane(
     skipped a rebuild. ``evidence`` replaces the default, which weighs only
     this namespace's pre-upgrade stamps.
     """
-    recorded = await get_schema_embedding_dimension(client.execute_query)
+    recorded = await recorded_graph_embedding_dimension(client)
     dimensions = recorded or EMBEDDING_DIM
     tables = (entity_sweep_table(dimensions), relationship_sweep_table(dimensions))
     stamp: EmbeddingStamp = provider.metadata.to_dict()
@@ -203,7 +239,7 @@ async def decide_graph_legacy_vectors(
 
 async def require_graph_sweep_schema(client: Any) -> None:
     """Refuse to touch graph embedding evidence before the namespace's upgrade snapshot."""
-    if not await embedding_sweep_schema_ready(client.execute_query, graph=True):
+    if not await graph_sweep_schema_ready(client):
         raise EmbeddingSchemaPendingError(
             f"graph namespace for {client.group_id} has not run its embedding sweep migration"
         )
@@ -223,7 +259,7 @@ async def sweep_graph_embeddings(
     provider = _resolve_provider(embedding_provider)
     if provider is None:
         return EmbeddingSweepResult(plane=GRAPH_EMBEDDING_PLANE, status=SWEEP_SKIPPED_NO_PROVIDER)
-    if not await embedding_sweep_schema_ready(runtime.client.execute_query, graph=True):
+    if not await graph_sweep_schema_ready(runtime.client):
         return EmbeddingSweepResult(
             plane=GRAPH_EMBEDDING_PLANE, status=SWEEP_SKIPPED_SCHEMA_PENDING
         )
@@ -232,7 +268,7 @@ async def sweep_graph_embeddings(
 
 
 async def _graph_tables(client: Any) -> tuple[SweepTable, SweepTable]:
-    recorded = await get_schema_embedding_dimension(client.execute_query)
+    recorded = await recorded_graph_embedding_dimension(client)
     dimensions = recorded or EMBEDDING_DIM
     return entity_sweep_table(dimensions), relationship_sweep_table(dimensions)
 
@@ -264,7 +300,9 @@ __all__ = [
     "entity_row_embedding_text",
     "entity_sweep_table",
     "graph_embedding_plane",
+    "graph_sweep_schema_ready",
     "mark_graph_embeddings_for_reembed",
+    "recorded_graph_embedding_dimension",
     "relationship_row_embedding_text",
     "relationship_sweep_table",
     "require_graph_sweep_schema",

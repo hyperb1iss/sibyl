@@ -1,7 +1,7 @@
 """Scheduled recovery of captures and graph rows awaiting source checks."""
 
 import asyncio
-from collections.abc import Awaitable, Sequence
+from collections.abc import Awaitable, Mapping, Sequence
 from dataclasses import asdict
 from typing import Any
 
@@ -22,9 +22,13 @@ from sibyl.persistence.organization_runtime import list_org_ids
 from sibyl_core.config import settings
 from sibyl_core.embeddings.providers import configured_embedding_provider
 from sibyl_core.projection.repair import LifecycleRepairResult, repair_graph_lifecycle
-from sibyl_core.services import content_client
-from sibyl_core.services.content_raw_embedding_repair import repair_raw_capture_embeddings
+from sibyl_core.services import content_client, content_models
+from sibyl_core.services.content_raw_embedding_repair import (
+    RAW_CAPTURE_EMBEDDING_PLANE,
+    repair_raw_capture_embeddings,
+)
 from sibyl_core.services.document_embedding_sweep import (
+    DOCUMENT_CHUNK_EMBEDDING_PLANE,
     ChunkEmbedder,
     content_sweep_schema_ready,
     sweep_document_chunk_embeddings,
@@ -51,8 +55,16 @@ from sibyl_core.services.embedding_verdicts import (
     settle_legacy_verdicts,
     verdict_settled,
 )
-from sibyl_core.services.graph_embedding_sweep import sweep_graph_embeddings
+from sibyl_core.services.graph_embedding_sweep import (
+    GRAPH_EMBEDDING_PLANE,
+    sweep_graph_embeddings,
+)
 from sibyl_core.services.graph_runtime import background_graph_runtime
+from sibyl_core.services.lifecycle_probe import (
+    ContentWork,
+    probe_content_work,
+    probe_graph_work,
+)
 from sibyl_core.services.memory_embedding import repair_promoted_embeddings
 from sibyl_core.services.memory_source_validation import (
     SourceReadAuthority,
@@ -279,15 +291,108 @@ async def _settle_unproven(organization_id: str, organizations: Sequence[str]) -
         )
 
 
+def _chunk_stamp(chunk_inputs: _ChunkInputs | BaseException | None) -> dict[str, Any] | None:
+    """The stamp chunk writes carry today, or None when no chunk embedder can run."""
+    if chunk_inputs is None or isinstance(chunk_inputs, BaseException):
+        return None
+    stamp, runnable, _embed = chunk_inputs
+    return stamp if runnable else None
+
+
+def _raw_stamp() -> dict[str, Any] | None:
+    provider = content_models.configured_raw_memory_embedding_provider()
+    if provider is None:
+        return None
+    return dict(content_models.raw_memory_embedding_metadata(provider.metadata))
+
+
+async def _probe_content(chunk_inputs: _ChunkInputs | BaseException | None) -> ContentWork | None:
+    """What every organization still owes on the content side, in one round trip.
+
+    A failed probe is logged and answered with None, which sends every
+    organization through its full pass as before.
+    """
+    stamps: dict[str, Mapping[str, Any]] = {}
+    if (chunk_stamp := _chunk_stamp(chunk_inputs)) is not None:
+        stamps[DOCUMENT_CHUNK_EMBEDDING_PLANE] = chunk_stamp
+    if (raw_stamp := _raw_stamp()) is not None:
+        stamps[RAW_CAPTURE_EMBEDDING_PLANE] = raw_stamp
+    try:
+        async with content_client.surreal_content_client() as client:
+            return await probe_content_work(
+                client,
+                stamps=stamps,
+                verify_interval=settings.embedding_sweep_verify_interval_seconds,
+            )
+    except Exception as exc:
+        log.warning("lifecycle_repair_content_probe_failed", error_type=type(exc).__name__)
+        return None
+
+
+async def _nothing_to_repair(
+    organization_id: str,
+    chunk_inputs: _ChunkInputs | BaseException | None,
+    content_work: ContentWork,
+) -> bool:
+    """Whether the organization can skip its pass: content idle, then one graph probe.
+
+    The content answer was read for every organization at once, so it is
+    checked first; only an organization idle there pays the graph probe.
+    A failed probe answers False, which runs the full pass as before.
+    """
+    planes = [
+        plane
+        for plane, stamp in (
+            (DOCUMENT_CHUNK_EMBEDDING_PLANE, _chunk_stamp(chunk_inputs)),
+            (RAW_CAPTURE_EMBEDDING_PLANE, _raw_stamp()),
+        )
+        if stamp is not None
+    ]
+    if not content_work.idle(organization_id, planes=planes):
+        return False
+    provider = configured_embedding_provider()
+    try:
+        async with background_graph_runtime(organization_id) as runtime:
+            work = await probe_graph_work(
+                runtime.client,
+                graph_stamp=provider.metadata.to_dict() if provider is not None else None,
+                verify_interval=settings.embedding_sweep_verify_interval_seconds,
+            )
+    except Exception as exc:
+        log.warning(
+            "lifecycle_repair_graph_probe_failed",
+            group_id=organization_id,
+            error_type=type(exc).__name__,
+        )
+        return False
+    return work.idle
+
+
 async def _repair_organization(
-    organization_id: str, *, sweeping: bool = True, organizations: Sequence[str] = ()
+    organization_id: str,
+    *,
+    sweeping: bool = True,
+    organizations: Sequence[str] = (),
+    chunk_inputs: _ChunkInputs | BaseException | None = None,
+    content_work: ContentWork | None = None,
 ) -> list[object]:
     """Run every repair for one organization, isolating each one's failure.
 
     Without ``sweeping`` (the content schema has not upgraded yet) nothing
-    that reads or rewrites embedding evidence runs.
+    that reads or rewrites embedding evidence runs. With ``content_work``,
+    an organization that owes nothing on either side is answered without
+    running a repair: its sweeps report current, as a pass would have.
     """
-    chunk_inputs = await _chunk_sweep_inputs() if sweeping else None
+    if sweeping and chunk_inputs is None:
+        chunk_inputs = await _chunk_sweep_inputs()
+    if sweeping and content_work is not None:
+        if await _nothing_to_repair(organization_id, chunk_inputs, content_work):
+            idle: list[object] = [chunk_inputs] if isinstance(chunk_inputs, BaseException) else []
+            idle.extend(
+                EmbeddingSweepResult(plane=plane, status=SWEEP_CURRENT)
+                for plane in (GRAPH_EMBEDDING_PLANE, DOCUMENT_CHUNK_EMBEDDING_PLANE)
+            )
+            return idle
     repairs: list[Awaitable[object]] = [
         _repair_graph(
             organization_id,
@@ -403,15 +508,30 @@ async def repair_lifecycle_all_orgs(ctx: dict[str, Any]) -> dict[str, int]:  # n
     if not sweeping:
         log.info("embedding_sweep_waiting_for_content_schema")
     organizations = await list_org_ids()
+    # The chunk stamp and the content-side answer are deployment-wide, so
+    # both are read once per tick rather than once per organization.
+    chunk_inputs = await _chunk_sweep_inputs() if sweeping else None
+    content_work = await _probe_content(chunk_inputs) if sweeping else None
+    slots = asyncio.Semaphore(settings.lifecycle_repair_concurrency)
+
+    async def visit(organization_id: str) -> list[object]:
+        async with slots:
+            return await _repair_organization(
+                organization_id,
+                sweeping=sweeping,
+                organizations=organizations,
+                chunk_inputs=chunk_inputs,
+                content_work=content_work,
+            )
+
+    repaired = await asyncio.gather(*(visit(organization_id) for organization_id in organizations))
     deferred: list[str] = []
     oldest_wait: float | None = None
     exercised = unhealthy = False
-    for organization_id in organizations:
+    for organization_id, results in zip(organizations, repaired, strict=True):
         summary["organizations"] += 1
         outcomes: list[object] = []
-        for result in await _repair_organization(
-            organization_id, sweeping=sweeping, organizations=organizations
-        ):
+        for result in results:
             if isinstance(result, tuple):
                 outcomes.extend(result)
             else:
