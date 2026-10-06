@@ -26,6 +26,7 @@ from sibyl.api.websocket import broadcast_event, entity_change_payload
 from sibyl.locks import entity_lock
 from sibyl.persistence.graph_runtime import (
     get_task_graph_runtime,
+    touch_graph_entity_bookkeeping,
     update_graph_entity,
 )
 from sibyl_core.models.entities import EntityType
@@ -251,15 +252,16 @@ async def _touch_project_activity(group_id: str, entity: Any) -> None:
     """Refresh the parent project's last_activity_at after an epic transition.
 
     Task transitions already do this inside the engine; epics write status
-    directly, so the activity bump lives here to match REST behavior. Failure
-    here must not fail the transition.
+    directly, so the activity bump lives here to match REST behavior. It is
+    bookkeeping on the project, not an edit, so it leaves the project's
+    revision alone. Failure here must not fail the transition.
     """
     metadata = getattr(entity, "metadata", None) or {}
     project_id = metadata.get("project_id")
     if not project_id:
         return
     try:
-        await update_graph_entity(
+        await touch_graph_entity_bookkeeping(
             group_id,
             project_id,
             {"last_activity_at": datetime.now(UTC).isoformat()},

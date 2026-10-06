@@ -342,9 +342,17 @@ class _FakeEntityManager:
 
     def __init__(self, task: Task) -> None:
         self.task = task
+        self.update_ids: list[str] = []
+        self.bookkeeping: list[tuple[str, dict]] = []
 
     async def get(self, entity_id: str) -> Task:
         return self.task
+
+    async def count_by_status(self, entity_type, **kwargs) -> dict[str, int]:
+        return {}
+
+    async def write_bookkeeping(self, entity_id: str, fields: dict) -> None:
+        self.bookkeeping.append((entity_id, dict(fields)))
 
     async def create(self, entity) -> str:  # type: ignore[override]
         # Accept creation of derived episodes; return provided id
@@ -356,6 +364,7 @@ class _FakeEntityManager:
         return await self.create(entity)
 
     async def update(self, entity_id: str, updates: dict) -> Task:
+        self.update_ids.append(entity_id)
         # Persist status and arbitrary fields into metadata for parity with real manager
         meta = {
             **self.task.metadata,
@@ -433,95 +442,105 @@ class _FakeGraphClient:
         return self.normalize_result(result)
 
 
+class _ProgressTrackingEntityManager:
+    """Records the aggregate it was asked for and refuses to edit anything."""
+
+    def __init__(self, counts: dict[str, int], *, epic_status: str | None = None) -> None:
+        self.counts = counts
+        self.epic_status = epic_status
+        self.count_calls: list[tuple[EntityType, dict]] = []
+        self.bookkeeping: list[tuple[str, dict]] = []
+        self.updates: list[tuple[str, dict]] = []
+        self.list_calls: list[tuple] = []
+
+    async def get(self, entity_id: str):
+        return type("EpicRecord", (), {"metadata": {"status": self.epic_status}})()
+
+    async def count_by_status(self, entity_type, **kwargs) -> dict[str, int]:
+        self.count_calls.append((entity_type, kwargs))
+        return dict(self.counts)
+
+    async def list_by_type(self, entity_type, **kwargs):
+        self.list_calls.append((entity_type, kwargs))
+        raise AssertionError("progress must not load task rows")
+
+    async def write_bookkeeping(self, entity_id: str, fields: dict) -> None:
+        self.bookkeeping.append((entity_id, dict(fields)))
+
+    async def update(self, entity_id: str, updates: dict):
+        self.updates.append((entity_id, updates))
+
+
 @pytest.mark.asyncio
-async def test_surreal_update_project_progress_uses_entity_listing() -> None:
-    """Project progress should come from EntityManager in surreal mode."""
+async def test_update_project_progress_counts_with_an_aggregate_and_never_edits_the_project() -> (
+    None
+):
+    """Completion asks for status counts and merges bookkeeping; no project edit.
+
+    Loading every task in the project (SELECT * with a 10,000 limit) just to
+    write three counters back, through update() and its revision bump, made
+    the project row the hottest row in the org.
+    """
     from sibyl_core.tasks.workflow import TaskWorkflowEngine
 
-    class TrackingEntityManager:
-        def __init__(self) -> None:
-            self.list_calls: list[tuple] = []
-            self.updates: list[tuple[str, dict]] = []
-
-        async def list_by_type(self, entity_type, **kwargs):
-            self.list_calls.append((entity_type, kwargs))
-            return [
-                Task(
-                    id="task-1",
-                    title="Doing task",
-                    description="",
-                    project_id="proj-001",
-                    status=TaskStatus.DOING,
-                    metadata={"status": "doing"},
-                ),
-                Task(
-                    id="task-2",
-                    title="Done task",
-                    description="",
-                    project_id="proj-001",
-                    status=TaskStatus.DONE,
-                    metadata={"status": "done"},
-                ),
-            ]
-
-        async def update(self, entity_id: str, updates: dict):
-            self.updates.append((entity_id, updates))
-
-    graph_client = _FakeGraphClient()
-    graph_client._store = "surreal"
-    entity_manager = TrackingEntityManager()
+    entity_manager = _ProgressTrackingEntityManager({"doing": 1, "done": 1, "todo": 2})
     engine = TaskWorkflowEngine(
         entity_manager,
         _FakeRelationshipManager(),
-        graph_client,
+        _FakeGraphClient(),
         organization_id="test-org",
     )
 
     await engine._update_project_progress("proj-001")
 
-    assert entity_manager.list_calls[0][1]["project_id"] == "proj-001"
-    assert entity_manager.updates[0][0] == "proj-001"
-    assert entity_manager.updates[0][1]["total_tasks"] == 2
-    assert entity_manager.updates[0][1]["completed_tasks"] == 1
-    assert entity_manager.updates[0][1]["in_progress_tasks"] == 1
+    assert entity_manager.count_calls == [(EntityType.TASK, {"project_id": "proj-001"})]
+    assert entity_manager.list_calls == []
+    assert entity_manager.updates == [], "a counter write is not an edit of the project"
+    project_id, fields = entity_manager.bookkeeping[0]
+    assert project_id == "proj-001"
+    assert fields["total_tasks"] == 4
+    assert fields["completed_tasks"] == 1
+    assert fields["in_progress_tasks"] == 1
+    assert "last_activity_at" in fields
 
 
 @pytest.mark.asyncio
-async def test_surreal_maybe_complete_epic_uses_entity_listing() -> None:
-    """Epic completion should derive counts from EntityManager in surreal mode."""
+async def test_task_transitions_touch_the_project_without_updating_it() -> None:
+    """Start, block, unblock and review bump activity; the task is the only edit."""
     from sibyl_core.tasks.workflow import TaskWorkflowEngine
 
-    class TrackingEntityManager:
+    task = Task(
+        id="task-1",
+        title="Implement feature X",
+        description="Do the work",
+        project_id="proj-001",
+        status=TaskStatus.TODO,
+    )
+    entity_manager = _FakeEntityManager(task)
+    engine = TaskWorkflowEngine(
+        entity_manager,
+        _FakeRelationshipManager(),
+        _FakeGraphClient(),
+        organization_id="test-org",
+    )
+
+    await engine.start_task(task.id, assignee="alice")
+    await engine.block_task(task.id, blocker_description="waiting on review")
+    await engine.unblock_task(task.id)
+
+    assert entity_manager.update_ids == [task.id, task.id, task.id]
+    assert [entity_id for entity_id, _ in entity_manager.bookkeeping] == ["proj-001"] * 3
+    assert all("last_activity_at" in fields for _, fields in entity_manager.bookkeeping)
+
+
+@pytest.mark.asyncio
+async def test_maybe_complete_epic_counts_with_an_aggregate() -> None:
+    """Epic completion derives its totals from status counts, not task rows."""
+    from sibyl_core.tasks.workflow import TaskWorkflowEngine
+
+    class TrackingEntityManager(_ProgressTrackingEntityManager):
         def __init__(self) -> None:
-            self.updates: list[tuple[str, dict]] = []
-
-        async def get(self, entity_id: str):
-            return type("EpicRecord", (), {"metadata": {"status": "in_progress"}})()
-
-        async def list_by_type(self, entity_type, **kwargs):
-            return [
-                Task(
-                    id="task-1",
-                    title="Done task",
-                    description="",
-                    project_id="proj-001",
-                    epic_id="epic-001",
-                    status=TaskStatus.DONE,
-                    metadata={"status": "done"},
-                ),
-                Task(
-                    id="task-2",
-                    title="Archived task",
-                    description="",
-                    project_id="proj-001",
-                    epic_id="epic-001",
-                    status=TaskStatus.ARCHIVED,
-                    metadata={"status": "archived"},
-                ),
-            ]
-
-        async def update(self, entity_id: str, updates: dict):
-            self.updates.append((entity_id, updates))
+            super().__init__({"done": 1, "archived": 1}, epic_status="in_progress")
 
     graph_client = _FakeGraphClient()
     graph_client._store = "surreal"
@@ -546,6 +565,8 @@ async def test_surreal_maybe_complete_epic_uses_entity_listing() -> None:
     )
 
     assert completed is True
+    assert entity_manager.count_calls == [(EntityType.TASK, {"epic_id": "epic-001"})]
+    assert entity_manager.list_calls == []
     assert entity_manager.updates[0][0] == "epic-001"
     assert entity_manager.updates[0][1]["status"] == EpicStatus.COMPLETED
     assert entity_manager.updates[0][1]["total_tasks"] == 2

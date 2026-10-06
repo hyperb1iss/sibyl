@@ -654,13 +654,15 @@ class TaskWorkflowEngine:
     async def update_project_activity(self, project_id: str) -> None:
         """Update project's last_activity_at timestamp.
 
-        Called when any child entity (task/epic) changes.
+        Called when any child entity (task/epic) changes. The task is the
+        edited record; the project only learns that something happened, so
+        this is a bookkeeping merge that leaves the project's revision alone.
 
         Args:
             project_id: Project UUID
         """
         now = datetime.now(UTC)
-        await self._entity_manager.update(
+        await self._entity_manager.write_bookkeeping(
             project_id,
             {"last_activity_at": now.isoformat()},
         )
@@ -671,33 +673,24 @@ class TaskWorkflowEngine:
     async def _update_project_progress(self, project_id: str) -> None:
         """Update project progress statistics.
 
+        The counters come from one aggregate over the project's tasks, and
+        they land as bookkeeping on the project row, not as an edit of it.
+
         Args:
             project_id: Project UUID
         """
         log.debug("Updating project progress", project_id=project_id)
         try:
-            total = 0
-            done = 0
-            doing = 0
-
-            tasks = await self._entity_manager.list_by_type(
+            counts = await self._entity_manager.count_by_status(
                 EntityType.TASK,
                 project_id=project_id,
-                limit=10_000,
-                include_archived=True,
             )
-            metadata_rows = [task.metadata or {} for task in tasks]
-
-            for metadata in metadata_rows:
-                status = (metadata.get("status") if isinstance(metadata, dict) else None) or "todo"
-                total += 1
-                if status == "done":
-                    done += 1
-                elif status == "doing":
-                    doing += 1
+            total = sum(counts.values())
+            done = counts.get("done", 0)
+            doing = counts.get("doing", 0)
 
             now = datetime.now(UTC)
-            await self._entity_manager.update(
+            await self._entity_manager.write_bookkeeping(
                 project_id,
                 {
                     "total_tasks": total,
@@ -800,18 +793,12 @@ class TaskWorkflowEngine:
             )
             return False
         current_status = str((epic.metadata or {}).get("status") or "planning")
-        tasks = await self._entity_manager.list_by_type(
+        counts = await self._entity_manager.count_by_status(
             EntityType.TASK,
             epic_id=epic_id,
-            limit=10_000,
-            include_archived=True,
         )
-        total = len(tasks)
-        terminal = 0
-        for epic_task in tasks:
-            task_status = str((epic_task.metadata or {}).get("status") or "").lower()
-            if task_status in {"done", "archived"}:
-                terminal += 1
+        total = sum(counts.values())
+        terminal = counts.get("done", 0) + counts.get("archived", 0)
 
         # Already completed or no tasks
         if current_status in ["completed", "archived"] or total == 0:
@@ -836,8 +823,8 @@ class TaskWorkflowEngine:
             )
             return True
 
-        # Update progress stats even if not complete
-        await self._entity_manager.update(
+        # Update progress stats even if not complete: bookkeeping, not an edit
+        await self._entity_manager.write_bookkeeping(
             epic_id,
             {
                 "total_tasks": total,
