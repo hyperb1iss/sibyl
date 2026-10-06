@@ -27,7 +27,7 @@ def configure_logging(
     *,
     service_name: str = "sibyl",
     service_width: int = 7,
-    level: str = "INFO",
+    level: str | None = None,
     colors: bool | None = None,
     json_output: bool = False,
     show_service: bool | None = None,
@@ -39,7 +39,8 @@ def configure_logging(
     Args:
         service_name: Service identifier (api, worker, cli, etc.)
         service_width: Width for service name padding
-        level: Minimum log level (DEBUG, INFO, WARNING, ERROR)
+        level: Minimum log level (DEBUG, INFO, WARNING, ERROR); defaults to
+            SIBYL_LOG_LEVEL from the environment, then INFO
         colors: Enable colors (auto-detect TTY/FORCE_COLOR if None)
         json_output: Use JSON output for production/log aggregation
         show_service: Show service prefix (auto-detect CONCURRENTLY env if None)
@@ -53,6 +54,10 @@ def configure_logging(
 
     if colors is None:
         colors = detect_colors(sys.stderr)
+
+    if level is None:
+        level = os.environ.get("SIBYL_LOG_LEVEL") or "INFO"
+    min_level = getattr(logging, level.upper(), logging.INFO)
 
     # Configure stdlib logging first
     _configure_stdlib_logging(level)
@@ -89,7 +94,11 @@ def configure_logging(
             capture_processor,  # Capture to ring buffer for dev introspection
             renderer,
         ],
-        wrapper_class=structlog.stdlib.BoundLogger,
+        # A filtering wrapper turns every call below the level into a no-op
+        # before the processor chain runs. The stdlib BoundLogger used before
+        # ran every debug event (one per SurrealDB query) through the whole
+        # chain and printed it, whatever level was configured.
+        wrapper_class=structlog.make_filtering_bound_logger(min_level),
         context_class=dict,
         logger_factory=structlog.PrintLoggerFactory(),
         cache_logger_on_first_use=False,
