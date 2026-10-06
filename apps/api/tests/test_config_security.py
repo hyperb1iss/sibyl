@@ -379,8 +379,15 @@ def test_api_settings_treat_every_surreal_scheme_consistently(
         surreal_pool_size=8,
         worker_max_jobs=None,
     )
-    expected_pool = 1 if embedded else 8
-    for kind in ("auth", "content", "graph"):
+    # Embedded stores clamp every client to one connection. Remote URLs keep
+    # the per-kind defaults: the shared auth and content pools are larger
+    # than a per-org graph pool.
+    expected_pools = (
+        {"auth": 1, "content": 1, "graph": 1}
+        if embedded
+        else {"auth": 16, "content": 32, "graph": 8}
+    )
+    for kind, expected_pool in expected_pools.items():
         assert development.effective_surreal_client_pool_size(kind) == expected_pool
     if embedded:
         # Background jobs share the one embedded connection.
