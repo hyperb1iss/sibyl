@@ -2,7 +2,7 @@
 
 import asyncio
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cached_property
 
 import structlog
@@ -45,6 +45,11 @@ class McpContext:
     is_api_key: bool = False
     accessible_teams: frozenset[str] = frozenset()
     accessible_delegations: frozenset[str] = frozenset()
+    # The resolved principal authority this context was built from. Grants
+    # reuse it so a tool call resolves the principal once, not once here and
+    # again inside the project read. It is derived state, so it stays out of
+    # equality.
+    authority: AuthContext | None = field(default=None, compare=False, repr=False)
 
     @cached_property
     def project_grants(self) -> asyncio.Task[tuple[frozenset[str], frozenset[str]]]:
@@ -55,6 +60,7 @@ class McpContext:
                 org_id=self.org_id,
                 scopes=self.scopes,
                 api_key_project_ids=self.api_key_project_ids,
+                authority=self.authority,
             )
         )
 
@@ -119,9 +125,13 @@ async def get_context() -> McpContext | None:
     if not raw:
         return None
 
-    # API Key authentication
+    # API Key authentication. The SDK's bearer backend already authenticated
+    # this request through the OAuth provider; reuse its result when the token
+    # carries one, and only run the KDF and scope reads for a bare token.
     if raw.startswith("sk_"):
-        auth = await authenticate_api_key(raw)
+        auth = getattr(token, "api_key_auth", None)
+        if auth is None:
+            auth = await authenticate_api_key(raw)
         if auth:
             # Convert project UUIDs to graph IDs (strings)
             project_ids = (
@@ -156,16 +166,19 @@ async def get_context() -> McpContext | None:
                 accessible_teams=authority.accessible_teams,
                 accessible_delegations=authority.accessible_delegations,
                 is_api_key=True,
+                authority=authority,
             )
         return None
 
     # JWT authentication
-    from sibyl.auth.jwt import JwtError, verify_access_token
+    claims = getattr(token, "jwt_claims", None)
+    if claims is None:
+        from sibyl.auth.jwt import JwtError, verify_access_token
 
-    try:
-        claims = verify_access_token(raw)
-    except JwtError:
-        return None
+        try:
+            claims = verify_access_token(raw)
+        except JwtError:
+            return None
 
     org_id = claims.get("org")
     user_id = claims.get("sub")
@@ -185,6 +198,7 @@ async def get_context() -> McpContext | None:
             org_role=org_role,
             accessible_teams=authority.accessible_teams,
             accessible_delegations=authority.accessible_delegations,
+            authority=authority,
         )
     return None
 
