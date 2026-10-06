@@ -861,6 +861,30 @@ async def _migrate_graph(
     )
     for line in outcome.unlinked[:10]:
         warn(f"  {line}")
+    if outcome.landed_earlier:
+        warn(
+            f"  {len(outcome.landed_earlier)} row(s) changed locally after an earlier version "
+            "reached the team server; the team copy holds that version: "
+            + ", ".join(outcome.landed_earlier[:10])
+        )
+    if outcome.landed_wider:
+        warn(
+            f"  {len(outcome.landed_wider)} row(s) now less visible locally (made private, "
+            "flagged sensitive, or narrowed) were already on the team server with wider "
+            "visibility; hide them there, or run --undo: " + ", ".join(outcome.landed_wider[:10])
+        )
+    if outcome.adopted_statuses:
+        warn(
+            f"  {len(outcome.adopted_statuses)} task(s) this migration cannot track as its own "
+            "(it linked to them, or could not confirm their first write) keep their team "
+            "status; the later local status stayed local: "
+            + ", ".join(outcome.adopted_statuses[:10])
+        )
+    if outcome.team_statuses:
+        warn(
+            f"  {len(outcome.team_statuses)} task status(es) changed on the team server were "
+            "left as they are there: " + ", ".join(outcome.team_statuses[:10])
+        )
     return outcome.failures
 
 

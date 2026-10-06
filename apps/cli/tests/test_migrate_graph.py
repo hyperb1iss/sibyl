@@ -16,6 +16,7 @@ from sibyl_cli.migrate_graph import (
     GraphPlan,
     SourceEdge,
     SourceEntity,
+    _shape,
     build_plan,
     execute_plan,
     validate_organization_id,
@@ -395,10 +396,37 @@ def test_a_zero_limit_keeps_completed_rows_for_status_and_link_recovery() -> Non
 
 
 class _ApiError(Exception):
-    def __init__(self, status_code: int, error_code: str | None = None) -> None:
-        super().__init__(f"HTTP {status_code}")
+    def __init__(
+        self, status_code: int, error_code: str | None = None, message: str | None = None
+    ) -> None:
+        super().__init__(message or f"HTTP {status_code}")
         self.status_code = status_code
         self.error_code = error_code
+
+
+def _revision_conflict(expected: object, actual: object) -> _ApiError:
+    # What PATCH /tasks answers once the API's error handler has shaped it: the
+    # revisions are dropped and only a generic conflict remains.
+    del expected, actual
+    return _ApiError(
+        409,
+        error_code="conflict",
+        message="conflict: The operation conflicts with the current state.",
+    )
+
+
+def _reconciliation_required() -> _ApiError:
+    return _ApiError(
+        409,
+        error_code="idempotency_reconciliation_required",
+        message="The write may have landed without its receipt.",
+    )
+
+
+def _key_reused() -> _ApiError:
+    return _ApiError(
+        409, message="conflict: Idempotency-Key was already used for a different request"
+    )
 
 
 class _Target:
@@ -481,7 +509,7 @@ class _Target:
             target_id = path.rsplit("/", 1)[-1]
             row = self.rows[target_id]
             if (json or {}).get("expected_revision") != row["revision"]:
-                raise _ApiError(409)
+                raise _revision_conflict((json or {}).get("expected_revision"), row["revision"])
             row["metadata"]["status"] = (json or {})["status"]
             row["revision"] += 1
             return {"mutation_receipt": {"applied": True, "revision": row["revision"]}}
@@ -1009,7 +1037,7 @@ class _IdempotentTarget(_Target):
         if key in self.responses:
             previous, response = self.responses[key]
             if previous != body:
-                raise _ApiError(409)
+                raise _key_reused()
             return copy.deepcopy(response)
         response = await super()._request(method, path, *args, **kwargs)
         self.responses[key] = (copy.deepcopy(body), copy.deepcopy(response))
@@ -1046,10 +1074,11 @@ async def test_source_edits_do_not_mint_a_new_key_after_an_unknown_create() -> N
         [_entity("decision_1", "decision", content="changed")], [], project=PROJECT
     )
     result = await _execute(target, ledger, changed)
-    assert result.failures and not ledger.ids
+    assert result.failures == []
+    assert ledger.ids == {"decision_1": "target-decision_1"}
     assert target.rows["target-decision_1"]["content"] == "original"
-    assert len(set(target.keys)) == 1
-    assert any("source changed" in failure for failure in result.failures)
+    assert len(set(target.keys)) == 1 and len(target.keys) == 3
+    assert result.landed_earlier == ["decision_1"] and result.landed_wider == []
 
 
 async def test_relink_uses_a_distinct_key_for_the_resolved_links() -> None:
@@ -1192,6 +1221,12 @@ class _IdempotentStatusTarget(_IdempotentTarget):
         self.status_responses: dict[str, dict[str, Any]] = {}
         self.status_keys: list[str] = []
         self.lose_status_ack = False
+        # Applies the status, then dies before the receipt is stored.
+        self.interrupt_after_status = False
+        # Applies the status, then answers that its receipt is still pending.
+        self.receipt_pending = False
+        # Keys whose request was claimed but never completed, as the server keeps them.
+        self.pending_claims: set[str] = set()
 
     async def _request(self, method: str, path: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
         if method != "PATCH":
@@ -1201,7 +1236,25 @@ class _IdempotentStatusTarget(_IdempotentTarget):
         self.status_keys.append(key)
         if key in self.status_responses:
             return self.status_responses[key]
-        result = await super()._request(method, path, *args, **kwargs)
+        if key in self.pending_claims:
+            raise _reconciliation_required()
+        try:
+            result = await super()._request(method, path, *args, **kwargs)
+        except Exception:
+            self.pending_claims.add(key)
+            raise
+        if self.interrupt_after_status:
+            self.interrupt_after_status = False
+            self.pending_claims.add(key)
+            raise RuntimeError("interrupted after the status landed")
+        if self.receipt_pending:
+            self.receipt_pending = False
+            self.pending_claims.add(key)
+            raise _ApiError(
+                503,
+                message="Mutation applied, but its receipt is still pending. "
+                "Retrying this idempotency key will not execute it again.",
+            )
         self.status_responses[key] = result
         if self.lose_status_ack:
             self.lose_status_ack = False
@@ -1438,17 +1491,15 @@ async def test_initial_status_guard_refuses_a_team_edit_after_creation() -> None
     target.edit_before_status = True
     plan = build_plan([_entity("task_1", "task", status="done")], [], project=PROJECT)
     result = await _execute(target, ledger, plan)
-    assert result.failures and result.statuses == 0 and ledger.statuses == {}
+    assert result.failures == [] and result.statuses == 0
+    assert result.team_statuses == ["task_1"]
     row = target.rows["target-task_1"]
     assert row["metadata"]["status"] == "doing" and row["content"] == "new team body"
     assert row["revision"] == 2
-    assert ledger.partial["task_1"]["status_intent"]["body"] == {
-        "status": "done",
-        "expected_revision": 1,
-    }
+    assert "status_intent" not in ledger.partial.get("task_1", {})
+    # The refused request is never sent again; the server would hold its key.
     second = await _execute(target, ledger, plan)
-    assert second.failures and target.status_requests == [
-        {"status": "done", "expected_revision": 1},
+    assert second.failures == [] and target.status_requests == [
         {"status": "done", "expected_revision": 1},
     ]
     assert row["metadata"]["status"] == "doing" and row["revision"] == 2
@@ -1465,7 +1516,7 @@ async def test_lost_create_receipt_does_not_adopt_an_edited_revision_for_status(
     row["metadata"]["status"] = "doing"
     row["revision"] += 1
     second = await _execute(target, ledger, plan)
-    assert second.failures and ledger.statuses == {}
+    assert second.failures == [] and second.team_statuses == ["task_1"]
     assert target.status_requests == [{"status": "done", "expected_revision": 1}]
     assert row["metadata"]["status"] == "doing" and row["revision"] == 2
 
@@ -1525,7 +1576,7 @@ async def test_missing_or_coerced_create_revision_cannot_authorize_status(revisi
 
 
 @pytest.mark.parametrize("changed_status", ["blocked", "todo"])
-async def test_changed_source_status_cannot_replace_a_saved_status_intent(
+async def test_a_changed_local_status_settles_the_saved_intent_first(
     changed_status: str,
 ) -> None:
     ledger = _Ledger()
@@ -1534,12 +1585,17 @@ async def test_changed_source_status_cannot_replace_a_saved_status_intent(
     original = build_plan([_entity("task_1", "task", status="done")], [], project=PROJECT)
     first = await _execute(target, ledger, original)
     assert first.failures
-    keys = target.status_keys.copy()
+    saved_key = target.status_keys[0]
     changed = build_plan([_entity("task_1", "task", status=changed_status)], [], project=PROJECT)
+
     result = await _execute(target, ledger, changed)
-    assert result.failures and "source status" in result.failures[0]
-    assert target.status_keys == keys
-    assert ledger.partial["task_1"]["status_intent"]["body"]["status"] == "done"
+
+    # The earlier request goes again under its own key, then the current status.
+    assert result.failures == []
+    assert target.status_keys[:2] == [saved_key, saved_key]
+    assert len(set(target.status_keys)) == 2
+    assert target.rows["target-task_1"]["metadata"]["status"] == changed_status
+    assert ledger.statuses == {"task_1": changed_status}
 
 
 async def test_legacy_landed_task_without_status_revision_fails_without_target_read() -> None:
@@ -2317,3 +2373,608 @@ async def test_the_access_check_cannot_trigger_a_sharing_scan(
 
     assert await access_refused(Client(), "project_target") is refused
     assert int(sent[0]["expected_revision"]) >= 2**31 - 1
+
+
+async def test_a_create_that_never_landed_lands_the_current_version() -> None:
+    ledger = _Ledger()
+    target = _IdempotentTarget()
+    target.fail = {"decision_1"}
+    original = build_plan(
+        [_entity("decision_1", "decision", content="original")], [], project=PROJECT
+    )
+    first = await _execute(target, ledger, original)
+    assert first.failures and "create_body" in ledger.partial["decision_1"]
+    target.fail.clear()
+    changed = build_plan(
+        [_entity("decision_1", "decision", content="changed")], [], project=PROJECT
+    )
+
+    result = await _execute(target, ledger, changed)
+
+    assert result.failures == [] and result.landed_earlier == []
+    assert ledger.ids == {"decision_1": "target-decision_1"}
+    assert target.rows["target-decision_1"]["content"] == "changed"
+    assert len(set(target.keys)) == 1
+    assert ledger.partial == {}
+
+
+async def _execute_remembering(
+    target: _Target, ledger: _Ledger, plan: GraphPlan, revisions: dict[str, int]
+) -> Any:
+    return await execute_plan(
+        target,
+        plan,
+        ids=ledger.ids,
+        statuses=ledger.statuses,
+        partial=ledger.partial,
+        target_project_id="project_target",
+        origin_org="org-src",
+        save=lambda: None,
+        revisions=revisions,
+    )
+
+
+def _task_with_status(status: str) -> GraphPlan:
+    return build_plan([_entity("task_1", "task", status=status)], [], project=PROJECT)
+
+
+async def test_a_later_source_status_lands_on_the_migrations_own_revision() -> None:
+    ledger, revisions, target = _Ledger(), {}, _Target()
+    first = await _execute_remembering(target, ledger, _task_with_status("doing"), revisions)
+    assert first.failures == [] and ledger.statuses == {"task_1": "doing"}
+
+    second = await _execute_remembering(target, ledger, _task_with_status("review"), revisions)
+
+    assert second.failures == []
+    assert target.rows["target-task_1"]["metadata"]["status"] == "review"
+    assert ledger.statuses == {"task_1": "review"} and ledger.partial == {}
+
+
+async def test_a_later_source_status_never_replaces_a_team_edit() -> None:
+    ledger, revisions, target = _Ledger(), {}, _Target()
+    await _execute_remembering(target, ledger, _task_with_status("doing"), revisions)
+    row = target.rows["target-task_1"]
+    row["metadata"]["status"] = "blocked"
+    row["revision"] += 1
+
+    second = await _execute_remembering(target, ledger, _task_with_status("review"), revisions)
+
+    assert second.failures == [] and second.team_statuses == ["task_1"]
+    assert row["metadata"]["status"] == "blocked"
+    third = await _execute_remembering(target, ledger, _task_with_status("review"), revisions)
+    assert third.failures == [] and third.team_statuses == []
+    assert row["metadata"]["status"] == "blocked"
+
+
+async def test_a_status_held_back_by_an_older_run_lands_in_one_rerun() -> None:
+    ledger, revisions, target = _Ledger(), {}, _Target()
+    await _execute_remembering(target, ledger, _task_with_status("doing"), revisions)
+    # What an older run left when it refused the status for want of a revision.
+    ledger.partial["task_1"] = {"missing": [], "digest": None, "status_revision_required": True}
+
+    result = await _execute_remembering(target, ledger, _task_with_status("review"), revisions)
+
+    assert result.failures == []
+    assert target.rows["target-task_1"]["metadata"]["status"] == "review"
+    assert ledger.partial == {}
+
+
+async def test_progress_counts_only_the_rows_this_run_writes() -> None:
+    entities = [_entity(f"note_{n:03d}", "note") for n in range(800)]
+    plan = build_plan(entities, [], project=PROJECT)
+    ledger = _Ledger()
+    ledger.ids.update({f"note_{n:03d}": f"target-note_{n:03d}" for n in range(500)})
+    target = _Target()
+    lines: list[tuple[str, int]] = []
+
+    def log(line: str) -> None:
+        lines.append((line, sum(1 for call in target.calls if call[0] == "POST")))
+
+    await execute_plan(
+        target,
+        plan,
+        ids=ledger.ids,
+        statuses=ledger.statuses,
+        partial=ledger.partial,
+        target_project_id="project_target",
+        origin_org="org-src",
+        save=lambda: None,
+        log=log,
+    )
+
+    assert ("  500 rows already finished; 300 to write", 0) in lines
+    progress = [(line, posts) for line, posts in lines if "rows (" in line]
+    assert [line.split(" of ")[0].strip() for line, _ in progress] == ["250"]
+    assert all("of 300 rows" in line and posts >= 250 for line, posts in progress)
+
+
+async def test_a_replayed_create_records_the_links_its_body_was_sent_with() -> None:
+    ledger = _Ledger()
+    target = _IdempotentTarget()
+    target.fail = {"decision_1"}
+    entities = [_entity("task_1", "task"), _entity("decision_1", "decision")]
+    linked = build_plan(
+        entities, [SourceEdge("RELATED_TO", "decision_1", "task_1")], project=PROJECT
+    )
+    await execute_plan(
+        target,
+        linked,
+        ids=ledger.ids,
+        statuses=ledger.statuses,
+        partial=ledger.partial,
+        target_project_id="project_target",
+        origin_org="org-src",
+        save=lambda: None,
+        structure=ledger.structure,
+    )
+    target.fail.clear()
+    unlinked = build_plan(entities, [], project=PROJECT)
+
+    result = await execute_plan(
+        target,
+        unlinked,
+        ids=ledger.ids,
+        statuses=ledger.statuses,
+        partial=ledger.partial,
+        target_project_id="project_target",
+        origin_org="org-src",
+        save=lambda: None,
+        structure=ledger.structure,
+    )
+
+    assert result.failures == []
+    links = set(ledger.structure["decision_1"]["links"])
+    assert links and links == set(_shape(_node(linked, "decision_1"))["links"])
+
+
+async def test_a_task_can_come_back_to_a_status_it_was_sent_before() -> None:
+    ledger, revisions, target = _Ledger(), {}, _IdempotentStatusTarget()
+    for status in ("doing", "review", "doing"):
+        result = await _execute_remembering(target, ledger, _task_with_status(status), revisions)
+        assert result.failures == [], status
+        assert target.rows["target-task_1"]["metadata"]["status"] == status
+    assert len(set(target.status_keys)) == 3
+
+
+async def test_a_row_made_private_after_it_landed_is_reported_not_hidden() -> None:
+    ledger = _Ledger()
+    target = _IdempotentTarget()
+    target.lose_ack = True
+    shared = build_plan([_entity("decision_1", "decision", scope="project")], [], project=PROJECT)
+    await _execute(target, ledger, shared)
+    private = build_plan([_entity("decision_1", "decision", scope="private")], [], project=PROJECT)
+
+    result = await _execute(target, ledger, private)
+
+    # The row is already on the team server; the ledger learns it so an undo can remove it.
+    assert result.failures == [] and ledger.ids == {"decision_1": "target-decision_1"}
+    assert result.landed_earlier == ["decision_1"] and result.landed_wider == ["decision_1"]
+    assert len(set(target.keys)) == 1
+
+
+async def test_a_row_made_private_before_its_create_landed_lands_private() -> None:
+    ledger = _Ledger()
+    target = _IdempotentTarget()
+    target.fail = {"decision_1"}
+    shared = build_plan([_entity("decision_1", "decision", scope="project")], [], project=PROJECT)
+    await _execute(target, ledger, shared)
+    target.fail.clear()
+    private = build_plan([_entity("decision_1", "decision", scope="private")], [], project=PROJECT)
+
+    result = await _execute(target, ledger, private)
+
+    assert result.failures == [] and result.landed_wider == []
+    landed = target.responses[target.keys[-1]][0]
+    assert landed["metadata"]["memory_scope"] == "private"
+
+
+async def test_a_body_that_fails_is_not_reported_as_landed() -> None:
+    ledger = _Ledger()
+    target = _IdempotentTarget()
+    target.lose_ack = True
+    original = build_plan([_entity("decision_1", "decision", content="a")], [], project=PROJECT)
+    await _execute(target, ledger, original)
+    target.responses.clear()
+    target.fail = {"decision_1"}
+    changed = build_plan([_entity("decision_1", "decision", content="b")], [], project=PROJECT)
+
+    result = await _execute(target, ledger, changed)
+
+    assert result.failures and result.landed_earlier == [] and result.landed_wider == []
+
+
+async def test_a_relink_adds_its_links_to_what_an_undo_protects() -> None:
+    ledger = _Ledger()
+    target = _IdempotentTarget()
+    target.fail = {"task_t", "task_d"}
+    entities = [_entity("task_t", "task"), _entity("task_d", "task"), _entity("task_e", "task")]
+    first = build_plan(entities, [SourceEdge("DEPENDS_ON", "task_t", "task_d")], project=PROJECT)
+    kwargs: dict[str, Any] = {
+        "ids": ledger.ids,
+        "statuses": ledger.statuses,
+        "partial": ledger.partial,
+        "target_project_id": "project_target",
+        "origin_org": "org-src",
+        "save": lambda: None,
+        "structure": ledger.structure,
+    }
+    await execute_plan(target, first, **kwargs)
+    target.fail.clear()
+    repointed = build_plan(
+        entities, [SourceEdge("DEPENDS_ON", "task_t", "task_e")], project=PROJECT
+    )
+
+    result = await execute_plan(target, repointed, **kwargs)
+
+    assert result.failures == []
+    assert {"task_d", "task_e"} <= set(ledger.structure["task_t"]["links"])
+
+
+async def test_a_refused_status_stays_settled_when_the_task_comes_back_to_it() -> None:
+    ledger, revisions, target = _Ledger(), {}, _IdempotentStatusTarget()
+    await _execute_remembering(target, ledger, _task_with_status("doing"), revisions)
+    row = target.rows["target-task_1"]
+    row["metadata"]["status"] = "blocked"
+    row["revision"] += 1
+
+    for status in ("review", "done", "review"):
+        result = await _execute_remembering(target, ledger, _task_with_status(status), revisions)
+        assert result.failures == [], status
+        assert result.team_statuses == ["task_1"], status
+    assert row["metadata"]["status"] == "blocked"
+
+
+async def test_a_status_that_landed_without_its_receipt_settles_without_its_revision() -> None:
+    ledger, revisions, target = _Ledger(), {}, _IdempotentStatusTarget()
+    await _execute_remembering(target, ledger, _task_with_status("doing"), revisions)
+    target.interrupt_after_status = True
+    first = await _execute_remembering(target, ledger, _task_with_status("review"), revisions)
+    assert first.failures
+
+    second = await _execute_remembering(target, ledger, _task_with_status("review"), revisions)
+
+    row = target.rows["target-task_1"]
+    assert second.failures == [] and second.team_statuses == []
+    assert ledger.statuses == {"task_1": "review"} and row["metadata"]["status"] == "review"
+    # The task holds the status, but nothing proves which write put it there, so
+    # the migration does not claim the revision and an undo keeps the task.
+    assert revisions["task_1"] < row["revision"]
+
+
+async def test_lock_contention_on_a_status_stays_a_failure() -> None:
+    ledger, revisions = _Ledger(), {}
+
+    class Locked(_Target):
+        locked = False
+
+        async def _request(
+            self, method: str, path: str, *args: Any, **kwargs: Any
+        ) -> dict[str, Any]:
+            if method == "PATCH" and self.locked:
+                raise _ApiError(409, error_code="entity_locked", message="entity_locked")
+            return await super()._request(method, path, *args, **kwargs)
+
+    target = Locked()
+    await _execute_remembering(target, ledger, _task_with_status("doing"), revisions)
+    target.locked = True
+    before = len(target.calls)
+
+    result = await _execute_remembering(target, ledger, _task_with_status("review"), revisions)
+
+    assert result.failures and result.team_statuses == []
+    assert ledger.statuses == {}
+    # Transient contention is retried next run, not settled by reading the row.
+    assert not any(call[0] == "GET" for call in target.calls[before:])
+
+
+async def test_a_row_narrowed_from_team_to_project_is_reported_wider() -> None:
+    ledger = _Ledger()
+    target = _IdempotentTarget()
+    target.lose_ack = True
+    team = build_plan([_entity("decision_1", "decision", scope="team")], [], project=PROJECT)
+    await _execute(target, ledger, team)
+    project = build_plan([_entity("decision_1", "decision", scope="project")], [], project=PROJECT)
+
+    result = await _execute(target, ledger, project)
+
+    assert result.landed_wider == ["decision_1"]
+
+
+class _Unreachable(_IdempotentUndoTarget):
+    """An ingress that answers 503 before the API sees the create."""
+
+    down = False
+
+    async def _request(self, method: str, path: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        if self.down and method == "POST" and path == "/entities":
+            raise _ApiError(503)
+        return await super()._request(method, path, *args, **kwargs)
+
+
+async def test_undo_recovers_a_row_held_by_an_earlier_body() -> None:
+    target, ledger, revisions = _Unreachable(), _Ledger(), {}
+    target.lose_ack = True
+    original = build_plan(
+        [_entity("decision_1", "decision", content="original")], [], project=PROJECT
+    )
+    await _run(target, ledger, revisions, original)
+    assert target.rows and "decision_1" not in ledger.ids
+    # The next run saves the edited body, then its send never reaches the server.
+    target.down = True
+    edited = build_plan([_entity("decision_1", "decision", content="edited")], [], project=PROJECT)
+    await _run(target, ledger, revisions, edited)
+    assert ledger.partial["decision_1"]["earlier"]
+    target.down = False
+
+    outcome = await _undo(target, ledger, revisions, edited)
+
+    assert outcome.failures == [] and outcome.removed == 1
+    assert target.rows == {} and ledger.ids == {}
+
+
+class _LosesOneAck(_IdempotentTarget):
+    lose_for: str = ""
+
+    async def _request(self, method: str, path: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        response = await super()._request(method, path, *args, **kwargs)
+        body = kwargs.get("json") or {}
+        origin = ((body.get("metadata") or {}).get("migration") or {}).get("origin_entity_id")
+        if method == "POST" and path == "/entities" and origin == self.lose_for:
+            self.lose_for = ""
+            raise RuntimeError("lost acknowledgement")
+        return response
+
+
+async def test_a_legacy_body_without_a_shape_records_the_links_it_was_sent_with() -> None:
+    ledger = _Ledger()
+    target = _LosesOneAck()
+    target.lose_for = "task_t"
+    entities = [_entity("task_t", "task"), _entity("task_d", "task"), _entity("task_e", "task")]
+    first = build_plan(entities, [SourceEdge("DEPENDS_ON", "task_t", "task_d")], project=PROJECT)
+    kwargs: dict[str, Any] = {
+        "ids": ledger.ids,
+        "statuses": ledger.statuses,
+        "partial": ledger.partial,
+        "target_project_id": "project_target",
+        "origin_org": "org-src",
+        "save": lambda: None,
+        "structure": ledger.structure,
+    }
+    await execute_plan(target, first, **kwargs)
+    # What a 1.4.4 ledger holds: a create intent with neither a shape nor a key.
+    for field in ("shape", "create_key"):
+        ledger.partial["task_t"].pop(field)
+    repointed = build_plan(
+        [_entity("task_t", "task", content="edited"), *entities[1:]],
+        [SourceEdge("DEPENDS_ON", "task_t", "task_e")],
+        project=PROJECT,
+    )
+
+    result = await execute_plan(target, repointed, **kwargs)
+
+    assert result.failures == []
+    assert {"task_d", "task_e"} <= set(ledger.structure["task_t"]["links"])
+
+
+async def test_a_teammate_setting_the_same_status_keeps_the_task_out_of_an_undo() -> None:
+    target, ledger, revisions = _IdempotentUndoTarget(), _Ledger(), {}
+    await _run(target, ledger, revisions, _task_with_status("doing"))
+    row = target.rows["target-task_1"]
+    row["metadata"]["status"] = "review"
+    row["revision"] += 1
+
+    result = await _run(target, ledger, revisions, _task_with_status("review"))
+
+    assert result.failures == [] and result.team_statuses == []
+    assert ledger.statuses == {"task_1": "review"}
+    assert revisions["task_1"] < row["revision"]
+    outcome = await _undo(target, ledger, revisions, _task_with_status("review"))
+    assert outcome.removed == 0 and "target-task_1" in target.rows
+
+
+async def test_a_status_lost_at_the_ingress_lands_after_the_local_status_moves() -> None:
+    class DropsFirstStatus(_IdempotentStatusTarget):
+        dropped = False
+
+        async def _request(
+            self, method: str, path: str, *args: Any, **kwargs: Any
+        ) -> dict[str, Any]:
+            if method == "PATCH" and not self.dropped:
+                self.dropped = True
+                raise _ApiError(503)
+            return await super()._request(method, path, *args, **kwargs)
+
+    ledger, revisions, target = _Ledger(), {}, DropsFirstStatus()
+    first = await _execute_remembering(target, ledger, _task_with_status("review"), revisions)
+    assert first.failures and ledger.partial["task_1"]["status_intent"]
+
+    second = await _execute_remembering(target, ledger, _task_with_status("done"), revisions)
+
+    assert second.failures == [] and second.statuses == 2
+    assert target.rows["target-task_1"]["metadata"]["status"] == "done"
+    assert ledger.statuses == {"task_1": "done"}
+
+
+async def test_a_legacy_body_reads_back_predicate_links_and_sits_above_them() -> None:
+    ledger = _Ledger()
+    target = _LosesOneAck()
+    target.lose_for = "decision_t"
+    entities = [_entity("decision_x", "decision"), _entity("decision_t", "decision")]
+    first = build_plan(
+        entities, [SourceEdge("SUPERSEDES", "decision_t", "decision_x")], project=PROJECT
+    )
+    kwargs: dict[str, Any] = {
+        "ids": ledger.ids,
+        "statuses": ledger.statuses,
+        "partial": ledger.partial,
+        "target_project_id": "project_target",
+        "origin_org": "org-src",
+        "save": lambda: None,
+        "structure": ledger.structure,
+    }
+    await execute_plan(target, first, **kwargs)
+    for field in ("shape", "create_key"):
+        ledger.partial["decision_t"].pop(field)
+    unlinked = build_plan(
+        [entities[0], _entity("decision_t", "decision", content="edited")], [], project=PROJECT
+    )
+
+    result = await execute_plan(target, unlinked, **kwargs)
+
+    assert result.failures == []
+    shape = ledger.structure["decision_t"]
+    assert "decision_x" in shape["links"]
+    assert shape["layer"] > ledger.structure["decision_x"]["layer"]
+
+
+@pytest.mark.parametrize("read_fails", [False, True])
+async def test_a_status_applied_without_its_receipt_stays_the_migrations_own(
+    read_fails: bool,
+) -> None:
+    class Target(_IdempotentStatusTarget):
+        fail_next_read = False
+
+        async def _request(
+            self, method: str, path: str, *args: Any, **kwargs: Any
+        ) -> dict[str, Any]:
+            if method == "GET" and self.fail_next_read:
+                self.fail_next_read = False
+                raise RuntimeError("read timed out")
+            return await super()._request(method, path, *args, **kwargs)
+
+    ledger, revisions, target = _Ledger(), {}, Target()
+    await _execute_remembering(target, ledger, _task_with_status("doing"), revisions)
+    target.receipt_pending = True
+    target.fail_next_read = read_fails
+    first = await _execute_remembering(target, ledger, _task_with_status("review"), revisions)
+    row = target.rows["target-task_1"]
+    if read_fails:
+        # The server's word that it applied the write is kept for the next run.
+        assert first.failures and ledger.partial["task_1"]["status_intent"]["applied"] is True
+        retry = await _execute_remembering(target, ledger, _task_with_status("review"), revisions)
+        assert retry.failures == []
+    else:
+        assert first.failures == []
+    assert row["metadata"]["status"] == "review" and revisions["task_1"] == row["revision"]
+
+    later = await _execute_remembering(target, ledger, _task_with_status("done"), revisions)
+
+    assert later.failures == [] and later.team_statuses == []
+    assert row["metadata"]["status"] == "done" and ledger.statuses == {"task_1": "done"}
+
+
+async def test_a_team_copy_already_at_the_local_status_is_not_listed() -> None:
+    class DropsFirstStatus(_IdempotentStatusTarget):
+        dropped = False
+
+        async def _request(
+            self, method: str, path: str, *args: Any, **kwargs: Any
+        ) -> dict[str, Any]:
+            if method == "PATCH" and not self.dropped:
+                self.dropped = True
+                raise _ApiError(503)
+            return await super()._request(method, path, *args, **kwargs)
+
+    ledger, revisions, target = _Ledger(), {}, DropsFirstStatus()
+    await _execute_remembering(target, ledger, _task_with_status("review"), revisions)
+    row = target.rows["target-task_1"]
+    row["metadata"]["status"] = "done"
+    row["revision"] += 1
+
+    result = await _execute_remembering(target, ledger, _task_with_status("done"), revisions)
+
+    assert result.failures == [] and result.team_statuses == []
+    assert ledger.statuses == {"task_1": "done"} and row["metadata"]["status"] == "done"
+
+
+async def test_an_adopted_task_moving_to_todo_is_left_alone() -> None:
+    ledger, target = _Ledger(), _Target()
+    ledger.ids["task_1"] = "target-task_1"
+    ledger.statuses["task_1"] = "doing"
+    ledger.preexisting.add("task_1")
+    target.rows["target-task_1"] = {"metadata": {"status": "doing"}, "revision": 5}
+
+    result = await execute_plan(
+        target,
+        _task_with_status("todo"),
+        ids=ledger.ids,
+        statuses=ledger.statuses,
+        partial=ledger.partial,
+        target_project_id="project_target",
+        origin_org="org-src",
+        save=lambda: None,
+        revisions={},
+        preexisting=ledger.preexisting,
+    )
+
+    assert result.failures == [] and result.adopted_statuses == ["task_1"]
+    assert not any(call[0] == "PATCH" for call in target.calls)
+
+
+def _adopted_ledger(**partial: Any) -> _Ledger:
+    ledger = _Ledger()
+    ledger.ids["task_1"] = "target-task_1"
+    ledger.preexisting.add("task_1")
+    if partial:
+        ledger.partial["task_1"] = {"missing": [], "digest": None, **partial}
+    return ledger
+
+
+async def _run_adopted(target: _Target, ledger: _Ledger, status: str) -> Any:
+    return await execute_plan(
+        target,
+        _task_with_status(status),
+        ids=ledger.ids,
+        statuses=ledger.statuses,
+        partial=ledger.partial,
+        target_project_id="project_target",
+        origin_org="org-src",
+        save=lambda: None,
+        revisions={},
+        preexisting=ledger.preexisting,
+    )
+
+
+async def test_a_later_status_on_an_adopted_task_stays_local_and_is_listed_once() -> None:
+    ledger = _adopted_ledger()
+    ledger.statuses["task_1"] = "doing"
+    target = _Target()
+    target.rows["target-task_1"] = {"metadata": {"status": "doing"}, "revision": 5}
+
+    first = await _run_adopted(target, ledger, "review")
+    second = await _run_adopted(target, ledger, "review")
+
+    assert first.failures == [] and first.adopted_statuses == ["task_1"]
+    assert second.failures == [] and second.adopted_statuses == []
+    assert not any(call[0] == "PATCH" for call in target.calls)
+
+
+async def test_an_adopted_task_reopened_to_todo_settles_its_saved_status() -> None:
+    intent = {
+        "target_id": "target-task_1",
+        "body": {"status": "doing", "expected_revision": 3},
+        "key": "saved-status-key",
+    }
+    ledger = _adopted_ledger(status_intent=intent)
+    target = _IdempotentStatusTarget()
+    target.rows["target-task_1"] = {"metadata": {"status": "todo"}, "revision": 3}
+
+    result = await _run_adopted(target, ledger, "todo")
+
+    # The saved request settles first, and its own revision carries the current status.
+    assert result.failures == [] and result.adopted_statuses == []
+    assert target.status_keys[0] == "saved-status-key" and len(target.status_keys) == 2
+    assert target.rows["target-task_1"]["metadata"]["status"] == "todo"
+    assert "status_intent" not in ledger.partial.get("task_1", {})
+
+
+async def test_an_adopted_task_whose_team_copy_matches_is_not_listed() -> None:
+    ledger = _adopted_ledger()
+    ledger.statuses["task_1"] = "doing"
+    target = _Target()
+    target.rows["target-task_1"] = {"metadata": {"status": "review"}, "revision": 6}
+
+    result = await _run_adopted(target, ledger, "review")
+
+    assert result.failures == [] and result.adopted_statuses == []
+    assert not any(call[0] == "PATCH" for call in target.calls)

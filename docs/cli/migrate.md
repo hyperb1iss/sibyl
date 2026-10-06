@@ -99,13 +99,17 @@ organization, and signed-in account. Running the command again skips completed r
 rest. The ledger stores pending request bodies with private file permissions. Keep the ledger until
 migration is complete.
 
-Task status changes use the revision returned by the original creation transaction. If someone edits
-the task before its status is set, the status change stops instead of replacing that edit.
+Task status changes use the revision returned by the original creation transaction, or the revision
+the migration's own last write left. If someone edits the task before its status is set, the status
+change stops instead of replacing that edit.
 
 Stable operation keys let the server replay a completed receipt when a response was lost. If the
-server cannot confirm whether a write completed, migration stops with
+server cannot confirm whether a create or link write completed, migration stops with
 `idempotency_reconciliation_required`. Preserve the ledger and ask your server administrator to
 check the operation before continuing; repeated runs do not overwrite the row to resolve the doubt.
+A task status in that state is settled by reading the task instead: the status it holds stays.
+Unless the server reported that write as applied, the migration no longer counts the task as
+unchanged, so an undo keeps it.
 
 When a linked row failed to migrate, the next run can add the missing link after that row lands.
 Link repair changes only relationships and task topology. The server checks the saved revision in
@@ -116,8 +120,20 @@ Older raw ledgers are adopted only after checking each receipt against the desti
 organization, and project. An older graph ledger without server and account identity stops the run
 for target-row verification; deleting that ledger can cause existing rows to be written again.
 
-Re-running does not carry edits you made locally after a row was migrated. Once a project has moved,
-work on it in the team server.
+Re-running carries a later local status change on a task while nobody else has changed the team
+copy. When the task changed on the team server first, its status there stays, and the run lists the
+task if that status differs from yours. A task the migration cannot track as its own (one it linked
+to rather than created, or one whose first write it could not confirm) keeps its team status after
+this migration's last write to it, and the run lists it once if that differs from yours. A status
+request that never got its answer is settled under its own key before the current status goes, so a
+delayed copy of it cannot land later; the team copy may pass through that earlier status on the way,
+and an epic can start from it. Other edits you make locally after a row was migrated stay local.
+
+When a create's answer was lost and you then edit the row locally, the next run sends the edited
+version. If the first version had already reached the team server, that version stays and the run
+lists the row. A row that is now less visible locally than the version that landed (made private,
+flagged as sensitive, or narrowed to a smaller scope) is listed separately, so you can hide it on
+the team server or undo the migration. Once a project has moved, work on it in the team server.
 
 `--limit N` migrates at most N new raw memories and N new graph entities. Repeat the command to
 advance through another batch; completed rows remain available for unfinished status and link work.
