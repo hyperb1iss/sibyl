@@ -68,6 +68,9 @@ from sibyl_core.backends.surreal.schema_version import (
     record_schema_version,
     schema_version_record_id,
 )
+from sibyl_core.backends.surreal.schema_work_item_columns import (
+    canonicalize_entity_work_item_columns,
+)
 from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
 from sibyl_core.config import core_config
 from sibyl_core.memory_pipeline.observations import SourceKind
@@ -409,6 +412,22 @@ WHERE entity_type = 'task'
     AND attributes.epic_id != NONE
     AND attributes.epic_id != '';
 """
+
+
+# Work-item listings filter on these columns with exact predicates so the
+# planner can use the (entity_type, project_id, ...) compound indexes; the
+# former "column or missing" branches walked every row of the type. Rows
+# written before the columns existed may still carry the value only in
+# attributes, so promote it once, the way parent_task_id was at version 7.
+ENTITY_WORK_ITEM_COLUMN_CANONICALIZATION_DEFINITIONS = "\n".join(
+    f"""
+UPDATE entity SET {column} = attributes.{column}
+WHERE ({column} = NONE OR {column} = '')
+    AND type::is::string(attributes.{column})
+    AND attributes.{column} != '';
+"""
+    for column in ("project_id", "epic_id", "status", "priority", "complexity", "feature")
+)
 
 
 GRAPH_INDEX_PRUNE_DEFINITIONS = """
@@ -945,6 +964,12 @@ GRAPH_SCHEMA_MIGRATIONS = (
         name="entity_typed_vector_space_index",
         statements=tuple(split_statements(ENTITY_TYPED_VECTOR_SPACE_INDEX_DEFINITIONS)),
     ),
+    SchemaMigration(
+        version=36,
+        name="entity_work_item_column_canonicalization",
+        statements=tuple(split_statements(ENTITY_WORK_ITEM_COLUMN_CANONICALIZATION_DEFINITIONS)),
+        action=canonicalize_entity_work_item_columns,
+    ),
 )
 
 
@@ -1467,6 +1492,7 @@ __all__ = [
     "ENTITY_UPDATED_AT_DATETIME_MIGRATION_DEFINITIONS",
     "ENTITY_USAGE_SIGNAL_DEFINITIONS",
     "ENTITY_VECTOR_SPACE_INDEX_DEFINITIONS",
+    "ENTITY_WORK_ITEM_COLUMN_CANONICALIZATION_DEFINITIONS",
     "GRAPH_EDGES",
     "GRAPH_ENUM_ASSERTION_DEFINITIONS",
     "GRAPH_INDEX_PRUNE_DEFINITIONS",

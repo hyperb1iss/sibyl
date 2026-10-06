@@ -520,14 +520,6 @@ def _surreal_indexed_field_missing(field: str) -> str:
     return f"({field} IS NONE OR {field} = '')"
 
 
-def _surreal_indexed_field_equals_or_missing(field: str) -> str:
-    return f"({field} = ${field} OR {_surreal_indexed_field_missing(field)})"
-
-
-def _surreal_indexed_field_in_or_missing(field: str, param: str) -> str:
-    return f"({field} IN ${param} OR {_surreal_indexed_field_missing(field)})"
-
-
 def _relationship_metadata(row: Mapping[str, object]) -> dict[str, object]:
     attributes = _row_attributes(row)
     metadata = dict(attributes)

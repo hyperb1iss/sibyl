@@ -14,8 +14,6 @@ from sibyl_core.services.graph_records import (
     _entity_select_fields,
     _entity_to_task,
     _int_value,
-    _surreal_indexed_field_equals_or_missing,
-    _surreal_indexed_field_in_or_missing,
     _surreal_indexed_field_missing,
 )
 from sibyl_core.services.graph_search import count_task_status as _count_task_status
@@ -28,14 +26,6 @@ from sibyl_core.services.graph_search import lower_sequence_values as _lower_seq
 from sibyl_core.services.graph_search import metadata_scalar as _metadata_scalar
 from sibyl_core.services.graph_search import new_task_progress as _new_task_progress
 from sibyl_core.services.graph_search import task_priority_rank as _task_priority_rank
-
-
-def _scoped_field_clause(field: str) -> str:
-    """Match a promoted scope column, or its attribute on a pre-promotion row."""
-    return (
-        f"({field} = ${field} OR "
-        f"({_surreal_indexed_field_missing(field)} AND attributes.{field} = ${field}))"
-    )
 
 
 def _private_memory_clauses(
@@ -301,10 +291,10 @@ class _EntityWorkItemManager(_EntitySearchManager):
 
         Archived rows are included and a row without a status counts as todo,
         the same reading list_by_type's callers apply to task metadata. The
-        scope filters accept the promoted column or, on a row written before
-        the column existed, the attribute it was promoted from, so the counts
-        agree with what list_by_type returns for the same scope without
-        loading a single row.
+        scope filters are exact column matches, the same predicates
+        list_by_type uses, so the aggregate stays on the compound
+        (entity_type, project_id, ...) indexes; rows written before the
+        columns existed were promoted by graph migrations 7 and 36.
         """
         where_clauses = [
             "group_id = $group_id",
@@ -315,16 +305,10 @@ class _EntityWorkItemManager(_EntitySearchManager):
             "entity_type": entity_type.value,
         }
         if project_id is not None:
-            where_clauses.append(_scoped_field_clause("project_id"))
+            where_clauses.append("project_id = $project_id")
             query_params["project_id"] = project_id
         if epic_id is not None:
-            where_clauses.append(
-                "("
-                + _scoped_field_clause("parent_task_id")
-                + " OR "
-                + _scoped_field_clause("epic_id")
-                + ")"
-            )
+            where_clauses.append("(parent_task_id = $parent_task_id OR epic_id = $epic_id)")
             query_params["epic_id"] = epic_id
             query_params["parent_task_id"] = epic_id
         rows = normalize_records(
@@ -371,9 +355,9 @@ class _EntityWorkItemManager(_EntitySearchManager):
     ) -> list[Entity]:
         """List one type newest-first, with ``offset`` counting visible rows.
 
-        A filter whose SurrealQL predicate admits a superset of the Python
-        recheck (legacy rows keep the value under ``attributes``) restarts the
-        walk at ``START 0`` so the visible offset stays exact. ``exact_window``
+        Every column filter is an exact predicate, so the database page is the
+        page; only the Python-side tag filter restarts the walk at ``START 0``
+        to keep the visible offset exact. ``exact_window``
         instead addresses the ordered index directly: one statement of
         ``limit`` rows from ``START offset``, no recheck, no fill. A caller
         paging a large type reads O(limit) per page that way and runs the
@@ -388,20 +372,13 @@ class _EntityWorkItemManager(_EntitySearchManager):
         priority_values = _lower_filter_values(priority)
         complexity_values = _lower_filter_values(complexity)
         tag_values = _lower_sequence_values(tags)
-        requires_recheck = any(
-            [
-                project_id is not None,
-                epic_id is not None,
-                no_epic,
-                parent_task_id is not None,
-                bool(status_values),
-                bool(priority_values),
-                bool(complexity_values),
-                bool(feature),
-                bool(tag_values),
-                not include_archived,
-            ]
-        )
+        # Every filter below is an exact column predicate, so the database
+        # page is the page: only tags (Python-only) force a restart from the
+        # first row. The old "or missing" branches admitted rows the recheck
+        # then dropped, which also pushed the planner off the compound
+        # (entity_type, project_id, ...) index onto a walk of every row of
+        # the type.
+        requires_recheck = bool(tag_values)
         target_count = max(int(offset), 0) + max(int(limit), 1) if requires_recheck else limit
         query_offset = 0 if requires_recheck else max(int(offset), 0)
         page_size = min(max(target_count, 1), 1000)
@@ -418,16 +395,10 @@ class _EntityWorkItemManager(_EntitySearchManager):
         }
 
         if project_id is not None:
-            where_clauses.append(_surreal_indexed_field_equals_or_missing("project_id"))
+            where_clauses.append("project_id = $project_id")
             query_params["project_id"] = project_id
         if epic_id is not None:
-            where_clauses.append(
-                "("
-                + _surreal_indexed_field_equals_or_missing("parent_task_id")
-                + " OR "
-                + _surreal_indexed_field_equals_or_missing("epic_id")
-                + ")"
-            )
+            where_clauses.append("(parent_task_id = $parent_task_id OR epic_id = $epic_id)")
             query_params["epic_id"] = epic_id
             query_params["parent_task_id"] = epic_id
         if no_epic:
@@ -439,23 +410,19 @@ class _EntityWorkItemManager(_EntitySearchManager):
                 + ")"
             )
         if parent_task_id is not None:
-            where_clauses.append(_surreal_indexed_field_equals_or_missing("parent_task_id"))
+            where_clauses.append("parent_task_id = $parent_task_id")
             query_params["parent_task_id"] = parent_task_id
         if status_values:
-            where_clauses.append(_surreal_indexed_field_in_or_missing("status", "status_values"))
+            where_clauses.append("status IN $status_values")
             query_params["status_values"] = status_values
         if priority_values:
-            where_clauses.append(
-                _surreal_indexed_field_in_or_missing("priority", "priority_values")
-            )
+            where_clauses.append("priority IN $priority_values")
             query_params["priority_values"] = priority_values
         if complexity_values:
-            where_clauses.append(
-                _surreal_indexed_field_in_or_missing("complexity", "complexity_values")
-            )
+            where_clauses.append("complexity IN $complexity_values")
             query_params["complexity_values"] = complexity_values
         if feature:
-            where_clauses.append(_surreal_indexed_field_equals_or_missing("feature"))
+            where_clauses.append("feature = $feature")
             query_params["feature"] = feature.lower()
         if not include_archived:
             where_clauses.append("(status IS NONE OR status = '' OR status != 'archived')")

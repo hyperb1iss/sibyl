@@ -26,6 +26,7 @@ from sibyl_core.backends.surreal.schema import (
     render_surreal_compatible_sql,
 )
 from sibyl_core.backends.surreal.schema_version import (
+    GRAPH_SCHEMA_CURRENT_VERSION,
     apply_schema_migrations,
     get_schema_version,
 )
@@ -786,7 +787,9 @@ async def test_entity_vector_space_index_registered_upgrade_retains_sources(
         for migration in _graph_schema_migrations(url=client._url, group_id=client.group_id)
         if migration.version <= 34
     )
-    assert await get_schema_version(client.execute_query, name="graph") == 35
+    assert (
+        await get_schema_version(client.execute_query, name="graph") == GRAPH_SCHEMA_CURRENT_VERSION
+    )
     info = await client.execute_query("INFO FOR TABLE entity;")
     assert "idx_entity_vector_space" in info["indexes"]
 
@@ -891,7 +894,9 @@ async def test_graph34_index_preserves_stamped_and_unstamped_dedup(
     from sibyl_core.models.entities import Entity
 
     client = vector_completion_client
-    assert await get_schema_version(client.execute_query, name="graph") == 35
+    assert (
+        await get_schema_version(client.execute_query, name="graph") == GRAPH_SCHEMA_CURRENT_VERSION
+    )
     stamp = _overfetch_provider("dedup-space").metadata.to_dict()
     vector = [1.0, *([0.0] * (EMBEDDING_DIM - 1))]
     await client.execute_query(
@@ -1538,7 +1543,9 @@ async def test_entity_typed_vector_space_index_upgrade_retains_sources_and_assoc
 ) -> None:
     client = vector_completion_client
     migrations = _graph_schema_migrations(url=client._url, group_id=client.group_id)
-    assert await get_schema_version(client.execute_query, name="graph") == 35
+    assert (
+        await get_schema_version(client.execute_query, name="graph") == GRAPH_SCHEMA_CURRENT_VERSION
+    )
     assert {"idx_entity_vector_space", "idx_entity_typed_vector_space", "idx_entity_embedding"} <= (
         await client.execute_query("INFO FOR TABLE entity;")
     )["indexes"].keys()
@@ -1582,8 +1589,13 @@ async def test_entity_typed_vector_space_index_upgrade_retains_sources_and_assoc
         for table in ("entity", "source_states", "memory_derivations"):
             before[table] = await historical.execute_query(f"SELECT * FROM {table} ORDER BY id;")
         applied = await apply_schema_migrations(historical.execute_query, migrations, name="graph")
-        assert [migration.version for migration in applied] == [35]
-        assert await get_schema_version(historical.execute_query, name="graph") == 35
+        assert [migration.version for migration in applied] == list(
+            range(35, GRAPH_SCHEMA_CURRENT_VERSION + 1)
+        )
+        assert (
+            await get_schema_version(historical.execute_query, name="graph")
+            == GRAPH_SCHEMA_CURRENT_VERSION
+        )
         assert {
             "idx_entity_vector_space",
             "idx_entity_typed_vector_space",
