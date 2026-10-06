@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import time
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
@@ -42,6 +44,17 @@ from sibyl_core.backends.surreal.records import (
     utcnow as _utcnow,
 )
 
+logger = logging.getLogger(__name__)
+
+# last_used_at is a coarse "seen recently" marker that only the key list
+# reads, so one write per key per window is its whole contract. Writing it
+# inline on every authentication made each request pay a non-retryable UPDATE
+# (plus its preflight round trip) against one hot row per agent.
+LAST_USED_WRITE_INTERVAL_SECONDS = 60.0
+_monotonic = time.monotonic
+_last_used_written_at: dict[str, float] = {}
+_last_used_writes: set[asyncio.Task[None]] = set()
+
 
 async def authenticate_api_key(raw_key: str):
     digest = api_key_digest(raw_key)
@@ -51,25 +64,59 @@ async def authenticate_api_key(raw_key: str):
             "SELECT * FROM api_keys WHERE key_prefix = $key_prefix ORDER BY created_at DESC;",
             key_prefix=api_key_prefix(raw_key),
         )
-        now = _utcnow()
         for candidate in candidates:
             if not _key_is_current(candidate):
                 continue
             if not await _candidate_matches(raw_key, digest, candidate):
                 continue
             api_key_id = _coerce_uuid(candidate.get("uuid"), field_name="api_key.uuid")
+            _schedule_last_used_write(api_key_id)
+            return await _resolve_key_scopes(repo, candidate)
+    return None
+
+
+def _schedule_last_used_write(api_key_id: UUID) -> bool:
+    """Queue one last_used_at write per key per window, off the request path."""
+    key = str(api_key_id)
+    now = _monotonic()
+    written_at = _last_used_written_at.get(key)
+    if written_at is not None and now - written_at < LAST_USED_WRITE_INTERVAL_SECONDS:
+        return False
+    _last_used_written_at[key] = now
+    task = asyncio.create_task(_write_last_used(key))
+    _last_used_writes.add(task)
+    task.add_done_callback(_last_used_writes.discard)
+    return True
+
+
+async def _write_last_used(api_key_id: str) -> None:
+    now = _utcnow()
+    try:
+        async with _auth_client_scope() as client:
             await client.execute_query(
                 """
                 UPDATE api_keys
                 SET last_used_at = $last_used_at, updated_at = $updated_at
                 WHERE uuid = $api_key_id AND revoked_at = NONE;
                 """,
-                api_key_id=str(api_key_id),
+                api_key_id=api_key_id,
                 last_used_at=now,
                 updated_at=now,
             )
-            return await _resolve_key_scopes(repo, candidate)
-    return None
+    except Exception as exc:
+        # The marker is advisory; a dropped write costs one coarse window.
+        logger.warning("Dropped api_keys.last_used_at write key=%s error=%s", api_key_id, exc)
+
+
+async def drain_last_used_writes() -> None:
+    """Wait for every queued last_used_at write to settle."""
+    if _last_used_writes:
+        await asyncio.gather(*list(_last_used_writes), return_exceptions=True)
+
+
+def reset_last_used_writes() -> None:
+    """Forget the write windows so the next authentication writes again."""
+    _last_used_written_at.clear()
 
 
 async def resolve_api_key_authority(

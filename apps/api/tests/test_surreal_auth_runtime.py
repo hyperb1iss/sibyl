@@ -17,6 +17,7 @@ from sibyl.persistence import graph_runtime
 from sibyl.persistence.surreal import auth as surreal_auth, auth_runtime as surreal_auth_runtime
 from sibyl.persistence.surreal.auth_runtime import (
     _common as auth_common,
+    api_keys as auth_api_keys,
     login as auth_login,
     users as auth_users,
 )
@@ -1119,7 +1120,6 @@ async def test_authenticate_api_key_batches_last_used_and_project_scopes(
                     "expires_at": None,
                 }
             ],
-            [],
             [
                 {
                     "uuid": str(uuid4()),
@@ -1147,6 +1147,7 @@ async def test_authenticate_api_key_batches_last_used_and_project_scopes(
                     "scope_key": "project-alpha",
                 }
             ],
+            [],
         ]
     )
 
@@ -1167,19 +1168,23 @@ async def test_authenticate_api_key_batches_last_used_and_project_scopes(
     assert auth.memory_space_ids == [memory_space_id]
     assert auth.memory_spaces is not None
     assert auth.memory_spaces[0].policy_key.endswith("project-alpha")
+    # The request path reads the key and its scopes; the last_used_at write
+    # lands afterwards, off the request.
+    assert len(client.calls) == 5
+    project_scope_query, project_scope_params = client.calls[1]
+    assert "SELECT * FROM api_key_project_scopes" in project_scope_query
+    assert project_scope_params["api_key_id"] == str(api_key_id)
+    memory_scope_query, memory_scope_params = client.calls[3]
+    assert "SELECT * FROM api_key_memory_space_scopes" in memory_scope_query
+    assert memory_scope_params["api_key_id"] == str(api_key_id)
+    await auth_api_keys.drain_last_used_writes()
     assert len(client.calls) == 6
-    scope_query, scope_params = client.calls[1]
+    scope_query, scope_params = client.calls[5]
     assert "UPDATE api_keys" in scope_query
     assert "revoked_at = NONE" in scope_query
     assert "UPSERT api_keys" not in scope_query
     assert scope_params["api_key_id"] == str(api_key_id)
     assert scope_params["last_used_at"] == scope_params["updated_at"]
-    project_scope_query, project_scope_params = client.calls[2]
-    assert "SELECT * FROM api_key_project_scopes" in project_scope_query
-    assert project_scope_params["api_key_id"] == str(api_key_id)
-    memory_scope_query, memory_scope_params = client.calls[4]
-    assert "SELECT * FROM api_key_memory_space_scopes" in memory_scope_query
-    assert memory_scope_params["api_key_id"] == str(api_key_id)
 
 
 @pytest.mark.asyncio
