@@ -134,6 +134,61 @@ class TestJobVisibility:
         session.get.assert_not_called()
 
 
+class TestResolveVisibleSourceIds:
+    @pytest.mark.asyncio
+    async def test_twenty_five_legacy_source_jobs_cost_one_lookup(self) -> None:
+        """The admin page polls every 15 s; visibility is one batched statement."""
+        from sibyl.api.routes.jobs import _resolve_visible_source_ids
+
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        other_org = UUID("00000000-0000-0000-0000-000000000999")
+        source_ids = [UUID(f"00000000-0000-0000-0000-{index:012d}") for index in range(1, 26)]
+        jobs = [
+            SimpleNamespace(function="crawl_source", args=(str(source_id),), kwargs=None)
+            for source_id in source_ids
+        ]
+        jobs.append(SimpleNamespace(function="create_entity", args=(), kwargs=None))
+        lookup = AsyncMock(
+            return_value={
+                source_id: (org.id if index % 2 == 0 else other_org)
+                for index, source_id in enumerate(source_ids)
+            }
+        )
+
+        with (
+            patch("sibyl.api.routes.jobs.list_crawl_source_organization_ids", lookup),
+            patch("sibyl.api.routes.jobs.get_crawl_source_by_id", AsyncMock()) as point_read,
+        ):
+            visible = await _resolve_visible_source_ids(jobs, org=org, session=object())
+
+        lookup.assert_awaited_once()
+        assert sorted(lookup.await_args.kwargs["source_ids"]) == sorted(source_ids)
+        point_read.assert_not_awaited()
+        assert visible == {
+            source_id for index, source_id in enumerate(source_ids) if index % 2 == 0
+        }
+
+    @pytest.mark.asyncio
+    async def test_jobs_without_legacy_sources_skip_the_lookup(self) -> None:
+        from sibyl.api.routes.jobs import _resolve_visible_source_ids
+
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        jobs = [
+            SimpleNamespace(
+                function="crawl_source",
+                args=("00000000-0000-0000-0000-000000000222",),
+                kwargs={"organization_id": str(org.id)},
+            )
+        ]
+
+        with patch(
+            "sibyl.api.routes.jobs.list_crawl_source_organization_ids", AsyncMock()
+        ) as lookup:
+            assert await _resolve_visible_source_ids(jobs, org=org, session=object()) == set()
+
+        lookup.assert_not_awaited()
+
+
 class TestListJobsRoute:
     @pytest.mark.asyncio
     async def test_list_jobs_batches_legacy_source_visibility_checks(self) -> None:

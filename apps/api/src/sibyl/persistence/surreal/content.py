@@ -1269,6 +1269,44 @@ async def get_crawl_source_by_id(
     return _source_from_record(record) if record is not None else None
 
 
+# `uuid IN $list` is served by a union of index lookups up to 32 values on
+# SurrealDB 3.x and falls back to a table scan beyond that.
+_UUID_LOOKUP_BATCH = 32
+
+
+async def list_crawl_source_organization_ids(
+    _session: object,
+    *,
+    source_ids: Sequence[UUID],
+) -> dict[UUID, UUID]:
+    """Map crawl source ids to their organizations in a few indexed statements.
+
+    The organization is read back rather than put in the WHERE: beside an
+    IN list the planner takes the organization index and scans the whole
+    org, while uuid alone stays on its unique index. The caller checks the
+    org on what comes back.
+    """
+    wanted = list(dict.fromkeys(str(source_id) for source_id in source_ids))
+    if not wanted:
+        return {}
+    organizations: dict[UUID, UUID] = {}
+    async with surreal_content_client() as client:
+        for start in range(0, len(wanted), _UUID_LOOKUP_BATCH):
+            rows = await _select_many(
+                client,
+                "SELECT uuid, organization_id FROM crawl_sources WHERE uuid IN $source_ids;",
+                source_ids=wanted[start : start + _UUID_LOOKUP_BATCH],
+            )
+            for row in rows:
+                try:
+                    organizations[UUID(str(row.get("uuid")))] = UUID(
+                        str(row.get("organization_id"))
+                    )
+                except (TypeError, ValueError):
+                    continue
+    return organizations
+
+
 async def get_crawl_source_by_url(
     _session: object,
     *,

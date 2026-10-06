@@ -19,6 +19,7 @@ from sibyl.coordination.broker import job_organization_id
 from sibyl.persistence.content_runtime import (
     get_content_read_session,
     get_crawl_source_by_id,
+    list_crawl_source_organization_ids,
 )
 from sibyl_core.auth import AuthOrganization
 
@@ -108,16 +109,17 @@ async def _resolve_visible_source_ids(
     if not source_ids:
         return set()
 
+    # One batched lookup for the whole list; the admin page polls this every
+    # 15 s, and a point read per crawl job made that N sequential round trips.
     async def _resolve(read_session: Any | None) -> set[UUID]:
-        visible: set[UUID] = set()
-        for source_id in source_ids:
-            if await _source_visible_to_org(
-                org_id=org.id,
-                source_uuid=source_id,
-                session=read_session,
-            ):
-                visible.add(source_id)
-        return visible
+        organizations = await list_crawl_source_organization_ids(
+            read_session, source_ids=sorted(source_ids)
+        )
+        return {
+            source_id
+            for source_id, organization_id in organizations.items()
+            if source_id in source_ids and organization_id == org.id
+        }
 
     if session is not None:
         return await _resolve(session)

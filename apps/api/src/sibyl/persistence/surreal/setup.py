@@ -18,6 +18,7 @@ from sibyl.persistence.surreal.auth import (
     SurrealOrganizationRepository,
     SurrealUserRepository,
     build_surreal_auth_client,
+    get_shared_surreal_auth_client,
 )
 from sibyl_core.auth import AuthUser, OrganizationRole
 
@@ -46,33 +47,35 @@ async def is_setup_mode() -> bool:
 
 
 async def get_setup_status() -> SetupStatus:
-    """Return whether Surreal auth storage has users and organizations."""
-    client = build_surreal_auth_client()
-    try:
-        payload = _object_mapping(
-            await client.execute_query(
-                """
-                    RETURN {
-                        users: (SELECT uuid FROM users LIMIT 1),
-                        organizations: (SELECT uuid FROM organizations LIMIT 1),
-                        initialized_memberships: (
-                            SELECT uuid FROM organization_members
-                            WHERE role = $owner_role OR role = $admin_role
-                            LIMIT 1
-                        ),
-                    };
-                """,
-                owner_role=OrganizationRole.OWNER.value,
-                admin_role=OrganizationRole.ADMIN.value,
-            )
+    """Return whether Surreal auth storage has users and organizations.
+
+    Public and polled by the dashboard, login page, welcome banner and the
+    onboarding wizard, so it borrows the shared pooled auth client rather
+    than opening, signing in and closing a socket of its own on every call.
+    """
+    client = await get_shared_surreal_auth_client()
+    payload = _object_mapping(
+        await client.execute_query(
+            """
+                RETURN {
+                    users: (SELECT uuid FROM users LIMIT 1),
+                    organizations: (SELECT uuid FROM organizations LIMIT 1),
+                    initialized_memberships: (
+                        SELECT uuid FROM organization_members
+                        WHERE role = $owner_role OR role = $admin_role
+                        LIMIT 1
+                    ),
+                };
+            """,
+            owner_role=OrganizationRole.OWNER.value,
+            admin_role=OrganizationRole.ADMIN.value,
         )
-        return SetupStatus(
-            has_users=_has_records(payload.get("users")),
-            has_orgs=_has_records(payload.get("organizations")),
-            setup_complete=_has_records(payload.get("initialized_memberships")),
-        )
-    finally:
-        await client.close()
+    )
+    return SetupStatus(
+        has_users=_has_records(payload.get("users")),
+        has_orgs=_has_records(payload.get("organizations")),
+        setup_complete=_has_records(payload.get("initialized_memberships")),
+    )
 
 
 def _require_request_token(request: Request) -> str:
