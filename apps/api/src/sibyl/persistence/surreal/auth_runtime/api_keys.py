@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import OrderedDict
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
@@ -51,8 +52,12 @@ logger = logging.getLogger(__name__)
 # inline on every authentication made each request pay a non-retryable UPDATE
 # (plus its preflight round trip) against one hot row per agent.
 LAST_USED_WRITE_INTERVAL_SECONDS = 60.0
+# Window starts are kept per key id in opening order; closed windows are
+# dropped as new ones open, and the bound covers a burst of more distinct
+# keys than that at the cost of one early write for the evicted key.
+LAST_USED_WINDOW_MAX_KEYS = 4096
 _monotonic = time.monotonic
-_last_used_written_at: dict[str, float] = {}
+_last_used_written_at: OrderedDict[str, float] = OrderedDict()
 _last_used_writes: set[asyncio.Task[None]] = set()
 
 
@@ -83,10 +88,24 @@ def _schedule_last_used_write(api_key_id: UUID) -> bool:
     if written_at is not None and now - written_at < LAST_USED_WRITE_INTERVAL_SECONDS:
         return False
     _last_used_written_at[key] = now
+    _last_used_written_at.move_to_end(key)
+    _expire_last_used_windows(now)
     task = asyncio.create_task(_write_last_used(key))
     _last_used_writes.add(task)
     task.add_done_callback(_last_used_writes.discard)
     return True
+
+
+def _expire_last_used_windows(now: float) -> None:
+    """Drop closed windows, oldest first, and keep the map bounded."""
+    while _last_used_written_at:
+        _oldest_key, oldest_at = next(iter(_last_used_written_at.items()))
+        if (
+            now - oldest_at < LAST_USED_WRITE_INTERVAL_SECONDS
+            and len(_last_used_written_at) <= LAST_USED_WINDOW_MAX_KEYS
+        ):
+            break
+        _last_used_written_at.popitem(last=False)
 
 
 async def _write_last_used(api_key_id: str) -> None:

@@ -132,3 +132,18 @@ async def test_failed_write_is_logged_and_dropped(
 
     assert len(store.update_calls) == 1, "a dropped write is not retried inside its window"
     assert any("Dropped api_keys.last_used_at write" in record.message for record in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_write_windows_expire_and_stay_bounded(
+    store: _ApiKeyStore, clock: list[float], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(api_keys, "LAST_USED_WINDOW_MAX_KEYS", 3)
+    for _ in range(5):
+        api_keys._schedule_last_used_write(uuid4())
+    assert len(api_keys._last_used_written_at) == 3
+
+    clock[0] += api_keys.LAST_USED_WRITE_INTERVAL_SECONDS
+    api_keys._schedule_last_used_write(uuid4())
+    assert len(api_keys._last_used_written_at) == 1, "closed windows are dropped"
+    await api_keys.drain_last_used_writes()
