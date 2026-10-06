@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import cast
+from typing import Literal, cast
 
 from sibyl_core.backends.surreal.connection import _query_tokens
 from sibyl_core.backends.surreal.schema import render_surreal_compatible_sql
@@ -20,12 +20,15 @@ from sibyl_core.backends.surreal.schema_version import SurrealExecute
 from sibyl_core.migrate.archive_phase_receipts import (
     ArchiveCreatedIdentity,
     ArchivePhaseControl,
+    ArchivePhaseCounts,
     ArchivePhaseKey,
     ArchivePhaseReceipt,
     IntroducedArchiveRow,
     phase_binding_json,
     strict_phase_json,
 )
+from sibyl_core.migrate.personal_archive_plan import ArchiveDisposition, ArchiveKind
+from sibyl_core.migrate.personal_archive_prepared import PreparedArchiveRecords
 
 _PREFIX = "sibyl_archive_phase_"
 _UNUSED_STORE_CLOSE_WRITER = "LET $sibyl_archive_phase_outcomes = [];"
@@ -536,3 +539,199 @@ async def read_archive_phase_receipt(
         "terminal": result["terminal"],
     }
     return ArchivePhaseReceipt.model_validate_json(strict_phase_json(payload))
+
+
+@dataclass(frozen=True, slots=True)
+class CheckedArchiveApplyProgress:
+    """Internal evidence for the sole immutable APPLY batch, never authority.
+
+    Tokens are returned only for validated open admission. The injected executor
+    must already own the correct physical store; caller authentication, locator
+    isolation and any subsequent CAS write remain the coordinator's duties.
+    """
+
+    state: Literal[
+        "not_required", "missing", "missing_initialized", "committed", "closed", "unavailable"
+    ]
+    expected_revision: int | None = None
+    token: str | None = None
+    receipt: ArchivePhaseReceipt | None = None
+
+
+_APPLY_PROGRESS_QUERY = """RETURN {
+    controls: (SELECT * FROM archive_phase_controls
+        WHERE organization_id = $org AND run_id = $run LIMIT 2),
+    receipts: (SELECT * FROM archive_phase_receipts
+        WHERE organization_id = $org AND run_id = $run LIMIT 2)
+};"""
+_GRAPH_APPLY_KINDS = frozenset(
+    {
+        ArchiveKind.GRAPH_ENTITY,
+        ArchiveKind.GRAPH_RELATIONSHIP,
+        ArchiveKind.GRAPH_EPISODE,
+        ArchiveKind.GRAPH_MENTION,
+    }
+)
+
+
+def _progress_binding_matches(row: dict[str, object], key: ArchivePhaseKey) -> bool:
+    binding = key.binding
+    return all(
+        row.get(name) == value
+        for name, value in {
+            "organization_id": binding.organization_id,
+            "actor_id": binding.actor_id,
+            "run_id": binding.run_id,
+            "store": key.store,
+            "binding_json": phase_binding_json(binding),
+            "binding_sha256": binding.sha256,
+            "checked_plan_sha256": binding.checked_plan_sha256,
+        }.items()
+    )
+
+
+def _progress_receipt(row: dict[str, object], key: ArchivePhaseKey) -> ArchivePhaseReceipt:
+    # Validate flat phase columns independently; constructing a key from the
+    # expected input would otherwise silently replace corrupted native evidence.
+    native_key = ArchivePhaseKey.model_validate_json(
+        strict_phase_json(
+            {
+                "binding": key.binding.model_dump(mode="json"),
+                "store": row["store"],
+                "action": row["action"],
+                "batch_sequence": row["batch_sequence"],
+            }
+        )
+    )
+    if row["phase"] != native_key.phase:
+        raise ValueError("archive phase column differs from its native key")
+    return ArchivePhaseReceipt.model_validate_json(
+        strict_phase_json(
+            {
+                "key": native_key.model_dump(mode="json"),
+                **{
+                    name: row[name]
+                    for name in (
+                        "token",
+                        "previous_token",
+                        "previous_revision",
+                        "committed_revision",
+                        "counts",
+                        "introduced",
+                        "retired",
+                        "terminal",
+                    )
+                },
+            }
+        )
+    )
+
+
+async def read_archive_apply_progress(
+    execute: SurrealExecute,
+    *,
+    key: ArchivePhaseKey,
+    prepared: PreparedArchiveRecords,
+) -> CheckedArchiveApplyProgress:
+    """Discover admission only from the complete original store selection.
+
+    One checked native RETURN reads org/run membership before any actor, store
+    or plan filtering. Two rows detect all extra history in the single-batch
+    domain. Existing target bodies are deliberately not reread: an immutable
+    receipt acknowledges historical completion even after a later target edit.
+    This reader neither initializes schemas nor generates tokens or dispatches.
+    """
+    key = ArchivePhaseKey.model_validate(key.model_dump(mode="python"))
+    plan = prepared.plan
+    if key.binding != prepared.binding or (key.action, key.batch_sequence) != ("apply", 0):
+        raise ValueError("archive progress requires the original prepared APPLY batch zero")
+    kinds = {ArchiveKind.RAW_CAPTURE} if key.store == "content" else _GRAPH_APPLY_KINDS
+    selected = tuple(row for row in plan.rows if row.kind in kinds)
+    expected_counts = {
+        kind.value: ArchivePhaseCounts(
+            kind=kind.value,
+            **{
+                disposition.value: sum(
+                    row.kind is kind and row.disposition is disposition for row in selected
+                )
+                for disposition in ArchiveDisposition
+            },
+        )
+        for kind in {row.kind for row in selected}
+    }
+    created_rows = [
+        (row.kind.value, row.destination_id)
+        for row in selected
+        if row.disposition is ArchiveDisposition.CREATED
+    ]
+    created = set(created_rows)
+    active = [
+        (row.kind, row.destination_id)
+        for row in selected
+        if row.disposition is not ArchiveDisposition.QUARANTINED
+    ]
+    # A canonical mapped anchor may have several logical SKIPPED aliases.
+    # Counts retain those decisions; only physical introductions must be unique.
+    if len(created) != len(created_rows) or any(identity is None for _, identity in active):
+        raise ValueError(
+            "archive progress selection repeats a create or omits an active destination"
+        )
+
+    result = await execute(
+        _APPLY_PROGRESS_QUERY, org=key.binding.organization_id, run=key.binding.run_id
+    )
+    if not isinstance(result, dict) or set(result) != {"controls", "receipts"}:
+        raise TypeError("archive progress requires checked native membership execution")
+    controls, receipts = result["controls"], result["receipts"]
+    unavailable = CheckedArchiveApplyProgress("unavailable")
+    if not isinstance(controls, list) or not isinstance(receipts, list):
+        return unavailable
+    if not controls and not receipts:
+        return (
+            CheckedArchiveApplyProgress("missing", expected_revision=0)
+            if selected
+            else CheckedArchiveApplyProgress("not_required")
+        )
+    if not selected or len(controls) != 1:
+        return unavailable
+    control_row = controls[0]
+    if not isinstance(control_row, dict) or not _progress_binding_matches(control_row, key):
+        return unavailable
+    try:
+        control = ArchivePhaseControl.model_validate_json(
+            strict_phase_json(
+                {
+                    "binding": key.binding.model_dump(mode="json"),
+                    "store": control_row["store"],
+                    "revision": control_row["revision"],
+                    "token": control_row["token"],
+                    "state": control_row["state"],
+                }
+            )
+        )
+        native_receipts = []
+        for row in receipts:
+            if not isinstance(row, dict) or not _progress_binding_matches(row, key):
+                return unavailable
+            native_receipts.append(_progress_receipt(row, key))
+    except (KeyError, TypeError, ValueError):
+        return unavailable
+    if control.state != "open":
+        # Closed is denial only, not a certificate of an unsupported rollback
+        # chain. No recovered token or old APPLY receipt escapes this result.
+        return CheckedArchiveApplyProgress("closed")
+    if not native_receipts and control.revision == 0:
+        return CheckedArchiveApplyProgress("missing_initialized", 0, control.token)
+    if len(native_receipts) != 1 or control.revision != 1:
+        return unavailable
+    receipt = native_receipts[0]
+    if (
+        receipt.key != key
+        or receipt.previous_revision != 0
+        or receipt.committed_revision != control.revision
+        or receipt.token != control.token
+        or {count.kind: count for count in receipt.counts} != expected_counts
+        or {(row.kind, row.destination_id) for row in receipt.introduced} != created
+    ):
+        return unavailable
+    return CheckedArchiveApplyProgress("committed", control.revision, control.token, receipt)

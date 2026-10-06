@@ -1,7 +1,11 @@
 """Synthetic native data/receipt composition, without an archive apply writer."""
 
 import asyncio
+import json
 import os
+from copy import deepcopy
+from dataclasses import FrozenInstanceError, replace
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -30,19 +34,51 @@ from sibyl_core.backends.surreal.schema_version import (
     record_schema_version,
 )
 from sibyl_core.memory_pipeline.observations import SourceKind
-from sibyl_core.migrate.archive_phase_receipts import ArchiveCreatedIdentity, ArchivePhaseKey
+from sibyl_core.migrate.archive_phase_receipts import (
+    ArchiveCreatedIdentity,
+    ArchivePhaseKey,
+    phase_binding_json,
+)
+from sibyl_core.migrate.personal_archive_candidates import normalize_archive_candidates
+from sibyl_core.migrate.personal_archive_plan import (
+    ArchiveCredentialCeiling,
+    ArchiveDisposition,
+    CheckedArchivePlan,
+    canonical_json,
+    checked_plan_bytes,
+    checked_plan_digest,
+    preview_counts,
+)
+from sibyl_core.migrate.personal_archive_prepared import (
+    PreparedArchiveRow,
+    destination_semantic_digest,
+)
 from sibyl_core.services.archive_phase_store import (
     prepare_archive_phase_transaction,
+    read_archive_apply_progress,
     read_archive_phase_receipt,
 )
+from tests import test_archive_graph_compiler as graph_fixtures
+from tests import test_archive_raw_compiler as raw_fixtures
 from tests.test_archive_phase_receipts import binding
 
 pytestmark = pytest.mark.asyncio
 
 
+def phase_namespace():
+    registry = os.environ.get("SIBYL_ARCHIVE_PHASE_NS_REGISTRY")
+    prefix = "archive_apply_progress_author_" if registry else "archive_phase_foundation_author_"
+    namespace = prefix + uuid4().hex
+    if registry:
+        # Register before client preparation can create the native namespace.
+        with Path(registry).open("a") as output:
+            output.write(json.dumps({"namespace": namespace}) + "\n")
+    return namespace
+
+
 @pytest.fixture
 async def phase_client():
-    namespace = "archive_phase_foundation_author_" + uuid4().hex
+    namespace = phase_namespace()
     client = SurrealContentClient(
         url=os.environ.get("SIBYL_ARCHIVE_TEST_SURREAL_URL", "memory://"),
         username=os.environ.get("SIBYL_ARCHIVE_TEST_SURREAL_USERNAME", ""),
@@ -641,7 +677,7 @@ async def test_archive_phase_uses_only_canonical_store_inventory(phase_client, s
 
 
 async def test_archive_phase_registered_fresh_content_bootstrap():
-    namespace = "archive_phase_foundation_author_" + uuid4().hex
+    namespace = phase_namespace()
     client = SurrealContentClient(
         url=os.environ.get("SIBYL_ARCHIVE_TEST_SURREAL_URL", "memory://"),
         username=os.environ.get("SIBYL_ARCHIVE_TEST_SURREAL_USERNAME", ""),
@@ -670,3 +706,457 @@ async def test_archive_phase_registered_fresh_content_bootstrap():
     finally:
         await client.execute_query(f"REMOVE NAMESPACE {namespace};")
         await client.close()
+
+
+def progress_inputs(tmp_path, *, store="content", count=1):
+    parsed, plan = raw_fixtures.inputs(tmp_path, count=count)
+    value = raw_fixtures.prepared(parsed, plan)
+    return value, ArchivePhaseKey(
+        binding=value.binding, store=store, action="apply", batch_sequence=0
+    )
+
+
+def seed_control(key, token):
+    return {
+        "organization_id": key.binding.organization_id,
+        "actor_id": key.binding.actor_id,
+        "run_id": key.binding.run_id,
+        "store": key.store,
+        "binding_json": phase_binding_json(key.binding),
+        "binding_sha256": key.binding.sha256,
+        "checked_plan_sha256": key.binding.checked_plan_sha256,
+        "revision": 0,
+        "token": token,
+        "state": "open",
+    }
+
+
+async def progress_payload(client, key):
+    return await client.execute_query(
+        """RETURN {
+            controls: (SELECT * FROM archive_phase_controls WHERE organization_id=$org AND run_id=$run),
+            receipts: (SELECT * FROM archive_phase_receipts WHERE organization_id=$org AND run_id=$run)
+        };""",
+        org=key.binding.organization_id,
+        run=key.binding.run_id,
+    )
+
+
+async def test_archive_apply_progress_native_seed_commit_lost_ack_and_edited_target(
+    phase_client, tmp_path
+):
+    value, key = progress_inputs(tmp_path)
+    missing = await read_archive_apply_progress(phase_client.execute_query, key=key, prepared=value)
+    assert (missing.state, missing.expected_revision, missing.token, missing.receipt) == (
+        "missing",
+        0,
+        None,
+        None,
+    )
+    token = str(uuid4())
+    await phase_client.execute_query(
+        "CREATE archive_phase_controls CONTENT $row;", row=seed_control(key, token)
+    )
+    initialized = await read_archive_apply_progress(
+        phase_client.execute_query, key=key, prepared=value
+    )
+    assert (initialized.state, initialized.expected_revision, initialized.token) == (
+        "missing_initialized",
+        0,
+        token,
+    )
+    _, _, tx = raw_fixtures.phase(value, key=key, token=token, url=phase_client._url)
+    await commit(phase_client, tx)
+    first = await read_archive_apply_progress(phase_client.execute_query, key=key, prepared=value)
+    assert first.state == "committed" and first.expected_revision == 1 and first.token == token
+    assert first.receipt.counts[0].created == 1
+    # Declarations include duplicate archive carriers; phase counts cover the
+    # normalized selection once rather than claiming coalesced writes.
+    assert raw_fixtures.raw_rows(value)[0].row.declarations > 1
+    before = await progress_payload(phase_client, key)
+    await phase_client.execute_query(
+        "UPDATE raw_captures SET raw_content='Later canonical edit', revision=2;"
+    )
+    assert (
+        await read_archive_apply_progress(phase_client.execute_query, key=key, prepared=value)
+        == first
+    )
+    assert await progress_payload(phase_client, key) == before
+    assert len(await phase_client.execute_query("SELECT * FROM raw_captures;")) == 1
+    with pytest.raises(FrozenInstanceError):
+        first.token = str(uuid4())
+
+
+@pytest.mark.parametrize(
+    "field", ["actor_id", "store", "checked_plan_sha256", "binding_sha256", "binding_json"]
+)
+async def test_archive_apply_progress_native_foreign_seed_not_hidden(phase_client, tmp_path, field):
+    value, key = progress_inputs(tmp_path)
+    row = seed_control(key, str(uuid4()))
+    row[field] = {
+        "actor_id": str(uuid4()),
+        "store": "graph",
+        "checked_plan_sha256": "0" * 64,
+        "binding_sha256": "1" * 64,
+        "binding_json": "{}",
+    }[field]
+    await phase_client.execute_query("CREATE archive_phase_controls CONTENT $row;", row=row)
+    progress = await read_archive_apply_progress(
+        phase_client.execute_query, key=key, prepared=value
+    )
+    assert (progress.state, progress.token, progress.receipt) == ("unavailable", None, None)
+
+
+async def test_archive_apply_progress_native_exact_counts_wrong_introduction(
+    phase_client, tmp_path
+):
+    value, key = progress_inputs(tmp_path)
+    _, tx, record = create_tx(value.binding, str(uuid4()))
+    assert record["uuid"] != raw_fixtures.raw_rows(value)[0].row.destination_id
+    await commit(phase_client, tx)
+    actual = await phase_client.execute_query("SELECT * FROM archive_phase_receipts;")
+    assert actual[0]["counts"][0]["created"] == 1
+    assert actual[0]["introduced"][0]["destination_id"] == record["uuid"]
+    progress = await read_archive_apply_progress(
+        phase_client.execute_query, key=key, prepared=value
+    )
+    assert progress.state == "unavailable" and progress.token is None
+
+
+async def test_archive_apply_progress_native_extra_apply_and_closed_history(phase_client, tmp_path):
+    value, key = progress_inputs(tmp_path)
+    token = str(uuid4())
+    _, _, first = raw_fixtures.phase(value, key=key, token=token, url=phase_client._url)
+    await commit(phase_client, first)
+    original = await read_archive_apply_progress(
+        phase_client.execute_query, key=key, prepared=value
+    )
+    assert original.state == "committed"
+    rollback = prepare_archive_phase_transaction(
+        url=phase_client._url,
+        key=ArchivePhaseKey(
+            binding=value.binding, store="content", action="rollback", batch_sequence=0
+        ),
+        expected_revision=1,
+        expected_token=token,
+        rollback_token=str(uuid4()),
+        terminal=True,
+        retirement_candidates=original.receipt.introduced,
+        writer_statements="""DELETE raw_captures WHERE uuid=$id;
+        LET $sibyl_archive_phase_outcomes=[{kind:'raw_capture',disposition:'retired',destination_id:$id}];""",
+        writer_parameters={"id": original.receipt.introduced[0].destination_id},
+    )
+    await commit(phase_client, rollback)
+    closed = await read_archive_apply_progress(phase_client.execute_query, key=key, prepared=value)
+    assert (closed.state, closed.token, closed.receipt) == ("closed", None, None)
+    other = replace(value, run_id=str(uuid4()), artifact_id=str(uuid4()))
+    other_key = ArchivePhaseKey(
+        binding=other.binding, store="content", action="apply", batch_sequence=0
+    )
+    _, tx0, _ = create_tx(other.binding, token)
+    await commit(phase_client, tx0)
+    _, tx1, _ = create_tx(other.binding, token, revision=1, batch=1)
+    await commit(phase_client, tx1)
+    assert len((await progress_payload(phase_client, other_key))["receipts"]) == 2
+    extra = await read_archive_apply_progress(
+        phase_client.execute_query, key=other_key, prepared=other
+    )
+    assert (extra.state, extra.token, extra.receipt) == ("unavailable", None, None)
+
+
+async def test_archive_apply_progress_empty_requires_both_memberships_absent(
+    phase_client, tmp_path
+):
+    value, key = progress_inputs(tmp_path, store="graph")
+    assert (
+        await read_archive_apply_progress(phase_client.execute_query, key=key, prepared=value)
+    ).state == "not_required"
+    await phase_client.execute_query(
+        "CREATE archive_phase_controls CONTENT $row;", row=seed_control(key, str(uuid4()))
+    )
+    result = await read_archive_apply_progress(phase_client.execute_query, key=key, prepared=value)
+    assert (result.state, result.token) == ("unavailable", None)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "duplicate_control",
+        "duplicate_receipt",
+        "orphan",
+        "actor_id",
+        "store",
+        "run_id",
+        "organization_id",
+        "checked_plan_sha256",
+        "binding_sha256",
+        "binding_json",
+        "phase",
+        "action",
+        "batch_sequence",
+        "previous_revision",
+        "committed_revision",
+        "token",
+        "previous_token",
+        "counts",
+        "introduced",
+        "empty_introduced",
+        "bool_revision",
+        "unknown_state",
+    ],
+)
+async def test_archive_apply_progress_rejects_corrupted_membership(
+    phase_client, tmp_path, mutation
+):
+    value, key = progress_inputs(tmp_path)
+    _, _, tx = raw_fixtures.phase(value, key=key, url=phase_client._url)
+    await commit(phase_client, tx)
+    payload = deepcopy(await progress_payload(phase_client, key))
+    row = payload["receipts"][0]
+    if mutation == "duplicate_control":
+        payload["controls"].append(deepcopy(payload["controls"][0]))
+    elif mutation == "duplicate_receipt":
+        payload["receipts"].append(deepcopy(row))
+    elif mutation == "orphan":
+        payload["controls"] = []
+    elif mutation == "bool_revision":
+        payload["controls"][0]["revision"] = True
+    elif mutation == "unknown_state":
+        payload["controls"][0]["state"] = "unknown"
+    elif mutation == "counts":
+        row["counts"][0]["created"] = 2
+    elif mutation == "introduced":
+        row["introduced"][0]["destination_id"] = str(uuid4())
+    elif mutation == "empty_introduced":
+        row["introduced"] = []
+    else:
+        replacements = {
+            "actor_id": str(uuid4()),
+            "store": "graph",
+            "run_id": str(uuid4()),
+            "organization_id": str(uuid4()),
+            "checked_plan_sha256": "a" * 64,
+            "binding_sha256": "b" * 64,
+            "binding_json": "{}",
+            "phase": "content_rollback",
+            "action": "rollback",
+            "batch_sequence": 1,
+            "previous_revision": 1,
+            "committed_revision": 2,
+            "token": str(uuid4()),
+            "previous_token": str(uuid4()),
+        }
+        row[mutation] = replacements[mutation]
+    calls = []
+
+    async def execute(query, **params):
+        calls.append((query, params))
+        return payload
+
+    result = await read_archive_apply_progress(execute, key=key, prepared=value)
+    assert (result.state, result.token, result.receipt) == ("unavailable", None, None)
+    assert len(calls) == 1 and calls[0][1] == {
+        "org": key.binding.organization_id,
+        "run": key.binding.run_id,
+    }
+    assert (
+        "actor_id =" not in calls[0][0]
+        and "store =" not in calls[0][0]
+        and "checked_plan_sha256 =" not in calls[0][0]
+    )
+    assert calls[0][0].count("LIMIT 2") == 2
+
+
+async def test_archive_apply_progress_invalid_saved_inputs_before_io(tmp_path):
+    value, key = progress_inputs(tmp_path)
+
+    async def execute(query, **params):
+        raise AssertionError("invalid saved input reached executor")
+
+    for field, changed in (("actor_id", str(uuid4())), ("run_id", str(uuid4()))):
+        wrong = key.model_copy(update={"binding": key.binding.model_copy(update={field: changed})})
+        with pytest.raises(ValueError, match="original prepared"):
+            await read_archive_apply_progress(execute, key=wrong, prepared=value)
+    for changes in ({"action": "rollback"}, {"batch_sequence": 1}):
+        with pytest.raises(ValueError, match="original prepared"):
+            await read_archive_apply_progress(
+                execute, key=key.model_copy(update=changes), prepared=value
+            )
+    with pytest.raises(ValueError):
+        await read_archive_apply_progress(execute, key=key, prepared=replace(value, rows=()))
+
+
+async def test_archive_apply_progress_native_count_mismatch_without_identity_corruption(
+    phase_client, tmp_path
+):
+    value, key = progress_inputs(tmp_path)
+    token = str(uuid4())
+    _, _, record = create_tx(
+        value.binding, token, record_id=raw_fixtures.raw_rows(value)[0].row.destination_id
+    )
+    second = {**record, "uuid": str(uuid4())}
+    tx = prepare_archive_phase_transaction(
+        key=key,
+        url=phase_client._url,
+        expected_revision=0,
+        expected_token=token,
+        writer_statements="""CREATE raw_captures CONTENT $first;
+        CREATE raw_captures CONTENT $second;
+        LET $sibyl_archive_phase_outcomes=[
+            {kind:'raw_capture', disposition:'created', destination_id:$first.uuid},
+            {kind:'raw_capture', disposition:'created', destination_id:$second.uuid}];""",
+        writer_parameters={"first": record, "second": second},
+        planned_creates=tuple(
+            ArchiveCreatedIdentity(kind="raw_capture", destination_id=row["uuid"])
+            for row in (record, second)
+        ),
+    )
+    await commit(phase_client, tx)
+    proof = await read_archive_phase_receipt(phase_client.execute_query, key=key, token=token)
+    assert proof.counts[0].created == 2 and len(proof.introduced) == 2
+    progress = await read_archive_apply_progress(
+        phase_client.execute_query, key=key, prepared=value
+    )
+    assert (progress.state, progress.token) == ("unavailable", None)
+
+
+async def test_archive_apply_progress_native_graph_compiler_complete_inventory(
+    phase_client, tmp_path
+):
+    parsed, plan = graph_fixtures.inputs(tmp_path)
+    value = graph_fixtures.prepared(parsed, plan)
+    key, token, tx = graph_fixtures.phase(value, url=phase_client._url)
+    assert (
+        await read_archive_apply_progress(phase_client.execute_query, key=key, prepared=value)
+    ).state == "missing"
+    await commit(phase_client, tx)
+    progress = await read_archive_apply_progress(
+        phase_client.execute_query, key=key, prepared=value
+    )
+    assert progress.state == "committed" and progress.token == token
+    assert {count.kind: count.created for count in progress.receipt.counts} == {
+        "graph_entity": 2,
+        "graph_relationship": 1,
+    }
+    assert len(progress.receipt.introduced) == 3
+
+
+async def test_archive_apply_progress_native_raw_quarantine_normalized_counts(
+    phase_client, tmp_path
+):
+    parsed, plan = raw_fixtures.inputs(tmp_path, count=2, protected=(1,))
+    value = raw_fixtures.prepared(parsed, plan)
+    key, token, tx = raw_fixtures.phase(value, url=phase_client._url)
+    await commit(phase_client, tx)
+    progress = await read_archive_apply_progress(
+        phase_client.execute_query, key=key, prepared=value
+    )
+    assert progress.state == "committed" and progress.token == token
+    assert (progress.receipt.counts[0].created, progress.receipt.counts[0].quarantined) == (1, 1)
+    assert len(progress.receipt.introduced) == 1
+
+
+async def test_archive_apply_progress_native_mapped_aliases_acknowledge_one_physical_guard(
+    phase_client, tmp_path
+):
+    parsed, plan = graph_fixtures.inputs(tmp_path / "existing", count=1)
+    installed = graph_fixtures.prepared(parsed, plan)
+    await commit(phase_client, graph_fixtures.phase(installed, url=phase_client._url)[2])
+    destination = graph_fixtures.graph_rows(installed)[0].row.destination_id
+    await phase_client.execute_query(
+        "UPDATE entity SET entity_type='project' WHERE uuid=$id;", id=destination
+    )
+    snapshot = await graph_fixtures.cut(phase_client, plan.organization_id, destination)
+    source_org, owner = str(uuid4()), str(uuid4())
+    fixtures = graph_fixtures.fixtures
+    records = [fixtures._entity(source_org, owner, entity_type="project") for _ in range(2)]
+    records[0]["name"], records[1]["name"] = "First source project", "Second source project"
+    archive = fixtures._parsed(
+        tmp_path / "aliases", source_org, graph=fixtures._graph(source_org, records)
+    )
+    mappings = fixtures._mapping(plan.actor_id, owner).model_copy(
+        update={"projects": {row["uuid"]: destination for row in records}}
+    )
+    candidates = normalize_archive_candidates(archive, mappings, actor_id=plan.actor_id)
+    rows = tuple(
+        candidate.initial_preview(
+            organization_id=plan.organization_id, actor_id=plan.actor_id, origin=archive.origin
+        ).model_copy(update={"witnesses": (graph_fixtures.witness(destination, snapshot),)})
+        for candidate in candidates
+    )
+    aliases = CheckedArchivePlan(
+        organization_id=plan.organization_id,
+        actor_id=plan.actor_id,
+        origin=archive.origin,
+        archive_sha256=archive.archive_sha256,
+        artifact_sha256=archive.artifact_sha256,
+        mappings=mappings,
+        credential=ArchiveCredentialCeiling(credential_kind="session"),
+        rows=rows,
+        counts=preview_counts(rows),
+    )
+    value = graph_fixtures.prepared(archive, aliases)
+    assert len(graph_fixtures.graph_rows(value)) == 2
+    assert all(
+        item.body is None and item.row.disposition is ArchiveDisposition.SKIPPED
+        for item in graph_fixtures.graph_rows(value)
+    )
+    key, token, tx = graph_fixtures.phase(value, url=phase_client._url)
+    assert len(tx.parameters["archive_graph_guards"]) == 1
+    assert (
+        await read_archive_apply_progress(phase_client.execute_query, key=key, prepared=value)
+    ).state == "missing"
+    await commit(phase_client, tx)
+    receipt = await read_archive_phase_receipt(phase_client.execute_query, key=key, token=token)
+    result = await read_archive_apply_progress(phase_client.execute_query, key=key, prepared=value)
+    assert result.state == "committed" and result.receipt == receipt
+    assert sum(count.skipped for count in result.receipt.counts) == 2
+    assert not result.receipt.introduced
+    assert snapshot == await graph_fixtures.cut(phase_client, plan.organization_id, destination)
+
+
+@pytest.mark.parametrize("malformation", ["duplicate_created", "missing_active"])
+async def test_archive_apply_progress_malformed_destinations_before_io(tmp_path, malformation):
+    value, _ = progress_inputs(tmp_path, count=2)
+    plan = value.plan
+    items = list(value.rows)
+    selected = raw_fixtures.raw_rows(value)
+    first, second = selected[:2]
+    body = second.body
+    destination = first.row.destination_id if malformation == "duplicate_created" else None
+    row = second.row.model_copy(
+        update={
+            "destination_id": destination,
+            "disposition": ArchiveDisposition.CREATED
+            if malformation == "duplicate_created"
+            else ArchiveDisposition.CONFLICTED,
+        }
+    )
+    if malformation == "duplicate_created":
+        body["source_id"] = destination
+        row = row.model_copy(update={"semantic_sha256": destination_semantic_digest(row, body)})
+    else:
+        body = None
+    items[items.index(second)] = PreparedArchiveRow(
+        row_json=canonical_json(row), body_json=None if body is None else canonical_json(body)
+    )
+    rows = tuple(item.row for item in items)
+    changed = plan.model_copy(update={"rows": rows, "counts": preview_counts(rows)})
+    malformed = replace(
+        value,
+        rows=tuple(items),
+        checked_plan_json=checked_plan_bytes(changed),
+        checked_plan_sha256=checked_plan_digest(changed),
+    )
+    # Local prepared validation succeeds: the reader must enforce its physical
+    # destination contract rather than pass this malformed selection to I/O.
+    assert malformed.plan == changed
+    key = ArchivePhaseKey(
+        binding=malformed.binding, store="content", action="apply", batch_sequence=0
+    )
+
+    async def execute(query, **params):
+        raise AssertionError("malformed physical destinations reached executor")
+
+    with pytest.raises(ValueError, match=r"repeats a create|omits an active"):
+        await read_archive_apply_progress(execute, key=key, prepared=malformed)
