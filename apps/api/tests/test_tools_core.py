@@ -710,6 +710,34 @@ class TestGetHealth:
             ctx.entity_manager.list_all.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_health_can_probe_readiness_instead_of_counting(self) -> None:
+        """A poller that only needs a verdict pays one RETURN, not a table scan."""
+
+        async with mock_tools() as ctx:
+            ctx.entity_manager.count_by_type = AsyncMock()
+            ctx.entity_manager.list_all = AsyncMock()
+            ctx.graph_client.execute_query = AsyncMock(return_value=[True])
+
+            result = await get_health(organization_id=TEST_ORG_ID, include_entity_counts=False)
+
+            assert result["status"] == "healthy"
+            assert result["graph_connected"] is True
+            assert result["entity_counts"] == {}
+            ctx.entity_manager.count_by_type.assert_not_awaited()
+            ctx.entity_manager.list_all.assert_not_awaited()
+            ctx.graph_client.execute_query.assert_awaited_once_with("RETURN true;")
+
+    @pytest.mark.asyncio
+    async def test_health_probe_failure_reports_unhealthy(self) -> None:
+        async with mock_tools() as ctx:
+            ctx.graph_client.execute_query = AsyncMock(side_effect=ConnectionError("socket gone"))
+
+            result = await get_health(organization_id=TEST_ORG_ID, include_entity_counts=False)
+
+            assert result["status"] == "unhealthy"
+            assert result["errors"] == ["socket gone"]
+
+    @pytest.mark.asyncio
     async def test_health_handles_connection_failure(self) -> None:
         """Health should report unhealthy on connection failure."""
 

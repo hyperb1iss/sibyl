@@ -28,12 +28,20 @@ async def execute_graph_query(
     return normalize_graph_records(await runtime.client.execute_query(query, **params))
 
 
-async def get_health(*, organization_id: str | None = None) -> dict[str, Any]:
+async def get_health(
+    *,
+    organization_id: str | None = None,
+    include_entity_counts: bool = True,
+) -> dict[str, Any]:
     """Get server health status.
 
     Args:
         organization_id: Organization ID for graph operations. If None, only basic
                         connectivity is checked.
+        include_entity_counts: Count entities by type for the org. Counting is a
+                        full table scan, so a caller that only needs to know the
+                        graph answers (a dashboard polling every 30 s) turns it
+                        off and gets a readiness probe instead.
     """
     from sibyl_core.config import settings
     from sibyl_core.observability import telemetry_registry
@@ -53,16 +61,22 @@ async def get_health(*, organization_id: str | None = None) -> dict[str, Any]:
             entity_manager = runtime.entity_manager
             health["graph_connected"] = True
 
-            try:
-                counts = await count_entities_by_type(entity_manager)
-            except Exception:
-                counts = None
+            if include_entity_counts:
+                try:
+                    counts = await count_entities_by_type(entity_manager)
+                except Exception:
+                    counts = None
 
-            for entity_type in [EntityType.PATTERN, EntityType.RULE, EntityType.EPISODE]:
-                if counts is None:
-                    health["entity_counts"][entity_type.value] = -1
-                else:
-                    health["entity_counts"][entity_type.value] = counts.get(entity_type.value, 0)
+                for entity_type in [EntityType.PATTERN, EntityType.RULE, EntityType.EPISODE]:
+                    if counts is None:
+                        health["entity_counts"][entity_type.value] = -1
+                    else:
+                        health["entity_counts"][entity_type.value] = counts.get(
+                            entity_type.value, 0
+                        )
+            else:
+                # Prove the socket answers without decoding a single row.
+                await runtime.client.execute_query("RETURN true;")
         else:
             await get_graph_client()
             health["graph_connected"] = True

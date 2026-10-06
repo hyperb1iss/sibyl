@@ -8,6 +8,7 @@ from typing import Any, Self
 
 import structlog
 
+from sibyl.persistence.read_memo import OrgReadMemo
 from sibyl_core.embeddings.providers import configured_embedding_provider
 from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
@@ -1077,7 +1078,17 @@ async def _graph_stats_payload(group_id: str) -> dict[str, object]:
     }
 
 
-async def get_graph_stats_payload(group_id: str) -> dict[str, object]:
+# Counting entities by type decodes the whole table; every entities page
+# render, dashboard load and search page asks for it, and the client
+# invalidates it on every create or delete broadcast. The memo answers a
+# burst of those from one scan; the write path's broadcast drops it.
+GRAPH_STATS_TTL_SECONDS = 10.0
+_GRAPH_STATS: OrgReadMemo[dict[str, object]] = OrgReadMemo(
+    "graph-stats", ttl_seconds=GRAPH_STATS_TTL_SECONDS
+)
+
+
+async def _compute_graph_stats_payload(group_id: str) -> dict[str, object]:
     try:
         return await _graph_stats_payload(group_id)
     except Exception as exc:
@@ -1086,6 +1097,15 @@ async def get_graph_stats_payload(group_id: str) -> dict[str, object]:
         service = await get_knowledge_read_adapter(group_id)
         stats = await service.stats()
         return graph_stats_payload(stats)
+
+
+async def get_graph_stats_payload(group_id: str) -> dict[str, object]:
+    return await _GRAPH_STATS.get(group_id, lambda: _compute_graph_stats_payload(group_id))
+
+
+def peek_graph_stats_payload(group_id: str) -> dict[str, object] | None:
+    """Return the memoized stats when warm, without counting anything."""
+    return _GRAPH_STATS.peek(group_id)
 
 
 async def ensure_graph_indexes(group_id: str) -> None:
