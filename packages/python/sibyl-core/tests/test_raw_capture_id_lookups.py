@@ -9,9 +9,11 @@ moved into Python rather than disappearing.
 
 from __future__ import annotations
 
+import os
 import re
 from contextlib import asynccontextmanager
 from typing import Any
+from uuid import uuid4
 
 import pytest
 
@@ -239,3 +241,69 @@ async def test_publication_snapshot_looks_captures_up_by_uuid_and_verifies_org(
         "                                (SELECT * FROM raw_captures WHERE uuid = $capture_id LIMIT 1)))"
     ) in query
     assert [row["uuid"] for row in seen[0]["captures"]] == ["own"]
+
+
+# A live SurrealDB 3.x namespace was found with idx_raw_captures_uuid reporting
+# `ready` while every capture created before an earlier index build was absent
+# from it, so point lookups by uuid missed those rows. The rewritten lookups
+# depend on that index, and migration 54 rebuilds it. This proves, on a real
+# server, that after the rebuild the oldest rows of an organization are found
+# through the rewritten path. Run with SIBYL_LIVE_SURREAL_TESTS=1 against a
+# scratch server named by SIBYL_SURREAL_URL; it creates and removes its own
+# namespace.
+@pytest.mark.skipif(
+    os.environ.get("SIBYL_LIVE_SURREAL_TESTS") != "1",
+    reason="live SurrealDB server required (SIBYL_LIVE_SURREAL_TESTS=1)",
+)
+async def test_rebuilt_uuid_index_serves_the_oldest_rows_on_a_live_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from sibyl_core.backends.surreal import SurrealContentClient
+    from sibyl_core.backends.surreal.content_schema import bootstrap_content_schema
+
+    url = os.environ.get("SIBYL_SURREAL_URL", "")
+    assert url, "SIBYL_SURREAL_URL must name the scratch server"
+    namespace = f"qp_uuid_rebuild_{uuid4().hex}"
+    client = SurrealContentClient(
+        url=url,
+        username=os.environ.get("SIBYL_SURREAL_USERNAME", "root"),
+        password=os.environ.get("SIBYL_SURREAL_PASSWORD", "root"),
+        namespace=namespace,
+    )
+    try:
+        await bootstrap_content_schema(client)
+        base = datetime(2026, 1, 1, tzinfo=UTC)
+        rows = [
+            {
+                **_capture(f"row-{index:03d}", memory_scope="organization"),
+                "captured_at": base + timedelta(days=index),
+                "created_at": base + timedelta(days=index),
+            }
+            for index in range(48)
+        ]
+        await client.execute_query("INSERT INTO raw_captures $rows RETURN NONE;", rows=rows)
+        await client.execute_query(RAW_CAPTURE_UUID_INDEX_REBUILD)
+
+        oldest = [str(row["uuid"]) for row in rows[:20]]
+        found = await client.execute_query(
+            "SELECT VALUE uuid FROM raw_captures WITH INDEX idx_raw_captures_uuid "
+            "WHERE uuid IN $ids;",
+            ids=oldest,
+        )
+        assert isinstance(found, list)
+        assert sorted(str(value) for value in found) == sorted(oldest)
+
+        @asynccontextmanager
+        async def session():
+            yield client
+
+        monkeypatch.setattr(content_client, "surreal_content_client", session)
+        memories = await list_raw_memories_for_promotion(
+            organization_id=ORG, raw_memory_ids=oldest, limit=100
+        )
+        assert sorted(memory.id for memory in memories) == sorted(oldest)
+    finally:
+        await client.execute_query(f"REMOVE NAMESPACE IF EXISTS {namespace};")
+        await client.close()

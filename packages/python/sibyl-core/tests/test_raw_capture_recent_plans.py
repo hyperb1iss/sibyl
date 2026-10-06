@@ -3,7 +3,7 @@
 The scope index `(organization_id, memory_scope, scope_key)` matches every
 private capture of an organization because private rows leave scope_key
 empty, so recall, listing and the embedding coverage probe fetched the whole
-scope and sorted it in memory. Migration 54 adds indexes that end in the
+scope and sorted it in memory. Migration 55 adds indexes that end in the
 order the readers use, and the readers order by exactly that tail so the
 3.x planner streams the scan and bounds it by the limit.
 """
@@ -63,11 +63,11 @@ def _defined_indexes(statements: tuple[str, ...]) -> dict[str, tuple[str, ...]]:
     return defined
 
 
-def test_migration_54_defines_the_recent_first_indexes() -> None:
+def test_migration_55_defines_the_recent_first_indexes() -> None:
     migrations = {item.version: item for item in _content_schema_migrations(url="")}
-    assert CONTENT_SCHEMA_CURRENT_VERSION == 54
-    assert migrations[54].name == "content_raw_capture_recent_indexes"
-    assert _defined_indexes(migrations[54].statements) == _EXPECTED_INDEXES
+    assert CONTENT_SCHEMA_CURRENT_VERSION >= 55
+    assert migrations[55].name == "content_raw_capture_recent_indexes"
+    assert _defined_indexes(migrations[55].statements) == _EXPECTED_INDEXES
 
 
 class _ScriptedClient:

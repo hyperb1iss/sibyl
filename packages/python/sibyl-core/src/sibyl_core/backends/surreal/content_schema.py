@@ -154,7 +154,7 @@ CONTENT_TABLES = (
     *RAW_LEXICAL_TABLES,
     RAW_LEXICAL_STATE_TABLE,
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 54
+CONTENT_SCHEMA_CURRENT_VERSION = 55
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -1249,7 +1249,7 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             statements=(RAW_CAPTURE_UUID_INDEX_REBUILD,),
         ),
         SchemaMigration(
-            version=54,
+            version=55,
             name="content_raw_capture_recent_indexes",
             statements=tuple(
                 split_statements(CONTENT_RAW_CAPTURE_RECENT_INDEX_MIGRATION_DEFINITIONS)
