@@ -161,6 +161,11 @@ has written by the time the undo reaches a row; a write still queued in the back
 linking to a row in the same moment the undo removes it, can leave that link pointing at nothing, as
 with any delete.
 
+A ledger written by a build from before migrated rows recorded their source project shows a
+cautious dry run: rows linked from inside the same migration can be reported as kept because "a row
+outside its migration links to it". The real undo removes the linking rows first and then their
+targets, so it removes more than such a dry run predicts.
+
 Migrating again after an undo writes fresh rows for everything the undo removed. Rows the undo kept
 stay in the ledger and are not written twice. An undo that stops part way can be run again; it first
 checks any writes whose answer was lost, and a migration after it checks the rows the undo had

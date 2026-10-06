@@ -299,8 +299,10 @@ async def _resolve_target_org(client: Any) -> dict[str, Any]:
 
 _DEFAULT_SOURCE_CREDENTIAL = "root"
 _UNDO_REFUSED = "undo refused: project maintainer access required"
-# Answers that say nothing about whether the original write landed.
-_UNSETTLED = {401, 403, 408, 409, 429}
+# Answers that prove the replayed write was refused before anything was stored:
+# validation failures. Any other answer (auth, a missing project, conflicts,
+# timeouts, rate limits) says nothing about whether the original write landed.
+_NEVER_LANDED = {400, 422}
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 # Where `sibyl local` publishes its SurrealDB (127.0.0.1:8000 in its compose file).
 _LOCAL_INSTALL_PORT = 8000
@@ -962,7 +964,7 @@ async def _undo_raw(
             )
         except Exception as exc:
             status = getattr(exc, "status_code", None)
-            if isinstance(status, int) and 400 <= status < 500 and status not in _UNSETTLED:
+            if status in _NEVER_LANDED:
                 # The server refused the write outright, so it never landed.
                 intents.pop(origin, None)
                 _save_raw_intents(ledger_file, route, intents)

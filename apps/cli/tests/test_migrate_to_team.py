@@ -844,7 +844,16 @@ def test_a_refused_undo_leaves_the_raw_memories_too(
 
 
 @pytest.mark.parametrize(
-    ("status", "dropped"), [(422, True), (404, True), (503, False), (408, False), (429, False)]
+    ("status", "dropped"),
+    [
+        (422, True),
+        (400, True),
+        (404, False),
+        (425, False),
+        (503, False),
+        (408, False),
+        (429, False),
+    ],
 )
 async def test_a_raw_write_the_server_refused_is_not_retried_forever(
     tmp_path: Path, status: int, dropped: bool
