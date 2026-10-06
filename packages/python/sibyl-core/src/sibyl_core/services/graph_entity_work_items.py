@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from sibyl_core.models.entities import Entity, EntityType
@@ -62,6 +62,72 @@ def _private_memory_clauses(
             " AND attributes.principal_id != $private_memory_owner)"
         ]
     return []
+
+
+def _summary_rows(value: object) -> list[Mapping[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [row for row in value if isinstance(row, Mapping)]
+
+
+# Status is read as the entity reader reads it (attributes over the column)
+# where it is displayed or grouped, and as the plain column where it selects
+# rows, so each bucket stays on idx_entity_type_status_updated or
+# idx_entity_type_project_updated instead of filtering the whole project.
+_SUMMARY_TASK_FIELDS = (
+    "uuid, name, attributes.status ?? status AS status, "
+    "attributes.priority ?? priority AS priority, updated_at"
+)
+_SUMMARY_TASK_SCOPE = "group_id = $group_id AND entity_type = 'task' AND project_id = $project_id"
+_SUMMARY_OPEN = "(status IS NONE OR status NOT IN ['done', 'archived'])"
+_PROJECT_SUMMARY_STATEMENT = f"""
+RETURN {{
+    status_counts: (
+        SELECT attributes.status ?? status AS status, count() AS n
+        FROM entity
+        WHERE {_SUMMARY_TASK_SCOPE}
+        GROUP BY status
+    ),
+    doing: (
+        SELECT {_SUMMARY_TASK_FIELDS} FROM entity
+        WHERE {_SUMMARY_TASK_SCOPE} AND status = 'doing'
+        ORDER BY updated_at DESC LIMIT $actionable_limit
+    ),
+    blocked: (
+        SELECT {_SUMMARY_TASK_FIELDS} FROM entity
+        WHERE {_SUMMARY_TASK_SCOPE} AND status = 'blocked'
+        ORDER BY updated_at DESC LIMIT $actionable_limit
+    ),
+    review: (
+        SELECT {_SUMMARY_TASK_FIELDS} FROM entity
+        WHERE {_SUMMARY_TASK_SCOPE} AND status = 'review'
+        ORDER BY updated_at DESC LIMIT $actionable_limit
+    ),
+    recent: (
+        SELECT {_SUMMARY_TASK_FIELDS} FROM entity
+        WHERE {_SUMMARY_TASK_SCOPE}
+          AND (status IS NONE OR status NOT IN ['doing', 'blocked', 'review'])
+        ORDER BY updated_at DESC LIMIT $actionable_limit
+    ),
+    critical: (
+        SELECT {_SUMMARY_TASK_FIELDS} FROM entity
+        WHERE {_SUMMARY_TASK_SCOPE} AND {_SUMMARY_OPEN} AND priority = 'critical'
+        ORDER BY updated_at DESC LIMIT $critical_limit
+    ),
+    high: (
+        SELECT {_SUMMARY_TASK_FIELDS} FROM entity
+        WHERE {_SUMMARY_TASK_SCOPE} AND {_SUMMARY_OPEN} AND priority = 'high'
+        ORDER BY updated_at DESC LIMIT $critical_limit
+    ),
+    flagged: (
+        SELECT {_SUMMARY_TASK_FIELDS} FROM entity
+        WHERE {_SUMMARY_TASK_SCOPE} AND {_SUMMARY_OPEN}
+          AND (priority IS NONE OR priority NOT IN ['critical', 'high'])
+          AND string::contains(string::uppercase(name), 'CRITICAL')
+        ORDER BY updated_at DESC LIMIT $critical_limit
+    ),
+}};
+"""
 
 
 class _EntityWorkItemManager(_EntitySearchManager):
@@ -126,88 +192,77 @@ class _EntityWorkItemManager(_EntitySearchManager):
         critical_limit: int = 3,
         epic_limit: int = 3,
     ) -> dict[str, Any]:
-        tasks: list[Entity] = []
-        offset = 0
-        page_size = 1000
-        while True:
-            page = await self.list_by_type(
-                EntityType.TASK,
+        """Roll a project's tasks up to counts and a few actionable rows.
+
+        One statement answers it: status counts grouped in the database, and
+        each actionable bucket (doing, blocked, review, the rest) and each
+        critical bucket as its own ordered, limited select on the project
+        index. This used to page every task of the project with SELECT *
+        and reduce the rows in Python; the hub project paid 1,150 rows over
+        three restarted pages to fill five slots.
+        """
+        rows = normalize_records(
+            await self._client.execute_query(
+                _PROJECT_SUMMARY_STATEMENT,
+                group_id=self._group_id,
                 project_id=project_id,
-                limit=page_size,
-                offset=offset,
-                include_archived=True,
+                actionable_limit=max(int(actionable_limit), 1),
+                critical_limit=max(int(critical_limit), 1),
             )
-            if not page:
-                break
-            tasks.extend(page)
-            if len(page) < page_size:
-                break
-            offset += len(page)
+        )
+        payload: dict[str, Any] = rows[0] if rows else {}
 
         status_counts: dict[str, int] = {}
-        doing_tasks: list[dict[str, Any]] = []
-        blocked_tasks: list[dict[str, Any]] = []
-        review_tasks: list[dict[str, Any]] = []
-        recent_tasks: list[dict[str, Any]] = []
-        critical_tasks: list[dict[str, Any]] = []
-        epic_progress: dict[str, dict[str, int]] = {}
+        for row in _summary_rows(payload.get("status_counts")):
+            status_value = str(row.get("status") or "todo")
+            status_counts[status_value] = status_counts.get(status_value, 0) + _int_value(
+                row.get("n")
+            )
 
-        for task in tasks:
-            metadata = task.metadata or {}
-            status_value = str(metadata.get("status") or "todo")
-            priority = str(metadata.get("priority") or "")
-            epic_ref = metadata.get("parent_task_id") or metadata.get("epic_id")
-
-            status_counts[status_value] = status_counts.get(status_value, 0) + 1
-            if epic_ref:
-                counters = epic_progress.setdefault(
-                    str(epic_ref),
-                    {"total_tasks": 0, "completed_tasks": 0},
-                )
-                counters["total_tasks"] += 1
-                if status_value == "done":
-                    counters["completed_tasks"] += 1
-
-            task_info = {
-                "id": task.id,
-                "name": task.name,
-                "status": status_value,
-                "priority": priority,
+        def task_info(row: Mapping[str, Any]) -> dict[str, Any]:
+            return {
+                "id": str(row.get("uuid") or ""),
+                "name": str(row.get("name") or ""),
+                "status": str(row.get("status") or "todo"),
+                "priority": str(row.get("priority") or ""),
             }
-            is_critical = (
-                priority.lower() in ("critical", "high") or "CRITICAL" in task.name.upper()
-            ) and status_value not in ("done", "archived")
-            if is_critical:
-                critical_tasks.append(task_info)
-            if status_value == "doing" and len(doing_tasks) < actionable_limit:
-                doing_tasks.append(task_info)
-            elif status_value == "blocked" and len(blocked_tasks) < actionable_limit:
-                blocked_tasks.append(task_info)
-            elif status_value == "review" and len(review_tasks) < actionable_limit:
-                review_tasks.append(task_info)
-            elif len(recent_tasks) < actionable_limit:
-                recent_tasks.append(task_info)
 
         actionable: list[dict[str, Any]] = []
-        critical_tasks = sorted(critical_tasks, key=_task_priority_rank)[:critical_limit]
-        for pool in (doing_tasks, blocked_tasks, review_tasks, recent_tasks):
-            for task_info in pool:
+        seen: set[str] = set()
+        for bucket in ("doing", "blocked", "review", "recent"):
+            for row in _summary_rows(payload.get(bucket)):
                 if len(actionable) >= actionable_limit:
                     break
-                if task_info["id"] not in {task["id"] for task in actionable}:
-                    actionable.append(task_info)
+                info = task_info(row)
+                if info["id"] in seen:
+                    continue
+                seen.add(info["id"])
+                actionable.append(info)
             if len(actionable) >= actionable_limit:
                 break
 
+        critical_candidates = [
+            task_info(row)
+            for bucket in ("critical", "high", "flagged")
+            for row in _summary_rows(payload.get(bucket))
+        ]
+        critical_tasks = sorted(critical_candidates, key=_task_priority_rank)[:critical_limit]
+
         epics: list[dict[str, Any]] = []
-        for epic in await self.list_epics_for_project(
+        listed_epics = await self.list_epics_for_project(
             project_id,
             limit=epic_limit,
             enrich_progress=False,
-        ):
+        )
+        epic_progress = (
+            await self._epic_progress_map({epic.id for epic in listed_epics}, project_id=project_id)
+            if listed_epics
+            else {}
+        )
+        for epic in listed_epics:
             progress = epic_progress.get(epic.id, {})
-            total_tasks = progress.get("total_tasks", 0)
-            completed_tasks = progress.get("completed_tasks", 0)
+            total_tasks = int(progress.get("total_tasks", 0))
+            completed_tasks = int(progress.get("completed_tasks", 0))
             epics.append(
                 {
                     "id": epic.id,
