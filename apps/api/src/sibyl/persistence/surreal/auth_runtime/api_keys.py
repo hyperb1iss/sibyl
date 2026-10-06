@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException
 
+from sibyl.auth.api_key_cache import (
+    api_key_digest,
+    api_key_hash_fingerprint,
+    verified_api_key_cache,
+)
 from sibyl.auth.api_key_common import (
     ApiKeyAuth,
     api_key_prefix,
@@ -38,6 +44,7 @@ from sibyl_core.backends.surreal.records import (
 
 
 async def authenticate_api_key(raw_key: str):
+    digest = api_key_digest(raw_key)
     async with _auth_client_scope() as client:
         repo = _SurrealRepository(client)
         candidates = await repo.select_many(
@@ -48,11 +55,7 @@ async def authenticate_api_key(raw_key: str):
         for candidate in candidates:
             if not _key_is_current(candidate):
                 continue
-            if not verify_api_key(
-                raw_key,
-                salt_hex=str(candidate.get("key_salt") or ""),
-                hash_hex=str(candidate.get("key_hash") or ""),
-            ):
+            if not await _candidate_matches(raw_key, digest, candidate):
                 continue
             api_key_id = _coerce_uuid(candidate.get("uuid"), field_name="api_key.uuid")
             await client.execute_query(
@@ -90,6 +93,35 @@ async def resolve_api_key_authority(
         if candidate is None or not _key_is_current(candidate):
             return None
         return await _resolve_key_scopes(repo, candidate)
+
+
+async def _candidate_matches(raw_key: str, digest: str, candidate: SurrealRecord) -> bool:
+    """Check the presented key against one current api_keys row.
+
+    The argon2id verify costs ~20 ms of CPU and a 64 MiB allocation, so a key
+    that already verified against this exact stored hash is accepted from the
+    process-local cache. The row itself was just read, so revocation, expiry
+    and scope changes are honored on every call; only the KDF is skipped.
+    """
+    salt_hex = str(candidate.get("key_salt") or "")
+    hash_hex = str(candidate.get("key_hash") or "")
+    row_id = str(candidate.get("uuid") or "")
+    fingerprint = api_key_hash_fingerprint(salt_hex=salt_hex, hash_hex=hash_hex)
+    cached = verified_api_key_cache.get(digest)
+    if (
+        cached is not None
+        and cached.api_key_id == row_id
+        and cached.hash_fingerprint == fingerprint
+    ):
+        return True
+    # argon2-cffi releases the GIL, so a worker thread keeps the event loop
+    # serving other requests for the whole hash instead of stalling them.
+    verified = await asyncio.to_thread(
+        verify_api_key, raw_key, salt_hex=salt_hex, hash_hex=hash_hex
+    )
+    if verified:
+        verified_api_key_cache.store(digest, api_key_id=row_id, hash_fingerprint=fingerprint)
+    return verified
 
 
 def _key_is_current(candidate: SurrealRecord) -> bool:
@@ -436,6 +468,7 @@ async def revoke_api_key_for_user(
             raise HTTPException(status_code=403, detail="Forbidden")
         updated = {**record, "revoked_at": _utcnow(), "updated_at": _utcnow()}
         await repo.replace_record("api_keys", uuid=api_key_id, record=updated)
+        verified_api_key_cache.invalidate_key(api_key_id)
         await _log_audit_event(
             client,
             action="auth.api_key.revoke",

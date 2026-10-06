@@ -24,6 +24,15 @@ def reset_vector_lane_readiness() -> None:
     reset_lane_readiness_cache()
 
 
+@pytest.fixture(autouse=True)
+def reset_auth_hot_path_caches() -> None:
+    # Request-time auth memoizes per process; a verdict reached in one test
+    # must not be served to the next.
+    from sibyl.auth.api_key_cache import verified_api_key_cache
+
+    verified_api_key_cache.clear()
+
+
 # =============================================================================
 # Git Repository Fixtures
 # =============================================================================
