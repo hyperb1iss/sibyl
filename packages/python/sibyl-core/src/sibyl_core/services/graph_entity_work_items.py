@@ -665,6 +665,34 @@ class _EntityWorkItemManager(_EntitySearchManager):
                 return True
         return False
 
+    async def project_task_tags(self, project_id: str) -> list[str]:
+        """Every tag on a project's tasks, archived ones included, lowercased and sorted.
+
+        The server reads the project's tasks through the type and project index
+        and returns only their distinct tag lists, so no task row reaches Python.
+        Rows match on the promoted ``project_id`` column; tags prefer attributes,
+        as entity reads do.
+        """
+        tag_lists = await self._client.execute_query(
+            """
+            RETURN array::distinct((
+                SELECT VALUE attributes.tags ?? tags
+                FROM entity
+                WHERE group_id = $group_id
+                  AND entity_type = $entity_type
+                  AND project_id = $project_id
+            ));
+            """,
+            group_id=self._group_id,
+            entity_type=EntityType.TASK.value,
+            project_id=project_id,
+        )
+        tags: set[str] = set()
+        for tag_list in tag_lists if isinstance(tag_lists, list) else []:
+            if isinstance(tag_list, list):
+                tags.update(tag.lower() for tag in tag_list if isinstance(tag, str) and tag)
+        return sorted(tags)
+
     async def _with_epic_progress(
         self, epics: list[Entity], *, project_id: str | None = None
     ) -> list[Entity]:

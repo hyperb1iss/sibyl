@@ -1,8 +1,7 @@
 """Helper functions and constants for Sibyl MCP tools."""
 
 import hashlib
-import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from typing import Any
 
 import structlog
@@ -450,31 +449,13 @@ async def get_project_tags(runtime_or_client: Any, project_id: str) -> list[str]
         List of unique tags used in the project
     """
     try:
-        all_tags: set[str] = set()
         state = getattr(runtime_or_client, "__dict__", {})
         entity_manager = state.get("entity_manager") if isinstance(state, dict) else None
-        if entity_manager is None or not callable(getattr(entity_manager, "list_by_type", None)):
+        project_task_tags = getattr(entity_manager, "project_task_tags", None)
+        if not callable(project_task_tags):
             return []
-
-        tasks = await entity_manager.list_by_type(
-            EntityType.TASK,
-            project_id=project_id,
-            limit=1000,
-            include_archived=True,
-        )
-
-        for tags in (_get_field(task, "tags", []) for task in tasks):
-            if isinstance(tags, list):
-                all_tags.update(t.lower() for t in tags if isinstance(t, str))
-            elif isinstance(tags, str):
-                try:
-                    parsed = json.loads(tags)
-                    if isinstance(parsed, list):
-                        all_tags.update(t.lower() for t in parsed if isinstance(t, str))
-                except (json.JSONDecodeError, TypeError):
-                    pass
-
-        return sorted(all_tags)
+        tags = await project_task_tags(project_id)
+        return list(tags) if isinstance(tags, list) else []
     except Exception as e:
         log.debug("Failed to fetch project tags", error=str(e))
         return []
@@ -549,22 +530,11 @@ async def _auto_discover_links(
 
 
 async def _has_auto_link_candidates(entity_manager: Any) -> bool:
-    count_by_type = getattr(entity_manager, "count_by_type", None)
-    if count_by_type is None:
+    has_entities_of_types = getattr(entity_manager, "has_entities_of_types", None)
+    if has_entities_of_types is None:
         return True
     try:
-        counts = await count_by_type(include_archived=False)
-    except TypeError:
-        try:
-            counts = await count_by_type()
-        except Exception as e:
-            log.debug("auto_discover_candidate_count_failed", error=str(e))
-            return True
+        return bool(await has_entities_of_types(AUTO_LINK_ENTITY_TYPES))
     except Exception as e:
-        log.debug("auto_discover_candidate_count_failed", error=str(e))
+        log.debug("auto_discover_candidate_check_failed", error=str(e))
         return True
-    if not isinstance(counts, Mapping):
-        return True
-    return any(
-        int(counts.get(entity_type.value) or 0) > 0 for entity_type in AUTO_LINK_ENTITY_TYPES
-    )

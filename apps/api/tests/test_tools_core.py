@@ -926,28 +926,23 @@ class TestGetProjectTags:
     """Tests for get_project_tags function."""
 
     @pytest.mark.asyncio
-    async def test_returns_list_of_tags(self) -> None:
-        """get_project_tags should return list of strings."""
+    async def test_returns_the_entity_managers_project_vocabulary(self) -> None:
         from sibyl_core.tools.core import get_project_tags
 
-        mock_client = MagicMock()
-        mock_client.execute_read_org = AsyncMock(return_value=[{"tags": ["backend", "api"]}])
+        runtime = SimpleNamespace(
+            entity_manager=SimpleNamespace(
+                project_task_tags=AsyncMock(return_value=["api", "backend"])
+            )
+        )
 
-        result = await get_project_tags(mock_client, "proj_123")
-
-        assert isinstance(result, list)
+        assert await get_project_tags(runtime, "proj_123") == ["api", "backend"]
+        runtime.entity_manager.project_task_tags.assert_awaited_once_with("proj_123")
 
     @pytest.mark.asyncio
-    async def test_handles_empty_result(self) -> None:
-        """get_project_tags should handle no results."""
+    async def test_runtime_without_an_entity_manager_has_no_tags(self) -> None:
         from sibyl_core.tools.core import get_project_tags
 
-        mock_client = MagicMock()
-        mock_client.execute_read_org = AsyncMock(return_value=[])
-
-        result = await get_project_tags(mock_client, "proj_123")
-
-        assert result == []
+        assert await get_project_tags(MagicMock(spec=[]), "proj_123") == []
 
 
 class TestHelperFunctions:

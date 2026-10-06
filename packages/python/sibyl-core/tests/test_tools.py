@@ -34,6 +34,7 @@ from sibyl_core.services.usage import (
     MemoryUsageWriteResult,
 )
 from sibyl_core.tools.helpers import (
+    AUTO_LINK_ENTITY_TYPES,
     MAX_CONTENT_LENGTH,
     MAX_TITLE_LENGTH,
     VALID_ENTITY_TYPES,
@@ -298,36 +299,26 @@ class TestGetProjectTags:
     """Test project tag lookup helpers."""
 
     @pytest.mark.asyncio
-    async def test_prefers_entity_manager_runtime(self) -> None:
-        """Project tag lookup should use the entity manager seam when available."""
+    async def test_reads_the_tag_vocabulary_without_listing_tasks(self) -> None:
+        """Every task create runs this, so it must not read task rows."""
         entity_manager = MagicMock()
-        entity_manager.list_by_type = AsyncMock(
-            return_value=[
-                MockEntity(
-                    id="task_1",
-                    entity_type=EntityType.TASK,
-                    name="Task 1",
-                    tags=["Backend", "API"],
-                ),
-                MockEntity(
-                    id="task_2",
-                    entity_type=EntityType.TASK,
-                    name="Task 2",
-                    tags=["api", "Urgent"],
-                ),
-            ]
-        )
+        entity_manager.project_task_tags = AsyncMock(return_value=["api", "backend", "urgent"])
+        entity_manager.list_by_type = AsyncMock(return_value=[])
         runtime = make_graph_runtime(entity_manager=entity_manager)
 
         tags = await get_project_tags(runtime, "project-123")
 
         assert tags == ["api", "backend", "urgent"]
-        entity_manager.list_by_type.assert_awaited_once_with(
-            EntityType.TASK,
-            project_id="project-123",
-            limit=1000,
-            include_archived=True,
-        )
+        entity_manager.project_task_tags.assert_awaited_once_with("project-123")
+        entity_manager.list_by_type.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_failed_lookup_leaves_auto_tagging_without_project_tags(self) -> None:
+        entity_manager = MagicMock()
+        entity_manager.project_task_tags = AsyncMock(side_effect=RuntimeError("socket closed"))
+        runtime = make_graph_runtime(entity_manager=entity_manager)
+
+        assert await get_project_tags(runtime, "project-123") == []
 
     def test_build_metadata_with_status_enum(self) -> None:
         """Serializes status enum to string."""
@@ -4366,7 +4357,7 @@ class TestAddTool:
     @pytest.mark.asyncio
     async def test_auto_discover_links_skips_empty_candidate_types(self) -> None:
         entity_manager = SimpleNamespace(
-            count_by_type=AsyncMock(return_value={"session": 50}),
+            has_entities_of_types=AsyncMock(return_value=False),
             search=AsyncMock(return_value=[]),
         )
 
@@ -4381,6 +4372,32 @@ class TestAddTool:
 
         assert links == []
         entity_manager.search.assert_not_awaited()
+        entity_manager.has_entities_of_types.assert_awaited_once_with(AUTO_LINK_ENTITY_TYPES)
+
+    @pytest.mark.parametrize(
+        "candidate_check",
+        [AsyncMock(return_value=True), AsyncMock(side_effect=RuntimeError("probe failed"))],
+        ids=["candidates-exist", "check-failed"],
+    )
+    async def test_auto_discover_links_searches_unless_candidates_are_known_absent(
+        self, candidate_check: AsyncMock
+    ) -> None:
+        candidate = Entity(id="pattern_1", name="Retry pattern", entity_type=EntityType.PATTERN)
+        entity_manager = SimpleNamespace(
+            has_entities_of_types=candidate_check,
+            search=AsyncMock(return_value=[(candidate, 0.9)]),
+        )
+
+        links = await _auto_discover_links(
+            entity_manager=entity_manager,
+            title="Retry the export",
+            content="Retries keep the original request id.",
+            technologies=[],
+            category=None,
+            exclude_id="task_1",
+        )
+
+        assert links == [("pattern_1", 0.9)]
 
 
 class TestAddEntityTypes:
