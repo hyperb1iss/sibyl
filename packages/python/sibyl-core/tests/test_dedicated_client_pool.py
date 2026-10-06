@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any
 
 import pytest
@@ -850,3 +851,84 @@ async def test_ping_pool_skips_busy_slots_instead_of_waiting(monkeypatch) -> Non
 
     tracker.release.set()
     await query
+
+
+def _install_recording_surreal(monkeypatch):
+    clients: list[object] = []
+
+    class FakeAsyncSurreal:
+        def __init__(self, url: str) -> None:
+            self.queries: list[str] = []
+            clients.append(self)
+
+        async def signin(self, credentials: dict[str, str]) -> None:
+            return None
+
+        async def use(self, namespace: str, database: str) -> None:
+            return None
+
+        async def query_raw(self, query: str, _params: object | None = None) -> object:
+            self.queries.append(query)
+            return {"result": [{"status": "OK", "result": [{"ok": True}]}]}
+
+        async def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("surrealdb.AsyncSurreal", FakeAsyncSurreal)
+    return clients
+
+
+def _remote_pool_client(pool_size: int = 1) -> DedicatedSurrealClient:
+    return DedicatedSurrealClient(
+        url="ws://localhost:8000/rpc",
+        username="root",
+        password="root",
+        namespace="org_preflight",
+        database="graph",
+        pool_size=pool_size,
+    )
+
+
+async def test_write_on_a_fresh_socket_skips_the_preflight(monkeypatch):
+    # The handshake just signed in and selected a namespace; a liveness probe
+    # right after it would only repeat that proof.
+    clients = _install_recording_surreal(monkeypatch)
+    client = _remote_pool_client()
+
+    await client.execute_query("UPDATE entity SET updated_at = time::now();")
+
+    assert clients[0].queries == ["UPDATE entity SET updated_at = time::now();"]
+
+
+async def test_write_after_a_recent_answer_skips_the_preflight(monkeypatch):
+    # A busy socket proves itself with every answered query, so back-to-back
+    # traffic never pays the extra round trip.
+    clients = _install_recording_surreal(monkeypatch)
+    client = _remote_pool_client()
+
+    await client.execute_query("SELECT * FROM entity LIMIT 1;")
+    await client.execute_query("UPDATE entity SET updated_at = time::now();")
+
+    assert clients[0].queries == [
+        "SELECT * FROM entity LIMIT 1;",
+        "UPDATE entity SET updated_at = time::now();",
+    ]
+
+
+async def test_write_after_an_idle_gap_is_preflighted(monkeypatch):
+    # Once the socket has been quiet past the window, a keepalive or proxy may
+    # have closed it, so the write is preceded by a probe again.
+    clients = _install_recording_surreal(monkeypatch)
+    client = _remote_pool_client()
+    await client.execute_query("SELECT * FROM entity LIMIT 1;")
+
+    idle_until = time.monotonic() + dedicated_client_module._WRITE_PREFLIGHT_IDLE_SECONDS + 1.0
+    monkeypatch.setattr(dedicated_client_module.time, "monotonic", lambda: idle_until)
+
+    await client.execute_query("UPDATE entity SET updated_at = time::now();")
+
+    assert clients[0].queries == [
+        "SELECT * FROM entity LIMIT 1;",
+        "RETURN true;",
+        "UPDATE entity SET updated_at = time::now();",
+    ]

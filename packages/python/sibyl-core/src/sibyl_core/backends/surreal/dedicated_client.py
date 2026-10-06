@@ -8,6 +8,7 @@ import logging
 import os
 import random
 import sys
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -52,6 +53,12 @@ _MAX_TRANSACTION_CONFLICT_RETRIES = 8
 _TRANSACTION_CONFLICT_RETRY_BASE_SECONDS = 0.05
 _TRANSACTION_CONFLICT_RETRY_MAX_SECONDS = 1.0
 _DEFAULT_POOL_SIZE = 4
+# A write is preceded by a liveness probe only when its socket has not proven
+# itself recently. A handshake or any answered query counts as proof, so a busy
+# connection never pays the extra round trip; one that sat idle long enough
+# for a keepalive or proxy to have silently closed it is probed first, so the
+# write itself is never the statement that discovers the dead socket.
+_WRITE_PREFLIGHT_IDLE_SECONDS = 5.0
 
 
 def _connect_timeout_seconds(url: str) -> float | None:
@@ -384,6 +391,16 @@ class _PooledConnection:
         self._database = database
         self._client: SurrealClient | None = None
         self._connect_lock = asyncio.Lock()
+        self._verified_at: float | None = None
+
+    def mark_verified(self) -> None:
+        """Record that the server just answered on this socket."""
+        self._verified_at = time.monotonic()
+
+    def verified_within(self, seconds: float) -> bool:
+        """Whether the server answered on this socket inside the last window."""
+        verified_at = self._verified_at
+        return verified_at is not None and time.monotonic() - verified_at < seconds
 
     async def connect(self, *, attempt: int = 1) -> SurrealClient:
         if self._client is not None:
@@ -455,6 +472,9 @@ class _PooledConnection:
             if connect_failure is not None:
                 raise connect_failure
             self._client = client
+            # The handshake just signed in and selected a namespace, which is
+            # all the proof a preflight would gather.
+            self.mark_verified()
             return client
 
     def _log_connect_error(
@@ -497,6 +517,7 @@ class _PooledConnection:
             raise connect_failure
         session = _EmbeddedNamespaceSession(engine, self._namespace, self._database)
         self._client = session
+        self.mark_verified()
         return session
 
     async def _handshake(self, client: SurrealClient) -> None:
@@ -525,6 +546,7 @@ class _PooledConnection:
     async def _close_locked(self) -> None:
         client = self._client
         self._client = None
+        self._verified_at = None
         if client is not None:
             try:
                 await client.close()
@@ -768,6 +790,7 @@ class DedicatedSurrealClient:
                 try:
                     client = await connection.connect()
                     await self._send_query(client, "RETURN true;", params={}, raw=False)
+                    connection.mark_verified()
                 except Exception as exc:
                     failures.append(type(exc).__name__)
                     reaped += 1
@@ -819,12 +842,17 @@ class DedicatedSurrealClient:
                                 client = await connection.connect(
                                     attempt=connection_retry_count + 1
                                 )
+                                # A fresh handshake or a recent answer already
+                                # proved this socket; only an idle one is probed.
+                                if connection.verified_within(_WRITE_PREFLIGHT_IDLE_SECONDS):
+                                    break
                                 await self._send_query(
                                     client,
                                     "RETURN true;",
                                     params={},
                                     raw=False,
                                 )
+                                connection.mark_verified()
                                 break
                             except Exception as exc:
                                 if not _is_transient_connection_error(exc):
@@ -841,6 +869,8 @@ class DedicatedSurrealClient:
                                 )
                     client = await connection.connect(attempt=connection_retry_count + 1)
                     response = await self._send_query(client, query, params=params, raw=True)
+                    # Any envelope, OK or ERR, came back over this socket.
+                    connection.mark_verified()
                     transaction_retry_allowed = _can_replay_query(query, response)
                     if raw:
                         # Raw callers retain statement envelopes, but an atomic
