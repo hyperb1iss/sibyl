@@ -140,8 +140,8 @@ An undo removes only what the migration created and still owns:
 - A graph row goes only while it still sits at the revision the migration's own last write left it
   at. A row anyone edited since, including you, stays and is listed.
 - A row stays while anything outside the migration depends on it: a teammate's task filed under a
-  migrated epic, a decision someone linked to it, or a row you created on the team server since.
-  The server checks this, and the revision, as it deletes.
+  migrated epic, a decision someone linked to it, or a row you created on the team server since. The
+  server checks this, and the revision, as it deletes.
 - A row that a kept row links to stays too, including links added on the team server after the
   migration, so nothing kept is left pointing at a deleted row.
 - Rows the migration updated rather than created stay: a teammate's epic or milestone of the same
@@ -150,21 +150,21 @@ An undo removes only what the migration created and still owns:
 - Raw memories the migration replayed are deleted through the memory lifecycle, the same path as
   `sibyl correct --action delete`, and only while nobody has corrected them since.
 
-The undo reads only the ledger, so it works even after the project changed on your instance or
-your local Sibyl is gone; pass `--source-org` in that case, since finding the organization
-automatically needs the local database. Rows that are already gone from the team server are
-reported and dropped from the ledger. Undoing needs a team server that advertises guarded deletes;
-the command checks before it deletes anything.
+The undo reads only the ledger, so it works even after the project changed on your instance or your
+local Sibyl is gone; pass `--source-org` in that case, since finding the organization automatically
+needs the local database. Rows that are already gone from the team server are reported and dropped
+from the ledger. Undoing needs a team server that advertises guarded deletes; the command checks
+before it deletes anything.
 
 Run the undo while nobody is working in the migrated rows. The checks above see what the team server
-has written by the time the undo reaches a row; a write still queued in the background, or a teammate
-linking to a row in the same moment the undo removes it, can leave that link pointing at nothing, as
-with any delete.
+has written by the time the undo reaches a row; a write still queued in the background, or a
+teammate linking to a row in the same moment the undo removes it, can leave that link pointing at
+nothing, as with any delete.
 
-A ledger written by a build from before migrated rows recorded their source project shows a
-cautious dry run: rows linked from inside the same migration can be reported as kept because "a row
-outside its migration links to it". The real undo removes the linking rows first and then their
-targets, so it removes more than such a dry run predicts.
+A ledger written by a build from before migrated rows recorded their source project shows a cautious
+dry run: rows linked from inside the same migration can be reported as kept because "a row outside
+its migration links to it". The real undo removes the linking rows first and then their targets, so
+it removes more than such a dry run predicts.
 
 Migrating again after an undo writes fresh rows for everything the undo removed. Rows the undo kept
 stay in the ledger and are not written twice. An undo that stops part way can be run again; it first
