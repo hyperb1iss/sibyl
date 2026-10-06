@@ -179,11 +179,16 @@ class MockRelationshipManager:
     """Mock RelationshipManager for testing workflow engine."""
 
     relationships: list[Any]
+    bulk_writes: list[list[Any]] = field(default_factory=list)
 
-    async def create(self, relationship: Any) -> str:
-        """Create relationship."""
-        self.relationships.append(relationship)
-        return relationship.id
+    async def create_direct_bulk(
+        self, relationships: list[Any], *, generate_embeddings: bool = False
+    ) -> list[str]:
+        """Write a batch of relationships at once, the way the engine does."""
+        batch = list(relationships)
+        self.bulk_writes.append(batch)
+        self.relationships.extend(batch)
+        return [relationship.id for relationship in batch]
 
     async def get_for_entity(
         self,

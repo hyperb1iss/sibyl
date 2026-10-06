@@ -185,36 +185,14 @@ async def _safe_broadcast(event: str, data: dict[str, Any], *, org_id: str | Non
         log.debug("Broadcast failed (Redis unavailable)", event=event)
 
 
-async def _create_learning_artifact_link(
-    relationship_manager: Any,
-    *,
-    source_id: str,
-    target_id: str,
-    relationship_type: Any,
-    link_id: str,
-    metadata: dict[str, Any] | None = None,
-) -> str:
-    from sibyl_core.models.entities import Relationship
-
-    return await relationship_manager.create(
-        Relationship(
-            id=link_id,
-            source_id=source_id,
-            target_id=target_id,
-            relationship_type=relationship_type,
-            metadata=metadata or {},
-        )
-    )
-
-
-async def _inherit_task_knowledge(
+async def _inherited_knowledge_links(
     relationship_manager: Any,
     *,
     source_id: str,
     task_id: str,
-) -> int:
-    """Copy task knowledge edges onto a derived learning artifact."""
-    from sibyl_core.models.entities import RelationshipType
+) -> list[Any]:
+    """The REFERENCES edges a derived learning artifact inherits from its task."""
+    from sibyl_core.models.entities import Relationship, RelationshipType
 
     task_relationships = await relationship_manager.get_for_entity(
         task_id,
@@ -224,28 +202,38 @@ async def _inherit_task_knowledge(
             RelationshipType.PART_OF,
         ],
     )
+    return [
+        Relationship(
+            id=f"rel_{source_id}_{rel.target_id}",
+            source_id=source_id,
+            target_id=rel.target_id,
+            relationship_type=RelationshipType.REFERENCES,
+            metadata={"inherited_from_task": task_id},
+        )
+        for rel in task_relationships
+    ]
 
-    inherited_count = 0
-    for rel in task_relationships:
-        try:
-            await _create_learning_artifact_link(
-                relationship_manager,
-                source_id=source_id,
-                target_id=rel.target_id,
-                relationship_type=RelationshipType.REFERENCES,
-                link_id=f"rel_{source_id}_{rel.target_id}",
-                metadata={"inherited_from_task": task_id},
-            )
-            inherited_count += 1
-        except Exception as e:
-            log.warning(
-                "learning_artifact_inherit_failed",
-                error=str(e),
-                source_id=source_id,
-                target_id=getattr(rel, "target_id", None),
-            )
 
-    return inherited_count
+async def _persist_learning_links(
+    relationship_manager: Any,
+    links: list[Any],
+    *,
+    log_event: str,
+) -> set[str]:
+    """Write a learning artifact's edges in one bulk write; return what landed.
+
+    Each edge used to cost two endpoint reads, a transaction and an embedding
+    call of its own. A failure is logged per batch rather than per edge, and
+    the artifact itself is already stored, so the caller reports the count.
+    """
+    if not links:
+        return set()
+    try:
+        written = await relationship_manager.create_direct_bulk(links, generate_embeddings=True)
+    except Exception as exc:
+        log.warning(log_event, error=str(exc), failed=len(links))
+        return set()
+    return set(written)
 
 
 async def _persist_job_relationships(
@@ -1132,7 +1120,7 @@ async def create_learning_episode(
     Returns:
         Dict with episode creation results
     """
-    from sibyl_core.models.entities import RelationshipType
+    from sibyl_core.models.entities import Relationship, RelationshipType
     from sibyl_core.models.tasks import Task
 
     task = Task.model_validate(task_data)
@@ -1166,20 +1154,26 @@ async def create_learning_episode(
             task_id=task.id,
         )
 
-        # Link episode back to task
-        await _create_learning_artifact_link(
-            relationship_manager,
-            source_id=episode_id,
-            target_id=task.id,
-            relationship_type=RelationshipType.DERIVED_FROM,
-            link_id=f"rel_episode_{task.id}",
-        )
-
-        inherited_count = await _inherit_task_knowledge(
+        # Link episode back to task and inherit its knowledge, in one write
+        inherited = await _inherited_knowledge_links(
             relationship_manager,
             source_id=episode_id,
             task_id=task.id,
         )
+        written = await _persist_learning_links(
+            relationship_manager,
+            [
+                Relationship(
+                    id=f"rel_episode_{task.id}",
+                    source_id=episode_id,
+                    target_id=task.id,
+                    relationship_type=RelationshipType.DERIVED_FROM,
+                ),
+                *inherited,
+            ],
+            log_event="learning_episode_links_failed",
+        )
+        inherited_count = sum(1 for link in inherited if link.id in written)
 
         result = {
             "episode_id": episode_id,
@@ -1280,28 +1274,31 @@ async def create_learning_procedure(
         _attach_learning_policy_metadata(procedure, decision)
         procedure_id = await entity_manager.create_direct(procedure)
 
-        await relationship_manager.create(
-            Relationship(
-                id=f"rel_task_{task.id}_procedure",
-                source_id=task.id,
-                target_id=procedure_id,
-                relationship_type=RelationshipType.USES_PROCEDURE,
-            )
-        )
-        await relationship_manager.create(
-            Relationship(
-                id=f"rel_procedure_{task.id}",
-                source_id=procedure_id,
-                target_id=task.id,
-                relationship_type=RelationshipType.DERIVED_FROM,
-            )
-        )
-
-        inherited_count = await _inherit_task_knowledge(
+        inherited = await _inherited_knowledge_links(
             relationship_manager,
             source_id=procedure_id,
             task_id=task.id,
         )
+        written = await _persist_learning_links(
+            relationship_manager,
+            [
+                Relationship(
+                    id=f"rel_task_{task.id}_procedure",
+                    source_id=task.id,
+                    target_id=procedure_id,
+                    relationship_type=RelationshipType.USES_PROCEDURE,
+                ),
+                Relationship(
+                    id=f"rel_procedure_{task.id}",
+                    source_id=procedure_id,
+                    target_id=task.id,
+                    relationship_type=RelationshipType.DERIVED_FROM,
+                ),
+                *inherited,
+            ],
+            log_event="learning_procedure_links_failed",
+        )
+        inherited_count = sum(1 for link in inherited if link.id in written)
 
         result = {
             "procedure_id": procedure_id,

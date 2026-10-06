@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
@@ -71,26 +70,47 @@ async def test_create_task_requires_registered_project_before_runtime() -> None:
     runtime.assert_not_awaited()
 
 
+def _bulk_relationship_manager(*, skip: set[str] | None = None) -> SimpleNamespace:
+    """A relationship manager whose bulk write records one batch per call."""
+    batches: list[list] = []
+
+    async def create_direct_bulk(relationships, *, generate_embeddings: bool = False):
+        batch = list(relationships)
+        batches.append(batch)
+        return [
+            relationship.id
+            for relationship in batch
+            if relationship.target_id not in (skip or set())
+        ]
+
+    return SimpleNamespace(
+        create_direct_bulk=AsyncMock(side_effect=create_direct_bulk),
+        batches=batches,
+    )
+
+
 @pytest.mark.asyncio
-async def test_create_task_writes_relationships_concurrently() -> None:
+async def test_create_task_writes_all_relationships_in_one_bulk_call() -> None:
+    """Project, epic and every dependency edge land in a single bulk write.
+
+    Per-edge create cost two endpoint reads, a transaction and an embedding
+    call each; five edges were twenty round trips. One bulk write resolves
+    every endpoint once and embeds the batch once.
+    """
     org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
     user = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000222"))
     auth = SimpleNamespace()
-    all_started = asyncio.Event()
-    started: list[str] = []
-    completed: list[str] = []
-
-    async def create_relationship(relationship):
-        started.append(relationship.target_id)
-        if len(started) == 3:
-            all_started.set()
-        await asyncio.wait_for(all_started.wait(), timeout=0.5)
-        completed.append(relationship.target_id)
-        return relationship.id
-
+    relationship_manager = _bulk_relationship_manager()
     runtime = SimpleNamespace(
-        entity_manager=SimpleNamespace(create_direct=AsyncMock(return_value="task-123")),
-        relationship_manager=SimpleNamespace(create=create_relationship),
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(
+                return_value=SimpleNamespace(
+                    entity_type=EntityType.EPIC, metadata={"status": "planning"}
+                )
+            ),
+            create_direct=AsyncMock(return_value="task-123"),
+        ),
+        relationship_manager=relationship_manager,
     )
 
     with (
@@ -101,9 +121,10 @@ async def test_create_task_writes_relationships_concurrently() -> None:
         response = await create_task(
             http_request=_request(),
             request=CreateTaskRequest(
-                title="Parallel task",
+                title="Bulk task",
                 project_id="project-1",
-                depends_on=["task-a", "task-b"],
+                epic_id="epic-1",
+                depends_on=["task-a", "task-b", "task-c"],
             ),
             org=org,
             user=user,
@@ -111,8 +132,83 @@ async def test_create_task_writes_relationships_concurrently() -> None:
         )
 
     assert response.task_id == "task-123"
-    assert started == ["project-1", "task-a", "task-b"]
-    assert set(completed) == {"project-1", "task-a", "task-b"}
+    relationship_manager.create_direct_bulk.assert_awaited_once()
+    assert relationship_manager.create_direct_bulk.await_args.kwargs == {
+        "generate_embeddings": True
+    }
+    assert [relationship.target_id for relationship in relationship_manager.batches[0]] == [
+        "project-1",
+        "epic-1",
+        "task-a",
+        "task-b",
+        "task-c",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_create_task_reports_a_dependency_the_bulk_write_could_not_resolve() -> None:
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    user = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000222"))
+    auth = SimpleNamespace()
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(create_direct=AsyncMock(return_value="task-123")),
+        relationship_manager=_bulk_relationship_manager(skip={"task-missing"}),
+    )
+
+    with (
+        patch("sibyl.api.routes.tasks.verify_entity_project_access", AsyncMock()),
+        patch("sibyl.api.routes.tasks.get_task_graph_runtime", AsyncMock(return_value=runtime)),
+        patch("sibyl.api.routes.tasks.broadcast_event", AsyncMock()),
+        pytest.raises(HTTPException) as exc,
+    ):
+        await create_task(
+            http_request=_request(),
+            request=CreateTaskRequest(
+                title="Dangling task",
+                project_id="project-1",
+                depends_on=["task-a", "task-missing"],
+            ),
+            org=org,
+            user=user,
+            auth=auth,
+        )
+
+    assert exc.value.status_code == 404
+    assert "task-missing" in str(exc.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_update_task_sync_writes_new_dependencies_in_one_bulk_call() -> None:
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    user = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000222"))
+    auth = SimpleNamespace()
+    updated = SimpleNamespace(name="Task", metadata={})
+    relationship_manager = _bulk_relationship_manager()
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(update=AsyncMock(return_value=updated)),
+        relationship_manager=relationship_manager,
+    )
+
+    with (
+        patch("sibyl.api.routes.tasks._verify_task_access", AsyncMock()),
+        patch("sibyl.api.routes.tasks.get_task_graph_runtime", AsyncMock(return_value=runtime)),
+        patch("sibyl.api.routes.tasks.broadcast_event", AsyncMock()),
+    ):
+        response = await update_task(
+            task_id="task-123",
+            request=UpdateTaskRequest(add_depends_on=["task-a", "task-b"]),
+            sync=True,
+            org=org,
+            user=user,
+            auth=auth,
+        )
+
+    assert response.success is True
+    relationship_manager.create_direct_bulk.assert_awaited_once()
+    assert [relationship.target_id for relationship in relationship_manager.batches[0]] == [
+        "task-a",
+        "task-b",
+    ]
 
 
 @pytest.mark.asyncio
@@ -125,7 +221,7 @@ async def test_create_task_returns_404_when_native_epic_lookup_misses() -> None:
             get=AsyncMock(side_effect=KeyError("epic-missing")),
             create_direct=AsyncMock(),
         ),
-        relationship_manager=SimpleNamespace(create=AsyncMock()),
+        relationship_manager=_bulk_relationship_manager(),
     )
 
     with (
@@ -356,7 +452,7 @@ async def test_create_task_saves_idempotent_response_after_success() -> None:
     auth = SimpleNamespace()
     runtime = SimpleNamespace(
         entity_manager=SimpleNamespace(create_direct=AsyncMock(return_value="task-123")),
-        relationship_manager=SimpleNamespace(create=AsyncMock(return_value="rel-123")),
+        relationship_manager=_bulk_relationship_manager(),
     )
     save_record = AsyncMock(side_effect=lambda _session, *, record: record)
 

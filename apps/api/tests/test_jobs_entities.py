@@ -659,11 +659,11 @@ class TestCreateLearningEpisodeJob:
         relationship_manager = MagicMock()
         created_relationships = []
 
-        async def _record_relationship(relationship):
-            created_relationships.append(relationship)
-            return relationship.id
+        async def _record_relationships(relationships, **_kwargs):
+            created_relationships.extend(relationships)
+            return [relationship.id for relationship in relationships]
 
-        relationship_manager.create = AsyncMock(side_effect=_record_relationship)
+        relationship_manager.create_direct_bulk = AsyncMock(side_effect=_record_relationships)
         relationship_manager.get_for_entity = AsyncMock(
             return_value=[
                 SimpleNamespace(target_id="pattern-1"),
@@ -816,7 +816,7 @@ class TestCreateLearningEpisodeJob:
         entity_manager = MagicMock()
         entity_manager.create_direct = AsyncMock(return_value="episode_task-123")
         relationship_manager = MagicMock()
-        relationship_manager.create = AsyncMock(return_value="rel_episode_task-123")
+        relationship_manager.create_direct_bulk = AsyncMock(return_value=["rel_episode_task-123"])
         relationship_manager.get_for_entity = AsyncMock(return_value=[])
         runtime = SimpleNamespace(
             entity_manager=entity_manager,
@@ -837,7 +837,9 @@ class TestCreateLearningEpisodeJob:
 
         assert result["episode_id"] == "episode_task-123"
         assert result["task_id"] == "task-123"
-        relationship_manager.create.assert_awaited_once()
+        relationship_manager.create_direct_bulk.assert_awaited_once()
+        batch = relationship_manager.create_direct_bulk.await_args.args[0]
+        assert [link.id for link in batch] == ["rel_episode_task-123"]
 
 
 class TestCreateLearningProcedureJob:
@@ -863,11 +865,11 @@ class TestCreateLearningProcedureJob:
         relationship_manager = MagicMock()
         created_relationships = []
 
-        async def _record_relationship(relationship):
-            created_relationships.append(relationship)
-            return relationship.id
+        async def _record_relationships(relationships, **_kwargs):
+            created_relationships.extend(relationships)
+            return [relationship.id for relationship in relationships]
 
-        relationship_manager.create = AsyncMock(side_effect=_record_relationship)
+        relationship_manager.create_direct_bulk = AsyncMock(side_effect=_record_relationships)
         relationship_manager.get_for_entity = AsyncMock(
             return_value=[
                 SimpleNamespace(target_id="pattern-1"),

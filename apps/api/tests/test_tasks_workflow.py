@@ -396,13 +396,17 @@ class _FakeEntityManager:
 
 
 class _FakeRelationshipManager:
+    def __init__(self) -> None:
+        self.bulk_writes: list[list] = []
+
     async def get_for_entity(
         self, entity_id: str, relationship_types=None, direction: str = "outgoing"
     ):
         return []
 
-    async def create(self, relationship):
-        return relationship.id
+    async def create_direct_bulk(self, relationships, *, generate_embeddings: bool = False):
+        self.bulk_writes.append(list(relationships))
+        return [relationship.id for relationship in relationships]
 
 
 class _FakeDriver:

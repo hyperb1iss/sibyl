@@ -113,23 +113,13 @@ class TaskWorkflowEngine:
             expected_revision=expected_revision,
         )
 
-    async def _create_learning_artifact_link(
-        self,
-        *,
-        source_id: str,
-        target_id: str,
-        relationship_type: RelationshipType,
-        link_id: str,
-        metadata: dict[str, Any] | None = None,
-    ) -> str:
-        return await self._relationship_manager.create(
-            Relationship(
-                id=link_id,
-                source_id=source_id,
-                target_id=target_id,
-                relationship_type=relationship_type,
-                metadata=metadata or {},
-            )
+    async def _create_learning_artifact_links(self, relationships: list[Relationship]) -> list[str]:
+        """Write a learning artifact's edges in one bulk relationship write."""
+        if not relationships:
+            return []
+        return await self._relationship_manager.create_direct_bulk(
+            relationships,
+            generate_embeddings=True,
         )
 
     def _validate_transition(
@@ -565,14 +555,17 @@ class TaskWorkflowEngine:
 
         episode_id = await self._entity_manager.create_direct(episode)
 
-        await self._create_learning_artifact_link(
-            source_id=episode_id,
-            target_id=task.id,
-            relationship_type=RelationshipType.DERIVED_FROM,
-            link_id=f"rel_episode_{task.id}",
+        await self._create_learning_artifact_links(
+            [
+                Relationship(
+                    id=f"rel_episode_{task.id}",
+                    source_id=episode_id,
+                    target_id=task.id,
+                    relationship_type=RelationshipType.DERIVED_FROM,
+                ),
+                *await self._inherited_knowledge_links(episode_id, task.id),
+            ]
         )
-
-        await self._inherit_task_knowledge(episode_id, task.id)
 
         log.info("Learning episode created", episode_id=episode_id, task_id=task.id)
         return episode_id
@@ -589,24 +582,23 @@ class TaskWorkflowEngine:
 
         procedure_id = await self._entity_manager.create_direct(procedure)
 
-        await self._relationship_manager.create(
-            Relationship(
-                id=f"rel_task_{task.id}_procedure",
-                source_id=task.id,
-                target_id=procedure_id,
-                relationship_type=RelationshipType.USES_PROCEDURE,
-            )
+        await self._create_learning_artifact_links(
+            [
+                Relationship(
+                    id=f"rel_task_{task.id}_procedure",
+                    source_id=task.id,
+                    target_id=procedure_id,
+                    relationship_type=RelationshipType.USES_PROCEDURE,
+                ),
+                Relationship(
+                    id=f"rel_procedure_{task.id}",
+                    source_id=procedure_id,
+                    target_id=task.id,
+                    relationship_type=RelationshipType.DERIVED_FROM,
+                ),
+                *await self._inherited_knowledge_links(procedure_id, task.id),
+            ]
         )
-        await self._relationship_manager.create(
-            Relationship(
-                id=f"rel_procedure_{task.id}",
-                source_id=procedure_id,
-                target_id=task.id,
-                relationship_type=RelationshipType.DERIVED_FROM,
-            )
-        )
-
-        await self._inherit_task_knowledge(procedure_id, task.id)
 
         log.info("Learning procedure created", procedure_id=procedure_id, task_id=task.id)
         return procedure_id
@@ -628,11 +620,12 @@ class TaskWorkflowEngine:
 
         return [note.content for note in notes if getattr(note, "content", "").strip()]
 
-    async def _inherit_task_knowledge(
+    async def _inherited_knowledge_links(
         self,
         source_id: str,
         task_id: str,
-    ) -> None:
+    ) -> list[Relationship]:
+        """The REFERENCES edges a learning artifact inherits from its task."""
         task_relationships = await self._relationship_manager.get_for_entity(
             task_id,
             relationship_types=[
@@ -642,14 +635,16 @@ class TaskWorkflowEngine:
             ],
         )
 
-        for rel in task_relationships:
-            await self._create_learning_artifact_link(
+        return [
+            Relationship(
+                id=f"rel_inherit_{source_id}_{rel.target_id}",
                 source_id=source_id,
                 target_id=rel.target_id,
                 relationship_type=RelationshipType.REFERENCES,
-                link_id=f"rel_inherit_{source_id}_{rel.target_id}",
                 metadata={"inherited_from_task": task_id},
             )
+            for rel in task_relationships
+        ]
 
     async def update_project_activity(self, project_id: str) -> None:
         """Update project's last_activity_at timestamp.
