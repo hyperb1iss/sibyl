@@ -31,7 +31,7 @@ from sibyl.auth.dependencies import (
     require_org_role,
 )
 from sibyl.jobs.entities import serialize_memory_policy_context
-from sibyl.locks import entity_lock, target_lock
+from sibyl.locks import entity_lock
 from sibyl.persistence.auth_runtime import list_accessible_project_graph_ids
 from sibyl.services.work_item_workflow import WorkItemAction, transition_work_item
 from sibyl_core.auth import AuthOrganization, AuthUser, OrganizationRole, ProjectRole
@@ -245,10 +245,7 @@ async def create_task(
         return replayed
 
     runtime = await get_task_graph_runtime(str(org.id))
-    async with target_lock(str(org.id), request.epic_id) as epic_token:
-        if request.epic_id and not epic_token:
-            raise entity_locked()
-        task_id, task = await _create_task_under_epic(runtime, request, user)
+    task_id, task = await _create_task_under_epic(runtime, request, user)
 
     log.info(
         "create_task_success",
@@ -306,7 +303,7 @@ async def _broadcast_task_update(
 
 
 async def _create_task_under_epic(runtime: Any, request: Any, user: Any) -> tuple[str, Any]:
-    """Write a task and its edges; the caller holds the epic's lock when there is one."""
+    """Write a task and its edges, under an epic that exists right now."""
     from sibyl_core.models.entities import Relationship, RelationshipType
     from sibyl_core.models.tasks import Task, TaskComplexity, TaskPriority, TaskStatus
 
@@ -373,7 +370,7 @@ async def _create_task_under_epic(runtime: Any, request: Any, user: Any) -> tupl
 async def _write_task_update(
     runtime: Any, task_id: str, request: Any, update_data: dict[str, Any]
 ) -> tuple[Any, dict[str, Any] | None]:
-    """Write a task update and its edges; the caller holds the epic's lock when one is named."""
+    """Write a task update and its edges, under an epic that exists right now."""
     from sibyl_core.models.entities import Relationship, RelationshipType
 
     if request.epic_id:
@@ -959,14 +956,7 @@ async def update_task(
 
             runtime = await get_task_graph_runtime(group_id)
 
-            # Filing the task under an epic holds the epic's lock, so a
-            # concurrent delete of that epic cannot land in between.
-            async with target_lock(group_id, request.epic_id) as epic_token:
-                if request.epic_id and not epic_token:
-                    raise entity_locked()
-                updated, epic_started = await _write_task_update(
-                    runtime, task_id, request, update_data
-                )
+            updated, epic_started = await _write_task_update(runtime, task_id, request, update_data)
 
             await _broadcast_task_update(
                 task_id,
