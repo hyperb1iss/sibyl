@@ -19,12 +19,11 @@ import structlog
 from sibyl_core.backends.surreal import SurrealContentClient
 from sibyl_core.backends.surreal.content_schema import EMBEDDING_DIM
 from sibyl_core.backends.surreal.schema_embedding_states import (
-    CONTENT_SCHEMA_RECORD_NAME,
     RAW_EMBEDDING_REFUSAL_SCHEMA_VERSION,
     embedding_state_key,
     raw_embedding_refusal_key,
 )
-from sibyl_core.backends.surreal.schema_version import schema_version_record_id
+from sibyl_core.config import settings
 from sibyl_core.embeddings.provenance import (
     PROVIDER_ERROR_INPUT,
     is_legacy_stamp,
@@ -48,7 +47,11 @@ from sibyl_core.services.content_raw_persistence import (
     _raw_memories_with_embeddings,
     _raw_memory_without_embedding,
 )
-from sibyl_core.services.embedding_sweep import page_after_cursor
+from sibyl_core.services.embedding_sweep import (
+    STATE_PROJECTION,
+    page_after_cursor,
+    plane_current,
+)
 
 log = structlog.get_logger()
 
@@ -61,6 +64,9 @@ RAW_EMBEDDING_REPAIR_BUDGET_SECONDS = 45.0
 RAW_CAPTURE_EMBEDDING_PLANE = "raw_captures"
 
 REPAIR_COMPLETED = "completed"
+#: A pass finished for the configured model within the verify interval and
+#: nothing has reopened the plane since, so the walk was skipped.
+REPAIR_CURRENT = "current"
 #: The budget ran out before the walk finished; ``cursor`` is where the next
 #: pass resumes.
 REPAIR_PARTIAL = "partial"
@@ -127,9 +133,11 @@ class RawEmbeddingRepairResult(LifecycleRepairResult):
 
 # The walk reads only what the candidate decision needs. raw_content and the
 # vector stay on the server until a row is actually going to be embedded; the
-# scheduler runs this every minute across every organization.
+# scheduler runs this every minute across every organization. The record id
+# rides along so every later read and write of the row addresses it directly.
 _RAW_EMBEDDING_WALK_FIELDS = ", ".join(
     (
+        "id AS record_id",
         "uuid",
         "revision",
         "organization_id",
@@ -152,13 +160,12 @@ _RAW_EMBEDDING_WALK_QUERY = (
     f"AND deleted_at = NONE AND {_RAW_EMBEDDING_OWED_PREDICATE} "
     "ORDER BY uuid ASC LIMIT $limit;"
 )
-# Found by uuid alone (see the writes below): beside the organization, a 3.x
-# server reads this page through an organization index, ten times slower.
+# Read by record id (see the writes below), so the page costs the rows it
+# returns whatever the table holds and whichever index the planner likes.
 _RAW_EMBEDDING_FETCH_QUERY = (
-    "SELECT uuid, revision, organization_id, source_id, principal_id, review_state, "
-    "deleted_at, title, raw_content, embedding, metadata "
-    "FROM (SELECT VALUE id FROM raw_captures WHERE uuid IN $ids) "
-    "WHERE organization_id = $organization_id;"
+    "SELECT id AS record_id, uuid, revision, organization_id, source_id, principal_id, "
+    "review_state, deleted_at, title, raw_content, embedding, metadata "
+    "FROM $records WHERE organization_id = $organization_id;"
 )
 # How far a converting organization has come, for the raw lane's readiness:
 # one read, only after a pass that did not reach every row.
@@ -176,11 +183,16 @@ _RAW_EMBEDDING_PROGRESS_QUERY = (
 # current format without an embedding call, a page at a time; only after the
 # content upgrade has photographed the old stamps may they be rewritten at all.
 #
-# Both writes find their rows by uuid alone and check the organization and the
-# revision on the rows found. Given the organization beside the uuid, a 3.x
-# server plans the UPDATE through an organization index and walks every capture
-# the organization has for each row (seconds per row at 50,000 captures); by
-# uuid alone it uses the unique index.
+# Both writes address the records the walk returned by id and check the
+# organization and the revision on them. They used to find their rows by uuid
+# alone, through the unique uuid index: on a live 3.2 server that index did
+# not answer point lookups for the organization's older captures (the index
+# scan returned nothing where a table scan found the row), so the restamp
+# matched nothing, every legacy row stayed pending, and the pass re-walked
+# the same rows every minute without ever converging. A record id needs no
+# index at all. Finding rows by organization and uuid instead would plan the
+# UPDATE through the organization index and walk every capture the
+# organization has for each row (seconds per row at 50,000 captures).
 #
 # Both also require the stamp this pass read to still be the one stored, in
 # every field that shapes the vector and in its format. Replacing a vector
@@ -194,7 +206,7 @@ _RAW_EMBEDDING_PROGRESS_QUERY = (
 # NULLs).
 _RAW_STAMP = "metadata.embedding_metadata"
 _RAW_EMBEDDING_RESTAMP_QUERY = f"""
-UPDATE (SELECT VALUE id FROM raw_captures WHERE uuid IN $uuids)
+UPDATE $records
 SET metadata.embedding_metadata = $embedding_metadata
 WHERE organization_id = $organization_id AND revision = $revisions[uuid]
     AND embedding != NONE AND {stamp_unchanged_predicate(_RAW_STAMP, "$observed[uuid]")}
@@ -202,7 +214,7 @@ RETURN uuid;
 """
 
 _RAW_EMBEDDING_UPDATE_QUERY = f"""
-UPDATE (SELECT VALUE id FROM raw_captures WHERE uuid = $uuid) SET
+UPDATE $record SET
     embedding = $embedding,
     metadata.embedding_metadata = $embedding_metadata
 WHERE organization_id = $organization_id AND revision = $revision
@@ -247,7 +259,9 @@ _ACQUIRE_LEASE_QUERY = (
     "updated_at = time::now() "
     "WHERE lease_until = NONE OR lease_until < time::now() RETURN lease_owner;"
 )
-_READ_STATE_QUERY = "SELECT lease_owner, cursors, generation FROM type::record($key);"
+# The whole state row, with the age of its last complete pass, so one read
+# both answers whether the plane is current and seeds the pass.
+_READ_STATE_QUERY = f"SELECT {STATE_PROJECTION} FROM type::record($key);"
 _RENEW_LEASE_QUERY = (
     "UPDATE type::record($key) SET cursors = $cursors, "
     "lease_until = time::now() + <duration>$lease, updated_at = time::now() "
@@ -430,7 +444,10 @@ async def repair_raw_capture_embeddings(
     A caller that already holds the database the captures live in, such as a
     restore, passes its client so the repair cannot land on another store.
 
-    The walk selects only the columns the candidate decision needs and lets
+    A plane whose last pass finished for the configured model within the
+    verify interval (``embedding_sweep_verify_interval_seconds``) is current
+    and costs one state read; an import, restore or rebuild reopens the
+    plane and the next pass walks it. The walk selects only the columns the candidate decision needs and lets
     the server drop rows whose vector already matches the configured provider,
     so a fully current organization returns one empty page. The server still
     reads every one of the organization's captures to find that out, because
@@ -474,6 +491,12 @@ async def repair_raw_capture_embeddings(
             )
             return RawEmbeddingRepairResult(status=REPAIR_SKIPPED_SCHEMA_PENDING)
         expected_metadata = models.raw_memory_embedding_metadata(provider.metadata)
+        key = embedding_state_key(organization_id, RAW_CAPTURE_EMBEDDING_PLANE)
+        known = await content_client.select_many(session, _READ_STATE_QUERY, key=key)
+        if known and plane_current(
+            known[0], dict(expected_metadata), settings.embedding_sweep_verify_interval_seconds
+        ):
+            return RawEmbeddingRepairResult(status=REPAIR_CURRENT)
         run = _Pass(
             organization_id=organization_id,
             provider=provider,
@@ -484,7 +507,7 @@ async def repair_raw_capture_embeddings(
             lease=f"{int(max(budget, 0.0) + _LEASE_MARGIN_SECONDS)}s",
             deadline=_clock() + max(budget, 0.0),
         )
-        state = await _acquire_lease(run)
+        state = await _acquire_lease(run, exists=bool(known))
         if state is None:
             log.info("raw_capture_embedding_repair_busy", organization_id=organization_id)
             return RawEmbeddingRepairResult(status=REPAIR_BUSY)
@@ -596,26 +619,29 @@ async def _content_session(
 
 
 async def _schema_ready(client: SurrealContentClient) -> bool:
-    rows = await content_client.select_many(
-        client, f"SELECT version FROM [{schema_version_record_id(CONTENT_SCHEMA_RECORD_NAME)}];"
+    return await content_client.content_schema_version_at_least(
+        client, RAW_EMBEDDING_REFUSAL_SCHEMA_VERSION
     )
-    version = rows[0].get("version") if rows else None
-    return isinstance(version, int | float) and version >= RAW_EMBEDDING_REFUSAL_SCHEMA_VERSION
 
 
 def _state_key(run: _Pass) -> str:
     return embedding_state_key(run.organization_id, RAW_CAPTURE_EMBEDDING_PLANE)
 
 
-async def _acquire_lease(run: _Pass) -> Mapping[str, Any] | None:
-    """Take the organization's raw repair lease; return its state, or None when held."""
+async def _acquire_lease(run: _Pass, *, exists: bool = False) -> Mapping[str, Any] | None:
+    """Take the organization's raw repair lease; return its state, or None when held.
+
+    ``exists`` says the caller has already read the state row, so it is not
+    created again.
+    """
     key = _state_key(run)
-    await run.rows(
-        _ENSURE_STATE_QUERY,
-        key=key,
-        organization_id=run.organization_id,
-        plane=RAW_CAPTURE_EMBEDDING_PLANE,
-    )
+    if not exists:
+        await run.rows(
+            _ENSURE_STATE_QUERY,
+            key=key,
+            organization_id=run.organization_id,
+            plane=RAW_CAPTURE_EMBEDDING_PLANE,
+        )
     won = await run.rows(
         _ACQUIRE_LEASE_QUERY,
         key=key,
@@ -694,6 +720,7 @@ async def _repair_rows(
     counts: dict[str, int],
 ) -> str | None:
     """Repair one walked page; return why the pass must stop, if it must."""
+    records = {str(row["uuid"]): row["record_id"] for row in rows}
     recallable = [
         memory
         for memory in (models.raw_memory_from_record(row) for row in rows)
@@ -711,7 +738,7 @@ async def _repair_rows(
     candidates = [memory for memory in recallable if memory.id not in set_aside]
     if not candidates:
         return None
-    outcomes, stop = await _repair_page(candidates, run)
+    outcomes, stop = await _repair_page(candidates, run, records)
     for outcome in outcomes:
         counts[outcome] += 1
     return stop
@@ -748,15 +775,18 @@ async def _set_aside(run: _Pass, memories: Sequence[RawMemory]) -> dict[str, str
 async def _repair_page(
     candidates: Sequence[RawMemory],
     run: _Pass,
+    records: Mapping[str, object],
 ) -> tuple[list[str], str | None]:
+    """Repair one page of candidates; ``records`` maps each uuid to its record id."""
     if run.out_of_time():
         return ["pending"] * len(candidates), REPAIR_PARTIAL
     # Fetch text and the current revision only now, for the rows being embedded.
     fetched = await run.rows(
         _RAW_EMBEDDING_FETCH_QUERY,
         organization_id=run.organization_id,
-        ids=[memory.id for memory in candidates],
+        records=[records[memory.id] for memory in candidates],
     )
+    records = {str(row["uuid"]): row["record_id"] for row in fetched}
     current = [models.raw_memory_from_record(row) for row in fetched]
     targets = [memory for memory in current if _repair_candidate(memory, run.provider)]
     # A row gone or made current between the walk and this fetch needs nothing
@@ -765,7 +795,7 @@ async def _repair_page(
     restamps = [memory for memory in targets if _needs_restamp_only(memory, run.provider)]
     stop: str | None = None
     if restamps:
-        restamp_outcomes, stop = await _restamp(run, restamps)
+        restamp_outcomes, stop = await _restamp(run, restamps, records)
         outcomes.extend(restamp_outcomes)
         targets = [memory for memory in targets if not _needs_restamp_only(memory, run.provider)]
     if not targets:
@@ -782,7 +812,11 @@ async def _repair_page(
     writes = await asyncio.gather(
         *(
             _write_embedding(
-                run.client, memory, run.organization_id, observed=observed.get(memory.id)
+                run.client,
+                memory,
+                run.organization_id,
+                observed=observed.get(memory.id),
+                record=records[memory.id],
             )
             for memory in vectors
         ),
@@ -813,7 +847,9 @@ async def _repair_page(
     return outcomes, embedded.stop
 
 
-async def _restamp(run: _Pass, restamps: Sequence[RawMemory]) -> tuple[list[str], str | None]:
+async def _restamp(
+    run: _Pass, restamps: Sequence[RawMemory], records: Mapping[str, object]
+) -> tuple[list[str], str | None]:
     """Rewrite legacy stamps that already name the configured model, in batches.
 
     A batch starts only while the budget lasts; one that started always runs
@@ -828,7 +864,7 @@ async def _restamp(run: _Pass, restamps: Sequence[RawMemory]) -> tuple[list[str]
                 return None
             rows = await run.rows(
                 _RAW_EMBEDDING_RESTAMP_QUERY,
-                uuids=[memory.id for memory in batch],
+                records=[records[memory.id] for memory in batch],
                 revisions={memory.id: memory.revision for memory in batch},
                 observed={memory.id: memory.metadata.get("embedding_metadata") for memory in batch},
                 organization_id=run.organization_id,
@@ -984,11 +1020,12 @@ async def _write_embedding(
     organization_id: str,
     *,
     observed: object,
+    record: object,
 ) -> bool:
     rows = await content_client.select_many(
         client,
         _RAW_EMBEDDING_UPDATE_QUERY,
-        uuid=memory.id,
+        record=record,
         organization_id=organization_id,
         revision=memory.revision,
         observed=observed,

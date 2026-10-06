@@ -153,7 +153,7 @@ async def test_a_restamp_never_relabels_a_vector_another_repair_just_wrote(engin
             content,
             organization_id,
             small,
-            before="uuid IN $uuids)\nSET metadata.embedding_metadata",
+            before="UPDATE $records\nSET metadata.embedding_metadata",
             write=other_repair,
         )
         stored = await _stored(content, uuid)
