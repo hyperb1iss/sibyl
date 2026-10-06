@@ -54,6 +54,25 @@ describe('useSearch', () => {
     );
   });
 
+  it('aborts the in-flight search when the next keystroke supersedes it', async () => {
+    const { rerender } = renderHook(
+      ({ query }) => useSearch({ query }, { keepPreviousResults: false }),
+      { initialProps: { query: 'beta' }, wrapper: createWrapper() }
+    );
+    await waitFor(() => expect(api.query).toHaveBeenCalledTimes(1));
+    const [, firstOptions] = api.query.mock.calls[0] as [unknown, { signal: AbortSignal }];
+    expect(firstOptions.signal).toBeInstanceOf(AbortSignal);
+    expect(firstOptions.signal.aborted).toBe(false);
+
+    rerender({ query: 'gamma' });
+    await waitFor(() => expect(api.query).toHaveBeenCalledTimes(2));
+
+    // The superseded request is cancelled on the server, not only discarded.
+    expect(firstOptions.signal.aborted).toBe(true);
+    const [, secondOptions] = api.query.mock.calls[1] as [unknown, { signal: AbortSignal }];
+    expect(secondOptions.signal.aborted).toBe(false);
+  });
+
   it('keeps the previous result set on screen while a new query loads by default', async () => {
     const { result, rerender } = renderHook(({ query }) => useSearch({ query }), {
       initialProps: { query: 'alpha' },

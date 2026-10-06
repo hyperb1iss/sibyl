@@ -6,7 +6,7 @@ import type { Entity, EntityCreate, EntityListResponse, EntityUpdate } from '../
 import { entitiesApi, graphApi } from '../api/graph';
 import { TIMING } from '../constants/app';
 import { queryKeys } from './query-keys';
-import { invalidateByEntityType } from './shared';
+import { invalidateByEntityType, queryClientInvalidator } from './shared';
 
 export function useEntities(
   params?: Parameters<typeof entitiesApi.list>[0],
@@ -14,7 +14,7 @@ export function useEntities(
 ) {
   return useQuery({
     queryKey: queryKeys.entities.list(params),
-    queryFn: () => entitiesApi.list(params),
+    queryFn: ({ signal }) => entitiesApi.list(params, { signal }),
     initialData,
     staleTime: TIMING.STALE_TIME,
     placeholderData: previousData => previousData,
@@ -28,7 +28,7 @@ export function useEntity(
 ) {
   return useQuery({
     queryKey: queryKeys.entities.detail(id, params),
-    queryFn: () => entitiesApi.get(id, params),
+    queryFn: ({ signal }) => entitiesApi.get(id, params, { signal }),
     enabled: !!id,
     initialData,
   });
@@ -42,7 +42,9 @@ export function useCreateEntity() {
     onSuccess: (data, variables) => {
       // Use entity type from response (most accurate) or input
       const entityType = data.entity_type || variables.entity_type;
-      invalidateByEntityType(queryClient, entityType, data.id, { includeStats: true });
+      invalidateByEntityType(queryClientInvalidator(queryClient), entityType, data.id, {
+        includeStats: true,
+      });
     },
   });
 }
@@ -55,7 +57,7 @@ export function useUpdateEntity() {
       entitiesApi.update(id, updates),
     onSuccess: (data, { id }) => {
       // Use entity type from response
-      invalidateByEntityType(queryClient, data.entity_type, id);
+      invalidateByEntityType(queryClientInvalidator(queryClient), data.entity_type, id);
     },
   });
 }
@@ -71,7 +73,9 @@ export function useDeleteEntity() {
         | { entity_type?: string }
         | undefined;
       const entityType = cachedEntity?.entity_type;
-      invalidateByEntityType(queryClient, entityType, id, { includeStats: true });
+      invalidateByEntityType(queryClientInvalidator(queryClient), entityType, id, {
+        includeStats: true,
+      });
     },
   });
 }
@@ -87,7 +91,7 @@ export function useHierarchicalGraph(params?: {
 }) {
   return useQuery({
     queryKey: queryKeys.graph.hierarchical(params),
-    queryFn: () => graphApi.hierarchical(params),
+    queryFn: ({ signal }) => graphApi.hierarchical(params, { signal }),
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
     placeholderData: previousData => previousData,

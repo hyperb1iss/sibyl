@@ -103,7 +103,7 @@ export const queryKeys = {
   },
   projects: {
     all: ['projects'] as const,
-    list: (includeArchived = false) => ['projects', 'list', { includeArchived }] as const,
+    list: () => ['projects', 'list'] as const,
     detail: (id: string) => ['projects', 'detail', id] as const,
     members: (id: string) => ['projects', 'members', id] as const,
   },
