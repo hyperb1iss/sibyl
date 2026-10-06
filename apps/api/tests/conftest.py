@@ -29,10 +29,12 @@ def reset_auth_hot_path_caches() -> None:
     # Request-time auth memoizes per process; a verdict reached in one test
     # must not be served to the next.
     from sibyl.auth.api_key_cache import verified_api_key_cache
+    from sibyl.persistence.surreal.auth_runtime._common import reset_server_instance_id_cache
     from sibyl.persistence.surreal.auth_runtime.api_keys import reset_last_used_writes
 
     verified_api_key_cache.clear()
     reset_last_used_writes()
+    reset_server_instance_id_cache()
 
 
 # =============================================================================

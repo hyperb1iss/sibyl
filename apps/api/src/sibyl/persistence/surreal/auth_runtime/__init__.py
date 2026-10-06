@@ -37,6 +37,7 @@ from sibyl.persistence.surreal.auth_runtime._common import (
     _utcnow,  # noqa: F401
     config_module,  # noqa: F401
     get_server_instance_id,
+    reset_server_instance_id_cache,
 )
 from sibyl.persistence.surreal.auth_runtime.api_keys import (
     authenticate_api_key,
@@ -197,6 +198,7 @@ __all__ = [
     "login_oidc_identity",
     "patch_auth_user",
     "request_user_deletion",
+    "reset_server_instance_id_cache",
     "request_password_reset",
     "remove_team_member_record",
     "resolve_accessible_project_graph_ids",
