@@ -1051,6 +1051,8 @@ class UndoOutcome:
     failures: list[str] = field(default_factory=list)
     # Creates whose outcome was never confirmed; a real undo resolves them first.
     unresolved: int = 0
+    # Unconfirmed creates from a run that kept no key; they cannot be resolved.
+    unresolved_unkeyed: int = 0
     # The server refused the caller's deletes outright (project maintainer access).
     refused: bool = False
 
@@ -1068,6 +1070,7 @@ async def undo_plan(
     concurrency: int = 8,
     log: Callable[[str], None] = lambda _message: None,
     undoing: set[str] | None = None,
+    project_id: str | None = None,
 ) -> UndoOutcome:
     """Remove what a migration created, as long as nobody has touched it since.
 
@@ -1097,13 +1100,9 @@ async def undo_plan(
         bucket.append(f"{label(origin)}: {reason}")
         still_linked.update((structure.get(origin) or {}).get("links") or [])
 
-    async def undo_one(origin: str) -> None:
-        target_id = ids.get(origin)
-        if target_id is None or outcome.refused:
-            return
-        if origin in still_linked:
-            keep(origin, outcome.kept_linked, "a row that was kept still links to it")
-            return
+    async def classify(origin: str) -> None:
+        """Phase one, read only: is this row still the migration's, as it left it?"""
+        target_id = ids[origin]
         revision = revisions.get(origin)
         if revision is None or origin not in structure:
             keep(
@@ -1111,6 +1110,7 @@ async def undo_plan(
                 outcome.kept_unrecorded,
                 "the migration did not create it, or an older run left no record of it",
             )
+            kept_rows[origin] = None
             return
         try:
             async with gate:
@@ -1124,16 +1124,55 @@ async def undo_plan(
                     _forget(origin, ids, revisions, statuses, partial)
                 return
             keep(origin, outcome.failures, f"could not read it ({exc})")
+            kept_rows[origin] = None
             return
         provenance = ((current.get("metadata") or {}).get("migration") or {}).get(
             "origin_entity_id"
         )
         if provenance != origin:
             keep(origin, outcome.kept_unrecorded, "the row on the target is not this migration's")
-            return
-        if current.get("revision") != revision:
+            kept_rows[origin] = current
+        elif current.get("revision") != revision:
             keep(origin, outcome.kept_edited, "changed on the team server since it was migrated")
+            kept_rows[origin] = current
+        else:
+            candidates.add(origin)
+
+    async def protect_current_links(origin: str, current: dict[str, Any] | None) -> None:
+        """A kept row keeps every migrated row it points at now.
+
+        Links added on the team server after the migration (a teammate moving
+        a migrated task under another migrated epic, or adding a dependency)
+        are not in the plan, and the server does not count links between rows
+        of the same migration as sharing, so the undo reads them itself.
+        """
+        target_ids = {t: o for o, t in ids.items()}
+        metadata = (current or {}).get("metadata") or {}
+        pointed = [metadata.get("epic_id"), metadata.get("parent_task_id")]
+        pointed += list(metadata.get("depends_on") or [])
+        async with gate:
+            related = await client._request(
+                "POST",
+                "/search/explore",
+                json={"mode": "related", "entity_id": ids[origin], "limit": 1000},
+                _buffer_pending=False,
+            )
+        pointed += [
+            row.get("id")
+            for row in related.get("entities") or []
+            if row.get("direction") == "outgoing"
+        ]
+        still_linked.update(target_ids[t] for t in pointed if t in target_ids)
+
+    async def undo_one(origin: str) -> None:
+        """Phase two: remove one row the first phase found unchanged."""
+        target_id = ids.get(origin)
+        if target_id is None or outcome.refused or origin not in candidates:
             return
+        if origin in still_linked:
+            keep(origin, outcome.kept_linked, "a row that was kept still links to it")
+            return
+        revision = revisions[origin]
         if dry_run:
             # The same checks the delete runs, so the dry run keeps what the undo would.
             try:
@@ -1188,6 +1227,21 @@ async def undo_plan(
             save()
             log(f"  {outcome.removed} removed...")
 
+    # Undoing deletes, which takes a project maintainer. Ask before anything
+    # else, so a refused undo writes nothing (not even a replayed create).
+    if project_id:
+        try:
+            await client._request(
+                "GET",
+                f"/entities/{project_id}/deletable",
+                params={"expected_revision": "1"},
+                _buffer_pending=False,
+            )
+        except Exception as exc:
+            if getattr(exc, "status_code", None) == 403:
+                outcome.refused = True
+                return outcome
+
     # A create whose answer was lost may have landed. Replay each under its
     # own key (the server answers with the original receipt, or creates the
     # row now), so the undo sees every row the migration wrote.
@@ -1196,6 +1250,12 @@ async def undo_plan(
         for origin, pending in partial.items()
         if origin not in ids and pending.get("create_key") and pending.get("create_body")
     }
+    # Intents from before keys were kept cannot be replayed safely; say so.
+    outcome.unresolved_unkeyed = sum(
+        1
+        for origin, pending in partial.items()
+        if origin not in ids and pending.get("create_body") and not pending.get("create_key")
+    )
     if dry_run:
         outcome.unresolved = len(unconfirmed)
     for origin, pending in unconfirmed.items() if not dry_run else ():
@@ -1231,13 +1291,29 @@ async def undo_plan(
     if unconfirmed and not dry_run:
         save()
 
+    # Phase one: classify every row before deleting any, and protect what the
+    # kept ones point at now, so no layer is undone before the rows that keep
+    # it are known.
+    candidates: set[str] = set()
+    kept_rows: dict[str, dict[str, Any] | None] = {}
+    await asyncio.gather(*(classify(origin) for origin in list(ids)))
+    try:
+        await asyncio.gather(
+            *(protect_current_links(origin, current) for origin, current in kept_rows.items())
+        )
+    except Exception as exc:
+        outcome.failures.append(
+            f"could not read what a kept row links to ({exc}); nothing was removed"
+        )
+        return outcome
+
     layers: dict[int, list[str]] = {}
     for origin in ids:
         layers.setdefault(int((structure.get(origin) or {}).get("layer") or 0), []).append(origin)
     for layer in sorted(layers, reverse=True):
         if outcome.refused:
             break
-        marking = [origin for origin in layers[layer] if origin in ids]
+        marking = [origin for origin in layers[layer] if origin in candidates]
         if not dry_run:
             marks.update(marking)
             save()

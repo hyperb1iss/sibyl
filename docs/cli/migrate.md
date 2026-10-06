@@ -142,7 +142,8 @@ An undo removes only what the migration created and still owns:
 - A row stays while anything outside the migration depends on it: a teammate's task filed under a
   migrated epic, a decision someone linked to it, or a row you created on the team server since.
   The server checks this, and the revision, as it deletes.
-- A row that a kept row links to stays too, so nothing kept is left pointing at a deleted row.
+- A row that a kept row links to stays too, including links added on the team server after the
+  migration, so nothing kept is left pointing at a deleted row.
 - Rows the migration updated rather than created stay: a teammate's epic or milestone of the same
   name that your tasks linked to, and a row of yours with the same title that was already on the
   team server.
@@ -154,6 +155,10 @@ your local Sibyl is gone; pass `--source-org` in that case, since finding the or
 automatically needs the local database. Rows that are already gone from the team server are
 reported and dropped from the ledger. Undoing needs a team server that advertises guarded deletes;
 the command checks before it deletes anything.
+
+Run the undo while nobody is working in the migrated rows. The checks above see everything written
+before the undo reaches a row, but a teammate linking to a row in the same moment the undo removes it
+can leave that link pointing at nothing, as with any delete.
 
 Migrating again after an undo writes fresh rows for everything the undo removed. Rows the undo kept
 stay in the ledger and are not written twice. An undo that stops part way can be run again; it first

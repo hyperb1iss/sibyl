@@ -841,3 +841,29 @@ def test_a_refused_undo_leaves_the_raw_memories_too(
 
     assert result.exit_code == 1
     raw_undo.assert_not_awaited()
+
+
+@pytest.mark.parametrize(("status", "dropped"), [(422, True), (503, False)])
+async def test_a_raw_write_the_server_refused_is_not_retried_forever(
+    tmp_path: Path, status: int, dropped: bool
+) -> None:
+    target = _Captures({})
+
+    async def remember_raw_memory(**_kwargs: Any) -> dict[str, Any]:
+        raise SibylClientError("API error", status_code=status)
+
+    target.remember_raw_memory = remember_raw_memory  # type: ignore[attr-defined]
+    intents = {"src-x": {"key": "k", "request": {"title": "t", "raw_content": "c"}}}
+
+    failures = await migrate._undo_raw(
+        target,
+        ledger_file=tmp_path / "raw.json",
+        route={"r": "1"},
+        ledger={},
+        revisions={},
+        dry_run=False,
+        intents=intents,
+    )
+
+    assert (intents == {}) is dropped
+    assert (failures == []) is dropped

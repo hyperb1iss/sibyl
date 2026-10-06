@@ -880,6 +880,7 @@ async def _undo_graph(target: Any, *, route: dict[str, str], dry_run: bool) -> l
         partial=partial,
         dry_run=dry_run,
         undoing=undoing,
+        project_id=route.get("target_project_id"),
         save=lambda: _save_graph_ledger(
             ledger_file, route, ids, statuses, partial, revisions, structure, preexisting, undoing
         ),
@@ -895,6 +896,11 @@ async def _undo_graph(target: Any, *, route: dict[str, str], dry_run: bool) -> l
         info(
             f"{outcome.unresolved} creates were sent without a confirmed answer; "
             "the undo checks them first and removes any that landed"
+        )
+    if outcome.unresolved_unkeyed:
+        warn(
+            f"{outcome.unresolved_unkeyed} creates from an older run were sent without a "
+            "confirmed answer and cannot be checked; if they landed, they stay"
         )
     verb = "Would remove" if dry_run else "Removed"
     success(
@@ -952,6 +958,12 @@ async def _undo_raw(
                 **intent["request"], _idempotency_key=intent["key"]
             )
         except Exception as exc:
+            status = getattr(exc, "status_code", None)
+            if isinstance(status, int) and 400 <= status < 500 and status not in {401, 403, 409}:
+                # The server refused the write outright, so it never landed.
+                intents.pop(origin, None)
+                _save_raw_intents(ledger_file, route, intents)
+                continue
             failures.append(f"raw {origin}: could not confirm an unfinished write ({exc})")
             continue
         ledger[origin] = str(response.get("id") or response.get("uuid") or "ok")

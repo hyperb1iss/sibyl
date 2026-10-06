@@ -2180,3 +2180,99 @@ async def test_a_finished_undo_leaves_only_uncertain_rows_marked() -> None:
     )
 
     assert undoing == {"decision_3"}
+
+
+class _LinkingTarget(_UndoTarget):
+    """Answers related-entity reads from the stored rows' topology and extra edges."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.extra_edges: list[tuple[str, str]] = []
+
+    async def _request(self, method: str, path: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        body = kwargs.get("json") or {}
+        if method == "POST" and path == "/search/explore" and body.get("mode") == "related":
+            source = body["entity_id"]
+            meta = self.rows[source]["metadata"]
+            outgoing = {meta.get("epic_id"), *(meta.get("depends_on") or [])}
+            outgoing |= {t for s, t in self.extra_edges if s == source}
+            return {
+                "entities": [{"id": t, "direction": "outgoing"} for t in outgoing if t in self.rows]
+            }
+        return await super()._request(method, path, *args, **kwargs)
+
+
+def _two_epics_two_tasks() -> GraphPlan:
+    return build_plan(
+        [
+            _entity("epic_1", "epic"),
+            _entity("epic_2", "epic"),
+            _entity("task_1", "task"),
+            _entity("task_3", "task"),
+            _entity("task_4", "task"),
+        ],
+        [SourceEdge("BELONGS_TO", "task_1", "epic_1")],
+        project=PROJECT,
+    )
+
+
+@pytest.mark.parametrize("change", ["moved_under_epic", "new_dependency"])
+@pytest.mark.asyncio
+async def test_undo_keeps_what_a_kept_row_was_linked_to_after_the_migration(change: str) -> None:
+    plan = _two_epics_two_tasks()
+    target = _LinkingTarget()
+    ledger, revisions = await _migrate_with_revisions(target, plan)
+    if change == "moved_under_epic":
+        # A teammate files migrated task_1 under migrated epic_2.
+        source, linked = "target-task_1", "target-epic_2"
+        target.rows[source]["metadata"]["epic_id"] = linked
+    else:
+        # A teammate adds a dependency from task_3 to task_4 through the links route.
+        source, linked = "target-task_3", "target-task_4"
+        target.extra_edges.append((source, linked))
+    target.rows[source]["revision"] += 1
+
+    outcome = await _undo(target, ledger, revisions, plan)
+
+    assert source in target.rows and linked in target.rows
+    kept = [line.split(":")[0] for line in outcome.kept_linked]
+    assert f"{'epic epic_2' if change == 'moved_under_epic' else 'task task_4'}" in kept
+
+
+@pytest.mark.asyncio
+async def test_a_refused_undo_writes_nothing_before_it_stops() -> None:
+    target, ledger, revisions = _IdempotentUndoTarget(), _Ledger(), {}
+    target.lose_ack = True
+    await _run(target, ledger, revisions, _one_decision())
+    posts_before = len(target.keys)
+
+    async def refuse(method: str, path: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        if path.endswith("/deletable") or method == "DELETE":
+            raise _ApiError(403, "project_access_denied")
+        return await _IdempotentUndoTarget._request(target, method, path, *args, **kwargs)
+
+    target._request = refuse  # type: ignore[method-assign]
+    from sibyl_cli.migrate_graph import undo_plan
+
+    outcome = await undo_plan(
+        target,
+        structure=ledger.structure,
+        ids=ledger.ids,
+        revisions=revisions,
+        statuses=ledger.statuses,
+        partial=ledger.partial,
+        save=lambda: None,
+        project_id="project_target",
+    )
+
+    assert outcome.refused and len(target.keys) == posts_before
+
+
+@pytest.mark.asyncio
+async def test_unconfirmed_creates_without_a_key_are_counted() -> None:
+    target, ledger, revisions = _UndoTarget(), _Ledger(), {}
+    ledger.partial["decision_old"] = {"create_body": {"name": "x"}, "missing": [], "digest": None}
+
+    outcome = await _undo(target, ledger, revisions, _one_decision(), dry_run=True)
+
+    assert outcome.unresolved_unkeyed == 1 and outcome.unresolved == 0
