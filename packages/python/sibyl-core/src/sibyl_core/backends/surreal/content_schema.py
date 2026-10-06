@@ -99,6 +99,15 @@ RAW_CAPTURE_ORGANIZATION_UUID_INDEX = (
     "DEFINE INDEX IF NOT EXISTS idx_raw_captures_org_uuid "
     "ON raw_captures FIELDS organization_id, uuid UNIQUE;"
 )
+# Capture id lookups are served by `idx_raw_captures_uuid` alone (an
+# organization equality beside `uuid IN` plans as a whole-org scan on 3.x). A
+# live namespace was found with that unique index reporting `ready` while every
+# row created before an earlier index build was absent from it, so point reads
+# by uuid silently missed those captures. Rebuild it from the table so the
+# index covers every row before the lookups depend on it.
+RAW_CAPTURE_UUID_INDEX_REBUILD = (
+    "REBUILD INDEX IF EXISTS idx_raw_captures_uuid ON TABLE raw_captures;"
+)
 
 if TYPE_CHECKING:
     from sibyl_core.backends.surreal.content_client import SurrealContentClient
@@ -145,7 +154,7 @@ CONTENT_TABLES = (
     *RAW_LEXICAL_TABLES,
     RAW_LEXICAL_STATE_TABLE,
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 53
+CONTENT_SCHEMA_CURRENT_VERSION = 54
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -1212,6 +1221,13 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
                 "DEFINE INDEX IF NOT EXISTS idx_raw_captures_validation_pending "
                 "ON raw_captures FIELDS metadata.source_validation_pending, organization_id",
             ),
+        ),
+        # 53 (the validation-pending index) merged from a parallel lane; the
+        # query-plan work takes the numbers after it.
+        SchemaMigration(
+            version=54,
+            name="content_raw_capture_uuid_index_rebuild",
+            statements=(RAW_CAPTURE_UUID_INDEX_REBUILD,),
         ),
     )
 

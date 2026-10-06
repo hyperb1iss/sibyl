@@ -250,12 +250,17 @@ async def unavailable_raw_derivation_ids(
         if execute_query is None:
             client = await stack.enter_async_context(content_client.surreal_content_client())
             execute_query = client.execute_query
-        for batch in content_client.value_batches(sorted(by_id)):
+        for batch in content_client.value_batches(
+            sorted(by_id), batch_size=content_client.ID_LOOKUP_BATCH_SIZE
+        ):
+            # The capture lookup is served by the uuid index alone: an
+            # organization equality beside `uuid IN` plans as a whole-org
+            # scan on 3.x. Rows of another organization are dropped below.
             rows = content_client.normalize_records(
                 await execute_query(
                     """RETURN {
                     RETURN {
-                        targets: (SELECT * FROM raw_captures WHERE organization_id=$org AND uuid IN $ids),
+                        targets: (SELECT * FROM raw_captures WHERE uuid IN $ids),
                         associations: (SELECT * FROM memory_derivations WHERE organization_id=$org
                             AND target_kind='raw_capture' AND target_id IN $ids)
                     };
@@ -270,7 +275,11 @@ async def unavailable_raw_derivation_ids(
             association_rows = rows[0].get("associations")
             if not isinstance(target_rows, list) or not isinstance(association_rows, list):
                 raise RuntimeError("derivation retrieval snapshot is malformed")
-            targets = {row["uuid"]: raw_memory_from_record(row) for row in target_rows}
+            targets = {
+                row["uuid"]: raw_memory_from_record(row)
+                for row in target_rows
+                if row.get("organization_id") == organization_id
+            }
             associations = {row["target_id"]: row for row in association_rows}
 
             async def current(memory_id, targets=targets, associations=associations):

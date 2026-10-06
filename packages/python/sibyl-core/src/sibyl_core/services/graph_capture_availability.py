@@ -174,21 +174,26 @@ async def available_capture_projection_rows[T](
                         content_client.surreal_content_client()
                     )
                     execute_query = client.execute_query
-                for batch in content_client.value_batches(sorted(requested)):
+                for batch in content_client.value_batches(
+                    sorted(requested), batch_size=content_client.ID_LOOKUP_BATCH_SIZE
+                ):
                     try:
+                        # An organization equality beside `uuid IN` makes the
+                        # 3.x planner walk the whole organization through its
+                        # org index and filter the ids in memory. The uuid
+                        # index alone serves one point lookup per id (uuid is
+                        # unique table-wide); the organization is verified on
+                        # the returned rows below.
                         query = (
                             "SELECT * OMIT raw_content, embedding FROM raw_captures "
-                            "WHERE organization_id = $organization_id "
-                            "AND uuid IN $source_ids;"
+                            "WHERE uuid IN $source_ids;"
                         )
                         if client is not None:
                             records = await content_client.select_many(
-                                client, query, organization_id=organization_id, source_ids=batch
+                                client, query, source_ids=batch
                             )
                         else:
-                            result = await execute_query(
-                                query, organization_id=organization_id, source_ids=batch
-                            )
+                            result = await execute_query(query, source_ids=batch)
                             error = content_client.query_error(result)
                             if error is not None:
                                 raise RuntimeError(error)

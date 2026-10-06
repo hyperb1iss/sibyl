@@ -46,12 +46,15 @@ from sibyl_core.models.reflection import (
     memory_lifecycle_from_metadata,
     with_memory_lifecycle_metadata,
 )
+from sibyl_core.services.content_client import ID_LOOKUP_BATCH_SIZE
 from sibyl_core.services.content_documents import invalidate_document_chunk_counts
 from sibyl_core.services.embedding_lane_readiness import chunk_vector_lane_readiness
 from sibyl_core.services.link_graph_status import LinkGraphSourceStatusData, LinkGraphStatusData
 from sibyl_core.utils.query import query_tokens
 
-_DEFAULT_BATCH_SIZE = 128
+# `uuid INSIDE` lists are index-served only up to the 3.x planner's union cap;
+# longer lists plan as a table scan. The cap lives beside the core batch helper.
+_DEFAULT_BATCH_SIZE = ID_LOOKUP_BATCH_SIZE
 _UPSERT_RECORD = {
     "crawl_sources": (
         "UPSERT crawl_sources CONTENT $record "

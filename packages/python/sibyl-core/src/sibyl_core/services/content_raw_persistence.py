@@ -925,12 +925,18 @@ async def resolve_raw_memory_prefix(
     if not normalized or limit <= 0:
         return []
     async with content_client.surreal_content_client() as client:
+        # The prefix ranges are index-served (uuid and source_id both lead an
+        # index) only when no organization equality sits beside them; the 3.x
+        # planner otherwise takes the org index and scans the whole
+        # organization. The inner select unions the two ranges and the outer
+        # statement applies the organization, order and limit.
         rows = await content_client.select_many(
             client,
+            "SELECT * FROM ("
             "SELECT * FROM raw_captures "
-            "WHERE organization_id = $organization_id "
-            "AND ((uuid >= $prefix AND uuid < $prefix_upper) "
-            "OR (source_id >= $prefix AND source_id < $prefix_upper)) "
+            "WHERE (uuid >= $prefix AND uuid < $prefix_upper) "
+            "OR (source_id >= $prefix AND source_id < $prefix_upper)"
+            ") WHERE organization_id = $organization_id "
             "ORDER BY captured_at DESC LIMIT $limit;",
             organization_id=organization_id,
             prefix=normalized,
@@ -950,16 +956,20 @@ async def list_raw_memories_for_promotion(
         return []
     if raw_memory_ids:
         rows: list[models.SurrealRecord] = []
-        for batch in content_client.value_batches(list(dict.fromkeys(raw_memory_ids))):
+        for batch in content_client.value_batches(
+            list(dict.fromkeys(raw_memory_ids)), batch_size=content_client.ID_LOOKUP_BATCH_SIZE
+        ):
             async with content_client.surreal_content_client() as client:
+                # Served by the uuid index alone; an organization equality
+                # beside `uuid INSIDE` plans as a whole-org scan on 3.x. The
+                # organization is verified on the returned rows below.
                 rows.extend(
                     await content_client.select_many(
                         client,
                         "SELECT * FROM raw_captures "
-                        "WHERE organization_id = $organization_id AND uuid INSIDE $raw_memory_ids "
+                        "WHERE uuid INSIDE $raw_memory_ids "
                         "AND memory_scope INSIDE $raw_promotion_visible_scopes "
                         "ORDER BY captured_at ASC, uuid ASC;",
-                        organization_id=organization_id,
                         raw_memory_ids=batch,
                         raw_promotion_visible_scopes=list(_RAW_PROMOTION_VISIBLE_SCOPES),
                     )
@@ -969,7 +979,8 @@ async def list_raw_memories_for_promotion(
         return [
             memory
             for memory in sorted(memories, key=lambda memory: order.get(memory.id, len(order)))
-            if memory.memory_scope.value in _RAW_PROMOTION_VISIBLE_SCOPES
+            if memory.organization_id == organization_id
+            and memory.memory_scope.value in _RAW_PROMOTION_VISIBLE_SCOPES
         ][:limit]
 
     query_limit = limit * content_client.LIFECYCLE_FILTER_OVERFETCH_FACTOR

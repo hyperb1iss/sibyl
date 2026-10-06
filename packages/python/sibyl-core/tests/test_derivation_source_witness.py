@@ -21,6 +21,7 @@ from sibyl_core.backends.surreal.content_schema import (
 from sibyl_core.backends.surreal.schema import (
     ANALYZER_DEFINITIONS,
     EDGE_DEFINITIONS,
+    GRAPH_SCHEMA_CURRENT_VERSION,
     NODE_DEFINITIONS,
     _graph_schema_migrations,
     render_surreal_compatible_sql,
@@ -110,7 +111,9 @@ async def store(request):
     try:
         applied = await initialize(client, request.param, url, migrations)
         assert applied[-1].version == (
-            CONTENT_SCHEMA_CURRENT_VERSION if request.param == "content" else 35
+            CONTENT_SCHEMA_CURRENT_VERSION
+            if request.param == "content"
+            else GRAPH_SCHEMA_CURRENT_VERSION
         )
         assert (
             await apply_schema_migrations(client.execute_query, migrations, name=request.param)

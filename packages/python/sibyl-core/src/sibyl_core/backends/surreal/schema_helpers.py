@@ -31,7 +31,11 @@ def split_statements(sql: str) -> list[str]:
 
 
 def is_duplicate_unique_index_error(statement: str, error: Exception) -> bool:
-    if " UNIQUE" not in statement.upper():
+    # A rebuild of an existing unique index fails on duplicate rows exactly
+    # as its definition would, so it gets the same tolerance; the invariant
+    # check reports the unenforced index either way.
+    upper = statement.upper()
+    if " UNIQUE" not in upper and not upper.lstrip().startswith("REBUILD INDEX"):
         return False
     return "already contains" in str(error).lower()
 
