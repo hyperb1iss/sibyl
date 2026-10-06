@@ -73,17 +73,8 @@ async def reserve_idempotency_record(
     payload: object,
     content_session: object,
 ) -> tuple[ApiIdempotencyRecord, bool]:
-    record = await content_runtime.get_api_idempotency_record(
-        content_session,
-        organization_id=organization_id,
-        principal_id=principal_id,
-        idempotency_key=idempotency_key,
-        method=method.upper(),
-        path=path,
-    )
-    if record is not None:
-        return record, False
-
+    # One write claims the scope or returns the record already holding it;
+    # the scope index is unique, so there is no lookup to race against.
     pending = ApiIdempotencyRecord(
         organization_id=organization_id,
         principal_id=principal_id,
@@ -95,32 +86,21 @@ async def reserve_idempotency_record(
         response_body={},
     )
     try:
-        saved = await content_runtime.save_api_idempotency_record(
+        return await content_runtime.reserve_api_idempotency_record(
             content_session,
             record=pending,
         )
     except Exception as exc:
-        record = await content_runtime.get_api_idempotency_record(
-            content_session,
-            organization_id=organization_id,
-            principal_id=principal_id,
-            idempotency_key=idempotency_key,
+        log.exception(
+            "api_idempotency_reservation_failed",
             method=method.upper(),
             path=path,
+            organization_id=str(organization_id),
         )
-        if record is None:
-            log.exception(
-                "api_idempotency_reservation_failed",
-                method=method.upper(),
-                path=path,
-                organization_id=str(organization_id),
-            )
-            raise HTTPException(
-                status_code=503,
-                detail="Could not reserve the idempotent operation. No mutation was attempted.",
-            ) from exc
-        return record, False
-    return saved, True
+        raise HTTPException(
+            status_code=503,
+            detail="Could not reserve the idempotent operation. No mutation was attempted.",
+        ) from exc
 
 
 async def complete_idempotency_record(
@@ -136,10 +116,18 @@ async def complete_idempotency_record(
         response_body=response_body,
     )
     try:
-        await content_runtime.save_api_idempotency_record(
+        # One UPDATE carries the body onto the reservation. The reservation
+        # can only be missing if it was purged mid-request; the receipt is
+        # then written whole so a retry still replays instead of re-running.
+        confirmed = await content_runtime.complete_api_idempotency_record(
             content_session,
             record=completed,
         )
+        if confirmed is None:
+            await content_runtime.save_api_idempotency_record(
+                content_session,
+                record=completed,
+            )
     except Exception as exc:
         try:
             confirmed = await content_runtime.get_api_idempotency_record(

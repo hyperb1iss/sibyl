@@ -37,11 +37,13 @@ from sibyl.persistence.surreal.backups import (
     update_backup_settings,
 )
 from sibyl.persistence.surreal.content import (
+    complete_api_idempotency_record,
     create_crawl_source_record,
     delete_crawl_source_record,
     delete_crawled_document_record,
     get_link_graph_status_payload,
     purge_due_deleted_raw_captures,
+    reserve_api_idempotency_record,
     save_api_idempotency_record,
     save_crawl_source_record,
     save_crawled_document_record,
@@ -2581,3 +2583,138 @@ async def test_capture_project_selection_precedes_pagination(surreal_content_cli
     )
     assert [capture.title for capture in widened] == ["Capture 8"]
     assert has_more is True
+
+
+def _idempotency_record(**overrides: object) -> ApiIdempotencyRecord:
+    values: dict[str, object] = {
+        "organization_id": uuid4(),
+        "principal_id": "user-123",
+        "idempotency_key": "idem-123",
+        "method": "POST",
+        "path": "/entities",
+        "request_hash": "hash-123",
+        "response_status_code": 102,
+        "response_body": {},
+    }
+    values.update(overrides)
+    return ApiIdempotencyRecord(**values)  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_reserve_api_idempotency_record_claims_the_scope_with_one_insert(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reservation is one INSERT ON DUPLICATE KEY, replacing read + UPSERT + CREATE."""
+    record = _idempotency_record()
+    client = _RecordingContentClient([surreal_content._api_idempotency_record(record)])
+
+    @asynccontextmanager
+    async def client_scope():
+        yield client
+
+    monkeypatch.setattr(surreal_content, "surreal_content_client", client_scope)
+
+    saved, claimed = await reserve_api_idempotency_record(None, record=record)
+
+    assert claimed is True
+    assert saved.id == record.id
+    assert len(client.calls) == 1
+    query, params = client.calls[0]
+    assert query.startswith("INSERT INTO api_idempotency_records $record ON DUPLICATE KEY UPDATE")
+    assert "RETURN AFTER" in query
+    assert params["record"]["uuid"] == str(record.id)
+    assert params["record"]["response_status_code"] == 102
+
+
+@pytest.mark.asyncio
+async def test_reserve_api_idempotency_record_returns_the_holder_of_the_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    holder = _idempotency_record(response_status_code=201, response_body={"id": "entity_1"})
+    newcomer = _idempotency_record(organization_id=holder.organization_id)
+    client = _RecordingContentClient([surreal_content._api_idempotency_record(holder)])
+
+    @asynccontextmanager
+    async def client_scope():
+        yield client
+
+    monkeypatch.setattr(surreal_content, "surreal_content_client", client_scope)
+
+    saved, claimed = await reserve_api_idempotency_record(None, record=newcomer)
+
+    assert claimed is False
+    assert saved.id == holder.id
+    assert saved.response_status_code == 201
+    assert len(client.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_complete_api_idempotency_record_is_one_update_carrying_the_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    record = _idempotency_record(response_status_code=201, response_body={"id": "entity_1"})
+    client = _RecordingContentClient([surreal_content._api_idempotency_record(record)])
+
+    @asynccontextmanager
+    async def client_scope():
+        yield client
+
+    monkeypatch.setattr(surreal_content, "surreal_content_client", client_scope)
+
+    completed = await complete_api_idempotency_record(None, record=record)
+
+    assert completed == record
+    assert len(client.calls) == 1
+    query, params = client.calls[0]
+    assert query.startswith("UPDATE api_idempotency_records SET response_status_code")
+    assert "WHERE uuid = $uuid AND organization_id = $organization_id" in query
+    assert params == {
+        "uuid": str(record.id),
+        "organization_id": str(record.organization_id),
+        "response_status_code": 201,
+        "response_body": {"id": "entity_1"},
+    }
+
+    client.response = []
+    assert await complete_api_idempotency_record(None, record=record) is None
+
+
+@pytest.mark.asyncio
+async def test_idempotency_reservation_and_completion_on_the_embedded_engine(
+    surreal_content_client: SurrealContentClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The unique scope index makes the second reservation return the first."""
+
+    @asynccontextmanager
+    async def client_scope():
+        yield surreal_content_client
+
+    monkeypatch.setattr(surreal_content, "surreal_content_client", client_scope)
+    first = _idempotency_record()
+    rival = _idempotency_record(organization_id=first.organization_id)
+
+    reserved, claimed = await reserve_api_idempotency_record(None, record=first)
+    assert claimed is True
+    assert reserved.id == first.id
+
+    taken, claimed_again = await reserve_api_idempotency_record(None, record=rival)
+    assert claimed_again is False
+    assert taken.id == first.id
+    assert taken.response_status_code == 102
+
+    completed = await complete_api_idempotency_record(
+        None,
+        record=ApiIdempotencyRecord(
+            **{**first.__dict__, "response_status_code": 201, "response_body": {"id": "e1"}}
+        ),
+    )
+    assert completed is not None
+    assert completed.id == first.id
+    assert completed.response_status_code == 201
+    assert completed.response_body == {"id": "e1"}
+
+    rows = await surreal_content_client.execute_query(
+        "SELECT count() AS total FROM api_idempotency_records GROUP ALL;"
+    )
+    assert rows == [{"total": 1}]

@@ -568,7 +568,7 @@ async def test_remember_mcp_memory_replays_idempotent_receipt(monkeypatch) -> No
             metadata={},
         )
     )
-    get_idempotency = AsyncMock(return_value=None)
+    get_idempotency = AsyncMock(side_effect=lambda _session, *, record: (record, True))
     save_idempotency = AsyncMock(side_effect=lambda _session, *, record: record)
     kwargs = {
         "title": "Use receipts",
@@ -595,11 +595,11 @@ async def test_remember_mcp_memory_replays_idempotent_receipt(monkeypatch) -> No
             AsyncMock(return_value=SimpleNamespace(entities=[])),
         ),
         patch(
-            "sibyl.persistence.content_runtime.get_api_idempotency_record",
+            "sibyl.persistence.content_runtime.reserve_api_idempotency_record",
             get_idempotency,
         ),
         patch(
-            "sibyl.persistence.content_runtime.save_api_idempotency_record",
+            "sibyl.persistence.content_runtime.complete_api_idempotency_record",
             save_idempotency,
         ),
     ):
@@ -613,7 +613,7 @@ async def test_remember_mcp_memory_replays_idempotent_receipt(monkeypatch) -> No
         "idempotency_key": "remember-1",
         "replayed": False,
     }
-    assert save_idempotency.await_count == 2
+    assert save_idempotency.await_count == 1
     saved_record = save_idempotency.await_args.kwargs["record"]
     add.reset_mock()
     remember_raw.reset_mock()
@@ -624,8 +624,8 @@ async def test_remember_mcp_memory_replays_idempotent_receipt(monkeypatch) -> No
             "sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value={"project-a"})
         ),
         patch(
-            "sibyl.persistence.content_runtime.get_api_idempotency_record",
-            AsyncMock(return_value=saved_record),
+            "sibyl.persistence.content_runtime.reserve_api_idempotency_record",
+            AsyncMock(return_value=(saved_record, False)),
         ),
         patch("sibyl_core.tools.core.add", add),
         patch("sibyl.mcp_tools.policy.validate_relationship_targets_for_caller", AsyncMock()),
@@ -1039,7 +1039,7 @@ async def test_manage_mcp_complete_task_routes_through_workflow_service(monkeypa
         "expected_revision": 1,
         "idempotency_key": "mcp-complete-1",
     }
-    get_idempotency = AsyncMock(return_value=None)
+    get_idempotency = AsyncMock(side_effect=lambda _session, *, record: (record, True))
     save_idempotency = AsyncMock(side_effect=lambda _session, *, record: record)
 
     with (
@@ -1055,11 +1055,11 @@ async def test_manage_mcp_complete_task_routes_through_workflow_service(monkeypa
         patch("sibyl.jobs.queue.enqueue_create_learning_episode", episode_enqueue),
         patch("sibyl.jobs.queue.enqueue_create_learning_procedure", procedure_enqueue),
         patch(
-            "sibyl.persistence.content_runtime.get_api_idempotency_record",
+            "sibyl.persistence.content_runtime.reserve_api_idempotency_record",
             get_idempotency,
         ),
         patch(
-            "sibyl.persistence.content_runtime.save_api_idempotency_record",
+            "sibyl.persistence.content_runtime.complete_api_idempotency_record",
             save_idempotency,
         ),
         patch("sibyl_core.tools.manage.manage", manage),
@@ -1118,7 +1118,7 @@ async def test_manage_mcp_complete_task_routes_through_workflow_service(monkeypa
     # Deprecation pointer is preserved for MCP clients.
     assert result["data"]["deprecation"]["use_instead"] == "POST /tasks/{id}/complete"
 
-    assert save_idempotency.await_count == 2
+    assert save_idempotency.await_count == 1
     saved_record = save_idempotency.await_args.kwargs["record"]
     transition.reset_mock()
 
@@ -1131,8 +1131,8 @@ async def test_manage_mcp_complete_task_routes_through_workflow_service(monkeypa
             "sibyl.mcp_tools.management._authorize_mcp_manage_action", AsyncMock(return_value=None)
         ),
         patch(
-            "sibyl.persistence.content_runtime.get_api_idempotency_record",
-            AsyncMock(return_value=saved_record),
+            "sibyl.persistence.content_runtime.reserve_api_idempotency_record",
+            AsyncMock(return_value=(saved_record, False)),
         ),
         patch("sibyl.services.work_item_workflow.transition_work_item", transition),
     ):

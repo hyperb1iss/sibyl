@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from sibyl.persistence.surreal.content import (
     check_relational_backend_health,
+    complete_api_idempotency_record,
     count_remaining_unlinked_chunks,
     create_crawl_source_record,
     delete_crawl_source_record,
@@ -37,6 +38,7 @@ from sibyl.persistence.surreal.content import (
     list_unlinked_source_chunks,
     mark_raw_capture_projected,
     purge_due_deleted_raw_captures,
+    reserve_api_idempotency_record,
     resolve_document_entity,
     save_api_idempotency_record,
     save_crawl_source_record,
@@ -54,6 +56,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "check_relational_backend_health",
+    "complete_api_idempotency_record",
     "count_remaining_unlinked_chunks",
     "create_crawl_source_record",
     "delete_crawl_source_record",
@@ -86,6 +89,7 @@ __all__ = [
     "list_sources_for_graph_linking",
     "list_unlinked_source_chunks",
     "purge_due_deleted_raw_captures",
+    "reserve_api_idempotency_record",
     "resolve_document_entity",
     "save_api_idempotency_record",
     "save_crawl_source_record",

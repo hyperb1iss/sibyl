@@ -273,8 +273,8 @@ async def test_create_task_replays_saved_idempotent_response() -> None:
     with (
         patch("sibyl.api.routes.tasks.verify_entity_project_access", AsyncMock()),
         patch(
-            "sibyl.api.idempotency.content_runtime.get_api_idempotency_record",
-            AsyncMock(return_value=record),
+            "sibyl.api.idempotency.content_runtime.reserve_api_idempotency_record",
+            AsyncMock(return_value=(record, False)),
         ),
         patch("sibyl.api.routes.tasks.get_task_graph_runtime", AsyncMock()) as runtime,
     ):
@@ -314,8 +314,8 @@ async def test_create_task_rejects_idempotency_key_payload_mismatch() -> None:
     with (
         patch("sibyl.api.routes.tasks.verify_entity_project_access", AsyncMock()),
         patch(
-            "sibyl.api.idempotency.content_runtime.get_api_idempotency_record",
-            AsyncMock(return_value=record),
+            "sibyl.api.idempotency.content_runtime.reserve_api_idempotency_record",
+            AsyncMock(return_value=(record, False)),
         ),
         pytest.raises(HTTPException) as exc,
     ):
@@ -360,8 +360,8 @@ async def test_idempotency_replay_marks_mutation_receipt() -> None:
     )
 
     with patch(
-        "sibyl.api.idempotency.content_runtime.get_api_idempotency_record",
-        AsyncMock(return_value=record),
+        "sibyl.api.idempotency.content_runtime.reserve_api_idempotency_record",
+        AsyncMock(return_value=(record, False)),
     ):
         response = await replay_idempotent_response(
             _request(idempotency_key="idem-replay"),
@@ -459,11 +459,11 @@ async def test_create_task_saves_idempotent_response_after_success() -> None:
     with (
         patch("sibyl.api.routes.tasks.verify_entity_project_access", AsyncMock()),
         patch(
-            "sibyl.api.idempotency.content_runtime.get_api_idempotency_record",
-            AsyncMock(return_value=None),
+            "sibyl.api.idempotency.content_runtime.reserve_api_idempotency_record",
+            AsyncMock(side_effect=lambda _session, *, record: (record, True)),
         ),
         patch(
-            "sibyl.api.idempotency.content_runtime.save_api_idempotency_record",
+            "sibyl.api.idempotency.content_runtime.complete_api_idempotency_record",
             save_record,
         ),
         patch("sibyl.api.routes.tasks.get_task_graph_runtime", AsyncMock(return_value=runtime)),
@@ -478,7 +478,7 @@ async def test_create_task_saves_idempotent_response_after_success() -> None:
         )
 
     assert response.task_id == "task-123"
-    assert save_record.await_count == 2
+    assert save_record.await_count == 1
     saved = save_record.await_args.kwargs["record"]
     assert saved.organization_id == org.id
     assert saved.principal_id == str(user.id)
@@ -536,11 +536,11 @@ class TestCompleteTaskRoute:
             patch("sibyl.jobs.queue.enqueue_create_learning_episode", episode_enqueue),
             patch("sibyl.jobs.queue.enqueue_create_learning_procedure", procedure_enqueue),
             patch(
-                "sibyl.api.idempotency.content_runtime.get_api_idempotency_record",
-                AsyncMock(return_value=None),
+                "sibyl.api.idempotency.content_runtime.reserve_api_idempotency_record",
+                AsyncMock(side_effect=lambda _session, *, record: (record, True)),
             ),
             patch(
-                "sibyl.api.idempotency.content_runtime.save_api_idempotency_record",
+                "sibyl.api.idempotency.content_runtime.complete_api_idempotency_record",
                 save_record,
             ),
         ):
@@ -607,7 +607,7 @@ class TestCompleteTaskRoute:
         assert response.mutation_receipt.revision == 2
         assert response.mutation_receipt.idempotency_key == "idem-complete"
         assert response.mutation_receipt.affected_records == ["entity:task-123"]
-        assert save_record.await_count == 2
+        assert save_record.await_count == 1
         saved = save_record.await_args.kwargs["record"]
         assert saved.path == "/tasks/task-123/complete"
         assert saved.response_body["mutation_receipt"]["revision"] == 2
@@ -657,11 +657,11 @@ class TestCompleteTaskRoute:
             ),
             patch("sibyl.api.routes.tasks.transition_work_item", transition),
             patch(
-                "sibyl.api.idempotency.content_runtime.get_api_idempotency_record",
-                AsyncMock(return_value=None),
+                "sibyl.api.idempotency.content_runtime.reserve_api_idempotency_record",
+                AsyncMock(side_effect=lambda _session, *, record: (record, True)),
             ),
             patch(
-                "sibyl.api.idempotency.content_runtime.save_api_idempotency_record",
+                "sibyl.api.idempotency.content_runtime.complete_api_idempotency_record",
                 AsyncMock(),
             ),
             patch(
@@ -720,8 +720,8 @@ class TestCompleteTaskRoute:
                 AsyncMock(return_value=SimpleNamespace(metadata={}, project_id="proj-1")),
             ),
             patch(
-                "sibyl.api.idempotency.content_runtime.get_api_idempotency_record",
-                AsyncMock(return_value=record),
+                "sibyl.api.idempotency.content_runtime.reserve_api_idempotency_record",
+                AsyncMock(return_value=(record, False)),
             ),
             patch("sibyl.api.routes.tasks.get_task_graph_runtime", AsyncMock()) as runtime,
         ):
@@ -771,8 +771,8 @@ class TestNotesRoute:
                 AsyncMock(return_value=SimpleNamespace(metadata={}, project_id="proj-1")),
             ),
             patch(
-                "sibyl.api.idempotency.content_runtime.get_api_idempotency_record",
-                AsyncMock(return_value=record),
+                "sibyl.api.idempotency.content_runtime.reserve_api_idempotency_record",
+                AsyncMock(return_value=(record, False)),
             ),
             patch("sibyl.api.routes.tasks.get_task_graph_runtime", AsyncMock()) as runtime,
         ):
@@ -812,11 +812,11 @@ class TestNotesRoute:
             patch("sibyl.jobs.pending.is_pending", AsyncMock(return_value=False)),
             patch("sibyl.api.routes.tasks.get_task_graph_runtime", AsyncMock(return_value=runtime)),
             patch(
-                "sibyl.api.idempotency.content_runtime.get_api_idempotency_record",
-                AsyncMock(return_value=None),
+                "sibyl.api.idempotency.content_runtime.reserve_api_idempotency_record",
+                AsyncMock(side_effect=lambda _session, *, record: (record, True)),
             ),
             patch(
-                "sibyl.api.idempotency.content_runtime.save_api_idempotency_record",
+                "sibyl.api.idempotency.content_runtime.complete_api_idempotency_record",
                 save_record,
             ),
             patch("sibyl.api.routes.tasks.broadcast_event", AsyncMock()),
@@ -834,7 +834,7 @@ class TestNotesRoute:
         assert response.content == "Save me"
         manager.create_direct.assert_awaited_once()
         runtime.relationship_manager.create.assert_awaited_once()
-        assert save_record.await_count == 2
+        assert save_record.await_count == 1
         saved = save_record.await_args.kwargs["record"]
         assert saved.organization_id == org.id
         assert saved.principal_id == str(user.id)

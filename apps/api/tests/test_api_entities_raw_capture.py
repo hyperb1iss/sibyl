@@ -166,8 +166,8 @@ async def test_create_entity_replays_saved_idempotent_response() -> None:
     with (
         patch("sibyl_core.tools.core.add", add),
         patch(
-            "sibyl.api.idempotency.content_runtime.get_api_idempotency_record",
-            AsyncMock(return_value=record),
+            "sibyl.api.idempotency.content_runtime.reserve_api_idempotency_record",
+            AsyncMock(return_value=(record, False)),
         ),
     ):
         replayed = await create_entity(
