@@ -609,28 +609,65 @@ class _EntityWorkItemManager(_EntitySearchManager):
         return entities[: max(int(limit), 1)]
 
     async def count_by_type(self, *, include_archived: bool = False) -> dict[str, int]:
-        where_clauses = ["group_id = $group_id"]
+        # Every row of an organization namespace shares group_id, so that
+        # predicate only disabled the count optimisation: with it, or with a
+        # GROUP BY, the 3.x planner scans and decodes the whole table. One
+        # single-column equality per type plans as an IndexCountScan, and the
+        # archived rows come from one scan of the status index.
+        types = list(EntityType)
+        statements = [
+            f"SELECT count() AS entity_count FROM entity WHERE entity_type = $type_{index} GROUP ALL;"
+            for index in range(len(types))
+        ]
         if not include_archived:
-            where_clauses.append("(status IS NONE OR status = '' OR status != 'archived')")
-        rows = normalize_records(
-            await self._client.execute_query(
-                """
-                SELECT entity_type, count() AS entity_count
-                FROM entity
-                WHERE """
-                + " AND ".join(where_clauses)
-                + """
-                GROUP BY entity_type;
-                """,
-                group_id=self._group_id,
+            statements.append(
+                "SELECT entity_type, count() AS entity_count FROM entity "
+                "WHERE status = 'archived' GROUP BY entity_type;"
             )
+        results = await self._client.execute_query_batch(
+            "\n".join(statements),
+            **{f"type_{index}": entity_type.value for index, entity_type in enumerate(types)},
         )
-        counts = {entity_type.value: 0 for entity_type in EntityType}
-        for row in rows:
-            entity_type = row.get("entity_type")
-            if isinstance(entity_type, str) and entity_type:
-                counts[entity_type] = _int_value(row.get("entity_count"))
+        if not isinstance(results, list) or len(results) != len(statements):
+            raise RuntimeError("entity type counts returned an unexpected statement set")
+        counts: dict[str, int] = {}
+        for entity_type, result in zip(types, results[: len(types)], strict=True):
+            rows = normalize_records(result)
+            counts[entity_type.value] = _int_value(rows[0].get("entity_count")) if rows else 0
+        if not include_archived:
+            for row in normalize_records(results[-1]):
+                entity_type_value = row.get("entity_type")
+                if isinstance(entity_type_value, str) and entity_type_value in counts:
+                    counts[entity_type_value] = max(
+                        counts[entity_type_value] - _int_value(row.get("entity_count")), 0
+                    )
         return counts
+
+    async def has_entities_of_types(
+        self, entity_types: Sequence[EntityType], *, include_archived: bool = False
+    ) -> bool:
+        """Whether any row of the given types exists, without counting anything.
+
+        One type per statement: a multi-type `IN` list makes the planner
+        materialise every branch before the limit applies, while a single
+        equality stops at the first row.
+        """
+        archived_clause = (
+            ""
+            if include_archived
+            else " AND (status IS NONE OR status = '' OR status != 'archived')"
+        )
+        for entity_type in entity_types:
+            rows = normalize_records(
+                await self._client.execute_query(
+                    f"SELECT uuid FROM entity WHERE entity_type = $entity_type{archived_clause} "
+                    "LIMIT 1;",
+                    entity_type=entity_type.value,
+                )
+            )
+            if rows:
+                return True
+        return False
 
     async def _with_epic_progress(
         self, epics: list[Entity], *, project_id: str | None = None
