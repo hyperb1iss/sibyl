@@ -26,10 +26,10 @@ RUN installer="$(mktemp)" \
         | sha256sum -c - \
     && bash "$installer" \
     && rm -f "$installer" \
-    && proto install moon 2.5.3 --pin global \
+    && proto install moon 2.6.0 --pin global \
     && proto install python 3.13.15 --pin global \
     && proto install node 24.19.0 --pin global \
-    && proto install pnpm 11.23.0 --pin global \
+    && proto install pnpm 12.10.0 --pin global \
     && printf '%s\n' \
         'export PROTO_HOME=/opt/proto' \
         'export PATH="/opt/proto/shims:/opt/proto/bin:$PATH"' \
