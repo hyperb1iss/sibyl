@@ -17,9 +17,9 @@ from tools.tests.conftest import REPO_ROOT
 EXPECTED_NATIVE_SAMPLE_LINES = 3
 EXPECTED_TOOLCHAIN_VERSIONS = {
     "proto": "0.61.1",
-    "moon": "2.5.3",
+    "moon": "2.6.0",
     "node": "24.19.0",
-    "pnpm": "11.23.0",
+    "pnpm": "12.10.0",
     "python": "3.13.15",
     "uv": "0.12.5",
 }
@@ -107,9 +107,9 @@ install_toolchain
     } == EXPECTED_TOOLCHAIN_VERSIONS
     assert install_log.read_text(encoding="utf-8").splitlines() == [
         "upgrade 0.61.1",
-        "install moon 2.5.3 --pin global",
+        "install moon 2.6.0 --pin global",
         "install node 24.19.0 --pin global",
-        "install pnpm 11.23.0 --pin global",
+        "install pnpm 12.10.0 --pin global",
         "install python 3.13.15 --pin global",
         "install uv 0.12.5 --pin global",
     ]
@@ -477,9 +477,9 @@ Write-Output "FINAL_PATH=$env:Path"
     } == EXPECTED_TOOLCHAIN_VERSIONS
     assert install_log.read_text(encoding="utf-8").splitlines() == [
         "upgrade 0.61.1",
-        "install moon 2.5.3 --pin global",
+        "install moon 2.6.0 --pin global",
         "install node 24.19.0 --pin global",
-        "install pnpm 11.23.0 --pin global",
+        "install pnpm 12.10.0 --pin global",
         "install python 3.13.15 --pin global",
         "install uv 0.12.5 --pin global",
     ]
@@ -538,7 +538,7 @@ def test_devcontainer_has_one_exact_node_and_pnpm_owner() -> None:
     assert "moonrepo.dev/install" not in dockerfile
     assert "> /etc/profile.d/proto.sh" in dockerfile
     assert "proto install node 24.19.0 --pin global" in dockerfile
-    assert "proto install pnpm 11.23.0 --pin global" in dockerfile
+    assert "proto install pnpm 12.10.0 --pin global" in dockerfile
 
 
 def _write_podman_docker_stub(bin_dir: Path) -> None:
