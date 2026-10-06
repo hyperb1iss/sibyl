@@ -52,6 +52,20 @@ describe('fetchAllTasks', () => {
     );
   });
 
+  it('starts the next page where the server says its window ends', async () => {
+    api.list
+      .mockResolvedValueOnce({ ...page(['a', 'b'], true, 3), next_offset: TASK_PAGE_SIZE })
+      .mockResolvedValueOnce(page(['c'], false, 3));
+
+    const result = await fetchAllTasks(undefined);
+
+    expect(result.entities.map(task => task.id)).toEqual(['a', 'b', 'c']);
+    expect(api.list).toHaveBeenNthCalledWith(2, undefined, {
+      limit: TASK_PAGE_SIZE,
+      offset: TASK_PAGE_SIZE,
+    });
+  });
+
   it('stops after a single page when the server has nothing more', async () => {
     api.list.mockResolvedValueOnce(page(['a'], false, 1));
 

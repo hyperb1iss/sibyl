@@ -281,7 +281,18 @@ class _EntityWorkItemManager(_EntitySearchManager):
         include_archived: bool = False,
         enrich_epic_progress: bool = False,
         include_content: bool = True,
+        exact_window: bool = False,
     ) -> list[Entity]:
+        """List one type newest-first, with ``offset`` counting visible rows.
+
+        A filter whose SurrealQL predicate admits a superset of the Python
+        recheck (legacy rows keep the value under ``attributes``) restarts the
+        walk at ``START 0`` so the visible offset stays exact. ``exact_window``
+        instead addresses the ordered index directly: one statement of
+        ``limit`` rows from ``START offset``, no recheck, no fill. A caller
+        paging a large type reads O(limit) per page that way and runs the
+        recheck on the rows it gets back.
+        """
         if limit <= 0:
             return []
 
@@ -361,17 +372,32 @@ class _EntityWorkItemManager(_EntitySearchManager):
         if not include_archived:
             where_clauses.append("(status IS NONE OR status = '' OR status != 'archived')")
         select_fields = _entity_select_fields(include_content)
+        statement = f"""
+            SELECT {select_fields}
+            FROM entity
+            WHERE {" AND ".join(where_clauses)}
+            ORDER BY updated_at DESC, created_at DESC, uuid DESC
+            LIMIT $limit START $offset;
+            """
+
+        if exact_window:
+            rows = normalize_records(
+                await self._client.execute_query(
+                    statement,
+                    **query_params,
+                    limit=max(int(limit), 1),
+                    offset=max(int(offset), 0),
+                )
+            )
+            entities = [_entity_from_row(row) for row in rows]
+            if entity_type == EntityType.EPIC and enrich_epic_progress:
+                return await self._with_epic_progress(entities, project_id=project_id)
+            return entities
 
         while len(entities) < target_count:
             rows = normalize_records(
                 await self._client.execute_query(
-                    f"""
-                    SELECT {select_fields}
-                    FROM entity
-                    WHERE {" AND ".join(where_clauses)}
-                    ORDER BY updated_at DESC, created_at DESC, uuid DESC
-                    LIMIT $limit START $offset;
-                    """,
+                    statement,
                     **query_params,
                     limit=page_size,
                     offset=query_offset,

@@ -179,6 +179,8 @@ export interface TaskListResponse {
   filters: Record<string, unknown>;
   has_more?: boolean;
   actual_total?: number | null;
+  /** Where the next page starts when the server pages by database window. */
+  next_offset?: number | null;
 }
 
 export interface TaskSummary {

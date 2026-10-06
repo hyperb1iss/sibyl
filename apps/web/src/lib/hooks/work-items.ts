@@ -66,10 +66,12 @@ function pageSizeRejected(error: unknown): boolean {
  * size instead of leaving the board empty during a rolling upgrade.
  *
  * The explore list filters some rows after its database window, so a page
- * can come back empty while the server still reports more. Offset widens
- * that window, so an empty page advances by the page size rather than
- * stopping; the page cap is what terminates the loop. When the cap is what
- * ends it, the response says so instead of claiming the set is complete.
+ * can come back short or empty while the server still reports more. A
+ * server that pages by database window says where the next window starts
+ * (`next_offset`); an older one counts visible rows, so an empty page
+ * advances by the page size rather than stopping. The page cap is what
+ * terminates the loop. When the cap is what ends it, the response says so
+ * instead of claiming the set is complete.
  */
 export async function fetchAllTasks(
   params?: Parameters<typeof tasksApi.list>[0]
@@ -91,7 +93,7 @@ export async function fetchAllTasks(
       throw error;
     }
     entities.push(...response.entities);
-    offset += response.entities.length || pageSize;
+    offset = response.next_offset ?? offset + (response.entities.length || pageSize);
     if (!response.has_more) break;
     truncated = page === MAX_TASK_PAGES - 1;
   }

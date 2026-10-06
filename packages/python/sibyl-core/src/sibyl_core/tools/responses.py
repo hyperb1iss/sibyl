@@ -74,6 +74,9 @@ class ExploreResponse:
     offset: int = 0  # Current offset
     has_more: bool = False  # True if more results exist beyond the limit
     actual_total: int | None = None  # Actual total count in DB (if available)
+    # Where the next page starts when the server pages by database window.
+    # Absent (None) on the last page and on legacy visible-row pagination.
+    next_offset: int | None = None
 
 
 @dataclass
