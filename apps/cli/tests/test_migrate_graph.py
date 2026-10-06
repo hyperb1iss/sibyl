@@ -2276,3 +2276,44 @@ async def test_unconfirmed_creates_without_a_key_are_counted() -> None:
     outcome = await _undo(target, ledger, revisions, _one_decision(), dry_run=True)
 
     assert outcome.unresolved_unkeyed == 1 and outcome.unresolved == 0
+
+
+@pytest.mark.asyncio
+async def test_migrated_rows_name_their_source_project() -> None:
+    target, ledger, revisions = _Target(), _Ledger(), {}
+
+    await execute_plan(
+        target,
+        _one_decision(),
+        ids=ledger.ids,
+        statuses=ledger.statuses,
+        partial=ledger.partial,
+        target_project_id="project_target",
+        origin_org="org-src",
+        save=lambda: None,
+        revisions=revisions,
+        origin_project="project_source",
+    )
+
+    migration = target.posts()["decision_1"]["metadata"]["migration"]
+    assert migration["origin_project"] == "project_source"
+
+
+@pytest.mark.parametrize(("status", "refused"), [(403, True), (409, False), (None, False)])
+@pytest.mark.asyncio
+async def test_the_access_check_cannot_trigger_a_sharing_scan(
+    status: int | None, refused: bool
+) -> None:
+    from sibyl_cli.migrate_graph import access_refused
+
+    sent: list[dict[str, Any]] = []
+
+    class Client:
+        async def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+            sent.append(kwargs["params"])
+            if status is not None:
+                raise _ApiError(status)
+            return {"deletable": False, "error": "revision_conflict"}
+
+    assert await access_refused(Client(), "project_target") is refused
+    assert int(sent[0]["expected_revision"]) >= 2**31 - 1

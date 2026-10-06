@@ -156,9 +156,10 @@ automatically needs the local database. Rows that are already gone from the team
 reported and dropped from the ledger. Undoing needs a team server that advertises guarded deletes;
 the command checks before it deletes anything.
 
-Run the undo while nobody is working in the migrated rows. The checks above see everything written
-before the undo reaches a row, but a teammate linking to a row in the same moment the undo removes it
-can leave that link pointing at nothing, as with any delete.
+Run the undo while nobody is working in the migrated rows. The checks above see what the team server
+has written by the time the undo reaches a row; a write still queued in the background, or a teammate
+linking to a row in the same moment the undo removes it, can leave that link pointing at nothing, as
+with any delete.
 
 Migrating again after an undo writes fresh rows for everything the undo removed. Rows the undo kept
 stay in the ledger and are not written twice. An undo that stops part way can be run again; it first

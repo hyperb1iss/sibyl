@@ -843,7 +843,9 @@ def test_a_refused_undo_leaves_the_raw_memories_too(
     raw_undo.assert_not_awaited()
 
 
-@pytest.mark.parametrize(("status", "dropped"), [(422, True), (503, False)])
+@pytest.mark.parametrize(
+    ("status", "dropped"), [(422, True), (404, True), (503, False), (408, False), (429, False)]
+)
 async def test_a_raw_write_the_server_refused_is_not_retried_forever(
     tmp_path: Path, status: int, dropped: bool
 ) -> None:
@@ -867,3 +869,28 @@ async def test_a_raw_write_the_server_refused_is_not_retried_forever(
 
     assert (intents == {}) is dropped
     assert (failures == []) is dropped
+
+
+def test_a_refused_undo_stops_before_moving_the_routes_keys(
+    ledger_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = _target(monkeypatch, TEAM)
+    identity_get = client.get.side_effect
+
+    async def get(path: str) -> dict[str, Any]:
+        answer = await identity_get(path)
+        if path == "/auth/replay-identity":
+            answer["capabilities"] = [*answer["capabilities"], "migration_guarded_delete_v1"]
+        return answer
+
+    client.get = AsyncMock(side_effect=get)
+    client._request = AsyncMock(side_effect=SibylClientError("forbidden", status_code=403))
+    graph_undo = AsyncMock(return_value=[])
+    monkeypatch.setattr(migrate, "_undo_graph", graph_undo)
+
+    result = _run("--undo")
+
+    assert result.exit_code == 1
+    assert "maintainer" in result.stdout
+    graph_undo.assert_not_awaited()
+    assert not list(ledger_dir.glob("*.epoch.json"))

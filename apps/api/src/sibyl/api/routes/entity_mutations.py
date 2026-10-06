@@ -293,6 +293,10 @@ async def create_entity(
     # which response shape it returns, so both have to agree: a pending response
     # would drop the rehearsal receipt the caller asked for.
     is_sync = entity.entity_type.value == "project" or sync or bool(entity.probes)
+    if epic and is_sync:
+        # Refuse to file a row under an epic that is not there.
+        runtime = await policy.get_entity_graph_runtime(group_id)
+        await _existing_entity_or_404(runtime.entity_manager, epic)
 
     result = await _add_with_structure(
         title=entity.name,
@@ -739,10 +743,21 @@ def _entity_author(entity: Any) -> str | None:
 
 
 def _migration_origin(entity: Any) -> object:
-    migration = (getattr(entity, "metadata", None) or {}).get("migration")
-    if not isinstance(migration, dict):
+    """Which migration wrote the row: tool, source org and project, and target project.
+
+    A row without a recorded source project (written before it was recorded)
+    belongs to no migration here, so it always counts as someone's work.
+    """
+    metadata = getattr(entity, "metadata", None) or {}
+    migration = metadata.get("migration")
+    if not isinstance(migration, dict) or not migration.get("origin_project"):
         return None
-    return migration.get("tool"), migration.get("origin_org")
+    return (
+        migration.get("tool"),
+        migration.get("origin_org"),
+        migration.get("origin_project"),
+        metadata.get("project_id"),
+    )
 
 
 def _entity_category(entity: Any) -> object:
@@ -771,7 +786,11 @@ async def _shared_reason(runtime: Any, existing: Any) -> str | None:
     for row in await runtime.entity_manager.get_many(sorted(linking_ids)):
         if row.entity_type in _UNSHARING_TYPES or _entity_category(row) in _DERIVED_CATEGORIES:
             continue
-        if origin is not None and _entity_author(row) == author and _migration_origin(row) == origin:
+        if (
+            origin is not None
+            and _entity_author(row) == author
+            and _migration_origin(row) == origin
+        ):
             continue
         return "a row outside its migration links to it"
     return None

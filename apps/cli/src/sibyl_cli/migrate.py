@@ -299,6 +299,8 @@ async def _resolve_target_org(client: Any) -> dict[str, Any]:
 
 _DEFAULT_SOURCE_CREDENTIAL = "root"
 _UNDO_REFUSED = "undo refused: project maintainer access required"
+# Answers that say nothing about whether the original write landed.
+_UNSETTLED = {401, 403, 408, 409, 429}
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 # Where `sibyl local` publishes its SurrealDB (127.0.0.1:8000 in its compose file).
 _LOCAL_INSTALL_PORT = 8000
@@ -839,6 +841,7 @@ async def _migrate_graph(
         structure=structure,
         preexisting=preexisting,
         undoing=undoing,
+        origin_project=project,
         save=lambda: _save_graph_ledger(
             ledger_file, route, ids, statuses, partial, revisions, structure, preexisting, undoing
         ),
@@ -959,10 +962,11 @@ async def _undo_raw(
             )
         except Exception as exc:
             status = getattr(exc, "status_code", None)
-            if isinstance(status, int) and 400 <= status < 500 and status not in {401, 403, 409}:
+            if isinstance(status, int) and 400 <= status < 500 and status not in _UNSETTLED:
                 # The server refused the write outright, so it never landed.
                 intents.pop(origin, None)
                 _save_raw_intents(ledger_file, route, intents)
+                info(f"raw {origin}: the team server refused the unfinished write; nothing landed")
                 continue
             failures.append(f"raw {origin}: could not confirm an unfinished write ({exc})")
             continue
@@ -1288,6 +1292,12 @@ def to_team(
 
         if undo:
             failed_undo: list[str] = []
+            if graph and await migrate_graph.access_refused(target, route["target_project_id"]):
+                error(
+                    "The team server refused the deletes: undoing needs project maintainer "
+                    "access. Ask a maintainer of the project to grant it, then run the undo again."
+                )
+                raise typer.Exit(1)
             if not dry_run:
                 # Before the first delete, so even an interrupted undo leaves a
                 # later migration writing fresh rows.

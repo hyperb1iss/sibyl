@@ -2951,7 +2951,11 @@ async def test_create_entities_bulk_never_replaces_another_members_row() -> None
     assert written.created_by == str(ctx.user.id)
 
 
-_MIGRATION = {"tool": "sibyl migrate to-team", "origin_org": "org-source"}
+_MIGRATION = {
+    "tool": "sibyl migrate to-team",
+    "origin_org": "org-source",
+    "origin_project": "project_source",
+}
 
 
 def _revisioned_decision(
@@ -3124,6 +3128,8 @@ def _own_native_task(author: str) -> Any:
         ("teammate_link", "links to it"),
         ("own_native_link", "links to it"),
         ("other_migration_link", "links to it"),
+        ("other_project_link", "links to it"),
+        ("unrecorded_project_link", "links to it"),
     ],
 )
 @pytest.mark.asyncio
@@ -3141,7 +3147,25 @@ async def test_an_unshared_delete_refuses_a_row_someone_else_depends_on(
                 author=me,
                 revision=1,
                 uuid="task_other_source",
-                migration={"tool": "sibyl migrate to-team", "origin_org": "org-elsewhere"},
+                migration={**_MIGRATION, "origin_org": "org-elsewhere"},
+            )
+        ],
+        # The same personal org, another of its projects: another migration.
+        "other_project_link": [
+            _revisioned_decision(
+                author=me,
+                revision=1,
+                uuid="task_other_project",
+                migration={**_MIGRATION, "origin_project": "project_elsewhere"},
+            )
+        ],
+        # Migrated before the source project was recorded: no migration claims it.
+        "unrecorded_project_link": [
+            _revisioned_decision(
+                author=me,
+                revision=1,
+                uuid="task_unrecorded",
+                migration={"tool": "sibyl migrate to-team", "origin_org": "org-source"},
             )
         ],
     }[case]
@@ -3247,3 +3271,42 @@ async def test_rows_this_one_links_to_do_not_make_it_shared() -> None:
     )
 
     delete_mock.assert_awaited_once()
+
+
+@pytest.mark.parametrize("sync", [True, False])
+@pytest.mark.asyncio
+async def test_a_synchronous_create_refuses_a_missing_epic(sync: bool) -> None:
+    entity = EntityCreate(
+        name="Filed under nothing",
+        content="c",
+        entity_type=EntityType.TASK,
+        metadata={"project_id": "project-1", "epic_id": "epic-gone"},
+    )
+    add_result = SimpleNamespace(success=True, id="task_new", message="queued")
+    runtime = SimpleNamespace(entity_manager=SimpleNamespace(get=AsyncMock(return_value=None)))
+
+    with (
+        patch("sibyl_core.tools.core.add", AsyncMock(return_value=add_result)) as add,
+        patch(
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        patch("sibyl.api.routes.entity_mutations.verify_entity_project_access", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
+    ):
+        call = create_entity(
+            request=_request(),
+            entity=entity,
+            org=_org(),
+            ctx=_ctx(),
+            content_session=None,
+            sync=sync,
+        )
+        if sync:
+            with pytest.raises(HTTPException) as excinfo:
+                await call
+            assert excinfo.value.status_code == 404
+        else:
+            await call
+
+    assert add.await_count == (0 if sync else 1)

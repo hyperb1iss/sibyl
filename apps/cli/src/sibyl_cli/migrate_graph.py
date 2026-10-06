@@ -409,6 +409,7 @@ def _payload(
     ids: Mapping[str, str],
     target_project_id: str,
     origin_org: str,
+    origin_project: str = "",
 ) -> tuple[dict[str, Any], list[str]]:
     """The create body for one entity, plus link targets that are not on the target yet."""
     source = node.source
@@ -430,6 +431,9 @@ def _payload(
     migration: dict[str, Any] = {
         "tool": "sibyl migrate to-team",
         "origin_org": origin_org,
+        # With the org, names the migration: the server counts rows of the same
+        # source project as one migration, and no others.
+        **({"origin_project": origin_project} if origin_project else {}),
         "origin_entity_id": source.uuid,
         "origin_created_at": source.created_at,
         "origin_updated_at": source.updated_at,
@@ -596,6 +600,7 @@ async def execute_plan(
     structure: dict[str, dict[str, Any]] | None = None,
     preexisting: set[str] | None = None,
     undoing: set[str] | None = None,
+    origin_project: str = "",
 ) -> GraphOutcome:
     """Create the plan layer by layer.
 
@@ -876,7 +881,11 @@ async def execute_plan(
                 key = pending.get("create_key") or operation_key(node, "create")
             else:
                 body, missing = _payload(
-                    node, ids=ids, target_project_id=target_project_id, origin_org=origin_org
+                    node,
+                    ids=ids,
+                    target_project_id=target_project_id,
+                    origin_org=origin_org,
+                    origin_project=origin_project,
                 )
                 # Retry the same body under the same key even when a dependency
                 # lands, or an undo moves the route's keys, after a lost
@@ -938,7 +947,11 @@ async def execute_plan(
         target_id = ids[origin]
         if "link_body" not in pending:
             body, missing = _payload(
-                node, ids=ids, target_project_id=target_project_id, origin_org=origin_org
+                node,
+                ids=ids,
+                target_project_id=target_project_id,
+                origin_org=origin_org,
+                origin_project=origin_project,
             )
             if set(missing) >= set(pending.get("missing") or []):
                 outcome.resumed += 1
@@ -1055,6 +1068,26 @@ class UndoOutcome:
     unresolved_unkeyed: int = 0
     # The server refused the caller's deletes outright (project maintainer access).
     refused: bool = False
+
+
+# A revision no row reaches. The access check runs before the revision check,
+# so a caller without maintainer access still gets its 403, and anyone else is
+# turned away at the revision instead of running the full sharing scan.
+_UNREACHABLE_REVISION = "2147483647"
+
+
+async def access_refused(client: Any, project_id: str) -> bool:
+    """Whether the team server refuses this caller the deletes an undo needs."""
+    try:
+        await client._request(
+            "GET",
+            f"/entities/{project_id}/deletable",
+            params={"expected_revision": _UNREACHABLE_REVISION},
+            _buffer_pending=False,
+        )
+    except Exception as exc:
+        return getattr(exc, "status_code", None) == 403
+    return False
 
 
 async def undo_plan(
@@ -1229,18 +1262,9 @@ async def undo_plan(
 
     # Undoing deletes, which takes a project maintainer. Ask before anything
     # else, so a refused undo writes nothing (not even a replayed create).
-    if project_id:
-        try:
-            await client._request(
-                "GET",
-                f"/entities/{project_id}/deletable",
-                params={"expected_revision": "1"},
-                _buffer_pending=False,
-            )
-        except Exception as exc:
-            if getattr(exc, "status_code", None) == 403:
-                outcome.refused = True
-                return outcome
+    if project_id and await access_refused(client, project_id):
+        outcome.refused = True
+        return outcome
 
     # A create whose answer was lost may have landed. Replay each under its
     # own key (the server answers with the original receipt, or creates the
