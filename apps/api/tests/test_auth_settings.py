@@ -63,11 +63,25 @@ def test_settings_store_defaults_to_surreal() -> None:
 
 
 def test_settings_surreal_client_pool_size_uses_default_for_each_client_kind() -> None:
+    # Graph pools are per org and follow the base size; the auth and content
+    # pools are shared by every org in the process and start larger.
     s = Settings(_env_file=None, surreal_pool_size=12)
+
+    assert s.surreal_client_pool_size("auth") == 16
+    assert s.surreal_client_pool_size("content") == 32
+    assert s.surreal_client_pool_size("graph") == 12
+
+
+def test_settings_shared_pool_sizes_follow_base_size_when_unset() -> None:
+    s = Settings(
+        _env_file=None,
+        surreal_pool_size=12,
+        surreal_auth_pool_size=None,
+        surreal_content_pool_size=None,
+    )
 
     assert s.surreal_client_pool_size("auth") == 12
     assert s.surreal_client_pool_size("content") == 12
-    assert s.surreal_client_pool_size("graph") == 12
 
 
 def test_settings_surreal_client_pool_size_prefers_client_kind_override() -> None:
@@ -103,9 +117,11 @@ def test_settings_worker_max_jobs_defaults_to_cpu_and_content_pool_scale(
 ) -> None:
     monkeypatch.setattr(config_module.os, "cpu_count", lambda: 16)
 
+    # Twice the CPUs is 32, and the shared content pool (32 by default) is the
+    # ceiling; the per-org graph pool size no longer caps background jobs.
     s = Settings(_env_file=None, surreal_url="ws://surrealdb:8000/rpc", surreal_pool_size=8)
 
-    assert s.resolved_worker_max_jobs == 8
+    assert s.resolved_worker_max_jobs == 32
 
 
 def test_settings_worker_max_jobs_uses_content_pool_override(
@@ -141,6 +157,7 @@ def test_settings_worker_max_jobs_preserves_floor_without_exceeding_pool(
             _env_file=None,
             surreal_url="ws://surrealdb:8000/rpc",
             surreal_pool_size=1,
+            surreal_content_pool_size=1,
         ).resolved_worker_max_jobs
         == 1
     )
