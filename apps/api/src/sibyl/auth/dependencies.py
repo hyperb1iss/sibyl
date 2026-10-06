@@ -12,6 +12,7 @@ from sibyl.auth.api_key_common import ApiKeyAuth
 from sibyl.auth.context import AuthContext
 from sibyl.auth.http import select_access_token
 from sibyl.auth.jwt import JwtError, verify_access_token
+from sibyl.auth.middleware import JWT_CHECKED_STATE_ATTR
 from sibyl.config import settings
 from sibyl.persistence.auth_runtime import (
     InvalidAuthClaimsError,
@@ -123,8 +124,12 @@ async def resolve_claims(
         cookie_token=request.cookies.get("sibyl_access_token"),
     )
     if token:
-        verified_claims = claims
-        if verified_claims is None:
+        verified_claims = None if token.startswith("sk_") else claims
+        if (
+            verified_claims is None
+            and not token.startswith("sk_")
+            and not getattr(request.state, JWT_CHECKED_STATE_ATTR, False)
+        ):
             try:
                 verified_claims = verify_access_token(token)
             except JwtError:
