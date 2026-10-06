@@ -10,18 +10,26 @@ from sibyl.api.event_types import WSEvent
 from sibyl.jobs import raw_changefeed
 
 
+def rpc_envelope(rows: list[dict[str, object]]) -> dict[str, object]:
+    """The reply ``execute_query_raw`` hands back from a live server, verbatim in shape."""
+    return {
+        "id": "ce271507-9e08-4870-857c-0cc8310a98b4",
+        "result": [{"result": list(rows), "status": "OK", "time": "432.1µs", "type": "other"}],
+    }
+
+
 class FakeChangefeedClient:
     def __init__(
         self,
         *,
         cursor_rows: list[dict[str, object]] | None = None,
         change_rows: list[dict[str, object]] | None = None,
-        organization_rows: list[dict[str, object]] | None = None,
+        cursor_table_rows: list[dict[str, object]] | None = None,
         update_returns_row: bool = False,
     ) -> None:
         self.cursor_rows = cursor_rows or []
         self.change_rows = change_rows or []
-        self.organization_rows = organization_rows or []
+        self.cursor_table_rows = cursor_table_rows or []
         self.update_returns_row = update_returns_row
         self.raw_queries: list[tuple[str, dict[str, object]]] = []
         self.queries: list[tuple[str, dict[str, object]]] = []
@@ -30,15 +38,17 @@ class FakeChangefeedClient:
 
     async def execute_query_raw(self, query: str, **params: object) -> object:
         self.raw_queries.append((query, dict(params)))
-        return list(self.change_rows)
+        return rpc_envelope(self.change_rows)
 
     async def execute_query(self, query: str, **params: object) -> object:
         self.queries.append((query, dict(params)))
         stripped = query.strip()
         if stripped.startswith("SELECT versionstamp, metadata FROM content_changefeed_cursors"):
             return list(self.cursor_rows)
-        if stripped.startswith("SELECT organization_id FROM raw_captures"):
-            return list(self.organization_rows)
+        if stripped.startswith(
+            "SELECT organization_id, versionstamp FROM content_changefeed_cursors"
+        ):
+            return list(self.cursor_table_rows)
         if stripped.startswith("UPDATE content_changefeed_cursors"):
             self.updated_records.append(dict(params))
             return [{"uuid": "cursor-existing"}] if self.update_returns_row else []
@@ -317,42 +327,122 @@ def test_strip_vector_fields_drops_vectors_and_keeps_everything_else() -> None:
 
 
 @pytest.mark.asyncio
-async def test_poll_all_raw_capture_changefeeds_polls_each_raw_capture_org(
+async def test_show_changes_reads_the_rows_inside_the_rpc_envelope() -> None:
+    """The live reply wraps the statement result; the rows and their versionstamp are inside."""
+    client = FakeChangefeedClient(
+        change_rows=[
+            {
+                "versionstamp": 117356782147600384,
+                "changes": [
+                    {
+                        "update": {
+                            "id": "raw_captures:bc2m4szsnf9onrd2fb8y",
+                            "uuid": "raw-a",
+                            "organization_id": "org-1",
+                            "embedding": [0.1, 0.2],
+                        }
+                    }
+                ],
+            }
+        ]
+    )
+
+    rows = await raw_changefeed._show_raw_capture_changes(client, since=0, limit=5)
+
+    assert len(rows) == 1
+    assert rows[0]["versionstamp"] == 117356782147600384
+    assert raw_changefeed._last_versionstamp(rows, default=0) == 117356782147600384
+    refs = raw_changefeed._raw_capture_refs_for_org(rows, organization_id="org-1")
+    assert [ref.raw_memory_id for ref in refs] == ["raw-a"]
+    assert "embedding" not in rows[0]["changes"][0]["update"]
+
+
+async def test_show_changes_raises_on_an_error_envelope() -> None:
+    class ErroringClient(FakeChangefeedClient):
+        async def execute_query_raw(self, query: str, **params: object) -> object:
+            return {"id": "x", "result": [{"result": "Changefeed is not enabled", "status": "ERR"}]}
+
+    with pytest.raises(RuntimeError, match="Changefeed is not enabled"):
+        await raw_changefeed._show_raw_capture_changes(ErroringClient(), since=0, limit=5)
+
+
+@pytest.mark.asyncio
+async def test_poll_all_polls_only_organizations_behind_the_feed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """One table-wide read from the oldest cursor decides who is polled; no capture scan runs."""
     client = FakeChangefeedClient(
-        organization_rows=[
-            {"organization_id": "org-a"},
-            {"organization_id": "org-b"},
-        ]
+        cursor_table_rows=[
+            {"organization_id": "org-a", "versionstamp": 5},
+            {"organization_id": "org-b", "versionstamp": 9},
+        ],
+        change_rows=[
+            {
+                "versionstamp": 7,
+                "changes": [{"update": {"uuid": "raw-c", "organization_id": "org-c"}}],
+            },
+            {
+                "versionstamp": 9,
+                "changes": [{"update": {"uuid": "raw-b", "organization_id": "org-b"}}],
+            },
+        ],
     )
     poll_one = AsyncMock(
         side_effect=[
-            {"organization_id": "org-a", "status": "idle"},
-            {"organization_id": "org-b", "status": "queued"},
+            {"organization_id": "org-a", "status": "advanced"},
+            {"organization_id": "org-c", "status": "queued"},
         ]
     )
     monkeypatch.setattr(raw_changefeed, "surreal_content_client", _client_context(client))
     monkeypatch.setattr(raw_changefeed, "poll_raw_capture_changefeed", poll_one)
 
-    result = await raw_changefeed.poll_all_raw_capture_changefeeds(
-        {"worker": "test"},
-        limit=10,
-        organization_limit=20,
-    )
+    result = await raw_changefeed.poll_all_raw_capture_changefeeds({"worker": "test"}, limit=10)
 
+    # org-a trails the newest change and org-c has no cursor yet; org-b is
+    # already at the newest change and costs nothing.
     assert result == {
         "status": "ok",
         "organizations": 2,
         "results": [
-            {"organization_id": "org-a", "status": "idle"},
-            {"organization_id": "org-b", "status": "queued"},
+            {"organization_id": "org-a", "status": "advanced"},
+            {"organization_id": "org-c", "status": "queued"},
         ],
     }
-    assert client.queries[0][1] == {"limit": 20}
-    assert poll_one.await_args_list[0].args == ({"worker": "test"}, "org-a")
-    assert poll_one.await_args_list[0].kwargs == {"limit": 10}
-    assert poll_one.await_args_list[1].args == ({"worker": "test"}, "org-b")
+    assert [call.args for call in poll_one.await_args_list] == [
+        ({"worker": "test"}, "org-a"),
+        ({"worker": "test"}, "org-c"),
+    ]
+    assert poll_one.await_args_list[0].kwargs == {
+        "limit": 10,
+        "consumer_name": raw_changefeed.RAW_CAPTURE_CHANGEFEED_CONSUMER,
+    }
+    assert len(client.raw_queries) == 1
+    assert "SINCE 5 " in client.raw_queries[0][0]
+    assert client.raw_queries[0][1] == {"limit": 10}
+    assert not any("FROM raw_captures" in query for query, _ in client.queries)
+
+
+@pytest.mark.asyncio
+async def test_poll_all_on_a_quiet_feed_costs_two_statements_and_polls_nobody(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = FakeChangefeedClient(
+        cursor_table_rows=[
+            {"organization_id": f"org-{index}", "versionstamp": 40} for index in range(250)
+        ],
+        change_rows=[],
+    )
+    poll_one = AsyncMock()
+    monkeypatch.setattr(raw_changefeed, "surreal_content_client", _client_context(client))
+    monkeypatch.setattr(raw_changefeed, "poll_raw_capture_changefeed", poll_one)
+
+    result = await raw_changefeed.poll_all_raw_capture_changefeeds({})
+
+    assert result == {"status": "ok", "organizations": 0, "results": []}
+    poll_one.assert_not_awaited()
+    assert len(client.queries) == 1
+    assert len(client.raw_queries) == 1
+    assert "SINCE 40 " in client.raw_queries[0][0]
 
 
 def test_changefeed_parser_dedupes_current_raw_capture_payloads() -> None:
