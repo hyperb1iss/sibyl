@@ -11,7 +11,9 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from starlette.requests import Request
 
+from sibyl.auth import dependencies
 from sibyl.persistence import auth_archive
 from sibyl.persistence.surreal.auth_runtime import _common as auth_common
 
@@ -78,3 +80,40 @@ async def test_archive_restore_replacing_the_identity_resets_the_cache(
     await auth_archive._finalize_auth_restore(store, source_instance_id=restored, api_key_ids=[])
 
     assert await auth_common.get_server_instance_id() == restored != stale
+
+
+def _replay_request(instance_id: str) -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/entities",
+            "headers": [(b"x-sibyl-server-instance", instance_id.encode())],
+            "state": {},
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_replay_mismatch_rereads_the_identity_once_before_refusing(
+    store: _IdentityStore,
+) -> None:
+    """A serving process heals its cache when a restore happened elsewhere."""
+    stale = await auth_common.get_server_instance_id()
+    restored = str(uuid4())
+    store.instance_id = restored
+    assert stale != restored
+
+    await dependencies._validate_replay_server_instance(_replay_request(restored))
+
+    assert store.reads == 2
+    assert await auth_common.get_server_instance_id() == restored
+    assert store.reads == 2, "the cache now holds the restored identity"
+
+    with pytest.raises(dependencies.HTTPException) as refused:
+        await dependencies._validate_replay_server_instance(_replay_request(str(uuid4())))
+
+    assert refused.value.status_code == 409
+    assert refused.value.detail["error"] == "replay_identity_mismatch"
+    assert store.reads == 3, "exactly one re-read before refusing"
+    assert await auth_common.get_server_instance_id() == restored

@@ -482,9 +482,11 @@ _server_identity_cache: dict[str, str] = {}
 async def get_server_instance_id() -> str:
     """Read the data-instance identity created by the auth schema migration.
 
-    The identity is immutable for a data instance, so it is read once per
-    process. The one writer after migration is an archive restore that
-    replaces the instance, and it resets this cache.
+    The identity only changes when a full archive restore replaces the data
+    instance, so it is cached per process. The restoring process resets
+    this cache itself; a serving process learns of the change on the first
+    replay whose stamp no longer matches, which resets and re-reads once
+    (see ``_validate_replay_server_instance``).
     """
     cached = _server_identity_cache.get("instance_id")
     if cached is not None:

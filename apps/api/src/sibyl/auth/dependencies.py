@@ -20,6 +20,7 @@ from sibyl.persistence.auth_runtime import (
     authenticate_api_key,
     get_server_instance_id,
     get_user_by_id,
+    reset_server_instance_id_cache,
     resolve_auth_context,
     validate_access_session,
 )
@@ -238,14 +239,21 @@ async def _validate_replay_server_instance(request: Request) -> None:
     if getattr(request.state, "replay_server_instance_validated", False):
         return
     if expected != await get_server_instance_id():
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "error": "replay_identity_mismatch",
-                "message": "The server data instance changed. The write was not applied.",
-                "remediation": "Verify the destination before recovering this pending write.",
-            },
-        )
+        # The identity is cached per process and a full archive restore in
+        # another process replaces it. A mismatch is the one signal that the
+        # cache may be stale, so re-read it once before refusing the replay:
+        # a client stamped with the restored identity is accepted and the
+        # cache heals, while a genuinely foreign stamp still gets the 409.
+        reset_server_instance_id_cache()
+        if expected != await get_server_instance_id():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error": "replay_identity_mismatch",
+                    "message": "The server data instance changed. The write was not applied.",
+                    "remediation": "Verify the destination before recovering this pending write.",
+                },
+            )
     request.state.replay_server_instance_validated = True
 
 
