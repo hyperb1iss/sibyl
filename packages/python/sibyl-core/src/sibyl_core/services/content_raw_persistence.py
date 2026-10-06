@@ -104,9 +104,18 @@ LET $saved = (INSERT INTO raw_captures $rows ON DUPLICATE KEY UPDATE
     citation_count = $input.citation_count ?? citation_count ?? 0,
     misled_count = $input.misled_count ?? misled_count ?? 0,
     created_at = $input.created_at RETURN AFTER);
-COMMIT TRANSACTION;
 RETURN $saved;
+COMMIT TRANSACTION;
 """
+# RETURN sits inside the transaction on purpose. A RETURN after COMMIT made
+# the statement list end on something other than COMMIT, which the dedicated
+# client reads as "not one atomic unit" and refuses to replay: a commit that
+# lost a race on raw_captures (one table for every organization, with two
+# FULLTEXT indexes and an HNSW index rewritten by each insert) then surfaced
+# as a failed remember instead of a retried one. Inside the transaction the
+# RETURN collapses the response to that single value, so the whole write is
+# replayable and the saved rows still come back as the only statement result.
+_RAW_MEMORY_BULK_RETURN = "RETURN $saved;"
 
 _RAW_PROMOTION_VISIBLE_SCOPES = (
     MemoryScope.ORGANIZATION.value,
@@ -135,7 +144,9 @@ async def replace_raw_memory_records_bulk(
     if derivations:
         from sibyl_core.backends.surreal.schema_derivations import STORE_RAW_DERIVATIONS
 
-        query = query.replace("COMMIT TRANSACTION;", STORE_RAW_DERIVATIONS + "COMMIT TRANSACTION;")
+        query = query.replace(
+            _RAW_MEMORY_BULK_RETURN, STORE_RAW_DERIVATIONS + _RAW_MEMORY_BULK_RETURN
+        )
     protected_targets = {derivation["target_id"] for derivation in derivations}
     rows = await content_client.select_many_raw(
         client,
