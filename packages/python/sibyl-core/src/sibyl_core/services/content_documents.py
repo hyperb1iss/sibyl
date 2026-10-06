@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import time
 from collections.abc import Mapping
 from uuid import uuid4
 
@@ -26,6 +27,62 @@ _DOCUMENT_CHUNK_SELECT = (
 )
 
 ContentSearchRow = tuple[ContentChunk, ContentDocument, str, str, float]
+
+# The chunk HNSW index is shared by every organization in the content
+# namespace, so a filtered walk for an organization that owns a small share of
+# it visits most of the index to find a handful of rows, and for an
+# organization that owns none it visits all of it to find nothing. A scope at
+# or below this many chunks is scored exactly over its own rows through the
+# org/source index instead; above it the walk is the cheaper read.
+DOCUMENT_CHUNK_EXACT_SCAN_MAX_ROWS = 512
+# Ingestion and deletion invalidate the count; the TTL covers writers in
+# another process and the archive and migration paths that reach the table
+# without going through them.
+DOCUMENT_CHUNK_COUNT_TTL_SECONDS = 10.0
+_chunk_count_cache: dict[tuple[str, tuple[str, ...]], tuple[float, int]] = {}
+
+
+async def searchable_document_chunk_count(
+    client: SurrealContentClient,
+    *,
+    organization_id: str,
+    source_ids: list[str],
+    ceiling: int = DOCUMENT_CHUNK_EXACT_SCAN_MAX_ROWS + 1,
+) -> int:
+    """How many chunks the search scope holds, counted up to ``ceiling``.
+
+    The count is served by the org/source index and cached per organization
+    and scope, so a search learns whether the scope has anything to score,
+    and how to score it, without touching the shared vector index.
+    """
+    key = (organization_id, tuple(sorted(source_ids)))
+    now = time.monotonic()
+    cached = _chunk_count_cache.get(key)
+    if cached is not None and cached[0] > now:
+        return cached[1]
+    rows = await content_client.select_many(
+        client,
+        "SELECT count() AS total FROM ("
+        "SELECT uuid FROM document_chunks "
+        "WHERE organization_id = $organization_id AND source_id IN $source_ids "
+        "LIMIT $ceiling) GROUP ALL;",
+        organization_id=organization_id,
+        source_ids=list(source_ids),
+        ceiling=max(int(ceiling), 1),
+    )
+    total = models.coerce_int(rows[0].get("total")) if rows else 0
+    _chunk_count_cache[key] = (now + DOCUMENT_CHUNK_COUNT_TTL_SECONDS, total)
+    return total
+
+
+def invalidate_document_chunk_counts(organization_id: str) -> None:
+    """Forget the cached chunk counts after an organization's chunks changed."""
+    for key in [key for key in _chunk_count_cache if key[0] == organization_id]:
+        del _chunk_count_cache[key]
+
+
+def reset_document_chunk_count_cache() -> None:
+    _chunk_count_cache.clear()
 
 
 async def load_sources_for_org(
@@ -369,6 +426,16 @@ async def search_document_chunks(
 
         source_ids = [source.id for source in sources]
         sources_by_id = {source.id: source for source in sources}
+        if query_embedding is None and not lexical_query_text:
+            return [], []
+        chunk_count = await searchable_document_chunk_count(
+            client, organization_id=organization_id, source_ids=source_ids
+        )
+        if chunk_count == 0:
+            # Nothing to score or match. Walking the namespace-global vector
+            # index to learn that costs seconds for every organization that
+            # has sources but no chunks yet.
+            return [], []
 
         vector_rows: list[models.SurrealRecord] = []
         vector_errors: list[str] = []
@@ -401,25 +468,44 @@ async def search_document_chunks(
                     )
                     + " "
                 )
+            if chunk_count <= DOCUMENT_CHUNK_EXACT_SCAN_MAX_ROWS:
+                # Exact cosine over the scope's own rows, reached through the
+                # org/source index. The dimension guard keeps a vector from an
+                # older model, admitted while unstamped rows are allowed in,
+                # from failing the whole statement.
+                vector_params["dimensions"] = len(query_embedding)
+                vector_query = (
+                    "SELECT * FROM ("
+                    "SELECT uuid, organization_id, source_id, document_id, chunk_index, "
+                    "chunk_type, content, context, heading_path, language, "
+                    "has_entities, entity_ids, embedding_metadata, "
+                    "vector::similarity::cosine(embedding, $query_embedding) AS score "
+                    "FROM document_chunks WHERE organization_id = $organization_id "
+                    "AND source_id IN $source_ids "
+                    "AND embedding != NONE AND array::len(embedding) = $dimensions"
+                    f"{language_clause} {space_clause}"
+                    ") WHERE score >= $similarity_threshold "
+                    "ORDER BY score DESC LIMIT $candidate_limit;"
+                )
+            else:
+                vector_query = (
+                    "SELECT * FROM ("
+                    "SELECT uuid, organization_id, source_id, document_id, chunk_index, "
+                    "chunk_type, content, context, heading_path, language, "
+                    "has_entities, entity_ids, embedding_metadata, "
+                    "(1 - vector::distance::knn()) AS score "
+                    "FROM document_chunks WHERE organization_id = $organization_id "
+                    # CONTAINS, not INSIDE: the embedded engine drops every
+                    # row for an INSIDE predicate inside an HNSW bracket.
+                    "AND $source_ids CONTAINS source_id"
+                    f"{language_clause} {space_clause}"
+                    f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding"
+                    ") WHERE score >= $similarity_threshold "
+                    "ORDER BY score DESC LIMIT $candidate_limit;"
+                )
             try:
                 vector_rows = await with_timeout(
-                    content_client.select_many_raw(
-                        client,
-                        "SELECT * FROM ("
-                        "SELECT uuid, organization_id, source_id, document_id, chunk_index, "
-                        "chunk_type, content, context, heading_path, language, "
-                        "has_entities, entity_ids, embedding_metadata, "
-                        "(1 - vector::distance::knn()) AS score "
-                        "FROM document_chunks WHERE organization_id = $organization_id "
-                        # CONTAINS, not INSIDE: the embedded engine drops every
-                        # row for an INSIDE predicate inside an HNSW bracket.
-                        "AND $source_ids CONTAINS source_id"
-                        f"{language_clause} {space_clause}"
-                        f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding"
-                        ") WHERE score >= $similarity_threshold "
-                        "ORDER BY score DESC LIMIT $candidate_limit;",
-                        **vector_params,
-                    ),
+                    content_client.select_many_raw(client, vector_query, **vector_params),
                     timeout_seconds=content_client.DIRECT_SEARCH_QUERY_TIMEOUT_SECONDS,
                     operation_name="surreal_document_vector_search",
                 )
