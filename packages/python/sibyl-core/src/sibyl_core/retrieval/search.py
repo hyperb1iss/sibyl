@@ -337,7 +337,11 @@ async def context_search(
         fusion_failures=fusion_failures,
         distinct_key=distinct_key,
     )
-    fused = fusion.candidates
+    fused = await source_stage._hydrate_candidate_bodies(
+        client=client,
+        group_id=search_plan.organization_id,
+        fused=fusion.candidates,
+    )
     stage_timings_ms["fusion"] = _elapsed_ms(stage_started_at)
 
     stage_started_at = time.perf_counter()

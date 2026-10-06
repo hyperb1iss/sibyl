@@ -255,7 +255,7 @@ async def _edge_rows_by_uuid(
         rows.extend(
             await _execute_query_records(
                 client,
-                "SELECT *, in.uuid AS source_uuid, out.uuid AS target_uuid, in.uuid AS source_node_uuid, out.uuid AS target_node_uuid FROM relates_to WHERE group_id=$group_id AND uuid IN $ids;",
+                "SELECT *, in.uuid AS source_uuid, out.uuid AS target_uuid, in.uuid AS source_node_uuid, out.uuid AS target_node_uuid OMIT fact_embedding FROM relates_to WHERE group_id=$group_id AND uuid IN $ids;",
                 group_id=group_id,
                 ids=edge_ids[offset : offset + 512],
             )
@@ -306,16 +306,23 @@ async def _available_edge_endpoints(
         source_visible=source_visible,
         memo=memo,
     )
+    # The same storage-only fields relationship_body_digest leaves out: the
+    # hydrated row carries no vector, and the proof's snapshot need not either.
+    storage_only = {
+        "metadata": {
+            "record_id",
+            "fact_embedding",
+            "embedding",
+            "embedding_metadata",
+            "operational_write_witness",
+        }
+    }
     rows = [
         row
         for row in rows
         if str(row.get("uuid")) in current_relationships
-        and relationship_from_surreal_row(row).model_dump(
-            mode="json", exclude={"metadata": {"operational_write_witness"}}
-        )
-        == current_relationships[str(row["uuid"])].model_dump(
-            mode="json", exclude={"metadata": {"operational_write_witness"}}
-        )
+        and relationship_from_surreal_row(row).model_dump(mode="json", exclude=storage_only)
+        == current_relationships[str(row["uuid"])].model_dump(mode="json", exclude=storage_only)
         and row.get("operational_source_binding")
         == current_relationships[str(row["uuid"])].operational_source_binding
     ]

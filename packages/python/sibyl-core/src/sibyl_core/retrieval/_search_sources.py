@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, cast
 
 import structlog
@@ -25,6 +25,7 @@ from sibyl_core.retrieval._search_candidates import (
     _candidate_from_episode_record,
     _candidate_from_node_record,
     _candidate_from_raw_memory,
+    _content_for_record,
     _record_score,
 )
 from sibyl_core.retrieval._search_database import _execute_query_records
@@ -33,7 +34,11 @@ from sibyl_core.retrieval._search_plan import (
     RetrievalSignal,
     SearchFilter,
 )
-from sibyl_core.retrieval.candidates import RetrievalCandidate, VectorCandidateFetch
+from sibyl_core.retrieval.candidates import (
+    CandidateKind,
+    RetrievalCandidate,
+    VectorCandidateFetch,
+)
 from sibyl_core.services.memory_source_validation import SourceReadAuthority
 from sibyl_core.services.surreal_content import (
     MemoryScope,
@@ -47,6 +52,53 @@ type RawMemoryRecallFn = Callable[..., Awaitable[list[RawMemory] | RawMemoryReca
 EDGE_FULLTEXT_MATCH_HEADROOM = 8
 EDGE_FULLTEXT_MIN_MATCH_LIMIT = 32
 NODE_FULLTEXT_FIELDS = ("name", "summary", "description", "content")
+# The columns the node lanes project: exactly what the candidate builder and
+# the gates read, never the vector, and never the body. SELECT * shipped a
+# 1024-float vector and the full content for every lane row, decoded on the
+# event loop, when fusion needs neither: the body is fetched once for the rows
+# that survive the cut (`_hydrate_candidate_bodies`).
+NODE_CANDIDATE_FIELDS = (
+    "uuid",
+    "name",
+    "entity_type",
+    "labels",
+    "attributes",
+    "group_id",
+    "project_id",
+    "created_at",
+    "revision",
+    "summary",
+    "description",
+    "status",
+    "priority",
+    "complexity",
+    "feature",
+    "tags",
+    "retrieval_keys",
+    "retrieval_keys_normalized",
+    "epic_id",
+    "task_id",
+    "created_by",
+    "modified_by",
+    "last_recalled_at",
+    "last_used_at",
+    "retrieval_count",
+    "citation_count",
+    "misled_count",
+)
+NODE_LANE_PROJECTION = ", ".join(NODE_CANDIDATE_FIELDS)
+NODE_LANE_OMIT = "OMIT attributes.content"
+NODE_BODY_PROJECTION = (
+    "uuid, content, description, summary, "
+    "attributes.content AS attribute_content, attributes.description AS attribute_description"
+)
+_DEFERRED_BODY_SIGNALS = frozenset(
+    {
+        RetrievalSignal.NODE_FULLTEXT.value,
+        RetrievalSignal.EXACT_KEY.value,
+        RetrievalSignal.NODE_VECTOR.value,
+    }
+)
 _RAW_MEMORY_CONTEXT_TYPES = {"raw_memory", "session", "episode", "note"}
 log = structlog.get_logger()
 
@@ -277,9 +329,9 @@ async def _node_fulltext_field_rows(
     return await _execute_query_records(
         client,
         f"""
-        SELECT *,
+        SELECT {NODE_LANE_PROJECTION},
                {match.score_expr} AS score
-        OMIT name_embedding
+        {NODE_LANE_OMIT}
         FROM entity
         WHERE """
         + _where_clause(["group_id = $group_id", *filter_clauses])
@@ -336,8 +388,9 @@ async def _exact_key_candidates(
     # definition is what this read depends on, not a stylistic choice.
     rows = await _execute_query_records(
         client,
-        """
-        SELECT *
+        f"""
+        SELECT {NODE_LANE_PROJECTION}
+        {NODE_LANE_OMIT}
         FROM entity
         WHERE """
         + _where_clause(["group_id = $group_id", *filter_clauses])
@@ -676,11 +729,12 @@ async def _node_vector_candidates(
         ]
         rows = await _execute_query_records(
             client,
-            """
+            f"""
             SELECT *
             FROM (
-                SELECT *,
+                SELECT {NODE_LANE_PROJECTION},
                        (1 - vector::distance::knn()) AS score
+                {NODE_LANE_OMIT}
                 FROM entity WITH INDEX idx_entity_embedding
                 WHERE """
             + _where_clause(
@@ -716,11 +770,12 @@ async def _node_vector_candidates(
             ]
     rows = await _execute_query_records(
         client,
-        """
+        f"""
         SELECT *
         FROM (
-            SELECT *,
+            SELECT {NODE_LANE_PROJECTION},
                    (1 - vector::distance::knn()) AS score
+            {NODE_LANE_OMIT}
             FROM entity WITH INDEX idx_entity_embedding
             WHERE """
         + _where_clause(
@@ -850,6 +905,56 @@ async def _edge_vector_candidates(
     ]
 
 
+async def _hydrate_candidate_bodies(
+    *,
+    client: Any,
+    group_id: str,
+    fused: list[tuple[RetrievalCandidate, float, dict[str, Any]]],
+) -> list[tuple[RetrievalCandidate, float, dict[str, Any]]]:
+    """Fetch the body once for the fused rows the node lanes proposed.
+
+    The lanes project no body, so a fused row they found carries the
+    description or summary the builder falls back to. One indexed read over
+    the surviving ids restores exactly the content the builder would have
+    chosen from the full row, before the coverage rerank reads it.
+    """
+    ids = list(
+        dict.fromkeys(
+            candidate.id
+            for candidate, _score, fusion_metadata in fused
+            if candidate.kind == CandidateKind.NODE
+            and not _DEFERRED_BODY_SIGNALS.isdisjoint(fusion_metadata.get("sources") or ())
+        )
+    )
+    if not ids:
+        return fused
+    rows = await _execute_query_records(
+        client,
+        f"SELECT {NODE_BODY_PROJECTION} FROM entity WHERE group_id = $group_id AND uuid IN $ids;",
+        group_id=group_id,
+        ids=ids,
+    )
+    bodies = {uuid: row for row in rows if (uuid := str(row.get("uuid") or ""))}
+    hydrated: list[tuple[RetrievalCandidate, float, dict[str, Any]]] = []
+    for candidate, score, fusion_metadata in fused:
+        row = bodies.get(candidate.id) if candidate.id in ids else None
+        if row is None:
+            hydrated.append((candidate, score, fusion_metadata))
+            continue
+        attributes = {
+            "content": row.get("attribute_content"),
+            "description": row.get("attribute_description"),
+        }
+        content = _content_for_record(row, attributes)
+        metadata = candidate.metadata
+        if attributes["content"] is not None:
+            metadata = {**metadata, "content": attributes["content"]}
+        hydrated.append(
+            (replace(candidate, content=content, metadata=metadata), score, fusion_metadata)
+        )
+    return hydrated
+
+
 def _query_embedding_from_batch(
     embeddings: Sequence[Sequence[float]],
     *,
@@ -929,9 +1034,11 @@ def _edge_match_filter_clause(
 
 
 def _edge_select(extra: str | None = None) -> str:
+    # The edge vector is never read by a candidate; the KNN bracket in the
+    # vector lane is the only place it belongs in a lane statement.
     extra_select = f", {extra}" if extra else ""
     return f"""
-        SELECT uuid, name, fact, fact_embedding, group_id, episodes, attributes,
+        SELECT uuid, name, fact, group_id, episodes, attributes,
                created_at, expired_at, valid_at, invalid_at,
                source_id AS source_node_uuid,
                target_id AS target_node_uuid,
