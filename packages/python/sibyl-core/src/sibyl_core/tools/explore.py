@@ -571,6 +571,9 @@ async def _explore_list_window(
         tags=tag_list,
         include_archived=include_archived,
         enrich_epic_progress=entity_type == EntityType.EPIC,
+        # A summary carries name, description and metadata; the prose and
+        # vectors were most of a 100-task page's bytes.
+        include_content=False,
         exact_window=True,
     )
     has_more = len(window) > limit

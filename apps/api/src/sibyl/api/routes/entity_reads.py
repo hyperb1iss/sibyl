@@ -27,6 +27,7 @@ from sibyl.persistence.content_runtime import (
     get_content_read_session,
 )
 from sibyl_core.auth import AuthOrganization
+from sibyl_core.auth.memory_policy import private_scope_granted_for
 from sibyl_core.models.entities import EntityType
 from sibyl_core.services import KnowledgeReadService
 from sibyl_core.services.graph_capture_availability import available_capture_projection_rows
@@ -41,6 +42,10 @@ router = APIRouter(
 
 LIST_ALL_PAGE_SIZE = 2000
 LIST_BY_TYPE_PAGE_SIZE = 1000
+# Rows per statement for the bounded walker. The statement already drops
+# archived rows and other readers' private rows, so a window arrives mostly
+# visible and one of them covers the first ten pages of twenty.
+BOUNDED_LIST_WINDOW_ROWS = 200
 GRAPH_ENTITY_ID_PREFIXES = frozenset(
     {entity_type.value for entity_type in EntityType if entity_type is not EntityType.DOCUMENT}
 )
@@ -141,31 +146,44 @@ async def _list_entities_bounded(
     accessible_teams: set[str] | None = None,
     accessible_delegations: set[str] | None = None,
 ) -> tuple[list[Any], int, bool]:
+    """Walk the org's newest rows until a page of visible ones is in hand.
+
+    Each window is one statement over the ordered index (``exact_window``),
+    with the archived and private-scope exclusions pushed into it so the
+    rows that come back are mostly the rows the reader may see. What the
+    statement cannot decide (project filters, source verdicts, scope rules
+    beyond private ownership) is checked here, per window.
+    """
     start = (page - 1) * page_size
     target = start + page_size + 1
-    batch_size = LIST_BY_TYPE_PAGE_SIZE if entity_type else LIST_ALL_PAGE_SIZE
+    batch_size = BOUNDED_LIST_WINDOW_ROWS
+    private_granted = private_scope_granted_for(
+        allowed_memory_scope_keys, principal_id=reader_user_id
+    )
+    scope_kwargs: dict[str, Any] = (
+        {"private_memory_owner": reader_user_id}
+        if private_granted and reader_user_id is not None
+        else {"exclude_private_memory": True}
+    )
     matched: list[Any] = []
     offset = 0
     exhausted = False
 
     while len(matched) < target:
+        list_kwargs: dict[str, Any] = {
+            "limit": batch_size,
+            "offset": offset,
+            "include_archived": False,
+            "exact_window": True,
+            **scope_kwargs,
+            **policy.lightweight_entity_list_kwargs(entity_manager),
+        }
         if entity_type:
-            list_kwargs: dict[str, Any] = {
-                "limit": batch_size,
-                "offset": offset,
-                "include_archived": True,
-                **policy.lightweight_entity_list_kwargs(entity_manager),
-            }
             if single_project_id:
                 list_kwargs["project_id"] = single_project_id
             batch = await entity_manager.list_by_type(entity_type, **list_kwargs)
         else:
-            batch = await entity_manager.list_all(
-                limit=batch_size,
-                offset=offset,
-                include_archived=True,
-                **policy.lightweight_entity_list_kwargs(entity_manager),
-            )
+            batch = await entity_manager.list_all(**list_kwargs)
         if not batch:
             exhausted = True
             break

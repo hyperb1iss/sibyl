@@ -38,6 +38,32 @@ def _scoped_field_clause(field: str) -> str:
     )
 
 
+def _private_memory_clauses(
+    *,
+    exclude_private_memory: bool,
+    private_memory_owner: str | None,
+    params: dict[str, object],
+) -> list[str]:
+    """Keep a reader's own private rows and drop everyone else's in SurrealQL.
+
+    The row-level rule (``memory_metadata_read_allowed``) still runs on what
+    comes back; these predicates only remove rows it would deny anyway, so a
+    list window arrives mostly visible instead of mostly filtered. Scope and
+    owner coalesce ``attributes`` over the column, the way the entity reader
+    does. A private row with no stamped principal is left for the row rule.
+    """
+    if exclude_private_memory:
+        return ["(attributes.memory_scope ?? memory_scope) != 'private'"]
+    if private_memory_owner is not None:
+        params["private_memory_owner"] = private_memory_owner
+        return [
+            "NOT ((attributes.memory_scope ?? memory_scope) = 'private'"
+            " AND attributes.principal_id != NONE"
+            " AND attributes.principal_id != $private_memory_owner)"
+        ]
+    return []
+
+
 class _EntityWorkItemManager(_EntitySearchManager):
     async def list_epics_for_project(
         self,
@@ -282,6 +308,8 @@ class _EntityWorkItemManager(_EntitySearchManager):
         enrich_epic_progress: bool = False,
         include_content: bool = True,
         exact_window: bool = False,
+        exclude_private_memory: bool = False,
+        private_memory_owner: str | None = None,
     ) -> list[Entity]:
         """List one type newest-first, with ``offset`` counting visible rows.
 
@@ -291,7 +319,9 @@ class _EntityWorkItemManager(_EntitySearchManager):
         instead addresses the ordered index directly: one statement of
         ``limit`` rows from ``START offset``, no recheck, no fill. A caller
         paging a large type reads O(limit) per page that way and runs the
-        recheck on the rows it gets back.
+        recheck on the rows it gets back. ``exclude_private_memory`` and
+        ``private_memory_owner`` push the reader's private-scope rule into
+        the statement (see ``_private_memory_clauses``).
         """
         if limit <= 0:
             return []
@@ -371,6 +401,13 @@ class _EntityWorkItemManager(_EntitySearchManager):
             query_params["feature"] = feature.lower()
         if not include_archived:
             where_clauses.append("(status IS NONE OR status = '' OR status != 'archived')")
+        where_clauses.extend(
+            _private_memory_clauses(
+                exclude_private_memory=exclude_private_memory,
+                private_memory_owner=private_memory_owner,
+                params=query_params,
+            )
+        )
         select_fields = _entity_select_fields(include_content)
         statement = f"""
             SELECT {select_fields}
@@ -458,7 +495,11 @@ class _EntityWorkItemManager(_EntitySearchManager):
         offset: int = 0,
         include_archived: bool = False,
         include_content: bool = True,
+        exact_window: bool = False,
+        exclude_private_memory: bool = False,
+        private_memory_owner: str | None = None,
     ) -> list[Entity]:
+        """List every type newest-first; the keyword contract matches list_by_type."""
         if limit <= 0:
             return []
         target_count = max(int(offset), 0) + max(int(limit), 1) if not include_archived else limit
@@ -468,23 +509,43 @@ class _EntityWorkItemManager(_EntitySearchManager):
         seen_entity_ids: set[str] = set()
         seen_pages: set[tuple[str | None, ...]] = set()
         where_clauses = ["group_id = $group_id"]
+        query_params: dict[str, object] = {"group_id": self._group_id}
         if not include_archived:
             where_clauses.append(
                 "string::lowercase(status ?? attributes.status ?? '') != 'archived'"
             )
+        where_clauses.extend(
+            _private_memory_clauses(
+                exclude_private_memory=exclude_private_memory,
+                private_memory_owner=private_memory_owner,
+                params=query_params,
+            )
+        )
         select_fields = _entity_select_fields(include_content)
+        statement = f"""
+            SELECT {select_fields}
+            FROM entity
+            WHERE {" AND ".join(where_clauses)}
+            ORDER BY updated_at DESC, created_at DESC, uuid DESC
+            LIMIT $limit START $offset;
+            """
+
+        if exact_window:
+            rows = normalize_records(
+                await self._client.execute_query(
+                    statement,
+                    **query_params,
+                    limit=max(int(limit), 1),
+                    offset=max(int(offset), 0),
+                )
+            )
+            return [_entity_from_row(row) for row in rows]
 
         while len(entities) < target_count:
             rows = normalize_records(
                 await self._client.execute_query(
-                    f"""
-                    SELECT {select_fields}
-                    FROM entity
-                    WHERE {" AND ".join(where_clauses)}
-                    ORDER BY updated_at DESC, created_at DESC, uuid DESC
-                    LIMIT $limit START $offset;
-                    """,
-                    group_id=self._group_id,
+                    statement,
+                    **query_params,
                     limit=page_size,
                     offset=query_offset,
                 )
