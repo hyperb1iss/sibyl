@@ -8,6 +8,7 @@ import time
 
 import structlog
 
+from sibyl_core.backends.surreal.connection import cached_by_query_text
 from sibyl_core.observability import telemetry_registry
 from sibyl_core.utils.log_safety import fingerprint_text
 
@@ -49,10 +50,12 @@ def _query_tokens(query: str) -> list[str]:
     return [match.group(0) for match in _TOKEN_PATTERN.finditer(query)]
 
 
+@cached_by_query_text
 def _statement_count(query: str) -> int:
     return len([statement for statement in query.split(";") if statement.strip()])
 
 
+@cached_by_query_text
 def _primary_statement(query: str) -> str:
     tokens = _query_tokens(query)
     if not tokens:
@@ -66,6 +69,7 @@ def _primary_statement(query: str) -> str:
     return tokens[0].lower()
 
 
+@cached_by_query_text
 def _query_tables(query: str) -> list[str]:
     tokens = _query_tokens(query)
     tables: set[str] = set()
@@ -79,6 +83,7 @@ def _query_tables(query: str) -> list[str]:
     return sorted(tables)[:8]
 
 
+@cached_by_query_text
 def _query_hash(query: str) -> str:
     normalized = " ".join(query.split())
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:12]
@@ -144,7 +149,14 @@ def log_query(
     query_origin: str | None = None,
     retry_count: int = 0,
     error: BaseException | None = None,
+    pool_wait_ms: float = 0.0,
 ) -> None:
+    """Record one query receipt.
+
+    ``elapsed`` is the query's own time on a socket. Time spent waiting for a
+    free pool slot arrives separately as ``pool_wait_ms`` so a saturated pool
+    reads as pool pressure in the histogram instead of as slow queries.
+    """
     statement = _primary_statement(query)
     query_hash = _query_hash(query)
     slow = error is None and elapsed >= _slow_query_threshold_ms()
@@ -158,6 +170,7 @@ def log_query(
         retry_count=retry_count,
         status=status,
         slow=slow,
+        pool_wait_ms=pool_wait_ms,
     )
     fields: dict[str, object] = {
         "client": client_kind,
@@ -171,6 +184,8 @@ def log_query(
         "tables": _query_tables(query),
         "query_hash": query_hash,
     }
+    if pool_wait_ms > 0:
+        fields["pool_wait_ms"] = round(pool_wait_ms, 2)
     if param_keys:
         fields["param_keys"] = sorted(param_keys)
     if query_label:

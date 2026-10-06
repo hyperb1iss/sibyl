@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import functools
 import re
+from collections.abc import Callable
 
 from sibyl_core.backends.surreal.url_schemes import (
     error_mentions_url_secret,
@@ -34,10 +36,40 @@ _WRITE_QUERY_TOKENS = {
 }
 
 _TOKEN_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+# Query text is a fixed template at almost every call site (values travel as
+# bound params), so its classification is memoised. Text past this size is
+# classified without caching so one bulk statement cannot pin megabytes.
+_QUERY_TEXT_CACHE_MAX_CHARS = 4096
+_QUERY_TEXT_CACHE_SIZE = 4096
 _SURREAL_QUERY_ID_PATTERN = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
     re.IGNORECASE,
 )
+
+
+class _QueryTextMemo[T]:
+    """A pure function of query text, memoised except for huge text."""
+
+    def __init__(self, fn: Callable[[str], T]) -> None:
+        self._fn = fn
+        self._cached = functools.lru_cache(maxsize=_QUERY_TEXT_CACHE_SIZE)(fn)
+        functools.update_wrapper(self, fn)
+
+    def __call__(self, query: str) -> T:
+        if len(query) > _QUERY_TEXT_CACHE_MAX_CHARS:
+            return self._fn(query)
+        return self._cached(query)
+
+    def cache_clear(self) -> None:
+        self._cached.cache_clear()
+
+    def cache_info(self) -> functools._CacheInfo:
+        return self._cached.cache_info()
+
+
+def cached_by_query_text[T](fn: Callable[[str], T]) -> _QueryTextMemo[T]:
+    """Memoise a pure function of query text, bypassing the cache for huge text."""
+    return _QueryTextMemo(fn)
 
 
 def _query_tokens(query: str) -> list[str]:
@@ -72,6 +104,7 @@ def _is_transient_connection_error(exc: BaseException) -> bool:
     return isinstance(exc, TimeoutError) and "opening handshake" in str(exc).lower()
 
 
+@cached_by_query_text
 def _can_retry_query(query: str) -> bool:
     statements = [statement.strip() for statement in query.split(";") if statement.strip()]
     if not statements:
@@ -82,6 +115,7 @@ def _can_retry_query(query: str) -> bool:
     ) and not (set(tokens) & _WRITE_QUERY_TOKENS)
 
 
+@cached_by_query_text
 def _can_retry_raw_query(query: str) -> bool:
     statements = [statement.strip() for statement in query.split(";") if statement.strip()]
     if not statements:

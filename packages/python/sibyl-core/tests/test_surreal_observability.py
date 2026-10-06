@@ -260,3 +260,46 @@ def test_log_query_records_runtime_telemetry(monkeypatch) -> None:
     assert any(
         metric["name"] == "sibyl_surreal_query_retries_total" for metric in snapshot["metrics"]
     )
+
+
+def test_pool_wait_is_reported_without_marking_the_query_slow(monkeypatch) -> None:
+    fake_log = FakeLog()
+    monkeypatch.setattr(observability, "log", fake_log)
+    monkeypatch.setattr(observability, "_slow_query_threshold_ms", lambda: 500.0)
+
+    observability.log_query(
+        "SELECT * FROM entity LIMIT 1;",
+        client_kind="graph",
+        namespace="org_busy",
+        database="graph",
+        raw=False,
+        elapsed=12.0,
+        pool_wait_ms=900.0,
+    )
+
+    level, event, fields = fake_log.events[0]
+    assert (level, event) == ("debug", "surreal_query_complete")
+    assert fields["pool_wait_ms"] == 900.0
+    assert fields["elapsed_ms"] == 12.0
+
+
+def test_query_text_helpers_are_memoised_for_templates() -> None:
+    query = "SELECT * FROM entity WHERE project_id = $project_id LIMIT 20;"
+    observability._query_tables.cache_clear()
+
+    first = observability._query_tables(query)
+    second = observability._query_tables(query)
+    info = observability._query_tables.cache_info()
+
+    assert first == second == ["entity"]
+    assert (info.hits, info.misses) == (1, 1)
+
+
+def test_huge_query_text_bypasses_the_memo() -> None:
+    observability._query_tables.cache_clear()
+    huge = "SELECT * FROM entity WHERE name IN [" + ",".join(["'x'"] * 2000) + "];"
+
+    assert observability._query_tables(huge) == ["entity"]
+    assert observability._query_tables(huge) == ["entity"]
+    info = observability._query_tables.cache_info()
+    assert (info.hits, info.misses, info.currsize) == (0, 0, 0)

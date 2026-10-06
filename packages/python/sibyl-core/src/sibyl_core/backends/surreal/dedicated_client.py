@@ -23,6 +23,7 @@ from sibyl_core.backends.surreal.connection import (
     _can_retry_raw_query,
     _is_transient_connection_error,
     _query_tokens,
+    cached_by_query_text,
     detach_url_secrets,
     withhold_url_secrets_in_envelope,
 )
@@ -340,6 +341,11 @@ def _can_replay_query(query: str, response: object = None) -> bool:
         # implicit transaction containing semicolons inside strings or blocks.
         if isinstance(results, list) and len(results) == 1:
             return True
+    return _query_text_is_atomic(query)
+
+
+@cached_by_query_text
+def _query_text_is_atomic(query: str) -> bool:
     statements = [part.strip().upper() for part in query.split(";") if part.strip()]
     if len(statements) == 1:
         return True
@@ -826,12 +832,20 @@ class DedicatedSurrealClient:
         query_label: str | None,
         query_origin: str | None,
     ) -> object:
-        started_at = query_start()
         connection_retry_count = 0
         transaction_retry_count = 0
         result: object = None
         can_retry = _can_retry_raw_query(query) if raw else _can_retry_query(query)
+        # Time parked on the queue is pool pressure, not query time, and is
+        # reported on its own so a saturated pool never reads as slow queries.
+        wait_started = query_start()
         connection = await self._available.get()
+        pool_wait = elapsed_ms(wait_started)
+        slot_held = True
+        started_at = query_start()
+        # Backoff sleeps and re-checkouts happen inside the timed window and
+        # are subtracted so elapsed stays the socket time.
+        off_socket_ms = 0.0
         try:
             while True:
                 transaction_retry_allowed = _can_replay_query(query)
@@ -902,7 +916,15 @@ class DedicatedSurrealClient:
                             delay,
                             _loggable(exc, self._url),
                         )
+                        # Hand the slot back while backing off: a conflict storm
+                        # is exactly when the rest of the namespace needs it.
+                        self._available.put_nowait(connection)
+                        slot_held = False
+                        backoff_started = query_start()
                         await asyncio.sleep(delay)
+                        connection = await self._available.get()
+                        slot_held = True
+                        off_socket_ms += elapsed_ms(backoff_started)
                         continue
                     if not _is_transient_connection_error(exc):
                         raise
@@ -923,27 +945,30 @@ class DedicatedSurrealClient:
                 namespace=self._namespace,
                 database=self._database,
                 raw=raw,
-                elapsed=elapsed_ms(started_at),
+                elapsed=max(0.0, elapsed_ms(started_at) - off_socket_ms),
                 param_keys=sorted(params),
                 query_label=query_label,
                 query_origin=query_origin,
                 retry_count=connection_retry_count + transaction_retry_count,
                 error=exc,
+                pool_wait_ms=pool_wait,
             )
             raise
         finally:
-            self._available.put_nowait(connection)
+            if slot_held:
+                self._available.put_nowait(connection)
         log_query(
             query,
             client_kind=self._client_kind,
             namespace=self._namespace,
             database=self._database,
             raw=raw,
-            elapsed=elapsed_ms(started_at),
+            elapsed=max(0.0, elapsed_ms(started_at) - off_socket_ms),
             param_keys=sorted(params),
             query_label=query_label,
             query_origin=query_origin,
             retry_count=connection_retry_count + transaction_retry_count,
+            pool_wait_ms=pool_wait,
         )
         return result
 
