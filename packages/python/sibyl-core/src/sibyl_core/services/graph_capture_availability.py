@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import re
 from collections.abc import Callable, Mapping
 from contextlib import AsyncExitStack
@@ -24,7 +23,6 @@ from sibyl_core.memory_pipeline.source_lifecycle import (
 )
 from sibyl_core.models.entities import Entity
 from sibyl_core.services import content_client, content_models
-from sibyl_core.services.graph_derivations import native_reflection_id, reflection_candidate_current
 from sibyl_core.services.memory_source_validation import _stored_source_ids
 
 log = structlog.get_logger()
@@ -89,7 +87,6 @@ async def available_capture_projection_rows[T](
                 raise ValueError("graph metadata must be a mapping")
             if (
                 _projection_row(row)
-                or native_reflection_id(identifier)
                 or _parent_ids(row)
                 or _capture_ids(metadata)
                 or metadata.get(SOURCE_BINDINGS_KEY)
@@ -130,22 +127,6 @@ async def available_capture_projection_rows[T](
         refresh_ids=dependent_ids & legacy_rows.keys(),
         read=read,
     )
-
-    async def terminal_graph_id(identifier, row):
-        try:
-            return None if await reflection_candidate_current(row, read) else identifier
-        except Exception:
-            return identifier
-
-    terminal_graph_ids = set(
-        await asyncio.gather(
-            *(
-                terminal_graph_id(identifier, row)
-                for identifier, row in graph_rows.items()
-                if row is not None and native_reflection_id(identifier)
-            )
-        )
-    )
     references: dict[str, set[str]] = {}
     for identifier in legacy_rows:
         try:
@@ -158,7 +139,6 @@ async def available_capture_projection_rows[T](
                         ancestor != identifier
                         and getattr(row, "organization_id", None) != organization_id
                     )
-                    or ancestor in terminal_graph_ids
                     or not graph_metadata_recallable(getattr(row, "metadata", None))
                     or (source_visible is not None and not source_visible(row))
                 ):
