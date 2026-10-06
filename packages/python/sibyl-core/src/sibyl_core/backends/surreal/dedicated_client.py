@@ -613,6 +613,7 @@ class DedicatedSurrealClient:
         for connection in self._pool:
             self._available.put_nowait(connection)
         self._close_lock = asyncio.Lock()
+        self._last_used_at = time.monotonic()
 
     @property
     def namespace(self) -> str:
@@ -625,6 +626,11 @@ class DedicatedSurrealClient:
     @property
     def supports_live_queries(self) -> bool:
         return is_websocket_surreal_url(self._url)
+
+    @property
+    def idle_seconds(self) -> float:
+        """Seconds since a query last started on this client."""
+        return time.monotonic() - self._last_used_at
 
     def _new_connection(self) -> _PooledConnection:
         return _PooledConnection(
@@ -842,6 +848,7 @@ class DedicatedSurrealClient:
         connection = await self._available.get()
         pool_wait = elapsed_ms(wait_started)
         slot_held = True
+        self._last_used_at = time.monotonic()
         started_at = query_start()
         # Backoff sleeps and re-checkouts happen inside the timed window and
         # are subtracted so elapsed stays the socket time.

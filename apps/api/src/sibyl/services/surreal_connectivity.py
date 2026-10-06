@@ -60,7 +60,25 @@ async def _monitor_loop() -> None:
         await asyncio.gather(
             _sweep_client("auth", _auth_client),
             _sweep_client("content", _content_client),
+            _reap_retired_graph_clients(),
         )
+
+
+async def _reap_retired_graph_clients() -> None:
+    """Close org graph pools evicted from the LRU once they have gone idle."""
+    from sibyl_core.services.graph_client import reap_retired_graph_clients
+
+    try:
+        reaped = await reap_retired_graph_clients()
+    except Exception as exc:
+        log.warning(
+            "retired_graph_client_reap_failed",
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        return
+    if reaped:
+        log.debug("retired_graph_clients_closed", count=reaped)
 
 
 def _health_interval_seconds() -> float:
