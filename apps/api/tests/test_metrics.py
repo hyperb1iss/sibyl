@@ -1,6 +1,8 @@
 """Tests for metrics endpoints and computation functions."""
 
+import asyncio
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, call, patch
 from uuid import uuid4
 
@@ -8,17 +10,55 @@ import pytest
 from fastapi import HTTPException
 
 from sibyl.api.routes.metrics import (
-    _compute_assignee_stats,
-    _compute_priority_distribution,
-    _compute_status_distribution,
-    _compute_velocity_trend,
-    _count_recent_tasks,
-    _normalize_metric_task_row,
+    TASK_ROLLUP_STATEMENT,
+    TaskRollup,
+    _assignee_stats,
+    _created_last_week,
     _parse_iso_date,
+    _priority_distribution,
+    _status_distribution,
+    _velocity_trend,
+    rollups_from_surreal_payload,
+    rollups_from_task_dicts,
 )
+from sibyl.api.websocket import ConnectionManager
 from sibyl.auth.context import AuthContext
+from sibyl.persistence.read_memo import reset_org_read_memos
 from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.storage import Page
+
+NOW = datetime.now(UTC)
+
+
+# The runtime that cannot run the grouped statement renders from paged task
+# rows grouped in Python, so the fixtures below feed that path and the
+# renderers the grouped statement shares with it.
+def status_distribution_of(tasks: list[dict[str, Any]]):
+    return _status_distribution(rollups_from_task_dicts(tasks, now=NOW))
+
+
+def priority_distribution_of(tasks: list[dict[str, Any]]):
+    return _priority_distribution(rollups_from_task_dicts(tasks, now=NOW))
+
+
+def assignee_stats_of(tasks: list[dict[str, Any]]):
+    return _assignee_stats(rollups_from_task_dicts(tasks, now=NOW))
+
+
+def velocity_trend_of(tasks: list[dict[str, Any]], *, days: int):
+    return _velocity_trend(rollups_from_task_dicts(tasks, now=NOW), now=NOW, days=days)
+
+
+def created_last_week_of(tasks: list[dict[str, Any]]) -> int:
+    return _created_last_week(rollups_from_task_dicts(tasks, now=NOW))
+
+
+@pytest.fixture(autouse=True)
+def _fresh_read_memos():
+    reset_org_read_memos()
+    yield
+    reset_org_read_memos()
+
 
 # =============================================================================
 # Helper Function Tests
@@ -63,11 +103,11 @@ class TestParseIsoDate:
 
 
 class TestComputeStatusDistribution:
-    """Tests for _compute_status_distribution helper."""
+    """Status counts rendered from grouped task rows."""
 
     def test_empty_tasks(self) -> None:
         """Empty list returns all zeros."""
-        result = _compute_status_distribution([])
+        result = status_distribution_of([])
         assert result.backlog == 0
         assert result.todo == 0
         assert result.doing == 0
@@ -82,7 +122,7 @@ class TestComputeStatusDistribution:
             {"metadata": {"status": "todo"}},
             {"metadata": {"status": "todo"}},
         ]
-        result = _compute_status_distribution(tasks)
+        result = status_distribution_of(tasks)
         assert result.todo == 3
         assert result.done == 0
 
@@ -95,7 +135,7 @@ class TestComputeStatusDistribution:
             {"metadata": {"status": "done"}},
             {"metadata": {"status": "review"}},
         ]
-        result = _compute_status_distribution(tasks)
+        result = status_distribution_of(tasks)
         assert result.todo == 1
         assert result.doing == 1
         assert result.done == 2
@@ -107,7 +147,7 @@ class TestComputeStatusDistribution:
             {"metadata": {}},
             {"metadata": {"other_field": "value"}},
         ]
-        result = _compute_status_distribution(tasks)
+        result = status_distribution_of(tasks)
         assert result.backlog == 2
 
     def test_unknown_status_ignored(self) -> None:
@@ -116,17 +156,17 @@ class TestComputeStatusDistribution:
             {"metadata": {"status": "unknown_status"}},
             {"metadata": {"status": "todo"}},
         ]
-        result = _compute_status_distribution(tasks)
+        result = status_distribution_of(tasks)
         assert result.todo == 1
         # unknown_status doesn't match any attribute, so only todo counted
 
 
 class TestComputePriorityDistribution:
-    """Tests for _compute_priority_distribution helper."""
+    """Priority counts rendered from grouped task rows."""
 
     def test_empty_tasks(self) -> None:
         """Empty list returns all zeros."""
-        result = _compute_priority_distribution([])
+        result = priority_distribution_of([])
         assert result.critical == 0
         assert result.high == 0
         assert result.medium == 0
@@ -134,82 +174,12 @@ class TestComputePriorityDistribution:
         assert result.someday == 0
 
 
-class TestNormalizeMetricTaskRow:
-    """Tests for raw metric-row normalization."""
-
-    def test_prefers_metadata_values_over_top_level_duplicates(self) -> None:
-        """Metadata remains the canonical source when both representations exist."""
-        normalized = _normalize_metric_task_row(
-            {
-                "project_id": "proj_top_level",
-                "status": "todo",
-                "priority": "medium",
-                "assignees": ["top-level"],
-                "metadata": {
-                    "project_id": "proj_meta",
-                    "status": "doing",
-                    "priority": "critical",
-                    "assignees": ["meta"],
-                },
-            }
-        )
-
-        assert normalized["metadata"]["project_id"] == "proj_meta"
-        assert normalized["metadata"]["status"] == "doing"
-        assert normalized["metadata"]["priority"] == "critical"
-        assert normalized["metadata"]["assignees"] == ["meta"]
-
-    def test_falls_back_to_valid_metadata_datetime_when_top_level_is_malformed(self) -> None:
-        """Malformed top-level timestamps should not hide valid metadata values."""
-        valid_created_at = "2026-04-13T12:00:00+00:00"
-        normalized = _normalize_metric_task_row(
-            {
-                "created_at": "not-a-date",
-                "completed_at": "still-not-a-date",
-                "metadata": {
-                    "created_at": valid_created_at,
-                    "completed_at": valid_created_at,
-                },
-            }
-        )
-
-        assert normalized["created_at"] == valid_created_at
-        assert normalized["metadata"]["created_at"] == valid_created_at
-        assert normalized["completed_at"] == valid_created_at
-        assert normalized["metadata"]["completed_at"] == valid_created_at
-
-    def test_mixed_priorities(self) -> None:
-        """Count tasks with mixed priorities."""
-        tasks = [
-            {"metadata": {"priority": "critical"}},
-            {"metadata": {"priority": "high"}},
-            {"metadata": {"priority": "high"}},
-            {"metadata": {"priority": "medium"}},
-            {"metadata": {"priority": "low"}},
-        ]
-        result = _compute_priority_distribution(tasks)
-        assert result.critical == 1
-        assert result.high == 2
-        assert result.medium == 1
-        assert result.low == 1
-        assert result.someday == 0
-
-    def test_missing_priority_defaults_to_medium(self) -> None:
-        """Tasks without priority default to medium."""
-        tasks = [
-            {"metadata": {}},
-            {"metadata": {"status": "todo"}},
-        ]
-        result = _compute_priority_distribution(tasks)
-        assert result.medium == 2
-
-
 class TestComputeAssigneeStats:
-    """Tests for _compute_assignee_stats helper."""
+    """Assignee totals rendered from grouped task rows."""
 
     def test_empty_tasks(self) -> None:
         """Empty list returns empty stats."""
-        result = _compute_assignee_stats([])
+        result = assignee_stats_of([])
         assert result == []
 
     def test_single_assignee(self) -> None:
@@ -219,7 +189,7 @@ class TestComputeAssigneeStats:
             {"metadata": {"assignees": ["alice"], "status": "doing"}},
             {"metadata": {"assignees": ["alice"], "status": "done"}},
         ]
-        result = _compute_assignee_stats(tasks)
+        result = assignee_stats_of(tasks)
         assert len(result) == 1
         assert result[0].name == "alice"
         assert result[0].total == 3
@@ -233,7 +203,7 @@ class TestComputeAssigneeStats:
             {"metadata": {"assignees": ["bob"], "status": "doing"}},
             {"metadata": {"assignees": ["alice"], "status": "todo"}},
         ]
-        result = _compute_assignee_stats(tasks)
+        result = assignee_stats_of(tasks)
         assert len(result) == 2
         # Sorted by total descending
         alice_stats = next(s for s in result if s.name == "alice")
@@ -248,7 +218,7 @@ class TestComputeAssigneeStats:
         tasks = [
             {"metadata": {"assignees": ["alice", "bob"], "status": "done"}},
         ]
-        result = _compute_assignee_stats(tasks)
+        result = assignee_stats_of(tasks)
         assert len(result) == 2
         assert all(s.total == 1 and s.completed == 1 for s in result)
 
@@ -257,7 +227,7 @@ class TestComputeAssigneeStats:
         tasks = [
             {"metadata": {"assignees": "alice", "status": "todo"}},
         ]
-        result = _compute_assignee_stats(tasks)
+        result = assignee_stats_of(tasks)
         assert len(result) == 1
         assert result[0].name == "alice"
 
@@ -267,22 +237,22 @@ class TestComputeAssigneeStats:
             {"metadata": {"assignees": [""], "status": "todo"}},
             {"metadata": {"assignees": [], "status": "todo"}},
         ]
-        result = _compute_assignee_stats(tasks)
+        result = assignee_stats_of(tasks)
         assert result == []
 
 
 class TestComputeVelocityTrend:
-    """Tests for _compute_velocity_trend helper."""
+    """Daily completions rendered from grouped task rows."""
 
     def test_empty_tasks(self) -> None:
         """Empty list returns trend with zeros."""
-        result = _compute_velocity_trend([], days=7)
+        result = velocity_trend_of([], days=7)
         assert len(result) == 7
         assert all(p.value == 0 for p in result)
 
     def test_trend_sorted_by_date(self) -> None:
         """Trend is sorted by date ascending."""
-        result = _compute_velocity_trend([], days=3)
+        result = velocity_trend_of([], days=3)
         dates = [p.date for p in result]
         assert dates == sorted(dates)
 
@@ -295,7 +265,7 @@ class TestComputeVelocityTrend:
             {"metadata": {"status": "done", "completed_at": yesterday}},
             {"metadata": {"status": "done", "completed_at": yesterday}},
         ]
-        result = _compute_velocity_trend(tasks, days=7)
+        result = velocity_trend_of(tasks, days=7)
 
         yesterday_date = (now - timedelta(days=1)).strftime("%Y-%m-%d")
         yesterday_point = next((p for p in result if p.date == yesterday_date), None)
@@ -311,7 +281,7 @@ class TestComputeVelocityTrend:
             {"metadata": {"status": "todo", "completed_at": today}},
             {"metadata": {"status": "doing", "completed_at": today}},
         ]
-        result = _compute_velocity_trend(tasks, days=7)
+        result = velocity_trend_of(tasks, days=7)
         assert all(p.value == 0 for p in result)
 
     def test_old_completions_ignored(self) -> None:
@@ -322,16 +292,16 @@ class TestComputeVelocityTrend:
         tasks = [
             {"metadata": {"status": "done", "completed_at": old_date}},
         ]
-        result = _compute_velocity_trend(tasks, days=7)
+        result = velocity_trend_of(tasks, days=7)
         assert all(p.value == 0 for p in result)
 
 
 class TestCountRecentTasks:
-    """Tests for _count_recent_tasks helper."""
+    """Tasks created in the last week, from grouped task rows."""
 
     def test_empty_tasks(self) -> None:
         """Empty list returns zero."""
-        assert _count_recent_tasks([], days=7) == 0
+        assert created_last_week_of([]) == 0
 
     def test_recent_tasks_counted(self) -> None:
         """Tasks within window are counted."""
@@ -344,7 +314,7 @@ class TestCountRecentTasks:
             {"created_at": recent},
             {"created_at": old},
         ]
-        assert _count_recent_tasks(tasks, days=7, field="created_at") == 2
+        assert created_last_week_of(tasks) == 2
 
     def test_metadata_field_checked(self) -> None:
         """Field can be in metadata."""
@@ -354,7 +324,7 @@ class TestCountRecentTasks:
         tasks = [
             {"metadata": {"created_at": recent}},
         ]
-        assert _count_recent_tasks(tasks, days=7, field="created_at") == 1
+        assert created_last_week_of(tasks) == 1
 
     def test_datetime_objects_are_counted(self) -> None:
         """Native datetime values count as recent activity."""
@@ -364,7 +334,7 @@ class TestCountRecentTasks:
             {"created_at": now - timedelta(days=1)},
             {"created_at": now - timedelta(days=2)},
         ]
-        assert _count_recent_tasks(tasks, days=7, field="created_at") == 2
+        assert created_last_week_of(tasks) == 2
 
 
 # =============================================================================
@@ -418,31 +388,89 @@ def create_mock_org(org_id: str = "test-org-123") -> MagicMock:
     return org
 
 
-def create_metric_task_row(
+def rollup_payload(
     *,
-    project_id: str | None = None,
-    status: str | None = None,
-    priority: str | None = None,
-    assignees: list[str] | str | None = None,
-    created_at: str | None = None,
-    completed_at: str | None = None,
-    updated_at: str | None = None,
-    due_date: str | None = None,
-    metadata: dict | str | None = None,
-) -> dict[str, object]:
-    """Create a raw task row for org metrics queries."""
-    timestamp = updated_at or datetime.now(UTC).isoformat()
-    return {
-        "project_id": project_id,
-        "status": status,
-        "priority": priority,
-        "assignees": assignees,
-        "created_at": created_at,
-        "completed_at": completed_at,
-        "updated_at": timestamp,
-        "due_date": due_date,
-        "metadata": metadata or {},
-    }
+    tasks: list[tuple[str | None, str | None, str | None, int]] = (),
+    assignees: list[tuple[str | None, object, str | None, int]] = (),
+    created: list[tuple[str | None, int]] = (),
+    completions: list[tuple[str | None, object, object]] = (),
+    due_dates: list[tuple[str | None, str | None, object]] = (),
+) -> list[dict[str, object]]:
+    """Shape the grouped statement's RETURN payload the way the driver hands it back."""
+    return [
+        {
+            "tasks": [
+                {"project_id": project, "status": status, "priority": priority, "n": count}
+                for project, status, priority, count in tasks
+            ],
+            "assignees": [
+                {"project_id": project, "assignees": names, "status": status, "n": count}
+                for project, names, status, count in assignees
+            ],
+            "created": [{"project_id": project, "n": count} for project, count in created],
+            "completions": [
+                {"project_id": project, "completed_at": completed_at, "updated_at": updated_at}
+                for project, completed_at, updated_at in completions
+            ],
+            "due_dates": [
+                {"project_id": project, "status": status, "due_date": due_date}
+                for project, status, due_date in due_dates
+            ],
+        }
+    ]
+
+
+def mock_project_service(*projects: Any) -> AsyncMock:
+    service = AsyncMock()
+    service.list_entities = AsyncMock(return_value=Page(items=list(projects), next_cursor=None))
+    return service
+
+
+class TestRollupPayload:
+    """The grouped statement's payload becomes typed rollups."""
+
+    def test_reads_every_section_and_defaults_missing_values(self) -> None:
+        now = datetime.now(UTC)
+        rollups = rollups_from_surreal_payload(
+            rollup_payload(
+                tasks=[("proj_a", None, None, 2), (None, "Doing", "HIGH", 1)],
+                assignees=[("proj_a", ["alice", ""], "done", 2), ("proj_a", "bob", "doing", 1)],
+                created=[("proj_a", 4)],
+                completions=[("proj_a", "not-a-date", now), ("proj_a", None, None)],
+                due_dates=[("proj_a", "todo", "not-a-date"), ("proj_a", "todo", now)],
+            )[0]
+        )
+
+        assert rollups.tasks == (
+            TaskRollup("proj_a", "backlog", "medium", 2),
+            TaskRollup("", "doing", "high", 1),
+        )
+        assert [(row.assignee, row.count) for row in rollups.assignees] == [
+            ("alice", 2),
+            ("bob", 1),
+        ]
+        assert rollups.created == (("proj_a", 4),)
+        assert [row.completed_at for row in rollups.completions] == [now]
+        assert [row.due_date for row in rollups.due_dates] == [now]
+        assert rollups.total_tasks == 3
+
+    def test_scoping_keeps_only_accessible_projects(self) -> None:
+        rollups = rollups_from_surreal_payload(
+            rollup_payload(
+                tasks=[
+                    ("proj_a", "todo", "high", 2),
+                    ("proj_b", "todo", "high", 3),
+                    (None, "todo", "low", 1),
+                ],
+                created=[("proj_a", 1), ("proj_b", 1)],
+            )[0]
+        )
+
+        scoped = rollups.scoped({"proj_a"})
+
+        assert scoped.total_tasks == 2
+        assert scoped.created == (("proj_a", 1),)
+        assert rollups.scoped(None) is rollups
 
 
 class TestGetProjectMetrics:
@@ -462,7 +490,6 @@ class TestGetProjectMetrics:
                 "sibyl.api.routes.metrics.get_knowledge_read_adapter",
                 AsyncMock(return_value=mock_service),
             ),
-            patch("sibyl.api.routes.metrics.get_entity_graph_runtime", AsyncMock()),
         ):
             with pytest.raises(HTTPException) as exc_info:
                 await get_project_metrics(
@@ -474,80 +501,54 @@ class TestGetProjectMetrics:
 
     @pytest.mark.asyncio
     async def test_project_metrics_success(self) -> None:
-        """Returns metrics for valid project."""
+        """Returns metrics for valid project from the organization rollups."""
         from sibyl.api.routes.metrics import get_project_metrics
 
         mock_org = create_mock_org()
         mock_service = AsyncMock()
-        mock_runtime = MagicMock()
-
-        # Create mock project
-        mock_project = create_mock_entity(
+        mock_service.get_entity.return_value = create_mock_entity(
             entity_type="project", name="Test Project", entity_id="proj_123"
         )
-
-        # Create mock tasks
         now = datetime.now(UTC)
-        mock_tasks = [
-            create_mock_entity(
-                entity_type="task",
-                name="Task 1",
-                entity_id="task_1",
-                metadata={
-                    "status": "done",
-                    "priority": "high",
-                    "project_id": "proj_123",
-                    "assignees": ["alice"],
-                    "completed_at": (now - timedelta(days=1)).isoformat(),
-                },
-            ),
-            create_mock_entity(
-                entity_type="task",
-                name="Task 2",
-                entity_id="task_2",
-                metadata={
-                    "status": "doing",
-                    "priority": "medium",
-                    "project_id": "proj_123",
-                    "assignees": ["bob"],
-                },
-            ),
-        ]
-
-        mock_runtime.entity_manager.list_by_type = AsyncMock(return_value=mock_tasks)
-        mock_service.get_entity.return_value = mock_project
+        payload = rollup_payload(
+            tasks=[
+                ("proj_123", "done", "high", 1),
+                ("proj_123", "doing", "medium", 1),
+                ("proj_other", "todo", "critical", 7),
+            ],
+            assignees=[
+                ("proj_123", ["alice"], "done", 1),
+                ("proj_123", ["bob"], "doing", 1),
+                ("proj_other", ["carol"], "todo", 7),
+            ],
+            completions=[("proj_123", (now - timedelta(days=1)).isoformat(), now)],
+        )
+        execute = AsyncMock(return_value=payload)
 
         with (
             patch(
                 "sibyl.api.routes.metrics.get_knowledge_read_adapter",
                 AsyncMock(return_value=mock_service),
             ),
-            patch(
-                "sibyl.api.routes.metrics.get_entity_graph_runtime",
-                AsyncMock(return_value=mock_runtime),
-            ),
+            patch("sibyl.api.routes.metrics.execute_surreal_graph_query", execute),
         ):
             result = await get_project_metrics(
                 "proj_123", org=mock_org, ctx=MagicMock(spec=AuthContext)
             )
 
-            assert result.metrics.project_id == "proj_123"
-            assert result.metrics.project_name == "Test Project"
-            assert result.metrics.total_tasks == 2  # Only proj_123 tasks
-            assert result.metrics.status_distribution.done == 1
-            assert result.metrics.status_distribution.doing == 1
-            assert result.metrics.priority_distribution.high == 1
-            assert result.metrics.priority_distribution.medium == 1
-            assert len(result.metrics.assignees) == 2
-            assert result.metrics.completion_rate == 50.0
-            assert mock_runtime.entity_manager.list_by_type.await_args_list == [
-                call(
-                    EntityType.TASK,
-                    limit=1000,
-                    offset=0,
-                    project_id="proj_123",
-                )
-            ]
+        assert result.metrics.project_id == "proj_123"
+        assert result.metrics.project_name == "Test Project"
+        assert result.metrics.total_tasks == 2  # Only proj_123 tasks
+        assert result.metrics.status_distribution.done == 1
+        assert result.metrics.status_distribution.doing == 1
+        assert result.metrics.priority_distribution.high == 1
+        assert result.metrics.priority_distribution.medium == 1
+        assert result.metrics.priority_distribution.critical == 0
+        assert [assignee.name for assignee in result.metrics.assignees] == ["alice", "bob"]
+        assert result.metrics.completion_rate == 50.0
+        assert result.metrics.tasks_completed_last_7d == 1
+        execute.assert_awaited_once()
+        mock_service.list_entities.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_project_metrics_empty_tasks(self) -> None:
@@ -556,14 +557,9 @@ class TestGetProjectMetrics:
 
         mock_org = create_mock_org()
         mock_service = AsyncMock()
-        mock_runtime = MagicMock()
-
-        mock_project = create_mock_entity(
+        mock_service.get_entity.return_value = create_mock_entity(
             entity_type="project", name="Empty Project", entity_id="proj_empty"
         )
-
-        mock_runtime.entity_manager.list_by_type = AsyncMock(return_value=[])
-        mock_service.get_entity.return_value = mock_project
 
         with (
             patch(
@@ -571,27 +567,26 @@ class TestGetProjectMetrics:
                 AsyncMock(return_value=mock_service),
             ),
             patch(
-                "sibyl.api.routes.metrics.get_entity_graph_runtime",
-                AsyncMock(return_value=mock_runtime),
+                "sibyl.api.routes.metrics.execute_surreal_graph_query",
+                AsyncMock(return_value=rollup_payload()),
             ),
         ):
             result = await get_project_metrics(
                 "proj_empty", org=mock_org, ctx=MagicMock(spec=AuthContext)
             )
 
-            assert result.metrics.total_tasks == 0
-            assert result.metrics.completion_rate == 0.0
-            assert len(result.metrics.velocity_trend) == 14
+        assert result.metrics.total_tasks == 0
+        assert result.metrics.completion_rate == 0.0
+        assert len(result.metrics.velocity_trend) == 14
 
     @pytest.mark.asyncio
-    async def test_project_metrics_pages_past_first_1000_tasks(self) -> None:
-        """Project metrics should keep loading tasks after the first page."""
+    async def test_project_metrics_fallback_pages_every_task_row(self) -> None:
+        """Without the grouped statement, project metrics group paged rows."""
         from sibyl.api.routes.metrics import get_project_metrics
 
         mock_org = create_mock_org()
         mock_service = AsyncMock()
-        mock_runtime = MagicMock()
-        mock_project = create_mock_entity(
+        mock_service.get_entity.return_value = create_mock_entity(
             entity_type="project", name="Big Project", entity_id="proj_big"
         )
         first_page = [
@@ -599,11 +594,7 @@ class TestGetProjectMetrics:
                 entity_type="task",
                 name=f"Task {index}",
                 entity_id=f"task_{index:04}",
-                metadata={
-                    "status": "todo",
-                    "priority": "low",
-                    "project_id": "proj_big",
-                },
+                metadata={"status": "todo", "priority": "low", "project_id": "proj_big"},
             )
             for index in range(1000)
         ]
@@ -612,16 +603,21 @@ class TestGetProjectMetrics:
                 entity_type="task",
                 name="Done task",
                 entity_id="task_done",
-                metadata={
-                    "status": "done",
-                    "priority": "high",
-                    "project_id": "proj_big",
-                },
-            )
+                metadata={"status": "done", "priority": "high", "project_id": "proj_big"},
+            ),
+            create_mock_entity(
+                entity_type="task",
+                name="Other project",
+                entity_id="task_other",
+                metadata={"status": "done", "priority": "high", "project_id": "proj_other"},
+            ),
         ]
-
-        mock_runtime.entity_manager.list_by_type = AsyncMock(side_effect=[first_page, second_page])
-        mock_service.get_entity.return_value = mock_project
+        mock_service.list_entities = AsyncMock(
+            side_effect=[
+                Page(items=first_page, next_cursor="cursor-2"),
+                Page(items=second_page, next_cursor=None),
+            ]
+        )
 
         with (
             patch(
@@ -629,8 +625,8 @@ class TestGetProjectMetrics:
                 AsyncMock(return_value=mock_service),
             ),
             patch(
-                "sibyl.api.routes.metrics.get_entity_graph_runtime",
-                AsyncMock(return_value=mock_runtime),
+                "sibyl.api.routes.metrics._load_surreal_task_rollups",
+                AsyncMock(return_value=None),
             ),
         ):
             result = await get_project_metrics(
@@ -642,19 +638,9 @@ class TestGetProjectMetrics:
         assert result.metrics.status_distribution.todo == 1000
         assert result.metrics.priority_distribution.high == 1
         assert result.metrics.priority_distribution.low == 1000
-        assert mock_runtime.entity_manager.list_by_type.await_args_list == [
-            call(
-                EntityType.TASK,
-                limit=1000,
-                offset=0,
-                project_id="proj_big",
-            ),
-            call(
-                EntityType.TASK,
-                limit=1000,
-                offset=1000,
-                project_id="proj_big",
-            ),
+        assert mock_service.list_entities.await_args_list == [
+            call(EntityType.TASK, limit=1000, cursor=None),
+            call(EntityType.TASK, limit=1000, cursor="cursor-2"),
         ]
 
 
@@ -730,7 +716,7 @@ class TestGetOrgMetrics:
                 AsyncMock(return_value=mock_service),
             ),
             patch(
-                "sibyl.api.routes.metrics._list_surreal_metric_task_rows",
+                "sibyl.api.routes.metrics._load_surreal_task_rollups",
                 AsyncMock(return_value=None),
             ),
         ):
@@ -763,42 +749,41 @@ class TestGetOrgMetrics:
             assert result.projects_summary[0].high == 1
 
     @pytest.mark.asyncio
-    async def test_org_metrics_uses_surreal_metric_task_fast_path(self) -> None:
-        """Organization metrics reuse lean Surreal task rows when available."""
+    async def test_org_metrics_renders_the_grouped_statement(self) -> None:
+        """Organization metrics come from grouped rows, never from task rows."""
         from sibyl.api.routes.metrics import get_org_metrics
 
         mock_org = create_mock_org()
-        mock_service = AsyncMock()
-        recent = datetime.now(UTC).isoformat()
-        mock_projects = [
+        now = datetime.now(UTC)
+        mock_service = mock_project_service(
             create_mock_entity(entity_type="project", name="Project A", entity_id="proj_a"),
             create_mock_entity(entity_type="project", name="Project B", entity_id="proj_b"),
-        ]
-        mock_tasks = [
-            _normalize_metric_task_row(
-                create_metric_task_row(
-                    project_id="proj_a",
-                    status="done",
-                    priority="critical",
-                    assignees=["alice"],
-                    created_at=recent,
-                    completed_at=recent,
-                )
-            ),
-            _normalize_metric_task_row(
-                create_metric_task_row(
-                    project_id="proj_b",
-                    status="doing",
-                    priority="high",
-                    assignees=["bob"],
-                    created_at=recent,
-                )
-            ),
-        ]
-        metric_task_rows = AsyncMock(return_value=mock_tasks)
-
-        mock_service.list_entities = AsyncMock(
-            return_value=Page(items=mock_projects, next_cursor=None)
+        )
+        execute = AsyncMock(
+            return_value=rollup_payload(
+                tasks=[
+                    ("proj_a", "done", "critical", 3),
+                    ("proj_a", "todo", "high", 2),
+                    ("proj_b", "doing", "high", 1),
+                    (None, "backlog", None, 4),
+                ],
+                assignees=[
+                    ("proj_a", ["alice"], "done", 3),
+                    ("proj_a", ["alice", "bob"], "todo", 2),
+                    ("proj_b", "bob", "doing", 1),
+                ],
+                created=[("proj_a", 2), (None, 1)],
+                completions=[
+                    ("proj_a", (now - timedelta(days=1)).isoformat(), now),
+                    ("proj_a", None, now - timedelta(days=2)),
+                    ("proj_a", (now - timedelta(days=30)).isoformat(), now),
+                ],
+                due_dates=[
+                    ("proj_a", "todo", (now - timedelta(days=1)).isoformat()),
+                    ("proj_a", "todo", (now + timedelta(days=1)).isoformat()),
+                    ("proj_b", "done", (now - timedelta(days=1)).isoformat()),
+                ],
+            )
         )
 
         with (
@@ -806,57 +791,134 @@ class TestGetOrgMetrics:
                 "sibyl.api.routes.metrics.get_knowledge_read_adapter",
                 AsyncMock(return_value=mock_service),
             ),
-            patch(
-                "sibyl.api.routes.metrics._list_surreal_metric_task_rows",
-                metric_task_rows,
-            ),
+            patch("sibyl.api.routes.metrics.execute_surreal_graph_query", execute),
         ):
             result = await get_org_metrics(org=mock_org)
 
         assert mock_service.list_entities.await_args_list == [
-            call(
-                EntityType.PROJECT,
-                limit=500,
-                cursor=None,
-            ),
+            call(EntityType.PROJECT, limit=500, cursor=None),
         ]
-        metric_task_rows.assert_awaited_once_with(str(mock_org.id))
+        execute.assert_awaited_once()
         assert result.total_projects == 2
-        assert result.total_tasks == 2
-        assert result.status_distribution.done == 1
+        assert result.total_tasks == 10
+        assert result.status_distribution.done == 3
+        assert result.status_distribution.todo == 2
         assert result.status_distribution.doing == 1
-        assert result.priority_distribution.critical == 1
-        assert result.priority_distribution.high == 1
-        assert result.top_assignees[0].name == "alice"
-        assert result.projects_summary[0].id in {"proj_a", "proj_b"}
+        assert result.status_distribution.backlog == 4
+        assert result.priority_distribution.critical == 3
+        assert result.priority_distribution.high == 3
+        assert result.priority_distribution.medium == 4
+        assert result.completion_rate == 30.0
+        assert [(a.name, a.total, a.completed, a.in_progress) for a in result.top_assignees] == [
+            ("alice", 5, 3, 0),
+            ("bob", 3, 0, 1),
+        ]
+        assert result.tasks_created_last_7d == 3
+        assert result.tasks_completed_last_7d == 2
+        assert sum(point.value for point in result.velocity_trend) == 2
+        summary = {item.id: item for item in result.projects_summary}
+        assert summary["proj_a"].total == 5
+        assert summary["proj_a"].completed == 3
+        assert summary["proj_a"].high == 2
+        assert summary["proj_a"].critical == 0
+        assert summary["proj_a"].overdue == 1
+        assert summary["proj_b"].doing == 1
+        assert summary["proj_b"].overdue == 0
 
     @pytest.mark.asyncio
-    async def test_org_metrics_rejects_oversized_surreal_fast_path(self) -> None:
-        """Returns 413 when the Surreal metric fast path exceeds the task cap."""
-        from sibyl.api.routes.metrics import METRICS_MAX_TASKS, get_org_metrics
+    async def test_org_metrics_issues_one_grouped_statement(self) -> None:
+        """The task scan is gone: one grouped statement, no row cap, bounded output."""
+        from sibyl.api.routes.metrics import get_org_metrics
 
         mock_org = create_mock_org()
-        mock_service = AsyncMock()
-        mock_service.list_entities = AsyncMock(return_value=Page(items=[], next_cursor=None))
-        oversized_rows = [
-            create_metric_task_row(project_id="proj_a", status="todo")
-            for _ in range(METRICS_MAX_TASKS + 1)
-        ]
+        execute = AsyncMock(return_value=rollup_payload(tasks=[("proj_a", "todo", "high", 2500)]))
 
         with (
             patch(
                 "sibyl.api.routes.metrics.get_knowledge_read_adapter",
-                AsyncMock(return_value=mock_service),
+                AsyncMock(return_value=mock_project_service()),
             ),
-            patch(
-                "sibyl.api.routes.metrics.execute_surreal_graph_query",
-                AsyncMock(return_value=oversized_rows),
-            ),
-            pytest.raises(HTTPException) as exc_info,
+            patch("sibyl.api.routes.metrics.execute_surreal_graph_query", execute),
         ):
-            await get_org_metrics(org=mock_org)
+            result = await get_org_metrics(org=mock_org)
 
-        assert exc_info.value.status_code == 413
+        assert result.total_tasks == 2500
+        execute.assert_awaited_once()
+        group_id, statement = execute.await_args.args
+        assert group_id == str(mock_org.id)
+        assert statement == TASK_ROLLUP_STATEMENT
+        assert "GROUP BY project_id, status, priority" in statement
+        assert "LIMIT" not in statement
+        kwargs = execute.await_args.kwargs
+        assert kwargs["task_type"] == EntityType.TASK.value
+        assert isinstance(kwargs["created_cutoff"], datetime)
+        assert isinstance(kwargs["completed_cutoff"], datetime)
+        assert kwargs["created_cutoff"] > kwargs["completed_cutoff"]
+
+    @pytest.mark.asyncio
+    async def test_concurrent_dashboards_compute_rollups_once(self) -> None:
+        """Ten tabs refetching at once share one grouped statement."""
+        from sibyl.api.routes.metrics import get_org_metrics
+
+        mock_org = create_mock_org()
+        gate = asyncio.Event()
+
+        async def execute(*_args: Any, **_kwargs: Any) -> list[dict[str, object]]:
+            await gate.wait()
+            return rollup_payload(tasks=[("proj_a", "todo", "high", 1)])
+
+        execute_mock = AsyncMock(side_effect=execute)
+
+        with (
+            patch(
+                "sibyl.api.routes.metrics.get_knowledge_read_adapter",
+                AsyncMock(return_value=mock_project_service()),
+            ),
+            patch("sibyl.api.routes.metrics.execute_surreal_graph_query", execute_mock),
+        ):
+            requests = [asyncio.create_task(get_org_metrics(org=mock_org)) for _ in range(10)]
+            await asyncio.sleep(0)
+            gate.set()
+            results = await asyncio.gather(*requests)
+            # A later refetch inside the window is served from the memo too.
+            later = await get_org_metrics(org=mock_org)
+
+        assert execute_mock.await_count == 1
+        assert all(result.total_tasks == 1 for result in results)
+        assert later.total_tasks == 1
+
+    @pytest.mark.asyncio
+    async def test_task_broadcast_drops_the_memoized_rollups(self) -> None:
+        """The same broadcast that makes tabs refetch outdates the memo first."""
+        from sibyl.api.routes.metrics import get_org_metrics
+
+        mock_org = create_mock_org()
+        execute = AsyncMock(
+            side_effect=[
+                rollup_payload(tasks=[("proj_a", "todo", "high", 1)]),
+                rollup_payload(tasks=[("proj_a", "todo", "high", 2)]),
+            ]
+        )
+
+        with (
+            patch(
+                "sibyl.api.routes.metrics.get_knowledge_read_adapter",
+                AsyncMock(return_value=mock_project_service()),
+            ),
+            patch("sibyl.api.routes.metrics.execute_surreal_graph_query", execute),
+        ):
+            before = await get_org_metrics(org=mock_org)
+            await ConnectionManager().broadcast(
+                "health_update", {"status": "ok"}, org_id=str(mock_org.id)
+            )
+            unchanged = await get_org_metrics(org=mock_org)
+            await ConnectionManager().broadcast(
+                "entity_updated", {"id": "task_1", "entity_type": "task"}, org_id=str(mock_org.id)
+            )
+            after = await get_org_metrics(org=mock_org)
+
+        assert (before.total_tasks, unchanged.total_tasks, after.total_tasks) == (1, 1, 2)
+        assert execute.await_count == 2
 
     @pytest.mark.asyncio
     async def test_org_metrics_rejects_unbounded_service_task_enumeration(self) -> None:
@@ -901,7 +963,7 @@ class TestGetOrgMetrics:
                 AsyncMock(return_value=mock_service),
             ),
             patch(
-                "sibyl.api.routes.metrics._list_surreal_metric_task_rows",
+                "sibyl.api.routes.metrics._load_surreal_task_rollups",
                 AsyncMock(return_value=None),
             ),
             pytest.raises(HTTPException) as exc_info,
@@ -931,7 +993,7 @@ class TestGetOrgMetrics:
                 AsyncMock(return_value=mock_service),
             ),
             patch(
-                "sibyl.api.routes.metrics._list_surreal_metric_task_rows",
+                "sibyl.api.routes.metrics._load_surreal_task_rollups",
                 AsyncMock(return_value=None),
             ),
         ):
@@ -1001,7 +1063,7 @@ class TestGetOrgMetrics:
                 AsyncMock(return_value=mock_service),
             ),
             patch(
-                "sibyl.api.routes.metrics._list_surreal_metric_task_rows",
+                "sibyl.api.routes.metrics._load_surreal_task_rollups",
                 AsyncMock(return_value=None),
             ),
         ):
@@ -1093,7 +1155,7 @@ class TestGetOrgMetrics:
                 AsyncMock(return_value=mock_service),
             ),
             patch(
-                "sibyl.api.routes.metrics._list_surreal_metric_task_rows",
+                "sibyl.api.routes.metrics._load_surreal_task_rollups",
                 AsyncMock(return_value=None),
             ),
         ):
@@ -1191,7 +1253,7 @@ class TestGetOrgMetrics:
                 AsyncMock(return_value=mock_service),
             ),
             patch(
-                "sibyl.api.routes.metrics._list_surreal_metric_task_rows",
+                "sibyl.api.routes.metrics._load_surreal_task_rollups",
                 AsyncMock(return_value=None),
             ),
         ):
@@ -1247,7 +1309,7 @@ class TestGetOrgMetrics:
                 AsyncMock(return_value=mock_service),
             ),
             patch(
-                "sibyl.api.routes.metrics._list_surreal_metric_task_rows",
+                "sibyl.api.routes.metrics._load_surreal_task_rollups",
                 AsyncMock(return_value=None),
             ),
         ):
@@ -1313,7 +1375,7 @@ class TestGetOrgMetrics:
                 AsyncMock(return_value=mock_service),
             ),
             patch(
-                "sibyl.api.routes.metrics._list_surreal_metric_task_rows",
+                "sibyl.api.routes.metrics._load_surreal_task_rollups",
                 AsyncMock(return_value=None),
             ),
             patch(
@@ -1391,7 +1453,7 @@ class TestGetProjectSummaries:
                 AsyncMock(return_value=mock_service),
             ),
             patch(
-                "sibyl.api.routes.metrics._list_surreal_metric_task_rows",
+                "sibyl.api.routes.metrics._load_surreal_task_rollups",
                 AsyncMock(return_value=None),
             ),
         ):
@@ -1419,38 +1481,23 @@ class TestGetProjectSummaries:
             assert result.projects_summary[1].critical == 1
 
     @pytest.mark.asyncio
-    async def test_project_summaries_uses_surreal_metric_task_fast_path(self) -> None:
-        """Surreal-backed summaries fetch lean task rows without paging task entities."""
-        from sibyl.api.routes.metrics import METRICS_MAX_TASKS, get_project_summaries
+    async def test_project_summaries_render_the_grouped_statement(self) -> None:
+        """Surreal-backed summaries read grouped rows without paging task entities."""
+        from sibyl.api.routes.metrics import get_project_summaries
 
         mock_org = create_mock_org()
-        mock_service = AsyncMock()
-        execute_surreal_query = AsyncMock(
-            return_value=[
-                create_metric_task_row(
-                    project_id="proj_b",
-                    status="doing",
-                    priority="critical",
-                ),
-                create_metric_task_row(
-                    project_id="proj_a",
-                    status="done",
-                    priority="high",
-                ),
-                create_metric_task_row(
-                    project_id="proj_a",
-                    status="todo",
-                    priority="high",
-                ),
-            ]
-        )
-
-        mock_projects = [
+        mock_service = mock_project_service(
             create_mock_entity(entity_type="project", name="Project A", entity_id="proj_a"),
             create_mock_entity(entity_type="project", name="Project B", entity_id="proj_b"),
-        ]
-        mock_service.list_entities = AsyncMock(
-            return_value=Page(items=mock_projects, next_cursor=None)
+        )
+        execute = AsyncMock(
+            return_value=rollup_payload(
+                tasks=[
+                    ("proj_b", "doing", "critical", 1),
+                    ("proj_a", "done", "high", 1),
+                    ("proj_a", "todo", "high", 1),
+                ]
+            )
         )
 
         with (
@@ -1458,31 +1505,20 @@ class TestGetProjectSummaries:
                 "sibyl.api.routes.metrics.get_knowledge_read_adapter",
                 AsyncMock(return_value=mock_service),
             ),
-            patch(
-                "sibyl.api.routes.metrics.execute_surreal_graph_query",
-                execute_surreal_query,
-            ),
+            patch("sibyl.api.routes.metrics.execute_surreal_graph_query", execute),
         ):
             result = await get_project_summaries(org=mock_org)
 
         assert mock_service.list_entities.await_args_list == [
-            call(
-                EntityType.PROJECT,
-                limit=500,
-                cursor=None,
-            ),
+            call(EntityType.PROJECT, limit=500, cursor=None),
         ]
-        assert execute_surreal_query.await_count == 1
-        assert execute_surreal_query.await_args.args[0] == str(mock_org.id)
-        assert "FROM entity" in execute_surreal_query.await_args.args[1]
+        execute.assert_awaited_once()
+        assert execute.await_args.args == (str(mock_org.id), TASK_ROLLUP_STATEMENT)
+        assert "GROUP BY project_id, status, priority" in TASK_ROLLUP_STATEMENT
         assert (
-            "string::lowercase(status ?? attributes.status ?? '') != 'archived'"
-            in execute_surreal_query.await_args.args[1]
+            "string::lowercase(attributes.status ?? status ?? '') != 'archived'"
+            in TASK_ROLLUP_STATEMENT
         )
-        assert execute_surreal_query.await_args.kwargs == {
-            "task_type": EntityType.TASK.value,
-            "limit": METRICS_MAX_TASKS + 1,
-        }
         assert result.projects_summary[0].id == "proj_a"
         assert result.projects_summary[0].total == 2
         assert result.projects_summary[0].completed == 1
@@ -1522,7 +1558,7 @@ class TestGetProjectSummaries:
                 AsyncMock(return_value=mock_service),
             ),
             patch(
-                "sibyl.api.routes.metrics._list_surreal_metric_task_rows",
+                "sibyl.api.routes.metrics._load_surreal_task_rollups",
                 AsyncMock(return_value=None),
             ),
         ):
@@ -1568,7 +1604,7 @@ class TestMetricsErrorHandling:
                 AsyncMock(return_value=mock_service),
             ),
             patch(
-                "sibyl.api.routes.metrics.get_entity_graph_runtime",
+                "sibyl.api.routes.metrics._load_surreal_task_rollups",
                 side_effect=Exception("Database error"),
             ),
         ):

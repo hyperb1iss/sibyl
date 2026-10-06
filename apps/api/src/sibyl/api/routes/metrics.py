@@ -1,7 +1,19 @@
-"""Metrics endpoints for project and org-level analytics."""
+"""Metrics endpoints for project and org-level analytics.
 
-import json
+Every number here is a rollup of the organization's open tasks: counts by
+status and priority per project, assignee totals, completions per day, and
+tasks created or due within a window. The graph answers those with one
+grouped statement whose row count is bounded by the distinct (project,
+status, priority) combinations rather than by the number of tasks, and the
+result is memoized per organization so a burst of dashboard refetches
+computes it once.
+"""
+
+from __future__ import annotations
+
 from collections import defaultdict
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -24,17 +36,12 @@ from sibyl.auth.authorization import verify_entity_project_access
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
 from sibyl.persistence.auth_runtime import list_accessible_project_graph_ids
+from sibyl.persistence.read_memo import OrgReadMemo
 from sibyl_core.auth import AuthOrganization, OrganizationRole, ProjectRole
 from sibyl_core.models.entities import EntityType
 from sibyl_core.services import KnowledgeReadService
 
 log = structlog.get_logger()
-
-
-async def get_entity_graph_runtime(group_id: str):
-    from sibyl.persistence.graph_runtime import get_entity_graph_runtime as service
-
-    return await service(group_id)
 
 
 async def get_knowledge_read_adapter(group_id: str):
@@ -54,6 +61,11 @@ async def execute_surreal_graph_query(
 
 
 METRICS_MAX_TASKS = 10_000
+VELOCITY_DAYS = 14
+RECENT_DAYS = 7
+# Rollups are dropped by the write path's broadcast; the window only bounds
+# staleness for a write that never broadcasts.
+TASK_ROLLUP_TTL_SECONDS = 10.0
 
 
 class MetricsEntityLimitExceededError(RuntimeError):
@@ -73,7 +85,7 @@ router = APIRouter(
 )
 
 
-def _parse_iso_date(date_str: str | datetime | None) -> datetime | None:
+def _parse_iso_date(date_str: object) -> datetime | None:
     """Parse ISO date strings or datetime objects to UTC datetimes."""
     if not date_str:
         return None
@@ -81,6 +93,8 @@ def _parse_iso_date(date_str: str | datetime | None) -> datetime | None:
         if date_str.tzinfo is None:
             return date_str.replace(tzinfo=UTC)
         return date_str.astimezone(UTC)
+    if not isinstance(date_str, str):
+        return None
     try:
         parsed = datetime.fromisoformat(date_str)
         if parsed.tzinfo is None:
@@ -95,127 +109,313 @@ def _is_open_status(status: str) -> bool:
     return status not in {"done", "archived"}
 
 
-def _compute_status_distribution(tasks: list[dict]) -> TaskStatusDistribution:
-    """Compute task counts by status."""
-    dist = TaskStatusDistribution()
-    for task in tasks:
-        status = task.get("metadata", {}).get("status", "backlog")
-        if hasattr(dist, status):
-            setattr(dist, status, getattr(dist, status) + 1)
-    return dist
+# =============================================================================
+# Task rollups
+# =============================================================================
 
 
-def _compute_priority_distribution(tasks: list[dict]) -> TaskPriorityDistribution:
-    """Compute task counts by priority."""
-    dist = TaskPriorityDistribution()
-    for task in tasks:
-        priority = task.get("metadata", {}).get("priority", "medium")
-        if hasattr(dist, priority):
-            setattr(dist, priority, getattr(dist, priority) + 1)
-    return dist
+@dataclass(frozen=True, slots=True)
+class TaskRollup:
+    """Open tasks sharing one (project, status, priority) combination."""
+
+    project_id: str
+    status: str
+    priority: str
+    count: int
 
 
-def _compute_assignee_stats(tasks: list[dict]) -> list[AssigneeStats]:
-    """Compute stats per assignee."""
-    stats: dict[str, dict] = defaultdict(lambda: {"total": 0, "completed": 0, "in_progress": 0})
+@dataclass(frozen=True, slots=True)
+class AssigneeRollup:
+    """Open tasks one assignee holds in one project at one status."""
 
-    for task in tasks:
-        assignees = task.get("metadata", {}).get("assignees", [])
-        status = task.get("metadata", {}).get("status", "")
+    project_id: str
+    assignee: str
+    status: str
+    count: int
 
-        # Handle both list and single assignee
-        if isinstance(assignees, str):
-            assignees = [assignees] if assignees else []
 
-        for assignee in assignees:
-            if not assignee:
-                continue
-            stats[assignee]["total"] += 1
-            if status == "done":
-                stats[assignee]["completed"] += 1
-            elif status == "doing":
-                stats[assignee]["in_progress"] += 1
+@dataclass(frozen=True, slots=True)
+class TaskCompletion:
+    """One task completed inside the velocity window."""
 
+    project_id: str
+    completed_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class TaskDueDate:
+    """One open task carrying a due date."""
+
+    project_id: str
+    status: str
+    due_date: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class OrgTaskRollups:
+    """Grouped counts over an organization's non-archived tasks.
+
+    ``project_id`` is the empty string for tasks outside any project; those
+    count toward organization totals and never toward a project summary.
+    """
+
+    tasks: tuple[TaskRollup, ...]
+    assignees: tuple[AssigneeRollup, ...]
+    created: tuple[tuple[str, int], ...]
+    completions: tuple[TaskCompletion, ...]
+    due_dates: tuple[TaskDueDate, ...]
+
+    @property
+    def total_tasks(self) -> int:
+        return sum(row.count for row in self.tasks)
+
+    def scoped(self, accessible_project_ids: set[str] | None) -> OrgTaskRollups:
+        """Keep the rows of accessible projects when project RBAC applies.
+
+        A caller with a project set sees only project work; unassigned tasks
+        drop out the way they always have for a scoped reader.
+        """
+        if accessible_project_ids is None:
+            return self
+
+        def allowed(project_id: str) -> bool:
+            return bool(project_id) and project_id in accessible_project_ids
+
+        return OrgTaskRollups(
+            tasks=tuple(row for row in self.tasks if allowed(row.project_id)),
+            assignees=tuple(row for row in self.assignees if allowed(row.project_id)),
+            created=tuple(item for item in self.created if allowed(item[0])),
+            completions=tuple(row for row in self.completions if allowed(row.project_id)),
+            due_dates=tuple(row for row in self.due_dates if allowed(row.project_id)),
+        )
+
+
+def _text(value: object) -> str:
+    return str(value).strip() if isinstance(value, str) else ""
+
+
+def _status_value(value: object) -> str:
+    return _text(value).lower() or "backlog"
+
+
+def _priority_value(value: object) -> str:
+    return _text(value).lower() or "medium"
+
+
+def _count_value(value: object) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _assignee_names(value: object) -> list[str]:
+    """Read assignees as the list they are, or the single string they were."""
+    if isinstance(value, str):
+        return [value] if value else []
+    if isinstance(value, Iterable) and not isinstance(value, bytes | Mapping):
+        return [str(name) for name in value if name]
+    return []
+
+
+def _nested_rows(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
     return [
-        AssigneeStats(name=name, **data)
-        for name, data in sorted(stats.items(), key=lambda x: x[1]["total"], reverse=True)
+        {str(key): item for key, item in row.items()} for row in value if isinstance(row, Mapping)
     ]
 
 
-def _compute_velocity_trend(tasks: list[dict], days: int = 14) -> list[TimeSeriesPoint]:
-    """Compute daily completion counts for the last N days."""
-    now = datetime.now(UTC)
-    daily_counts: dict[str, int] = defaultdict(int)
+def rollups_from_task_dicts(tasks: Iterable[Mapping[str, Any]], *, now: datetime) -> OrgTaskRollups:
+    """Group task-shaped dictionaries the way the grouped statement would.
 
-    # Initialize all days with 0
-    for i in range(days):
-        date = (now - timedelta(days=i)).strftime("%Y-%m-%d")
-        daily_counts[date] = 0
+    Serves the runtime that cannot run the aggregate, so a non-Surreal graph
+    renders the same response from paged rows.
+    """
+    task_counts: dict[tuple[str, str, str], int] = defaultdict(int)
+    assignee_counts: dict[tuple[str, str, str], int] = defaultdict(int)
+    created_counts: dict[str, int] = defaultdict(int)
+    completions: list[TaskCompletion] = []
+    due_dates: list[TaskDueDate] = []
+    created_cutoff = now - timedelta(days=RECENT_DAYS)
 
-    # Count completions by day
     for task in tasks:
-        status = task.get("metadata", {}).get("status", "")
-        if status != "done":
+        metadata = task.get("metadata")
+        if not isinstance(metadata, Mapping):
+            metadata = {}
+        status_value = _status_value(metadata.get("status"))
+        if status_value == "archived":
             continue
+        project_id = _text(metadata.get("project_id"))
+        priority = _priority_value(metadata.get("priority"))
+        task_counts[(project_id, status_value, priority)] += 1
+        for name in _assignee_names(metadata.get("assignees")):
+            assignee_counts[(project_id, name, status_value)] += 1
 
-        # Try completed_at, then updated_at
-        completed_at = task.get("metadata", {}).get("completed_at")
-        if not completed_at:
-            completed_at = task.get("updated_at")
+        created_at = _parse_iso_date(task.get("created_at") or metadata.get("created_at"))
+        if created_at is not None and created_at >= created_cutoff:
+            created_counts[project_id] += 1
 
-        completed_date = _parse_iso_date(completed_at)
-        if completed_date and completed_date >= now - timedelta(days=days):
-            date_str = completed_date.strftime("%Y-%m-%d")
-            if date_str in daily_counts:
-                daily_counts[date_str] += 1
+        if status_value == "done":
+            completed_at = _parse_iso_date(metadata.get("completed_at")) or _parse_iso_date(
+                task.get("updated_at")
+            )
+            if completed_at is not None:
+                completions.append(TaskCompletion(project_id, completed_at))
 
-    # Return sorted by date ascending
-    return [TimeSeriesPoint(date=date, value=count) for date, count in sorted(daily_counts.items())]
+        due_date = _parse_iso_date(metadata.get("due_date"))
+        if due_date is not None:
+            due_dates.append(TaskDueDate(project_id, status_value, due_date))
 
-
-def _count_recent_tasks(tasks: list[dict], days: int, field: str = "created_at") -> int:
-    """Count tasks created/completed in the last N days."""
-    now = datetime.now(UTC)
-    cutoff = now - timedelta(days=days)
-    count = 0
-
-    for task in tasks:
-        date_str = task.get(field) or task.get("metadata", {}).get(field)
-        date = _parse_iso_date(date_str)
-        if date and date >= cutoff:
-            count += 1
-
-    return count
+    return OrgTaskRollups(
+        tasks=tuple(TaskRollup(*key, count) for key, count in task_counts.items()),
+        assignees=tuple(AssigneeRollup(*key, count) for key, count in assignee_counts.items()),
+        created=tuple(created_counts.items()),
+        completions=tuple(completions),
+        due_dates=tuple(due_dates),
+    )
 
 
-async def _list_entities_by_type_paginated(
-    entities: Any,
-    entity_type: EntityType,
-    *,
-    batch_size: int = 1000,
-    **filters: Any,
-) -> list[Any]:
-    """List all matching entities by paging through list_by_type."""
-    items: list[Any] = []
-    offset = 0
-
-    while True:
-        batch = await entities.list_by_type(
-            entity_type,
-            limit=batch_size,
-            offset=offset,
-            **filters,
+def rollups_from_surreal_payload(payload: Mapping[str, object]) -> OrgTaskRollups:
+    """Read the grouped statement's RETURN payload."""
+    tasks = tuple(
+        TaskRollup(
+            _text(row.get("project_id")),
+            _status_value(row.get("status")),
+            _priority_value(row.get("priority")),
+            _count_value(row.get("n")),
         )
-        if not batch:
-            break
+        for row in _nested_rows(payload.get("tasks"))
+    )
+    assignees: list[AssigneeRollup] = []
+    for row in _nested_rows(payload.get("assignees")):
+        project_id = _text(row.get("project_id"))
+        status_value = _status_value(row.get("status"))
+        count = _count_value(row.get("n"))
+        assignees.extend(
+            AssigneeRollup(project_id, name, status_value, count)
+            for name in _assignee_names(row.get("assignees"))
+        )
+    created = tuple(
+        (_text(row.get("project_id")), _count_value(row.get("n")))
+        for row in _nested_rows(payload.get("created"))
+    )
+    completions: list[TaskCompletion] = []
+    for row in _nested_rows(payload.get("completions")):
+        completed_at = _parse_iso_date(row.get("completed_at")) or _parse_iso_date(
+            row.get("updated_at")
+        )
+        if completed_at is not None:
+            completions.append(TaskCompletion(_text(row.get("project_id")), completed_at))
+    due_dates: list[TaskDueDate] = []
+    for row in _nested_rows(payload.get("due_dates")):
+        due_date = _parse_iso_date(row.get("due_date"))
+        if due_date is not None:
+            due_dates.append(
+                TaskDueDate(
+                    _text(row.get("project_id")), _status_value(row.get("status")), due_date
+                )
+            )
+    return OrgTaskRollups(
+        tasks=tasks,
+        assignees=tuple(assignees),
+        created=created,
+        completions=tuple(completions),
+        due_dates=tuple(due_dates),
+    )
 
-        items.extend(batch)
-        if len(batch) < batch_size:
-            break
 
-        offset += batch_size
+# The reader resolves attributes.* over the top-level column, so every group
+# key coalesces the same way. The not-archived predicate filters after the
+# entity_type index access; a grouped answer is bounded by distinct
+# (project, status, priority) combinations, never by the task count.
+# Completions are selected as rows: completed_at is stored as text, so the
+# datetime column updated_at (bumped by the completing write, so never older)
+# bounds the window and Python reads the real completion instant.
+TASK_ROLLUP_STATEMENT = """
+RETURN {
+    tasks: (
+        SELECT attributes.project_id ?? project_id AS project_id,
+               attributes.status ?? status AS status,
+               attributes.priority ?? priority AS priority,
+               count() AS n
+        FROM entity
+        WHERE group_id = $group_id
+          AND entity_type = $task_type
+          AND string::lowercase(attributes.status ?? status ?? '') != 'archived'
+        GROUP BY project_id, status, priority
+    ),
+    assignees: (
+        SELECT attributes.project_id ?? project_id AS project_id,
+               attributes.assignees AS assignees,
+               attributes.status ?? status AS status,
+               count() AS n
+        FROM entity
+        WHERE group_id = $group_id
+          AND entity_type = $task_type
+          AND string::lowercase(attributes.status ?? status ?? '') != 'archived'
+          AND attributes.assignees != NONE
+        GROUP BY project_id, assignees, status
+    ),
+    created: (
+        SELECT attributes.project_id ?? project_id AS project_id,
+               count() AS n
+        FROM entity
+        WHERE group_id = $group_id
+          AND entity_type = $task_type
+          AND string::lowercase(attributes.status ?? status ?? '') != 'archived'
+          AND created_at >= $created_cutoff
+        GROUP BY project_id
+    ),
+    completions: (
+        SELECT attributes.project_id ?? project_id AS project_id,
+               attributes.completed_at AS completed_at,
+               updated_at
+        FROM entity
+        WHERE group_id = $group_id
+          AND entity_type = $task_type
+          AND string::lowercase(attributes.status ?? status ?? '') = 'done'
+          AND updated_at >= $completed_cutoff
+    ),
+    due_dates: (
+        SELECT attributes.project_id ?? project_id AS project_id,
+               attributes.status ?? status AS status,
+               attributes.due_date AS due_date
+        FROM entity
+        WHERE group_id = $group_id
+          AND entity_type = $task_type
+          AND string::lowercase(attributes.status ?? status ?? '') NOT IN ['archived', 'done']
+          AND attributes.due_date != NONE
+    ),
+};
+"""
 
-    return items
+_TASK_ROLLUPS: OrgReadMemo[OrgTaskRollups] = OrgReadMemo(
+    "task-rollups", ttl_seconds=TASK_ROLLUP_TTL_SECONDS
+)
+
+
+async def _load_surreal_task_rollups(group_id: str) -> OrgTaskRollups | None:
+    now = datetime.now(UTC)
+    try:
+        rows = await execute_surreal_graph_query(
+            group_id,
+            TASK_ROLLUP_STATEMENT,
+            task_type=EntityType.TASK.value,
+            created_cutoff=now - timedelta(days=RECENT_DAYS),
+            completed_cutoff=now - timedelta(days=VELOCITY_DAYS),
+        )
+    except Exception as exc:
+        log.warning(
+            "surreal_task_rollup_failed",
+            group_id=group_id,
+            error_type=type(exc).__name__,
+        )
+        return None
+    if rows is None:
+        return None
+    payload = rows[0] if rows and isinstance(rows[0], Mapping) else {}
+    return rollups_from_surreal_payload(payload)
 
 
 async def _list_entities_by_type_paginated_via_service(
@@ -250,6 +450,138 @@ async def _list_entities_by_type_paginated_via_service(
     return entities
 
 
+async def _load_task_rollups(group_id: str, service: KnowledgeReadService) -> OrgTaskRollups:
+    """Return the organization's task rollups, computed once per window."""
+
+    async def compute() -> OrgTaskRollups:
+        rollups = await _load_surreal_task_rollups(group_id)
+        if rollups is not None:
+            return rollups
+        tasks = [
+            task.model_dump()
+            for task in await _list_entities_by_type_paginated_via_service(
+                service,
+                EntityType.TASK,
+                batch_size=1000,
+                max_entities=METRICS_MAX_TASKS,
+            )
+        ]
+        return rollups_from_task_dicts(tasks, now=datetime.now(UTC))
+
+    return await _TASK_ROLLUPS.get(group_id, compute)
+
+
+# =============================================================================
+# Rendering
+# =============================================================================
+
+
+def _status_distribution(rollups: OrgTaskRollups) -> TaskStatusDistribution:
+    dist = TaskStatusDistribution()
+    for row in rollups.tasks:
+        if row.status in TaskStatusDistribution.model_fields:
+            setattr(dist, row.status, getattr(dist, row.status) + row.count)
+    return dist
+
+
+def _priority_distribution(rollups: OrgTaskRollups) -> TaskPriorityDistribution:
+    dist = TaskPriorityDistribution()
+    for row in rollups.tasks:
+        if row.priority in TaskPriorityDistribution.model_fields:
+            setattr(dist, row.priority, getattr(dist, row.priority) + row.count)
+    return dist
+
+
+def _assignee_stats(rollups: OrgTaskRollups) -> list[AssigneeStats]:
+    stats: dict[str, dict[str, int]] = defaultdict(
+        lambda: {"total": 0, "completed": 0, "in_progress": 0}
+    )
+    for row in rollups.assignees:
+        entry = stats[row.assignee]
+        entry["total"] += row.count
+        if row.status == "done":
+            entry["completed"] += row.count
+        elif row.status == "doing":
+            entry["in_progress"] += row.count
+    return [
+        AssigneeStats(name=name, **data)
+        for name, data in sorted(stats.items(), key=lambda item: item[1]["total"], reverse=True)
+    ]
+
+
+def _velocity_trend(
+    rollups: OrgTaskRollups, *, now: datetime, days: int = VELOCITY_DAYS
+) -> list[TimeSeriesPoint]:
+    """Daily completion counts for the last ``days`` days, oldest first."""
+    daily_counts = {
+        (now - timedelta(days=offset)).strftime("%Y-%m-%d"): 0 for offset in range(days)
+    }
+    cutoff = now - timedelta(days=days)
+    for row in rollups.completions:
+        if row.completed_at < cutoff:
+            continue
+        key = row.completed_at.strftime("%Y-%m-%d")
+        if key in daily_counts:
+            daily_counts[key] += 1
+    return [TimeSeriesPoint(date=date, value=count) for date, count in sorted(daily_counts.items())]
+
+
+def _completed_last_week(velocity: list[TimeSeriesPoint]) -> int:
+    return (
+        sum(point.value for point in velocity[-RECENT_DAYS:])
+        if len(velocity) >= RECENT_DAYS
+        else sum(point.value for point in velocity)
+    )
+
+
+def _created_last_week(rollups: OrgTaskRollups) -> int:
+    return sum(count for _project_id, count in rollups.created)
+
+
+def _empty_project_task_counts() -> dict[str, int]:
+    """Return a zeroed task rollup for a project."""
+    return {
+        "total": 0,
+        "completed": 0,
+        "doing": 0,
+        "blocked": 0,
+        "review": 0,
+        "todo": 0,
+        "backlog": 0,
+        "critical": 0,
+        "high": 0,
+        "overdue": 0,
+    }
+
+
+_STATUS_COUNT_KEYS = {
+    "done": "completed",
+    "doing": "doing",
+    "blocked": "blocked",
+    "review": "review",
+    "todo": "todo",
+    "backlog": "backlog",
+}
+
+
+def _project_task_counts(rollups: OrgTaskRollups, *, now: datetime) -> dict[str, dict[str, int]]:
+    """Aggregate per-project task rollups from grouped rows."""
+    project_task_counts: dict[str, dict[str, int]] = defaultdict(_empty_project_task_counts)
+    for row in rollups.tasks:
+        if not row.project_id:
+            continue
+        counts = project_task_counts[row.project_id]
+        counts["total"] += row.count
+        if (key := _STATUS_COUNT_KEYS.get(row.status)) is not None:
+            counts[key] += row.count
+        if _is_open_status(row.status) and row.priority in ("critical", "high"):
+            counts[row.priority] += row.count
+    for due in rollups.due_dates:
+        if due.project_id and _is_open_status(due.status) and due.due_date < now:
+            project_task_counts[due.project_id]["overdue"] += 1
+    return project_task_counts
+
+
 def _build_project_summaries(
     projects: list[Any], counts_by_project: dict[str, dict[str, int]]
 ) -> list[ProjectSummary]:
@@ -280,109 +612,6 @@ def _build_project_summaries(
     return projects_summary
 
 
-def _empty_project_task_counts() -> dict[str, int]:
-    """Return a zeroed task rollup for a project."""
-    return {
-        "total": 0,
-        "completed": 0,
-        "doing": 0,
-        "blocked": 0,
-        "review": 0,
-        "todo": 0,
-        "backlog": 0,
-        "critical": 0,
-        "high": 0,
-        "overdue": 0,
-    }
-
-
-def _compute_project_task_counts(
-    tasks: list[dict[str, Any]],
-    *,
-    now: datetime,
-) -> dict[str, dict[str, int]]:
-    """Aggregate per-project task rollups from normalized task dictionaries."""
-    project_task_counts: dict[str, dict[str, int]] = defaultdict(_empty_project_task_counts)
-
-    for task in tasks:
-        metadata = task.get("metadata", {})
-        proj_id = metadata.get("project_id", "")
-        if not proj_id:
-            continue
-
-        counts = project_task_counts[proj_id]
-        counts["total"] += 1
-
-        status = metadata.get("status", "backlog")
-        if status == "done":
-            counts["completed"] += 1
-        elif status == "doing":
-            counts["doing"] += 1
-        elif status == "blocked":
-            counts["blocked"] += 1
-        elif status == "review":
-            counts["review"] += 1
-        elif status == "todo":
-            counts["todo"] += 1
-        elif status == "backlog":
-            counts["backlog"] += 1
-
-        if _is_open_status(status):
-            priority = metadata.get("priority", "")
-            if priority == "critical":
-                counts["critical"] += 1
-            elif priority == "high":
-                counts["high"] += 1
-
-            due_date = _parse_iso_date(metadata.get("due_date"))
-            if due_date and due_date < now:
-                counts["overdue"] += 1
-
-    return project_task_counts
-
-
-def _parse_metadata_dict(metadata: Any) -> dict[str, Any]:
-    """Parse graph metadata payloads into dictionaries."""
-    if isinstance(metadata, dict):
-        return metadata
-    if isinstance(metadata, str):
-        try:
-            parsed = json.loads(metadata)
-        except json.JSONDecodeError:
-            return {}
-        if isinstance(parsed, dict):
-            return parsed
-    return {}
-
-
-def _prefer_metadata_value(metadata: dict[str, Any], row: dict[str, Any], field: str) -> Any:
-    """Prefer canonical metadata values and fall back to top-level properties."""
-    metadata_value = metadata.get(field)
-    if metadata_value not in (None, ""):
-        return metadata_value
-
-    row_value = row.get(field)
-    if row_value not in (None, ""):
-        return row_value
-
-    return None
-
-
-def _prefer_valid_datetime_value(
-    metadata: dict[str, Any], row: dict[str, Any], field: str
-) -> str | None:
-    """Prefer the first parseable datetime value, falling back across representations."""
-    metadata_value = metadata.get(field)
-    if _parse_iso_date(metadata_value):
-        return metadata_value
-
-    row_value = row.get(field)
-    if _parse_iso_date(row_value):
-        return row_value
-
-    return metadata_value or row_value
-
-
 def _filter_projects_by_access(
     projects: list[Any], accessible_project_ids: set[str] | None
 ) -> list[Any]:
@@ -392,117 +621,9 @@ def _filter_projects_by_access(
     return [project for project in projects if str(project.id) in accessible_project_ids]
 
 
-def _filter_tasks_by_access(
-    tasks: list[dict[str, Any]], accessible_project_ids: set[str] | None
-) -> list[dict[str, Any]]:
-    """Filter tasks to accessible projects when project RBAC set is available."""
-    if accessible_project_ids is None:
-        return tasks
-
-    filtered: list[dict[str, Any]] = []
-    for task in tasks:
-        project_id = str(task.get("metadata", {}).get("project_id") or "")
-        if project_id and project_id in accessible_project_ids:
-            filtered.append(task)
-    return filtered
-
-
-def _normalize_metric_task_row(row: dict[str, Any]) -> dict[str, Any]:
-    """Normalize raw task rows into the legacy task-shaped metrics format."""
-    metadata = _parse_metadata_dict(row.get("metadata"))
-
-    assignees = _prefer_metadata_value(metadata, row, "assignees")
-    if assignees is None:
-        assignees = []
-
-    created_at = _prefer_valid_datetime_value(metadata, row, "created_at")
-    completed_at = _prefer_valid_datetime_value(metadata, row, "completed_at")
-    due_date = _prefer_valid_datetime_value(metadata, row, "due_date")
-
-    normalized_metadata = {
-        **metadata,
-        "project_id": _prefer_metadata_value(metadata, row, "project_id"),
-        "status": _prefer_metadata_value(metadata, row, "status") or "backlog",
-        "priority": _prefer_metadata_value(metadata, row, "priority") or "medium",
-        "assignees": assignees,
-        "created_at": created_at,
-        "completed_at": completed_at,
-        "due_date": due_date,
-    }
-
-    return {
-        "created_at": created_at,
-        "completed_at": completed_at,
-        "updated_at": row.get("updated_at"),
-        "metadata": normalized_metadata,
-    }
-
-
-async def _list_surreal_metric_task_rows(group_id: str) -> list[dict[str, Any]] | None:
-    try:
-        rows = await execute_surreal_graph_query(
-            group_id,
-            """
-            SELECT
-                uuid,
-                project_id,
-                status,
-                priority,
-                assignees,
-                completed_at,
-                due_date,
-                attributes.metadata AS metadata,
-                created_at,
-                updated_at ?? attributes.updated_at AS updated_at
-            FROM entity
-            WHERE group_id = $group_id
-                AND entity_type = $task_type
-                AND string::lowercase(status ?? attributes.status ?? '') != 'archived'
-            LIMIT $limit;
-            """,
-            task_type=EntityType.TASK.value,
-            limit=METRICS_MAX_TASKS + 1,
-        )
-    except Exception as exc:
-        log.warning(
-            "surreal_metric_task_fast_path_failed",
-            group_id=group_id,
-            error_type=type(exc).__name__,
-        )
-        return None
-
-    if rows is None:
-        return None
-
-    # Outside the try/except above on purpose: raising inside it would be
-    # swallowed as a fast-path failure instead of surfacing the 413.
-    if len(rows) > METRICS_MAX_TASKS:
-        raise MetricsEntityLimitExceededError(
-            f"surreal metric fast-path exceeded task cap: {METRICS_MAX_TASKS}"
-        )
-
-    tasks = [_normalize_metric_task_row(row) for row in rows]
-    return [
-        task for task in tasks if str(task["metadata"].get("status") or "").lower() != "archived"
-    ]
-
-
-async def _list_summary_metric_tasks(
-    group_id: str,
-    service: KnowledgeReadService,
-) -> list[dict[str, Any]]:
-    if (rows := await _list_surreal_metric_task_rows(group_id)) is not None:
-        return rows
-
-    return [
-        task.model_dump()
-        for task in await _list_entities_by_type_paginated_via_service(
-            service,
-            EntityType.TASK,
-            batch_size=1000,
-            max_entities=METRICS_MAX_TASKS,
-        )
-    ]
+# =============================================================================
+# Endpoints
+# =============================================================================
 
 
 @router.get("/projects/{project_id}", response_model=ProjectMetricsResponse)
@@ -518,7 +639,6 @@ async def get_project_metrics(
     # membership that reading the project itself does.
     await verify_entity_project_access(None, ctx, project_id, required_role=ProjectRole.VIEWER)
     service = await get_knowledge_read_adapter(group_id)
-    entity_runtime = await get_entity_graph_runtime(group_id)
 
     # Get project
     project = await service.get_entity(project_id)
@@ -531,43 +651,23 @@ async def get_project_metrics(
             ),
         )
 
-    project_tasks = await _list_entities_by_type_paginated(
-        entity_runtime.entity_manager,
-        EntityType.TASK,
-        project_id=project_id,
-    )
-    tasks = [task.model_dump() for task in project_tasks]
-
-    # Compute metrics
-    status_dist = _compute_status_distribution(tasks)
-    priority_dist = _compute_priority_distribution(tasks)
-    assignees = _compute_assignee_stats(tasks)
-    velocity = _compute_velocity_trend(tasks)
-
-    total = len(tasks)
-    completed = status_dist.done
-    completion_rate = (completed / total * 100) if total > 0 else 0.0
-
-    # Count recent activity
-    tasks_created_7d = _count_recent_tasks(tasks, 7, "created_at")
-    tasks_completed_7d = sum(1 for t in tasks if t.get("metadata", {}).get("status") == "done")
-    # Re-count completed in last 7d using velocity
-    tasks_completed_7d = (
-        sum(p.value for p in velocity[-7:])
-        if len(velocity) >= 7
-        else sum(p.value for p in velocity)
-    )
+    rollups = (await _load_task_rollups(group_id, service)).scoped({project_id})
+    now = datetime.now(UTC)
+    status_dist = _status_distribution(rollups)
+    velocity = _velocity_trend(rollups, now=now)
+    total = rollups.total_tasks
+    completion_rate = (status_dist.done / total * 100) if total > 0 else 0.0
 
     metrics = ProjectMetrics(
         project_id=project_id,
         project_name=project.name,
         total_tasks=total,
         status_distribution=status_dist,
-        priority_distribution=priority_dist,
+        priority_distribution=_priority_distribution(rollups),
         completion_rate=round(completion_rate, 1),
-        assignees=assignees[:10],  # Top 10 assignees
-        tasks_created_last_7d=tasks_created_7d,
-        tasks_completed_last_7d=tasks_completed_7d,
+        assignees=_assignee_stats(rollups)[:10],  # Top 10 assignees
+        tasks_created_last_7d=_created_last_week(rollups),
+        tasks_completed_last_7d=_completed_last_week(velocity),
         velocity_trend=velocity,
     )
 
@@ -593,12 +693,8 @@ async def get_project_summaries(
         )
         projects = _filter_projects_by_access(projects, accessible_project_ids)
 
-        tasks = await _list_summary_metric_tasks(group_id, service)
-        tasks = _filter_tasks_by_access(tasks, accessible_project_ids)
-        counts_by_project = _compute_project_task_counts(
-            tasks,
-            now=datetime.now(UTC),
-        )
+        rollups = (await _load_task_rollups(group_id, service)).scoped(accessible_project_ids)
+        counts_by_project = _project_task_counts(rollups, now=datetime.now(UTC))
 
         return ProjectSummariesResponse(
             projects_summary=_build_project_summaries(projects, counts_by_project)
@@ -640,38 +736,26 @@ async def get_org_metrics(
         )
         projects = _filter_projects_by_access(projects, accessible_project_ids)
 
-        tasks = await _list_summary_metric_tasks(group_id, service)
-        tasks = _filter_tasks_by_access(tasks, accessible_project_ids)
-
-        status_dist = _compute_status_distribution(tasks)
-        priority_dist = _compute_priority_distribution(tasks)
-        assignees = _compute_assignee_stats(tasks)
-        velocity = _compute_velocity_trend(tasks)
-
-        total_tasks = len(tasks)
-        tasks_created_7d = _count_recent_tasks(tasks, 7, "created_at")
-        tasks_completed_7d = (
-            sum(p.value for p in velocity[-7:])
-            if len(velocity) >= 7
-            else sum(p.value for p in velocity)
-        )
-
-        completed = status_dist.done
-        completion_rate = (completed / total_tasks * 100) if total_tasks > 0 else 0.0
-
+        rollups = (await _load_task_rollups(group_id, service)).scoped(accessible_project_ids)
         now = datetime.now(UTC)
-        project_task_counts = _compute_project_task_counts(tasks, now=now)
-        projects_summary = _build_project_summaries(projects, project_task_counts)
+
+        status_dist = _status_distribution(rollups)
+        velocity = _velocity_trend(rollups, now=now)
+        total_tasks = rollups.total_tasks
+        completion_rate = (status_dist.done / total_tasks * 100) if total_tasks > 0 else 0.0
+        projects_summary = _build_project_summaries(
+            projects, _project_task_counts(rollups, now=now)
+        )
 
         return OrgMetricsResponse(
             total_projects=len(projects),
             total_tasks=total_tasks,
             status_distribution=status_dist,
-            priority_distribution=priority_dist,
+            priority_distribution=_priority_distribution(rollups),
             completion_rate=round(completion_rate, 1),
-            top_assignees=assignees[:10],
-            tasks_created_last_7d=tasks_created_7d,
-            tasks_completed_last_7d=tasks_completed_7d,
+            top_assignees=_assignee_stats(rollups)[:10],
+            tasks_created_last_7d=_created_last_week(rollups),
+            tasks_completed_last_7d=_completed_last_week(velocity),
             velocity_trend=velocity,
             projects_summary=projects_summary,
         )
