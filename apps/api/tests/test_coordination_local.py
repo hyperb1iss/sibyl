@@ -13,6 +13,7 @@ from sibyl.coordination._local.events import LocalEventBus
 from sibyl.coordination._local.locks import LocalLockManager
 from sibyl.coordination._local.pending import LocalPendingRegistry
 from sibyl.coordination.broker import (
+    RECENT_JOB_INDEX_LIMIT,
     JobInfo,
     JobStatus,
     entity_embedding_job_id,
@@ -1088,3 +1089,126 @@ async def _wait_for_job_status(
         await asyncio.sleep(0.01)
 
     pytest.fail(f"Timed out waiting for {job_id} to reach {expected_status.value}")
+
+
+@pytest.mark.asyncio
+async def test_local_queue_broker_keeps_no_vectors_in_a_finished_record() -> None:
+    async def backfill_entity_embeddings(
+        _ctx: dict[str, object],
+        entities_data: list[dict[str, object]],
+        group_id: str,
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        return {
+            "group_id": group_id,
+            "embedded": len(entities_data),
+            "vectors": [[0.5] * 1024],
+            "scores": [0.5] * 64,
+            "ids": ["entity-1"],
+        }
+
+    broker = LocalQueueBroker(
+        functions={"backfill_entity_embeddings": backfill_entity_embeddings},
+        max_concurrency=1,
+        result_ttl_seconds=60,
+    )
+    await broker.startup()
+    entity = {
+        "id": "entity-1",
+        "name": "vectorised",
+        "embedding": [0.1] * 1024,
+        "metadata": {"name_embedding": [0.2] * 1024, "importance": 3},
+    }
+    job_id = await broker.enqueue_entity_embedding_backfill(
+        [entity], "org-1", relationships=[{"source_id": "a", "fact_embedding": [0.3] * 1024}]
+    )
+    info = await _wait_for_job_status(broker, job_id, JobStatus.COMPLETE)
+    await broker.shutdown()
+
+    # Ids and plain fields survive; vectors, named or merely long, do not.
+    assert info.args == (
+        [{"id": "entity-1", "name": "vectorised", "metadata": {"importance": 3}}],
+        "org-1",
+    )
+    assert info.kwargs == {"relationships": [{"source_id": "a"}]}
+    assert info.result == {
+        "group_id": "org-1",
+        "embedded": 1,
+        "scores": "<64 numbers dropped>",
+        "ids": ["entity-1"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_local_queue_broker_retires_finished_history_and_purges_without_a_scan() -> None:
+    async def update_task(
+        _ctx: dict[str, object],
+        task_id: str,
+        updates: dict[str, object],
+        group_id: str,
+        **_: object,
+    ) -> dict[str, object]:
+        return {"task_id": task_id, "group_id": group_id, "size": len(str(updates))}
+
+    broker = LocalQueueBroker(
+        functions={"update_task": update_task}, max_concurrency=8, result_ttl_seconds=3600
+    )
+    await broker.startup()
+    payload = {"description": "x" * 1024}
+    job_ids = [
+        await broker.enqueue_update_task(f"task-{index}", payload, "org-1")
+        for index in range(5_000)
+    ]
+    for _ in range(2_000):
+        health = await broker.health()
+        if health["queue_depth"] == 0 and health["running_jobs"] == 0:
+            break
+        await asyncio.sleep(0.01)
+    else:
+        pytest.fail("the broker never drained")
+    for job_id in job_ids[-8:]:
+        await _wait_for_job_status(broker, job_id, JobStatus.COMPLETE)
+
+    # Finished records live on only as far back as the recent index can list.
+    assert len(broker._jobs) <= RECENT_JOB_INDEX_LIMIT
+    assert (await broker.get_job_status(job_ids[-1])).status == JobStatus.COMPLETE
+    assert (await broker.get_job_status(job_ids[0])).status == JobStatus.NOT_FOUND
+    assert len(await broker.list_jobs(limit=5_000)) <= RECENT_JOB_INDEX_LIMIT
+
+    # A status call purges from the expiry heap, never by reading every record.
+    class CountingJobs(dict):
+        scans = 0
+
+        def items(self):  # type: ignore[override]
+            type(self).scans += 1
+            return super().items()
+
+    broker._jobs = CountingJobs(broker._jobs)
+    for _ in range(50):
+        await broker.get_job_status("missing")
+        await broker.enqueue_update_task("task-extra", payload, "org-1")
+    assert CountingJobs.scans == 0
+    await broker.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_local_queue_broker_still_expires_finished_records_through_the_heap() -> None:
+    async def crawl_source(_ctx: dict[str, object], source_id: str, **_: object) -> dict[str, str]:
+        return {"source_id": source_id}
+
+    broker = LocalQueueBroker(
+        functions={"crawl_source": crawl_source}, max_concurrency=1, result_ttl_seconds=60
+    )
+    await broker.startup()
+    job_id = await broker.enqueue_crawl("source-expiring")
+    info = await _wait_for_job_status(broker, job_id, JobStatus.COMPLETE)
+    assert info.status == JobStatus.COMPLETE
+    # Time passes beyond the result's life.
+    record = broker._jobs[job_id]
+    record.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    broker._expiring = [(record.expires_at, 0, job_id)]
+
+    assert (await broker.get_job_status(job_id)).status == JobStatus.NOT_FOUND
+    assert job_id not in broker._jobs
+    assert await broker.list_jobs() == []
+    await broker.shutdown()

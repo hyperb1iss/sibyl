@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import heapq
 from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -38,6 +39,38 @@ QueueEntry = tuple[int, int, str]
 LOCAL_BROKER_ERROR = "Local job broker is not running"
 _DEFAULT_QUEUE_PRIORITY = 0
 _DERIVED_QUEUE_PRIORITY = 1
+_FINISHED_STATUSES = frozenset({JobStatus.COMPLETE, JobStatus.FAILED, JobStatus.CANCELLED})
+# Payload fields that hold vectors. A finished record keeps its arguments
+# for the job listing, but a vector there is dead weight: a day of entity
+# writes with 1,024-float embeddings would hold hundreds of megabytes.
+_VECTOR_KEYS = frozenset(
+    {"embedding", "embeddings", "name_embedding", "fact_embedding", "vector", "vectors"}
+)
+_VECTOR_SUFFIXES = ("_embedding", "_embeddings", "_vector", "_vectors")
+_VECTOR_MIN_LENGTH = 32
+
+
+def _is_vector_key(key: object) -> bool:
+    name = str(key).lower()
+    return name in _VECTOR_KEYS or name.endswith(_VECTOR_SUFFIXES)
+
+
+def _slim_payload(value: Any) -> Any:
+    """A copy of a job payload with its vectors dropped, for a finished record.
+
+    Named vector fields go, and so does any long list of numbers whatever
+    its name; everything else, ids included, is kept as it was.
+    """
+    if isinstance(value, dict):
+        return {key: _slim_payload(item) for key, item in value.items() if not _is_vector_key(key)}
+    if isinstance(value, list | tuple):
+        if len(value) >= _VECTOR_MIN_LENGTH and all(
+            isinstance(item, int | float) and not isinstance(item, bool) for item in value
+        ):
+            return f"<{len(value)} numbers dropped>"
+        slimmed = [_slim_payload(item) for item in value]
+        return tuple(slimmed) if isinstance(value, tuple) else slimmed
+    return value
 
 
 @dataclass
@@ -105,6 +138,13 @@ class LocalQueueBroker:
         self._workers: list[asyncio.Task[None]] = []
         self._jobs: dict[str, LocalJobRecord] = {}
         self._recent_job_ids: deque[str] = deque(maxlen=recent_job_limit)
+        # Finished records by expiry, so a purge pops only what has expired
+        # instead of reading every record on every enqueue and status call.
+        self._expiring: list[tuple[datetime, int, str]] = []
+        self._expiry_sequence = count()
+        # Finished records in finish order; the oldest beyond the recent
+        # index limit are retired, so a day's jobs never pile up in memory.
+        self._finished: deque[tuple[str, datetime]] = deque()
         self._ctx: dict[str, Any] = {}
         self._lifecycle_lock = asyncio.Lock()
 
@@ -601,11 +641,7 @@ class LocalQueueBroker:
             return False
 
         if record.status == JobStatus.QUEUED:
-            record.status = JobStatus.CANCELLED
-            record.finish_time = datetime.now(UTC)
-            record.result = None
-            record.error = "cancelled"
-            record.expires_at = record.finish_time + self._result_ttl
+            self._finish(record, status=JobStatus.CANCELLED, result=None, error="cancelled")
             self._record_recent_job(job_id)
             return True
 
@@ -795,11 +831,7 @@ class LocalQueueBroker:
         try:
             result = await function(self._ctx, *record.args, **record.kwargs)
         except asyncio.CancelledError:
-            record.status = JobStatus.CANCELLED
-            record.finish_time = datetime.now(UTC)
-            record.result = None
-            record.error = "cancelled"
-            record.expires_at = record.finish_time + self._result_ttl
+            self._finish(record, status=JobStatus.CANCELLED, result=None, error="cancelled")
             telemetry_registry().record_job_finished(
                 function=record.function,
                 status="cancelled",
@@ -808,11 +840,7 @@ class LocalQueueBroker:
             log.info("Local job cancelled", job_id=record.job_id, function=record.function)
             return
         except Exception as e:
-            record.status = JobStatus.FAILED
-            record.finish_time = datetime.now(UTC)
-            record.error = str(e)
-            record.result = None
-            record.expires_at = record.finish_time + self._result_ttl
+            self._finish(record, status=JobStatus.FAILED, result=None, error=str(e))
             await self._clear_failed_create_pending(record)
             telemetry_registry().record_job_finished(
                 function=record.function,
@@ -822,11 +850,7 @@ class LocalQueueBroker:
             log.exception("Local job failed", job_id=record.job_id, function=record.function)
             return
 
-        record.status = JobStatus.COMPLETE
-        record.finish_time = datetime.now(UTC)
-        record.result = result
-        record.error = None
-        record.expires_at = record.finish_time + self._result_ttl
+        self._finish(record, status=JobStatus.COMPLETE, result=result, error=None)
         telemetry_registry().record_job_finished(
             function=record.function,
             status="ok",
@@ -855,18 +879,50 @@ class LocalQueueBroker:
                 error=str(exc),
             )
 
-    def _purge_expired_jobs(self) -> None:
-        expired_job_ids = [
-            job_id
-            for job_id, record in self._jobs.items()
-            if record.expires_at is not None and datetime.now(UTC) >= record.expires_at
-        ]
-        if not expired_job_ids:
-            return
+    def _finish(
+        self, record: LocalJobRecord, *, status: JobStatus, result: Any, error: str | None
+    ) -> None:
+        """Close a record: outcome, expiry, and a payload that no longer carries vectors."""
+        record.status = status
+        record.finish_time = datetime.now(UTC)
+        record.result = _slim_payload(result)
+        record.error = error
+        record.expires_at = record.finish_time + self._result_ttl
+        record.args = _slim_payload(record.args)
+        record.kwargs = _slim_payload(record.kwargs)
+        heapq.heappush(
+            self._expiring, (record.expires_at, next(self._expiry_sequence), record.job_id)
+        )
+        self._finished.append((record.job_id, record.finish_time))
+        self._retire_finished_beyond_limit()
 
-        expired = set(expired_job_ids)
-        for job_id in expired:
-            self._jobs.pop(job_id, None)
+    def _retire_finished_beyond_limit(self) -> None:
+        """Drop the oldest finished records once more than the recent index can list."""
+        while len(self._finished) > self._recent_job_limit:
+            job_id, finish_time = self._finished.popleft()
+            record = self._jobs.get(job_id)
+            # The same id re-enqueued since is a newer record with its own
+            # place in the order; only the record that finished then goes.
+            if (
+                record is not None
+                and record.status in _FINISHED_STATUSES
+                and record.finish_time == finish_time
+            ):
+                self._jobs.pop(job_id, None)
+
+    def _purge_expired_jobs(self) -> None:
+        now = datetime.now(UTC)
+        expired: set[str] = set()
+        while self._expiring and self._expiring[0][0] <= now:
+            expires_at, _sequence, job_id = heapq.heappop(self._expiring)
+            record = self._jobs.get(job_id)
+            # A record re-enqueued under the same id carries a newer expiry
+            # and its own heap entry; this stale entry says nothing about it.
+            if record is not None and record.expires_at == expires_at:
+                self._jobs.pop(job_id, None)
+                expired.add(job_id)
+        if not expired:
+            return
 
         self._recent_job_ids = deque(
             (job_id for job_id in self._recent_job_ids if job_id not in expired),
@@ -874,16 +930,11 @@ class LocalQueueBroker:
         )
 
     def _mark_queued_jobs_cancelled(self, *, reason: str) -> None:
-        finish_time = datetime.now(UTC)
-        for record in self._jobs.values():
+        for record in list(self._jobs.values()):
             if record.status != JobStatus.QUEUED:
                 continue
 
-            record.status = JobStatus.CANCELLED
-            record.finish_time = finish_time
-            record.result = None
-            record.error = reason
-            record.expires_at = finish_time + self._result_ttl
+            self._finish(record, status=JobStatus.CANCELLED, result=None, error=reason)
             self._record_recent_job(record.job_id)
             telemetry_registry().record_job_finished(
                 function=record.function,
