@@ -104,3 +104,25 @@ async def test_graph_availability_keeps_the_supplied_validation_phase(monkeypatc
     )
     assert result == {"protected": rows[0]}
     assert guard.await_args.kwargs["read"] is read
+
+
+@pytest.mark.parametrize("pool_size", [1, 4])
+async def test_relationship_batches_overlap_only_on_a_pooled_client(pool_size: int) -> None:
+    import asyncio
+
+    active = 0
+    overlap = 0
+
+    async def read_batch(batch: int) -> int:
+        nonlocal active, overlap
+        active += 1
+        overlap = max(overlap, active)
+        await asyncio.sleep(0)
+        active -= 1
+        return batch * 10
+
+    client = SimpleNamespace(pool_size=pool_size)
+    results = await availability._each_batch(client, read_batch, [3, 1, 2])
+
+    assert results == [30, 10, 20]
+    assert overlap == (1 if pool_size == 1 else 3)
