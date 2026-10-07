@@ -273,3 +273,64 @@ async def test_an_embedded_store_stamps_inline_so_nothing_is_pending_at_exit() -
         assert await drain_pending_exposure_stamps() == 0
 
     assert summary["stamped_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_the_deferred_stamp_resolves_the_graph_client_when_it_runs() -> None:
+    """The task carries the organization id, never a captured client instance.
+
+    The per-organization graph client cache evicts and closes idle clients; a
+    stamp holding the instance it saw at request time would reconnect that
+    evicted client outside the cache. Resolving by id when the stamp runs
+    always lands on whatever client the cache holds then.
+    """
+
+    def _graph_client() -> AsyncMock:
+        client = AsyncMock()
+        client.is_embedded = False
+        client.execute_query = AsyncMock(
+            side_effect=lambda query, **params: [
+                {"uuid": stamp["item_id"], "group_id": params["organization_id"], **stamp}
+                for stamp in params["stamps"]
+            ]
+        )
+        return client
+
+    at_request_time = _graph_client()
+    at_stamp_time = _graph_client()
+    resolve_graph_client = AsyncMock(side_effect=[at_request_time, at_stamp_time])
+    content_client = _RecordingContentClient()
+    results = [
+        SearchResult(
+            id="entity-1",
+            type="decision",
+            name="Decision",
+            content="",
+            score=1.0,
+            result_origin="graph",
+        )
+    ]
+
+    with (
+        patch.object(
+            usage_exposure,
+            "get_shared_surreal_content_client",
+            AsyncMock(return_value=content_client),
+        ),
+        patch.object(usage_exposure, "get_surreal_graph_client", resolve_graph_client),
+    ):
+        summary = await annotate_search_result_exposures(
+            results,
+            organization_id="org-a",
+            principal_id="user-a",
+            project_id=None,
+            source_surface="search",
+        )
+        assert summary["stamped_count"] == 1
+        assert resolve_graph_client.await_count == 1, "the request path resolves once"
+        assert await drain_pending_exposure_stamps() == 1
+
+    assert resolve_graph_client.await_count == 2
+    assert resolve_graph_client.await_args.args == ("org-a",)
+    at_stamp_time.execute_query.assert_awaited_once()
+    at_request_time.execute_query.assert_not_awaited()

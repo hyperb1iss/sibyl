@@ -387,15 +387,17 @@ async def _record_target_exposures(
         await _run_exposure_stamp(
             content_client,
             stamp_targets,
-            graph_client=graph_client,
+            organization_id=organization_id,
             source_surface=source_surface,
+            graph_client=graph_client,
         )
     elif stamp_targets:
         _schedule_exposure_stamp(
             content_client,
             stamp_targets,
-            graph_client=graph_client,
+            organization_id=organization_id,
             source_surface=source_surface,
+            needs_graph_client=graph_client is not None,
         )
     return {(target.item_kind, target.item_id) for target in stamp_targets}
 
@@ -424,15 +426,21 @@ def _schedule_exposure_stamp(
     content_client: Any,
     targets: Sequence[MemoryUsageTarget],
     *,
-    graph_client: Any | None,
+    organization_id: str,
     source_surface: str,
+    needs_graph_client: bool,
 ) -> None:
+    # The task carries the organization id, not the graph client instance.
+    # The per-organization graph client cache evicts and closes idle clients,
+    # and a captured instance would be reconnected by this stamp outside the
+    # cache; resolving by id when the stamp runs always lands on the live one.
     task = asyncio.create_task(
         _run_exposure_stamp(
             content_client,
             targets,
-            graph_client=graph_client,
+            organization_id=organization_id,
             source_surface=source_surface,
+            needs_graph_client=needs_graph_client,
         ),
         name=f"usage_exposure_stamp:{source_surface}",
     )
@@ -444,10 +452,14 @@ async def _run_exposure_stamp(
     content_client: Any,
     targets: Sequence[MemoryUsageTarget],
     *,
-    graph_client: Any | None,
+    organization_id: str,
     source_surface: str,
+    graph_client: Any | None = None,
+    needs_graph_client: bool = False,
 ) -> None:
     try:
+        if needs_graph_client and graph_client is None:
+            graph_client = await get_surreal_graph_client(organization_id)
         await stamp_memory_usage(content_client, targets, graph_client=graph_client)
     except Exception as exc:
         # The events already landed, so the next stamp of these rows carries
