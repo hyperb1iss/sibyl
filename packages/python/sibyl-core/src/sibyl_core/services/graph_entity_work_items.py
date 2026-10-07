@@ -212,9 +212,12 @@ class _EntityWorkItemManager(_EntitySearchManager):
         )
         payload: dict[str, Any] = rows[0] if rows else {}
 
+        # Keyed the way count_by_status keys its counts: a status-less task is
+        # todo and the key is lowercase, so the summary and the completion
+        # counters the write path maintains read one task the same way.
         status_counts: dict[str, int] = {}
         for row in _summary_rows(payload.get("status_counts")):
-            status_value = str(row.get("status") or "todo")
+            status_value = str(row.get("status") or "todo").lower()
             status_counts[status_value] = status_counts.get(status_value, 0) + _int_value(
                 row.get("n")
             )

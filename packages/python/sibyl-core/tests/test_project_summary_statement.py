@@ -38,7 +38,8 @@ async def test_summary_reads_counts_and_buckets_from_one_statement() -> None:
         {
             "status_counts": [
                 {"status": "todo", "n": 500},
-                {"status": "done", "n": 393},
+                {"status": "done", "n": 390},
+                {"status": "Done", "n": 3},
                 {"status": "doing", "n": 2},
                 {"status": None, "n": 8},
             ],
