@@ -271,12 +271,15 @@ class TestGraphRoutes:
             relationship_type=RelationshipType.BELONGS_TO,
         )
         entities = {"task-1": center, "project-1": related}
+        neighbours = {"task-1": [(related, relationship)], "project-1": [(center, relationship)]}
         runtime = SimpleNamespace(
             entity_manager=SimpleNamespace(
                 get=AsyncMock(side_effect=lambda entity_id: entities[entity_id]),
             ),
             relationship_manager=SimpleNamespace(
-                get_related_entities=AsyncMock(return_value=[(related, relationship)]),
+                get_related_entities_batch=AsyncMock(
+                    side_effect=lambda ids, **_: {seed: neighbours[seed] for seed in ids}
+                ),
             ),
         )
 
@@ -296,19 +299,15 @@ class TestGraphRoutes:
         assert result.node_count == 2
         assert result.edge_count == 1
         assert {node.id for node in result.nodes} == {"task-1", "project-1"}
-        assert runtime.relationship_manager.get_related_entities.await_count == 2
-        assert runtime.relationship_manager.get_related_entities.await_args_list[0].kwargs == {
-            "entity_id": "task-1",
-            "relationship_types": None,
-            "max_depth": 1,
-            "limit": 50,
-        }
-        assert runtime.relationship_manager.get_related_entities.await_args_list[1].kwargs == {
-            "entity_id": "project-1",
-            "relationship_types": None,
-            "max_depth": 1,
-            "limit": 50,
-        }
+        # One neighbour read per frontier, never one per visited node.
+        batch = runtime.relationship_manager.get_related_entities_batch
+        assert batch.await_count == 2
+        assert batch.await_args_list[0].args == (["task-1"],)
+        assert batch.await_args_list[1].args == (["project-1"],)
+        assert all(
+            call.kwargs == {"relationship_types": None, "limit_per_entity": 50}
+            for call in batch.await_args_list
+        )
 
     @pytest.mark.asyncio
     async def test_get_clusters_uses_runtime_client(self) -> None:
@@ -796,7 +795,9 @@ class TestGraphRoutes:
         )
         runtime = SimpleNamespace(
             entity_manager=SimpleNamespace(get=AsyncMock(return_value=private)),
-            relationship_manager=SimpleNamespace(get_related_entities=AsyncMock(return_value=[])),
+            relationship_manager=SimpleNamespace(
+                get_related_entities_batch=AsyncMock(return_value={})
+            ),
         )
 
         with (
@@ -844,7 +845,9 @@ class TestGraphRoutes:
                 get=AsyncMock(side_effect=lambda entity_id: entities[entity_id]),
             ),
             relationship_manager=SimpleNamespace(
-                get_related_entities=AsyncMock(return_value=[(private, relationship)]),
+                get_related_entities_batch=AsyncMock(
+                    return_value={"task-1": [(private, relationship)]}
+                ),
             ),
         )
 

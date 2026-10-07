@@ -816,95 +816,68 @@ async def get_subgraph(
     if not center:
         raise HTTPException(status_code=404, detail=f"Entity not found: {payload.entity_id}")
 
-    # Build subgraph via traversal
-    visited_nodes: dict[str, int] = {}
+    visible = partial(
+        _graph_entity_visible,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=memory_grants,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
+    )
+    # Build the subgraph breadth first. One frontier costs one neighbour
+    # read, one endpoint proof and one edge proof; the depth-first walk paid
+    # all three for every visited node, in sequence.
+    visited_nodes: dict[str, int] = {payload.entity_id: 0}
     relationships: list[Relationship] = []
-
-    async def traverse(entity_id: str, current_depth: int) -> None:
-        if current_depth > payload.depth:
-            return
-        if len(visited_nodes) >= payload.max_nodes:
-            return
-        if entity_id in visited_nodes:
-            return
-
-        entity = await _get_graph_entity(
-            group_id,
-            entity_id,
-            principal_id=principal_id,
-            accessible_projects=accessible_projects,
-            allowed_memory_scope_keys=memory_grants,
-            accessible_teams=accessible_teams,
-            accessible_delegations=accessible_delegations,
-        )
-        if not entity:
-            return
-
-        visited_nodes[entity_id] = current_depth
-
-        # Get related entities
-        related = await runtime.relationship_manager.get_related_entities(
-            entity_id=entity_id,
+    frontier = [payload.entity_id]
+    for depth in range(payload.depth + 1):
+        if not frontier:
+            break
+        related_by_seed = await runtime.relationship_manager.get_related_entities_batch(
+            frontier,
             relationship_types=payload.relationship_types,
-            max_depth=1,
-            limit=50,
+            limit_per_entity=50,
         )
-
+        listed = [
+            (neighbour, relationship)
+            for seed in frontier
+            for neighbour, relationship in related_by_seed.get(seed, [])
+        ]
         current_neighbors = await available_graph_entities(
             group_id,
-            [entity.id for entity, _relationship in related],
-            source_visible=partial(
-                _graph_entity_visible,
-                principal_id=principal_id,
-                accessible_projects=accessible_projects,
-                allowed_memory_scope_keys=memory_grants,
-                accessible_teams=accessible_teams,
-                accessible_delegations=accessible_delegations,
-            ),
+            [neighbour.id for neighbour, _relationship in listed],
+            source_visible=visible,
             include_embeddings=False,
         )
         current_edges = {
             r.id: r
             for r in await _current_relationships(
-                runtime,
-                group_id,
-                [r for _, r in related],
+                runtime, group_id, [relationship for _neighbour, relationship in listed]
             )
         }
-        for listed_entity, listed_relationship in related:
+        next_frontier: list[str] = []
+        for listed_neighbour, listed_relationship in listed:
             relationship = current_edges.get(listed_relationship.id)
-            if relationship is None:
-                continue
-            related_entity = current_neighbors.get(listed_entity.id)
-            if related_entity is None:
+            neighbour = current_neighbors.get(listed_neighbour.id)
+            if relationship is None or neighbour is None:
                 continue
             # An edge naming a hidden neighbour still discloses that the row
             # exists and its id, so the endpoint drops it before it is built
-            # rather than relying on the node check further down the traversal.
-            if not _graph_entity_visible(
-                relationship,
-                principal_id=principal_id,
-                accessible_projects=accessible_projects,
-                allowed_memory_scope_keys=memory_grants,
-                accessible_teams=accessible_teams,
-                accessible_delegations=accessible_delegations,
-            ) or not _graph_entity_visible(
-                related_entity,
-                principal_id=principal_id,
-                accessible_projects=accessible_projects,
-                allowed_memory_scope_keys=memory_grants,
-                accessible_teams=accessible_teams,
-                accessible_delegations=accessible_delegations,
+            # rather than relying on the node check further down.
+            if not visible(relationship) or not visible(neighbour):
+                continue
+            relationships.append(relationship)
+            if neighbour.id in visited_nodes or neighbour.id in next_frontier:
+                continue
+            if (
+                depth >= payload.depth
+                or len(visited_nodes) + len(next_frontier) >= payload.max_nodes
             ):
                 continue
-
-            relationships.append(relationship)
-
-            # Recurse
-            await traverse(related_entity.id, current_depth + 1)
-
-    # Start traversal from center
-    await traverse(payload.entity_id, 0)
+            next_frontier.append(neighbour.id)
+        for identifier in next_frontier:
+            visited_nodes[identifier] = depth + 1
+        frontier = next_frontier
 
     relationships = await _current_relationships(runtime, group_id, relationships)
     current, relationships = await _current_view(
