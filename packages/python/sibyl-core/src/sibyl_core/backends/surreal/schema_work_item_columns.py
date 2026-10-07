@@ -6,7 +6,10 @@ Rows written before the denormalized columns existed keep ``project_id``,
 such a row would be invisible to every filtered list until something rewrote
 it. This runs once per namespace from the schema migration and copies each
 value its column is missing; a row that already carries the column is left
-alone, so repeated runs are no-ops.
+alone, so repeated runs are no-ops. Every entity type carrying a snapshot is
+promoted, not only tasks: a note or topic whose snapshot holds a status or a
+project gains the column too, which is exactly how the entity reader already
+coalesces that metadata for every row.
 """
 
 from __future__ import annotations
