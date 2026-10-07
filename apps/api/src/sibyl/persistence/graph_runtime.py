@@ -955,6 +955,16 @@ async def update_graph_entity(
     return await runtime.entity_manager.update(entity_id, patch)
 
 
+async def touch_graph_entity_bookkeeping(
+    group_id: str,
+    entity_id: str,
+    fields: dict[str, object],
+) -> None:
+    """Merge bookkeeping values onto an entity without bumping its revision."""
+    runtime = await _get_graph_runtime(group_id)
+    await runtime.entity_manager.write_bookkeeping(entity_id, fields)
+
+
 async def delete_graph_data(group_id: str) -> None:
     runtime = await _get_graph_runtime(group_id)
     driver = runtime.client

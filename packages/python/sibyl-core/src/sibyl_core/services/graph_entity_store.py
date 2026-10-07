@@ -435,6 +435,12 @@ async def _heal_one_metadata_snapshot(
     that was read, and a refusal means re-reading and folding again, by which
     point the newer value sits in the flattened bag and is no longer folded at
     all.
+
+    A usage stamp is not a real writer: it adds or raises recall keys without
+    touching ``revision``, so the fence cannot see it. The fold covers that
+    window itself by only ever filling slots that are still empty when the
+    write lands. Existing keys win, so a stamp that arrived after the read
+    survives the fold, and the fold still needs nothing from the stamp.
     """
     for _ in range(_MAX_SNAPSHOT_HEAL_ATTEMPTS):
         row = await _select_one(
@@ -461,12 +467,18 @@ async def _heal_one_metadata_snapshot(
             for key, value in _snapshot_without_owned_keys(snapshot).items()
             if key not in attributes
         }
-        # None drops the snapshot the same way any other removal drops a key.
-        patch["metadata"] = None
+        # The stored bag is concatenated after the patch, so a key that exists
+        # when the write lands keeps its stored value; the snapshot then goes
+        # the same way any other removal drops a key.
         applied = normalize_records(
             await client.execute_query(
                 """
-                UPDATE entity MERGE { attributes: $patch }
+                UPDATE entity SET
+                    attributes = object::from_entries(array::concat(
+                        object::entries($patch),
+                        object::entries(attributes ?? {})
+                    )),
+                    attributes.metadata = NONE
                 WHERE group_id = $group_id
                     AND uuid = $uuid
                     AND revision = $seen_revision

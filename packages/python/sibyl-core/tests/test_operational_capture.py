@@ -234,9 +234,9 @@ async def test_replayed_or_refused_source_never_embeds(store, monkeypatch):
     calls = []
     original = owner._raw_memory_with_embedding
 
-    async def spy(memory, provider):
+    async def spy(memory, provider, *, timeout_seconds=None):
         calls.append(memory.raw_content)
-        return await original(memory, None)
+        return await original(memory, None, timeout_seconds=timeout_seconds)
 
     monkeypatch.setattr(owner, "_raw_memory_with_embedding", spy)
     first = await capture()
@@ -262,7 +262,7 @@ async def test_source_fence_survives_async_embedding(store, monkeypatch):
 
     first = await capture()
 
-    async def interleave(memory, provider):
+    async def interleave(memory, provider, *, timeout_seconds=None):
         await store.execute_query(
             "UPDATE raw_captures SET raw_content='during embedding', revision += 1 WHERE uuid=$id;",
             id=first.id,

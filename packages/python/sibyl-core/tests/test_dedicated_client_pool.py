@@ -1032,3 +1032,58 @@ async def test_conflict_backoff_hands_the_slot_back(monkeypatch):
         "SELECT * FROM entity LIMIT 1;",
         "UPDATE entity SET n = 1;",
     ]
+
+
+@pytest.mark.parametrize(
+    ("query", "retried"),
+    [
+        ("RETURN { UPDATE item SET value = 1; RETURN true; };", True),
+        ("UPDATE item SET value = 1; UPDATE other SET value = 2;", False),
+    ],
+)
+async def test_conflict_raised_as_exception_is_retried_only_for_one_statement(
+    monkeypatch, query, retried
+):
+    """A conflict that surfaces as an exception has no envelope to count.
+
+    The response-shape shortcut cannot fire, so the decision rests on the
+    query text alone: a lone RETURN block is one statement and is sent again,
+    two top-level statements are not.
+    """
+    from surrealdb.errors import SurrealError
+
+    conflict = "Transaction conflict: Write conflict. This transaction can be retried"
+    calls: list[str] = []
+
+    async def send(_client, statement, *, params, raw):
+        if statement == "RETURN true;" and statement != query:
+            return {"result": [{"status": "OK", "result": True}]}
+        calls.append(statement)
+        if len(calls) == 1:
+            raise SurrealError(conflict)
+        return {"result": [{"status": "OK", "result": [{"uuid": "retained"}]}]}
+
+    async def connect(_self, *, attempt: int = 1):
+        return object()
+
+    async def sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(dedicated_client_module._PooledConnection, "connect", connect)
+    monkeypatch.setattr(dedicated_client_module.asyncio, "sleep", sleep)
+    client = DedicatedSurrealClient(
+        url="ws://localhost:8000/rpc",
+        username="",
+        password="",
+        namespace="exception_conflict",
+        database="content",
+        pool_size=1,
+    )
+    monkeypatch.setattr(client, "_send_query", send)
+    if retried:
+        assert await client.execute_query(query) == [{"uuid": "retained"}]
+        assert len(calls) == 2, "one retry after the exception"
+    else:
+        with pytest.raises(SurrealError, match="can be retried"):
+            await client.execute_query(query)
+        assert len(calls) == 1, "a non-atomic query is never re-sent"

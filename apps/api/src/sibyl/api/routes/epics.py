@@ -41,6 +41,14 @@ async def update_graph_entity(group_id: str, entity_id: str, patch: dict[str, ob
     return await service(group_id, entity_id, patch)
 
 
+async def touch_graph_entity_bookkeeping(
+    group_id: str, entity_id: str, fields: dict[str, object]
+) -> None:
+    from sibyl.persistence.graph_runtime import touch_graph_entity_bookkeeping as service
+
+    await service(group_id, entity_id, fields)
+
+
 router = APIRouter(
     prefix="/epics",
     tags=["epics"],
@@ -145,13 +153,16 @@ async def _broadcast_epic_update(
 
 
 async def _update_project_activity(group_id: str, epic: Any) -> None:
-    """Update parent project's last_activity_at when epic changes."""
+    """Touch the parent project's last_activity_at when an epic changes.
+
+    Bookkeeping on the project, not an edit: its revision stays put.
+    """
     project_id = epic.metadata.get("project_id") if hasattr(epic, "metadata") else None
     if not project_id:
         return
 
     try:
-        await update_graph_entity(
+        await touch_graph_entity_bookkeeping(
             group_id,
             project_id,
             {"last_activity_at": datetime.now(UTC).isoformat()},

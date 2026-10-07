@@ -523,5 +523,32 @@ class EntityManager(_EntityWorkItemManager):
             return None
         return _entity_from_row(rows[0])
 
+    async def write_bookkeeping(self, entity_id: str, fields: Mapping[str, object]) -> None:
+        """Merge bookkeeping values onto a row without bumping its revision.
+
+        Activity timestamps and progress counters describe what happened
+        around an entity, not an edit of it. Writing them through update()
+        cost a pre-read, a snapshot probe and a three-statement transaction
+        ending in revision += 1 on a row every task in the project contends
+        for, and that bump fenced out whoever was editing the project itself.
+        One MERGE lands the values and updated_at and leaves revision alone.
+        """
+        if not fields:
+            return
+        now = datetime.now(UTC)
+        attributes: dict[str, object] = {str(key): value for key, value in fields.items()}
+        attributes["updated_at"] = now
+        await self._client.execute_query(
+            """
+            UPDATE entity MERGE { updated_at: $updated_at, attributes: $attributes }
+            WHERE group_id = $group_id AND uuid = $uuid
+            RETURN NONE;
+            """,
+            group_id=self._group_id,
+            uuid=entity_id,
+            updated_at=now,
+            attributes=attributes,
+        )
+
 
 __all__ = ["EntityManager"]

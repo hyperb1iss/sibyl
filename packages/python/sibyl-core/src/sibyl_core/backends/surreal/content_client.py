@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from sibyl_core.backends.surreal.dedicated_client import DedicatedSurrealClient
+from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
 
 
 class SurrealContentClient(DedicatedSurrealClient):
@@ -29,3 +30,8 @@ class SurrealContentClient(DedicatedSurrealClient):
             client_kind="content",
             pool_size=pool_size,
         )
+
+    @property
+    def is_embedded(self) -> bool:
+        """Whether this client runs an in-process engine rather than a server."""
+        return is_embedded_surreal_url(self._url)

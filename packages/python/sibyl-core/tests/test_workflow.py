@@ -106,6 +106,30 @@ class MockEntityManager:
         self.entities[entity.id] = entity
         return entity.id
 
+    async def write_bookkeeping(self, entity_id: str, fields: dict[str, Any]) -> None:
+        """Merge bookkeeping values the way the real manager does, sans revision."""
+        await self.update(entity_id, dict(fields))
+
+    async def count_by_status(
+        self,
+        entity_type: EntityType,
+        *,
+        project_id: str | None = None,
+        epic_id: str | None = None,
+    ) -> dict[str, int]:
+        """Count per status over the same rows list_by_type would return."""
+        counts: dict[str, int] = {}
+        for entity in await self.list_by_type(
+            entity_type,
+            limit=10_000,
+            project_id=project_id,
+            epic_id=epic_id,
+            include_archived=True,
+        ):
+            status = str((entity.metadata or {}).get("status") or "todo").lower()
+            counts[status] = counts.get(status, 0) + 1
+        return counts
+
     async def list_by_type(
         self,
         entity_type: EntityType,
@@ -155,11 +179,16 @@ class MockRelationshipManager:
     """Mock RelationshipManager for testing workflow engine."""
 
     relationships: list[Any]
+    bulk_writes: list[list[Any]] = field(default_factory=list)
 
-    async def create(self, relationship: Any) -> str:
-        """Create relationship."""
-        self.relationships.append(relationship)
-        return relationship.id
+    async def create_direct_bulk(
+        self, relationships: list[Any], *, generate_embeddings: bool = False
+    ) -> list[str]:
+        """Write a batch of relationships at once, the way the engine does."""
+        batch = list(relationships)
+        self.bulk_writes.append(batch)
+        self.relationships.extend(batch)
+        return [relationship.id for relationship in batch]
 
     async def get_for_entity(
         self,
@@ -766,7 +795,7 @@ class TestWorkflowEngine:
         """complete_task should not fail after the task status write lands."""
 
         class FailingProgressEntityManager(MockEntityManager):
-            async def list_by_type(self, *args: Any, **kwargs: Any) -> list[Entity]:
+            async def count_by_status(self, *args: Any, **kwargs: Any) -> dict[str, int]:
                 raise RuntimeError("stale project read")
 
         task = make_task(status=TaskStatus.DOING, project_id="project_abc123")
@@ -796,7 +825,7 @@ class TestWorkflowEngine:
         """archive_task should not fail after the task status write lands."""
 
         class FailingProgressEntityManager(MockEntityManager):
-            async def list_by_type(self, *args: Any, **kwargs: Any) -> list[Entity]:
+            async def count_by_status(self, *args: Any, **kwargs: Any) -> dict[str, int]:
                 raise RuntimeError("stale project read")
 
         task = make_task(status=TaskStatus.TODO, project_id="project_abc123")

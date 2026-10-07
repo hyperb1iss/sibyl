@@ -30,6 +30,14 @@ from sibyl_core.services.graph_search import new_task_progress as _new_task_prog
 from sibyl_core.services.graph_search import task_priority_rank as _task_priority_rank
 
 
+def _scoped_field_clause(field: str) -> str:
+    """Match a promoted scope column, or its attribute on a pre-promotion row."""
+    return (
+        f"({field} = ${field} OR "
+        f"({_surreal_indexed_field_missing(field)} AND attributes.{field} = ${field}))"
+    )
+
+
 class _EntityWorkItemManager(_EntitySearchManager):
     async def list_epics_for_project(
         self,
@@ -197,6 +205,63 @@ class _EntityWorkItemManager(_EntitySearchManager):
             "critical_tasks": critical_tasks,
             "epics": epics,
         }
+
+    async def count_by_status(
+        self,
+        entity_type: EntityType,
+        *,
+        project_id: str | None = None,
+        epic_id: str | None = None,
+    ) -> dict[str, int]:
+        """Count rows of one type per status in a single aggregate statement.
+
+        Archived rows are included and a row without a status counts as todo,
+        the same reading list_by_type's callers apply to task metadata. The
+        scope filters accept the promoted column or, on a row written before
+        the column existed, the attribute it was promoted from, so the counts
+        agree with what list_by_type returns for the same scope without
+        loading a single row.
+        """
+        where_clauses = [
+            "group_id = $group_id",
+            "entity_type = $entity_type",
+        ]
+        query_params: dict[str, object] = {
+            "group_id": self._group_id,
+            "entity_type": entity_type.value,
+        }
+        if project_id is not None:
+            where_clauses.append(_scoped_field_clause("project_id"))
+            query_params["project_id"] = project_id
+        if epic_id is not None:
+            where_clauses.append(
+                "("
+                + _scoped_field_clause("parent_task_id")
+                + " OR "
+                + _scoped_field_clause("epic_id")
+                + ")"
+            )
+            query_params["epic_id"] = epic_id
+            query_params["parent_task_id"] = epic_id
+        rows = normalize_records(
+            await self._client.execute_query(
+                f"""
+                SELECT status, count() AS total
+                FROM entity
+                WHERE {" AND ".join(where_clauses)}
+                GROUP BY status;
+                """,
+                **query_params,
+            )
+        )
+        counts: dict[str, int] = {}
+        for row in rows:
+            status = str(row.get("status") or "todo").lower()
+            total = row.get("total")
+            counts[status] = counts.get(status, 0) + (
+                int(total) if isinstance(total, int | float) and not isinstance(total, bool) else 0
+            )
+        return counts
 
     async def list_by_type(
         self,

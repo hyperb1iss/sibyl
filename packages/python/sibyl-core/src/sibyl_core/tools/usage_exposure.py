@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -17,8 +18,10 @@ from sibyl_core.services.usage import (
     MemoryUsageEvent,
     MemoryUsageItemKind,
     MemoryUsageSignal,
-    MemoryUsageStamp,
-    record_memory_usage,
+    MemoryUsageTarget,
+    record_memory_usage_events,
+    stamp_memory_usage,
+    usage_targets_for_events,
 )
 from sibyl_core.tools.responses import SearchResult
 
@@ -27,6 +30,13 @@ log = structlog.get_logger()
 _USAGE_EXPOSURE_METADATA_KEY = "usage_exposure"
 _USAGE_EXPOSURE_SUMMARY_KEY = "usage_exposure"
 _RAW_MEMORY_PREFIX = "raw_memory:"
+
+# Stamps scheduled after a response was built. The request path appends the
+# exposure events (one statement) and returns; the row stamps run here so a
+# recall never waits on, or fails because of, a read-modify-write on the
+# most popular rows in the store. Shutdown drains the set before the shared
+# clients close, and tests drain it to observe the stamp.
+_pending_stamps: set[asyncio.Task[None]] = set()
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +102,16 @@ async def annotate_context_item_exposures(
     return summary
 
 
+async def drain_pending_exposure_stamps() -> int:
+    """Await every deferred stamp and return how many were waited on."""
+    drained = 0
+    while _pending_stamps:
+        pending = list(_pending_stamps)
+        await asyncio.gather(*pending, return_exceptions=True)
+        drained += len(pending)
+    return drained
+
+
 async def _annotate_exposures(
     *,
     items: Sequence[Any],
@@ -141,110 +161,83 @@ async def _annotate_exposures(
             )
         targets = []
 
-    stamped_targets: set[tuple[MemoryUsageItemKind, str]] = set()
+    recorded_targets: set[tuple[MemoryUsageItemKind, str]] = set()
     failed_response_ids: set[str] = set()
     if targets:
-        try:
-            content_client = await get_shared_surreal_content_client()
-        except Exception as exc:
-            log.warning(
-                "usage_exposure_recording_failed",
-                source_surface=source_surface,
-                error_type=type(exc).__name__,
-            )
-            failed_response_ids.update(
-                _exclude_failed_targets(
-                    targets,
-                    items=items,
-                    metadata_factory=metadata_factory,
-                    exclusions=exclusions,
+        recordable = list(targets)
+        graph_client: Any | None = None
+        graph_targets = [
+            target for target in targets if target.item_kind is MemoryUsageItemKind.GRAPH_ENTITY
+        ]
+        if graph_targets:
+            # The graph client is resolved before the single insert so a graph
+            # outage excludes only the graph items; raw exposures still land.
+            try:
+                graph_client = await get_surreal_graph_client(str(organization_id))
+            except Exception as exc:
+                log.warning(
+                    "usage_exposure_recording_failed",
                     source_surface=source_surface,
-                    session_key=session_key,
-                    message_key=message_key,
+                    item_kind=MemoryUsageItemKind.GRAPH_ENTITY.value,
                     error_type=type(exc).__name__,
                 )
-            )
-        else:
-            raw_targets = [
-                target for target in targets if target.item_kind == MemoryUsageItemKind.RAW_CAPTURE
-            ]
-            graph_targets = [
-                target for target in targets if target.item_kind == MemoryUsageItemKind.GRAPH_ENTITY
-            ]
-            if raw_targets:
-                try:
-                    stamped_targets.update(
-                        await _record_target_exposures(
-                            content_client,
-                            raw_targets,
-                            organization_id=str(organization_id),
-                            principal_id=principal_id,
-                            project_id=project_id,
-                            source_surface=source_surface,
-                            session_key=session_key,
-                            message_key=message_key,
-                        )
-                    )
-                except Exception as exc:
-                    log.warning(
-                        "usage_exposure_recording_failed",
+                failed_response_ids.update(
+                    _exclude_failed_targets(
+                        graph_targets,
+                        items=items,
+                        metadata_factory=metadata_factory,
+                        exclusions=exclusions,
                         source_surface=source_surface,
-                        item_kind=MemoryUsageItemKind.RAW_CAPTURE.value,
+                        session_key=session_key,
+                        message_key=message_key,
                         error_type=type(exc).__name__,
                     )
-                    failed_response_ids.update(
-                        _exclude_failed_targets(
-                            raw_targets,
-                            items=items,
-                            metadata_factory=metadata_factory,
-                            exclusions=exclusions,
-                            source_surface=source_surface,
-                            session_key=session_key,
-                            message_key=message_key,
-                            error_type=type(exc).__name__,
-                        )
-                    )
-            if graph_targets:
-                try:
-                    graph_client = await get_surreal_graph_client(str(organization_id))
-                    stamped_targets.update(
-                        await _record_target_exposures(
-                            content_client,
-                            graph_targets,
-                            organization_id=str(organization_id),
-                            principal_id=principal_id,
-                            project_id=project_id,
-                            source_surface=source_surface,
-                            session_key=session_key,
-                            message_key=message_key,
-                            graph_client=graph_client,
-                        )
-                    )
-                except Exception as exc:
-                    log.warning(
-                        "usage_exposure_recording_failed",
+                )
+                recordable = [
+                    target
+                    for target in targets
+                    if target.item_kind is not MemoryUsageItemKind.GRAPH_ENTITY
+                ]
+        if recordable:
+            try:
+                content_client = await get_shared_surreal_content_client()
+                recorded_targets.update(
+                    await _record_target_exposures(
+                        content_client,
+                        recordable,
+                        organization_id=str(organization_id),
+                        principal_id=principal_id,
+                        project_id=project_id,
                         source_surface=source_surface,
-                        item_kind=MemoryUsageItemKind.GRAPH_ENTITY.value,
+                        session_key=session_key,
+                        message_key=message_key,
+                        graph_client=graph_client,
+                    )
+                )
+            except Exception as exc:
+                log.warning(
+                    "usage_exposure_recording_failed",
+                    source_surface=source_surface,
+                    error_type=type(exc).__name__,
+                )
+                failed_response_ids.update(
+                    _exclude_failed_targets(
+                        recordable,
+                        items=items,
+                        metadata_factory=metadata_factory,
+                        exclusions=exclusions,
+                        source_surface=source_surface,
+                        session_key=session_key,
+                        message_key=message_key,
                         error_type=type(exc).__name__,
                     )
-                    failed_response_ids.update(
-                        _exclude_failed_targets(
-                            graph_targets,
-                            items=items,
-                            metadata_factory=metadata_factory,
-                            exclusions=exclusions,
-                            source_surface=source_surface,
-                            session_key=session_key,
-                            message_key=message_key,
-                            error_type=type(exc).__name__,
-                        )
-                    )
+                )
 
     for target in targets:
         if target.response_id in failed_response_ids:
             continue
         metadata = _metadata_for_response_id(items, metadata_factory, target.response_id)
-        if (target.item_kind, target.item_id) in stamped_targets:
+        if (target.item_kind, target.item_id) in recorded_targets:
             _mark_stamped(
                 metadata,
                 target,
@@ -359,9 +352,16 @@ async def _record_target_exposures(
     source_surface: str,
     session_key: str,
     message_key: str,
-    graph_client: Any | None = None,
+    graph_client: Any | None,
 ) -> set[tuple[MemoryUsageItemKind, str]]:
-    result = await record_memory_usage(
+    """Append the exposure events now; stamp the rows after the response.
+
+    The events are the durable record, written in one statement for every
+    returned item. The per-row stamps (counts and timestamps derived from
+    those events) are scheduled as one deferred batch, so the request pays
+    one write and never blocks on the hot rows.
+    """
+    rows = await record_memory_usage_events(
         content_client,
         [
             MemoryUsageEvent(
@@ -381,9 +381,95 @@ async def _record_target_exposures(
             )
             for target in targets
         ],
-        graph_client=graph_client,
     )
-    return {(stamp.item_kind, stamp.item_id) for stamp in result.stamps if _stamp_applied(stamp)}
+    stamp_targets = usage_targets_for_events(rows)
+    if stamp_targets and _stamps_run_inline(content_client, graph_client):
+        await _run_exposure_stamp(
+            content_client,
+            stamp_targets,
+            organization_id=organization_id,
+            source_surface=source_surface,
+            graph_client=graph_client,
+        )
+    elif stamp_targets:
+        _schedule_exposure_stamp(
+            content_client,
+            stamp_targets,
+            organization_id=organization_id,
+            source_surface=source_surface,
+            needs_graph_client=graph_client is not None,
+        )
+    return {(target.item_kind, target.item_id) for target in stamp_targets}
+
+
+def _stamps_run_inline(content_client: Any, graph_client: Any | None) -> bool:
+    """Whether the stamp must finish before the response instead of after it.
+
+    Deferral only pays against a networked server, where the stamp's round
+    trips would otherwise sit between the recall and its response. An
+    embedded store is clamped to one connection, so a deferred stamp would
+    queue behind the next query anyway, and it dies with the process: a
+    query still in flight when the loop closes aborts the interpreter from
+    the engine's worker thread. The stamp therefore runs inline whenever
+    either store it touches is embedded.
+    """
+    # Only a literal True counts: a test double that manufactures attributes
+    # on demand must not look like an embedded store.
+    return any(
+        getattr(client, "is_embedded", False) is True
+        for client in (content_client, graph_client)
+        if client is not None
+    )
+
+
+def _schedule_exposure_stamp(
+    content_client: Any,
+    targets: Sequence[MemoryUsageTarget],
+    *,
+    organization_id: str,
+    source_surface: str,
+    needs_graph_client: bool,
+) -> None:
+    # The task carries the organization id, not the graph client instance.
+    # The per-organization graph client cache evicts and closes idle clients,
+    # and a captured instance would be reconnected by this stamp outside the
+    # cache; resolving by id when the stamp runs always lands on the live one.
+    task = asyncio.create_task(
+        _run_exposure_stamp(
+            content_client,
+            targets,
+            organization_id=organization_id,
+            source_surface=source_surface,
+            needs_graph_client=needs_graph_client,
+        ),
+        name=f"usage_exposure_stamp:{source_surface}",
+    )
+    _pending_stamps.add(task)
+    task.add_done_callback(_pending_stamps.discard)
+
+
+async def _run_exposure_stamp(
+    content_client: Any,
+    targets: Sequence[MemoryUsageTarget],
+    *,
+    organization_id: str,
+    source_surface: str,
+    graph_client: Any | None = None,
+    needs_graph_client: bool = False,
+) -> None:
+    try:
+        if needs_graph_client and graph_client is None:
+            graph_client = await get_surreal_graph_client(organization_id)
+        await stamp_memory_usage(content_client, targets, graph_client=graph_client)
+    except Exception as exc:
+        # The events already landed, so the next stamp of these rows carries
+        # this exposure; the recall that scheduled this stamp has returned.
+        log.warning(
+            "usage_exposure_stamp_failed",
+            source_surface=source_surface,
+            targets=len(targets),
+            error_type=type(exc).__name__,
+        )
 
 
 def _exclude_failed_targets(
@@ -494,13 +580,10 @@ def _project_id_from_metadata(metadata: Mapping[str, object]) -> str | None:
     return None
 
 
-def _stamp_applied(stamp: MemoryUsageStamp) -> bool:
-    return stamp.last_recalled_at is not None or stamp.retrieval_count > 0
-
-
 __all__ = [
     "_USAGE_EXPOSURE_METADATA_KEY",
     "_USAGE_EXPOSURE_SUMMARY_KEY",
     "annotate_context_item_exposures",
     "annotate_search_result_exposures",
+    "drain_pending_exposure_stamps",
 ]

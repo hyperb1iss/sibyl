@@ -49,6 +49,11 @@ class SurrealGraphClient(DedicatedSurrealClient):
     def group_id(self) -> str:
         return self._group_id
 
+    @property
+    def is_embedded(self) -> bool:
+        """Whether this client runs an in-process engine rather than a server."""
+        return is_embedded_surreal_url(self._url)
+
 
 _prepared_groups: set[str] = set()
 _prepare_locks: WeakValueDictionary[tuple[str, str], asyncio.Lock] = WeakValueDictionary()

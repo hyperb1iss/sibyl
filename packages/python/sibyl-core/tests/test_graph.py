@@ -1499,12 +1499,12 @@ async def test_a_writer_landing_mid_heal_is_not_overwritten_by_the_snapshot() ->
 async def test_a_usage_stamp_landing_mid_heal_survives_the_snapshot_fold() -> None:
     """A recall stamped mid-fold must not be rolled back to the snapshot's counts.
 
-    The fence only holds if every writer announces itself, and the usage stamp
-    is a writer: it rewrites the recall columns and their mirror inside the
-    attributes bag. A stamp that left revision alone was invisible to the
-    fence, so the fold's write still matched, and a pre-flattening row whose
-    recall stamps lived only in the JSON snapshot had a fresh recall replaced
-    by the stale one the snapshot was carrying.
+    The usage stamp leaves revision alone (it is telemetry, not an edit), so
+    the revision fence cannot see it land. The fold therefore only fills slots
+    that are still empty when its write runs: a pre-flattening row whose
+    recall stamps lived only in the JSON snapshot keeps the fresh recall the
+    stamp wrote into the bag, and the stale snapshot copy is dropped with the
+    snapshot.
     """
     client = SurrealGraphClient(group_id="org-heal-usage-race", url="memory://")
     try:

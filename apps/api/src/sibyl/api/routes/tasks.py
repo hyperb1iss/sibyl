@@ -39,7 +39,7 @@ from sibyl_core.auth.memory_policy import (
     memory_metadata_read_allowed,
     private_scope_granted_for,
 )
-from sibyl_core.errors import RevisionConflictError
+from sibyl_core.errors import EntityNotFoundError, RevisionConflictError
 from sibyl_core.models.tasks import AuthorType, Note, TaskComplexity, TaskPriority, TaskStatus
 from sibyl_core.tools.helpers import _project_id_for_policy
 
@@ -62,6 +62,26 @@ async def get_task_graph_runtime(group_id: str):
     from sibyl.persistence.graph_runtime import get_task_graph_runtime as service
 
     return await service(group_id)
+
+
+async def _write_task_relationships(relationship_manager: Any, relationships: list[Any]) -> None:
+    """Write a task's edges as one bulk relationship write.
+
+    One endpoint lookup, one transaction and one batched embedding call for
+    the whole set, instead of two reads, a transaction and an embedding call
+    per edge. An edge the bulk write skipped has an endpoint that does not
+    exist, which the per-edge path used to surface as a bare ValueError.
+    """
+    if not relationships:
+        return
+    written = set(
+        await relationship_manager.create_direct_bulk(relationships, generate_embeddings=True)
+    )
+    missing = sorted(
+        {relationship.target_id for relationship in relationships if relationship.id not in written}
+    )
+    if missing:
+        raise EntityNotFoundError("relationship target", ", ".join(missing))
 
 
 async def _verify_task_access(
@@ -361,9 +381,7 @@ async def _create_task_under_epic(runtime: Any, request: Any, user: Any) -> tupl
         for dep_id in request.depends_on
     )
 
-    await asyncio.gather(
-        *(runtime.relationship_manager.create(relationship) for relationship in relationships)
-    )
+    await _write_task_relationships(runtime.relationship_manager, relationships)
     return task_id, task
 
 
@@ -392,24 +410,29 @@ async def _write_task_update(
     )
     relationship_manager = runtime.relationship_manager if needs_rel_mgr else None
 
+    new_links: list[Relationship] = []
     if request.epic_id is not None:
-        belongs_to_epic = Relationship(
-            id=f"rel_{task_id}_belongs_to_{request.epic_id}",
-            source_id=task_id,
-            target_id=request.epic_id,
-            relationship_type=RelationshipType.BELONGS_TO,
+        new_links.append(
+            Relationship(
+                id=f"rel_{task_id}_belongs_to_{request.epic_id}",
+                source_id=task_id,
+                target_id=request.epic_id,
+                relationship_type=RelationshipType.BELONGS_TO,
+            )
         )
-        await relationship_manager.create(belongs_to_epic)
 
-    # Handle dependency mutations
-    for dep_id in request.add_depends_on:
-        dep_rel = Relationship(
+    # Handle dependency mutations: every new edge in one bulk write
+    new_links.extend(
+        Relationship(
             id=f"rel_{task_id}_depends_on_{dep_id}",
             source_id=task_id,
             target_id=dep_id,
             relationship_type=RelationshipType.DEPENDS_ON,
         )
-        await relationship_manager.create(dep_rel)
+        for dep_id in request.add_depends_on
+    )
+    if new_links:
+        await _write_task_relationships(relationship_manager, new_links)
     for dep_id in request.remove_depends_on:
         await relationship_manager.delete_between(task_id, dep_id, RelationshipType.DEPENDS_ON)
 

@@ -2055,6 +2055,63 @@ async def save_api_idempotency_record(
     return _api_idempotency_from_record(saved)
 
 
+# The scope index (organization, principal, method, path, key) is UNIQUE, so
+# one INSERT either claims the scope or trips ON DUPLICATE KEY and hands back
+# the record already holding it. A no-op assignment keeps that record as it
+# is. One statement replaces a lookup, an UPSERT and a CREATE fallback, and
+# being one statement it is replayed after a lost commit race.
+_API_IDEMPOTENCY_RESERVE_QUERY = (
+    "INSERT INTO api_idempotency_records $record ON DUPLICATE KEY UPDATE uuid = uuid RETURN AFTER;"
+)
+_API_IDEMPOTENCY_COMPLETE_QUERY = (
+    "UPDATE api_idempotency_records SET "
+    "response_status_code = $response_status_code, "
+    "response_body = $response_body "
+    "WHERE uuid = $uuid AND organization_id = $organization_id "
+    "RETURN AFTER;"
+)
+
+
+async def reserve_api_idempotency_record(
+    _session: object,
+    *,
+    record: ApiIdempotencyRecord,
+) -> tuple[ApiIdempotencyRecord, bool]:
+    """Claim the record's scope in one write, or return the record holding it.
+
+    Returns the stored record and whether this call claimed the scope.
+    """
+    async with surreal_content_client() as client:
+        rows = await _select_many(
+            client,
+            _API_IDEMPOTENCY_RESERVE_QUERY,
+            record=_api_idempotency_record(record),
+        )
+    if not rows:
+        msg = f"Failed to reserve api_idempotency_records {record.id}"
+        raise RuntimeError(msg)
+    saved = _api_idempotency_from_record(rows[0])
+    return saved, saved.id == record.id
+
+
+async def complete_api_idempotency_record(
+    _session: object,
+    *,
+    record: ApiIdempotencyRecord,
+) -> ApiIdempotencyRecord | None:
+    """Write the response onto a reserved record; None when the record is gone."""
+    async with surreal_content_client() as client:
+        rows = await _select_many(
+            client,
+            _API_IDEMPOTENCY_COMPLETE_QUERY,
+            uuid=str(record.id),
+            organization_id=str(record.organization_id),
+            response_status_code=record.response_status_code,
+            response_body=dict(record.response_body),
+        )
+    return _api_idempotency_from_record(rows[0]) if rows else None
+
+
 async def _load_document_entity_chunk(
     client: SurrealContentClient,
     *,

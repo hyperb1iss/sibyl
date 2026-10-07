@@ -113,23 +113,13 @@ class TaskWorkflowEngine:
             expected_revision=expected_revision,
         )
 
-    async def _create_learning_artifact_link(
-        self,
-        *,
-        source_id: str,
-        target_id: str,
-        relationship_type: RelationshipType,
-        link_id: str,
-        metadata: dict[str, Any] | None = None,
-    ) -> str:
-        return await self._relationship_manager.create(
-            Relationship(
-                id=link_id,
-                source_id=source_id,
-                target_id=target_id,
-                relationship_type=relationship_type,
-                metadata=metadata or {},
-            )
+    async def _create_learning_artifact_links(self, relationships: list[Relationship]) -> list[str]:
+        """Write a learning artifact's edges in one bulk relationship write."""
+        if not relationships:
+            return []
+        return await self._relationship_manager.create_direct_bulk(
+            relationships,
+            generate_embeddings=True,
         )
 
     def _validate_transition(
@@ -565,14 +555,17 @@ class TaskWorkflowEngine:
 
         episode_id = await self._entity_manager.create_direct(episode)
 
-        await self._create_learning_artifact_link(
-            source_id=episode_id,
-            target_id=task.id,
-            relationship_type=RelationshipType.DERIVED_FROM,
-            link_id=f"rel_episode_{task.id}",
+        await self._create_learning_artifact_links(
+            [
+                Relationship(
+                    id=f"rel_episode_{task.id}",
+                    source_id=episode_id,
+                    target_id=task.id,
+                    relationship_type=RelationshipType.DERIVED_FROM,
+                ),
+                *await self._inherited_knowledge_links(episode_id, task.id),
+            ]
         )
-
-        await self._inherit_task_knowledge(episode_id, task.id)
 
         log.info("Learning episode created", episode_id=episode_id, task_id=task.id)
         return episode_id
@@ -589,24 +582,23 @@ class TaskWorkflowEngine:
 
         procedure_id = await self._entity_manager.create_direct(procedure)
 
-        await self._relationship_manager.create(
-            Relationship(
-                id=f"rel_task_{task.id}_procedure",
-                source_id=task.id,
-                target_id=procedure_id,
-                relationship_type=RelationshipType.USES_PROCEDURE,
-            )
+        await self._create_learning_artifact_links(
+            [
+                Relationship(
+                    id=f"rel_task_{task.id}_procedure",
+                    source_id=task.id,
+                    target_id=procedure_id,
+                    relationship_type=RelationshipType.USES_PROCEDURE,
+                ),
+                Relationship(
+                    id=f"rel_procedure_{task.id}",
+                    source_id=procedure_id,
+                    target_id=task.id,
+                    relationship_type=RelationshipType.DERIVED_FROM,
+                ),
+                *await self._inherited_knowledge_links(procedure_id, task.id),
+            ]
         )
-        await self._relationship_manager.create(
-            Relationship(
-                id=f"rel_procedure_{task.id}",
-                source_id=procedure_id,
-                target_id=task.id,
-                relationship_type=RelationshipType.DERIVED_FROM,
-            )
-        )
-
-        await self._inherit_task_knowledge(procedure_id, task.id)
 
         log.info("Learning procedure created", procedure_id=procedure_id, task_id=task.id)
         return procedure_id
@@ -628,11 +620,12 @@ class TaskWorkflowEngine:
 
         return [note.content for note in notes if getattr(note, "content", "").strip()]
 
-    async def _inherit_task_knowledge(
+    async def _inherited_knowledge_links(
         self,
         source_id: str,
         task_id: str,
-    ) -> None:
+    ) -> list[Relationship]:
+        """The REFERENCES edges a learning artifact inherits from its task."""
         task_relationships = await self._relationship_manager.get_for_entity(
             task_id,
             relationship_types=[
@@ -642,25 +635,29 @@ class TaskWorkflowEngine:
             ],
         )
 
-        for rel in task_relationships:
-            await self._create_learning_artifact_link(
+        return [
+            Relationship(
+                id=f"rel_inherit_{source_id}_{rel.target_id}",
                 source_id=source_id,
                 target_id=rel.target_id,
                 relationship_type=RelationshipType.REFERENCES,
-                link_id=f"rel_inherit_{source_id}_{rel.target_id}",
                 metadata={"inherited_from_task": task_id},
             )
+            for rel in task_relationships
+        ]
 
     async def update_project_activity(self, project_id: str) -> None:
         """Update project's last_activity_at timestamp.
 
-        Called when any child entity (task/epic) changes.
+        Called when any child entity (task/epic) changes. The task is the
+        edited record; the project only learns that something happened, so
+        this is a bookkeeping merge that leaves the project's revision alone.
 
         Args:
             project_id: Project UUID
         """
         now = datetime.now(UTC)
-        await self._entity_manager.update(
+        await self._entity_manager.write_bookkeeping(
             project_id,
             {"last_activity_at": now.isoformat()},
         )
@@ -671,33 +668,24 @@ class TaskWorkflowEngine:
     async def _update_project_progress(self, project_id: str) -> None:
         """Update project progress statistics.
 
+        The counters come from one aggregate over the project's tasks, and
+        they land as bookkeeping on the project row, not as an edit of it.
+
         Args:
             project_id: Project UUID
         """
         log.debug("Updating project progress", project_id=project_id)
         try:
-            total = 0
-            done = 0
-            doing = 0
-
-            tasks = await self._entity_manager.list_by_type(
+            counts = await self._entity_manager.count_by_status(
                 EntityType.TASK,
                 project_id=project_id,
-                limit=10_000,
-                include_archived=True,
             )
-            metadata_rows = [task.metadata or {} for task in tasks]
-
-            for metadata in metadata_rows:
-                status = (metadata.get("status") if isinstance(metadata, dict) else None) or "todo"
-                total += 1
-                if status == "done":
-                    done += 1
-                elif status == "doing":
-                    doing += 1
+            total = sum(counts.values())
+            done = counts.get("done", 0)
+            doing = counts.get("doing", 0)
 
             now = datetime.now(UTC)
-            await self._entity_manager.update(
+            await self._entity_manager.write_bookkeeping(
                 project_id,
                 {
                     "total_tasks": total,
@@ -800,18 +788,12 @@ class TaskWorkflowEngine:
             )
             return False
         current_status = str((epic.metadata or {}).get("status") or "planning")
-        tasks = await self._entity_manager.list_by_type(
+        counts = await self._entity_manager.count_by_status(
             EntityType.TASK,
             epic_id=epic_id,
-            limit=10_000,
-            include_archived=True,
         )
-        total = len(tasks)
-        terminal = 0
-        for epic_task in tasks:
-            task_status = str((epic_task.metadata or {}).get("status") or "").lower()
-            if task_status in {"done", "archived"}:
-                terminal += 1
+        total = sum(counts.values())
+        terminal = counts.get("done", 0) + counts.get("archived", 0)
 
         # Already completed or no tasks
         if current_status in ["completed", "archived"] or total == 0:
@@ -836,8 +818,8 @@ class TaskWorkflowEngine:
             )
             return True
 
-        # Update progress stats even if not complete
-        await self._entity_manager.update(
+        # Update progress stats even if not complete: bookkeeping, not an edit
+        await self._entity_manager.write_bookkeeping(
             epic_id,
             {
                 "total_tasks": total,

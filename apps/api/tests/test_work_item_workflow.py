@@ -172,11 +172,13 @@ class TestEpicTransition:
     async def test_complete_epic_writes_status_bumps_activity_and_broadcasts(self) -> None:
         epic = SimpleNamespace(id="epic-1", name="Epic Nova", metadata={"project_id": "proj-9"})
         update_entity = AsyncMock()
+        touch_entity = AsyncMock()
         broadcast = AsyncMock()
 
         with (
             patch.object(wiw, "entity_lock", MagicMock(side_effect=_granting_lock)),
             patch.object(wiw, "update_graph_entity", update_entity),
+            patch.object(wiw, "touch_graph_entity_bookkeeping", touch_entity),
             patch.object(wiw, "broadcast_event", broadcast),
         ):
             result = await transition_work_item(
@@ -187,14 +189,17 @@ class TestEpicTransition:
                 entity=epic,
             )
 
-        # Status write + completed_date + learnings, then a project-activity bump.
-        status_write = update_entity.await_args_list[0]
+        # Status write + completed_date + learnings on the epic; the project
+        # only gets bookkeeping, never an edit that bumps its revision.
+        update_entity.assert_awaited_once()
+        status_write = update_entity.await_args
         assert status_write.args[:2] == (GROUP_ID, "epic-1")
         assert status_write.args[2]["status"] == "completed"
         assert status_write.args[2]["learnings"] == "thin seam"
         assert "completed_date" in status_write.args[2]
 
-        activity_write = update_entity.await_args_list[1]
+        touch_entity.assert_awaited_once()
+        activity_write = touch_entity.await_args
         assert activity_write.args[:2] == (GROUP_ID, "proj-9")
         assert "last_activity_at" in activity_write.args[2]
 
@@ -207,10 +212,12 @@ class TestEpicTransition:
     async def test_archive_epic_without_project_skips_activity_bump(self) -> None:
         epic = SimpleNamespace(id="epic-1", name="Epic Nova", metadata={})
         update_entity = AsyncMock()
+        touch_entity = AsyncMock()
 
         with (
             patch.object(wiw, "entity_lock", MagicMock(side_effect=_granting_lock)),
             patch.object(wiw, "update_graph_entity", update_entity),
+            patch.object(wiw, "touch_graph_entity_bookkeeping", touch_entity),
             patch.object(wiw, "broadcast_event", AsyncMock()),
         ):
             result = await transition_work_item(
@@ -220,6 +227,7 @@ class TestEpicTransition:
         # Only the status write; no project to touch.
         update_entity.assert_awaited_once()
         assert update_entity.await_args.args[2] == {"status": "archived"}
+        touch_entity.assert_not_awaited()
         assert result.status == "archived"
 
 

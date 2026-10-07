@@ -346,8 +346,13 @@ def _can_replay_query(query: str, response: object = None) -> bool:
 
 @cached_by_query_text
 def _query_text_is_atomic(query: str) -> bool:
-    statements = [part.strip().upper() for part in query.split(";") if part.strip()]
+    statements = _top_level_statements(query)
     if len(statements) == 1:
+        # One statement, which includes a lone RETURN { ... } block: its inner
+        # semicolons sit at brace depth one, so the block runs as a single
+        # statement in its own transaction and replays like one. The response
+        # shortcut above already said so; this answers before a response
+        # exists, which is what a conflict raised as an exception needs.
         return True
     if not statements or statements[0] not in {"BEGIN", "BEGIN TRANSACTION"}:
         return False
@@ -357,6 +362,35 @@ def _query_text_is_atomic(query: str) -> bool:
     # words may suppress a retry, but cannot hide an intervening commit.
     tokens = _query_tokens(query)
     return tokens.count("BEGIN") == 1 and tokens.count("COMMIT") == 1 and "CANCEL" not in tokens
+
+
+def _top_level_statements(query: str) -> list[str]:
+    """Split on the semicolons at brace depth zero, upper-cased and stripped.
+
+    A RETURN { ... } block carries its own statements inside the braces; they
+    belong to the block, not to the query. Braces are counted without parsing
+    strings or comments, so a brace quoted inside a literal can unbalance the
+    count; an unbalanced query falls back to the plain split, which only ever
+    reports more statements and therefore never replays what it should not.
+    """
+    statements: list[str] = []
+    depth = 0
+    start = 0
+    for index, char in enumerate(query):
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth < 0:
+                break
+        elif char == ";" and depth == 0:
+            statements.append(query[start:index])
+            start = index + 1
+    else:
+        if depth == 0:
+            statements.append(query[start:])
+            return [part.strip().upper() for part in statements if part.strip()]
+    return [part.strip().upper() for part in query.split(";") if part.strip()]
 
 
 @dataclass(frozen=True, slots=True)
