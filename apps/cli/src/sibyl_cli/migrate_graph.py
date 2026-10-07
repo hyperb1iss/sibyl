@@ -403,6 +403,149 @@ def _shape(node: PlannedEntity) -> dict[str, Any]:
     return {"type": node.source.entity_type, "layer": node.layer, "links": _link_targets(node)}
 
 
+def _merged_shape(recorded: Mapping[str, Any] | None, current: Mapping[str, Any]) -> dict[str, Any]:
+    """A shape covering both: every link either names, at the later of their layers.
+
+    A row can carry links from its first body and from a later relink, so an
+    undo that keeps it must protect all of them.
+    """
+    if not recorded:
+        return dict(current)
+    links = sorted({*(recorded.get("links") or []), *(current.get("links") or [])})
+    layers = [
+        layer for layer in (recorded.get("layer"), current.get("layer")) if type(layer) is int
+    ]
+    return {
+        "type": current.get("type") or recorded.get("type"),
+        "layer": max(layers) if layers else current.get("layer"),
+        "links": links,
+    }
+
+
+def _key_used_by_another_body(exc: BaseException) -> bool:
+    """The server already holds this idempotency key for a different request body."""
+    return getattr(exc, "status_code", None) == 409 and "already used for a different request" in (
+        str(exc)
+    )
+
+
+def _contested(exc: BaseException) -> bool:
+    """A 409 the row itself can settle: a refused revision, or a key the server holds.
+
+    The API reports a refused revision as a generic conflict, so the row is
+    read to tell a teammate's edit from a write that landed. Lock contention is
+    and a request still in flight are transient and stay failures.
+    """
+    return getattr(exc, "status_code", None) == 409 and getattr(exc, "error_code", None) not in {
+        "entity_locked",
+        "idempotency_in_progress",
+    }
+
+
+def _applied_without_receipt(exc: BaseException) -> bool:
+    """The server applied the write but could not store its receipt."""
+    return getattr(exc, "status_code", None) == 503 and "receipt is still pending" in str(exc)
+
+
+# Who can see a row, narrowest first.
+_VISIBILITY = ("private", "delegated", "project", "team", "organization", "shared", "public")
+
+
+def _wider(landed: str | None, current: str | None) -> bool:
+    """Whether a landed scope is more visible than the row's scope now."""
+    if landed not in _VISIBILITY or current not in _VISIBILITY:
+        return False
+    return _VISIBILITY.index(landed) > _VISIBILITY.index(current)
+
+
+def _body_link_origins(
+    body: Mapping[str, Any], missing: Iterable[str] | None, ids: Mapping[str, str]
+) -> list[str]:
+    """The source rows a sent body links to, read back from its resolved targets."""
+    by_target = {target: origin for origin, target in ids.items()}
+    metadata = body.get("metadata") if isinstance(body.get("metadata"), Mapping) else {}
+    predicates = {f"{predicate}:" for predicate in DECLARABLE.values()}
+    related = [
+        next((entry[len(p) :] for p in predicates if entry.startswith(p)), entry)
+        for entry in body.get("related_to") or []
+        if isinstance(entry, str)
+    ]
+    targets = [
+        *related,
+        metadata.get("epic_id"),
+        metadata.get("parent_task_id"),
+        *(metadata.get("depends_on") or []),
+    ]
+    found = {
+        by_target[target] for target in targets if isinstance(target, str) and target in by_target
+    }
+    return sorted(found | set(missing or []))
+
+
+def _read_back_shape(
+    sent: Mapping[str, Any],
+    ids: Mapping[str, str],
+    structure: Mapping[str, Mapping[str, Any]],
+    *,
+    layer: int = 0,
+) -> dict[str, Any]:
+    """A shape for a body saved before shapes were kept.
+
+    Its links come from the body itself, and its layer sits above every row it
+    links to, so an undo removes it before them.
+    """
+    links = _body_link_origins(sent.get("create_body") or {}, sent.get("missing"), ids)
+    above = [int((structure.get(link) or {}).get("layer") or 0) + 1 for link in links]
+    return {"layer": max([layer, *above]), "links": links}
+
+
+async def _replay_saved_create(
+    client: Any, intent: Mapping[str, Any]
+) -> tuple[dict[str, Any], Mapping[str, Any]]:
+    """Send a create intent's saved bodies under its key, newest first, until one is taken.
+
+    The server answers a body that is not the one holding the key with "used
+    for a different request", so the next earlier body goes; an earlier body
+    only ever recovers a row the server already holds.
+    """
+    candidates = [intent, *(intent.get("earlier") or [])]
+    for index, candidate in enumerate(candidates):
+        try:
+            receipt = await client._request(
+                "POST",
+                "/entities",
+                json=candidate["create_body"],
+                params={
+                    "sync": "true",
+                    "replay_interrupted": "false",
+                    "protect_ownership": "true",
+                },
+                _buffer_pending=False,
+                _idempotency_key=intent["create_key"],
+            )
+        except Exception as exc:
+            if index < len(candidates) - 1 and _key_used_by_another_body(exc):
+                continue
+            raise
+        return receipt, candidate
+    raise RuntimeError("the create intent holds no body")
+
+
+def _sent_body(intent: Mapping[str, Any]) -> dict[str, Any]:
+    """The parts of a create intent that describe one body sent under its key."""
+    return {
+        key: intent[key]
+        for key in ("create_body", "shape", "missing", "source_digest")
+        if key in intent
+    }
+
+
+def _body_scope(body: Mapping[str, Any]) -> str | None:
+    metadata = body.get("metadata")
+    scope = metadata.get("memory_scope") if isinstance(metadata, Mapping) else None
+    return scope if isinstance(scope, str) else None
+
+
 def _payload(
     node: PlannedEntity,
     *,
@@ -516,6 +659,17 @@ class GraphOutcome:
     statuses: int = 0
     failures: list[str] = field(default_factory=list)
     unlinked: list[str] = field(default_factory=list)
+    # Rows that changed locally after an earlier body of theirs reached the team
+    # server; the team copy holds that earlier body.
+    landed_earlier: list[str] = field(default_factory=list)
+    # The subset whose earlier body was more visible than the local row is now.
+    landed_wider: list[str] = field(default_factory=list)
+    # Tasks whose later local status was not written because the task changed on
+    # the team server since the migration's own last write.
+    team_statuses: list[str] = field(default_factory=list)
+    # Tasks whose revisions the migration cannot claim (it linked to the row, or
+    # could not confirm its first write); a later local status stays local.
+    adopted_statuses: list[str] = field(default_factory=list)
 
 
 # Every metadata field a write from this pass sets. A row whose value for any
@@ -575,12 +729,16 @@ async def _existing_container(
     return None
 
 
-def _task_status(node: PlannedEntity) -> str | None:
+def _task_status(node: PlannedEntity, *, include_todo: bool = False) -> str | None:
+    """The task status to write. A new row already starts at todo, so todo is
+    written only once the migration has sent the task another status."""
     if node.source.entity_type != "task":
         return None
     status = str(node.source.status or node.source.attributes.get("status") or "").lower()
     status = _STATUS_ALIASES.get(status, status)
-    return status if status in _TASK_STATUSES and status != "todo" else None
+    if status not in _TASK_STATUSES or (status == "todo" and not include_todo):
+        return None
+    return status
 
 
 async def execute_plan(
@@ -694,7 +852,7 @@ async def execute_plan(
         }
 
     async def write(
-        node: PlannedEntity, body: dict[str, Any], key: str
+        node: PlannedEntity, body: dict[str, Any], key: str, *, raise_key_reuse: bool = False
     ) -> tuple[str, int | None] | None:
         origin = node.source.uuid
         kind = node.source.entity_type
@@ -713,6 +871,8 @@ async def execute_plan(
                     _idempotency_key=key,
                 )
             except Exception as exc:
+                if raise_key_reuse and _key_used_by_another_body(exc):
+                    raise
                 if (
                     getattr(exc, "status_code", None) != 409
                     or kind not in {"epic", "milestone"}
@@ -744,35 +904,71 @@ async def execute_plan(
             )
         return target_id, revision
 
-    async def set_status(node: PlannedEntity, target_id: str, status: str) -> bool:
+    async def land(
+        node: PlannedEntity, intent: dict[str, Any], key: str
+    ) -> tuple[tuple[str, int | None], dict[str, Any]] | None:
+        """Send an intent's bodies under its key, newest first, until one is accepted.
+
+        The server answers a body that is not the one holding the key with "used
+        for a different request", so the next earlier body goes. An earlier body
+        therefore only ever recovers a row the server already holds.
+        """
         origin = node.source.uuid
-        statuses.pop(origin, None)
-        pending = partial.setdefault(origin, {"missing": [], "digest": None})
-        try:
-            intent: dict[str, Any] | None = pending.get("status_intent")
-            if intent is None:
-                revision = pending.get("created_revision")
-                if type(revision) is not int or revision < 1:
-                    pending["status_revision_required"] = True
-                    save()
-                    raise RuntimeError(
-                        "no trustworthy saved create revision is available; reconcile "
-                        "the target status before retrying"
-                    )
-                intent = {
-                    "target_id": target_id,
-                    "body": {"status": status, "expected_revision": revision},
-                    "key": operation_key(
-                        node, "status", {"target_id": target_id, "status": status}
-                    ),
-                }
-                pending["status_intent"] = intent
-                await persist_intent()
-            if intent["target_id"] != target_id or intent["body"]["status"] != status:
-                raise RuntimeError(
-                    "the source status or target changed after its intent was saved; "
-                    "restore the original input or reconcile the saved status receipt"
+        candidates = [intent, *(intent.get("earlier") or [])]
+        for index, candidate in enumerate(candidates):
+            try:
+                created = await write(
+                    node,
+                    candidate["create_body"],
+                    key,
+                    raise_key_reuse=index < len(candidates) - 1,
                 )
+            except Exception as exc:
+                if not _key_used_by_another_body(exc):
+                    raise
+                continue
+            if created is None:
+                return None
+            if index:
+                outcome.landed_earlier.append(origin)
+                if _wider(_body_scope(candidate["create_body"]), node.scope):
+                    outcome.landed_wider.append(origin)
+            return created, candidate
+        return None
+
+    def _status_guard_revision(origin: str, pending: dict[str, Any]) -> int | None:
+        """The revision a status write may expect: the create's, else the migration's last.
+
+        A row the migration wrote and nobody touched since still sits at the
+        revision its own last write left, so a later source status change can
+        land there; any other write moves the revision and the server refuses.
+        """
+        for revision in (pending.get("created_revision"), last_written.get(origin)):
+            if type(revision) is int and revision >= 1:
+                return revision
+        return None
+
+    async def _read_quietly(target_id: str) -> dict[str, Any] | None:
+        try:
+            return await read(target_id)
+        except Exception:
+            return None
+
+    async def send_status(origin: str, intent: dict[str, Any]) -> tuple[str, str, int | None]:
+        """Send a saved status intent under its key: the outcome, the task's status, and,
+        for the migration's own write, the revision it left.
+
+        "set" means the write is the migration's own. When the server answers
+        that it applied the write but could not store the receipt, the intent
+        is marked applied, and the task still at exactly the next revision with
+        this status is claimed. Any other contested answer is settled by reading
+        the task: the server never releases a refused key, so that request did
+        not write. A task holding this status got it some other way ("there");
+        one holding another was changed on the team server ("team"). Neither is
+        claimed, so an undo keeps the task.
+        """
+        target_id = intent["target_id"]
+        try:
             async with gate:
                 response = await client._request(
                     "PATCH",
@@ -782,19 +978,119 @@ async def execute_plan(
                     _buffer_pending=False,
                     _idempotency_key=intent["key"],
                 )
-                receipt = response.get("mutation_receipt") or {}
-                if receipt.get("applied") is False:
-                    raise RuntimeError("the server queued the status instead of applying it")
-                remember(origin, receipt.get("revision"))
-                note_epic_start(response)
+        except Exception as exc:
+            if _applied_without_receipt(exc) and not intent.get("applied"):
+                intent["applied"] = True
+                await persist_intent()
+            applied = bool(intent.get("applied"))
+            row = await _read_quietly(target_id) if applied or _contested(exc) else None
+            expected = intent["body"]["expected_revision"]
+            row_revision = (row or {}).get("revision")
+            if not (
+                type(row_revision) is int and type(expected) is int and row_revision > expected
+            ):
+                raise
+            row_status = str(((row or {}).get("metadata") or {}).get("status") or "").lower()
+            if row_status != intent["body"]["status"]:
+                return "team", row_status, None
+            if applied and row_revision == expected + 1:
+                remember(origin, row_revision)
+                return "set", row_status, row_revision
+            return "there", row_status, None
+        receipt = response.get("mutation_receipt") or {}
+        if receipt.get("applied") is False:
+            raise RuntimeError("the server queued the status instead of applying it")
+        revision = receipt.get("revision")
+        remember(origin, revision)
+        note_epic_start(response)
+        return "set", intent["body"]["status"], revision if type(revision) is int else None
+
+    async def set_status(node: PlannedEntity, target_id: str, status: str) -> bool:
+        origin = node.source.uuid
+        follow_revision: int | None = None
+        statuses.pop(origin, None)
+        pending = partial.setdefault(origin, {"missing": [], "digest": None})
+        try:
+            intent: dict[str, Any] | None = pending.get("status_intent")
+            if intent is not None and intent["target_id"] != target_id:
+                raise RuntimeError(
+                    "the target changed after its status intent was saved; reconcile the "
+                    "saved status receipt before retrying"
+                )
+            if intent is not None and intent["body"]["status"] != status:
+                # The local status moved while an earlier one was unconfirmed. The
+                # earlier request is settled under its own key first, so a delayed
+                # copy of it can never land after the current one; the current
+                # status then follows from the revision that left.
+                settled, held, settled_revision = await send_status(origin, intent)
+                pending.pop("status_intent")
+                pending.pop("created_revision", None)
+                if settled == "set":
+                    outcome.statuses += 1
+                    # The migration's own write just left the task at this revision,
+                    # so the current status follows from it, even on a row the
+                    # migration otherwise does not keep in step.
+                    follow_revision = settled_revision
+                else:
+                    # Not the migration's write, so no revision to build on: the
+                    # task stays as the team server has it.
+                    if held != status:
+                        outcome.team_statuses.append(origin)
+                    statuses[origin] = status
+                    return True
+                intent = None
+            if intent is None:
+                revision = follow_revision or _status_guard_revision(origin, pending)
+                if revision is None and origin in adopted:
+                    # The migration cannot claim this row's revisions (it linked to
+                    # the row, or could not confirm its first write), so it does not
+                    # keep the row's status in step. The task is listed only when the
+                    # team copy holds a different status.
+                    row = await _read_quietly(target_id)
+                    held = str(((row or {}).get("metadata") or {}).get("status") or "").lower()
+                    if held != status:
+                        outcome.adopted_statuses.append(origin)
+                    statuses[origin] = status
+                    pending.pop("status_revision_required", None)
+                    return True
+                if revision is None:
+                    pending["status_revision_required"] = True
+                    save()
+                    raise RuntimeError(
+                        "no trustworthy saved create revision is available; reconcile "
+                        "the target status before retrying"
+                    )
+                # The revision is part of the key: a task can come back to a status
+                # it was sent before, and that later write is a different request.
+                intent = {
+                    "target_id": target_id,
+                    "body": {"status": status, "expected_revision": revision},
+                    "key": operation_key(
+                        node,
+                        "status",
+                        {"target_id": target_id, "status": status, "expected_revision": revision},
+                    ),
+                }
+                pending["status_intent"] = intent
+                await persist_intent()
+            settled, _held, _revision = await send_status(origin, intent)
         except Exception as exc:
             outcome.failures.append(f"task {origin}: status {status} not set ({exc})")
             return False
+        # A status changed on the team server stands, and the status counts as
+        # handled either way, so a re-run does not resend a refused request (the
+        # server keeps its key).
+        if settled == "team":
+            outcome.team_statuses.append(origin)
+        elif settled == "set":
+            outcome.statuses += 1
         statuses[origin] = status
-        pending.pop("status_intent")
+        pending.pop("status_intent", None)
         pending.pop("created_revision", None)
-        outcome.statuses += 1
         return True
+
+    def finished(origin: str) -> bool:
+        return origin in ids and origin not in partial
 
     total = len(plan.entities)
     processed = 0
@@ -802,12 +1098,17 @@ async def execute_plan(
 
     async def create(node: PlannedEntity) -> None:
         nonlocal processed
+        # Rows an earlier run finished stay out of the count, so the rate is
+        # the rate of rows this run writes.
+        counted = not finished(node.source.uuid)
         # One row's trouble never stops the run: it is reported, and the
         # ledger keeps what is needed to finish it next time.
         try:
             await create_one(node)
         except Exception as exc:
             outcome.failures.append(f"{node.source.entity_type} {node.source.uuid}: {exc}")
+        if not counted:
+            return
         processed += 1
         if processed % _PROGRESS_EVERY == 0 and processed < total:
             rate = processed / max(time.monotonic() - started, 0.001)
@@ -824,10 +1125,16 @@ async def execute_plan(
                 "reconcile the target status before retrying"
             )
         if origin in ids and pending and pending.get("status_revision_required"):
-            raise RuntimeError(
-                "no trustworthy saved create revision is available; reconcile "
-                "the target status before retrying"
-            )
+            if _status_guard_revision(origin, pending) is None and origin not in adopted:
+                raise RuntimeError(
+                    "no trustworthy saved create revision is available; reconcile "
+                    "the target status before retrying"
+                )
+            # The status this flag held back is retried below, against that revision.
+            pending.pop("status_revision_required")
+            if not pending.get("missing") and set(pending) <= {"missing", "digest"}:
+                partial.pop(origin)
+                pending = None
         if (
             origin in ids
             and pending
@@ -840,11 +1147,11 @@ async def execute_plan(
                 )
             )
         ):
-            status = _task_status(node)
+            status = _task_status(node, include_todo=True)
             if not status:
                 raise RuntimeError(
-                    "the source status changed after its intent was saved; restore "
-                    "the original input or reconcile the saved status receipt"
+                    "the task's local status is not one the team server accepts; set a "
+                    "valid status locally before retrying"
                 )
             if not await set_status(node, ids[origin], status):
                 return
@@ -870,15 +1177,30 @@ async def execute_plan(
                 ).encode()
             ).hexdigest()
             if pending and "create_body" in pending:
-                if pending.get("source_digest") != source_digest:
-                    raise RuntimeError(
-                        "the source changed after its create intent was saved; restore the "
-                        "original source or reconcile the saved target receipt before retrying"
-                    )
-                body = pending["create_body"]
-                missing = pending["missing"]
                 # Older intents did not keep their key; theirs is the plain one.
                 key = pending.get("create_key") or operation_key(node, "create")
+                if pending.get("source_digest") != source_digest:
+                    # The row changed locally while its create was unconfirmed. Its
+                    # current body goes first under the same key; every body sent
+                    # before stays on file, since one of them may hold the key.
+                    body, missing = _payload(
+                        node,
+                        ids=ids,
+                        target_project_id=target_project_id,
+                        origin_org=origin_org,
+                        origin_project=origin_project,
+                    )
+                    earlier = [_sent_body(pending), *(pending.get("earlier") or [])]
+                    partial[origin] = {
+                        "create_body": body,
+                        "create_key": key,
+                        "shape": _shape(node),
+                        "source_digest": source_digest,
+                        "missing": missing,
+                        "digest": None,
+                        "earlier": earlier,
+                    }
+                    await persist_intent()
             else:
                 body, missing = _payload(
                     node,
@@ -900,11 +1222,17 @@ async def execute_plan(
                     "digest": None,
                 }
                 await persist_intent()
-            created = await write(node, body, key)
-            if created is None:
+            landed = await land(node, partial[origin], key)
+            if landed is None:
                 return
+            created, sent = landed
+            missing = sent["missing"]
             target_id, revision = created
-            shape[origin] = _shape(node)
+            # The links the body that landed carries; a later relink adds its own.
+            # A body saved before shapes were kept is read back from its targets.
+            shape[origin] = dict(sent.get("shape") or {}) or _merged_shape(
+                _read_back_shape(sent, ids, shape, layer=node.layer), _shape(node)
+            )
             # A fresh row starts at revision 1; a higher one means the id
             # already held a row (the author's own, or one with no author).
             if type(revision) is int and revision > 1:
@@ -930,7 +1258,9 @@ async def execute_plan(
             writes += 1
             if writes % _SAVE_EVERY == 0:
                 save()
-        status = _task_status(node)
+        # Once the migration has sent a task a status, a move back to todo is a
+        # status change like any other.
+        status = _task_status(node, include_todo=origin in statuses)
         if (
             status
             and statuses.get(origin) != status
@@ -1026,6 +1356,9 @@ async def execute_plan(
             # it, and now knows what it links to so it keeps those rows too.
             adopted.add(origin)
             shape[origin] = _shape(node)
+        else:
+            # The relink added the current links to whatever the row landed with.
+            shape[origin] = _merged_shape(shape[origin], _shape(node))
         remember(origin, revision)
         if missing:
             partial[origin] = {"missing": missing, "digest": None}
@@ -1046,6 +1379,10 @@ async def execute_plan(
         marked.clear()
         save()
 
+    total = sum(1 for node in plan.entities if not finished(node.source.uuid))
+    if total < len(plan.entities):
+        log(f"  {len(plan.entities) - total} rows already finished; {total} to write")
+    started = time.monotonic()
     for index, layer in enumerate(plan.layers):
         await asyncio.gather(*(create(node) for node in layer))
         save()
@@ -1282,36 +1619,34 @@ async def undo_plan(
     )
     if dry_run:
         outcome.unresolved = len(unconfirmed)
+
+    def saved_shape(body: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(body.get("shape") or {}) or _read_back_shape(body, ids, structure)
+
+    def saved_links(body: Mapping[str, Any]) -> list[str]:
+        return list(saved_shape(body).get("links") or [])
+
     for origin, pending in unconfirmed.items() if not dry_run else ():
         try:
-            receipt = await client._request(
-                "POST",
-                "/entities",
-                json=pending["create_body"],
-                params={
-                    "sync": "true",
-                    "replay_interrupted": "false",
-                    "protect_ownership": "true",
-                },
-                _buffer_pending=False,
-                _idempotency_key=pending["create_key"],
-            )
+            receipt, sent = await _replay_saved_create(client, pending)
         except Exception as exc:
-            # Unknown: keep what it would link to, so nothing kept is stranded.
-            still_linked.update((pending.get("shape") or {}).get("links") or [])
+            # Unknown: keep what any saved body would link to, so nothing kept
+            # is stranded.
+            for body in (pending, *(pending.get("earlier") or [])):
+                still_linked.update(saved_links(body))
             outcome.failures.append(f"{origin}: could not confirm an unfinished create ({exc})")
             continue
         target_id = str(receipt.get("id") or "")
         if not target_id:
-            still_linked.update((pending.get("shape") or {}).get("links") or [])
+            for body in (pending, *(pending.get("earlier") or [])):
+                still_linked.update(saved_links(body))
             outcome.failures.append(f"{origin}: an unfinished create returned no id")
             continue
         ids[origin] = target_id
-        if pending.get("shape"):
-            structure[origin] = pending["shape"]
+        structure[origin] = saved_shape(sent)
         if receipt.get("revision") == 1:
             revisions[origin] = 1
-        partial[origin] = {"missing": pending.get("missing") or [], "digest": None}
+        partial[origin] = {"missing": sent.get("missing") or [], "digest": None}
     if unconfirmed and not dry_run:
         save()
 
