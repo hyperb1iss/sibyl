@@ -1495,11 +1495,20 @@ async def _forget_settled_rejections(plane: SweepPlane, counts: _Counts) -> None
         counts.keep_rejections(table, {str(row.get("uuid")) for row in rows})
 
 
-def _plane_current(state: Mapping[str, Any], stamp: EmbeddingStamp, interval: float) -> bool:
+def plane_current(state: Mapping[str, Any], stamp: EmbeddingStamp, interval: float) -> bool:
+    """Whether a plane state row (read with ``STATE_PROJECTION``) needs no walk right now.
+
+    A plane is current when a full pass finished for exactly this stamp less
+    than ``interval`` seconds ago. A reopen clears ``complete_metadata``, so
+    rows handed over by an import or a rebuild never hide behind this.
+    """
     if interval <= 0 or not same_vector_identity(state.get("complete_metadata"), stamp):
         return False
     completed = state.get("complete_age_seconds")
     return isinstance(completed, int | float) and completed < interval
+
+
+_plane_current = plane_current
 
 
 def _cursor_map(value: object) -> dict[str, str]:
@@ -1520,12 +1529,14 @@ async def _rows(plane: SweepPlane, query: str, **params: object) -> list[dict[st
     )
 
 
-_STATE_PROJECTION = (
+# A plane state row with the ages ``plane_current`` and the deferral wait read.
+STATE_PROJECTION = (
     "*, IF complete_at = NONE THEN NONE "
     "ELSE duration::secs(time::now() - complete_at) END AS complete_age_seconds, "
     "IF legacy_deferred_at = NONE THEN NONE "
     "ELSE duration::secs(time::now() - legacy_deferred_at) END AS deferred_age_seconds"
 )
+_STATE_PROJECTION = STATE_PROJECTION
 
 
 async def _ensure_state(plane: SweepPlane) -> dict[str, Any]:
@@ -1767,6 +1778,7 @@ __all__ = [
     "LEGACY_WARNING_ADOPTED_ON_INCOMPLETE_EVIDENCE",
     "LEGACY_WARNING_ADOPTED_WITHOUT_EVIDENCE",
     "PROVISIONAL_ADOPTION_KEY",
+    "STATE_PROJECTION",
     "SWEEP_BUSY",
     "SWEEP_COMPLETED",
     "SWEEP_CURRENT",
@@ -1792,6 +1804,7 @@ __all__ = [
     "ensure_legacy_decision",
     "mark_plane_for_reembed",
     "page_after_cursor",
+    "plane_current",
     "read_embedding_sweep_state",
     "run_embedding_sweep",
 ]

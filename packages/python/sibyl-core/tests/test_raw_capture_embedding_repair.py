@@ -444,7 +444,7 @@ async def test_walk_leaves_text_and_vectors_on_the_server(content_store, monkeyp
             "(metadata.embedding_metadata.model ?? NONE) != ($expected_metadata.model ?? NONE)"
             in walk
         )
-    fetches = [q for q in queries if "uuid IN $ids" in q]
+    fetches = [q for q in queries if " FROM $records " in q]
     assert len(fetches) == 1
     assert "raw_content" in fetches[0]
 
@@ -563,10 +563,119 @@ async def test_legacy_stamps_are_restamped_a_page_per_statement(content_store, m
 
     assert (result.checked, result.recovered, result.pending) == (12, 12, 0)
     restamps = [query for query in statements if "SET metadata.embedding_metadata" in query]
-    # Twelve rows in pages of five: three statements, each finding rows by uuid.
+    # Twelve rows in pages of five: three statements, each addressing its rows
+    # by the record ids the walk returned.
     assert len(restamps) == 3
-    assert all("WHERE uuid IN $uuids" in query for query in restamps)
+    assert all(query.lstrip().startswith("UPDATE $records") for query in restamps)
     for memory in memories:
         assert (await stored(memory.id))["embedding_metadata"] == raw_memory_embedding_metadata(
             current.metadata
         )
+
+
+async def test_a_legacy_stamp_is_rewritten_once_and_the_plane_is_then_current(
+    content_store, monkeypatch
+):
+    """The pass converges: one restamp, then one state read per tick until something reopens it."""
+    org = str(uuid4())
+    current = provider("current")
+    memory = await remember(org, "legacy", embedding_provider=current)
+    # The previous release wrote the same stamp without a version.
+    async with content_client.surreal_content_client() as client:
+        await content_client.select_many(
+            client,
+            "UPDATE raw_captures UNSET metadata.embedding_metadata.stamp_version WHERE uuid = $id;",
+            id=memory.id,
+        )
+    assert "stamp_version" not in (await stored(memory.id))["embedding_metadata"]
+    statements: list[str] = []
+    select_many = content_client.select_many
+
+    async def recording(client, sql, **params):
+        statements.append(sql)
+        return await select_many(client, sql, **params)
+
+    monkeypatch.setattr(content_client, "select_many", recording)
+
+    first = await repair_raw_capture_embeddings(org, embedding_provider=current)
+    issued = list(statements)
+
+    assert (first.status, first.checked, first.recovered, first.pending) == ("completed", 1, 1, 0)
+    assert (await stored(memory.id))["embedding_metadata"]["stamp_version"] == 2
+    restamps = [
+        sql for sql in issued if "SET metadata.embedding_metadata = $embedding_metadata" in sql
+    ]
+    assert restamps, "the legacy stamp is rewritten in place, without an embedding call"
+    # Every read and write of a walked row addresses its record id. A lookup by
+    # uuid alone rides the uuid index, which a live server has answered with
+    # nothing for older rows, leaving every legacy row pending forever.
+    assert all(sql.lstrip().startswith("UPDATE $records") for sql in restamps)
+    assert not any("WHERE uuid IN $" in sql or "WHERE uuid = $" in sql for sql in issued)
+
+    statements.clear()
+    second = await repair_raw_capture_embeddings(org, embedding_provider=current)
+
+    assert second.status == repair_module.REPAIR_CURRENT
+    assert (second.checked, second.recovered, second.pending) == (0, 0, 0)
+    assert len(statements) == 1, "a converged organization costs the tick one state read"
+    assert "FROM type::record($key)" in statements[0]
+
+
+async def test_a_reopened_plane_is_walked_again(content_store, monkeypatch):
+    org = str(uuid4())
+    current = provider("current")
+    await remember(org, "settled", embedding_provider=current)
+    assert (await repair_raw_capture_embeddings(org, embedding_provider=current)).status == (
+        "completed"
+    )
+    assert (await repair_raw_capture_embeddings(org, embedding_provider=current)).status == (
+        repair_module.REPAIR_CURRENT
+    )
+    # A restore or an import hands the plane rows it has not seen and reopens it.
+    missing = await remember(org, "restored")
+    from sibyl_core.backends.surreal.schema_embedding_states import REOPEN_EMBEDDING_STATES
+
+    async with content_client.surreal_content_client() as client:
+        await content_client.select_many(client, REOPEN_EMBEDDING_STATES, organizations=[org])
+
+    result = await repair_raw_capture_embeddings(org, embedding_provider=current)
+
+    assert (result.status, result.checked, result.recovered) == ("completed", 1, 1)
+    assert (await stored(missing.id))["embedding"] is not None
+
+
+async def test_a_deferred_capture_keeps_the_plane_open_until_it_is_retried(content_store):
+    """A capture the model keeps failing on is counted every pass, never hidden by the gate."""
+
+    class ModelFailedError(Exception):
+        status_code = 424
+
+    org = str(uuid4())
+    failing = await remember(org, "failing")
+    for index in range(3):
+        await remember(org, f"fine-{index}")
+    base = provider("deferring")
+    requests: list[list[str]] = []
+
+    class FailsOnOneRow:
+        metadata = base.metadata
+
+        async def embed_texts(self, texts, *, input_kind: str = "document"):
+            requests.append(list(texts))
+            if any("failing" in text for text in texts):
+                raise ModelFailedError("model failed")
+            return await base.embed_texts(texts, input_kind=input_kind)
+
+    first = await repair_raw_capture_embeddings(org, embedding_provider=FailsOnOneRow())
+    held = len(requests)
+    second = await repair_raw_capture_embeddings(org, embedding_provider=FailsOnOneRow())
+
+    assert (first.status, first.recovered, first.deferred, first.refused) == ("completed", 3, 1, 0)
+    assert (second.status, second.checked, second.deferred, second.refused) == (
+        "completed",
+        1,
+        1,
+        0,
+    )
+    assert len(requests) == held, "a held deferral is not sent again"
+    assert (await stored(failing.id))["embedding"] is None

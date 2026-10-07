@@ -14,8 +14,9 @@ For single-pod deployments, broadcasts work locally without Redis.
 """
 
 import asyncio
+import contextlib
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -48,6 +49,9 @@ READ_MEMO_INVALIDATING_EVENTS = frozenset(
     }
 )
 
+# Messages a connection may have waiting for its reader before it is dropped.
+OUTBOX_LIMIT = 256
+
 
 @dataclass
 class Connection:
@@ -59,15 +63,30 @@ class Connection:
     last_heartbeat_sent_at: datetime | None = None
     pending_pong: bool = False
     topics: frozenset[str] | None = None
+    # Outbound messages wait here for this connection's own sender task, so
+    # a reader that has stopped draining its socket holds up nothing but
+    # itself: not the request that broadcast, not the heartbeat, and not
+    # the other connections.
+    outbox: asyncio.Queue[dict[str, Any]] = field(
+        default_factory=lambda: asyncio.Queue(maxsize=OUTBOX_LIMIT)
+    )
+    sender: asyncio.Task[None] | None = None
 
 
 class ConnectionManager:
-    """Manages WebSocket connections and broadcasts events by organization."""
+    """Manages WebSocket connections and broadcasts events by organization.
+
+    Sends never run on the caller's task. Each connection has a bounded
+    outbox and a sender task; a broadcast only queues, and a client whose
+    outbox overflows, whose send times out or fails, is dropped and closed.
+    """
 
     # Heartbeat interval in seconds
     HEARTBEAT_INTERVAL = 30
     # How long to wait for pong before considering connection dead
     PONG_TIMEOUT = 10
+    # Longest one send may take before the connection counts as gone.
+    SEND_TIMEOUT = 5.0
 
     def __init__(self) -> None:
         self.active_connections: list[Connection] = []
@@ -80,6 +99,7 @@ class ConnectionManager:
         conn = Connection(websocket=websocket, org_id=org_id, last_activity=datetime.now(UTC))
         async with self._lock:
             self.active_connections.append(conn)
+            self._start_sender(conn)
             # Start heartbeat task if not running
             if self._heartbeat_task is None or self._heartbeat_task.done():
                 self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
@@ -92,17 +112,90 @@ class ConnectionManager:
         )
 
     async def disconnect(self, websocket: WebSocket) -> None:
-        """Remove a WebSocket connection."""
+        """Remove a WebSocket connection and stop its sender."""
         async with self._lock:
+            removed = [c for c in self.active_connections if c.websocket == websocket]
             self.active_connections = [
                 c for c in self.active_connections if c.websocket != websocket
             ]
             active = len(self.active_connections)
+        current = asyncio.current_task()
+        senders = [
+            conn.sender
+            for conn in removed
+            if conn.sender is not None and conn.sender is not current
+        ]
+        for sender in senders:
+            sender.cancel()
+        if senders:
+            await asyncio.gather(*senders, return_exceptions=True)
         telemetry_registry().record_websocket_connections(active=active)
         log.info("websocket_disconnected", total_connections=active)
 
+    async def shutdown(self) -> None:
+        """Stop the heartbeat and every sender; the server closes the sockets."""
+        async with self._lock:
+            connections = list(self.active_connections)
+            self.active_connections = []
+            heartbeat, self._heartbeat_task = self._heartbeat_task, None
+        tasks = [conn.sender for conn in connections if conn.sender is not None]
+        if heartbeat is not None:
+            tasks.append(heartbeat)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        telemetry_registry().record_websocket_connections(active=0)
+
+    def _start_sender(self, conn: Connection) -> None:
+        if conn.sender is None or conn.sender.done():
+            conn.sender = asyncio.create_task(self._send_loop(conn))
+
+    def _enqueue(self, conn: Connection, message: dict[str, Any]) -> bool:
+        """Hand a message to the connection's sender; False when its outbox is full."""
+        try:
+            conn.outbox.put_nowait(message)
+        except asyncio.QueueFull:
+            return False
+        self._start_sender(conn)
+        return True
+
+    async def _send_loop(self, conn: Connection) -> None:
+        """Deliver one connection's outbox in order, each send bounded by ``SEND_TIMEOUT``."""
+        while True:
+            message = await conn.outbox.get()
+            try:
+                async with asyncio.timeout(self.SEND_TIMEOUT):
+                    await conn.websocket.send_json(message)
+            except asyncio.CancelledError:
+                conn.outbox.task_done()
+                raise
+            except Exception as exc:
+                conn.outbox.task_done()
+                await self._drop(conn, reason=type(exc).__name__)
+                return
+            if message.get("event") == "heartbeat":
+                # The pong deadline runs from the moment the ping left the
+                # socket, not from when it was queued behind other messages.
+                conn.last_heartbeat_sent_at = datetime.now(UTC)
+            conn.outbox.task_done()
+
+    async def _drop(self, conn: Connection, *, reason: str) -> None:
+        """Forget a connection that cannot keep up and close its socket."""
+        log.info("websocket_dropped", org_id=conn.org_id, reason=reason, queued=conn.outbox.qsize())
+        await self.disconnect(conn.websocket)
+        with contextlib.suppress(Exception):
+            async with asyncio.timeout(self.SEND_TIMEOUT):
+                await conn.websocket.close(code=1011)
+
+    async def flush(self) -> None:
+        """Wait until every active connection's outbox has been sent."""
+        async with self._lock:
+            connections = list(self.active_connections)
+        await asyncio.gather(*(conn.outbox.join() for conn in connections))
+
     async def broadcast(self, event: str, data: dict[str, Any], org_id: str | None = None) -> None:
-        """Broadcast an event to clients in the same organization.
+        """Queue an event for the clients in the same organization and return.
 
         Args:
             event: Event type name.
@@ -135,45 +228,43 @@ class ConnectionManager:
                     c for c in self.active_connections if _connection_accepts_event(c, event)
                 ]
 
-        async def send(conn: Connection) -> WebSocket | None:
-            try:
-                await conn.websocket.send_json(message)
-            except Exception:
-                return conn.websocket
-            return None
-
-        disconnected = [
-            websocket
-            for websocket in await asyncio.gather(*(send(conn) for conn in connections))
-            if websocket is not None
-        ]
-
-        # Clean up disconnected clients
-        await asyncio.gather(*(self.disconnect(websocket) for websocket in disconnected))
+        # A full outbox means the client has stopped reading; it is dropped
+        # rather than allowed to pile up messages or stall anyone else.
+        dropped = [conn for conn in connections if not self._enqueue(conn, message)]
+        if dropped:
+            await asyncio.gather(*(self._drop(conn, reason="outbox_full") for conn in dropped))
 
         if connections:
             telemetry_registry().record_websocket_broadcast(
                 event=event,
-                recipients=len(connections) - len(disconnected),
+                recipients=len(connections) - len(dropped),
             )
             log.debug(
                 "websocket_broadcast",
                 ws_event=event,
-                recipients=len(connections) - len(disconnected),
+                recipients=len(connections) - len(dropped),
                 org_id=org_id,
             )
 
     async def send_personal(self, websocket: WebSocket, event: str, data: dict[str, Any]) -> None:
-        """Send an event to a specific client."""
+        """Queue an event for a specific client, in order with its broadcasts."""
         message = {
             "event": event,
             "data": data,
             "timestamp": datetime.now(UTC).isoformat(),
         }
-        try:
-            await websocket.send_json(message)
-        except Exception:
-            await self.disconnect(websocket)
+        async with self._lock:
+            conn = next((c for c in self.active_connections if c.websocket == websocket), None)
+        if conn is None:
+            # Not registered: answer directly, still bounded.
+            try:
+                async with asyncio.timeout(self.SEND_TIMEOUT):
+                    await websocket.send_json(message)
+            except Exception:
+                await self.disconnect(websocket)
+            return
+        if not self._enqueue(conn, message):
+            await self._drop(conn, reason="outbox_full")
 
     def mark_activity(self, websocket: WebSocket) -> None:
         """Mark activity for a connection (e.g., when pong received)."""
@@ -213,14 +304,17 @@ class ConnectionManager:
             dead_connections: list[WebSocket] = []
             for conn in self.active_connections:
                 if conn.pending_pong:
-                    sent_at = conn.last_heartbeat_sent_at or conn.last_activity or now
-                    if (now - sent_at).total_seconds() >= self.PONG_TIMEOUT:
+                    # A ping still waiting in the outbox has not started the
+                    # clock; the sender stamps the moment it goes out, and a
+                    # sender that cannot deliver drops the client itself.
+                    sent_at = conn.last_heartbeat_sent_at
+                    if sent_at is not None and (now - sent_at).total_seconds() >= self.PONG_TIMEOUT:
                         dead_connections.append(conn.websocket)
                     continue
 
                 if send_heartbeats:
                     conn.pending_pong = True
-                    conn.last_heartbeat_sent_at = now
+                    conn.last_heartbeat_sent_at = None
                     heartbeat_connections.append(conn)
 
         return heartbeat_connections, dead_connections
@@ -244,17 +338,16 @@ class ConnectionManager:
             if send_heartbeats:
                 next_heartbeat_at = now + timedelta(seconds=self.HEARTBEAT_INTERVAL)
 
+            heartbeat = {
+                "event": "heartbeat",
+                "data": {"server_time": now.isoformat()},
+                "timestamp": now.isoformat(),
+            }
+            # Each heartbeat rides the connection's own sender, so one stalled
+            # client cannot hold the others' pings past their pong deadline.
             for conn in heartbeat_connections:
-                try:
-                    await conn.websocket.send_json(
-                        {
-                            "event": "heartbeat",
-                            "data": {"server_time": now.isoformat()},
-                            "timestamp": now.isoformat(),
-                        }
-                    )
-                except Exception:
-                    dead_connections.append(conn.websocket)
+                if not self._enqueue(conn, heartbeat):
+                    await self._drop(conn, reason="outbox_full")
 
             # Clean up dead connections
             for ws in dead_connections:

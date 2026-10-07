@@ -310,7 +310,7 @@ async def _restored_embedding_follow_up(
     *,
     repair_captures: bool,
 ) -> dict[str, dict[str, int | str]]:
-    await _reopen_restored_chunk_planes(client, tables, scope)
+    await _reopen_restored_planes(client, tables, scope)
     if not repair_captures:
         return {}
     return await _repair_restored_capture_embeddings(
@@ -318,18 +318,25 @@ async def _restored_embedding_follow_up(
     )
 
 
-async def _reopen_restored_chunk_planes(
+async def _reopen_restored_planes(
     client: SurrealContentClient,
     tables: Mapping[str, object],
     scope: Sequence[str] | None,
 ) -> None:
-    """Send the embedding sweep back over the chunks a restore just wrote.
+    """Send the embedding passes back over the chunks and captures a restore just wrote.
 
-    A plane that already finished a pass would otherwise skip its walk until
-    the verify interval lapses. A failure here only delays that, so it never
-    fails the restore.
+    A plane that already finished a pass, chunk sweep and raw capture repair
+    alike, would otherwise skip its walk until the verify interval lapses.
+    A failure here only delays that, so it never fails the restore.
     """
-    organizations = _restored_row_organizations(tables, "document_chunks", scope)
+    organizations = list(
+        dict.fromkeys(
+            [
+                *_restored_row_organizations(tables, "document_chunks", scope),
+                *_restored_capture_organizations(tables, scope),
+            ]
+        )
+    )
     if not organizations:
         return
     try:

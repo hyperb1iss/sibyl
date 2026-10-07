@@ -442,6 +442,11 @@ class _PooledConnection:
         verified_at = self._verified_at
         return verified_at is not None and time.monotonic() - verified_at < seconds
 
+    @property
+    def connected(self) -> bool:
+        """Whether this slot currently holds a socket (or an embedded session)."""
+        return self._client is not None
+
     async def connect(self, *, attempt: int = 1) -> SurrealClient:
         if self._client is not None:
             return self._client
@@ -643,7 +648,13 @@ class DedicatedSurrealClient:
         self._pool: list[_PooledConnection] = [
             self._new_connection() for _ in range(self._pool_size)
         ]
-        self._available: asyncio.Queue[_PooledConnection] = asyncio.Queue()
+        # Slots connect lazily, and the slot a query returns goes back on top,
+        # so sequential queries keep reusing the one socket they warmed. A
+        # first-in-first-out queue rotated every query across every slot, which
+        # opened a socket (TCP, WebSocket, signin, USE) per slot before any real
+        # concurrency asked for it. Cold slots still connect the moment a burst
+        # needs them, so capacity is unchanged.
+        self._available: asyncio.LifoQueue[_PooledConnection] = asyncio.LifoQueue()
         for connection in self._pool:
             self._available.put_nowait(connection)
         self._close_lock = asyncio.Lock()
@@ -809,39 +820,47 @@ class DedicatedSurrealClient:
                 self._available.put_nowait(connection)
 
     async def ping_pool(self) -> PoolHealth:
-        """Check each idle slot in turn, dropping the ones whose socket is gone.
+        """Check every idle slot that holds a socket, dropping the ones whose socket is gone.
 
-        One slot is held at a time so a sweep never freezes the whole pool,
-        and a dropped slot reconnects lazily on its next query rather than on
-        a request path.
+        The idle slots come off the pool together, so none is checked twice,
+        and each goes back the moment its own check ends, so a query arriving
+        mid-sweep waits for at most one ping. A busy slot is being proved
+        healthy by the query holding it, and a slot that never connected has
+        no socket to lose; neither is touched, so the sweep spends no
+        handshake. A dropped slot reconnects lazily on its next query rather
+        than on a request path.
         """
         checked = 0
         reaped = 0
         failures: list[str] = []
-        seen: set[int] = set()
-        for _ in range(self._pool_size):
+        idle: list[_PooledConnection] = []
+        while True:
             try:
-                # Idle slots only. A busy slot is being proved healthy by the
-                # query holding it, and waiting on one would park the sweep
-                # behind a long query.
-                connection = self._available.get_nowait()
+                idle.append(self._available.get_nowait())
             except asyncio.QueueEmpty:
                 break
-            try:
-                if id(connection) in seen:
-                    # Every idle slot has been checked already.
-                    continue
-                seen.add(id(connection))
-                checked += 1
+        # Coldest first, so the slot queries warmed most recently is back on
+        # top of the pool when the sweep ends.
+        remaining = list(idle)
+        try:
+            while remaining:
+                connection = remaining.pop()
                 try:
-                    client = await connection.connect()
-                    await self._send_query(client, "RETURN true;", params={}, raw=False)
-                    connection.mark_verified()
-                except Exception as exc:
-                    failures.append(type(exc).__name__)
-                    reaped += 1
-                    await connection.drop()
-            finally:
+                    if not connection.connected:
+                        continue
+                    checked += 1
+                    try:
+                        client = await connection.connect()
+                        await self._send_query(client, "RETURN true;", params={}, raw=False)
+                        connection.mark_verified()
+                    except Exception as exc:
+                        failures.append(type(exc).__name__)
+                        reaped += 1
+                        await connection.drop()
+                finally:
+                    self._available.put_nowait(connection)
+        finally:
+            for connection in remaining:
                 self._available.put_nowait(connection)
         return PoolHealth(checked=checked, reaped=reaped, failures=tuple(failures))
 

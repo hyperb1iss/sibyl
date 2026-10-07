@@ -14,7 +14,10 @@ import pytest
 import pytest_asyncio
 
 from sibyl_core.backends.surreal import SurrealContentClient
-from sibyl_core.backends.surreal.content_schema import _content_schema_migrations
+from sibyl_core.backends.surreal.content_schema import (
+    CONTENT_SCHEMA_CURRENT_VERSION,
+    _content_schema_migrations,
+)
 from sibyl_core.backends.surreal.schema import (
     ANALYZER_DEFINITIONS,
     EDGE_DEFINITIONS,
@@ -106,7 +109,9 @@ async def store(request):
     trace = []
     try:
         applied = await initialize(client, request.param, url, migrations)
-        assert applied[-1].version == (52 if request.param == "content" else 35)
+        assert applied[-1].version == (
+            CONTENT_SCHEMA_CURRENT_VERSION if request.param == "content" else 35
+        )
         assert (
             await apply_schema_migrations(client.execute_query, migrations, name=request.param)
             == []

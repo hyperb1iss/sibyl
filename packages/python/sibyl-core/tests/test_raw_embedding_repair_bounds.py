@@ -39,6 +39,12 @@ from tests.test_reflection_identity import content_store as content_store
 PROBE_WORDING = "raw capture embedding health check"
 
 
+@pytest.fixture(autouse=True)
+def walk_every_pass(monkeypatch):
+    """These bounds are about the walk, so no pass here is skipped as current."""
+    monkeypatch.setattr(repair_module.settings, "embedding_sweep_verify_interval_seconds", 0.0)
+
+
 class RefusedError(Exception):
     """An input the provider will not embed, carried the way SDK errors carry a 4xx."""
 
@@ -449,9 +455,9 @@ async def test_a_write_that_outlives_the_budget_still_lands(content_store, monke
     memory = await remember(org, "slow-write")
     write = repair_module._write_embedding
 
-    async def slow_write(client, memory, organization_id, *, observed):
+    async def slow_write(client, memory, organization_id, *, observed, record):
         await asyncio.sleep(0.3)
-        return await write(client, memory, organization_id, observed=observed)
+        return await write(client, memory, organization_id, observed=observed, record=record)
 
     monkeypatch.setattr(repair_module, "_write_embedding", slow_write)
     monkeypatch.setattr(repair_module, "RAW_EMBEDDING_REPAIR_BUDGET_SECONDS", 0.1)
@@ -550,8 +556,9 @@ async def test_restamps_do_not_start_after_the_deadline(content_store, monkeypat
         progressed=True,
     )
     rows = [await remember(str(uuid4()), f"legacy-{index}") for index in range(3)]
+    records = {memory.id: f"raw_captures:{index}" for index, memory in enumerate(rows)}
 
-    outcomes, stop = await repair_module._restamp(run, rows)
+    outcomes, stop = await repair_module._restamp(run, rows, records)
 
     assert (outcomes, stop) == (["pending"] * 3, "partial")
     assert issued == []

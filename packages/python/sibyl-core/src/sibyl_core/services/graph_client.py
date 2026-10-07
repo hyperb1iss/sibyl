@@ -65,6 +65,12 @@ _clients: OrderedDict[str, SurrealGraphClient] = OrderedDict()
 # request still holding the evicted client keeps working meanwhile.
 _retired: list[tuple[SurrealGraphClient, float]] = []
 RETIRED_CLIENT_IDLE_SECONDS = 60.0
+# Answers about an organization's graph schema that hold until the schema is
+# marked dirty: whether the sweep migration has run, the recorded embedding
+# dimension. Background passes ask every minute; the schema moves only through
+# a bootstrap or a migration, which mark it dirty the same way they already
+# invalidate ``_prepared_groups``.
+_schema_facts: dict[str, dict[str, Any]] = {}
 
 
 @dataclass
@@ -72,10 +78,16 @@ class _BackgroundLease:
     client: SurrealGraphClient
     users: int = 0
     closing: asyncio.Task[None] | None = None
+    # Teardown scheduled while the lease sits idle; the next user cancels it.
+    idle_close: asyncio.TimerHandle | None = None
 
 
-_background_clients: dict[str, _BackgroundLease] = {}
+# Most recently used last, so the warm set is bounded by evicting from the front.
+_background_clients: OrderedDict[str, _BackgroundLease] = OrderedDict()
 _background_lock = asyncio.Lock()
+# Expiry tasks spawned from the loop's timer, held so they cannot be collected
+# before they run.
+_expiry_tasks: set[asyncio.Task[None]] = set()
 
 
 def _new_graph_client(group_id: str) -> SurrealGraphClient:
@@ -113,11 +125,73 @@ async def _finish_background_cleanup(task: asyncio.Task[None]) -> None:
         raise asyncio.CancelledError
 
 
+def _start_background_close(group_id: str, lease: _BackgroundLease) -> asyncio.Task[None]:
+    """Begin tearing an idle lease down; the caller holds ``_background_lock``."""
+    if lease.idle_close is not None:
+        lease.idle_close.cancel()
+        lease.idle_close = None
+    lease.closing = asyncio.create_task(_close_background_lease(group_id, lease))
+    return lease.closing
+
+
+async def _expire_background_lease(group_id: str, lease: _BackgroundLease) -> None:
+    """Close a lease nobody has used for the idle window, unless a user came back."""
+    async with _background_lock:
+        lease.idle_close = None
+        if (
+            lease.users
+            or lease.closing is not None
+            or _background_clients.get(group_id) is not lease
+        ):
+            return
+        closing = _start_background_close(group_id, lease)
+    await closing
+
+
+def _schedule_background_expiry(group_id: str, lease: _BackgroundLease, idle: float) -> None:
+    def expire() -> None:
+        task = asyncio.ensure_future(_expire_background_lease(group_id, lease))
+        _expiry_tasks.add(task)
+        task.add_done_callback(_expiry_tasks.discard)
+
+    lease.idle_close = asyncio.get_running_loop().call_later(idle, expire)
+
+
+def _retire_idle_background_leases_beyond_cap() -> None:
+    """Hand the least recently used idle pools to the retired list; the caller holds the lock.
+
+    Every organization's tick re-arms its lease, so without a bound one
+    pool per organization would stay open for the life of the process. A
+    retired pool closes once the health sweep finds it idle, the way an
+    evicted foreground client does.
+    """
+    cap = settings.surreal_background_client_cache_size
+    idle = [
+        (group_id, lease)
+        for group_id, lease in _background_clients.items()
+        if lease.users == 0 and lease.closing is None
+    ]
+    for group_id, lease in idle[: max(0, len(idle) - cap)]:
+        if lease.idle_close is not None:
+            lease.idle_close.cancel()
+            lease.idle_close = None
+        del _background_clients[group_id]
+        _retired.append((lease.client, time.monotonic()))
+
+
 async def _release_background_lease(group_id: str, lease: _BackgroundLease) -> None:
     async with _background_lock:
         lease.users -= 1
         if lease.users == 0:
-            lease.closing = asyncio.create_task(_close_background_lease(group_id, lease))
+            idle = settings.surreal_background_client_idle_seconds
+            if idle > 0:
+                # The pool stays warm for the next pass: the scheduled repairs
+                # come back every minute, and a torn-down pool costs a socket
+                # handshake per slot before the first query runs.
+                _schedule_background_expiry(group_id, lease, idle)
+                _retire_idle_background_leases_beyond_cap()
+            else:
+                _start_background_close(group_id, lease)
         closing = lease.closing
     if closing is not None:
         await closing
@@ -127,9 +201,11 @@ async def _release_background_lease(group_id: str, lease: _BackgroundLease) -> N
 async def background_graph_client(group_id: str) -> AsyncIterator[SurrealGraphClient]:
     """Share one network pool across overlapping background operations per org.
 
-    The active-lease registry is separate from the foreground LRU. Its last user
-    closes the pool; a new operation waits for any old pool teardown to finish.
-    Embedded stores must share their original single writer and memory identity.
+    The active-lease registry is separate from the foreground LRU. The pool
+    outlives its last user by ``surreal_background_client_idle_seconds`` so
+    the next background operation reuses its sockets; a new operation waits
+    for any old pool teardown to finish. Embedded stores must share their
+    original single writer and memory identity.
     """
     if is_embedded_surreal_url(settings.resolved_surreal_url):
         yield await get_surreal_graph_client(group_id)
@@ -141,7 +217,11 @@ async def background_graph_client(group_id: str) -> AsyncIterator[SurrealGraphCl
                 lease = _BackgroundLease(_new_graph_client(group_id))
                 _background_clients[group_id] = lease
             if lease.closing is None:
+                if lease.idle_close is not None:
+                    lease.idle_close.cancel()
+                    lease.idle_close = None
                 lease.users += 1
+                _background_clients.move_to_end(group_id)
                 break
             closing = lease.closing
         await asyncio.shield(closing)
@@ -150,6 +230,18 @@ async def background_graph_client(group_id: str) -> AsyncIterator[SurrealGraphCl
     finally:
         cleanup = asyncio.create_task(_release_background_lease(group_id, lease))
         await _finish_background_cleanup(cleanup)
+
+
+async def close_idle_background_clients() -> None:
+    """Close every background pool with no current user, without waiting for its idle window."""
+    async with _background_lock:
+        closing = [
+            _start_background_close(group_id, lease)
+            for group_id, lease in list(_background_clients.items())
+            if lease.users == 0 and lease.closing is None
+        ]
+    if closing:
+        await asyncio.gather(*closing, return_exceptions=True)
 
 
 def validate_native_embedding_dimensions(
@@ -207,7 +299,9 @@ async def close_graph_clients() -> None:
         _clients.clear()
         _retired.clear()
         _prepared_groups.clear()
+        _schema_facts.clear()
     await asyncio.gather(*(client.close() for client in clients), return_exceptions=True)
+    await close_idle_background_clients()
 
 
 async def prepare_graph_schema(client: SurrealGraphClient) -> None:
@@ -226,6 +320,28 @@ async def prepare_graph_schema(client: SurrealGraphClient) -> None:
 
 def mark_graph_schema_dirty(group_id: str) -> None:
     _prepared_groups.discard(group_id)
+    _schema_facts.pop(group_id, None)
+
+
+def reset_graph_schema_facts() -> None:
+    """Forget every remembered schema answer; tests sharing a process call this."""
+    _schema_facts.clear()
+
+
+def graph_schema_fact(group_id: str, key: str) -> Any:
+    """A remembered answer about this organization's graph schema, or None."""
+    facts = _schema_facts.get(group_id)
+    return facts.get(key) if facts is not None else None
+
+
+def remember_graph_schema_fact(group_id: str, key: str, value: Any) -> None:
+    """Keep an answer until the organization's schema is marked dirty.
+
+    Only answers a schema change can move belong here, and only ones the
+    caller has just read from the database; a bootstrap, a migration or an
+    evicted client marks the schema dirty and forgets them.
+    """
+    _schema_facts.setdefault(group_id, {})[key] = value
 
 
 def _namespace_for_group(prefix: str, group_id: str) -> str:
@@ -241,9 +357,13 @@ __all__ = [
     "SurrealGraphClient",
     "background_graph_client",
     "close_graph_clients",
+    "close_idle_background_clients",
     "get_surreal_graph_client",
+    "graph_schema_fact",
     "mark_graph_schema_dirty",
     "prepare_graph_schema",
     "reap_retired_graph_clients",
+    "remember_graph_schema_fact",
+    "reset_graph_schema_facts",
     "validate_native_embedding_dimensions",
 ]

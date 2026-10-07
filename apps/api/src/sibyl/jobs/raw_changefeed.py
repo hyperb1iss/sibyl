@@ -17,6 +17,7 @@ from sibyl.jobs import queue as job_queue
 from sibyl.persistence.surreal.content import surreal_content_client
 from sibyl_core.backends.surreal.records import normalize_records
 from sibyl_core.observability import elapsed_ms
+from sibyl_core.services.content_client import normalize_raw_statement_records, query_error
 
 log = structlog.get_logger()
 
@@ -24,6 +25,8 @@ RAW_CAPTURE_CHANGEFEED_CONSUMER = "raw_capture_enrichment"
 RAW_CAPTURE_CHANGEFEED_TABLE = "raw_captures"
 RAW_CAPTURE_CHANGEFEED_CURSOR_TABLE = "content_changefeed_cursors"
 _MAX_PENDING_RAW_MEMORY_IDS = 500
+# Most changes one SHOW CHANGES statement is asked for.
+_MAX_CHANGEFEED_LIMIT = 10_000
 _VECTOR_FIELD_NAMES = frozenset({"embedding", "embeddings", "vector", "vectors"})
 _VECTOR_FIELD_SUFFIXES = ("_embedding", "_embeddings", "_vector", "_vectors")
 
@@ -73,6 +76,10 @@ async def poll_raw_capture_changefeed(
             since=cursor.versionstamp,
             limit=bounded_limit,
         )
+        # SINCE is inclusive on a 3.x server: the change at the cursor comes
+        # back on every poll, so only changes past the cursor count. Without
+        # this the row at the cursor was enqueued again every minute.
+        rows = [row for row in rows if _coerce_int(row.get("versionstamp")) > cursor.versionstamp]
         next_versionstamp = _last_versionstamp(rows, default=cursor.versionstamp)
         changed_refs = _raw_capture_refs_for_org(rows, organization_id=organization_id)
         raw_memory_ids = [ref.raw_memory_id for ref in changed_refs]
@@ -206,18 +213,27 @@ async def poll_all_raw_capture_changefeeds(
     ctx: dict[str, Any],
     *,
     limit: int = 100,
-    organization_limit: int = 100,
+    consumer_name: str = RAW_CAPTURE_CHANGEFEED_CONSUMER,
 ) -> dict[str, Any]:
+    """Poll the organizations the feed has moved past, and only those.
+
+    The feed is table-wide, so one read from the oldest saved cursor says
+    which organizations still have changes ahead of their own cursor and
+    which ones appear in it without a cursor yet. A quiet tick costs two
+    statements whatever the number of organizations, and nothing walks
+    the capture table itself.
+    """
     if not settings.raw_capture_changefeed_poll_enabled:
         return {"status": "disabled", "organizations": 0, "results": []}
 
     async with surreal_content_client() as client:
-        organization_ids = await _raw_capture_organization_ids(
-            client,
-            limit=max(int(organization_limit), 1),
+        organization_ids = await _organizations_behind_the_feed(
+            client, consumer_name=consumer_name, limit=max(int(limit), 1)
         )
     results = [
-        await poll_raw_capture_changefeed(ctx, organization_id, limit=limit)
+        await poll_raw_capture_changefeed(
+            ctx, organization_id, limit=limit, consumer_name=consumer_name
+        )
         for organization_id in organization_ids
     ]
     return {
@@ -227,21 +243,103 @@ async def poll_all_raw_capture_changefeeds(
     }
 
 
+async def _organizations_behind_the_feed(
+    client: Any, *, consumer_name: str, limit: int
+) -> list[str]:
+    """Organizations with changes past their cursor, plus ones the feed names without a cursor.
+
+    An organization whose cursor trails the newest change read here is
+    polled even when none of the changes are its own: its poll moves its
+    cursor past them, which is what lets the oldest cursor, and so the
+    start of this read, advance.
+    """
+    cursors = await _load_cursors(client, consumer_name=consumer_name)
+    floor = min(cursors.values(), default=0)
+    rows = await _show_raw_capture_changes(client, since=floor, limit=limit)
+    if not rows:
+        return []
+    latest = _last_versionstamp(rows, default=floor)
+    behind = [
+        organization_id
+        for organization_id, versionstamp in cursors.items()
+        if versionstamp < latest
+    ]
+    seen = set(behind)
+    for row in rows:
+        for payload in _change_payloads(row.get("changes")):
+            ref = raw_capture_ref_from_payload(payload)
+            if ref is None or ref.organization_id in seen or ref.organization_id in cursors:
+                continue
+            seen.add(ref.organization_id)
+            behind.append(ref.organization_id)
+    log.debug(
+        "raw_capture_changefeed_discovered",
+        consumer_name=consumer_name,
+        rows_seen=len(rows),
+        since=floor,
+        latest=latest,
+        organizations=len(behind),
+    )
+    return behind
+
+
+async def _load_cursors(client: Any, *, consumer_name: str) -> dict[str, int]:
+    rows = await _execute_records(
+        client,
+        """
+        SELECT organization_id, versionstamp FROM content_changefeed_cursors
+        WHERE table_name = $table_name AND consumer_name = $consumer_name;
+        """,
+        table_name=RAW_CAPTURE_CHANGEFEED_TABLE,
+        consumer_name=consumer_name,
+    )
+    cursors: dict[str, int] = {}
+    for row in rows:
+        organization_id = _optional_str(row.get("organization_id"))
+        if organization_id:
+            cursors[organization_id] = _coerce_int(row.get("versionstamp"))
+    return cursors
+
+
+def _unsigned_literal(value: object, *, name: str, maximum: int | None = None) -> int:
+    number = _coerce_int(value, default=-1)
+    if number < 0:
+        raise ValueError(f"{name} must be an unsigned integer, got {value!r}")
+    return min(number, maximum) if maximum is not None else number
+
+
 async def _show_raw_capture_changes(
     client: Any,
     *,
     since: int,
     limit: int,
 ) -> list[dict[str, object]]:
-    raw = await client.execute_query_raw(
-        f"SHOW CHANGES FOR TABLE {RAW_CAPTURE_CHANGEFEED_TABLE} SINCE {since} LIMIT $limit;",
-        limit=limit,
+    # SINCE and LIMIT take unsigned integer literals only: a 3.x server
+    # rejects a parameter in either position with a parse error, answered as
+    # an RPC error envelope rather than a statement result, which is how the
+    # poller sat inert while reporting one row per poll. Both values are
+    # validated here and never come from a request.
+    since_literal = _unsigned_literal(since, name="since")
+    limit_literal = _unsigned_literal(
+        max(_coerce_int(limit), 1), name="limit", maximum=_MAX_CHANGEFEED_LIMIT
     )
+    raw = await client.execute_query_raw(
+        f"SHOW CHANGES FOR TABLE {RAW_CAPTURE_CHANGEFEED_TABLE} "
+        f"SINCE {since_literal} LIMIT {limit_literal};"
+    )
+    error = query_error(raw)
+    if error is not None:
+        raise RuntimeError(error)
+    # The raw reply is the RPC envelope: every statement's result wrapped once
+    # more, and the change rows are the last statement's. Read as plain
+    # records the envelope was one row with no versionstamp, so the poller
+    # saw one change and never advanced a cursor.
+    rows = normalize_raw_statement_records(raw, statement_index=-1)
     # SHOW CHANGES cannot project fields, so every change arrives with the
     # whole record, embedding vectors included. The consumer only needs ids,
     # so the vectors are dropped here, before anything holds or re-encodes
     # them.
-    return [strip_vector_fields(dict(row)) for row in normalize_records(raw)]
+    return [strip_vector_fields(dict(row)) for row in rows]
 
 
 def strip_vector_fields(value: Any) -> Any:
@@ -344,24 +442,6 @@ async def _save_cursor(
             "updated_at": datetime.now(UTC),
         },
     )
-
-
-async def _raw_capture_organization_ids(client: Any, *, limit: int) -> list[str]:
-    rows = await _execute_records(
-        client,
-        """
-        SELECT organization_id FROM raw_captures
-        WHERE organization_id != NONE AND organization_id != ''
-        GROUP BY organization_id
-        LIMIT $limit;
-        """,
-        limit=limit,
-    )
-    return [
-        organization_id
-        for organization_id in (_optional_str(row.get("organization_id")) for row in rows)
-        if organization_id
-    ]
 
 
 async def _execute_records(client: Any, query: str, **params: object) -> list[dict[str, object]]:

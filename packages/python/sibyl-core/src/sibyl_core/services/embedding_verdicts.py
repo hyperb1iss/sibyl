@@ -27,7 +27,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from sibyl_core.backends.surreal import SurrealContentClient
-from sibyl_core.backends.surreal.schema_embedding_states import embedding_sweep_schema_ready
 from sibyl_core.embeddings.providers import EmbeddingProvider
 from sibyl_core.services import content_client
 from sibyl_core.services.document_embedding_sweep import (
@@ -48,7 +47,10 @@ from sibyl_core.services.embedding_sweep import (
     LegacyEvidence,
     ensure_legacy_decision,
 )
-from sibyl_core.services.graph_embedding_sweep import graph_embedding_plane
+from sibyl_core.services.graph_embedding_sweep import (
+    graph_embedding_plane,
+    graph_sweep_schema_ready,
+)
 
 type PlaneVerdict = dict[str, Any] | BaseException | None
 
@@ -164,7 +166,7 @@ async def settle_legacy_verdicts(
         async def content_execute(query: str, **params: object) -> object:
             return await content_client.select_many(content, query, **params)
 
-        graph_ready = await embedding_sweep_schema_ready(graph_client.execute_query, graph=True)
+        graph_ready = await graph_sweep_schema_ready(graph_client)
         if graph_ready:
             await publish_graph_snapshot(
                 organization_id=organization_id,

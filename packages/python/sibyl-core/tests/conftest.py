@@ -20,13 +20,15 @@ def disable_raw_memory_auto_embedding(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(autouse=True)
 def reset_vector_lane_readiness() -> None:
-    # Lane verdicts are cached per process; one test's plane state must not
-    # decide another test's lanes.
+    # Lane verdicts and schema facts are cached per process; one test's plane
+    # state or schema must not decide another test's lanes.
     from sibyl_core.services.content_documents import reset_document_chunk_count_cache
     from sibyl_core.services.embedding_lane_readiness import reset_lane_readiness_cache
+    from sibyl_core.services.graph_client import reset_graph_schema_facts
 
     reset_lane_readiness_cache()
     reset_document_chunk_count_cache()
+    reset_graph_schema_facts()
 
 
 def make_entity(

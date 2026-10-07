@@ -197,9 +197,10 @@ class RuntimeServices:
 
         try:
             from sibyl.api.pubsub import shutdown_pubsub
-            from sibyl.api.websocket import disable_pubsub
+            from sibyl.api.websocket import disable_pubsub, get_manager
 
             disable_pubsub()
+            await get_manager().shutdown()
             await shutdown_pubsub()
         except Exception as e:
             self._log.debug("Pub/sub shutdown error", error=str(e))

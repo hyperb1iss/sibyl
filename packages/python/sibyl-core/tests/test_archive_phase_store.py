@@ -275,11 +275,11 @@ async def test_archive_phase_actor_and_org_reads_and_native_binding_change(phase
 
 async def test_archive_phase_registration_uses_next_store_versions():
     content_migrations = _content_schema_migrations(url="memory://")
-    content = content_migrations[-2]
+    content = next(migration for migration in content_migrations if migration.version == 51)
     graph = next(migration for migration in GRAPH_SCHEMA_MIGRATIONS if migration.version == 32)
     assert content.version == 51
     assert graph.version == 32
-    assert content_migrations[-1].version == CONTENT_SCHEMA_CURRENT_VERSION == 52
+    assert content_migrations[-1].version == CONTENT_SCHEMA_CURRENT_VERSION == 53
     assert GRAPH_SCHEMA_MIGRATIONS[-1].version == GRAPH_SCHEMA_CURRENT_VERSION == 35
     assert content.name == "content_archive_phase_receipts"
     assert graph.name == "graph_archive_phase_receipts"

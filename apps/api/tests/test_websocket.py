@@ -19,6 +19,14 @@ from sibyl.auth.jwt import create_access_token
 from sibyl.config import Settings
 
 
+async def _eventually(predicate, *, within: float = 1.0) -> None:
+    deadline = asyncio.get_running_loop().time() + within
+    while not predicate():
+        if asyncio.get_running_loop().time() >= deadline:
+            pytest.fail("condition never held")
+        await asyncio.sleep(0.005)
+
+
 class TestConnection:
     """Tests for Connection dataclass."""
 
@@ -96,6 +104,7 @@ class TestEntityBroadcastPayload:
             entity_change_payload("decision_private", "episode"),
             org_id="org-1",
         )
+        await manager.flush()
 
         for socket in sockets:
             sent = socket.send_json.await_args.args[0]
@@ -135,6 +144,7 @@ class TestConnectionManagerOrgScoping:
 
         # Broadcast to org_a only
         await manager.broadcast("test_event", {"key": "value"}, org_id="org_a")
+        await manager.flush()
 
         # Only org_a connections should receive
         assert ws1.send_json.called
@@ -156,6 +166,7 @@ class TestConnectionManagerOrgScoping:
 
         # Broadcast to all (system event)
         await manager.broadcast("health_update", {"status": "ok"}, org_id=None)
+        await manager.flush()
 
         assert ws1.send_json.called
         assert ws2.send_json.called
@@ -206,9 +217,141 @@ class TestConnectionManagerOrgScoping:
         ]
 
         await manager.broadcast("test_event", {}, org_id="org_a")
+        await manager.flush()
+        await _eventually(
+            lambda: (
+                [connection.websocket for connection in manager.active_connections] == [healthy_ws]
+            )
+        )
 
         healthy_ws.send_json.assert_awaited_once()
-        assert [connection.websocket for connection in manager.active_connections] == [healthy_ws]
+
+    @pytest.mark.asyncio
+    async def test_broadcast_returns_while_a_stalled_client_blocks_its_own_send(
+        self, manager: ConnectionManager
+    ) -> None:
+        """A client that stops reading delays nobody: not the caller, not its neighbours."""
+        manager.SEND_TIMEOUT = 0.05
+        release = asyncio.Event()
+
+        async def stalled_send(_message: object) -> None:
+            await release.wait()
+
+        stalled_ws = MagicMock()
+        stalled_ws.send_json = AsyncMock(side_effect=stalled_send)
+        stalled_ws.close = AsyncMock()
+        healthy_ws = MagicMock()
+        healthy_ws.send_json = AsyncMock()
+        manager.active_connections = [
+            Connection(websocket=stalled_ws, org_id="org_a"),
+            Connection(websocket=healthy_ws, org_id="org_a"),
+        ]
+
+        try:
+            await asyncio.wait_for(
+                manager.broadcast("entity_updated", {"id": "row"}, org_id="org_a"), timeout=0.5
+            )
+            await _eventually(lambda: healthy_ws.send_json.await_count == 1)
+            # The stalled send runs out its timeout; its client is dropped and closed,
+            # and the healthy one is untouched.
+            await _eventually(
+                lambda: (
+                    [connection.websocket for connection in manager.active_connections]
+                    == [healthy_ws]
+                )
+            )
+            await _eventually(lambda: stalled_ws.close.await_count == 1)
+            assert stalled_ws.close.await_args.kwargs == {"code": 1011}
+        finally:
+            release.set()
+
+    @pytest.mark.asyncio
+    async def test_a_client_that_overflows_its_outbox_is_dropped_and_closed(
+        self, manager: ConnectionManager
+    ) -> None:
+        release = asyncio.Event()
+
+        async def stalled_send(_message: object) -> None:
+            await release.wait()
+
+        stalled_ws = MagicMock()
+        stalled_ws.send_json = AsyncMock(side_effect=stalled_send)
+        stalled_ws.close = AsyncMock()
+        manager.active_connections = [Connection(websocket=stalled_ws, org_id="org_a")]
+
+        try:
+            # One message is in flight; the outbox fills behind it, then overflows.
+            for _ in range(websocket_module.OUTBOX_LIMIT + 2):
+                await asyncio.wait_for(
+                    manager.broadcast("entity_updated", {"id": "row"}, org_id="org_a"),
+                    timeout=0.5,
+                )
+            assert manager.active_connections == []
+            await _eventually(lambda: stalled_ws.close.await_count == 1)
+        finally:
+            release.set()
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_deadline_starts_when_the_ping_leaves_the_socket(
+        self, manager: ConnectionManager
+    ) -> None:
+        """A ping queued behind other messages must not count against a live reader."""
+        now = datetime.now(UTC)
+        queued = Connection(
+            websocket=MagicMock(),
+            org_id="org_a",
+            pending_pong=True,
+            last_heartbeat_sent_at=None,
+            last_activity=now - timedelta(seconds=manager.PONG_TIMEOUT * 3),
+        )
+        manager.active_connections = [queued]
+        _heartbeats, dead = await manager._prepare_heartbeat_batch(now=now, send_heartbeats=False)
+        assert dead == []
+
+        sent_ws = MagicMock()
+        sent_ws.send_json = AsyncMock()
+        conn = Connection(websocket=sent_ws, org_id="org_a")
+        manager.active_connections = [conn]
+        before = datetime.now(UTC)
+        _heartbeats, _dead = await manager._prepare_heartbeat_batch(
+            now=before, send_heartbeats=True
+        )
+        assert conn.pending_pong
+        assert conn.last_heartbeat_sent_at is None
+        assert manager._enqueue(
+            conn, {"event": "heartbeat", "data": {}, "timestamp": before.isoformat()}
+        )
+        await manager.flush()
+        assert conn.last_heartbeat_sent_at is not None
+        assert conn.last_heartbeat_sent_at >= before
+        sent_ws.send_json.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_disconnect_and_shutdown_stop_sender_tasks(
+        self, manager: ConnectionManager
+    ) -> None:
+        sockets = []
+        for _ in range(2):
+            ws = MagicMock()
+            ws.accept = AsyncMock()
+            ws.send_json = AsyncMock()
+            sockets.append(ws)
+            await manager.connect(ws, org_id="org_a")
+        senders = [conn.sender for conn in manager.active_connections]
+        assert all(sender is not None and not sender.done() for sender in senders)
+        heartbeat = manager._heartbeat_task
+        assert heartbeat is not None
+        assert not heartbeat.done()
+
+        await manager.disconnect(sockets[0])
+        assert senders[0].done(), "disconnect waits for the sender to stop"
+        assert not senders[1].done()
+
+        await manager.shutdown()
+        assert senders[1].done()
+        assert heartbeat.done()
+        assert manager.active_connections == []
+        assert manager._heartbeat_task is None
 
     @pytest.mark.asyncio
     async def test_broadcast_to_empty_org(self, manager: ConnectionManager) -> None:
@@ -254,6 +397,7 @@ class TestConnectionManagerOrgScoping:
         ]
 
         await manager.broadcast("raw_capture_changed", {"raw_memory_ids": ["raw-a"]}, "org_a")
+        await manager.flush()
 
         assert ws_all.send_json.called
         assert ws_raw.send_json.called

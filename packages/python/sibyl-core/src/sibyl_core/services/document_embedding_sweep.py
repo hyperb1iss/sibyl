@@ -21,7 +21,7 @@ from typing import Any
 
 from sibyl_core.backends.surreal import SurrealContentClient
 from sibyl_core.backends.surreal.content_schema import EMBEDDING_DIM
-from sibyl_core.backends.surreal.schema_embedding_states import embedding_sweep_schema_ready
+from sibyl_core.backends.surreal.schema_embedding_states import CONTENT_SWEEP_SCHEMA_VERSION
 from sibyl_core.backends.surreal.schema_invariants import fetch_vector_field_dimension
 from sibyl_core.services import content_client
 from sibyl_core.services.embedding_evidence import gather_legacy_evidence
@@ -117,12 +117,14 @@ async def document_chunk_embedding_plane(
 
 
 async def content_sweep_schema_ready(client: SurrealContentClient) -> bool:
-    """Whether the shared content namespace has taken the sweep's evidence snapshot."""
+    """Whether the shared content namespace has taken the sweep's evidence snapshot.
 
-    async def execute(query: str, **params: object) -> object:
-        return await content_client.select_many(client, query, **params)
-
-    return await embedding_sweep_schema_ready(execute, graph=False)
+    Remembered per client once true, so the scheduled passes do not re-read
+    the version record for every organization every minute.
+    """
+    return await content_client.content_schema_version_at_least(
+        client, CONTENT_SWEEP_SCHEMA_VERSION
+    )
 
 
 async def require_content_sweep_schema(client: SurrealContentClient) -> None:
