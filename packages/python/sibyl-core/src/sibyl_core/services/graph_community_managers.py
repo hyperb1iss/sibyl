@@ -176,22 +176,23 @@ def _native_graph_client(client: Any) -> bool:
     return isinstance(client, SurrealGraphClient)
 
 
-def _cursor_binding(client: Any) -> tuple[str, Callable[[str], object]]:
-    """How a cursor's ISO text reaches the engine: a bound template and a value.
+def _cursor_binding(client: Any) -> tuple[str, str, Callable[[str], object]]:
+    """How a cursor reaches the engine: datetime and text bound templates, a value.
 
     The server seeks the composite index for a native datetime parameter, so
-    the text is sent as one through the SDK's Datetime wrapper, which keeps
-    its nanoseconds. The embedded 2.x engine returns the oldest rows for a
-    DESC LIMIT page bounded by a datetime parameter; an inline cast of the
-    text keeps it off that path, and it has no planner to lose.
+    the ISO text is sent as one through the SDK's Datetime wrapper, which
+    keeps its nanoseconds, and a uuid travels as a plain parameter. The
+    embedded 2.x engine returns the lowest rows for a DESC LIMIT page bounded
+    by any bare parameter, datetime or string; an inline cast of the text
+    keeps it off that path, and it has no planner to lose.
     """
     from surrealdb.data.types.datetime import Datetime
 
     from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
 
     if is_embedded_surreal_url(client._url):
-        return "<datetime>${}", str
-    return "${}", Datetime
+        return "<datetime>${}", "<string>${}", str
+    return "${}", "${}", Datetime
 
 
 def _page_limit(collected: int, *, batch_size: int, max_items: int | None) -> int:
@@ -199,6 +200,20 @@ def _page_limit(collected: int, *, batch_size: int, max_items: int | None) -> in
     if max_items is not None:
         limit = min(limit, max(max_items - collected, 0))
     return limit
+
+
+async def _page_results(
+    client: Any, selects: list[str], params: dict[str, Any]
+) -> list[list[dict[str, Any]]]:
+    """One round trip for one or more top-level statements, results per statement."""
+    from sibyl_core.services.graph_common import normalize_graph_records
+
+    if len(selects) == 1:
+        return [normalize_graph_records(await client.execute_query(selects[0], **params))]
+    results = await client.execute_query_batch(" ".join(selects), **params)
+    if not isinstance(results, list) or len(results) != len(selects):
+        raise RuntimeError("graph enumeration page returned no statement results")
+    return [normalize_graph_records(result) for result in results]
 
 
 async def _page_rows(
@@ -209,14 +224,7 @@ async def _page_rows(
     Two top-level statements in one batch, each planned against the bound
     cursor parameter; the client returns their results in statement order.
     """
-    from sibyl_core.services.graph_common import normalize_graph_records
-
-    if len(selects) == 1:
-        return normalize_graph_records(await client.execute_query(selects[0], **params))
-    results = await client.execute_query_batch(" ".join(selects), **params)
-    if not isinstance(results, list) or len(results) != len(selects):
-        raise RuntimeError("graph enumeration page returned no statement results")
-    return [row for result in results for row in normalize_graph_records(result)]
+    return [row for result in await _page_results(client, selects, params) for row in result]
 
 
 async def _list_all_entities(
@@ -271,12 +279,15 @@ async def _walk_entities(
     """Enumerate every entity by keyset over the (updated_at, created_at, uuid) index.
 
     An offset page costs the scan of every page before it; a keyset page seeks
-    the index at its cursor. The cursor's own timestamp is drained with an
-    equality seek before the strict range continues below it: a single
-    "<= cursor AND NOT (...)" predicate is index-served too, but the 3.x
-    planner drops the rows sharing the cursor's timestamp once it has consumed
-    that bound for the range. Rows without updated_at sort after every dated
-    row and form a second phase with its own range.
+    the index at its cursor. Only the leading column ever carries a datetime
+    bound: a range page is ``updated_at < cursor`` in index order, and the
+    rows sharing the cursor's updated_at are drained as one group ordered and
+    sought by uuid alone, skipping those the range page already returned. A
+    residual ``created_at`` comparison would disagree with the index inside a
+    tie group: the index orders a whole-second datetime ahead of fractional
+    ones in the same second while the comparison goes by value, which both
+    skipped and duplicated rows on 3.2. Rows without updated_at sort after
+    every dated row and drain the same way.
     """
     from sibyl_core.services.graph_records import _ENTITY_LIST_FIELDS, _entity_from_row
 
@@ -284,56 +295,82 @@ async def _walk_entities(
     # single source of what an enumerated row leaves behind.
     fields = f"*, {_ENTITY_CURSOR_FIELDS} {_ENTITY_LIST_FIELDS.removeprefix('*').strip()}"
     select = f"SELECT {fields} FROM entity WHERE group_id = $group_id"
-    bound, cursor_value = _cursor_binding(client)
-    updated_bound, created_bound = bound.format("updated_at"), bound.format("created_at")
-    before_cursor = (
-        f"(created_at < {created_bound} OR (created_at = {created_bound} AND uuid < $uuid))"
-    )
+    datetime_bound, text_bound, cursor_value = _cursor_binding(client)
+    updated_bound = datetime_bound.format("updated_at")
+    uuid_bound = text_bound.format("uuid")
+    group_order = "ORDER BY uuid DESC"
+    base_params: dict[str, Any] = {"group_id": organization_id}
     entities: list[Entity] = []
-    dated = True
-    cursor: dict[str, Any] | None = None
 
+    def budget() -> int:
+        return _page_limit(len(entities), batch_size=batch_size, max_items=max_items)
+
+    def emit(rows: list[dict[str, Any]], seen: set[str] | None = None) -> None:
+        for row in rows:
+            uuid = str(row.get("uuid"))
+            if seen is not None:
+                if uuid in seen:
+                    continue
+                seen.add(uuid)
+            if max_items is not None and len(entities) >= max_items:
+                return
+            entities.append(_entity_from_row(row))
+
+    async def drain(predicate: str, params: dict[str, Any], seen: set[str]) -> None:
+        """Walk one group (one updated_at, or the undated tail) by uuid."""
+        cursor: str | None = None
+        while (limit := budget()) > 0:
+            page_params = {**params, "limit": limit}
+            seek = ""
+            if cursor is not None:
+                page_params["uuid"] = cursor
+                seek = f" AND uuid < {uuid_bound}"
+            (rows,) = await _page_results(
+                client, [f"{select} AND {predicate}{seek} {group_order} LIMIT $limit;"], page_params
+            )
+            emit(rows, seen)
+            if len(rows) < limit:
+                return
+            cursor = str(rows[-1].get("uuid"))
+
+    limit = budget()
+    if limit <= 0:
+        return entities
+    (rows,) = await _page_results(
+        client, [f"{select} {_ENTITY_ORDER} LIMIT $limit;"], {**base_params, "limit": limit}
+    )
+    undated_seen: set[str] = set()
     while True:
-        limit = _page_limit(len(entities), batch_size=batch_size, max_items=max_items)
-        if limit <= 0:
+        dated_rows = [row for row in rows if row.get("updated_at") is not None]
+        undated_rows = rows[len(dated_rows) :]
+        emit(dated_rows)
+        emit(undated_rows, undated_seen)
+        if budget() <= 0:
+            return entities
+        if undated_rows or len(rows) < limit or not dated_rows:
             break
-        params: dict[str, Any] = {"group_id": organization_id, "limit": limit, **(cursor or {})}
-        if dated and cursor is None:
-            selects = [f"{select} {_ENTITY_ORDER} LIMIT $limit;"]
-        elif dated:
-            selects = [
-                f"{select} AND updated_at = {updated_bound} AND {before_cursor} "
-                f"{_ENTITY_ORDER} LIMIT $limit;",
+        # The page ended inside a group: finish that group by uuid, and fetch
+        # the range below it in the same round trip.
+        group = str(dated_rows[-1].get("updated_at_text"))
+        seen = {str(row.get("uuid")) for row in dated_rows if row.get("updated_at_text") == group}
+        limit = budget()
+        params = {**base_params, "limit": limit, "updated_at": cursor_value(group)}
+        group_rows, rows = await _page_results(
+            client,
+            [
+                f"{select} AND updated_at = {updated_bound} {group_order} LIMIT $limit;",
                 f"{select} AND updated_at < {updated_bound} {_ENTITY_ORDER} LIMIT $limit;",
-            ]
-        elif cursor is None:
-            selects = [f"{select} AND updated_at IS NONE {_ENTITY_ORDER} LIMIT $limit;"]
-        else:
-            selects = [
-                f"{select} AND updated_at IS NONE AND {before_cursor} {_ENTITY_ORDER} LIMIT $limit;"
-            ]
-        rows = (await _page_rows(client, selects, params))[:limit]
-        entities.extend(_entity_from_row(row) for row in rows)
-        if not rows:
-            if not dated:
-                break
-            dated, cursor = False, None
-            continue
-        last = rows[-1]
-        if dated and last.get("updated_at") is None:
-            dated = False
-        elif len(rows) < limit:
-            if not dated:
-                break
-            dated, cursor = False, None
-            continue
-        cursor = {
-            "created_at": cursor_value(str(last.get("created_at_text"))),
-            "uuid": last.get("uuid"),
-        }
-        if dated:
-            cursor["updated_at"] = cursor_value(str(last.get("updated_at_text")))
-
+            ],
+            params,
+        )
+        emit(group_rows, seen)
+        if len(group_rows) >= limit:
+            await drain(
+                f"updated_at = {updated_bound} AND uuid < {uuid_bound}",
+                {**params, "uuid": str(group_rows[-1].get("uuid"))},
+                seen,
+            )
+    await drain("updated_at IS NONE", base_params, undated_seen)
     return entities
 
 
@@ -413,8 +450,9 @@ async def _walk_relationships(
         f"SELECT {_RELATIONSHIP_ENUMERATION_FIELDS} FROM relates_to "
         f"WHERE group_id = $group_id {type_clause} {relationship_weight_predicate(client)}"
     )
-    bound, cursor_value = _cursor_binding(client)
-    created_bound = bound.format("created_at")
+    datetime_bound, text_bound, cursor_value = _cursor_binding(client)
+    created_bound = datetime_bound.format("created_at")
+    uuid_bound = text_bound.format("uuid")
     relationships: list[Relationship] = []
     cursor: dict[str, Any] | None = None
 
@@ -434,7 +472,7 @@ async def _walk_relationships(
             selects = [f"{select} {_RELATIONSHIP_ORDER} LIMIT $limit;"]
         else:
             selects = [
-                f"{select} AND created_at = {created_bound} AND uuid < $uuid "
+                f"{select} AND created_at = {created_bound} AND uuid < {uuid_bound} "
                 f"{_RELATIONSHIP_ORDER} LIMIT $limit;",
                 f"{select} AND created_at < {created_bound} {_RELATIONSHIP_ORDER} LIMIT $limit;",
             ]

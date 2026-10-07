@@ -2,23 +2,31 @@
 
 from __future__ import annotations
 
+import os
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from itertools import pairwise
+from uuid import uuid4
 
 import pytest
+from surrealdb.data.types.datetime import Datetime
 
+from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
-from sibyl_core.services.graph_client import SurrealGraphClient
+from sibyl_core.services.graph_client import SurrealGraphClient, prepare_graph_schema
+from sibyl_core.services.graph_common import normalize_graph_records
 from sibyl_core.services.graph_community_managers import (
     _list_all_entities,
     _list_all_relationships,
 )
+from tests.test_reflection_identity import content_store as content_store
 from tests.test_reflection_identity import runtime as runtime
 
 PAGE = 1000
 DATED = 1250
 TIED = 1100
 UNDATED = 300
+UNDATED_IDS = {f"walk-{index:05d}" for index in range(DATED + TIED, DATED + TIED + UNDATED)}
 
 
 @pytest.fixture
@@ -91,13 +99,21 @@ async def test_entity_walk_matches_offset_order_without_offset_pages(enumerated_
 
     walked = await _list_all_entities(runtime.client, org, batch_size=PAGE)
 
-    assert [entity.id for entity in walked] == [entity.id for entity in expected]
-    assert {entity.id for entity in entities} <= {entity.id for entity in walked}
+    walked_ids = [entity.id for entity in walked]
+    assert len(walked_ids) == len(set(walked_ids))
+    assert set(walked_ids) == {entity.id for entity in expected}
+    # Dated rows first, newest first; a tie group may be emitted in its own
+    # order, and the undated tail comes last.
+    dated = [entity for entity in walked if entity.id not in UNDATED_IDS]
+    assert [entity.id for entity in walked[len(dated) :]] and all(
+        entity.id in UNDATED_IDS for entity in walked[len(dated) :]
+    )
+    stamps = [entity.updated_at for entity in dated]
+    assert stamps == sorted(stamps, reverse=True)
     assert all("START" not in statement for statement in statements)
-    # Dated pages, the tie group, the undated tail and the terminating short
-    # page: each is one round trip.
-    assert len(statements) <= len(walked) // PAGE + 3
-    assert walked[-1].id in {entity.id for entity in entities[DATED + TIED :]}
+    # Range pages, the tie group drains, the undated tail and the terminating
+    # short page: each is one round trip.
+    assert len(statements) <= len(walked) // PAGE + 4
 
 
 async def test_entity_walk_honours_the_item_cap(enumerated_graph) -> None:
@@ -108,8 +124,10 @@ async def test_entity_walk_honours_the_item_cap(enumerated_graph) -> None:
 
     walked = await _list_all_entities(runtime.client, org, batch_size=PAGE, max_items=1500)
 
-    assert [entity.id for entity in walked] == [entity.id for entity in expected[:1500]]
-    assert len(statements) == 2
+    assert len(walked) == 1500
+    assert len({entity.id for entity in walked}) == 1500
+    assert {entity.id for entity in walked} <= {entity.id for entity in expected}
+    assert len(statements) <= 3
 
 
 async def test_relationship_walk_reads_legacy_metadata_once(enumerated_graph) -> None:
@@ -130,7 +148,7 @@ async def test_relationship_walk_reads_legacy_metadata_once(enumerated_graph) ->
 
 
 async def test_relationship_walk_decodes_edges_as_the_validation_snapshot_does(
-    enumerated_graph,
+    enumerated_graph, content_store
 ) -> None:
     from sibyl_core.services.graph_community_snapshot import _current_graph_relationships
     from sibyl_core.services.graph_view_availability import _edge_evidence
@@ -187,8 +205,111 @@ async def test_server_dialect_binds_cursors_as_native_datetimes(monkeypatch) -> 
     _first, second, undated = calls
     assert all("START" not in query for query, _ in calls)
     assert "updated_at IS NONE" in undated[0]
+    # The page ended inside a group: its drain seeks the group by uuid and the
+    # range below it seeks the index, both on a native datetime parameter.
+    assert "updated_at = $updated_at" in second[0] and "ORDER BY uuid DESC" in second[0]
     assert "updated_at < $updated_at" in second[0]
-    assert "<datetime>" not in second[0]
+    assert "<datetime>" not in second[0] and "created_at <" not in second[0]
     assert isinstance(second[1]["updated_at"], Datetime)
     assert second[1]["updated_at"].dt == "2026-01-01T00:00:00.000000123Z"
-    assert second[1]["uuid"] == "row-1"
+
+
+def _iso(stamp: datetime, nanos: int = 0) -> str:
+    return f"{stamp.strftime('%Y-%m-%dT%H:%M:%S.%f')}{nanos:03d}Z"
+
+
+@pytest.fixture(params=["embedded", "live"])
+async def tie_graph(request) -> AsyncIterator[tuple[SurrealGraphClient, str, list[str]]]:
+    """Whole-second and fractional stamps mixed inside one updated_at group.
+
+    The live variant runs against a SurrealDB server (the engine whose index
+    orders a whole-second datetime ahead of fractional ones in the same
+    second) when SIBYL_LIVE_SURREAL_TESTS=1 and SIBYL_SURREAL_URL name one.
+    """
+    group_id = f"walk-tie-{uuid4().hex[:10]}"
+    if request.param == "embedded":
+        client = SurrealGraphClient(group_id=group_id, url="memory://")
+    else:
+        if os.environ.get("SIBYL_LIVE_SURREAL_TESTS") != "1":
+            pytest.skip("live SurrealDB tests are disabled")
+        url = os.environ.get("SIBYL_SURREAL_URL", "")
+        if not url or is_embedded_surreal_url(url):
+            pytest.skip("live SurrealDB tests require SIBYL_SURREAL_URL to point at a server")
+        client = SurrealGraphClient(
+            group_id=group_id,
+            url=url,
+            username=os.environ.get("SIBYL_SURREAL_USERNAME", "root"),
+            password=os.environ.get("SIBYL_SURREAL_PASSWORD", "root"),
+            namespace_prefix="verify_",
+            database="graph",
+            pool_size=2,
+        )
+    try:
+        await prepare_graph_schema(client)
+        base = datetime(2026, 1, 1, tzinfo=UTC)
+        day = timedelta(days=1)
+        rows: list[dict[str, object]] = []
+
+        def add(uuid: str, updated: str | None, created: str) -> None:
+            rows.append(
+                {
+                    "uuid": uuid,
+                    "updated_at": Datetime(updated) if updated else None,
+                    "created_at": Datetime(created),
+                }
+            )
+
+        # The verifier's shape: one whole-second row among fractional ones in
+        # a single updated_at group, then a second group of the same shape.
+        add("tie-a-whole", _iso(base), _iso(base - day))
+        for index in range(1, 6):
+            add(
+                f"tie-a-micro-{index}",
+                _iso(base),
+                (base - day + timedelta(microseconds=index)).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+            )
+        add("tie-b-whole", _iso(base - day), _iso(base - 2 * day))
+        for index in range(1, 4):
+            add(f"tie-b-nano-{index}", _iso(base - day), _iso(base - 2 * day, nanos=index))
+        add("older", _iso(base - 5 * day, nanos=7), _iso(base - 5 * day, nanos=7))
+        add("undated-whole", None, _iso(base - 3 * day))
+        for index in range(1, 4):
+            add(
+                f"undated-micro-{index}",
+                None,
+                (base - 3 * day + timedelta(microseconds=index)).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+            )
+        await client.execute_query(
+            "FOR $row IN $rows { CREATE entity CONTENT { uuid: $row.uuid, name: $row.uuid, "
+            "entity_type: 'topic', group_id: $group_id, created_at: $row.created_at, "
+            "updated_at: $row.updated_at, attributes: {} }; };",
+            rows=rows,
+            group_id=group_id,
+        )
+        listed = normalize_graph_records(
+            await client.execute_query(
+                "SELECT uuid, updated_at, created_at FROM entity WHERE group_id = $group_id "
+                "ORDER BY updated_at DESC, created_at DESC, uuid DESC;",
+                group_id=group_id,
+            )
+        )
+        assert len(listed) == len(rows)
+        yield client, group_id, [str(row["uuid"]) for row in listed]
+    finally:
+        if request.param == "live":
+            await client.execute_query(f"REMOVE NAMESPACE IF EXISTS {client.namespace};")
+        await client.close()
+
+
+@pytest.mark.parametrize("page", [1, 2, 3, 7])
+async def test_tie_groups_with_mixed_precision_walk_without_skips_or_duplicates(
+    tie_graph, page: int
+) -> None:
+    client, group_id, engine_order = tie_graph
+
+    walked = [entity.id for entity in await _list_all_entities(client, group_id, batch_size=page)]
+
+    assert len(walked) == len(set(walked)), walked
+    assert set(walked) == set(engine_order), walked
+    assert walked[:6] and set(walked[:6]) == {row for row in engine_order[:6]}
+    assert walked[-4:] and set(walked[-4:]) == set(engine_order[-4:])
