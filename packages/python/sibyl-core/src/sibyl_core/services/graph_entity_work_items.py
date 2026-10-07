@@ -15,6 +15,7 @@ from sibyl_core.services.graph_records import (
     _entity_to_task,
     _int_value,
     _surreal_indexed_field_missing,
+    entity_type_literal,
 )
 from sibyl_core.services.graph_search import count_task_status as _count_task_status
 from sibyl_core.services.graph_search import (
@@ -615,19 +616,20 @@ class _EntityWorkItemManager(_EntitySearchManager):
         # single-column equality per type plans as an IndexCountScan, and the
         # archived rows come from one scan of the status index.
         types = list(EntityType)
+        # Literal types, not parameters: bound, the equality plans as an
+        # Aggregate over an IndexScan of the type's rows (2,754 rows, 34 ms
+        # for tasks on the dev namespace); literal, it is an IndexCountScan.
         statements = [
-            f"SELECT count() AS entity_count FROM entity WHERE entity_type = $type_{index} GROUP ALL;"
-            for index in range(len(types))
+            "SELECT count() AS entity_count FROM entity "
+            f"WHERE entity_type = {entity_type_literal(entity_type)} GROUP ALL;"
+            for entity_type in types
         ]
         if not include_archived:
             statements.append(
                 "SELECT entity_type, count() AS entity_count FROM entity "
                 "WHERE status = 'archived' GROUP BY entity_type;"
             )
-        results = await self._client.execute_query_batch(
-            "\n".join(statements),
-            **{f"type_{index}": entity_type.value for index, entity_type in enumerate(types)},
-        )
+        results = await self._client.execute_query_batch("\n".join(statements))
         if not isinstance(results, list) or len(results) != len(statements):
             raise RuntimeError("entity type counts returned an unexpected statement set")
         counts: dict[str, int] = {}
@@ -643,25 +645,19 @@ class _EntityWorkItemManager(_EntitySearchManager):
                     )
         return counts
 
-    async def has_entities_of_types(
-        self, entity_types: Sequence[EntityType], *, include_archived: bool = False
-    ) -> bool:
+    async def has_entities_of_types(self, entity_types: Sequence[EntityType]) -> bool:
         """Whether any row of the given types exists, without counting anything.
 
         One type per statement: a multi-type `IN` list makes the planner
         materialise every branch before the limit applies, while a single
-        equality stops at the first row.
+        equality with no residual filter pushes LIMIT 1 into the index scan
+        and reads one row. Archived rows count as existing; the reads that
+        follow a positive answer apply their own archived filter.
         """
-        archived_clause = (
-            ""
-            if include_archived
-            else " AND (status IS NONE OR status = '' OR status != 'archived')"
-        )
         for entity_type in entity_types:
             rows = normalize_records(
                 await self._client.execute_query(
-                    f"SELECT uuid FROM entity WHERE entity_type = $entity_type{archived_clause} "
-                    "LIMIT 1;",
+                    "SELECT uuid FROM entity WHERE entity_type = $entity_type LIMIT 1;",
                     entity_type=entity_type.value,
                 )
             )

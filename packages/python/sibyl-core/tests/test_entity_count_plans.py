@@ -37,9 +37,9 @@ class _BatchClient:
                     ]
                 )
                 continue
-            param = re.search(r"entity_type = \$(type_\d+)", statement)
-            assert param is not None, statement
-            total = self.totals.get(str(params[param.group(1)]), 0)
+            literal = re.search(r"entity_type = '([a-z_]+)' GROUP ALL;", statement)
+            assert literal is not None, statement
+            total = self.totals.get(literal.group(1), 0)
             results.append([{"entity_count": total}] if total else [])
         return results
 
@@ -58,15 +58,16 @@ async def test_count_by_type_uses_one_index_count_per_type_and_no_group_id() -> 
     assert "group_id" not in active_query
     assert "GROUP BY" not in active_query.rsplit("\n", 1)[0]
     counted = re.findall(
-        r"SELECT count\(\) AS entity_count FROM entity WHERE entity_type = \$type_\d+ GROUP ALL;",
+        r"SELECT count\(\) AS entity_count FROM entity WHERE entity_type = '([a-z_]+)' GROUP ALL;",
         active_query,
     )
-    assert len(counted) == len(EntityType)
+    assert sorted(counted) == sorted(entity_type.value for entity_type in EntityType)
+    assert "$type_" not in active_query and "$entity_type" not in active_query
     assert active_query.endswith(
         "SELECT entity_type, count() AS entity_count FROM entity "
         "WHERE status = 'archived' GROUP BY entity_type;"
     )
-    assert sorted(params.values()) == sorted(entity_type.value for entity_type in EntityType)
+    assert params == {}
     everything_query, _ = client.batches[1]
     assert "archived" not in everything_query
 
@@ -93,11 +94,8 @@ async def test_existence_probe_stops_at_the_first_type_with_a_row() -> None:
     assert found is True
     assert [params["entity_type"] for _, params in client.calls] == ["pattern", "rule"]
     for query, _ in client.calls:
-        assert query == (
-            "SELECT uuid FROM entity WHERE entity_type = $entity_type "
-            "AND (status IS NONE OR status = '' OR status != 'archived') LIMIT 1;"
-        )
+        # No residual filter: LIMIT 1 pushes into the index scan and reads one row.
+        assert query == "SELECT uuid FROM entity WHERE entity_type = $entity_type LIMIT 1;"
 
     client.calls.clear()
-    assert await manager.has_entities_of_types([EntityType.GUIDE], include_archived=True) is False
-    assert client.calls[0][0] == "SELECT uuid FROM entity WHERE entity_type = $entity_type LIMIT 1;"
+    assert await manager.has_entities_of_types([EntityType.GUIDE]) is False

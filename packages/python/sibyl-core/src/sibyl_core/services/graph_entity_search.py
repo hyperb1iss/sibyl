@@ -31,7 +31,11 @@ from sibyl_core.services.graph_embeddings import (
     _embed_texts_with_timeout,
     _embedding_vector_from_batch,
 )
-from sibyl_core.services.graph_records import _ENTITY_SEARCH_FIELDS, _entity_from_row
+from sibyl_core.services.graph_records import (
+    _ENTITY_SEARCH_FIELDS,
+    _entity_from_row,
+    entity_type_literal,
+)
 from sibyl_core.services.graph_search import (
     bounded_similarity_score as _bounded_similarity_score,
 )
@@ -601,23 +605,24 @@ class _EntitySearchManager:
         table through a CountScan when untyped). An unanswered count reports
         False so the exact pass still runs.
         """
+        # Literal types: a parameter-bound equality plans as an Aggregate over
+        # an IndexScan of the type's rows, a literal as an IndexCountScan.
         statements = (
             [
-                (
-                    "SELECT count() AS total FROM entity WHERE entity_type = $entity_type GROUP ALL;",
-                    value,
-                )
+                "SELECT count() AS total FROM entity "
+                f"WHERE entity_type = {entity_type_literal(value)} GROUP ALL;"
                 for value in type_values
             ]
             if type_values
-            else [("SELECT count() AS total FROM entity GROUP ALL;", None)]
+            else ["SELECT count() AS total FROM entity GROUP ALL;"]
         )
         total = 0
-        for statement, value in statements:
-            params: dict[str, Any] = {"_query_label": "entity.search.vector.type_total"}
-            if value is not None:
-                params["entity_type"] = value
-            counted = normalize_records(await self._client.execute_query(statement, **params))
+        for statement in statements:
+            counted = normalize_records(
+                await self._client.execute_query(
+                    statement, _query_label="entity.search.vector.type_total"
+                )
+            )
             if not counted:
                 return False
             raw_total = counted[0].get("total")

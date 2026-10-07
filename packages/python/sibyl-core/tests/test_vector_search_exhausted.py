@@ -49,10 +49,10 @@ async def test_exhausted_type_skips_the_exact_pass() -> None:
     assert [entity.id for entity, _ in found] == [row["uuid"] for row in walked]
     assert _labels(client) == ["entity.search.vector", "entity.search.vector.type_total"]
     count_query, count_params = client.calls[1]
-    assert count_query == (
-        "SELECT count() AS total FROM entity WHERE entity_type = $entity_type GROUP ALL;"
+    assert (
+        count_query == "SELECT count() AS total FROM entity WHERE entity_type = 'rule' GROUP ALL;"
     )
-    assert count_params["entity_type"] == "rule"
+    assert "entity_type" not in count_params
 
 
 async def test_shortfall_with_rows_left_still_runs_the_exact_pass() -> None:
