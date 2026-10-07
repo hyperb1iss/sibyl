@@ -997,12 +997,12 @@ async def test_native_entity_manager_get_many_preserves_requested_order_and_scop
 
     assert [entity.id for entity in entities] == ["second", "first"]
     query, params = client.calls[0]
-    # Per-uuid indexed lookups: `uuid IN $list` is never index-served, so the
-    # bulk read maps over the ids instead of scanning the table. The closure
-    # sees only its own argument, so scope enforcement happens app-side.
-    assert "uuid IN" not in query
-    assert "$uuids.map" in query
-    assert "uuid = $u" in query
+    # Clumps of 32 keep `uuid IN` on the unique index; one IN over the whole
+    # list would scan the table. The closure sees only its own argument, so
+    # scope enforcement happens app-side.
+    assert "array::clump($uuids, 32).map(|$clump|" in query
+    assert "WHERE uuid IN $clump" in query
+    assert "$org" not in query
     assert params == {
         "uuids": ["second", "first", "missing"],
     }
@@ -5480,9 +5480,8 @@ async def test_native_embedding_backfill_hydrates_thousands_in_one_scoped_rpc() 
     embed.assert_not_awaited()
     client.execute_query.assert_awaited_once()
     query = client.execute_query.call_args.args[0]
-    assert "$uuids.map" in query
-    assert "uuid = $u" in query
-    assert "uuid IN" not in query
+    assert "array::clump($uuids, 32).map(|$clump|" in query
+    assert "WHERE uuid IN $clump" in query
     assert client.execute_query.call_args.kwargs == {
         "uuids": list(dict.fromkeys(entity.id for entity in requested))
     }

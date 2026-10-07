@@ -176,18 +176,18 @@ class _EntitySearchManager:
         fields = "*" if include_embeddings else _ENTITY_ROW_FIELDS_WITHOUT_VECTORS
         rows = normalize_records(
             await self._client.execute_query(
-                # `uuid IN $list` is never index-served, and here the scan
-                # decodes every full row (contents plus embeddings), so each
-                # uuid gets its own indexed lookup. The closure body may
-                # reference nothing but its own argument: any other binding
-                # silently evaluates to nothing on at least one engine, so the
-                # group guard is applied to the returned rows instead (uuid is
-                # unique table-wide). A missing uuid yields a NONE entry,
-                # which normalize_records drops.
+                # Past 32 values `uuid IN $list` is no longer index-served: the
+                # scan decodes every full row (contents plus embeddings) and
+                # tests it against the whole list. Clumps of 32 stay on the
+                # unique index and cost a fraction of one lookup per uuid. The
+                # closure body may reference nothing but its own argument: any
+                # other binding silently evaluates to nothing on at least one
+                # engine, so the group guard is applied to the returned rows
+                # instead (uuid is unique table-wide).
                 f"""
-                RETURN $uuids.map(|$u|
-                    (SELECT {fields} FROM entity WHERE uuid = $u LIMIT 1)[0]
-                );
+                RETURN array::flatten(array::clump($uuids, 32).map(|$clump|
+                    (SELECT {fields} FROM entity WHERE uuid IN $clump)
+                ));
                 """,
                 uuids=ordered_ids,
             )

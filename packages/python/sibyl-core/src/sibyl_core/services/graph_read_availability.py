@@ -142,6 +142,20 @@ class GraphReadMemo:
         }
 
 
+async def _each_batch[T, R](
+    client: Any, read_batch: Callable[[T], Awaitable[R]], batches: Sequence[T]
+) -> list[R]:
+    """Read batches concurrently on a pooled client, in order on a single slot.
+
+    A single-slot pool (every embedded store) only queues overlapping reads,
+    and a queued waiter binds the pool's queue to the current event loop,
+    which a later loop reusing the same client cannot wait on.
+    """
+    if getattr(client, "pool_size", 1) <= 1:
+        return [await read_batch(batch) for batch in batches]
+    return list(await asyncio.gather(*(read_batch(batch) for batch in batches)))
+
+
 async def available_graph_entities(
     organization_id: str,
     entity_ids: Sequence[str],
@@ -292,21 +306,18 @@ async def _load_available_graph_relationships(
     from sibyl_core.services.operational_relationships import (
         _snapshot,
         operational_relationship_current,
+        org_lookup_clumps,
         relationship_body_digest,
     )
 
     graph = runtime or await get_surreal_graph_runtime(organization_id, ensure_schema=False)
-    captured = []
-    all_endpoints: set[str] = set()
-    for start in range(0, len(ids), _READ_BATCH_SIZE):
-        batch = ids[start : start + _READ_BATCH_SIZE]
+    endpoints_query = f"""RETURN array::flatten({org_lookup_clumps("ids")}.map(|$lookup|
+        (SELECT in.uuid AS source_uuid, out.uuid AS target_uuid FROM relates_to
+            WHERE group_id=$lookup[0] AND uuid IN $lookup[1])));"""
+
+    async def capture(batch: list[str]) -> tuple[list[str], set[str], dict[str, Any]]:
         initial = normalize_records(
-            await graph.client.execute_query(
-                "SELECT in.uuid AS source_uuid,out.uuid AS target_uuid FROM relates_to "
-                "WHERE group_id=$org AND uuid IN $ids;",
-                org=organization_id,
-                ids=batch,
-            )
+            await graph.client.execute_query(endpoints_query, org=organization_id, ids=batch)
         )
         endpoints = {
             value
@@ -315,11 +326,20 @@ async def _load_available_graph_relationships(
             if isinstance(value := r.get(k), str)
         }
         snapshot = await _snapshot(
-            graph.client, organization_id=organization_id, ids=endpoints, relationship_ids=batch
+            graph.client,
+            organization_id=organization_id,
+            ids=endpoints,
+            relationship_ids=batch,
+            include_embeddings=False,
         )
+        return batch, endpoints, snapshot
 
-        captured.append((batch, endpoints, snapshot))
-        all_endpoints.update(endpoints)
+    captured = await _each_batch(
+        graph.client,
+        capture,
+        [ids[start : start + _READ_BATCH_SIZE] for start in range(0, len(ids), _READ_BATCH_SIZE)],
+    )
+    all_endpoints: set[str] = set().union(*(endpoints for _, endpoints, _ in captured))
 
     async def validate(snapshots, read):
         result = {}
@@ -343,7 +363,7 @@ async def _load_available_graph_relationships(
                 ):
                     continue
                 # Vectors are storage, not evidence: entity_read_evidence
-                # leaves them out and the endpoint rows were read without them.
+                # leaves them out, and neither side was read with them.
                 if any(
                     current[endpoint].model_dump(mode="json", exclude={"embedding"})
                     != entity_from_surreal_row(targets[endpoint]).model_dump(
@@ -373,10 +393,17 @@ async def _load_available_graph_relationships(
     first = await validate(
         [snapshot for _, _, snapshot in captured], GraphReadValidation(organization_id)
     )
-    final_snapshots = []
-    for batch, endpoints, snapshot in captured:
+
+    async def recapture(
+        entry: tuple[list[str], set[str], dict[str, Any]],
+    ) -> dict[str, Any]:
+        batch, endpoints, snapshot = entry
         fresh = await _snapshot(
-            graph.client, organization_id=organization_id, ids=endpoints, relationship_ids=batch
+            graph.client,
+            organization_id=organization_id,
+            ids=endpoints,
+            relationship_ids=batch,
+            include_embeddings=False,
         )
         originals = {row["uuid"]: row for row in snapshot["relationships"]}
         original_associations = {row["target_id"]: row for row in snapshot["associations"]}
@@ -410,7 +437,9 @@ async def _load_available_graph_relationships(
             ):
                 unchanged_rows.append(row)
         fresh["relationships"] = unchanged_rows
-        final_snapshots.append(fresh)
+        return fresh
+
+    final_snapshots = await _each_batch(graph.client, recapture, captured)
     return await validate(
         final_snapshots, read if read is not None else GraphReadValidation(organization_id)
     )
