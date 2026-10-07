@@ -7,6 +7,7 @@ import pytest
 
 from sibyl_core.backends.surreal.content_client import SurrealContentClient
 from sibyl_core.backends.surreal.content_schema import bootstrap_content_schema
+from sibyl_core.backends.surreal.dedicated_client import _can_replay_query
 from sibyl_core.backends.surreal.records import coerce_datetime, normalize_records
 from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.services.content_models import RawMemory, raw_memory_record
@@ -315,6 +316,7 @@ def test_stamp_statements_are_single_block_statements() -> None:
         assert stripped.endswith("};")
         assert "BEGIN" not in stripped
         assert "COMMIT" not in stripped
+        assert _can_replay_query(query) is True, "replayable by text, before any response"
 
 
 @pytest.mark.asyncio

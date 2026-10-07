@@ -160,6 +160,15 @@ async def test_partial_batch_must_not_replay_successful_write(query):
         ("BEGIN; UPDATE counter:one; COMMIT; UPDATE other:one;", False),
         ("BEGIN; UPDATE counter:one; COMMIT; BEGIN; UPDATE other:one; COMMIT;", False),
         ("BEGIN; UPDATE counter:one; CANCEL; COMMIT;", False),
+        # A lone RETURN block is one statement: its semicolons sit inside braces.
+        ("RETURN { UPDATE counter:one SET value += 1; RETURN true; };", True),
+        ("RETURN {\n  FOR $x IN $xs { UPDATE counter:one; };\n  RETURN $xs;\n};", True),
+        # Anything beside the block at depth zero is a second statement.
+        ("RETURN { UPDATE counter:one; RETURN true; }; UPDATE other:one;", False),
+        ("RETURN { UPDATE counter:one; }; RETURN { UPDATE other:one; };", False),
+        ("BEGIN; RETURN { UPDATE counter:one; }; COMMIT; UPDATE other:one;", False),
+        # A brace inside a literal unbalances the count: not trusted, not replayed.
+        ("RETURN { UPDATE counter:one SET value = '{'; RETURN true; };", False),
     ],
 )
 def test_conflict_replay_requires_one_atomic_unit(query, allowed):

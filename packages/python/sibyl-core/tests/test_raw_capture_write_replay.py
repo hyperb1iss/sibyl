@@ -40,9 +40,6 @@ def _raw_record(
     )
 
 
-_ONE_RESULT = {"result": [{"status": "OK", "result": [], "time": "0"}]}
-
-
 def _is_one_block_statement(query: str) -> bool:
     """One RETURN block, no BEGIN/COMMIT: a single result on server and embedded.
 
@@ -61,7 +58,7 @@ def _is_one_block_statement(query: str) -> bool:
 
 def test_raw_memory_bulk_upsert_is_one_replayable_unit() -> None:
     assert _is_one_block_statement(_RAW_MEMORY_BULK_UPSERT_QUERY)
-    assert _can_replay_query(_RAW_MEMORY_BULK_UPSERT_QUERY, _ONE_RESULT) is True
+    assert _can_replay_query(_RAW_MEMORY_BULK_UPSERT_QUERY) is True, "replayable by text"
 
 
 def test_raw_memory_bulk_upsert_with_derivations_is_one_replayable_unit() -> None:
@@ -73,7 +70,7 @@ def test_raw_memory_bulk_upsert_with_derivations_is_one_replayable_unit() -> Non
         _RAW_MEMORY_BULK_RETURN
     )
     assert _is_one_block_statement(with_derivations)
-    assert _can_replay_query(with_derivations, _ONE_RESULT) is True
+    assert _can_replay_query(with_derivations) is True, "replayable by text"
 
 
 @pytest.mark.asyncio
