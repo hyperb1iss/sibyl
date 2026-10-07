@@ -62,6 +62,7 @@ from sibyl_core.services.graph_embedding_sweep import (
 from sibyl_core.services.graph_runtime import background_graph_runtime
 from sibyl_core.services.lifecycle_probe import (
     ContentWork,
+    PlaneFacts,
     probe_content_work,
     probe_graph_work,
 )
@@ -221,6 +222,7 @@ async def _repair_graph(
     *,
     sweeping: bool,
     organizations: Sequence[str],
+    settled: LegacyVerdicts | BaseException | None = None,
 ) -> tuple[object, ...]:
     """Settle both verdicts, then run the graph repairs beside both sweeps.
 
@@ -229,14 +231,20 @@ async def _repair_graph(
     has published its evidence, skips its sweep this pass rather than
     deciding on partial evidence. The verdicts ride back in the result, even
     when a graph repair fails, so the caller can settle deferred planes.
-    Without ``sweeping`` only the graph repairs run.
+    ``settled`` carries verdicts the tick settled already, in organization
+    order, so they are not weighed again here. Without ``sweeping`` only the
+    graph repairs run.
     """
     async with background_graph_runtime(organization_id) as runtime:
         reported: list[object] = []
         graph_settled = chunks_settled = False
         if sweeping:
-            verdicts = await _settle_verdicts(
-                organization_id, runtime, chunk_inputs, organizations=organizations
+            verdicts = (
+                settled
+                if settled is not None
+                else await _settle_verdicts(
+                    organization_id, runtime, chunk_inputs, organizations=organizations
+                )
             )
             reported.append(verdicts)
             if isinstance(verdicts, LegacyVerdicts):
@@ -329,27 +337,43 @@ async def _probe_content(chunk_inputs: _ChunkInputs | BaseException | None) -> C
         return None
 
 
-async def _nothing_to_repair(
+def _current_sweep(plane: str, facts: PlaneFacts | None) -> EmbeddingSweepResult:
+    """The result a sweep returns for a plane it would skip as current."""
+    if facts is None:
+        return EmbeddingSweepResult(plane=plane, status=SWEEP_SKIPPED_NO_PROVIDER)
+    return EmbeddingSweepResult(
+        plane=plane,
+        status=SWEEP_CURRENT,
+        legacy_decision=facts.legacy_decision,
+        warning=facts.warning,
+        notice=facts.notice,
+    )
+
+
+async def _idle_outcomes(
     organization_id: str,
     chunk_inputs: _ChunkInputs | BaseException | None,
     content_work: ContentWork,
-) -> bool:
-    """Whether the organization can skip its pass: content idle, then one graph probe.
+) -> list[object] | None:
+    """The outcomes of an organization that owes nothing, or None when it owes something.
 
     The content answer was read for every organization at once, so it is
-    checked first; only an organization idle there pays the graph probe.
-    A failed probe answers False, which runs the full pass as before.
+    checked first; only an organization idle there pays the graph probe. A
+    failed probe answers None, which runs the full pass as before. The
+    outcomes are what the sweeps would have reported: current, with the
+    verdict each plane holds, so the tick's summary reads the same.
     """
+    chunk_stamp = _chunk_stamp(chunk_inputs)
     planes = [
         plane
         for plane, stamp in (
-            (DOCUMENT_CHUNK_EMBEDDING_PLANE, _chunk_stamp(chunk_inputs)),
+            (DOCUMENT_CHUNK_EMBEDDING_PLANE, chunk_stamp),
             (RAW_CAPTURE_EMBEDDING_PLANE, _raw_stamp()),
         )
         if stamp is not None
     ]
     if not content_work.idle(organization_id, planes=planes):
-        return False
+        return None
     provider = configured_embedding_provider()
     try:
         async with background_graph_runtime(organization_id) as runtime:
@@ -364,8 +388,39 @@ async def _nothing_to_repair(
             group_id=organization_id,
             error_type=type(exc).__name__,
         )
-        return False
-    return work.idle
+        return None
+    if not work.idle:
+        return None
+    outcomes: list[object] = [chunk_inputs] if isinstance(chunk_inputs, BaseException) else []
+    outcomes.append(_current_sweep(GRAPH_EMBEDDING_PLANE, work.sweep))
+    outcomes.append(
+        _current_sweep(
+            DOCUMENT_CHUNK_EMBEDDING_PLANE,
+            content_work.facts(organization_id, DOCUMENT_CHUNK_EMBEDDING_PLANE)
+            if chunk_stamp is not None
+            else None,
+        )
+    )
+    return outcomes
+
+
+async def _settle_organization(
+    organization_id: str,
+    chunk_inputs: _ChunkInputs | BaseException,
+    organizations: Sequence[str],
+) -> LegacyVerdicts | BaseException | None:
+    """Settle one organization's verdicts ahead of its pass.
+
+    None when the organization's graph cannot be reached; the pass itself
+    then reports that failure the way it always has.
+    """
+    try:
+        async with background_graph_runtime(organization_id) as runtime:
+            return await _settle_verdicts(
+                organization_id, runtime, chunk_inputs, organizations=organizations
+            )
+    except Exception:
+        return None
 
 
 async def _repair_organization(
@@ -374,31 +429,23 @@ async def _repair_organization(
     sweeping: bool = True,
     organizations: Sequence[str] = (),
     chunk_inputs: _ChunkInputs | BaseException | None = None,
-    content_work: ContentWork | None = None,
+    settled: LegacyVerdicts | BaseException | None = None,
 ) -> list[object]:
     """Run every repair for one organization, isolating each one's failure.
 
     Without ``sweeping`` (the content schema has not upgraded yet) nothing
-    that reads or rewrites embedding evidence runs. With ``content_work``,
-    an organization that owes nothing on either side is answered without
-    running a repair: its sweeps report current, as a pass would have.
+    that reads or rewrites embedding evidence runs. ``settled`` carries the
+    verdicts the tick settled for this organization already.
     """
     if sweeping and chunk_inputs is None:
         chunk_inputs = await _chunk_sweep_inputs()
-    if sweeping and content_work is not None:
-        if await _nothing_to_repair(organization_id, chunk_inputs, content_work):
-            idle: list[object] = [chunk_inputs] if isinstance(chunk_inputs, BaseException) else []
-            idle.extend(
-                EmbeddingSweepResult(plane=plane, status=SWEEP_CURRENT)
-                for plane in (GRAPH_EMBEDDING_PLANE, DOCUMENT_CHUNK_EMBEDDING_PLANE)
-            )
-            return idle
     repairs: list[Awaitable[object]] = [
         _repair_graph(
             organization_id,
             chunk_inputs if chunk_inputs is not None else RuntimeError("not sweeping"),
             sweeping=sweeping,
             organizations=organizations or [organization_id],
+            settled=settled,
         ),
         repair_raw_source_lifecycle(organization_id, authority_resolver=resolve_source_authority),
     ]
@@ -490,6 +537,57 @@ async def _settle_deferred(
         await _settle_unproven(organization_id, organizations)
 
 
+async def _visit_organizations(
+    organizations: Sequence[str],
+    *,
+    sweeping: bool,
+    chunk_inputs: _ChunkInputs | BaseException | None,
+    content_work: ContentWork | None,
+) -> list[list[object]]:
+    """Every organization's outcomes: probed in parallel, settled in order, repaired in parallel."""
+    slots = asyncio.Semaphore(settings.lifecycle_repair_concurrency)
+
+    async def probe(organization_id: str) -> list[object] | None:
+        if not sweeping or content_work is None or chunk_inputs is None:
+            return None
+        async with slots:
+            return await _idle_outcomes(organization_id, chunk_inputs, content_work)
+
+    idle = dict(
+        zip(
+            organizations,
+            await asyncio.gather(*(probe(organization_id) for organization_id in organizations)),
+            strict=True,
+        )
+    )
+    # Verdicts settle in organization order, one at a time: a plane waits
+    # for the organizations listed after it to publish their evidence, and
+    # that wait is what keeps a verdict from depending on who went first
+    # (see embedding_verdicts). The sweeps and repairs then overlap.
+    settled: dict[str, LegacyVerdicts | BaseException | None] = {}
+    if sweeping and chunk_inputs is not None:
+        for organization_id in organizations:
+            if idle[organization_id] is None:
+                settled[organization_id] = await _settle_organization(
+                    organization_id, chunk_inputs, organizations
+                )
+
+    async def visit(organization_id: str) -> list[object]:
+        outcomes = idle[organization_id]
+        if outcomes is not None:
+            return outcomes
+        async with slots:
+            return await _repair_organization(
+                organization_id,
+                sweeping=sweeping,
+                organizations=organizations,
+                chunk_inputs=chunk_inputs,
+                settled=settled.get(organization_id),
+            )
+
+    return await asyncio.gather(*(visit(organization_id) for organization_id in organizations))
+
+
 async def repair_lifecycle_all_orgs(ctx: dict[str, Any]) -> dict[str, int]:  # noqa: ARG001
     summary = {
         "organizations": 0,
@@ -512,19 +610,9 @@ async def repair_lifecycle_all_orgs(ctx: dict[str, Any]) -> dict[str, int]:  # n
     # both are read once per tick rather than once per organization.
     chunk_inputs = await _chunk_sweep_inputs() if sweeping else None
     content_work = await _probe_content(chunk_inputs) if sweeping else None
-    slots = asyncio.Semaphore(settings.lifecycle_repair_concurrency)
-
-    async def visit(organization_id: str) -> list[object]:
-        async with slots:
-            return await _repair_organization(
-                organization_id,
-                sweeping=sweeping,
-                organizations=organizations,
-                chunk_inputs=chunk_inputs,
-                content_work=content_work,
-            )
-
-    repaired = await asyncio.gather(*(visit(organization_id) for organization_id in organizations))
+    repaired = await _visit_organizations(
+        organizations, sweeping=sweeping, chunk_inputs=chunk_inputs, content_work=content_work
+    )
     deferred: list[str] = []
     oldest_wait: float | None = None
     exercised = unhealthy = False

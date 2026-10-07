@@ -278,6 +278,28 @@ _RELEASE_LEASE_QUERY = (
 )
 
 
+def raw_plane_current(
+    state: Mapping[str, Any], stamp: Mapping[str, object], verify_interval: float
+) -> bool:
+    """Whether the raw plane needs no walk right now.
+
+    A full pass must have finished for exactly this stamp within the verify
+    interval, and its receipt must have set no capture aside: a deferred or
+    refused capture is counted on every pass and retried once its wait
+    ends, so a plane that holds one stays open. ``state`` is the plane's
+    state row read with ``STATE_PROJECTION``, or the lifecycle probe's
+    projection of it, which flattens the receipt's counts onto the row.
+    """
+    if not plane_current(state, dict(stamp), verify_interval):
+        return False
+    receipt = state.get("last_run")
+    counts = receipt if isinstance(receipt, Mapping) else state
+    return not (
+        models.coerce_int(counts.get("pass_deferred"))
+        or models.coerce_int(counts.get("pass_refused"))
+    )
+
+
 def raw_memory_embedding_current(memory: RawMemory, provider: EmbeddingProvider) -> bool:
     """A vector counts only when its recorded provenance matches the configured provider.
 
@@ -445,9 +467,11 @@ async def repair_raw_capture_embeddings(
     restore, passes its client so the repair cannot land on another store.
 
     A plane whose last pass finished for the configured model within the
-    verify interval (``embedding_sweep_verify_interval_seconds``) is current
-    and costs one state read; an import, restore or rebuild reopens the
-    plane and the next pass walks it. The walk selects only the columns the candidate decision needs and lets
+    verify interval (``embedding_sweep_verify_interval_seconds``) and set no
+    capture aside is current and costs one state read; an import, restore
+    or rebuild reopens the plane and the next pass walks it, and a deferred
+    or refused capture keeps the plane open so every pass counts it and
+    retries it once its wait ends. The walk selects only the columns the candidate decision needs and lets
     the server drop rows whose vector already matches the configured provider,
     so a fully current organization returns one empty page. The server still
     reads every one of the organization's captures to find that out, because
@@ -493,8 +517,8 @@ async def repair_raw_capture_embeddings(
         expected_metadata = models.raw_memory_embedding_metadata(provider.metadata)
         key = embedding_state_key(organization_id, RAW_CAPTURE_EMBEDDING_PLANE)
         known = await content_client.select_many(session, _READ_STATE_QUERY, key=key)
-        if known and plane_current(
-            known[0], dict(expected_metadata), settings.embedding_sweep_verify_interval_seconds
+        if known and raw_plane_current(
+            known[0], expected_metadata, settings.embedding_sweep_verify_interval_seconds
         ):
             return RawEmbeddingRepairResult(status=REPAIR_CURRENT)
         run = _Pass(

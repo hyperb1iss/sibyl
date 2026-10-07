@@ -9,6 +9,8 @@ import pytest
 from sibyl_core.backends.surreal.schema_embedding_states import embedding_state_key
 from sibyl_core.services.lifecycle_probe import (
     ContentWork,
+    PlaneFacts,
+    plane_facts,
     probe_content_work,
     probe_graph_work,
 )
@@ -22,6 +24,9 @@ STAMP = {
     "stamp_version": 2,
 }
 OTHER = {**STAMP, "model": "graph-v2"}
+CHUNK = {**STAMP, "model": "chunks-v1"}
+RAW = {**STAMP, "model": "raw-v1", "text_version": "raw-capture-v1"}
+PLANES = ["document_chunks", "raw_captures"]
 
 
 class FakeClient:
@@ -35,8 +40,8 @@ class FakeClient:
         return self.results
 
 
-def _current(stamp: dict[str, Any], age: float = 10.0) -> dict[str, Any]:
-    return {"complete_metadata": dict(stamp), "complete_age_seconds": age}
+def _current(stamp: dict[str, Any], age: float = 10.0, **fields: Any) -> dict[str, Any]:
+    return {"complete_metadata": dict(stamp), "complete_age_seconds": age, **fields}
 
 
 async def test_graph_probe_is_one_indexed_round_trip_on_the_organization_namespace() -> None:
@@ -66,6 +71,10 @@ async def test_graph_probe_is_one_indexed_round_trip_on_the_organization_namespa
         ([[_current(OTHER)], [], []], "a sweep finished for another model"),
         ([[_current(STAMP, age=7200.0)], [], []], "a sweep older than the verify interval"),
         ([[], [], []], "no sweep state at all"),
+        (
+            [[_current(STAMP, legacy_provisional=True)], [], []],
+            "a provisional adoption is weighed again every pass",
+        ),
     ],
 )
 async def test_graph_probe_sends_an_organization_with_work_through_the_full_pass(
@@ -78,12 +87,29 @@ async def test_graph_probe_sends_an_organization_with_work_through_the_full_pass
     assert not work.idle, reason
 
 
+async def test_graph_probe_reports_the_verdict_a_current_plane_holds() -> None:
+    state = _current(
+        STAMP,
+        legacy_decision="adopt",
+        legacy_warning="adopted_without_evidence",
+        legacy_notice=None,
+    )
+    client = FakeClient("org-w", [[state], [], []])
+
+    work = await probe_graph_work(client, graph_stamp=STAMP, verify_interval=3600.0)
+
+    assert work.idle
+    assert work.sweep == PlaneFacts(
+        current=True, legacy_decision="adopt", warning="adopted_without_evidence", notice=None
+    )
+
+
 async def test_graph_probe_without_a_provider_asks_only_for_lifecycle_rows() -> None:
     client = FakeClient("org-c", [[]])
 
     work = await probe_graph_work(client, graph_stamp=None, verify_interval=3600.0)
 
-    assert work.idle
+    assert work.idle and work.sweep is None
     query, params = client.calls[0]
     assert query.count(";") == 1
     assert "state_key" not in params and "stamp" not in params
@@ -93,36 +119,100 @@ async def test_graph_probe_without_a_provider_asks_only_for_lifecycle_rows() -> 
 
 
 async def test_content_probe_answers_every_organization_in_one_round_trip() -> None:
-    chunk = {**STAMP, "model": "chunks-v1"}
-    raw = {**STAMP, "model": "raw-v1", "text_version": "raw-capture-v1"}
     rows = [
-        {"organization_id": "a", "plane": "document_chunks", **_current(chunk)},
-        {"organization_id": "a", "plane": "raw_captures", **_current(raw)},
-        {"organization_id": "b", "plane": "document_chunks", **_current(chunk)},
+        {"organization_id": "a", "plane": "document_chunks", **_current(CHUNK)},
+        {"organization_id": "a", "plane": "raw_captures", **_current(RAW)},
+        {"organization_id": "b", "plane": "document_chunks", **_current(CHUNK)},
         {"organization_id": "b", "plane": "raw_captures", **_current(OTHER)},
-        {"organization_id": "d", "plane": "document_chunks", **_current(chunk)},
-        {"organization_id": "d", "plane": "raw_captures", **_current(raw)},
+        {"organization_id": "d", "plane": "document_chunks", **_current(CHUNK)},
+        {"organization_id": "d", "plane": "raw_captures", **_current(RAW)},
     ]
     client = FakeClient("content", [rows, [{"organization_id": "d"}]])
 
     work = await probe_content_work(
-        client,
-        stamps={"document_chunks": chunk, "raw_captures": raw},
-        verify_interval=3600.0,
+        client, stamps={"document_chunks": CHUNK, "raw_captures": RAW}, verify_interval=3600.0
     )
 
     assert len(client.calls) == 1
     query, params = client.calls[0]
     assert query.count(";") == 2
     assert "WITH INDEX idx_raw_captures_validation_pending" in query
-    assert params == {"planes": ["document_chunks", "raw_captures"]}
-    planes = ["document_chunks", "raw_captures"]
-    assert work.idle("a", planes=planes)
-    assert not work.idle("b", planes=planes), "the raw plane finished for another model"
+    assert "last_run.pass_deferred AS pass_deferred" in query
+    assert params == {"planes": PLANES}
+    assert work.idle("a", planes=PLANES)
+    assert not work.idle("b", planes=PLANES), "the raw plane finished for another model"
     assert work.idle("b", planes=["document_chunks"])
-    assert not work.idle("c", planes=planes), "an organization with no state owes a pass"
+    assert not work.idle("c", planes=PLANES), "an organization with no state owes a pass"
     assert work.idle("c", planes=[])
-    assert not work.idle("d", planes=planes), "source validation is pending"
+    assert not work.idle("d", planes=PLANES), "source validation is pending"
+
+
+@pytest.mark.parametrize(
+    ("receipt", "reason"),
+    [
+        ({"pass_deferred": 1, "pass_refused": 0}, "a capture the model keeps failing on"),
+        ({"pass_deferred": 0, "pass_refused": 2}, "a capture the provider refused"),
+    ],
+)
+async def test_a_raw_plane_holding_a_set_aside_capture_is_never_idle(
+    receipt: dict[str, int], reason: str
+) -> None:
+    """A deferred or refused capture is counted every pass and retried when its wait ends."""
+    rows = [
+        {"organization_id": "a", "plane": "raw_captures", **_current(RAW, **receipt)},
+        {"organization_id": "a", "plane": "document_chunks", **_current(CHUNK)},
+    ]
+    client = FakeClient("content", [rows, []])
+
+    work = await probe_content_work(
+        client, stamps={"document_chunks": CHUNK, "raw_captures": RAW}, verify_interval=3600.0
+    )
+
+    assert not work.idle("a", planes=PLANES), reason
+    assert work.idle("a", planes=["document_chunks"])
+    facts = work.facts("a", "raw_captures")
+    assert facts is not None and not facts.current
+
+
+async def test_a_provisional_chunk_plane_is_never_idle_and_its_warning_is_reported() -> None:
+    rows = [
+        {
+            "organization_id": "a",
+            "plane": "document_chunks",
+            **_current(
+                CHUNK,
+                legacy_decision="adopt",
+                legacy_warning="adopted_on_incomplete_evidence",
+                legacy_provisional=True,
+            ),
+        },
+        {
+            "organization_id": "b",
+            "plane": "document_chunks",
+            **_current(CHUNK, legacy_decision="adopt", legacy_warning="adopted_without_evidence"),
+        },
+    ]
+    client = FakeClient("content", [rows, []])
+
+    work = await probe_content_work(
+        client, stamps={"document_chunks": CHUNK}, verify_interval=3600.0
+    )
+
+    assert not work.idle("a", planes=["document_chunks"])
+    assert work.idle("b", planes=["document_chunks"])
+    assert work.facts("b", "document_chunks") == PlaneFacts(
+        current=True,
+        legacy_decision="adopt",
+        warning="adopted_without_evidence",
+        notice=None,
+    )
+
+
+def test_plane_facts_judges_the_raw_plane_by_its_receipt() -> None:
+    state = _current(RAW, pass_deferred=0, pass_refused=0)
+    assert plane_facts(state, plane="raw_captures", stamp=RAW, verify_interval=3600.0).current
+    held = _current(RAW, pass_deferred=1)
+    assert not plane_facts(held, plane="raw_captures", stamp=RAW, verify_interval=3600.0).current
 
 
 async def test_content_probe_without_embedders_asks_only_about_source_validation() -> None:
@@ -132,7 +222,7 @@ async def test_content_probe_without_embedders_asks_only_about_source_validation
 
     query, params = client.calls[0]
     assert query.count(";") == 1 and params == {}
-    assert work == ContentWork(current_planes=frozenset(), validation_pending=frozenset({"x"}))
+    assert work == ContentWork(planes={}, validation_pending=frozenset({"x"}))
 
 
 async def test_probes_refuse_a_response_with_the_wrong_statement_count() -> None:

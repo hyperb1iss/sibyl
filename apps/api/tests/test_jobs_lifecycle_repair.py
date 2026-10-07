@@ -21,9 +21,10 @@ from sibyl_core.services.embedding_sweep import (
     EmbeddingSweepResult,
 )
 from sibyl_core.services.embedding_verdicts import LegacyVerdicts
-from sibyl_core.services.lifecycle_probe import ContentWork
+from sibyl_core.services.lifecycle_probe import ContentWork, PlaneFacts
 
-_NOTHING_CURRENT = ContentWork(current_planes=frozenset(), validation_pending=frozenset())
+_NOTHING_CURRENT = ContentWork(planes={}, validation_pending=frozenset())
+_CURRENT = PlaneFacts(current=True)
 
 _NO_EMBEDDING_WORK = {
     "embedding_checked": 0,
@@ -131,9 +132,11 @@ async def test_scheduled_repair_continues_after_org_failure(monkeypatch):
         **_NO_EMBEDDING_WORK,
     }
     repair.assert_awaited_once_with(runtime)
-    # One runtime serves each organization's verdicts, graph repairs and sweeps.
-    assert entered == ["a", "b"]
-    assert closed == ["b"]
+    # The verdicts settle in organization order ahead of the passes, on the
+    # same warm lease; each pass then holds one runtime for its graph repairs
+    # and sweeps. An organization whose graph cannot be reached fails once.
+    assert entered == ["a", "b", "a", "b"]
+    assert closed == ["b", "b"]
     assert raw_repair.await_count == 2
     assert embedding_repair.await_count == 2
     assert {call.args for call in embedding_repair.await_args_list} == {("a",), ("b",)}
@@ -580,7 +583,7 @@ async def test_idle_organization_costs_one_graph_query_per_tick_and_no_repair(mo
 
     monkeypatch.setattr(lifecycle_repair, "background_graph_runtime", background)
     content = ContentWork(
-        current_planes=frozenset({("idle", "document_chunks"), ("idle", "raw_captures")}),
+        planes={("idle", "document_chunks"): _CURRENT, ("idle", "raw_captures"): _CURRENT},
         validation_pending=frozenset(),
     )
     probe_content = AsyncMock(return_value=content)
@@ -622,7 +625,7 @@ async def test_an_organization_with_pending_work_still_gets_its_full_pass(monkey
         "probe_content_work",
         AsyncMock(
             return_value=ContentWork(
-                current_planes=frozenset({("busy", "document_chunks")}),
+                planes={("busy", "document_chunks"): _CURRENT},
                 validation_pending=frozenset(),
             )
         ),
@@ -677,3 +680,106 @@ async def test_organizations_with_work_are_repaired_concurrently(monkeypatch):
     assert entered == {"a", "b"}
     assert result["failed_organizations"] == 0
     assert (result["checked"], result["recovered"]) == (2, 2)
+
+
+async def test_an_idle_organization_still_reports_the_verdict_its_planes_hold(monkeypatch):
+    """A plane adopted without evidence keeps warning on every tick, skipped or not."""
+    stamp = {"provider": "fake", "model": "graph", "dimensions": 3, "stamp_version": 2}
+    provider = SimpleNamespace(metadata=SimpleNamespace(to_dict=lambda: dict(stamp)))
+    monkeypatch.setattr(lifecycle_repair, "configured_embedding_provider", lambda: provider)
+    monkeypatch.setattr(lifecycle_repair, "list_org_ids", AsyncMock(return_value=["idle"]))
+
+    class _WarningProbeClient(_ProbeClient):
+        async def execute_query_batch(self, query, **params):
+            self.batches.append((query, dict(params)))
+            state = {
+                "complete_metadata": dict(params["stamp"]),
+                "complete_age_seconds": 5,
+                "legacy_decision": "adopt",
+                "legacy_warning": LEGACY_WARNING_ADOPTED_WITHOUT_EVIDENCE,
+            }
+            return [[state], [], []]
+
+    client = _WarningProbeClient("idle", current=True)
+
+    @asynccontextmanager
+    async def background(_group_id):
+        yield SimpleNamespace(client=client)
+
+    monkeypatch.setattr(lifecycle_repair, "background_graph_runtime", background)
+    chunks = PlaneFacts(
+        current=True, legacy_decision="adopt", warning=LEGACY_WARNING_ADOPTED_WITHOUT_EVIDENCE
+    )
+    monkeypatch.setattr(
+        lifecycle_repair,
+        "probe_content_work",
+        AsyncMock(
+            return_value=ContentWork(
+                planes={("idle", "document_chunks"): chunks, ("idle", "raw_captures"): _CURRENT},
+                validation_pending=frozenset(),
+            )
+        ),
+    )
+    for name in _REPAIRS:
+        monkeypatch.setattr(
+            lifecycle_repair, name, AsyncMock(side_effect=AssertionError(f"{name} ran"))
+        )
+
+    result = await lifecycle_repair.repair_lifecycle_all_orgs({})
+
+    assert result["embedding_unverified"] == 2
+    assert len(client.batches) == 1
+
+
+async def test_an_organization_holding_a_deferred_capture_gets_its_full_pass(monkeypatch):
+    """A raw plane whose last pass set a capture aside is work, however current its sweep."""
+    stamp = {"provider": "fake", "model": "graph", "dimensions": 3, "stamp_version": 2}
+    provider = SimpleNamespace(metadata=SimpleNamespace(to_dict=lambda: dict(stamp)))
+    monkeypatch.setattr(lifecycle_repair, "configured_embedding_provider", lambda: provider)
+    monkeypatch.setattr(lifecycle_repair, "list_org_ids", AsyncMock(return_value=["held"]))
+    raw_provider = SimpleNamespace(metadata=SimpleNamespace())
+    monkeypatch.setattr(
+        lifecycle_repair.content_models,
+        "configured_raw_memory_embedding_provider",
+        lambda: raw_provider,
+    )
+    monkeypatch.setattr(
+        lifecycle_repair.content_models,
+        "raw_memory_embedding_metadata",
+        lambda _m: {"model": "raw"},
+    )
+    client = _ProbeClient("held", current=True)
+
+    @asynccontextmanager
+    async def background(_group_id):
+        yield SimpleNamespace(client=client)
+
+    monkeypatch.setattr(lifecycle_repair, "background_graph_runtime", background)
+    # Exactly what probe_content_work reports for a plane whose receipt names a deferral.
+    monkeypatch.setattr(
+        lifecycle_repair,
+        "probe_content_work",
+        AsyncMock(
+            return_value=ContentWork(
+                planes={
+                    ("held", "document_chunks"): _CURRENT,
+                    ("held", "raw_captures"): PlaneFacts(current=False),
+                },
+                validation_pending=frozenset(),
+            )
+        ),
+    )
+    raw_repair = AsyncMock(return_value=RawEmbeddingRepairResult(checked=1, deferred=1))
+    monkeypatch.setattr(lifecycle_repair, "repair_raw_capture_embeddings", raw_repair)
+    for name in (
+        "repair_graph_lifecycle",
+        "repair_promoted_embeddings",
+        "repair_raw_source_lifecycle",
+    ):
+        monkeypatch.setattr(lifecycle_repair, name, AsyncMock(return_value=LifecycleRepairResult()))
+
+    result = await lifecycle_repair.repair_lifecycle_all_orgs({})
+
+    raw_repair.assert_awaited_once_with("held")
+    assert (result["checked"], result["deferred"]) == (1, 1)
+    assert client.batches == [], "the graph probe is never asked once the content side owes work"

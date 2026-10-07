@@ -642,3 +642,40 @@ async def test_a_reopened_plane_is_walked_again(content_store, monkeypatch):
 
     assert (result.status, result.checked, result.recovered) == ("completed", 1, 1)
     assert (await stored(missing.id))["embedding"] is not None
+
+
+async def test_a_deferred_capture_keeps_the_plane_open_until_it_is_retried(content_store):
+    """A capture the model keeps failing on is counted every pass, never hidden by the gate."""
+
+    class ModelFailedError(Exception):
+        status_code = 424
+
+    org = str(uuid4())
+    failing = await remember(org, "failing")
+    for index in range(3):
+        await remember(org, f"fine-{index}")
+    base = provider("deferring")
+    requests: list[list[str]] = []
+
+    class FailsOnOneRow:
+        metadata = base.metadata
+
+        async def embed_texts(self, texts, *, input_kind: str = "document"):
+            requests.append(list(texts))
+            if any("failing" in text for text in texts):
+                raise ModelFailedError("model failed")
+            return await base.embed_texts(texts, input_kind=input_kind)
+
+    first = await repair_raw_capture_embeddings(org, embedding_provider=FailsOnOneRow())
+    held = len(requests)
+    second = await repair_raw_capture_embeddings(org, embedding_provider=FailsOnOneRow())
+
+    assert (first.status, first.recovered, first.deferred, first.refused) == ("completed", 3, 1, 0)
+    assert (second.status, second.checked, second.deferred, second.refused) == (
+        "completed",
+        1,
+        1,
+        0,
+    )
+    assert len(requests) == held, "a held deferral is not sent again"
+    assert (await stored(failing.id))["embedding"] is None

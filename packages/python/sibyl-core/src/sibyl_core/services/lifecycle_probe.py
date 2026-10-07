@@ -9,6 +9,13 @@ namespace; the content side is one round trip per tick for every
 organization at once. Each statement runs through an index, so an idle
 organization costs the tick one query. Only an organization that owes
 something gets the full pass.
+
+A plane is idle only when nothing about it can change without a write:
+its last pass finished for the configured stamp within the verify
+interval, its verdict is final rather than provisional (a provisional
+adoption is weighed again every pass), and, for the raw capture plane, its
+last receipt set no capture aside (a deferred or refused capture is
+counted on every pass and retried once its wait ends).
 """
 
 from __future__ import annotations
@@ -24,6 +31,10 @@ from sibyl_core.backends.surreal.schema_embedding_states import (
 )
 from sibyl_core.embeddings.provenance import vector_identity_differs_predicate
 from sibyl_core.projection.repair import PENDING_REPAIR_QUERY
+from sibyl_core.services.content_raw_embedding_repair import (
+    RAW_CAPTURE_EMBEDDING_PLANE,
+    raw_plane_current,
+)
 from sibyl_core.services.embedding_sweep import STATE_PROJECTION, plane_current
 
 type EmbeddingStamp = Mapping[str, Any]
@@ -46,7 +57,9 @@ EMBEDDING_PENDING_STATEMENT = (
 # Spelled CONTAINS rather than IN: the embedded test engine drops IN matches
 # that an index answers (see ``REOPEN_EMBEDDING_STATES``).
 CONTENT_STATES_STATEMENT = (
-    "SELECT organization_id, plane, complete_metadata, IF complete_at = NONE THEN NONE "
+    "SELECT organization_id, plane, complete_metadata, legacy_decision, legacy_warning, "
+    "legacy_notice, legacy_provisional, last_run.pass_deferred AS pass_deferred, "
+    "last_run.pass_refused AS pass_refused, IF complete_at = NONE THEN NONE "
     "ELSE duration::secs(time::now() - complete_at) END AS complete_age_seconds "
     "FROM embedding_states WHERE $planes CONTAINS plane;"
 )
@@ -60,16 +73,51 @@ VALIDATION_PENDING_STATEMENT = (
 
 
 @dataclass(frozen=True, slots=True)
-class GraphWork:
-    """What one organization's graph namespace still owes the lifecycle pass."""
+class PlaneFacts:
+    """What one plane's state row says: whether it is idle, and the verdict it reports."""
 
-    sweep_current: bool
+    current: bool
+    legacy_decision: str | None = None
+    warning: str | None = None
+    notice: str | None = None
+
+
+def plane_facts(
+    state: Mapping[str, Any], *, plane: str, stamp: EmbeddingStamp, verify_interval: float
+) -> PlaneFacts:
+    """Judge a plane state row the way its own pass would, without running it."""
+    if plane == RAW_CAPTURE_EMBEDDING_PLANE:
+        current = raw_plane_current(state, stamp, verify_interval)
+    else:
+        # A provisional adoption is weighed again by every settle, so the pass
+        # that does the weighing must run.
+        current = plane_current(state, dict(stamp), verify_interval) and not state.get(
+            "legacy_provisional"
+        )
+    return PlaneFacts(
+        current=current,
+        legacy_decision=_optional_str(state.get("legacy_decision")),
+        warning=_optional_str(state.get("legacy_warning")),
+        notice=_optional_str(state.get("legacy_notice")),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class GraphWork:
+    """What one organization's graph namespace still owes the lifecycle pass.
+
+    ``sweep`` is None when no graph provider is configured: there is no
+    sweep to owe.
+    """
+
+    sweep: PlaneFacts | None
     lifecycle_pending: bool
     embeddings_pending: bool
 
     @property
     def idle(self) -> bool:
-        return self.sweep_current and not self.lifecycle_pending and not self.embeddings_pending
+        sweep_current = self.sweep is None or self.sweep.current
+        return sweep_current and not self.lifecycle_pending and not self.embeddings_pending
 
 
 async def probe_graph_work(
@@ -98,13 +146,23 @@ async def probe_graph_work(
     )
     if graph_stamp is None:
         return GraphWork(
-            sweep_current=True,
+            sweep=None,
             lifecycle_pending=bool(normalize_records(results[0])),
             embeddings_pending=False,
         )
     states = normalize_records(results[0])
+    sweep = (
+        plane_facts(
+            states[0],
+            plane=GRAPH_EMBEDDING_STATE_PLANE,
+            stamp=graph_stamp,
+            verify_interval=verify_interval,
+        )
+        if states
+        else PlaneFacts(current=False)
+    )
     return GraphWork(
-        sweep_current=bool(states) and plane_current(states[0], dict(graph_stamp), verify_interval),
+        sweep=sweep,
         lifecycle_pending=bool(normalize_records(results[1])),
         embeddings_pending=bool(normalize_records(results[2])),
     )
@@ -114,8 +172,11 @@ async def probe_graph_work(
 class ContentWork:
     """What the shared content namespace says each organization still owes."""
 
-    current_planes: frozenset[tuple[str, str]]
+    planes: Mapping[tuple[str, str], PlaneFacts]
     validation_pending: frozenset[str]
+
+    def facts(self, organization_id: str, plane: str) -> PlaneFacts | None:
+        return self.planes.get((organization_id, plane))
 
     def idle(self, organization_id: str, *, planes: Iterable[str]) -> bool:
         """Whether the organization owes nothing on the content side.
@@ -125,13 +186,16 @@ class ContentWork:
         """
         if organization_id in self.validation_pending:
             return False
-        return all((organization_id, plane) in self.current_planes for plane in planes)
+        return all(
+            (facts := self.planes.get((organization_id, plane))) is not None and facts.current
+            for plane in planes
+        )
 
 
 async def probe_content_work(
     client: Any, *, stamps: Mapping[str, EmbeddingStamp], verify_interval: float
 ) -> ContentWork:
-    """One round trip for every organization: current content planes and pending source checks.
+    """One round trip for every organization: content plane facts and pending source checks.
 
     ``stamps`` maps each content plane to the stamp its writes carry today;
     a plane without a configured embedder is left out and never counts as
@@ -146,19 +210,22 @@ async def probe_content_work(
     results = _statement_results(
         await client.execute_query_batch(" ".join(statements), **params), len(statements)
     )
-    current: set[tuple[str, str]] = set()
+    facts: dict[tuple[str, str], PlaneFacts] = {}
     if planes:
         for row in normalize_records(results[0]):
             plane = str(row.get("plane") or "")
             stamp = stamps.get(plane)
-            if stamp is not None and plane_current(row, dict(stamp), verify_interval):
-                current.add((str(row.get("organization_id") or ""), plane))
+            if stamp is None:
+                continue
+            facts[(str(row.get("organization_id") or ""), plane)] = plane_facts(
+                row, plane=plane, stamp=stamp, verify_interval=verify_interval
+            )
     pending = {
         str(row["organization_id"])
         for row in normalize_records(results[-1])
         if row.get("organization_id")
     }
-    return ContentWork(current_planes=frozenset(current), validation_pending=frozenset(pending))
+    return ContentWork(planes=facts, validation_pending=frozenset(pending))
 
 
 def _statement_results(response: object, expected: int) -> list[object]:
@@ -169,6 +236,10 @@ def _statement_results(response: object, expected: int) -> list[object]:
     return list(response)
 
 
+def _optional_str(value: object) -> str | None:
+    return str(value) if value else None
+
+
 __all__ = [
     "CONTENT_STATES_STATEMENT",
     "EMBEDDING_PENDING_STATEMENT",
@@ -177,6 +248,8 @@ __all__ = [
     "VALIDATION_PENDING_STATEMENT",
     "ContentWork",
     "GraphWork",
+    "PlaneFacts",
+    "plane_facts",
     "probe_content_work",
     "probe_graph_work",
 ]
