@@ -23,6 +23,7 @@ from sibyl_core.backends.surreal.content_schema import (
     _content_schema_migrations,
 )
 from sibyl_core.backends.surreal.schema_helpers import is_duplicate_unique_index_error
+from sibyl_core.backends.surreal.schema_version import SchemaMigration, apply_schema_migrations
 from sibyl_core.services import content_client, eval_publication_guards
 from sibyl_core.services.content_models import raw_memory_from_record
 from sibyl_core.services.content_raw_persistence import (
@@ -115,16 +116,41 @@ def test_content_migration_rebuilds_the_raw_capture_uuid_index() -> None:
     )
 
 
-def test_unique_index_rebuild_tolerates_duplicate_rows_like_its_definition() -> None:
+def test_unique_index_rebuild_failure_is_not_tolerated() -> None:
     duplicate = RuntimeError("Database index `idx_raw_captures_uuid` already contains 'dirty-row'")
-    assert is_duplicate_unique_index_error(RAW_CAPTURE_UUID_INDEX_REBUILD, duplicate)
-    assert not is_duplicate_unique_index_error(
-        RAW_CAPTURE_UUID_INDEX_REBUILD, RuntimeError("connection reset")
+    assert not is_duplicate_unique_index_error(RAW_CAPTURE_UUID_INDEX_REBUILD, duplicate)
+    assert is_duplicate_unique_index_error(
+        "DEFINE INDEX IF NOT EXISTS idx_raw_captures_uuid ON raw_captures FIELDS uuid UNIQUE;",
+        duplicate,
     )
     assert not is_duplicate_unique_index_error(
         "DEFINE INDEX IF NOT EXISTS idx_raw_captures_org ON raw_captures FIELDS organization_id;",
         duplicate,
     )
+
+
+async def test_rebuild_on_duplicate_rows_fails_the_migration_and_records_nothing() -> None:
+    executed: list[str] = []
+
+    async def execute(statement: str, /, **params: object) -> object:
+        executed.append(statement)
+        if statement.startswith("REBUILD INDEX"):
+            raise RuntimeError("Database index `idx_raw_captures_uuid` already contains 'dup'")
+        return []
+
+    with pytest.raises(RuntimeError, match="already contains"):
+        await apply_schema_migrations(
+            execute,
+            [
+                SchemaMigration(
+                    version=1,
+                    name="rebuild_probe",
+                    statements=(RAW_CAPTURE_UUID_INDEX_REBUILD,),
+                )
+            ],
+            name="rebuild_probe",
+        )
+    assert not any(statement.startswith("UPSERT") for statement in executed)
 
 
 async def test_promotion_id_lookup_uses_uuid_index_and_verifies_org(
