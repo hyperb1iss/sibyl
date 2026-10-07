@@ -46,6 +46,7 @@ from sibyl_core.models.reflection import (
     memory_lifecycle_from_metadata,
     with_memory_lifecycle_metadata,
 )
+from sibyl_core.services.content_documents import invalidate_document_chunk_counts
 from sibyl_core.services.embedding_lane_readiness import chunk_vector_lane_readiness
 from sibyl_core.services.link_graph_status import LinkGraphSourceStatusData, LinkGraphStatusData
 from sibyl_core.utils.query import query_tokens
@@ -2383,6 +2384,8 @@ async def save_document_chunks(
                 record=_chunk_record(chunk),
             )
             saved.append(_chunk_from_record(record))
+    for organization_id in {str(chunk.organization_id) for chunk in saved}:
+        invalidate_document_chunk_counts(organization_id)
     return saved
 
 
@@ -2400,6 +2403,7 @@ async def delete_document_chunks_for_document(
             document_id=str(document_id),
             organization_id=str(organization_id),
         )
+    invalidate_document_chunk_counts(str(organization_id))
     return len(rows)
 
 
@@ -2464,6 +2468,7 @@ async def delete_crawled_document_record(
             record=_source_record(source),
         )
 
+    invalidate_document_chunk_counts(str(organization_id))
     return document, chunks_deleted
 
 
@@ -2500,6 +2505,7 @@ async def delete_crawl_source_record(
             organization_id=str(organization_id),
         )
 
+    invalidate_document_chunk_counts(str(organization_id))
     return source
 
 

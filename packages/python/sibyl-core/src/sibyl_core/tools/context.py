@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import asdict, replace
+from functools import partial
 from typing import Any
 
 import structlog
@@ -43,6 +45,7 @@ from sibyl_core.retrieval.search import build_context_retrieval_plan, context_se
 from sibyl_core.services.eval_publication_guards import (
     unavailable_publication_ids,
 )
+from sibyl_core.services.graph_read_availability import GraphReadMemo
 from sibyl_core.services.graph_runtime import get_surreal_graph_runtime
 from sibyl_core.services.surreal_content import (
     MemoryScope,
@@ -559,10 +562,13 @@ async def _default_related_items_batch(
     principal_id: str | None = None,
     allowed_memory_scope_keys: set[str] | None = None,
     limit: int = 3,
+    read_memo: GraphReadMemo | None = None,
 ) -> dict[str, list[ContextRelatedItem]]:
     ids = list(dict.fromkeys(str(entity_id) for entity_id in entity_ids if entity_id))
     if not ids:
         return {}
+    if read_memo is None:
+        read_memo = GraphReadMemo(organization_id)
 
     runtime = await get_graph_runtime(organization_id)
     relationship_manager = runtime.relationship_manager
@@ -586,19 +592,24 @@ async def _default_related_items_batch(
             if entity.id
         )
     )
-    superseded, _edge_count = await _superseded_candidate_uuids(
-        runtime.client,
-        group_id=organization_id,
-        uuids=candidate_ids,
-    )
-
-    unavailable_publications = await unavailable_publication_ids(
-        organization_id,
-        {
-            str(entity.id): getattr(entity, "metadata", None)
-            for results in raw_by_seed.values()
-            for entity, _relationship in results
-        },
+    # The two checks read different tables for the same neighbours; the memo
+    # already holds a verdict for every neighbour the pack admitted as an item.
+    (superseded, _edge_count), unavailable_publications = await asyncio.gather(
+        _superseded_candidate_uuids(
+            runtime.client,
+            group_id=organization_id,
+            uuids=candidate_ids,
+            memo=read_memo,
+        ),
+        read_memo.unavailable_publication_ids(
+            organization_id,
+            {
+                str(entity.id): getattr(entity, "metadata", None)
+                for results in raw_by_seed.values()
+                for entity, _relationship in results
+            },
+            load=unavailable_publication_ids,
+        ),
     )
     related_by_seed: dict[str, list[ContextRelatedItem]] = {}
     for seed_id, raw_results in raw_by_seed.items():
@@ -841,7 +852,10 @@ def _lineage_rank(item: ContextItem) -> tuple[int, float]:
 
 
 async def _drop_retired_items(
-    sections: list[ContextSection], organization_id: str
+    sections: list[ContextSection],
+    organization_id: str,
+    *,
+    read_memo: GraphReadMemo | None = None,
 ) -> list[ContextSection]:
     """Refuse admission to any row a correction retired.
 
@@ -849,11 +863,16 @@ async def _drop_retired_items(
     gate never saw: the active-work lookup and the legacy fallback search both
     reach a section directly. Running ahead of selection rather than after it
     is what keeps a retired row from spending one of the pack's limited slots
-    and shrinking the answer on its way out.
+    and shrinking the answer on its way out. With the request's memo in hand
+    only those unseen rows are proven here; the native lane's rows were.
     """
 
-    unavailable = await unavailable_publication_ids(
-        organization_id, {item.id: item.metadata for section in sections for item in section.items}
+    if read_memo is None:
+        read_memo = GraphReadMemo(organization_id)
+    unavailable = await read_memo.unavailable_publication_ids(
+        organization_id,
+        {item.id: item.metadata for section in sections for item in section.items},
+        load=unavailable_publication_ids,
     )
     kept: list[ContextSection] = []
     for section in sections:
@@ -1421,6 +1440,7 @@ async def _compile_native_sections(
     audit: bool = False,
     naive_retrieval: bool = False,
     include_raw_memory: bool = True,
+    read_memo: GraphReadMemo | None = None,
 ) -> list[ContextSection]:
     search_limit = min(50, max(limit, per_facet_limit * len(facets)))
     facet = ContextFacet.RECENT_MEMORY if ContextFacet.RECENT_MEMORY in facets else None
@@ -1454,6 +1474,7 @@ async def _compile_native_sections(
                 raw_memory_recall_fn if include_raw_memory else _empty_raw_memory_recall
             ),
             distinct_key=distinct_key,
+            read_memo=read_memo,
         )
     return _sections_from_response(response, facets=facets, audit=audit)
 
@@ -1530,6 +1551,9 @@ async def compile_context(
         knn_type_overfetch=knn_type_overfetch,
     )
 
+    # One memo for the whole pack: the native lane, the admission check and
+    # the related-item batch all ask whether the same rows are still current.
+    read_memo = GraphReadMemo(organization_id)
     sections: list[ContextSection] = []
     retrieval_failed = False
     try:
@@ -1542,6 +1566,7 @@ async def compile_context(
             audit=audit,
             naive_retrieval=naive_retrieval,
             include_raw_memory=include_documents,
+            read_memo=read_memo,
         )
     except Exception as exc:
         if naive_retrieval:
@@ -1597,7 +1622,9 @@ async def compile_context(
             )
         sections = _merge_active_work(sections, active_items, facets)
 
-    sections = _dedupe_lineage(await _drop_retired_items(sections, organization_id))
+    sections = _dedupe_lineage(
+        await _drop_retired_items(sections, organization_id, read_memo=read_memo)
+    )
     sections = _dedupe_sections(sections, limit, per_facet_limit=per_facet_limit)
     if not sections and retrieval_failed:
         sections = _dedupe_sections(
@@ -1619,6 +1646,7 @@ async def compile_context(
                     include_documents=include_documents,
                 ),
                 organization_id,
+                read_memo=read_memo,
             ),
             limit,
             per_facet_limit=per_facet_limit,
@@ -1639,6 +1667,7 @@ async def compile_context(
             related_fn=related_fn,
             principal_id=principal_id,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
+            related_batch_fn=partial(_default_related_items_batch, read_memo=read_memo),
         )
     usage_metadata: dict[str, Any] = {}
     if sections and record_exposure:

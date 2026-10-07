@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Sequence
+from collections.abc import Awaitable, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -40,6 +40,7 @@ from sibyl_core.retrieval._search_plan import (
 from sibyl_core.retrieval.candidates import RetrievalCandidate
 from sibyl_core.retrieval.identifier_query import identifier_probe_tokens
 from sibyl_core.retrieval.temporal import resolve_temporal_reference
+from sibyl_core.services.graph_read_availability import GraphReadMemo
 from sibyl_core.services.surreal_content import recall_raw_memory_with_sources
 
 if TYPE_CHECKING:
@@ -76,17 +77,24 @@ async def context_search(
     embedding_provider: EmbeddingProvider | None = None,
     raw_memory_recall_fn: source_stage.RawMemoryRecallFn = recall_raw_memory_with_sources,
     distinct_key: fusion_stage.DistinctKey | None = None,
+    read_memo: GraphReadMemo | None = None,
 ) -> SearchResponse:
     """Search context-pack candidates through native SurrealDB paths.
 
     ``distinct_key`` names the rows the caller will fold into one item. The
     fused cut then counts ``limit`` distinct items, so a response can carry
     more than ``limit`` rows when several of them share a key.
+
+    ``read_memo`` lets the caller share availability verdicts across the
+    whole request; the search creates its own when none is supplied, so its
+    two gate passes still settle each row once.
     """
 
     from sibyl_core.tools.responses import SearchResponse
 
     search_started_at = time.perf_counter()
+    if read_memo is None:
+        read_memo = GraphReadMemo(plan.organization_id)
     stage_timings_ms: dict[str, float] = {}
     stage_started_at = time.perf_counter()
     limit = max(1, min(limit, MAX_RETRIEVAL_LIMIT))
@@ -165,28 +173,42 @@ async def context_search(
             else source_stage._empty_candidate_source(),
         ),
     ]
-    raw_source, graph_sources, raw_failures, raw_recall_metadata = await _gather_candidate_sources(
-        raw_task,
-        graph_tasks,
-    )
-    raw_candidates = list(raw_source.candidates)
-    graph_candidate_lists = [list(source.candidates) for source in graph_sources]
-    stage_timings_ms["lexical_candidates"] = _elapsed_ms(stage_started_at)
-
-    stage_started_at = time.perf_counter()
     vector_plan = search_planning._vector_scoped_plan(
         search_plan,
         include_nodes=node_sources_allowed,
         include_edges=edge_sources_allowed,
     )
-    vector_fetch = await source_stage._vector_candidate_sources_detailed(
-        client=client,
-        plan=vector_plan,
-        search_filter=search_filter,
-        embedding_provider=embedding_provider,
+    # The vector lanes need nothing the lexical lanes return: the query text
+    # is known, the embedding is cached per process and the walks read the
+    # same client. Awaiting them after the lexical gather parked the embedding
+    # call and both HNSW walks behind the slowest raw-memory scope, so both
+    # groups start together and each stage records its own completion time
+    # from the shared start.
+    (
+        (raw_source, graph_sources, raw_failures, raw_recall_metadata),
+        vector_fetch,
+    ) = await asyncio.gather(
+        _timed_stage(
+            _gather_candidate_sources(raw_task, graph_tasks),
+            stage_timings_ms,
+            "lexical_candidates",
+            stage_started_at,
+        ),
+        _timed_stage(
+            source_stage._vector_candidate_sources_detailed(
+                client=client,
+                plan=vector_plan,
+                search_filter=search_filter,
+                embedding_provider=embedding_provider,
+            ),
+            stage_timings_ms,
+            "vector_candidates",
+            stage_started_at,
+        ),
     )
+    raw_candidates = list(raw_source.candidates)
+    graph_candidate_lists = [list(source.candidates) for source in graph_sources]
     vector_candidate_lists = [vector_fetch.node_candidates, vector_fetch.edge_candidates]
-    stage_timings_ms["vector_candidates"] = _elapsed_ms(stage_started_at)
 
     def candidate_authorized(candidate: RetrievalCandidate) -> bool:
         return candidate_stage._candidate_allowed(
@@ -223,6 +245,7 @@ async def context_search(
         group_id=search_plan.organization_id,
         plan=search_plan,
         source_lists=direct_lists,
+        memo=read_memo,
     )
     stage_timings_ms["candidate_filtering"] = _elapsed_ms(stage_started_at)
 
@@ -275,6 +298,7 @@ async def context_search(
                 ],
             )
         ],
+        memo=read_memo,
     )
     filtered_lists = [*direct_lists, *expansion_lists]
     supersession_metadata = lifecycle_stage._merged_supersession_metadata(
@@ -313,7 +337,11 @@ async def context_search(
         fusion_failures=fusion_failures,
         distinct_key=distinct_key,
     )
-    fused = fusion.candidates
+    fused = await source_stage._hydrate_candidate_bodies(
+        client=client,
+        group_id=search_plan.organization_id,
+        fused=fusion.candidates,
+    )
     stage_timings_ms["fusion"] = _elapsed_ms(stage_started_at)
 
     stage_started_at = time.perf_counter()
@@ -370,6 +398,15 @@ async def context_search(
 
 def _elapsed_ms(started_at: float) -> float:
     return (time.perf_counter() - started_at) * 1000.0
+
+
+async def _timed_stage[T](
+    stage: Awaitable[T], timings: dict[str, float], key: str, started_at: float
+) -> T:
+    try:
+        return await stage
+    finally:
+        timings[key] = _elapsed_ms(started_at)
 
 
 async def _gather_candidate_sources(

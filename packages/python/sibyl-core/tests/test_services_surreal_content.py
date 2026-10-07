@@ -29,6 +29,7 @@ from sibyl_core.services import (
     content_raw_recall,
 )
 from sibyl_core.services.content_client import replace_record
+from sibyl_core.services.content_documents import DOCUMENT_CHUNK_EXACT_SCAN_MAX_ROWS
 from sibyl_core.services.content_models import raw_memory_from_record
 from sibyl_core.services.surreal_content import (
     MemoryScope,
@@ -1034,6 +1035,7 @@ class TestSurrealContentHelpers:
                         }
                     ]
                 ),
+                _query_result([{"total": DOCUMENT_CHUNK_EXACT_SCAN_MAX_ROWS + 1}]),
                 _raw_query_result(
                     [
                         {
@@ -1097,13 +1099,16 @@ class TestSurrealContentHelpers:
         assert vector_rows[0][2] == "Docs"
 
         source_query, source_params = fake_client.calls[0]
-        vector_query, vector_params = fake_client.calls[1]
-        lexical_query, lexical_params = fake_client.calls[2]
-        document_query, document_params = fake_client.calls[3]
+        count_query, count_params = fake_client.calls[1]
+        vector_query, vector_params = fake_client.calls[2]
+        lexical_query, lexical_params = fake_client.calls[3]
+        document_query, document_params = fake_client.calls[4]
         assert "FROM crawl_sources WHERE organization_id = $organization_id" in source_query
         assert "uuid = $source_id" in source_query
         assert source_params["organization_id"] == "org-1"
         assert source_params["source_id"] == "src-1"
+        assert "SELECT count() AS total FROM (SELECT uuid FROM document_chunks" in count_query
+        assert count_params["source_ids"] == ["src-1"]
         assert "FROM document_chunks WHERE organization_id = $organization_id" in vector_query
         assert "$source_ids CONTAINS source_id" in vector_query
         assert "FROM document_chunks WHERE organization_id = $organization_id" in lexical_query
@@ -1127,6 +1132,7 @@ class TestSurrealContentHelpers:
         fake_client = FakeClient(
             [
                 _query_result([{"uuid": "src-1", "organization_id": "org-1", "name": "Docs"}]),
+                _query_result([{"total": DOCUMENT_CHUNK_EXACT_SCAN_MAX_ROWS + 1}]),
                 _raw_query_result([]),
                 _query_result([]),
                 _query_result([]),
@@ -1164,6 +1170,7 @@ class TestSurrealContentHelpers:
                         }
                     ]
                 ),
+                _query_result([{"total": 3}]),
                 _raw_query_result(
                     [
                         {
@@ -1225,6 +1232,7 @@ class TestSurrealContentHelpers:
                         }
                     ]
                 ),
+                _query_result([{"total": 3}]),
                 _raw_query_result(
                     [
                         {
@@ -1266,7 +1274,7 @@ class TestSurrealContentHelpers:
 
         assert vector_rows == []
         assert [row[0].id for row in lexical_rows] == ["chunk-lexical"]
-        lexical_query, lexical_params = fake_client.calls[1]
+        lexical_query, lexical_params = fake_client.calls[2]
         assert "content @0@ $search_query" in lexical_query
         assert lexical_params["search_query"] == "alpha beta"
 
@@ -1521,6 +1529,7 @@ class TestSurrealContentHelpers:
                         }
                     ]
                 ),
+                _query_result([{"total": DOCUMENT_CHUNK_EXACT_SCAN_MAX_ROWS + 1}]),
                 _raw_error_result("vector index unavailable"),
                 _raw_error_result("fulltext index unavailable"),
             ]
@@ -1541,7 +1550,7 @@ class TestSurrealContentHelpers:
                     limit=5,
                 )
 
-        assert len(fake_client.calls) == 3
+        assert len(fake_client.calls) == 4
 
     @pytest.mark.asyncio
     async def test_search_document_chunks_reports_vector_timeout_with_lexical_results(
@@ -1559,6 +1568,7 @@ class TestSurrealContentHelpers:
                         }
                     ]
                 ),
+                _query_result([{"total": DOCUMENT_CHUNK_EXACT_SCAN_MAX_ROWS + 1}]),
                 _query_result(
                     [
                         {

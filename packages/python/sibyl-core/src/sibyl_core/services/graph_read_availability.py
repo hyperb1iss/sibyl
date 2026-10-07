@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+import asyncio
+from collections.abc import Awaitable, Callable, Coroutine, Hashable, Mapping, Sequence
 from typing import Any
 
 from pydantic import ValidationError
@@ -11,8 +12,134 @@ from sibyl_core.models.entities import Entity, Relationship
 from sibyl_core.services.eval_publication_guards import available_graph_entity_rows
 from sibyl_core.services.graph_read_validation import GraphReadValidation
 from sibyl_core.services.graph_runtime import GraphRuntime, get_surreal_graph_runtime
+from sibyl_core.services.source_observations import SourceUnavailableError
 
 _READ_BATCH_SIZE = 512
+
+type SourceVisible = Callable[[Any], bool]
+
+
+class GraphReadMemo:
+    """Settle each read-availability question once per retrieval request.
+
+    One request asks the same question about the same rows several times
+    over: the supersession gate before the graph walk and the gate after it,
+    the pack's admission check and the related-item batch each re-derive
+    availability for ids an earlier pass already settled, and inside one pass
+    the edge proof re-reads its endpoints for every validation phase. Each
+    (kind, id) is loaded here once; a later asker, concurrent or not, awaits
+    the load already in flight instead of issuing its own.
+
+    The memo lives for one request and one reader. A verdict is as fresh as
+    the request's first read of that row, which is the snapshot the request
+    answers from in any case. Every scoped question in one request must come
+    from the same reader filter: the filter is part of the verdict, and only
+    its presence is part of the key.
+    """
+
+    def __init__(self, organization_id: str) -> None:
+        self.organization_id = organization_id
+        self._loads: dict[tuple[str, Hashable], asyncio.Task[Mapping[Any, Any]]] = {}
+        self.load_count: dict[str, int] = {}
+
+    def _check_org(self, organization_id: str) -> None:
+        if organization_id != self.organization_id:
+            raise SourceUnavailableError()
+
+    @staticmethod
+    def reader_scope(source_visible: SourceVisible | None) -> str:
+        return "unscoped" if source_visible is None else "scoped"
+
+    async def once[K: Hashable, V](
+        self,
+        kind: str,
+        keys: Sequence[K],
+        load: Callable[[list[K]], Coroutine[Any, Any, Mapping[K, V]]],
+        *,
+        missing: V,
+    ) -> dict[K, V]:
+        """Answer ``keys`` for ``kind``, loading only the ones nobody asked yet.
+
+        ``load`` receives the unsettled keys and returns a verdict per key it
+        found; a key it leaves out settles to ``missing``. A load that raises
+        settles nothing, so the next asker reloads those keys, and an asker
+        cancelled mid-wait leaves the shared load running for the others.
+        """
+        ordered = list(dict.fromkeys(keys))
+        pending = [key for key in ordered if (kind, key) not in self._loads]
+        if pending:
+            # Reserve every key before yielding so an overlapping asker shares
+            # this load rather than starting a second one for the same ids.
+            task = asyncio.create_task(load(pending))
+            for key in pending:
+                self._loads[(kind, key)] = task
+            self.load_count[kind] = self.load_count.get(kind, 0) + 1
+        by_task: dict[asyncio.Task[Mapping[Any, Any]], list[K]] = {}
+        for key in ordered:
+            by_task.setdefault(self._loads[(kind, key)], []).append(key)
+        results: dict[K, V] = {}
+        for task, task_keys in by_task.items():
+            try:
+                loaded = await asyncio.shield(task)
+            except BaseException:
+                if task.done() and not task.cancelled() and task.exception() is not None:
+                    for key in task_keys:
+                        if self._loads.get((kind, key)) is task:
+                            del self._loads[(kind, key)]
+                raise
+            for key in task_keys:
+                results[key] = loaded.get(key, missing)
+        return results
+
+    async def unavailable_publication_ids(
+        self,
+        organization_id: str,
+        rows: Mapping[str, Mapping[str, object] | None],
+        *,
+        load: Callable[..., Awaitable[set[str]]],
+    ) -> set[str]:
+        """The protected-ledger verdict per row id, each id proven once."""
+        self._check_org(organization_id)
+
+        async def load_missing(missing: list[str]) -> dict[str, bool]:
+            unavailable = await load(
+                organization_id, {identifier: rows[identifier] for identifier in missing}
+            )
+            return dict.fromkeys(unavailable, True)
+
+        verdicts = await self.once("publication", list(rows), load_missing, missing=False)
+        return {identifier for identifier, unavailable in verdicts.items() if unavailable}
+
+    async def available_capture_projection_rows[T](
+        self,
+        organization_id: str,
+        rows: Mapping[str, T],
+        *,
+        load: Callable[..., Awaitable[Mapping[str, T]]],
+        graph_client: Any,
+        source_visible: SourceVisible | None,
+    ) -> dict[str, T]:
+        """The capture-ancestry verdict per row id, each id proven once."""
+        self._check_org(organization_id)
+
+        async def load_missing(missing: list[str]) -> dict[str, bool]:
+            available = await load(
+                organization_id,
+                {identifier: rows[identifier] for identifier in missing},
+                graph_client=graph_client,
+                source_visible=source_visible,
+            )
+            return dict.fromkeys(available, True)
+
+        verdicts = await self.once(
+            f"capture_rows:{self.reader_scope(source_visible)}",
+            list(rows),
+            load_missing,
+            missing=False,
+        )
+        return {
+            identifier: rows[identifier] for identifier, available in verdicts.items() if available
+        }
 
 
 async def available_graph_entities(
@@ -21,20 +148,48 @@ async def available_graph_entities(
     *,
     runtime: GraphRuntime | None = None,
     read: GraphReadValidation | None = None,
-    source_visible: Callable[[Any], bool] | None = None,
+    source_visible: SourceVisible | None = None,
+    memo: GraphReadMemo | None = None,
 ) -> dict[str, Entity]:
     """Refresh actual rows and reject missing, retired, or unavailable ancestry.
 
     A supplied runtime must be the existing GraphRuntime for this organization.
     Callers retain their principal/project scope filters and render these current
     rows, rather than cached values with the same IDs. Each standalone call owns
-    a fresh validation phase unless its caller supplies one.
+    a fresh validation phase unless its caller supplies one. A memo settles each
+    id once for the request that owns it, and cannot share an explicit phase.
     """
     if read is not None and read.content_execute_query is not None:
         raise ValueError("explicit validation readers require supplied entity rows")
     ids = list(dict.fromkeys(entity_ids))
     if not ids:
         return {}
+    if memo is not None:
+        if read is not None:
+            raise ValueError("a read memo cannot share an explicit validation phase")
+        memo._check_org(organization_id)
+        verdicts = await memo.once(
+            f"entity:{memo.reader_scope(source_visible)}",
+            ids,
+            lambda missing: _load_available_graph_entities(
+                organization_id, missing, runtime=runtime, source_visible=source_visible
+            ),
+            missing=None,
+        )
+        return {identifier: row for identifier, row in verdicts.items() if row is not None}
+    return await _load_available_graph_entities(
+        organization_id, ids, runtime=runtime, read=read, source_visible=source_visible
+    )
+
+
+async def _load_available_graph_entities(
+    organization_id: str,
+    ids: list[str],
+    *,
+    runtime: GraphRuntime | None,
+    read: GraphReadValidation | None = None,
+    source_visible: SourceVisible | None,
+) -> dict[str, Entity]:
     graph = runtime or await get_surreal_graph_runtime(organization_id, ensure_schema=False)
     validation = read if read is not None else GraphReadValidation(organization_id)
     current: dict[str, Entity] = {}
@@ -59,12 +214,53 @@ async def available_graph_relationships(
     *,
     runtime: GraphRuntime | None = None,
     read: GraphReadValidation | None = None,
+    source_visible: SourceVisible | None = None,
+    memo: GraphReadMemo | None = None,
 ) -> dict[str, Relationship]:
     """Refresh stored edges and require their protected operational generation.
 
     The first validation phase is private. The final phase can share its source
     proof with a caller that records the complete response read footprint.
+    ``source_visible`` narrows the endpoints an edge may stand on to the rows
+    this reader can see, which is the check an edge reader applies afterwards
+    in any case; proving it here lets a memo settle each endpoint once.
     """
+    if read is not None and read.content_execute_query is not None:
+        raise ValueError("explicit validation readers do not materialize relationships")
+    ids = list(dict.fromkeys(relationship_ids))
+    if not ids:
+        return {}
+    if memo is not None:
+        if read is not None:
+            raise ValueError("a read memo cannot share an explicit validation phase")
+        memo._check_org(organization_id)
+        verdicts = await memo.once(
+            f"relationship:{memo.reader_scope(source_visible)}",
+            ids,
+            lambda missing: _load_available_graph_relationships(
+                organization_id,
+                missing,
+                runtime=runtime,
+                source_visible=source_visible,
+                memo=memo,
+            ),
+            missing=None,
+        )
+        return {identifier: row for identifier, row in verdicts.items() if row is not None}
+    return await _load_available_graph_relationships(
+        organization_id, ids, runtime=runtime, read=read, source_visible=source_visible
+    )
+
+
+async def _load_available_graph_relationships(
+    organization_id: str,
+    ids: list[str],
+    *,
+    runtime: GraphRuntime | None,
+    read: GraphReadValidation | None = None,
+    source_visible: SourceVisible | None,
+    memo: GraphReadMemo | None = None,
+) -> dict[str, Relationship]:
     from sibyl_core.backends.surreal.records import normalize_records
     from sibyl_core.services.graph_records import (
         entity_from_surreal_row,
@@ -76,11 +272,6 @@ async def available_graph_relationships(
         relationship_body_digest,
     )
 
-    if read is not None and read.content_execute_query is not None:
-        raise ValueError("explicit validation readers do not materialize relationships")
-    ids = list(dict.fromkeys(relationship_ids))
-    if not ids:
-        return {}
     graph = runtime or await get_surreal_graph_runtime(organization_id, ensure_schema=False)
     captured = []
     all_endpoints: set[str] = set()
@@ -110,7 +301,12 @@ async def available_graph_relationships(
     async def validate(snapshots, read):
         result = {}
         current = await available_graph_entities(
-            organization_id, sorted(all_endpoints), runtime=graph, read=read
+            organization_id,
+            sorted(all_endpoints),
+            runtime=graph,
+            read=None if memo is not None else read,
+            source_visible=source_visible,
+            memo=memo,
         )
         for snapshot in snapshots:
             targets = {r["uuid"]: r for r in snapshot["targets"]}

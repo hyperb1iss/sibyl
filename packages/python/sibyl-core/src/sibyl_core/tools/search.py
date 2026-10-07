@@ -30,6 +30,7 @@ from sibyl_core.retrieval.fusion import rrf_merge
 from sibyl_core.retrieval.hybrid import _apply_current_entity_gate
 from sibyl_core.retrieval.temporal import parse_temporal_datetime
 from sibyl_core.services import document_search as document_search_service
+from sibyl_core.services.graph_read_availability import GraphReadMemo
 from sibyl_core.services.graph_runtime import get_surreal_graph_runtime
 from sibyl_core.services.memory_source_validation import SourceReadAuthority
 from sibyl_core.services.surreal_content import (
@@ -1065,6 +1066,9 @@ async def search(
             runtime = await get_graph_runtime(organization_id)
             client = runtime.client
             entity_manager = runtime.entity_manager
+            # Every lifecycle gate on this request, inside hybrid search and
+            # the final pass below, proves each row once through this memo.
+            read_memo = GraphReadMemo(organization_id)
 
             # Parse since date if provided
             since_date = None
@@ -1129,6 +1133,7 @@ async def search(
                             include_metadata=include_retrieval_diagnostics,
                             group_id=organization_id,
                             result_filter=graph_result_allowed,
+                            read_memo=read_memo,
                         ),
                         timeout_seconds=TIMEOUTS["search"],
                         operation_name="hybrid_search",
@@ -1282,6 +1287,7 @@ async def search(
                 raw_results,
                 client=client,
                 group_id=organization_id,
+                read_memo=read_memo,
             )
             graph_retrieval_metadata["final_lifecycle_gate"] = final_lifecycle_gate[
                 "lifecycle_gate"

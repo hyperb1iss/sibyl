@@ -13,7 +13,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import structlog
 
@@ -46,6 +46,9 @@ from sibyl_core.services.eval_publication_guards import (
     unavailable_publication_ids,
 )
 from sibyl_core.utils.log_safety import query_log_fields
+
+if TYPE_CHECKING:
+    from sibyl_core.services.graph_read_availability import GraphReadMemo
 
 log = structlog.get_logger()
 
@@ -330,10 +333,21 @@ async def _apply_current_entity_gate(
     *,
     client: Any,
     group_id: str,
+    read_memo: GraphReadMemo | None = None,
 ) -> tuple[list[tuple[Any, float]], dict[str, Any]]:
-    """Filter authorized entities by metadata and incoming supersession edges."""
+    """Filter authorized entities by metadata and incoming supersession edges.
 
-    unavailable = await unavailable_publication_ids(
+    The gate runs on the seeds, on what the walk brought back and once more on
+    the final rows; a memo shared across those passes proves each id once.
+    """
+
+    if read_memo is None:
+        # Deferred like the supersession lookup below: the availability
+        # service reaches back into this package through the source readers.
+        from sibyl_core.services.graph_read_availability import GraphReadMemo
+
+        read_memo = GraphReadMemo(group_id)
+    unavailable = await read_memo.unavailable_publication_ids(
         group_id,
         {
             _entity_id(entity): (
@@ -343,6 +357,7 @@ async def _apply_current_entity_gate(
             )
             for entity, _score in results
         },
+        load=unavailable_publication_ids,
     )
     metadata_filtered = [
         (entity, score)
@@ -361,6 +376,7 @@ async def _apply_current_entity_gate(
                 client,
                 group_id=group_id,
                 uuids=entity_ids,
+                memo=read_memo,
             )
         except Exception as exc:
             error_type = type(exc).__name__
@@ -740,6 +756,7 @@ async def hybrid_search(
     group_id: str | None = None,
     result_filter: Callable[[Any], bool] | None = None,
     knn_type_overfetch: int = 0,
+    read_memo: GraphReadMemo | None = None,
 ) -> HybridResult:
     """Perform hybrid search combining multiple retrieval strategies.
 
@@ -779,6 +796,10 @@ async def hybrid_search(
     reranking_receipt = _initial_reranking_receipt(config)
 
     resolved_group_id = _resolve_group_id(entity_manager, group_id)
+    if read_memo is None:
+        from sibyl_core.services.graph_read_availability import GraphReadMemo
+
+        read_memo = GraphReadMemo(resolved_group_id)
 
     log.info("hybrid_search_start", **query_log_fields(query), limit=limit)
 
@@ -821,6 +842,7 @@ async def hybrid_search(
         direct_results,
         client=client,
         group_id=resolved_group_id,
+        read_memo=read_memo,
     )
     direct_by_id = {_entity_id(entity): (entity, score) for entity, score in direct_results}
     vector_results = [
@@ -864,6 +886,7 @@ async def hybrid_search(
                 graph_results,
                 client=client,
                 group_id=resolved_group_id,
+                read_memo=read_memo,
             )
         else:
             graph_lifecycle_gate = {}
