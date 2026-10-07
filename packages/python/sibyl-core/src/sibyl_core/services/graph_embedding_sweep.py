@@ -14,6 +14,8 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING, Any, cast
 
+import structlog
+
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM
 from sibyl_core.backends.surreal.schema_embedding_states import (
     GRAPH_EMBEDDING_STATE_PLANE,
@@ -30,6 +32,7 @@ from sibyl_core.services.embedding_evidence import classify_stamps, read_graph_s
 from sibyl_core.services.embedding_sweep import (
     SWEEP_SKIPPED_NO_PROVIDER,
     SWEEP_SKIPPED_SCHEMA_PENDING,
+    SWEEP_STORE_FAILING,
     EmbeddingSchemaPendingError,
     EmbeddingStamp,
     EmbeddingSweepResult,
@@ -42,7 +45,11 @@ from sibyl_core.services.embedding_sweep import (
     mark_plane_for_reembed,
     run_embedding_sweep,
 )
-from sibyl_core.services.graph_client import graph_schema_fact, remember_graph_schema_fact
+from sibyl_core.services.graph_client import (
+    graph_schema_fact,
+    mark_graph_schema_dirty,
+    remember_graph_schema_fact,
+)
 from sibyl_core.services.graph_embeddings import _embed_texts_with_timeout
 from sibyl_core.services.graph_records import (
     entity_from_surreal_row,
@@ -51,6 +58,8 @@ from sibyl_core.services.graph_records import (
 
 if TYPE_CHECKING:
     from sibyl_core.services.graph_runtime import GraphRuntime
+
+log = structlog.get_logger()
 
 GRAPH_EMBEDDING_PLANE = GRAPH_EMBEDDING_STATE_PLANE
 _AUTO = object()
@@ -263,6 +272,27 @@ async def sweep_graph_embeddings(
         return EmbeddingSweepResult(
             plane=GRAPH_EMBEDDING_PLANE, status=SWEEP_SKIPPED_SCHEMA_PENDING
         )
+    group_id = str(runtime.client.group_id)
+    remembered = graph_schema_fact(group_id, _DIMENSION_FACT)
+    plane = await graph_embedding_plane(runtime.client, provider)
+    result = await run_embedding_sweep(plane, **options)
+    if result.status != SWEEP_STORE_FAILING or remembered is None:
+        return result
+    # The store refused the writes while the dimension came from memory. A
+    # rebuild run from another process resizes the vector fields without
+    # marking this process's schema dirty, so the recorded dimension is read
+    # once more; if it moved, the pass is decided again on it, and a
+    # mismatch is reported as one rather than as a failing store.
+    mark_graph_schema_dirty(group_id)
+    recorded = await recorded_graph_embedding_dimension(runtime.client)
+    if recorded == plane.schema_dimensions:
+        return result
+    log.warning(
+        "embedding_sweep_dimension_rechecked",
+        organization_id=group_id,
+        remembered_dimensions=plane.schema_dimensions,
+        recorded_dimensions=recorded,
+    )
     plane = await graph_embedding_plane(runtime.client, provider)
     return await run_embedding_sweep(plane, **options)
 
