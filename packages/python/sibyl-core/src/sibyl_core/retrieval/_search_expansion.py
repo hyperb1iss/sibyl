@@ -409,7 +409,10 @@ async def _community_member_hops(
     # and walks every BELONGS_TO edge of the namespace, and an ORDER BY on the
     # indexed target column turns even the hinted lookup into a full ordered
     # index walk. The hint keeps one point lookup per community (the index is
-    # part of the base graph schema) and the order applies to that result.
+    # part of the base graph schema) and the order applies to that result by
+    # its projected name: the inner select renames target_id to community_id,
+    # and on 3.x an ORDER BY naming a key the rows lack sorts nothing, which
+    # would let LIMIT pick a different member set than the ordered walk did.
     rows = await _execute_query_records(
         client,
         """
@@ -423,7 +426,7 @@ async def _community_member_hops(
               AND in.group_id = $group_id
               AND in.entity_type != "community"
         )
-        ORDER BY target_id
+        ORDER BY community_id
         LIMIT $limit;
         """,
         community_uuids=community_ids,

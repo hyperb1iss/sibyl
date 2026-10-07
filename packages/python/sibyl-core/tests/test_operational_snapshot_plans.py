@@ -16,11 +16,12 @@ from uuid import uuid4
 
 import pytest
 
-from sibyl_core.models.entities import Entity, EntityType
+from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.retrieval import _search_expansion
 from sibyl_core.services import graph_entity_store, operational_relationships
 from sibyl_core.services.graph_client import SurrealGraphClient, prepare_graph_schema
 from sibyl_core.services.graph_entities import EntityManager
+from sibyl_core.services.graph_relationships import RelationshipManager
 
 _DIRECT_ORDERED_UUID_LIST = re.compile(r"uuid IN \$\w+ ORDER BY uuid")
 _SORTED_UNION_LOOKUP = re.compile(r"SELECT \* FROM \(SELECT \*.*? uuid IN \$\w+\) ORDER BY uuid")
@@ -107,9 +108,53 @@ async def test_community_member_hop_hints_the_target_index_and_sorts_outside(
     )
 
     query, params = client.calls[0]
-    inner = re.search(r"SELECT \* FROM \((.*)\)\s*ORDER BY target_id\s*LIMIT \$limit;", query, re.S)
+    inner = re.search(
+        r"SELECT \* FROM \((.*)\)\s*ORDER BY community_id\s*LIMIT \$limit;", query, re.S
+    )
     assert inner is not None, query
     assert "FROM relates_to WITH INDEX idx_relates_target" in inner.group(1)
     assert "ORDER BY" not in inner.group(1)
     assert params["community_uuids"] == ["community-1"]
     assert [(hop.uuid, hop.community_id) for hop in hops] == [("member-1", "community-1")]
+
+
+async def test_member_hop_limit_keeps_the_lowest_community_first(
+    graph_client: SurrealGraphClient,
+) -> None:
+    """ORDER BY must name the projected key, or LIMIT picks an arbitrary member set."""
+    group_id = graph_client.group_id
+    entities = EntityManager(graph_client, group_id=group_id)
+    relationships = RelationshipManager(graph_client, group_id=group_id)
+    for entity_id, entity_type in (
+        ("seed", EntityType.TASK),
+        ("aa_comm2", EntityType.COMMUNITY),
+        ("zz_comm2", EntityType.COMMUNITY),
+        *((f"mem_a{index}", EntityType.NOTE) for index in range(3)),
+        *((f"mem_z{index}", EntityType.NOTE) for index in range(3)),
+    ):
+        await entities.create_direct(
+            Entity(id=entity_id, entity_type=entity_type, name=entity_id),
+            generate_embedding=False,
+        )
+    edges = [("seed", "aa_comm2"), ("seed", "zz_comm2")]
+    edges += [(f"mem_a{index}", "aa_comm2") for index in range(3)]
+    edges += [(f"mem_z{index}", "zz_comm2") for index in range(3)]
+    created, failed = await relationships.create_bulk(
+        [
+            Relationship(
+                id=f"rel_{source}_{target}",
+                source_id=source,
+                target_id=target,
+                relationship_type=RelationshipType.BELONGS_TO,
+            )
+            for source, target in edges
+        ]
+    )
+    assert (created, failed) == (len(edges), 0)
+
+    hops = await _search_expansion._community_member_hops(
+        client=graph_client, source_uuids=["seed"], group_id=group_id, depth=1, limit=3
+    )
+
+    assert {hop.uuid for hop in hops} == {"mem_a0", "mem_a1", "mem_a2"}
+    assert {hop.community_id for hop in hops} == {"aa_comm2"}
