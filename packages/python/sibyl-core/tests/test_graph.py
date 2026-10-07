@@ -2000,6 +2000,7 @@ async def test_native_entity_manager_search_overlaps_fulltext_and_vector_branche
         "entity.search.fulltext",
         "entity.search.vector",
         "entity.search.vector.exact",
+        "entity.search.vector.type_total",
     }
     vector_query = next(
         query

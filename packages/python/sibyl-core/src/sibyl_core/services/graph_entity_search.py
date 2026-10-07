@@ -552,25 +552,32 @@ class _EntitySearchManager:
             )
             if len(rows) < candidate_limit:
                 # Filtered HNSW can exhaust its traversal before the eligible
-                # rows. Score the whole eligible slice before limiting output.
+                # rows. Score the whole eligible slice before limiting output,
+                # unless the walk already returned every row of the requested
+                # types: a type smaller than the candidate pool always falls
+                # short, and the exact pass over it would only re-score rows
+                # the walk has in hand.
                 try:
-                    rows = normalize_records(
-                        await self._client.execute_query(
-                            self._exact_vector_query(
-                                type_count=len(type_values),
-                                admit_unstamped=readiness.admit_unstamped,
-                            ),
-                            group_id=self._group_id,
-                            query_embedding=query_embedding,
-                            **{f"entity_type_{i}": value for i, value in enumerate(type_values)},
-                            limit=candidate_limit,
-                            **{
-                                f"embedding_{field}": embedding_metadata[field]
-                                for field in VECTOR_SPACE_FIELDS
-                            },
-                            _query_label="entity.search.vector.exact",
+                    if not await self._vector_walk_exhausted(type_values, len(rows)):
+                        rows = normalize_records(
+                            await self._client.execute_query(
+                                self._exact_vector_query(
+                                    type_count=len(type_values),
+                                    admit_unstamped=readiness.admit_unstamped,
+                                ),
+                                group_id=self._group_id,
+                                query_embedding=query_embedding,
+                                **{
+                                    f"entity_type_{i}": value for i, value in enumerate(type_values)
+                                },
+                                limit=candidate_limit,
+                                **{
+                                    f"embedding_{field}": embedding_metadata[field]
+                                    for field in VECTOR_SPACE_FIELDS
+                                },
+                                _query_label="entity.search.vector.exact",
+                            )
                         )
-                    )
                 except Exception as exc:
                     log.warning(
                         "entity_vector_search_completion_failed",
@@ -586,6 +593,38 @@ class _EntitySearchManager:
             return []
 
         return [(_entity_from_row(row), _row_score(row)) for row in rows]
+
+    async def _vector_walk_exhausted(self, type_values: Sequence[str], returned: int) -> bool:
+        """Whether a filtered vector walk already returned every row it could.
+
+        Counts the requested types through one IndexCountScan each (the whole
+        table through a CountScan when untyped). An unanswered count reports
+        False so the exact pass still runs.
+        """
+        statements = (
+            [
+                (
+                    "SELECT count() AS total FROM entity WHERE entity_type = $entity_type GROUP ALL;",
+                    value,
+                )
+                for value in type_values
+            ]
+            if type_values
+            else [("SELECT count() AS total FROM entity GROUP ALL;", None)]
+        )
+        total = 0
+        for statement, value in statements:
+            params: dict[str, Any] = {"_query_label": "entity.search.vector.type_total"}
+            if value is not None:
+                params["entity_type"] = value
+            counted = normalize_records(await self._client.execute_query(statement, **params))
+            if not counted:
+                return False
+            raw_total = counted[0].get("total")
+            if not isinstance(raw_total, int | float):
+                return False
+            total += int(raw_total)
+        return returned >= total
 
     async def _fallback_text_search(
         self,
