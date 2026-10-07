@@ -84,7 +84,6 @@ ALLOWED_IMPORTS = {
     },
     "graph_community_hierarchy": {
         "graph_community_detection",
-        "graph_community_managers",
         "graph_community_models",
         "graph_community_selection",
         "graph_community_snapshot",
