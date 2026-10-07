@@ -92,7 +92,7 @@ async def enumerated_graph(runtime, monkeypatch: pytest.MonkeyPatch):
 
 
 async def test_entity_walk_matches_offset_order_without_offset_pages(enumerated_graph) -> None:
-    runtime, entities, _edges, statements = enumerated_graph
+    runtime, _entities, _edges, statements = enumerated_graph
     org = runtime.client.group_id
     expected = await runtime.entity_manager.list_all(limit=10_000, include_archived=True)
     statements.clear()
