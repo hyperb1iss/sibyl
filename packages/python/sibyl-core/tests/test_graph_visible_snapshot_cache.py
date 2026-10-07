@@ -15,6 +15,7 @@ from sibyl_core.services import graph_community_managers as managers
 from sibyl_core.services import graph_community_snapshot as snapshots
 from sibyl_core.services import graph_derivations, graph_view_availability
 from sibyl_core.services.graph_client import SurrealGraphClient
+from sibyl_core.services.usage import MemoryUsageItemKind, MemoryUsageStamp, _stamp_graph_entities
 from tests.test_reflection_identity import content_store as content_store
 from tests.test_reflection_identity import runtime as runtime
 
@@ -258,3 +259,95 @@ async def test_two_thousand_node_graph_is_warm_after_one_proof(
 
     assert warm is cold
     assert len(statements) == cold_statements
+
+
+def test_bookkeeping_labels_exempt_a_statement_from_the_bump() -> None:
+    stamp = "UPDATE entity SET last_recalled_at = time::now() WHERE uuid = $id;"
+    assert invalidation.query_mutates_graph(stamp) is True
+    assert invalidation.query_mutates_graph(stamp, label="entity.search.vector") is True
+    assert invalidation.query_mutates_graph(stamp, label="usage.graph_stamp") is False
+    assert invalidation.query_mutates_graph(stamp, label="entity.bookkeeping") is False
+    assert invalidation.query_mutates_graph("SELECT uuid FROM entity;") is False
+    assert invalidation.query_mutates_graph("RETURN fn::retire_rows($org);") is True
+    assert invalidation.query_mutates_graph("REMOVE TABLE entity;") is True
+    assert invalidation.query_mutates_graph("IMPORT 'rows.surql';") is True
+    assert invalidation.query_mutates_graph("DEFINE INDEX idx ON entity FIELDS uuid;") is False
+
+
+def test_mutation_tokens_are_the_row_changing_subset_of_write_tokens() -> None:
+    from sibyl_core.backends.surreal.connection import _WRITE_QUERY_TOKENS
+
+    tokens = {
+        token
+        for token in _WRITE_QUERY_TOKENS
+        if invalidation.query_mutates_graph(f"{token} something;")
+    }
+    assert tokens == {
+        "CREATE",
+        "UPDATE",
+        "UPSERT",
+        "DELETE",
+        "INSERT",
+        "RELATE",
+        "FN",
+        "IMPORT",
+        "REMOVE",
+    }
+
+
+async def test_graph_client_keeps_caches_warm_for_labelled_bookkeeping() -> None:
+    client = SurrealGraphClient(group_id=f"label-{uuid4().hex}", url="memory://")
+    try:
+        await client.execute_query("CREATE probe:one SET value = 1;")
+        before = invalidation.graph_generation(client.group_id)
+
+        await client.execute_query(
+            "UPDATE probe:one SET value = 2;", _query_label="usage.graph_stamp"
+        )
+        await client.execute_query_batch(
+            "UPDATE probe:one SET value = 3; RETURN 1;", _query_label="entity.bookkeeping"
+        )
+        assert invalidation.graph_generation(client.group_id) == before
+
+        await client.execute_query("UPDATE probe:one SET value = 4;")
+        assert invalidation.graph_generation(client.group_id) == before + 1
+        await client.execute_query("UPDATE probe:one SET value = 5;", _query_label="other")
+        assert invalidation.graph_generation(client.group_id) == before + 2
+    finally:
+        await client.close()
+
+
+async def test_usage_stamps_and_bookkeeping_leave_the_generation_alone(
+    runtime, content_store
+) -> None:
+    """The real call sites carry the label; structural writes still bump."""
+    from datetime import UTC, datetime
+
+    org = runtime.client.group_id
+    before = invalidation.graph_generation(org)
+    entity = Entity(id="stamped", name="Stamped", entity_type=EntityType.TOPIC, organization_id=org)
+    await runtime.entity_manager.create_direct(entity)
+    assert invalidation.graph_generation(org) == before + 1
+
+    stamped = await _stamp_graph_entities(
+        runtime.client,
+        organization_id=org,
+        stamps=[
+            MemoryUsageStamp(
+                item_kind=MemoryUsageItemKind.GRAPH_ENTITY,
+                item_id=entity.id,
+                retrieval_count=3,
+                citation_count=1,
+                last_recalled_at=datetime.now(UTC),
+                last_used_at=None,
+            )
+        ],
+    )
+    assert stamped[0].retrieval_count == 3
+    await runtime.entity_manager.write_bookkeeping(
+        entity.id, {"last_activity_at": datetime.now(UTC), "total_tasks": 1}
+    )
+    assert invalidation.graph_generation(org) == before + 1
+
+    assert await runtime.entity_manager.delete(entity.id)
+    assert invalidation.graph_generation(org) == before + 2

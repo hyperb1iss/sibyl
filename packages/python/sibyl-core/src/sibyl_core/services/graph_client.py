@@ -61,14 +61,16 @@ class SurrealGraphClient(DedicatedSurrealClient):
     async def _execute(self, query: str, **kwargs: Any) -> object:
         # Every in-process graph write for this organization passes through
         # here, so one seam keeps the reader caches honest without each writer
-        # remembering to invalidate. Reads never bump. The bump also follows a
-        # failed statement, since a multi-statement write may have landed in
-        # part. Origin attribution for slow-query logs is resolved by the
-        # public execute methods before they reach this frame.
+        # remembering to invalidate. Reads never bump, and neither do writes
+        # a call site labels as bookkeeping (see BOOKKEEPING_QUERY_LABELS).
+        # The bump also follows a failed statement, since a multi-statement
+        # write may have landed in part. Origin attribution for slow-query
+        # logs is resolved by the public execute methods before this frame.
+        label = kwargs.get("query_label")
         try:
             return await super()._execute(query, **kwargs)
         finally:
-            if query_mutates_graph(query):
+            if query_mutates_graph(query, label=label if isinstance(label, str) else None):
                 invalidate_graph_caches(self._group_id)
 
 

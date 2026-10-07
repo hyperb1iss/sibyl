@@ -548,6 +548,8 @@ class EntityManager(_EntityWorkItemManager):
             uuid=entity_id,
             updated_at=now,
             attributes=attributes,
+            # Bookkeeping only: the graph caches stay warm (BOOKKEEPING_QUERY_LABELS).
+            _query_label="entity.bookkeeping",
         )
 
 

@@ -19,12 +19,28 @@ from typing import Final
 _generations: dict[str, int] = {}
 _listeners: list[Callable[[str], None]] = []
 
-# Statements that can change a row. Schema statements (DEFINE, REMOVE) run on
-# every runtime acquisition and change no row, so they never bump a
-# generation. A keyword inside a literal only costs one cache rebuild.
+# Statements that can change a row: the row-changing subset of the connection
+# layer's _WRITE_QUERY_TOKENS. Stored functions (FN) can write when invoked
+# from a SELECT or RETURN, IMPORT and REMOVE replace or drop whole tables.
+# Schema definitions (DEFINE, ALTER, REBUILD) and transaction brackets change
+# no row by themselves and run on every runtime acquisition, so they never
+# bump a generation. A keyword inside a literal only costs one rebuild.
 _MUTATION_TOKENS: Final = re.compile(
-    r"\b(?:CREATE|UPDATE|UPSERT|DELETE|INSERT|RELATE)\b", re.IGNORECASE
+    r"\b(?:CREATE|UPDATE|UPSERT|DELETE|INSERT|RELATE|FN|IMPORT|REMOVE)\b", re.IGNORECASE
 )
+
+# The bookkeeping contract. A statement sent with one of these as its
+# ``_query_label`` touches usage and activity bookkeeping only: the recall and
+# citation stamps (last_recalled_at, last_used_at, retrieval_count,
+# citation_count, misled_count) and the project activity counters
+# (last_activity_at, total_tasks, completed_tasks, in_progress_tasks, with
+# the updated_at they carry). None of it changes what a graph reader renders
+# or proves, and every search, context pack and recall writes it, so the
+# write seam leaves the caches alone for these. Anything structural (create,
+# delete, relate, status, visibility, attributes) ships without a label or
+# with any other label and bumps the generation. Adding a label here is a
+# claim that its statement can never change a rendered or proven fact.
+BOOKKEEPING_QUERY_LABELS: Final = frozenset({"usage.graph_stamp", "entity.bookkeeping"})
 
 
 def graph_generation(organization_id: str) -> int:
@@ -45,6 +61,8 @@ def register_invalidation_listener(listener: Callable[[str], None]) -> None:
         _listeners.append(listener)
 
 
-def query_mutates_graph(query: str) -> bool:
-    """Whether a statement can change rows; false positives only cost a rebuild."""
+def query_mutates_graph(query: str, *, label: str | None = None) -> bool:
+    """Whether a statement can change what readers see; false positives cost a rebuild."""
+    if label is not None and label in BOOKKEEPING_QUERY_LABELS:
+        return False
     return _MUTATION_TOKENS.search(query) is not None
