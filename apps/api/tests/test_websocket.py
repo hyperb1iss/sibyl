@@ -292,6 +292,68 @@ class TestConnectionManagerOrgScoping:
             release.set()
 
     @pytest.mark.asyncio
+    async def test_heartbeat_deadline_starts_when_the_ping_leaves_the_socket(
+        self, manager: ConnectionManager
+    ) -> None:
+        """A ping queued behind other messages must not count against a live reader."""
+        now = datetime.now(UTC)
+        queued = Connection(
+            websocket=MagicMock(),
+            org_id="org_a",
+            pending_pong=True,
+            last_heartbeat_sent_at=None,
+            last_activity=now - timedelta(seconds=manager.PONG_TIMEOUT * 3),
+        )
+        manager.active_connections = [queued]
+        _heartbeats, dead = await manager._prepare_heartbeat_batch(now=now, send_heartbeats=False)
+        assert dead == []
+
+        sent_ws = MagicMock()
+        sent_ws.send_json = AsyncMock()
+        conn = Connection(websocket=sent_ws, org_id="org_a")
+        manager.active_connections = [conn]
+        before = datetime.now(UTC)
+        _heartbeats, _dead = await manager._prepare_heartbeat_batch(
+            now=before, send_heartbeats=True
+        )
+        assert conn.pending_pong
+        assert conn.last_heartbeat_sent_at is None
+        assert manager._enqueue(
+            conn, {"event": "heartbeat", "data": {}, "timestamp": before.isoformat()}
+        )
+        await manager.flush()
+        assert conn.last_heartbeat_sent_at is not None
+        assert conn.last_heartbeat_sent_at >= before
+        sent_ws.send_json.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_disconnect_and_shutdown_stop_sender_tasks(
+        self, manager: ConnectionManager
+    ) -> None:
+        sockets = []
+        for _ in range(2):
+            ws = MagicMock()
+            ws.accept = AsyncMock()
+            ws.send_json = AsyncMock()
+            sockets.append(ws)
+            await manager.connect(ws, org_id="org_a")
+        senders = [conn.sender for conn in manager.active_connections]
+        assert all(sender is not None and not sender.done() for sender in senders)
+        heartbeat = manager._heartbeat_task
+        assert heartbeat is not None
+        assert not heartbeat.done()
+
+        await manager.disconnect(sockets[0])
+        assert senders[0].done(), "disconnect waits for the sender to stop"
+        assert not senders[1].done()
+
+        await manager.shutdown()
+        assert senders[1].done()
+        assert heartbeat.done()
+        assert manager.active_connections == []
+        assert manager._heartbeat_task is None
+
+    @pytest.mark.asyncio
     async def test_broadcast_to_empty_org(self, manager: ConnectionManager) -> None:
         """Broadcast to org with no connections should succeed without error."""
         ws1 = MagicMock()

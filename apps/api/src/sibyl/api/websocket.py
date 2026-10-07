@@ -120,11 +120,32 @@ class ConnectionManager:
             ]
             active = len(self.active_connections)
         current = asyncio.current_task()
-        for conn in removed:
-            if conn.sender is not None and conn.sender is not current:
-                conn.sender.cancel()
+        senders = [
+            conn.sender
+            for conn in removed
+            if conn.sender is not None and conn.sender is not current
+        ]
+        for sender in senders:
+            sender.cancel()
+        if senders:
+            await asyncio.gather(*senders, return_exceptions=True)
         telemetry_registry().record_websocket_connections(active=active)
         log.info("websocket_disconnected", total_connections=active)
+
+    async def shutdown(self) -> None:
+        """Stop the heartbeat and every sender; the server closes the sockets."""
+        async with self._lock:
+            connections = list(self.active_connections)
+            self.active_connections = []
+            heartbeat, self._heartbeat_task = self._heartbeat_task, None
+        tasks = [conn.sender for conn in connections if conn.sender is not None]
+        if heartbeat is not None:
+            tasks.append(heartbeat)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        telemetry_registry().record_websocket_connections(active=0)
 
     def _start_sender(self, conn: Connection) -> None:
         if conn.sender is None or conn.sender.done():
@@ -153,6 +174,10 @@ class ConnectionManager:
                 conn.outbox.task_done()
                 await self._drop(conn, reason=type(exc).__name__)
                 return
+            if message.get("event") == "heartbeat":
+                # The pong deadline runs from the moment the ping left the
+                # socket, not from when it was queued behind other messages.
+                conn.last_heartbeat_sent_at = datetime.now(UTC)
             conn.outbox.task_done()
 
     async def _drop(self, conn: Connection, *, reason: str) -> None:
@@ -279,14 +304,17 @@ class ConnectionManager:
             dead_connections: list[WebSocket] = []
             for conn in self.active_connections:
                 if conn.pending_pong:
-                    sent_at = conn.last_heartbeat_sent_at or conn.last_activity or now
-                    if (now - sent_at).total_seconds() >= self.PONG_TIMEOUT:
+                    # A ping still waiting in the outbox has not started the
+                    # clock; the sender stamps the moment it goes out, and a
+                    # sender that cannot deliver drops the client itself.
+                    sent_at = conn.last_heartbeat_sent_at
+                    if sent_at is not None and (now - sent_at).total_seconds() >= self.PONG_TIMEOUT:
                         dead_connections.append(conn.websocket)
                     continue
 
                 if send_heartbeats:
                     conn.pending_pong = True
-                    conn.last_heartbeat_sent_at = now
+                    conn.last_heartbeat_sent_at = None
                     heartbeat_connections.append(conn)
 
         return heartbeat_connections, dead_connections
