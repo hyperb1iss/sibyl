@@ -86,6 +86,36 @@ async def test_invalidation_during_compute_discards_the_result(memo: OrgReadMemo
 
 
 @pytest.mark.asyncio
+async def test_a_reader_after_a_write_never_joins_the_pre_write_compute(
+    memo: OrgReadMemo[int],
+) -> None:
+    gate = asyncio.Event()
+    calls = 0
+
+    async def compute() -> int:
+        nonlocal calls
+        calls += 1
+        # The value is fixed on entry, so whichever compute finishes first,
+        # the one that began before the write answers 1 and the one that
+        # began after it answers 2.
+        value = calls
+        await gate.wait()
+        return value
+
+    early = asyncio.create_task(memo.get("org-a", compute))
+    await asyncio.sleep(0)
+    memo.invalidate("org-a")  # the write lands while the first compute runs
+    late = asyncio.create_task(memo.get("org-a", compute))
+    await asyncio.sleep(0)
+    gate.set()
+
+    assert await early == 1
+    assert await late == 2
+    assert calls == 2
+    assert memo.peek("org-a") == 2
+
+
+@pytest.mark.asyncio
 async def test_registry_invalidation_targets_one_organization(memo: OrgReadMemo[int]) -> None:
     await memo.get("org-a", _Counter())
     await memo.get("org-b", _Counter())

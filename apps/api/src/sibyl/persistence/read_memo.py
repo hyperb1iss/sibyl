@@ -36,6 +36,9 @@ class _OrgState[T]:
     value: T | None = None
     expires_at: float = 0.0
     inflight: asyncio.Task[T] | None = None
+    # The generation the in-flight compute started under. A reader arriving
+    # after a write must not join a compute that began before it.
+    inflight_generation: int = 0
 
 
 @dataclass(slots=True)
@@ -67,10 +70,12 @@ class OrgReadMemo[T]:
             return cached
         state = self._states.setdefault(group_id, _OrgState())
         task = state.inflight
-        if task is None:
+        if task is None or state.inflight_generation != state.generation:
             # The generation is taken here, when the request is made, so a
             # write that lands before the compute even starts still outdates
-            # its result.
+            # its result. A compute from an older generation keeps running
+            # for the readers that joined it before the write; this reader
+            # came after, so it gets its own.
             task = asyncio.create_task(
                 self._compute(group_id, state, state.generation, compute),
                 name=f"read-memo:{self.name}:{group_id}",
@@ -79,6 +84,7 @@ class OrgReadMemo[T]:
             # exception behind when the shared task fails after it left.
             task.add_done_callback(_retrieve_exception)
             state.inflight = task
+            state.inflight_generation = state.generation
         # Shielded so one cancelled waiter does not cancel the computation
         # every other waiter is sharing.
         return await asyncio.shield(task)
