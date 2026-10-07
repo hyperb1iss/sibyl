@@ -110,14 +110,35 @@ class LifecycleRuntime:
                     for key, value in self.headers.items()
                     if key.lower() not in {"host", "connection", "content-length"}
                 }
-                with httpx.Client(timeout=60, trust_env=False) as client:
-                    response = client.request(
-                        self.command,
-                        owner.upstream_url.removesuffix("/api") + self.path,
-                        headers=headers,
-                        content=body,
+                try:
+                    with httpx.Client(timeout=60, trust_env=False) as client:
+                        response = client.request(
+                            self.command,
+                            owner.upstream_url.removesuffix("/api") + self.path,
+                            headers=headers,
+                            content=body,
+                        )
+                except httpx.HTTPError as error:
+                    owner.record(
+                        "upstream_http_error",
+                        {
+                            "method": self.command,
+                            "path": self.path,
+                            "error_type": type(error).__name__,
+                            "error": str(error),
+                        },
                     )
-                payload = response.json()
+                    response = httpx.Response(
+                        502,
+                        content=b"Upstream request failed.\n",
+                        headers={"content-type": "text/plain; charset=utf-8"},
+                    )
+                try:
+                    payload = response.json()
+                    json_response = True
+                except ValueError:
+                    payload = response.text
+                    json_response = False
                 recorded_payload = (
                     {
                         key: value
@@ -133,18 +154,22 @@ class LifecycleRuntime:
                     "key": self.headers.get("Idempotency-Key"),
                     "status": response.status_code,
                     "response": recorded_payload,
+                    "json_response": json_response,
                 }
+                receipt = payload.get("mutation_receipt") if isinstance(payload, dict) else None
                 with owner.lock:
                     owner.requests.append(observation)
                     drop = (
                         self.command == "POST"
                         and self.path == owner.drop_path
                         and response.is_success
+                        and json_response
+                        and isinstance(receipt, dict)
+                        and receipt.get("applied") is True
+                        and bool(observation["key"])
+                        and receipt.get("idempotency_key") == observation["key"]
                     )
                     if drop:
-                        receipt = payload.get("mutation_receipt", {})
-                        assert receipt.get("applied") is True, payload
-                        assert receipt.get("idempotency_key") == observation["key"], payload
                         owner.drop_path = None
                         observation["ack_dropped_after_applied_receipt"] = True
                     owner.record("http", observation)
@@ -154,7 +179,9 @@ class LifecycleRuntime:
                     self.connection.close()
                     return
                 self.send_response(response.status_code)
-                self.send_header("content-type", "application/json")
+                content_type = response.headers.get("content-type")
+                if content_type is not None:
+                    self.send_header("content-type", content_type)
                 self.send_header("content-length", str(len(response.content)))
                 self.end_headers()
                 self.wfile.write(response.content)
