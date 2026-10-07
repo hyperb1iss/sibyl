@@ -33,6 +33,7 @@ from sibyl_core.services.graph_community_selection import (
     _snapshot_to_networkx,
 )
 from sibyl_core.services.graph_community_snapshot import (
+    BoundedTTLCache,
     _get_visible_graph_snapshot,
     _reader_cache_key,
     _ReaderCacheKey,
@@ -41,13 +42,17 @@ from sibyl_core.services.graph_community_snapshot import (
 
 log = structlog.get_logger()
 
-HIERARCHICAL_CACHE: dict[
+HIERARCHICAL_CACHE_TTL = timedelta(minutes=5)
+HIERARCHICAL_CACHE_SIZE = 128
+HIERARCHICAL_CACHE: BoundedTTLCache[
     tuple[str, _ReaderCacheKey],
     tuple[datetime, str, dict[str, str], list[dict[str, Any]]],
-] = {}
-HIERARCHICAL_CACHE_TTL = timedelta(minutes=5)
-GRAPH_LOD_CACHE: dict[tuple[Any, ...], tuple[datetime, str, HierarchicalGraphData]] = {}
+] = BoundedTTLCache(maxsize=HIERARCHICAL_CACHE_SIZE, ttl=HIERARCHICAL_CACHE_TTL)
 GRAPH_LOD_CACHE_TTL = timedelta(minutes=2)
+GRAPH_LOD_CACHE_SIZE = 256
+GRAPH_LOD_CACHE: BoundedTTLCache[tuple[Any, ...], tuple[datetime, str, HierarchicalGraphData]] = (
+    BoundedTTLCache(maxsize=GRAPH_LOD_CACHE_SIZE, ttl=GRAPH_LOD_CACHE_TTL)
+)
 
 
 async def _get_graph_totals(

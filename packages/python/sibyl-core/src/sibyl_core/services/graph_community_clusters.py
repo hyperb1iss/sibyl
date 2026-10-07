@@ -33,6 +33,7 @@ from sibyl_core.services.graph_community_selection import (
     _snapshot_to_networkx,
 )
 from sibyl_core.services.graph_community_snapshot import (
+    BoundedTTLCache,
     _count_int,
     _current_graph_relationships,
     _get_graph_snapshot,
@@ -46,11 +47,12 @@ from sibyl_core.services.graph_visibility import graph_row_read_allowed
 
 log = structlog.get_logger()
 
-CLUSTER_CACHE: dict[
+CLUSTER_CACHE_TTL = timedelta(minutes=5)
+CLUSTER_CACHE_SIZE = 64
+CLUSTER_CACHE: BoundedTTLCache[
     tuple[str, _ReaderCacheKey],
     tuple[datetime, str, list[ClusterSummary]],
-] = {}
-CLUSTER_CACHE_TTL = timedelta(minutes=5)
+] = BoundedTTLCache(maxsize=CLUSTER_CACHE_SIZE, ttl=CLUSTER_CACHE_TTL)
 
 
 async def _native_type_counts_for_ids(

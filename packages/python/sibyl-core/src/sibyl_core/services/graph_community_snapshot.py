@@ -6,7 +6,9 @@ import asyncio
 import hashlib
 import inspect
 import json
-from collections.abc import Callable, Coroutine
+import time
+from collections import OrderedDict
+from collections.abc import Callable, Coroutine, Iterator, MutableMapping
 from datetime import UTC, datetime, timedelta
 from functools import partial
 from typing import Any
@@ -33,8 +35,61 @@ type _ReaderCacheKey = tuple[
 type _SnapshotKey = tuple[str, int | None, int | None]
 type _VisibleSnapshotKey = tuple[str, int | None, int | None, _ReaderCacheKey]
 
-GRAPH_SNAPSHOT_CACHE: dict[_SnapshotKey, tuple[datetime, GraphSnapshot]] = {}
+
+class BoundedTTLCache[K, V](MutableMapping[K, V]):
+    """Insertion-ordered mapping that evicts by size and by age.
+
+    Every graph cache holds whole-organization material keyed per reader,
+    per filter or per caps, so an unbounded dict grows with every distinct
+    reader for the life of the process. Reads refresh an entry's recency and
+    refuse one older than the TTL; writes sweep expired entries and then
+    evict the least recently used until the bound holds. Each cache keeps
+    its own age check on the stamp it stores, so the TTL here is the memory
+    bound, not the freshness rule.
+    """
+
+    def __init__(self, *, maxsize: int, ttl: timedelta) -> None:
+        self.maxsize = max(int(maxsize), 1)
+        self.ttl = ttl.total_seconds()
+        self._entries: OrderedDict[K, tuple[float, V]] = OrderedDict()
+
+    def _expired(self, stamp: float) -> bool:
+        return time.monotonic() - stamp >= self.ttl
+
+    def __getitem__(self, key: K) -> V:
+        stamp, value = self._entries[key]
+        if self._expired(stamp):
+            del self._entries[key]
+            raise KeyError(key)
+        self._entries.move_to_end(key)
+        return value
+
+    def __setitem__(self, key: K, value: V) -> None:
+        self._entries[key] = (time.monotonic(), value)
+        self._entries.move_to_end(key)
+        for stale in [key for key, (stamp, _) in self._entries.items() if self._expired(stamp)]:
+            del self._entries[stale]
+        while len(self._entries) > self.maxsize:
+            self._entries.popitem(last=False)
+
+    def __delitem__(self, key: K) -> None:
+        del self._entries[key]
+
+    def __iter__(self) -> Iterator[K]:
+        return iter(list(self._entries))
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+    def copy(self) -> dict[K, V]:
+        return {key: value for key, (_, value) in self._entries.items()}
+
+
 GRAPH_SNAPSHOT_CACHE_TTL = timedelta(minutes=5)
+GRAPH_SNAPSHOT_CACHE_SIZE = 16
+GRAPH_SNAPSHOT_CACHE: BoundedTTLCache[_SnapshotKey, tuple[datetime, GraphSnapshot]] = (
+    BoundedTTLCache(maxsize=GRAPH_SNAPSHOT_CACHE_SIZE, ttl=GRAPH_SNAPSHOT_CACHE_TTL)
+)
 GRAPH_SNAPSHOT_LOADS: dict[_SnapshotKey, asyncio.Task[GraphSnapshot]] = {}
 _GRAPH_SNAPSHOT_WAITERS: dict[asyncio.Task[GraphSnapshot], int] = {}
 
@@ -44,15 +99,24 @@ _GRAPH_SNAPSHOT_WAITERS: dict[asyncio.Task[GraphSnapshot], int] = {}
 # was proven against and stays valid only while that same enumeration is the
 # cached one: a write drops the enumeration through the generation listener,
 # the enumeration TTL ages it out, and either retires the proofs with it.
-GRAPH_VISIBLE_SNAPSHOT_CACHE: dict[_VisibleSnapshotKey, tuple[GraphSnapshot, GraphSnapshot]] = {}
+GRAPH_VISIBLE_SNAPSHOT_CACHE_SIZE = 64
+GRAPH_VISIBLE_SNAPSHOT_CACHE: BoundedTTLCache[
+    _VisibleSnapshotKey, tuple[GraphSnapshot, GraphSnapshot]
+] = BoundedTTLCache(maxsize=GRAPH_VISIBLE_SNAPSHOT_CACHE_SIZE, ttl=GRAPH_SNAPSHOT_CACHE_TTL)
 GRAPH_VISIBLE_SNAPSHOT_LOADS: dict[_VisibleSnapshotKey, asyncio.Task[GraphSnapshot]] = {}
 _GRAPH_VISIBLE_SNAPSHOT_WAITERS: dict[asyncio.Task[GraphSnapshot], int] = {}
 
 
+def _drop_organization[K: tuple[Any, ...], V](
+    cache: BoundedTTLCache[K, V], organization_id: str
+) -> None:
+    for key in [key for key in cache if key[0] == organization_id]:
+        cache.pop(key, None)
+
+
 def _drop_organization_entries(organization_id: str) -> None:
-    for cache in (GRAPH_SNAPSHOT_CACHE, GRAPH_VISIBLE_SNAPSHOT_CACHE):
-        for key in [key for key in cache if key[0] == organization_id]:
-            cache.pop(key, None)
+    _drop_organization(GRAPH_SNAPSHOT_CACHE, organization_id)
+    _drop_organization(GRAPH_VISIBLE_SNAPSHOT_CACHE, organization_id)
 
 
 register_invalidation_listener(_drop_organization_entries)
@@ -358,9 +422,10 @@ async def _load_visible_graph_snapshot(
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
     )
-    # Bind the fingerprint now, off the loop, so the derived caches read it
-    # instead of serializing the whole graph again on every warm request.
-    await asyncio.to_thread(_snapshot_fingerprint, visible)
+    # Compact the rows and bind the fingerprint off the loop, so the cache
+    # holds what rendering reads and the derived caches never serialize the
+    # whole graph again on a warm request.
+    visible = await asyncio.to_thread(_finalize_visible_snapshot, visible)
     GRAPH_VISIBLE_SNAPSHOT_CACHE[cache_key] = (base, visible)
     log.info(
         "graph_visible_snapshot_cache_updated",
@@ -443,6 +508,36 @@ async def _current_graph_snapshot(
         ],
         entity_by_id=entities,
     )
+
+
+# Body text and vectors never reach a rendered node; the proofs above already
+# ran on the full rows.
+_BODY_METADATA_KEYS = frozenset({"content", "embedding", "name_embedding", "fact_embedding"})
+
+
+def _compact_entity(entity: Entity) -> Entity:
+    update: dict[str, Any] = {}
+    if entity.content:
+        update["content"] = ""
+    if entity.embedding is not None:
+        update["embedding"] = None
+    if _BODY_METADATA_KEYS & entity.metadata.keys():
+        update["metadata"] = {
+            key: value for key, value in entity.metadata.items() if key not in _BODY_METADATA_KEYS
+        }
+    return entity.model_copy(update=update) if update else entity
+
+
+def _finalize_visible_snapshot(snapshot: GraphSnapshot) -> GraphSnapshot:
+    """Strip bodies and vectors from a proven snapshot and bind its fingerprint."""
+    entities = [_compact_entity(entity) for entity in snapshot.entities]
+    compact = GraphSnapshot(
+        entities=entities,
+        relationships=snapshot.relationships,
+        entity_by_id=_entity_index(entities),
+    )
+    _snapshot_fingerprint(compact)
+    return compact
 
 
 def _snapshot_fingerprint(snapshot: GraphSnapshot) -> str:
