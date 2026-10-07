@@ -230,11 +230,16 @@ async def _load_graph_snapshot(
             max_items=max_relationships,
         ),
     )
+    # Enumerated rows are already body-free by projection; compacting here
+    # keeps that true for any loader, since every reader snapshot of this
+    # organization will reference these same objects.
+    entities = [_compact_entity(entity) for entity in entities]
     entity_by_id = _entity_index(entities)
     snapshot = GraphSnapshot(
         entities=entities,
         relationships=relationships,
         entity_by_id=entity_by_id,
+        relationship_by_id={edge.id: edge for edge in relationships if edge.id},
     )
     if graph_generation(organization_id) != generation:
         # A write landed while the pages were read. The callers that waited
@@ -401,7 +406,7 @@ async def _load_visible_graph_snapshot(
         max_entities=max_entities,
         max_relationships=max_relationships,
     )
-    snapshot = await _current_graph_snapshot(
+    proven = await _current_graph_snapshot(
         client,
         organization_id,
         base,
@@ -415,17 +420,16 @@ async def _load_visible_graph_snapshot(
         ),
     )
     visible = _reader_visible_snapshot(
-        snapshot,
+        _shared_rows(base, proven),
         principal_id=principal_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
     )
-    # Compact the rows and bind the fingerprint off the loop, so the cache
-    # holds what rendering reads and the derived caches never serialize the
-    # whole graph again on a warm request.
-    visible = await asyncio.to_thread(_finalize_visible_snapshot, visible)
+    # Bind the fingerprint off the loop, so the derived caches never serialize
+    # the whole graph again on a warm request.
+    await asyncio.to_thread(_snapshot_fingerprint, visible)
     GRAPH_VISIBLE_SNAPSHOT_CACHE[cache_key] = (base, visible)
     log.info(
         "graph_visible_snapshot_cache_updated",
@@ -528,16 +532,32 @@ def _compact_entity(entity: Entity) -> Entity:
     return entity.model_copy(update=update) if update else entity
 
 
-def _finalize_visible_snapshot(snapshot: GraphSnapshot) -> GraphSnapshot:
-    """Strip bodies and vectors from a proven snapshot and bind its fingerprint."""
-    entities = [_compact_entity(entity) for entity in snapshot.entities]
-    compact = GraphSnapshot(
+def _shared_rows(base: GraphSnapshot, proven: GraphSnapshot) -> GraphSnapshot:
+    """The proven ids, carried by the enumeration's own row objects.
+
+    The proof reads fresh rows, with bodies, to decide what is current. What a
+    reader renders from those rows is name, type, description and semantic
+    metadata, which the enumeration already holds in the same generation; so
+    every reader snapshot of an organization points at the enumeration's
+    objects and costs its id lists, not a second copy of the graph.
+    """
+    if not base.relationship_by_id and base.relationships:
+        base.relationship_by_id = {edge.id: edge for edge in base.relationships if edge.id}
+    entities = [
+        base.entity_by_id[identifier]
+        for identifier in proven.entity_by_id
+        if identifier in base.entity_by_id
+    ]
+    relationships = [
+        base.relationship_by_id[edge.id]
+        for edge in proven.relationships
+        if edge.id in base.relationship_by_id
+    ]
+    return GraphSnapshot(
         entities=entities,
-        relationships=snapshot.relationships,
+        relationships=relationships,
         entity_by_id=_entity_index(entities),
     )
-    _snapshot_fingerprint(compact)
-    return compact
 
 
 def _snapshot_fingerprint(snapshot: GraphSnapshot) -> str:

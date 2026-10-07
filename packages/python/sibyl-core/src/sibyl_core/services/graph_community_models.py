@@ -79,6 +79,11 @@ class GraphSnapshot:
     # Content fingerprint, bound once the rows are final; the derived caches
     # compare it on every request.
     fingerprint: str | None = field(default=None, compare=False, repr=False)
+    # Edge index, built on demand; reader snapshots reference an enumeration's
+    # rows through it rather than carrying their own copies.
+    relationship_by_id: dict[str, Relationship] = field(
+        default_factory=dict, compare=False, repr=False
+    )
 
 
 @dataclass

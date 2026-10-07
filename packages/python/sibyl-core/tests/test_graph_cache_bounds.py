@@ -102,6 +102,14 @@ async def test_reader_snapshots_are_cached_without_bodies_or_vectors(monkeypatch
     assert cached.metadata == {"summary": "kept"}
     assert cached.name == "Fat node"
     assert visible.fingerprint is not None
+    # A second reader shares the enumeration's row objects rather than copies.
+    other = await snapshots._get_visible_graph_snapshot(
+        object(), org, principal_id="user_b", accessible_projects=set()
+    )
+    assert other is not visible
+    assert other.entity_by_id["fat"] is cached
+    base = next(iter(snapshots.GRAPH_SNAPSHOT_CACHE.values()))[1]
+    assert base.entity_by_id["fat"] is cached
     assert (
         snapshots.GRAPH_VISIBLE_SNAPSHOT_CACHE[next(iter(snapshots.GRAPH_VISIBLE_SNAPSHOT_CACHE))][
             1
