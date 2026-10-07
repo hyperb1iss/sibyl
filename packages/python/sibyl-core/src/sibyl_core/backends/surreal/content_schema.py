@@ -154,7 +154,7 @@ CONTENT_TABLES = (
     *RAW_LEXICAL_TABLES,
     RAW_LEXICAL_STATE_TABLE,
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 55
+CONTENT_SCHEMA_CURRENT_VERSION = 56
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -662,6 +662,29 @@ DEFINE INDEX IF NOT EXISTS idx_raw_captures_surface_review
     ON raw_captures FIELDS organization_id, capture_surface, review_state, captured_at, uuid;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_org_created
     ON raw_captures FIELDS organization_id, created_at, uuid;
+"""
+
+# raw_captures carried 22 indexes, every one maintained on each capture write
+# and on every recall exposure stamp. The two FULLTEXT indexes tokenise title
+# and content into BM25 postings that no statement reads (the lexical lane
+# queries the raw_lexical_* mirror tables), the single-column source and
+# org_dedupe indexes duplicate the (source_id, ...) and (dedupe_key, ...)
+# lookup composites, the captured_at and created_at singles were never chosen
+# over the organization index and are superseded by the recent-first
+# composites, and nothing filters captures by entity_id. purge_after stays:
+# the purge job ranges on it without an organization. The source lineage
+# element index is re-asserted here because a live namespace at the current
+# version was found without it although migration 26 defines it; the hinted
+# lineage lookup silently table-scans whenever the index is absent.
+CONTENT_RAW_CAPTURE_INDEX_PRUNE_MIGRATION_DEFINITIONS = """
+REMOVE INDEX IF EXISTS idx_raw_captures_title_ft ON TABLE raw_captures;
+REMOVE INDEX IF EXISTS idx_raw_captures_content_ft ON TABLE raw_captures;
+REMOVE INDEX IF EXISTS idx_raw_captures_source ON TABLE raw_captures;
+REMOVE INDEX IF EXISTS idx_raw_captures_org_dedupe ON TABLE raw_captures;
+REMOVE INDEX IF EXISTS idx_raw_captures_captured_at ON TABLE raw_captures;
+REMOVE INDEX IF EXISTS idx_raw_captures_created_at ON TABLE raw_captures;
+REMOVE INDEX IF EXISTS idx_raw_captures_entity_id ON TABLE raw_captures;
+DEFINE INDEX IF NOT EXISTS idx_raw_captures_source_lineage ON raw_captures FIELDS metadata.raw_source_ids.*;
 """
 
 CONTENT_LIFECYCLE_REVIEW_SPLIT_MIGRATION_DEFINITIONS = f"""
@@ -1253,6 +1276,13 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             name="content_raw_capture_recent_indexes",
             statements=tuple(
                 split_statements(CONTENT_RAW_CAPTURE_RECENT_INDEX_MIGRATION_DEFINITIONS)
+            ),
+        ),
+        SchemaMigration(
+            version=56,
+            name="content_raw_capture_index_prune",
+            statements=tuple(
+                split_statements(CONTENT_RAW_CAPTURE_INDEX_PRUNE_MIGRATION_DEFINITIONS)
             ),
         ),
     )
