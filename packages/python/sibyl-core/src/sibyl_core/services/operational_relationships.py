@@ -26,22 +26,52 @@ from sibyl_core.services.source_observations import (
 )
 from sibyl_core.services.source_state_store import source_snapshot_from_records
 
-# `uuid IN $ids ORDER BY uuid` makes the 3.x planner walk the whole uuid index
-# in order and filter it (every entity and every edge of the namespace for a
-# handful of ids). Sorting the union lookup in an outer select keeps the point
-# lookups and yields the same rows in the same order, so the fingerprint is
-# unchanged.
-_SNAPSHOT = """
-LET $targets = SELECT * FROM (SELECT * FROM entity WHERE group_id=$org AND uuid IN $ids) ORDER BY uuid;
-LET $associations = SELECT * OMIT validation_write_witness FROM memory_derivations WHERE organization_id=$org
-    AND target_kind='graph_entity' AND target_id IN $ids ORDER BY target_id;
-LET $states = SELECT * OMIT validation_write_witness FROM source_states
-    WHERE organization_id=$org AND source_kind='graph_entity' AND source_id IN $ids ORDER BY source_id;
-LET $relationships = SELECT * FROM (SELECT *, in.uuid AS source_uuid, out.uuid AS target_uuid FROM relates_to
-    WHERE group_id=$org AND uuid IN $relationship_ids) ORDER BY uuid;
+# Past 32 values the 3.x planner stops serving `IN $list` from an index: it
+# scans the table and tests each row against the whole list, so a whole-graph
+# snapshot costs rows times ids. Every lookup therefore runs in clumps the
+# index still serves. Rows are sorted in an outer select, because an ORDER BY
+# beside the IN walks the whole index instead. A closure body may use only its
+# own argument (other bindings evaluate to nothing on at least one engine), so
+# each clump carries the organization with it. The rows, their order and so
+# the fingerprint are the same as a single IN would give.
+_LOOKUP_CLUMP = 32
+
+
+def org_lookup_clumps(param: str) -> str:
+    """SurrealQL for `[$org, ids]` pairs covering `$param` in index-served clumps."""
+    clumps = f"array::clump(${param}, {_LOOKUP_CLUMP})"
+    return f"array::transpose([array::repeat($org, array::len({clumps})), {clumps}])"
+
+
+def _snapshot_lookups(*, vectors: bool) -> str:
+    entity_fields = "*" if vectors else "* OMIT embedding, name_embedding"
+    relationship_omit = "" if vectors else " OMIT fact_embedding"
+    return f"""
+LET $id_lookups = {org_lookup_clumps("ids")};
+LET $relationship_lookups = {org_lookup_clumps("relationship_ids")};
+LET $targets = SELECT * FROM array::flatten($id_lookups.map(|$lookup|
+    (SELECT {entity_fields} FROM entity WHERE group_id=$lookup[0] AND uuid IN $lookup[1])))
+    ORDER BY uuid;
+LET $associations = SELECT * OMIT validation_write_witness FROM array::flatten($id_lookups.map(|$lookup|
+    (SELECT * FROM memory_derivations WHERE organization_id=$lookup[0] AND target_kind='graph_entity'
+        AND target_id IN $lookup[1]))) ORDER BY target_id;
+LET $states = SELECT * OMIT validation_write_witness FROM array::flatten($id_lookups.map(|$lookup|
+    (SELECT * FROM source_states WHERE organization_id=$lookup[0] AND source_kind='graph_entity'
+        AND source_id IN $lookup[1]))) ORDER BY source_id;
+LET $relationships = SELECT * FROM array::flatten($relationship_lookups.map(|$lookup|
+    (SELECT *, in.uuid AS source_uuid, out.uuid AS target_uuid{relationship_omit} FROM relates_to
+        WHERE group_id=$lookup[0] AND uuid IN $lookup[1]))) ORDER BY uuid;
+"""
+
+
+_SNAPSHOT = (
+    _snapshot_lookups(vectors=True)
+    + """
 LET $relationship_evidence = SELECT * OMIT attributes.operational_write_witness FROM $relationships;
 LET $operational_snapshot_fingerprint = crypto::sha256(type::string([$targets,$associations,$states,$relationship_evidence]));
 """
+)
+_SNAPSHOT_WITHOUT_VECTORS = _snapshot_lookups(vectors=False)
 
 _ENDPOINT_WRITE_WITNESS = (
     "LET $source_states_to_fence = $states;"
@@ -109,19 +139,31 @@ def relationship_body_digest(row: dict[str, Any]) -> str:
     return evidence_hash({"version": 1, "body": encode_record(body)})
 
 
-async def _snapshot(client, *, organization_id, ids, relationship_ids):
+async def _snapshot(
+    client, *, organization_id, ids, relationship_ids, include_embeddings: bool = True
+):
+    """Read endpoint rows, their ledgers and the edges in one statement.
+
+    Callers that only compare rows pass include_embeddings=False: the rows
+    come back without vectors and without the write fingerprint, which
+    covers stored vectors and so cannot be computed from them.
+    """
+    if include_embeddings:
+        statement = _SNAPSHOT
+        returned = "relationships:$relationships, fingerprint:$operational_snapshot_fingerprint"
+    else:
+        statement = _SNAPSHOT_WITHOUT_VECTORS
+        returned = "relationships:$relationships"
     rows = normalize_records(
         await client.execute_query(
             "RETURN {"
-            + _SNAPSHOT
-            + """
-        RETURN {targets:$targets, associations:$associations, states:$states,
-            relationships:$relationships,
-            fingerprint:$operational_snapshot_fingerprint};
-        };""",
+            + statement
+            + "RETURN {targets:$targets, associations:$associations, states:$states, "
+            + returned
+            + "}; };",
             org=organization_id,
-            ids=sorted(ids),
-            relationship_ids=sorted(relationship_ids),
+            ids=sorted(set(ids)),
+            relationship_ids=sorted(set(relationship_ids)),
         )
     )
     if len(rows) != 1:

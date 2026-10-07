@@ -221,6 +221,7 @@ async def available_graph_view(
         organization_id=organization_id,
         ids=graph_ids,
         relationship_ids=list(current_edges),
+        include_embeddings=False,
     )
     try:
         final_captures = await _capture_snapshot(organization_id, raw_ids)
