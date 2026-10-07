@@ -64,6 +64,7 @@ async def test_background_pool_saturation_preserves_interactive_capacity(monkeyp
             surreal_database="custom_graph",
             surreal_client_pool_size=lambda kind: 1,
             surreal_background_client_idle_seconds=0.0,
+            surreal_background_client_cache_size=64,
         ),
     )
     monkeypatch.setattr(
@@ -143,6 +144,7 @@ async def test_overlapping_background_leases_share_pool_until_last_exit(monkeypa
         SimpleNamespace(
             resolved_surreal_url="ws://test.invalid/rpc",
             surreal_background_client_idle_seconds=0.0,
+            surreal_background_client_cache_size=64,
         ),
     )
     monkeypatch.setattr(graph_client, "_new_graph_client", factory)
@@ -172,6 +174,7 @@ async def test_repeated_shutdown_cancellation_finishes_socket_teardown(monkeypat
         SimpleNamespace(
             resolved_surreal_url="ws://test.invalid/rpc",
             surreal_background_client_idle_seconds=0.0,
+            surreal_background_client_cache_size=64,
         ),
     )
     monkeypatch.setattr(graph_client, "_new_graph_client", lambda _: client)
@@ -207,6 +210,7 @@ async def test_cancellation_while_release_waits_for_registry_lock_does_not_leak(
         SimpleNamespace(
             resolved_surreal_url="ws://test.invalid/rpc",
             surreal_background_client_idle_seconds=0.0,
+            surreal_background_client_cache_size=64,
         ),
     )
     monkeypatch.setattr(graph_client, "_new_graph_client", lambda _: client)
@@ -238,7 +242,7 @@ async def test_cancellation_while_release_waits_for_registry_lock_does_not_leak(
         await asyncio.gather(task, return_exceptions=True)
 
 
-def _warm_settings(idle_seconds: float) -> SimpleNamespace:
+def _warm_settings(idle_seconds: float, *, cache_size: int = 64) -> SimpleNamespace:
     return SimpleNamespace(
         resolved_surreal_url="ws://test.invalid/rpc",
         require_serviceable_surreal_url=lambda: "ws://test.invalid/rpc",
@@ -249,6 +253,7 @@ def _warm_settings(idle_seconds: float) -> SimpleNamespace:
         surreal_database="custom_graph",
         surreal_client_pool_size=lambda kind: 1,
         surreal_background_client_idle_seconds=idle_seconds,
+        surreal_background_client_cache_size=cache_size,
     )
 
 
@@ -326,3 +331,46 @@ async def test_a_user_arriving_inside_the_idle_window_keeps_the_pool(monkeypatch
     finally:
         await graph_client.close_idle_background_clients()
     client.close.assert_awaited_once()
+
+
+async def test_warm_background_pools_are_bounded_and_evicted_least_recently_used(monkeypatch):
+    """Every org's tick re-arms its lease; beyond the cap the coldest pools are retired."""
+    clients: dict[str, SurrealGraphClient] = {}
+
+    def factory(group_id: str) -> SurrealGraphClient:
+        client = SurrealGraphClient(group_id=group_id, url="ws://test.invalid/rpc")
+        client.close = AsyncMock()
+        clients[group_id] = client
+        return client
+
+    monkeypatch.setattr(graph_client, "settings", _warm_settings(60.0, cache_size=2))
+    monkeypatch.setattr(graph_client, "_new_graph_client", factory)
+    graph_client._retired.clear()
+    try:
+        for group_id in ("A", "B", "C"):
+            async with graph_client.background_graph_client(group_id):
+                pass
+        assert list(graph_client._background_clients) == ["B", "C"]
+        assert [client.group_id for client, _ in graph_client._retired] == ["A"]
+        clients["A"].close.assert_not_awaited()
+        # Using B again makes C the least recently used, so D evicts C.
+        async with graph_client.background_graph_client("B"):
+            pass
+        async with graph_client.background_graph_client("D"):
+            pass
+        assert list(graph_client._background_clients) == ["B", "D"]
+        assert [client.group_id for client, _ in graph_client._retired] == ["A", "C"]
+        # A lease in use is never retired, however cold it looks; the idle
+        # ones beyond the cap go the moment the pools in use are released.
+        async with (
+            graph_client.background_graph_client("E"),
+            graph_client.background_graph_client("F"),
+        ):
+            assert set(graph_client._background_clients) == {"B", "D", "E", "F"}
+        assert list(graph_client._background_clients) == ["E", "F"]
+        assert [client.group_id for client, _ in graph_client._retired] == ["A", "C", "B", "D"]
+        assert graph_client._expiry_tasks == set()
+    finally:
+        await graph_client.close_graph_clients()
+    assert graph_client._retired == []
+    assert all(client.close.await_count == 1 for client in clients.values())

@@ -159,6 +159,14 @@ class CoreConfig(BaseSettings):
             "instead of handshaking again; 0 closes it as soon as the last user leaves."
         ),
     )
+    surreal_background_client_cache_size: int = Field(
+        default=64,
+        ge=1,
+        description=(
+            "Most idle background graph pools kept warm per process; the least recently "
+            "used beyond this are retired and closed by the pool health sweep."
+        ),
+    )
     allow_embedded_single_writer: bool = Field(
         default=False,
         description="Allow embedded SurrealDB storage in production for explicit single-writer mode",

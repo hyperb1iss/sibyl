@@ -82,8 +82,12 @@ class _BackgroundLease:
     idle_close: asyncio.TimerHandle | None = None
 
 
-_background_clients: dict[str, _BackgroundLease] = {}
+# Most recently used last, so the warm set is bounded by evicting from the front.
+_background_clients: OrderedDict[str, _BackgroundLease] = OrderedDict()
 _background_lock = asyncio.Lock()
+# Expiry tasks spawned from the loop's timer, held so they cannot be collected
+# before they run.
+_expiry_tasks: set[asyncio.Task[None]] = set()
 
 
 def _new_graph_client(group_id: str) -> SurrealGraphClient:
@@ -144,6 +148,37 @@ async def _expire_background_lease(group_id: str, lease: _BackgroundLease) -> No
     await closing
 
 
+def _schedule_background_expiry(group_id: str, lease: _BackgroundLease, idle: float) -> None:
+    def expire() -> None:
+        task = asyncio.ensure_future(_expire_background_lease(group_id, lease))
+        _expiry_tasks.add(task)
+        task.add_done_callback(_expiry_tasks.discard)
+
+    lease.idle_close = asyncio.get_running_loop().call_later(idle, expire)
+
+
+def _retire_idle_background_leases_beyond_cap() -> None:
+    """Hand the least recently used idle pools to the retired list; the caller holds the lock.
+
+    Every organization's tick re-arms its lease, so without a bound one
+    pool per organization would stay open for the life of the process. A
+    retired pool closes once the health sweep finds it idle, the way an
+    evicted foreground client does.
+    """
+    cap = settings.surreal_background_client_cache_size
+    idle = [
+        (group_id, lease)
+        for group_id, lease in _background_clients.items()
+        if lease.users == 0 and lease.closing is None
+    ]
+    for group_id, lease in idle[: max(0, len(idle) - cap)]:
+        if lease.idle_close is not None:
+            lease.idle_close.cancel()
+            lease.idle_close = None
+        del _background_clients[group_id]
+        _retired.append((lease.client, time.monotonic()))
+
+
 async def _release_background_lease(group_id: str, lease: _BackgroundLease) -> None:
     async with _background_lock:
         lease.users -= 1
@@ -153,10 +188,8 @@ async def _release_background_lease(group_id: str, lease: _BackgroundLease) -> N
                 # The pool stays warm for the next pass: the scheduled repairs
                 # come back every minute, and a torn-down pool costs a socket
                 # handshake per slot before the first query runs.
-                lease.idle_close = asyncio.get_running_loop().call_later(
-                    idle,
-                    lambda: asyncio.ensure_future(_expire_background_lease(group_id, lease)),
-                )
+                _schedule_background_expiry(group_id, lease, idle)
+                _retire_idle_background_leases_beyond_cap()
             else:
                 _start_background_close(group_id, lease)
         closing = lease.closing
@@ -188,6 +221,7 @@ async def background_graph_client(group_id: str) -> AsyncIterator[SurrealGraphCl
                     lease.idle_close.cancel()
                     lease.idle_close = None
                 lease.users += 1
+                _background_clients.move_to_end(group_id)
                 break
             closing = lease.closing
         await asyncio.shield(closing)
