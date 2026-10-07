@@ -38,8 +38,12 @@ _LOOKUP_CLUMP = 32
 
 
 def org_lookup_clumps(param: str) -> str:
-    """SurrealQL for `[$org, ids]` pairs covering `$param` in index-served clumps."""
-    clumps = f"array::clump(${param}, {_LOOKUP_CLUMP})"
+    """SurrealQL for `[$org, ids]` pairs covering `$param` in index-served clumps.
+
+    Duplicates go first: an id split across two clumps would return its row
+    twice, where a single IN returns it once.
+    """
+    clumps = f"array::clump(array::distinct(${param}), {_LOOKUP_CLUMP})"
     return f"array::transpose([array::repeat($org, array::len({clumps})), {clumps}])"
 
 
@@ -162,8 +166,8 @@ async def _snapshot(
             + returned
             + "}; };",
             org=organization_id,
-            ids=sorted(set(ids)),
-            relationship_ids=sorted(set(relationship_ids)),
+            ids=sorted(ids),
+            relationship_ids=sorted(relationship_ids),
         )
     )
     if len(rows) != 1:
