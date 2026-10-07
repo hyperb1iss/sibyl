@@ -25,6 +25,8 @@ RAW_CAPTURE_CHANGEFEED_CONSUMER = "raw_capture_enrichment"
 RAW_CAPTURE_CHANGEFEED_TABLE = "raw_captures"
 RAW_CAPTURE_CHANGEFEED_CURSOR_TABLE = "content_changefeed_cursors"
 _MAX_PENDING_RAW_MEMORY_IDS = 500
+# Most changes one SHOW CHANGES statement is asked for.
+_MAX_CHANGEFEED_LIMIT = 10_000
 _VECTOR_FIELD_NAMES = frozenset({"embedding", "embeddings", "vector", "vectors"})
 _VECTOR_FIELD_SUFFIXES = ("_embedding", "_embeddings", "_vector", "_vectors")
 
@@ -74,6 +76,10 @@ async def poll_raw_capture_changefeed(
             since=cursor.versionstamp,
             limit=bounded_limit,
         )
+        # SINCE is inclusive on a 3.x server: the change at the cursor comes
+        # back on every poll, so only changes past the cursor count. Without
+        # this the row at the cursor was enqueued again every minute.
+        rows = [row for row in rows if _coerce_int(row.get("versionstamp")) > cursor.versionstamp]
         next_versionstamp = _last_versionstamp(rows, default=cursor.versionstamp)
         changed_refs = _raw_capture_refs_for_org(rows, organization_id=organization_id)
         raw_memory_ids = [ref.raw_memory_id for ref in changed_refs]
@@ -295,15 +301,31 @@ async def _load_cursors(client: Any, *, consumer_name: str) -> dict[str, int]:
     return cursors
 
 
+def _unsigned_literal(value: object, *, name: str, maximum: int | None = None) -> int:
+    number = _coerce_int(value, default=-1)
+    if number < 0:
+        raise ValueError(f"{name} must be an unsigned integer, got {value!r}")
+    return min(number, maximum) if maximum is not None else number
+
+
 async def _show_raw_capture_changes(
     client: Any,
     *,
     since: int,
     limit: int,
 ) -> list[dict[str, object]]:
+    # SINCE and LIMIT take unsigned integer literals only: a 3.x server
+    # rejects a parameter in either position with a parse error, answered as
+    # an RPC error envelope rather than a statement result, which is how the
+    # poller sat inert while reporting one row per poll. Both values are
+    # validated here and never come from a request.
+    since_literal = _unsigned_literal(since, name="since")
+    limit_literal = _unsigned_literal(
+        max(_coerce_int(limit), 1), name="limit", maximum=_MAX_CHANGEFEED_LIMIT
+    )
     raw = await client.execute_query_raw(
-        f"SHOW CHANGES FOR TABLE {RAW_CAPTURE_CHANGEFEED_TABLE} SINCE {since} LIMIT $limit;",
-        limit=limit,
+        f"SHOW CHANGES FOR TABLE {RAW_CAPTURE_CHANGEFEED_TABLE} "
+        f"SINCE {since_literal} LIMIT {limit_literal};"
     )
     error = query_error(raw)
     if error is not None:

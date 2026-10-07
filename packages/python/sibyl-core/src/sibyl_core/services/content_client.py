@@ -101,29 +101,8 @@ async def surreal_content_client() -> AsyncIterator[SurrealContentClient]:
     yield await get_shared_surreal_content_client()
 
 
-def query_error(result: object) -> str | None:
-    if isinstance(result, str):
-        return result
-    if isinstance(result, dict):
-        payload = {str(key): value for key, value in result.items()}
-        if (
-            "result" in payload
-            and "status" not in payload
-            and isinstance(payload.get("result"), list)
-        ):
-            return query_error(payload["result"])
-        status = payload.get("status")
-        if isinstance(status, str) and status.upper() == "ERR":
-            detail = payload.get("detail") or payload.get("result") or payload
-            return str(detail)
-        return None
-    if not isinstance(result, list):
-        return None
-    for item in result:
-        error = query_error(item)
-        if error is not None:
-            return error
-    return None
+# One error detector for every reply shape, the RPC error envelope included.
+query_error = _surreal_records.query_error
 
 
 async def select_many(

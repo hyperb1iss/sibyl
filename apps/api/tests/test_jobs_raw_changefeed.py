@@ -10,6 +10,14 @@ from sibyl.api.event_types import WSEvent
 from sibyl.jobs import raw_changefeed
 
 
+def rpc_error_envelope(message: str) -> dict[str, object]:
+    """The reply a live server gives when it refuses the request itself."""
+    return {
+        "id": "ce271507-9e08-4870-857c-0cc8310a98b4",
+        "error": {"code": -32000, "message": message},
+    }
+
+
 def rpc_envelope(rows: list[dict[str, object]]) -> dict[str, object]:
     """The reply ``execute_query_raw`` hands back from a live server, verbatim in shape."""
     return {
@@ -38,6 +46,11 @@ class FakeChangefeedClient:
 
     async def execute_query_raw(self, query: str, **params: object) -> object:
         self.raw_queries.append((query, dict(params)))
+        if params or not query.startswith("SHOW CHANGES FOR TABLE raw_captures SINCE "):
+            # A 3.x server refuses a parameter in SINCE or LIMIT.
+            return rpc_error_envelope(
+                "Parse error: Unexpected token 'a parameter', expected an unsigned integer"
+            )
         return rpc_envelope(self.change_rows)
 
     async def execute_query(self, query: str, **params: object) -> object:
@@ -123,8 +136,7 @@ async def test_poll_raw_capture_changefeed_queues_changes_and_saves_cursor(
     assert result["changed_raw_memory_ids"] == ["raw-a", "raw-b"]
     assert result["previous_versionstamp"] == 0
     assert result["next_versionstamp"] == 9
-    assert "SINCE 0" in client.raw_queries[0][0]
-    assert client.raw_queries[0][1] == {"limit": 25}
+    assert client.raw_queries[0] == ("SHOW CHANGES FOR TABLE raw_captures SINCE 0 LIMIT 25;", {})
     enqueue_raw_promotion.assert_awaited_once_with(
         "org-1",
         raw_memory_ids=["raw-a", "raw-b"],
@@ -366,6 +378,77 @@ async def test_show_changes_raises_on_an_error_envelope() -> None:
         await raw_changefeed._show_raw_capture_changes(ErroringClient(), since=0, limit=5)
 
 
+async def test_show_changes_raises_on_an_rpc_error_envelope() -> None:
+    """A refused statement answers with no result at all; that must not read as one row."""
+
+    class RefusingClient(FakeChangefeedClient):
+        async def execute_query_raw(self, query: str, **params: object) -> object:
+            return rpc_error_envelope(
+                "Parse error: Unexpected token 'a parameter', expected an unsigned integer"
+            )
+
+    with pytest.raises(RuntimeError, match="Parse error"):
+        await raw_changefeed._show_raw_capture_changes(RefusingClient(), since=0, limit=5)
+
+
+async def test_show_changes_inlines_validated_literals_and_never_binds_parameters() -> None:
+    client = FakeChangefeedClient(change_rows=[{"versionstamp": 3, "changes": []}])
+
+    rows = await raw_changefeed._show_raw_capture_changes(client, since=117, limit=50_000)
+
+    assert rows == [{"versionstamp": 3, "changes": []}]
+    assert client.raw_queries == [
+        ("SHOW CHANGES FOR TABLE raw_captures SINCE 117 LIMIT 10000;", {})
+    ]
+    with pytest.raises(ValueError):
+        await raw_changefeed._show_raw_capture_changes(client, since=-1, limit=5)
+
+
+@pytest.mark.asyncio
+async def test_poll_never_replays_the_change_at_its_own_cursor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SINCE is inclusive: the change at the cursor comes back, and must not be enqueued again."""
+    client = FakeChangefeedClient(
+        cursor_rows=[{"versionstamp": 7, "metadata": {}}],
+        change_rows=[
+            {
+                "versionstamp": 7,
+                "changes": [{"update": {"uuid": "raw-a", "organization_id": "org-1"}}],
+            },
+            {
+                "versionstamp": 9,
+                "changes": [{"update": {"uuid": "raw-b", "organization_id": "org-1"}}],
+            },
+        ],
+        update_returns_row=True,
+    )
+    enqueue_raw_promotion = AsyncMock(return_value="raw_promotion:queued")
+    monkeypatch.setattr(raw_changefeed, "surreal_content_client", _client_context(client))
+    monkeypatch.setattr(raw_changefeed.job_queue, "enqueue_raw_promotion", enqueue_raw_promotion)
+    monkeypatch.setattr("sibyl.api.pubsub.publish_event", AsyncMock())
+
+    result = await raw_changefeed.poll_raw_capture_changefeed({}, "org-1", limit=10)
+
+    assert result["changed_raw_memory_ids"] == ["raw-b"]
+    assert (result["rows_seen"], result["previous_versionstamp"], result["next_versionstamp"]) == (
+        1,
+        7,
+        9,
+    )
+    enqueue_raw_promotion.assert_awaited_once_with("org-1", raw_memory_ids=["raw-b"], limit=1)
+    assert client.updated_records[0]["versionstamp"] == 9
+
+    # At the cursor, with nothing past it, a poll is idle and saves nothing.
+    client.cursor_rows = [{"versionstamp": 9, "metadata": {}}]
+    client.change_rows = client.change_rows[1:]
+    client.updated_records.clear()
+    quiet = await raw_changefeed.poll_raw_capture_changefeed({}, "org-1", limit=10)
+    assert (quiet["status"], quiet["rows_seen"], quiet["next_versionstamp"]) == ("idle", 0, 9)
+    assert client.updated_records == []
+    enqueue_raw_promotion.assert_awaited_once()
+
+
 @pytest.mark.asyncio
 async def test_poll_all_polls_only_organizations_behind_the_feed(
     monkeypatch: pytest.MonkeyPatch,
@@ -416,9 +499,7 @@ async def test_poll_all_polls_only_organizations_behind_the_feed(
         "limit": 10,
         "consumer_name": raw_changefeed.RAW_CAPTURE_CHANGEFEED_CONSUMER,
     }
-    assert len(client.raw_queries) == 1
-    assert "SINCE 5 " in client.raw_queries[0][0]
-    assert client.raw_queries[0][1] == {"limit": 10}
+    assert client.raw_queries == [("SHOW CHANGES FOR TABLE raw_captures SINCE 5 LIMIT 10;", {})]
     assert not any("FROM raw_captures" in query for query, _ in client.queries)
 
 

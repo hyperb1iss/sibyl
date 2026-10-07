@@ -59,14 +59,24 @@ def query_error(result: object) -> str | None:
 
     Detects every error shape any caller might receive: a bare error string,
     a statement envelope with ``status == "ERR"``, a raw ``query_raw`` envelope
-    whose ``result`` holds the per-statement list, and any list nesting of the
-    above. The bare nested-result branch is load-bearing: without it an errored
+    whose ``result`` holds the per-statement list, the RPC error envelope a
+    server answers a refused request with, and any list nesting of the above. The bare nested-result branch is load-bearing: without it an errored
     statement returned inside ``{"result": [...]}`` is silently read as success.
     """
     if isinstance(result, str):
         return result
     if isinstance(result, dict):
         payload = {str(key): value for key, value in result.items()}
+        rpc_error = payload.get("error")
+        if (
+            "result" not in payload
+            and isinstance(rpc_error, dict)
+            and "code" in rpc_error
+            and "message" in rpc_error
+        ):
+            # The RPC-level error envelope: the server refused the request as a
+            # whole (a parse error, for one) and returned no statement result.
+            return str(rpc_error["message"])
         if (
             "result" in payload
             and "status" not in payload
