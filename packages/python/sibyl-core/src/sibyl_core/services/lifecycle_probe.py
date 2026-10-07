@@ -121,50 +121,50 @@ class GraphWork:
 
 
 async def probe_graph_work(
-    client: Any, *, graph_stamp: EmbeddingStamp | None, verify_interval: float
+    client: Any,
+    *,
+    graph_stamp: EmbeddingStamp | None,
+    embedding_stamp: EmbeddingStamp | None,
+    verify_interval: float,
 ) -> GraphWork:
     """One round trip: the sweep state, one pending lifecycle row, one candidate owed a vector.
 
-    ``graph_stamp`` is what the configured graph provider writes today; with
-    none configured there is no sweep and no vector to owe, so only the
-    lifecycle row is asked for.
+    ``graph_stamp`` is what the graph sweep's provider writes today; with
+    none there is no sweep to owe. ``embedding_stamp`` is what the
+    promoted-embedding repair's provider writes, asked for on its own
+    because that repair resolves its provider itself; with none it would
+    enqueue nothing. The lifecycle row is always asked for.
     """
     group_id = str(client.group_id)
     params: dict[str, Any] = {"group_id": group_id, "cursor": "", "limit": 1}
-    if graph_stamp is None:
-        statements = [LIFECYCLE_PENDING_STATEMENT]
-    else:
-        statements = [
-            GRAPH_STATE_STATEMENT,
-            LIFECYCLE_PENDING_STATEMENT,
-            EMBEDDING_PENDING_STATEMENT,
-        ]
+    statements: list[str] = []
+    if graph_stamp is not None:
+        statements.append(GRAPH_STATE_STATEMENT)
         params["state_key"] = embedding_state_key(group_id, GRAPH_EMBEDDING_STATE_PLANE)
-        params["stamp"] = dict(graph_stamp)
+    statements.append(LIFECYCLE_PENDING_STATEMENT)
+    if embedding_stamp is not None:
+        statements.append(EMBEDDING_PENDING_STATEMENT)
+        params["stamp"] = dict(embedding_stamp)
     results = _statement_results(
         await client.execute_query_batch(" ".join(statements), **params), len(statements)
     )
-    if graph_stamp is None:
-        return GraphWork(
-            sweep=None,
-            lifecycle_pending=bool(normalize_records(results[0])),
-            embeddings_pending=False,
+    sweep: PlaneFacts | None = None
+    if graph_stamp is not None:
+        states = normalize_records(results.pop(0))
+        sweep = (
+            plane_facts(
+                states[0],
+                plane=GRAPH_EMBEDDING_STATE_PLANE,
+                stamp=graph_stamp,
+                verify_interval=verify_interval,
+            )
+            if states
+            else PlaneFacts(current=False)
         )
-    states = normalize_records(results[0])
-    sweep = (
-        plane_facts(
-            states[0],
-            plane=GRAPH_EMBEDDING_STATE_PLANE,
-            stamp=graph_stamp,
-            verify_interval=verify_interval,
-        )
-        if states
-        else PlaneFacts(current=False)
-    )
+    lifecycle_pending = bool(normalize_records(results.pop(0)))
+    embeddings_pending = embedding_stamp is not None and bool(normalize_records(results.pop(0)))
     return GraphWork(
-        sweep=sweep,
-        lifecycle_pending=bool(normalize_records(results[1])),
-        embeddings_pending=bool(normalize_records(results[2])),
+        sweep=sweep, lifecycle_pending=lifecycle_pending, embeddings_pending=embeddings_pending
     )
 
 

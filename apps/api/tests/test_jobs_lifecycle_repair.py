@@ -552,11 +552,14 @@ class _ProbeClient:
 
     async def execute_query_batch(self, query: str, **params: object) -> object:
         self.batches.append((query, dict(params)))
-        statements = query.count(";")
-        if statements == 1:
-            return [[]]
-        state = [{"complete_metadata": dict(params["stamp"]), "complete_age_seconds": 5}]
-        return [state if self.current else [], [], []]
+        results: list[object] = []
+        for statement in query.split(";")[:-1]:
+            if "FROM type::record($state_key)" in statement:
+                state = {"complete_metadata": dict(params["stamp"]), "complete_age_seconds": 5}
+                results.append([state] if self.current else [])
+            else:
+                results.append([])
+        return results
 
 
 _REPAIRS = (
@@ -574,6 +577,9 @@ async def test_idle_organization_costs_one_graph_query_per_tick_and_no_repair(mo
     stamp = {"provider": "fake", "model": "graph", "dimensions": 3, "stamp_version": 2}
     provider = SimpleNamespace(metadata=SimpleNamespace(to_dict=lambda: dict(stamp)))
     monkeypatch.setattr(lifecycle_repair, "configured_embedding_provider", lambda: provider)
+    monkeypatch.setattr(
+        lifecycle_repair.memory_embedding, "configured_embedding_provider", lambda: provider
+    )
     monkeypatch.setattr(lifecycle_repair, "list_org_ids", AsyncMock(return_value=["idle"]))
     client = _ProbeClient("idle", current=True)
 
@@ -687,6 +693,9 @@ async def test_an_idle_organization_still_reports_the_verdict_its_planes_hold(mo
     stamp = {"provider": "fake", "model": "graph", "dimensions": 3, "stamp_version": 2}
     provider = SimpleNamespace(metadata=SimpleNamespace(to_dict=lambda: dict(stamp)))
     monkeypatch.setattr(lifecycle_repair, "configured_embedding_provider", lambda: provider)
+    monkeypatch.setattr(
+        lifecycle_repair.memory_embedding, "configured_embedding_provider", lambda: provider
+    )
     monkeypatch.setattr(lifecycle_repair, "list_org_ids", AsyncMock(return_value=["idle"]))
 
     class _WarningProbeClient(_ProbeClient):

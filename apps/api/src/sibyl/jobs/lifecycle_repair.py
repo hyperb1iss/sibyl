@@ -22,7 +22,7 @@ from sibyl.persistence.organization_runtime import list_org_ids
 from sibyl_core.config import settings
 from sibyl_core.embeddings.providers import configured_embedding_provider
 from sibyl_core.projection.repair import LifecycleRepairResult, repair_graph_lifecycle
-from sibyl_core.services import content_client, content_models
+from sibyl_core.services import content_client, content_models, memory_embedding
 from sibyl_core.services.content_raw_embedding_repair import (
     RAW_CAPTURE_EMBEDDING_PLANE,
     repair_raw_capture_embeddings,
@@ -375,11 +375,15 @@ async def _idle_outcomes(
     if not content_work.idle(organization_id, planes=planes):
         return None
     provider = configured_embedding_provider()
+    # The promoted-embedding repair resolves its provider itself; the probe
+    # stands in for that repair, so it asks the same source.
+    promoted = memory_embedding.configured_embedding_provider()
     try:
         async with background_graph_runtime(organization_id) as runtime:
             work = await probe_graph_work(
                 runtime.client,
                 graph_stamp=provider.metadata.to_dict() if provider is not None else None,
+                embedding_stamp=promoted.metadata.to_dict() if promoted is not None else None,
                 verify_interval=settings.embedding_sweep_verify_interval_seconds,
             )
     except Exception as exc:

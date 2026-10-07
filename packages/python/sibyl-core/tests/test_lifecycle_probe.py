@@ -47,7 +47,9 @@ def _current(stamp: dict[str, Any], age: float = 10.0, **fields: Any) -> dict[st
 async def test_graph_probe_is_one_indexed_round_trip_on_the_organization_namespace() -> None:
     client = FakeClient("org-a", [[_current(STAMP)], [], []])
 
-    work = await probe_graph_work(client, graph_stamp=STAMP, verify_interval=3600.0)
+    work = await probe_graph_work(
+        client, graph_stamp=STAMP, embedding_stamp=STAMP, verify_interval=3600.0
+    )
 
     assert work.idle
     assert len(client.calls) == 1, "an idle organization costs the tick one query"
@@ -82,7 +84,9 @@ async def test_graph_probe_sends_an_organization_with_work_through_the_full_pass
 ) -> None:
     client = FakeClient("org-b", results)
 
-    work = await probe_graph_work(client, graph_stamp=STAMP, verify_interval=3600.0)
+    work = await probe_graph_work(
+        client, graph_stamp=STAMP, embedding_stamp=STAMP, verify_interval=3600.0
+    )
 
     assert not work.idle, reason
 
@@ -96,7 +100,9 @@ async def test_graph_probe_reports_the_verdict_a_current_plane_holds() -> None:
     )
     client = FakeClient("org-w", [[state], [], []])
 
-    work = await probe_graph_work(client, graph_stamp=STAMP, verify_interval=3600.0)
+    work = await probe_graph_work(
+        client, graph_stamp=STAMP, embedding_stamp=STAMP, verify_interval=3600.0
+    )
 
     assert work.idle
     assert work.sweep == PlaneFacts(
@@ -107,7 +113,9 @@ async def test_graph_probe_reports_the_verdict_a_current_plane_holds() -> None:
 async def test_graph_probe_without_a_provider_asks_only_for_lifecycle_rows() -> None:
     client = FakeClient("org-c", [[]])
 
-    work = await probe_graph_work(client, graph_stamp=None, verify_interval=3600.0)
+    work = await probe_graph_work(
+        client, graph_stamp=None, embedding_stamp=None, verify_interval=3600.0
+    )
 
     assert work.idle and work.sweep is None
     query, params = client.calls[0]
@@ -115,7 +123,11 @@ async def test_graph_probe_without_a_provider_asks_only_for_lifecycle_rows() -> 
     assert "state_key" not in params and "stamp" not in params
 
     client = FakeClient("org-c", [[{"uuid": "row"}]])
-    assert not (await probe_graph_work(client, graph_stamp=None, verify_interval=3600.0)).idle
+    assert not (
+        await probe_graph_work(
+            client, graph_stamp=None, embedding_stamp=None, verify_interval=3600.0
+        )
+    ).idle
 
 
 async def test_content_probe_answers_every_organization_in_one_round_trip() -> None:
@@ -228,4 +240,27 @@ async def test_content_probe_without_embedders_asks_only_about_source_validation
 async def test_probes_refuse_a_response_with_the_wrong_statement_count() -> None:
     client = FakeClient("org-e", [[]])
     with pytest.raises(RuntimeError):
-        await probe_graph_work(client, graph_stamp=STAMP, verify_interval=3600.0)
+        await probe_graph_work(
+            client, graph_stamp=STAMP, embedding_stamp=STAMP, verify_interval=3600.0
+        )
+
+
+async def test_a_candidate_owed_a_vector_is_work_even_with_no_graph_sweep_provider() -> None:
+    """The promoted-embedding repair resolves its own provider; the probe asks with that stamp."""
+    client = FakeClient("org-p", [[], [{"uuid": "candidate"}]])
+
+    work = await probe_graph_work(
+        client, graph_stamp=None, embedding_stamp=STAMP, verify_interval=3600.0
+    )
+
+    assert not work.idle
+    assert work.sweep is None and work.embeddings_pending
+    query, params = client.calls[0]
+    assert query.count(";") == 2
+    assert "idx_entity_reflection_candidate_uuid" in query
+    assert params["stamp"] == STAMP and "state_key" not in params
+
+    quiet = FakeClient("org-q", [[], []])
+    assert (
+        await probe_graph_work(quiet, graph_stamp=None, embedding_stamp=STAMP, verify_interval=1.0)
+    ).idle
