@@ -854,6 +854,9 @@ class TestGetOrgMetrics:
         assert isinstance(kwargs["created_cutoff"], datetime)
         assert isinstance(kwargs["completed_cutoff"], datetime)
         assert kwargs["created_cutoff"] > kwargs["completed_cutoff"]
+        # completed_at is ISO text on the row, so the window bounds it both ways.
+        assert kwargs["completed_cutoff_text"] == kwargs["completed_cutoff"].isoformat()
+        assert "attributes.completed_at >= $completed_cutoff_text" in statement
 
     @pytest.mark.asyncio
     async def test_concurrent_dashboards_compute_rollups_once(self) -> None:

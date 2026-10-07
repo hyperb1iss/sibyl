@@ -329,9 +329,11 @@ def rollups_from_surreal_payload(payload: Mapping[str, object]) -> OrgTaskRollup
 # key coalesces the same way. The not-archived predicate filters after the
 # entity_type index access; a grouped answer is bounded by distinct
 # (project, status, priority) combinations, never by the task count.
-# Completions are selected as rows: completed_at is stored as text, so the
-# datetime column updated_at (bumped by the completing write, so never older)
-# bounds the window and Python reads the real completion instant.
+# Completions are selected as rows: completed_at is stored as ISO text, so
+# the window is bounded by the datetime column updated_at or by the text
+# itself (ISO text orders lexicographically to the day), and Python reads
+# the real completion instant. Either bound alone misses rows: a completion
+# stamped later than its last update exists on live data.
 TASK_ROLLUP_STATEMENT = """
 RETURN {
     tasks: (
@@ -375,7 +377,8 @@ RETURN {
         WHERE group_id = $group_id
           AND entity_type = $task_type
           AND string::lowercase(attributes.status ?? status ?? '') = 'done'
-          AND updated_at >= $completed_cutoff
+          AND (updated_at >= $completed_cutoff
+               OR attributes.completed_at >= $completed_cutoff_text)
     ),
     due_dates: (
         SELECT attributes.project_id ?? project_id AS project_id,
@@ -397,13 +400,15 @@ _TASK_ROLLUPS: OrgReadMemo[OrgTaskRollups] = OrgReadMemo(
 
 async def _load_surreal_task_rollups(group_id: str) -> OrgTaskRollups | None:
     now = datetime.now(UTC)
+    completed_cutoff = now - timedelta(days=VELOCITY_DAYS)
     try:
         rows = await execute_surreal_graph_query(
             group_id,
             TASK_ROLLUP_STATEMENT,
             task_type=EntityType.TASK.value,
             created_cutoff=now - timedelta(days=RECENT_DAYS),
-            completed_cutoff=now - timedelta(days=VELOCITY_DAYS),
+            completed_cutoff=completed_cutoff,
+            completed_cutoff_text=completed_cutoff.isoformat(),
         )
     except Exception as exc:
         log.warning(
