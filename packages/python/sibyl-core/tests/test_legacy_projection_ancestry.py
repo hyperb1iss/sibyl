@@ -128,7 +128,12 @@ async def test_graph_parent_reads_are_batched_and_never_write(runtime, content_s
             runtime.client.group_id, children, graph_client=runtime.client
         )
     ) == set(children)
-    assert graph_query.await_count == 2
+    # One ancestry read for the parent set, then the derivation verdict for
+    # the 100 children in batches of 32 ids (32, 32, 32, 4): the planner
+    # unions point lookups for an IN list up to 32 ids and scans the table
+    # past it. Every id is read exactly once across the batches.
+    verdict_batches = -(-len(children) // 32)
+    assert graph_query.await_count == 1 + verdict_batches
     assert content_query.await_count == 1
     for call in [*graph_query.await_args_list, *content_query.await_args_list]:
         assert call.args[0].lstrip().upper().startswith(("SELECT ", "RETURN "))
