@@ -1,11 +1,16 @@
 """Graph visualization data endpoints."""
 
+import asyncio
+from collections.abc import Coroutine
+from contextlib import suppress
 from functools import partial
+from typing import Any
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from sibyl.api.decorators import handle_workflow_errors
+from sibyl.api.routes.memory_auth import REQUEST_AUTO_INJECT_SENTINEL
 from sibyl.api.schemas import GraphData, GraphEdge, GraphNode, SubgraphRequest
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import (
@@ -16,6 +21,10 @@ from sibyl.auth.dependencies import (
 from sibyl.persistence.auth_runtime import list_accessible_project_graph_ids
 from sibyl_core.auth import AuthOrganization, OrganizationRole
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
+from sibyl_core.services.graph_community_selection import (
+    DETECTION_MAX_ENTITIES,
+    DETECTION_MAX_RELATIONSHIPS,
+)
 from sibyl_core.services.graph_read_availability import (
     available_graph_entities,
     available_graph_relationships,
@@ -35,6 +44,34 @@ _ADMIN_ROLES = (
     OrganizationRole.OWNER,
     OrganizationRole.ADMIN,
 )
+_DISCONNECT_POLL_SECONDS = 0.5
+
+
+async def _unless_disconnected[T](request: Request | None, work: Coroutine[Any, Any, T]) -> T:
+    """Run whole-graph work, abandoning it once the caller has gone.
+
+    The server keeps a handler running after its client drops, so a refreshed
+    graph page used to leave the previous whole-graph proof competing with
+    the new one for the same organization pool. The shared loaders count
+    their waiters: cancelling this one releases the work only when no other
+    request still needs it.
+    """
+    if request is None:
+        return await work
+    task = asyncio.ensure_future(work)
+    try:
+        while True:
+            done, _ = await asyncio.wait({task}, timeout=_DISCONNECT_POLL_SECONDS)
+            if done:
+                return task.result()
+            if await request.is_disconnected():
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+                raise HTTPException(status_code=499, detail="Client disconnected")
+    except asyncio.CancelledError:
+        task.cancel()
+        raise
 
 
 async def get_entity_graph_runtime(group_id: str):
@@ -365,6 +402,7 @@ async def _list_graph_entities(
                 accessible_teams=accessible_teams,
                 accessible_delegations=accessible_delegations,
             ),
+            include_embeddings=False,
         )
         for listed in batch:
             entity = current.get(listed.id)
@@ -414,6 +452,7 @@ async def _get_graph_entity(
             accessible_teams=accessible_teams,
             accessible_delegations=accessible_delegations,
         ),
+        include_embeddings=False,
     )
     entity = current.get(entity_id)
     if entity is None or not _graph_entity_visible(
@@ -822,6 +861,7 @@ async def get_subgraph(
                 accessible_teams=accessible_teams,
                 accessible_delegations=accessible_delegations,
             ),
+            include_embeddings=False,
         )
         current_edges = {
             r.id: r
@@ -954,6 +994,7 @@ async def get_clusters(
     org: AuthOrganization = Depends(get_current_organization),
     ctx: AuthContext = Depends(get_auth_context),
     refresh: bool = Query(default=False, description="Force refresh clusters"),
+    request: Request = REQUEST_AUTO_INJECT_SENTINEL,
 ) -> dict:
     """Get clusters for bubble visualization.
 
@@ -970,15 +1011,18 @@ async def get_clusters(
         accessible_delegations,
     ) = await _graph_scope_reader(ctx)
 
-    clusters = await get_clusters_for_visualization(
-        runtime.client,
-        group_id,
-        force_refresh=refresh,
-        principal_id=principal_id,
-        accessible_projects=accessible_projects,
-        allowed_memory_scope_keys=memory_grants,
-        accessible_teams=accessible_teams,
-        accessible_delegations=accessible_delegations,
+    clusters = await _unless_disconnected(
+        request,
+        get_clusters_for_visualization(
+            runtime.client,
+            group_id,
+            force_refresh=refresh,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=memory_grants,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
+        ),
     )
 
     # Transform to API response format
@@ -1008,6 +1052,7 @@ async def get_cluster_detail(
     cluster_id: str,
     org: AuthOrganization = Depends(get_current_organization),
     ctx: AuthContext = Depends(get_auth_context),
+    request: Request = REQUEST_AUTO_INJECT_SENTINEL,
 ) -> dict:
     """Get nodes and edges within a specific cluster for drill-down view."""
     group_id = str(org.id)
@@ -1020,15 +1065,18 @@ async def get_cluster_detail(
         accessible_delegations,
     ) = await _graph_scope_reader(ctx)
 
-    result = await get_cluster_nodes(
-        runtime.client,
-        group_id,
-        cluster_id,
-        principal_id=principal_id,
-        accessible_projects=accessible_projects,
-        allowed_memory_scope_keys=memory_grants,
-        accessible_teams=accessible_teams,
-        accessible_delegations=accessible_delegations,
+    result = await _unless_disconnected(
+        request,
+        get_cluster_nodes(
+            runtime.client,
+            group_id,
+            cluster_id,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=memory_grants,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
+        ),
     )
 
     if result.get("error"):
@@ -1088,6 +1136,7 @@ async def get_hierarchical_graph_data(
         description="Graph detail level",
     ),
     cluster_id: str | None = Query(default=None, description="Focus a specific cluster"),
+    request: Request = REQUEST_AUTO_INJECT_SENTINEL,
 ) -> dict:
     """Get hierarchical graph data with cluster assignments.
 
@@ -1115,20 +1164,23 @@ async def get_hierarchical_graph_data(
     # belong to and receive its task names and structure.
     focused_projects = _authorized_project_focus(projects, accessible_projects)
 
-    data = await get_hierarchical_graph(
-        runtime.client,
-        group_id,
-        project_ids=focused_projects,
-        entity_types=[t.value for t in types] if types else None,
-        max_nodes=max_nodes,
-        max_edges=max_edges,
-        resolution=resolution,
-        cluster_id=cluster_id,
-        principal_id=principal_id,
-        accessible_projects=accessible_projects,
-        allowed_memory_scope_keys=memory_grants,
-        accessible_teams=accessible_teams,
-        accessible_delegations=accessible_delegations,
+    data = await _unless_disconnected(
+        request,
+        get_hierarchical_graph(
+            runtime.client,
+            group_id,
+            project_ids=focused_projects,
+            entity_types=[t.value for t in types] if types else None,
+            max_nodes=max_nodes,
+            max_edges=max_edges,
+            resolution=resolution,
+            cluster_id=cluster_id,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=memory_grants,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
+        ),
     )
 
     # Guard against focused-mode totals undercounting. If filtered data exists,
@@ -1179,6 +1231,7 @@ async def get_hierarchical_graph_data(
 async def get_graph_stats(
     org: AuthOrganization = Depends(get_current_organization),
     ctx: AuthContext = Depends(get_auth_context),
+    request: Request = REQUEST_AUTO_INJECT_SENTINEL,
 ) -> dict:
     """Count current reader-visible graph rows and their visible connections."""
     from collections import Counter
@@ -1194,14 +1247,21 @@ async def get_graph_stats(
         accessible_teams,
         accessible_delegations,
     ) = await _graph_scope_reader(ctx)
-    snapshot = await _get_visible_graph_snapshot(
-        runtime.client,
-        group_id,
-        principal_id=principal_id,
-        accessible_projects=accessible_projects,
-        allowed_memory_scope_keys=memory_grants,
-        accessible_teams=accessible_teams,
-        accessible_delegations=accessible_delegations,
+    # Same snapshot key as the hierarchical and cluster views, so an
+    # organization holds one whole-graph snapshot rather than one per caller.
+    snapshot = await _unless_disconnected(
+        request,
+        _get_visible_graph_snapshot(
+            runtime.client,
+            group_id,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=memory_grants,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
+            max_entities=DETECTION_MAX_ENTITIES,
+            max_relationships=DETECTION_MAX_RELATIONSHIPS,
+        ),
     )
     return {
         "total_nodes": len(snapshot.entities),

@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 import inspect
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime, timedelta
 from functools import partial
 from typing import Any
@@ -14,6 +14,10 @@ from typing import Any
 import structlog
 
 from sibyl_core.models.entities import Entity, Relationship
+from sibyl_core.services.graph_cache_invalidation import (
+    graph_generation,
+    register_invalidation_listener,
+)
 from sibyl_core.services.graph_community_managers import (
     _list_all_entities,
     _list_all_relationships,
@@ -26,11 +30,85 @@ log = structlog.get_logger()
 type _ReaderCacheKey = tuple[
     str, tuple[str, ...], tuple[str, ...] | None, tuple[str, ...], tuple[str, ...]
 ]
+type _SnapshotKey = tuple[str, int | None, int | None]
+type _VisibleSnapshotKey = tuple[str, int | None, int | None, _ReaderCacheKey]
 
-GRAPH_SNAPSHOT_CACHE: dict[tuple[str, int | None, int | None], tuple[datetime, GraphSnapshot]] = {}
+GRAPH_SNAPSHOT_CACHE: dict[_SnapshotKey, tuple[datetime, GraphSnapshot]] = {}
 GRAPH_SNAPSHOT_CACHE_TTL = timedelta(minutes=5)
-GRAPH_SNAPSHOT_LOADS: dict[tuple[str, int | None, int | None], asyncio.Task[GraphSnapshot]] = {}
+GRAPH_SNAPSHOT_LOADS: dict[_SnapshotKey, asyncio.Task[GraphSnapshot]] = {}
 _GRAPH_SNAPSHOT_WAITERS: dict[asyncio.Task[GraphSnapshot], int] = {}
+
+# The validated, reader-visible snapshot: the enumeration above plus the
+# current-row, ancestry and scope proofs, which run under the reader's source
+# visibility and so are keyed by reader. An entry records the enumeration it
+# was proven against and stays valid only while that same enumeration is the
+# cached one: a write drops the enumeration through the generation listener,
+# the enumeration TTL ages it out, and either retires the proofs with it.
+GRAPH_VISIBLE_SNAPSHOT_CACHE: dict[_VisibleSnapshotKey, tuple[GraphSnapshot, GraphSnapshot]] = {}
+GRAPH_VISIBLE_SNAPSHOT_LOADS: dict[_VisibleSnapshotKey, asyncio.Task[GraphSnapshot]] = {}
+_GRAPH_VISIBLE_SNAPSHOT_WAITERS: dict[asyncio.Task[GraphSnapshot], int] = {}
+
+
+def _drop_organization_entries(organization_id: str) -> None:
+    for cache in (GRAPH_SNAPSHOT_CACHE, GRAPH_VISIBLE_SNAPSHOT_CACHE):
+        for key in [key for key in cache if key[0] == organization_id]:
+            cache.pop(key, None)
+
+
+register_invalidation_listener(_drop_organization_entries)
+
+
+async def _shared_load[K, T](
+    loads: dict[K, asyncio.Task[T]],
+    waiters: dict[asyncio.Task[T], int],
+    key: K,
+    start: Callable[[], Coroutine[Any, Any, T]],
+    *,
+    event: str,
+    organization_id: str,
+) -> T:
+    """Join the in-flight load for a key, or start it, as one of its peer waiters."""
+    task = loads.get(key)
+    if task is not None:
+        log.debug(f"{event}_joined", org_id=organization_id)
+    else:
+        task = asyncio.create_task(start())
+        loads[key] = task
+
+    waiters[task] = waiters.get(task, 0) + 1
+    try:
+        # Every caller is a peer waiter. Shielding prevents one cancelled
+        # request from deciding the lifetime of work another request needs.
+        return await asyncio.shield(task)
+    finally:
+        remaining = waiters[task] - 1
+        if remaining > 0:
+            waiters[task] = remaining
+        else:
+            waiters.pop(task, None)
+            if loads.get(key) is task:
+                loads.pop(key, None)
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                except Exception as error:
+                    log.debug(
+                        f"{event}_cancelled_loader_failed",
+                        org_id=organization_id,
+                        error=str(error),
+                    )
+
+
+def _fresh_snapshot(cached: tuple[datetime, GraphSnapshot] | None) -> GraphSnapshot | None:
+    if cached is None:
+        return None
+    cached_at, snapshot = cached
+    if datetime.now(UTC) - cached_at < GRAPH_SNAPSHOT_CACHE_TTL:
+        return snapshot
+    return None
 
 
 async def _get_graph_snapshot(
@@ -41,62 +119,29 @@ async def _get_graph_snapshot(
     max_relationships: int | None = None,
 ) -> GraphSnapshot:
     cache_key = (organization_id, max_entities, max_relationships)
-    cached = GRAPH_SNAPSHOT_CACHE.get(cache_key)
-    if cached is not None:
-        cached_at, snapshot = cached
-        if datetime.now(UTC) - cached_at < GRAPH_SNAPSHOT_CACHE_TTL:
-            log.debug(
-                "graph_snapshot_cache_hit",
-                org_id=organization_id,
-                max_entities=max_entities,
-                max_relationships=max_relationships,
-            )
-            return snapshot
-
-    task = GRAPH_SNAPSHOT_LOADS.get(cache_key)
-    if task is not None:
+    snapshot = _fresh_snapshot(GRAPH_SNAPSHOT_CACHE.get(cache_key))
+    if snapshot is not None:
         log.debug(
-            "graph_snapshot_load_joined",
+            "graph_snapshot_cache_hit",
             org_id=organization_id,
             max_entities=max_entities,
             max_relationships=max_relationships,
         )
-    else:
-        task = asyncio.create_task(
-            _load_graph_snapshot(
-                client,
-                organization_id,
-                max_entities=max_entities,
-                max_relationships=max_relationships,
-            )
-        )
-        GRAPH_SNAPSHOT_LOADS[cache_key] = task
+        return snapshot
 
-    _GRAPH_SNAPSHOT_WAITERS[task] = _GRAPH_SNAPSHOT_WAITERS.get(task, 0) + 1
-    try:
-        # Every caller is a peer waiter. Shielding prevents one cancelled
-        # request from deciding the lifetime of work another request needs.
-        return await asyncio.shield(task)
-    finally:
-        remaining = _GRAPH_SNAPSHOT_WAITERS[task] - 1
-        if remaining > 0:
-            _GRAPH_SNAPSHOT_WAITERS[task] = remaining
-        else:
-            _GRAPH_SNAPSHOT_WAITERS.pop(task, None)
-            if GRAPH_SNAPSHOT_LOADS.get(cache_key) is task:
-                GRAPH_SNAPSHOT_LOADS.pop(cache_key, None)
-            if not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-                except Exception as error:
-                    log.debug(
-                        "graph_snapshot_cancelled_loader_failed",
-                        org_id=organization_id,
-                        error=str(error),
-                    )
+    return await _shared_load(
+        GRAPH_SNAPSHOT_LOADS,
+        _GRAPH_SNAPSHOT_WAITERS,
+        cache_key,
+        lambda: _load_graph_snapshot(
+            client,
+            organization_id,
+            max_entities=max_entities,
+            max_relationships=max_relationships,
+        ),
+        event="graph_snapshot_load",
+        organization_id=organization_id,
+    )
 
 
 async def _load_graph_snapshot(
@@ -106,6 +151,7 @@ async def _load_graph_snapshot(
     max_entities: int | None,
     max_relationships: int | None,
 ) -> GraphSnapshot:
+    generation = graph_generation(organization_id)
     entities, relationships = await asyncio.gather(
         _list_all_entities(
             client,
@@ -126,6 +172,11 @@ async def _load_graph_snapshot(
         relationships=relationships,
         entity_by_id=entity_by_id,
     )
+    if graph_generation(organization_id) != generation:
+        # A write landed while the pages were read. The callers that waited
+        # get this snapshot; the next one re-enumerates.
+        log.info("graph_snapshot_stale_after_load", org_id=organization_id)
+        return snapshot
     GRAPH_SNAPSHOT_CACHE[(organization_id, max_entities, max_relationships)] = (
         datetime.now(UTC),
         snapshot,
@@ -227,7 +278,60 @@ async def _get_visible_graph_snapshot(
     max_entities: int | None = None,
     max_relationships: int | None = None,
 ) -> GraphSnapshot:
-    snapshot = await _get_graph_snapshot(
+    snapshot_key: _SnapshotKey = (organization_id, max_entities, max_relationships)
+    cache_key: _VisibleSnapshotKey = (
+        *snapshot_key,
+        _reader_cache_key(
+            principal_id,
+            accessible_projects,
+            allowed_memory_scope_keys,
+            accessible_teams,
+            accessible_delegations,
+        ),
+    )
+    cached = GRAPH_VISIBLE_SNAPSHOT_CACHE.get(cache_key)
+    if cached is not None:
+        base, visible = cached
+        if _fresh_snapshot(GRAPH_SNAPSHOT_CACHE.get(snapshot_key)) is base:
+            log.debug("graph_visible_snapshot_cache_hit", org_id=organization_id)
+            return visible
+        GRAPH_VISIBLE_SNAPSHOT_CACHE.pop(cache_key, None)
+
+    return await _shared_load(
+        GRAPH_VISIBLE_SNAPSHOT_LOADS,
+        _GRAPH_VISIBLE_SNAPSHOT_WAITERS,
+        cache_key,
+        lambda: _load_visible_graph_snapshot(
+            client,
+            organization_id,
+            cache_key=cache_key,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
+            max_entities=max_entities,
+            max_relationships=max_relationships,
+        ),
+        event="graph_visible_snapshot_load",
+        organization_id=organization_id,
+    )
+
+
+async def _load_visible_graph_snapshot(
+    client: Any,
+    organization_id: str,
+    *,
+    cache_key: _VisibleSnapshotKey,
+    principal_id: str | None,
+    accessible_projects: set[str] | None,
+    allowed_memory_scope_keys: set[str] | None,
+    accessible_teams: set[str] | None,
+    accessible_delegations: set[str] | None,
+    max_entities: int | None,
+    max_relationships: int | None,
+) -> GraphSnapshot:
+    base = await _get_graph_snapshot(
         client,
         organization_id,
         max_entities=max_entities,
@@ -236,7 +340,7 @@ async def _get_visible_graph_snapshot(
     snapshot = await _current_graph_snapshot(
         client,
         organization_id,
-        snapshot,
+        base,
         source_visible=partial(
             graph_row_read_allowed,
             principal_id=principal_id,
@@ -246,7 +350,7 @@ async def _get_visible_graph_snapshot(
             accessible_delegations=accessible_delegations,
         ),
     )
-    return _reader_visible_snapshot(
+    visible = _reader_visible_snapshot(
         snapshot,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
@@ -254,6 +358,17 @@ async def _get_visible_graph_snapshot(
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
     )
+    # Bind the fingerprint now, off the loop, so the derived caches read it
+    # instead of serializing the whole graph again on every warm request.
+    await asyncio.to_thread(_snapshot_fingerprint, visible)
+    GRAPH_VISIBLE_SNAPSHOT_CACHE[cache_key] = (base, visible)
+    log.info(
+        "graph_visible_snapshot_cache_updated",
+        org_id=organization_id,
+        entity_count=len(visible.entities),
+        relationship_count=len(visible.relationships),
+    )
+    return visible
 
 
 async def _current_graph_entities(
@@ -272,6 +387,7 @@ async def _current_graph_entities(
         ids,
         runtime=_runtime_for_client(client, organization_id),
         source_visible=source_visible,
+        include_embeddings=False,
     )
 
 
@@ -300,18 +416,18 @@ async def _current_graph_snapshot(
 
     Enumeration stays cached. Current rows and protected ancestry determine
     what can be rendered; a replacement using the same ID cannot revive an
-    older cached label or relationship fact.
+    older cached label or relationship fact. One view pass proves edges and
+    endpoints together: an edge whose stored body moved since enumeration is
+    dropped here rather than refreshed, and the write that moved it already
+    retired the enumeration it came from.
     """
     from sibyl_core.services.graph_community_managers import _runtime_for_client
     from sibyl_core.services.graph_view_availability import available_graph_view
 
-    discovered_relationships = await _current_graph_relationships(
-        client, organization_id, [relationship.id for relationship in snapshot.relationships]
-    )
     entities, current_relationships = await available_graph_view(
         organization_id,
         list(snapshot.entity_by_id),
-        discovered_relationships,
+        {relationship.id: relationship for relationship in snapshot.relationships},
         runtime=_runtime_for_client(client, organization_id),
         source_visible=source_visible,
     )
@@ -330,7 +446,13 @@ async def _current_graph_snapshot(
 
 
 def _snapshot_fingerprint(snapshot: GraphSnapshot) -> str:
-    """Bind derived cache values to their current, authorized input content."""
+    """Bind derived cache values to their current, authorized input content.
+
+    Computed once per snapshot object and remembered on it: a snapshot's rows
+    never change after it is built, and the derived caches ask on every call.
+    """
+    if snapshot.fingerprint is not None:
+        return snapshot.fingerprint
     payload = {
         "entities": [
             entity.model_dump(mode="json", exclude={"embedding"})
@@ -343,9 +465,10 @@ def _snapshot_fingerprint(snapshot: GraphSnapshot) -> str:
             )
         ],
     }
-    return hashlib.sha256(
+    snapshot.fingerprint = hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+    return snapshot.fingerprint
 
 
 def _count_int(value: object) -> int:

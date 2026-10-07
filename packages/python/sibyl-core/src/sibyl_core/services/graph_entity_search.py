@@ -121,6 +121,11 @@ def _rescue_explicit_anchor_candidate(
     return selected
 
 
+# The projection shared by every vector-free row read. The derivation verdict
+# snapshot reads the same shape, so rows from both compare equal.
+_ENTITY_ROW_FIELDS_WITHOUT_VECTORS = "* OMIT embedding, name_embedding"
+
+
 class _EntitySearchManager:
     def __init__(
         self,
@@ -149,14 +154,26 @@ class _EntitySearchManager:
             raise KeyError(entity_id)
         return _entity_from_row(row)
 
-    async def get_many(self, entity_ids: Sequence[str]) -> list[Entity]:
-        return [_entity_from_row(row) for row in await self._get_many_rows(entity_ids)]
+    # Readers that compare or render rows may skip the vector columns; the
+    # read proofs never consult them and a 1024-float column dominates a row.
+    supports_embedding_free_reads = True
 
-    async def _get_many_rows(self, entity_ids: Sequence[str]) -> list[dict[str, Any]]:
+    async def get_many(
+        self, entity_ids: Sequence[str], *, include_embeddings: bool = True
+    ) -> list[Entity]:
+        return [
+            _entity_from_row(row)
+            for row in await self._get_many_rows(entity_ids, include_embeddings=include_embeddings)
+        ]
+
+    async def _get_many_rows(
+        self, entity_ids: Sequence[str], *, include_embeddings: bool = True
+    ) -> list[dict[str, Any]]:
         """Load scoped raw rows once, in unique requested order, preserving stored fields."""
         ordered_ids = list(dict.fromkeys(str(entity_id) for entity_id in entity_ids if entity_id))
         if not ordered_ids:
             return []
+        fields = "*" if include_embeddings else _ENTITY_ROW_FIELDS_WITHOUT_VECTORS
         rows = normalize_records(
             await self._client.execute_query(
                 # `uuid IN $list` is never index-served, and here the scan
@@ -167,9 +184,9 @@ class _EntitySearchManager:
                 # group guard is applied to the returned rows instead (uuid is
                 # unique table-wide). A missing uuid yields a NONE entry,
                 # which normalize_records drops.
-                """
+                f"""
                 RETURN $uuids.map(|$u|
-                    (SELECT * FROM entity WHERE uuid = $u LIMIT 1)[0]
+                    (SELECT {fields} FROM entity WHERE uuid = $u LIMIT 1)[0]
                 );
                 """,
                 uuids=ordered_ids,

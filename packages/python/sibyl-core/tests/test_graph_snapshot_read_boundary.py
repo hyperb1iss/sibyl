@@ -3,7 +3,7 @@
 from functools import partial
 
 from sibyl_core.models.entities import Entity, EntityType
-from sibyl_core.services import graph_read_availability
+from sibyl_core.services import graph_view_availability
 from sibyl_core.services.graph_community_models import GraphSnapshot
 from sibyl_core.services.graph_community_snapshot import _current_graph_snapshot
 from sibyl_core.services.graph_visibility import graph_row_read_allowed
@@ -33,7 +33,7 @@ async def test_snapshot_rechecks_source_after_relationship_validation(
         runtime.client, runtime.client.group_id, snapshot, source_visible=visible
     )
     assert set(baseline.entity_by_id) == {parent.id, ordinary.id}
-    validate = graph_read_availability.available_graph_relationships
+    validate = graph_view_availability.available_graph_relationships
     applied = False
 
     async def retire_during_relationship_validation(*args, **kwargs):
@@ -49,7 +49,7 @@ async def test_snapshot_rechecks_source_after_relationship_validation(
         return await validate(*args, **kwargs)
 
     monkeypatch.setattr(
-        graph_read_availability,
+        graph_view_availability,
         "available_graph_relationships",
         retire_during_relationship_validation,
     )

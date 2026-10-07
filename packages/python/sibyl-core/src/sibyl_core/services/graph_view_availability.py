@@ -182,7 +182,12 @@ async def available_graph_view(
         if _edge_evidence(edge) == _edge_evidence(relationships[identifier])
     }
     nodes = await available_graph_entities(
-        organization_id, entity_ids, runtime=runtime, read=read, source_visible=source_visible
+        organization_id,
+        entity_ids,
+        runtime=runtime,
+        read=read,
+        source_visible=source_visible,
+        include_embeddings=False,
     )
     edge_dependencies: dict[str, set[SourceIdentity]] = {}
     for identifier, edge in current_edges.items():

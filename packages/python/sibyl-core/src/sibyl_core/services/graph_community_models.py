@@ -76,6 +76,9 @@ class GraphSnapshot:
     entities: list[Entity]
     relationships: list[Relationship]
     entity_by_id: dict[str, Entity]
+    # Content fingerprint, bound once the rows are final; the derived caches
+    # compare it on every request.
+    fingerprint: str | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass

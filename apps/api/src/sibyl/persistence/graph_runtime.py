@@ -782,6 +782,7 @@ class GraphQueryAdapter:
             sorted(endpoints),
             runtime=self._runtime,
             source_visible=entity_visible,
+            include_embeddings=False,
         )
         visible = {identity for identity, entity in current.items() if entity_visible(entity)}
         for relationship in relationships.values():

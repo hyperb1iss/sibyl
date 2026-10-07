@@ -16,6 +16,10 @@ from sibyl_core.backends.surreal.schema import EMBEDDING_DIM, bootstrap_schema
 from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
 from sibyl_core.config import settings
 from sibyl_core.embeddings.providers import EmbeddingProvider
+from sibyl_core.services.graph_cache_invalidation import (
+    invalidate_graph_caches,
+    query_mutates_graph,
+)
 
 
 class SurrealGraphClient(DedicatedSurrealClient):
@@ -53,6 +57,19 @@ class SurrealGraphClient(DedicatedSurrealClient):
     def is_embedded(self) -> bool:
         """Whether this client runs an in-process engine rather than a server."""
         return is_embedded_surreal_url(self._url)
+
+    async def _execute(self, query: str, **kwargs: Any) -> object:
+        # Every in-process graph write for this organization passes through
+        # here, so one seam keeps the reader caches honest without each writer
+        # remembering to invalidate. Reads never bump. The bump also follows a
+        # failed statement, since a multi-statement write may have landed in
+        # part. Origin attribution for slow-query logs is resolved by the
+        # public execute methods before they reach this frame.
+        try:
+            return await super()._execute(query, **kwargs)
+        finally:
+            if query_mutates_graph(query):
+                invalidate_graph_caches(self._group_id)
 
 
 _prepared_groups: set[str] = set()

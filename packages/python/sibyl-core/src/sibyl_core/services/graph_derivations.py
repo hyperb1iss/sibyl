@@ -18,6 +18,18 @@ from sibyl_core.services.memory_derivations import observation_from_record, vali
 from sibyl_core.services.memory_source_validation import source_authority_ceiling
 from sibyl_core.services.source_observations import SourceUnavailableError, graph_evidence
 
+# The planner unions point lookups for an IN list up to this size; one more
+# id and it scans the table. Each batch is one round trip of that shape.
+_VERDICT_BATCH_SIZE = 32
+_VERDICT_SNAPSHOT_QUERY = """RETURN {
+    RETURN {
+        associations: (SELECT * FROM memory_derivations WHERE organization_id=$org
+            AND target_kind='graph_entity' AND target_id IN $ids),
+        targets: (SELECT * OMIT embedding, name_embedding FROM entity
+            WHERE group_id=$org AND uuid IN $ids)
+    };
+};"""
+
 
 def graph_target_digest(entity) -> str:
     """Bind published evidence and audience, excluding publication bookkeeping."""
@@ -198,29 +210,42 @@ async def _graph_derivation_verdicts(
     execute_query = read.graph_execute_query if read is not None else None
     if read is not None:
         read._check_org(organization_id)
+    # An explicit reader is a transaction executor on one connection; it
+    # cannot take overlapping statements. A pooled client takes as many as it
+    # has slots; on a single-slot pool (every embedded store) overlapping
+    # batches only queue behind each other, and a queued waiter binds the
+    # pool's queue to the current event loop, which a later loop reusing the
+    # same client cannot wait on.
+    sequential = execute_query is not None
     if execute_query is None:
         if client is None:
             client = (await get_surreal_graph_runtime(organization_id)).client
         execute_query = client.execute_query
-    snapshots = normalize_records(
-        await execute_query(
-            """RETURN {
-            RETURN {
-                associations: (SELECT * FROM memory_derivations WHERE organization_id=$org
-                    AND target_kind='graph_entity' AND target_id IN $ids),
-                targets: (SELECT * FROM entity WHERE group_id=$org AND uuid IN $ids)
-            };
-        };""",
-            org=organization_id,
-            ids=list(ids),
+        sequential = getattr(client, "pool_size", 1) <= 1
+    unique_ids = list(dict.fromkeys(ids))
+    batches = [
+        unique_ids[start : start + _VERDICT_BATCH_SIZE]
+        for start in range(0, len(unique_ids), _VERDICT_BATCH_SIZE)
+    ]
+
+    async def snapshot(batch: list[str]) -> tuple[list[Any], list[Any]]:
+        rows = normalize_records(
+            await execute_query(_VERDICT_SNAPSHOT_QUERY, org=organization_id, ids=batch)
         )
-    )
-    if len(snapshots) != 1:
-        raise RuntimeError("graph derivation snapshot unavailable")
-    target_rows = snapshots[0].get("targets")
-    association_rows = snapshots[0].get("associations")
-    if not isinstance(target_rows, list) or not isinstance(association_rows, list):
-        raise RuntimeError("graph derivation snapshot unavailable")
+        if len(rows) != 1:
+            raise RuntimeError("graph derivation snapshot unavailable")
+        batch_targets = rows[0].get("targets")
+        batch_associations = rows[0].get("associations")
+        if not isinstance(batch_targets, list) or not isinstance(batch_associations, list):
+            raise RuntimeError("graph derivation snapshot unavailable")
+        return batch_targets, batch_associations
+
+    if sequential:
+        snapshots = [await snapshot(batch) for batch in batches]
+    else:
+        snapshots = await asyncio.gather(*(snapshot(batch) for batch in batches))
+    target_rows = [row for batch_targets, _ in snapshots for row in batch_targets]
+    association_rows = [row for _, batch_associations in snapshots for row in batch_associations]
     targets = {}
     for row in target_rows:
         try:
@@ -264,11 +289,14 @@ async def _graph_derivation_verdicts(
                 return False
         if expected_entities is not None:
             expected = expected_entities.get(target_id)
+            # The snapshot rows above carry no vectors, so the comparison
+            # must not either; entity_read_evidence draws the same line.
             if (
                 expected is None
                 or entity is None
                 or (
-                    expected.model_dump(mode="json") != entity.model_dump(mode="json")
+                    expected.model_dump(mode="json", exclude={"embedding"})
+                    != entity.model_dump(mode="json", exclude={"embedding"})
                     or expected.derivation_required != entity.derivation_required
                     or expected.observed_revision != entity.observed_revision
                 )

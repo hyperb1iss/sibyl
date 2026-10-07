@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, patch
 from uuid import UUID
@@ -37,7 +38,7 @@ def stored_graph_rows(monkeypatch):
     in the graph availability and community source-retirement controls.
     """
 
-    async def available(org, ids, *, source_visible=None):
+    async def available(org, ids, *, source_visible=None, **_read_options):
         runtime = await graph_routes.get_entity_graph_runtime(org)
         manager = runtime.entity_manager
         if hasattr(manager, "get_many"):
@@ -538,6 +539,50 @@ class TestGraphRoutes:
             accessible_teams=set(),
             accessible_delegations=set(),
         )
+
+    @pytest.mark.asyncio
+    async def test_hierarchical_graph_stops_when_the_client_disconnects(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        runtime = SimpleNamespace(client=object())
+        started = asyncio.Event()
+        cancelled = asyncio.Event()
+
+        async def abandoned_graph(*args, **kwargs):
+            started.set()
+            try:
+                await asyncio.sleep(30)
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+            raise AssertionError("graph work should have been cancelled")
+
+        request = SimpleNamespace(is_disconnected=AsyncMock(return_value=True))
+        monkeypatch.setattr(graph_routes, "_DISCONNECT_POLL_SECONDS", 0.01)
+        with (
+            patch(
+                "sibyl.api.routes.graph.get_entity_graph_runtime",
+                AsyncMock(return_value=runtime),
+            ),
+            patch("sibyl.api.routes.graph.get_hierarchical_graph", abandoned_graph),
+            _accessible_projects(),
+            pytest.raises(HTTPException) as excinfo,
+        ):
+            await graph_routes.get_hierarchical_graph_data(
+                org=_org(),
+                ctx=_ctx(),
+                projects=None,
+                types=None,
+                max_nodes=1000,
+                max_edges=5000,
+                resolution="detail",
+                cluster_id=None,
+                request=request,
+            )
+
+        assert excinfo.value.status_code == 499
+        assert started.is_set()
+        assert cancelled.is_set()
 
     @pytest.mark.asyncio
     async def test_get_hierarchical_graph_data_uses_type_filter_fallback_totals(self) -> None:
