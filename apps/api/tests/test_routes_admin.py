@@ -30,7 +30,8 @@ from sibyl_core.auth import OrganizationRole
 
 
 @pytest.mark.asyncio
-async def test_health_passes_org_context_to_core_health() -> None:
+async def test_health_probes_the_org_graph_without_counting_rows() -> None:
+    """The dashboard polls this every 30 s; it must never scan the entity table."""
     org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
     mock_get_health = AsyncMock(
         return_value={
@@ -38,17 +39,49 @@ async def test_health_passes_org_context_to_core_health() -> None:
             "server_name": "sibyl",
             "uptime_seconds": 42,
             "graph_connected": True,
-            "entity_counts": {"task": 3},
+            "entity_counts": {},
             "errors": [],
         }
     )
 
-    with patch("sibyl_core.tools.core.get_health", mock_get_health):
+    with (
+        patch("sibyl_core.tools.core.get_health", mock_get_health),
+        patch("sibyl.api.routes.admin.peek_graph_stats_payload", return_value=None),
+    ):
         response = await health(org=org)
 
     assert response.status == "healthy"
+    assert response.graph_connected is True
+    assert response.entity_counts == {}
+    mock_get_health.assert_awaited_once_with(
+        organization_id=str(org.id), include_entity_counts=False
+    )
+
+
+@pytest.mark.asyncio
+async def test_health_serves_type_counts_only_from_the_warm_stats_memo() -> None:
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    mock_get_health = AsyncMock(
+        return_value={
+            "status": "healthy",
+            "server_name": "sibyl",
+            "uptime_seconds": 42,
+            "graph_connected": True,
+            "entity_counts": {},
+            "errors": [],
+        }
+    )
+
+    with (
+        patch("sibyl_core.tools.core.get_health", mock_get_health),
+        patch(
+            "sibyl.api.routes.admin.peek_graph_stats_payload",
+            return_value={"entity_counts": {"task": 3}, "total_entities": 3},
+        ),
+    ):
+        response = await health(org=org)
+
     assert response.entity_counts == {"task": 3}
-    mock_get_health.assert_awaited_once_with(organization_id=str(org.id))
 
 
 @pytest.mark.asyncio

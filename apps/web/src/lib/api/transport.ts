@@ -155,6 +155,16 @@ function shouldRedirectAuthFailure(endpoint: string): boolean {
   return endpoint !== '/auth/refresh' && !isPublicRoutePath(window.location.pathname);
 }
 
+/**
+ * Per-request options a query hook threads through to fetch. React Query
+ * hands each queryFn an AbortSignal and aborts it when the query is
+ * superseded or loses its last observer; forwarding it is what stops a
+ * cancelled refetch on the server instead of only discarding its answer.
+ */
+export interface RequestOptions {
+  signal?: AbortSignal;
+}
+
 export async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const makeRequest = () =>
     fetch(`${API_BASE}${endpoint}`, {

@@ -19,6 +19,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from sibyl.api.routes.metrics import OrgTaskRollups
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import (
     get_auth_context,
@@ -236,9 +237,6 @@ class TestProjectMetricsWire:
         )
         service = AsyncMock()
         service.get_entity.return_value = SimpleNamespace(id="proj-x", name="P", metadata={})
-        runtime = SimpleNamespace(
-            entity_manager=SimpleNamespace(list_by_type=AsyncMock(return_value=[]))
-        )
 
         with (
             patch("sibyl.api.routes.metrics.verify_entity_project_access", acl),
@@ -247,8 +245,8 @@ class TestProjectMetricsWire:
                 AsyncMock(return_value=service),
             ),
             patch(
-                "sibyl.api.routes.metrics.get_entity_graph_runtime",
-                AsyncMock(return_value=runtime),
+                "sibyl.api.routes.metrics._load_task_rollups",
+                AsyncMock(return_value=OrgTaskRollups((), (), (), (), ())),
             ),
             _wire(router, OUTSIDER_ID) as client,
         ):

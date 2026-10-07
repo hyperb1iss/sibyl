@@ -146,14 +146,22 @@ async def _explore_paginated(**filters: object) -> list[object]:
             **filters,
         )
         batch = list(response.entities or [])
-        if not batch:
-            break
-
         entities.extend(batch)
         if not getattr(response, "has_more", False):
             break
 
-        offset += len(batch)
+        # A single-type page is one database window, and rows the server's
+        # recheck drops shorten it without moving it: the next page starts
+        # where the server says (next_offset), never after what came back,
+        # and an empty window with more behind it is a window, not the end.
+        # A server from before next_offset counted visible rows, so its next
+        # page starts after the rows it returned, or a full page past an
+        # empty one, which widens the window it filtered.
+        next_offset = getattr(response, "next_offset", None)
+        if isinstance(next_offset, int) and next_offset > offset:
+            offset = next_offset
+        else:
+            offset += len(batch) or EXPLORE_PAGE_SIZE
 
     return entities
 

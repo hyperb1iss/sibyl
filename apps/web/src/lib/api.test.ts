@@ -293,6 +293,18 @@ describe('fetchApi auth state machine', () => {
     expect(setHref).not.toHaveBeenCalled();
   });
 
+  it('forwards an AbortSignal so a cancelled query stops the request itself', async () => {
+    const { fetchMock } = scriptFetch([
+      { match: '/admin/health', response: jsonResponse({ status: 'healthy' }) },
+    ]);
+    const controller = new AbortController();
+
+    const { fetchApi } = await import('./api/transport');
+    await fetchApi('/admin/health', { signal: controller.signal });
+
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ signal: controller.signal });
+  });
+
   it('returns undefined for 204 responses without parsing a body', async () => {
     scriptFetch([
       {

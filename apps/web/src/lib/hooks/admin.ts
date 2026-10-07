@@ -18,7 +18,7 @@ import { useWebSocketStatus } from './realtime';
 export function useHealth() {
   return useQuery({
     queryKey: queryKeys.admin.health,
-    queryFn: adminApi.health,
+    queryFn: ({ signal }) => adminApi.health({ signal }),
     refetchInterval: TIMING.HEALTH_CHECK_INTERVAL,
   });
 }
@@ -26,7 +26,7 @@ export function useHealth() {
 export function useStats(initialData?: StatsResponse) {
   return useQuery({
     queryKey: queryKeys.admin.stats,
-    queryFn: adminApi.stats,
+    queryFn: ({ signal }) => adminApi.stats({ signal }),
     initialData,
     staleTime: 5 * TIMING.STALE_TIME,
     refetchOnWindowFocus: false,
@@ -231,11 +231,14 @@ export function useJobs(options?: { enabled?: boolean; function?: string; limit?
       function: options?.function,
       limit: options?.limit ?? 25,
     }),
-    queryFn: () =>
-      jobsApi.list({
-        function: options?.function,
-        limit: options?.limit ?? 25,
-      }),
+    queryFn: ({ signal }) =>
+      jobsApi.list(
+        {
+          function: options?.function,
+          limit: options?.limit ?? 25,
+        },
+        { signal }
+      ),
     enabled: options?.enabled ?? true,
     staleTime: 5000,
     refetchInterval: 15000,

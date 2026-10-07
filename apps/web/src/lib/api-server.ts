@@ -219,6 +219,10 @@ export async function fetchSearchResults(params: {
  * Fetch projects list.
  * User-scoped: projects are filtered by org membership.
  */
+/**
+ * Seeds the one shared project list query, so it carries every project
+ * (archived ones included) and the client filters views from it.
+ */
 export async function fetchProjects(): Promise<TaskListResponse> {
   return serverFetch<TaskListResponse>('/search/explore', {
     method: 'POST',
@@ -226,6 +230,7 @@ export async function fetchProjects(): Promise<TaskListResponse> {
       mode: 'list',
       types: ['project'],
       limit: 100,
+      include_archived: true,
     }),
     ...CACHE_CONFIG.userScoped,
   });

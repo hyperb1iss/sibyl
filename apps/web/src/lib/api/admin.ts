@@ -1,4 +1,4 @@
-import { fetchApi, fetchApiBlob } from './transport';
+import { fetchApi, fetchApiBlob, type RequestOptions } from './transport';
 
 export interface AdminAuditEvent {
   id: string;
@@ -433,8 +433,10 @@ function adminAuditSearchParams(params?: AdminAuditParams): URLSearchParams {
 export const checkHealth = () => fetchApi<{ status: string }>('/health');
 
 export const adminApi = {
-  health: () => fetchApi<HealthResponse>('/admin/health'),
-  stats: () => fetchApi<StatsResponse>('/admin/stats'),
+  health: (options?: RequestOptions) =>
+    fetchApi<HealthResponse>('/admin/health', { signal: options?.signal }),
+  stats: (options?: RequestOptions) =>
+    fetchApi<StatsResponse>('/admin/stats', { signal: options?.signal }),
   audit: {
     list: (params?: AdminAuditParams) => {
       const searchParams = adminAuditSearchParams(params);
@@ -472,12 +474,14 @@ export const telemetryApi = {
 };
 
 export const jobsApi = {
-  list: (params?: { function?: string; limit?: number }) => {
+  list: (params?: { function?: string; limit?: number }, options?: RequestOptions) => {
     const search = new URLSearchParams();
     if (params?.function) search.set('function', params.function);
     if (params?.limit) search.set('limit', String(params.limit));
     const suffix = search.toString();
-    return fetchApi<BackgroundJobListResponse>(`/jobs${suffix ? `?${suffix}` : ''}`);
+    return fetchApi<BackgroundJobListResponse>(`/jobs${suffix ? `?${suffix}` : ''}`, {
+      signal: options?.signal,
+    });
   },
   runConsolidation: () =>
     fetchApi<MaintenanceJobResponse>('/jobs/consolidation', {

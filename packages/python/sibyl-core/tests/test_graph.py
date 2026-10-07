@@ -2688,35 +2688,32 @@ async def test_graph_delete_transaction_rolls_back_after_mid_transaction_error()
 
 @pytest.mark.asyncio
 async def test_native_project_summary_sorts_critical_tasks_by_priority() -> None:
-    entity_manager = EntityManager(cast(Any, object()), group_id="org-native-graph")
-    entity_manager.list_by_type = AsyncMock(  # type: ignore[method-assign]
-        return_value=[
-            Entity(
-                id="task-high",
-                entity_type=EntityType.TASK,
-                name="High task",
-                description="",
-                organization_id="org-native-graph",
-                metadata={
-                    "project_id": "project_native",
-                    "status": "todo",
-                    "priority": "high",
-                },
-            ),
-            Entity(
-                id="task-critical",
-                entity_type=EntityType.TASK,
-                name="Critical task",
-                description="",
-                organization_id="org-native-graph",
-                metadata={
-                    "project_id": "project_native",
-                    "status": "todo",
-                    "priority": "critical",
-                },
-            ),
-        ]
-    )
+    class _SummaryClient:
+        async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
+            assert "GROUP BY status" in query
+            return [
+                {
+                    "status_counts": [{"status": "todo", "n": 2}],
+                    "high": [
+                        {
+                            "uuid": "task-high",
+                            "name": "High task",
+                            "status": "todo",
+                            "priority": "high",
+                        }
+                    ],
+                    "critical": [
+                        {
+                            "uuid": "task-critical",
+                            "name": "Critical task",
+                            "status": "todo",
+                            "priority": "critical",
+                        }
+                    ],
+                }
+            ]
+
+    entity_manager = EntityManager(cast(Any, _SummaryClient()), group_id="org-native-graph")
     entity_manager.list_epics_for_project = AsyncMock(return_value=[])  # type: ignore[method-assign]
 
     summary = await entity_manager.get_project_summary("project_native")
@@ -2725,6 +2722,7 @@ async def test_native_project_summary_sorts_critical_tasks_by_priority() -> None
         "task-critical",
         "task-high",
     ]
+    assert summary["total_tasks"] == 2
 
 
 @pytest.mark.asyncio

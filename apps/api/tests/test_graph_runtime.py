@@ -149,6 +149,43 @@ async def test_graph_stats_payload_skips_archive_only_tables(
     assert all("saga_count" not in query for query in client.queries)
 
 
+@pytest.mark.asyncio
+async def test_graph_stats_payload_counts_once_per_org_until_a_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every entities page, dashboard and search render asks for the counts.
+
+    The count is a full table scan, so a burst of those is served from one
+    scan per organization and the write path's broadcast drops it.
+    """
+    from sibyl.persistence.read_memo import invalidate_org_read_memos, reset_org_read_memos
+
+    reset_org_read_memos()
+    client = _StatsPayloadClient()
+    monkeypatch.setattr(
+        graph_runtime,
+        "_get_graph_runtime",
+        AsyncMock(return_value=SimpleNamespace(client=client)),
+    )
+    try:
+        first = await graph_runtime.get_graph_stats_payload("org-123")
+        second = await graph_runtime.get_graph_stats_payload("org-123")
+        assert first == second
+        assert len(client.queries) == 1
+        assert graph_runtime.peek_graph_stats_payload("org-123") == first
+        assert graph_runtime.peek_graph_stats_payload("org-456") is None
+
+        await graph_runtime.get_graph_stats_payload("org-456")
+        assert len(client.queries) == 2
+
+        invalidate_org_read_memos("org-123")
+        assert graph_runtime.peek_graph_stats_payload("org-123") is None
+        await graph_runtime.get_graph_stats_payload("org-123")
+        assert len(client.queries) == 3
+    finally:
+        reset_org_read_memos()
+
+
 def test_graph_runtime_contains_only_the_native_driver_construction_path() -> None:
     source = Path(graph_runtime.__file__).read_text()
     tree = ast.parse(source)

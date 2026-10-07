@@ -18,7 +18,9 @@ export function useSearch(
 ) {
   return useQuery({
     queryKey: queryKeys.search.query(params),
-    queryFn: () => searchApi.query(params),
+    // The signal is consumed so a superseded query (the next keystroke) is
+    // aborted on the server instead of running to completion unobserved.
+    queryFn: ({ signal }) => searchApi.query(params, { signal }),
     enabled: (options?.enabled ?? true) && !!params.query,
     initialData: options?.initialData,
     // The app-wide default (placeholderData: keepPreviousData) keeps the last

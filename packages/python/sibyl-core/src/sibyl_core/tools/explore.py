@@ -1,5 +1,6 @@
 """Explore tool for navigating the Sibyl knowledge graph."""
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal
 
 import structlog
@@ -9,6 +10,11 @@ from sibyl_core.models.entities import Entity, EntityType, Relationship, Relatio
 from sibyl_core.services.graph_read_availability import (
     available_graph_entities,
     available_graph_relationships,
+)
+from sibyl_core.services.graph_search import (
+    entity_matches_list_filters,
+    lower_filter_values,
+    lower_sequence_values,
 )
 from sibyl_core.services.graph_view_availability import available_graph_view
 from sibyl_core.tools.helpers import (
@@ -145,6 +151,8 @@ async def explore(
         - total: Count returned in this response
         - has_more: True if more results exist beyond limit
         - actual_total: Actual count matching filters (for pagination awareness)
+        - next_offset: Offset of the next page when listing one type; a page
+          can come back shorter than limit, so pass this back as offset
         - filters: Applied filter criteria
 
     EXAMPLES:
@@ -419,8 +427,49 @@ async def _explore_list(
     )
     requested_project_id_set = set(requested_project_ids) if requested_project_ids else None
 
-    # Fetch with DB-level filtering for efficiency
-    # Over-fetch to detect has_more after any remaining client-side filters
+    def passes_python_filters(entity: Entity) -> bool:
+        return _passes_entity_filters(
+            entity=entity,
+            language=language,
+            category=category,
+            project=None,  # project already filtered by DB when only one is requested
+            project_ids=requested_project_id_set,
+            accessible_projects=accessible_projects,
+            epic=None,
+            status=None,
+            priority=None,
+            complexity=None,
+            feature=None,
+            tags=None,
+            include_archived=include_archived,
+            scope_guard=scope_guard,
+        )
+
+    if len(target_types) == 1:
+        return await _explore_list_window(
+            runtime,
+            target_types[0],
+            project_id_filter=project_id_filter,
+            epic=epic,
+            no_epic=no_epic,
+            status=status,
+            priority=priority,
+            complexity=complexity,
+            feature=feature,
+            tag_list=tag_list,
+            include_archived=include_archived,
+            limit=limit,
+            offset=offset,
+            filters=filters,
+            group_id=group_id,
+            scope_guard=scope_guard,
+            passes_python_filters=passes_python_filters,
+        )
+
+    # Several types share one page, so the offset counts visible rows across
+    # the merged list and every page re-reads the rows before it. Only the
+    # default browse set lists more than one type; the hot single-type
+    # listings take the window path above.
     fetch_limit = limit + offset + 50
     all_entities = []
     # A type whose fetch came back full may have rows past the window that
@@ -447,27 +496,7 @@ async def _explore_list(
             window_full = True
         all_entities.extend(entities)
 
-    # Apply remaining filters not handled by DB (language, category, accessible_projects)
-    filtered_entities = [
-        entity
-        for entity in all_entities
-        if _passes_entity_filters(
-            entity=entity,
-            language=language,
-            category=category,
-            project=None,  # project already filtered by DB when only one is requested
-            project_ids=requested_project_id_set,
-            accessible_projects=accessible_projects,
-            epic=None,
-            status=None,
-            priority=None,
-            complexity=None,
-            feature=None,
-            tags=None,
-            include_archived=include_archived,
-            scope_guard=scope_guard,
-        )
-    ]
+    filtered_entities = [entity for entity in all_entities if passes_python_filters(entity)]
 
     from sibyl_core.services.graph_capture_availability import available_capture_projection_rows
 
@@ -483,18 +512,7 @@ async def _explore_list(
     actual_total = len(filtered_entities)
     paginated_entities = filtered_entities[offset : offset + limit]
     has_more = offset + len(paginated_entities) < actual_total or window_full
-
-    # Build result summaries
-    results = [
-        EntitySummary(
-            id=entity.id,
-            type=entity.entity_type.value,
-            name=entity.name,
-            description=entity.description[:200] if entity.description else "",
-            metadata=_build_entity_metadata(entity),
-        )
-        for entity in paginated_entities
-    ]
+    results = _entity_summaries(paginated_entities)
 
     return ExploreResponse(
         mode="list",
@@ -506,6 +524,116 @@ async def _explore_list(
         has_more=has_more,
         actual_total=actual_total,
     )
+
+
+async def _explore_list_window(
+    runtime: Any,
+    entity_type: EntityType,
+    *,
+    project_id_filter: str | None,
+    epic: str | None,
+    no_epic: bool,
+    status: str | None,
+    priority: str | None,
+    complexity: str | None,
+    feature: str | None,
+    tag_list: list[str] | None,
+    include_archived: bool,
+    limit: int,
+    offset: int,
+    filters: dict[str, Any],
+    group_id: str,
+    scope_guard: ScopeGuard | None,
+    passes_python_filters: Callable[[Entity], bool],
+) -> ExploreResponse:
+    """Page one type over exactly one database window.
+
+    ``offset`` and ``limit`` address the ordered index directly, so page k
+    costs one statement of ``limit + 1`` rows wherever it starts. Under the
+    visible-row offset every page re-read every row before it, and the task
+    board pages through the whole type on each write. Rows the recheck or the
+    reader's scope drops shorten the page instead of pulling the next window
+    in: ``has_more`` comes from the raw row count and ``next_offset`` says
+    where the next window starts, so no row is skipped or repeated.
+    """
+    query_project_id = None if entity_type == EntityType.PROJECT else project_id_filter
+    window = await runtime.entity_manager.list_by_type(
+        entity_type,
+        limit=limit + 1,
+        offset=offset,
+        project_id=query_project_id,
+        epic_id=epic,
+        no_epic=no_epic,
+        status=status,
+        priority=priority,
+        complexity=complexity,
+        feature=feature,
+        tags=tag_list,
+        include_archived=include_archived,
+        enrich_epic_progress=entity_type == EntityType.EPIC,
+        # A summary carries name, description and metadata; the prose and
+        # vectors were most of a 100-task page's bytes.
+        include_content=False,
+        exact_window=True,
+    )
+    has_more = len(window) > limit
+    status_values = lower_filter_values(status)
+    priority_values = lower_filter_values(priority)
+    complexity_values = lower_filter_values(complexity)
+    tag_values = lower_sequence_values(tag_list)
+    candidates = [
+        entity
+        for entity in window[:limit]
+        if entity_matches_list_filters(
+            entity,
+            project_id=query_project_id,
+            epic_id=epic,
+            no_epic=no_epic,
+            status_values=status_values,
+            priority_values=priority_values,
+            complexity_values=complexity_values,
+            feature=feature,
+            tag_values=tag_values,
+            include_archived=include_archived,
+        )
+        and passes_python_filters(entity)
+    ]
+
+    from sibyl_core.services.graph_capture_availability import available_capture_projection_rows
+
+    current = await available_capture_projection_rows(
+        group_id,
+        {entity.id: entity for entity in candidates},
+        graph_client=runtime.client,
+        source_visible=scope_guard,
+    )
+    page = [entity for entity in candidates if entity.id in current]
+    results = _entity_summaries(page)
+    return ExploreResponse(
+        mode="list",
+        entities=results,
+        total=len(results),
+        filters=filters,
+        limit=limit,
+        offset=offset,
+        has_more=has_more,
+        # Only a single complete window knows its visible total.
+        actual_total=None if has_more or offset else len(results),
+        next_offset=offset + limit if has_more else None,
+    )
+
+
+def _entity_summaries(entities: list[Entity]) -> list[EntitySummary]:
+    return [
+        EntitySummary(
+            id=entity.id,
+            type=entity.entity_type.value,
+            name=entity.name,
+            description=entity.description[:200] if entity.description else "",
+            metadata=_build_entity_metadata(entity),
+        )
+        for entity in entities
+    ]
 
 
 async def _explore_dependencies(

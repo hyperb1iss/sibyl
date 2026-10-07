@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 
 import { type ConnectionStatus, wsClient } from '../websocket';
 import { queryKeys } from './query-keys';
-import { invalidateByEntityType } from './shared';
+import { createInvalidationScheduler, invalidateByEntityType } from './shared';
 import type { CrawlProgressData } from './sources';
 
 export function useWebSocketStatus(enabled = true): ConnectionStatus {
@@ -41,23 +41,28 @@ export function useRealtimeUpdates(isAuthenticated?: boolean) {
 
     wsClient.connect();
 
+    // Every broadcast in the org lands here, so invalidations are coalesced
+    // per query key: a burst of events becomes one trailing refetch.
+    const scheduler = createInvalidationScheduler(queryClient);
+    const invalidate = scheduler.schedule;
+
     // Entity created - smart invalidation based on entity type
     const unsubCreate = wsClient.on('entity_created', data => {
       const entityType = data.entity_type || data.type;
-      invalidateByEntityType(queryClient, entityType, data.id, { includeStats: true });
+      invalidateByEntityType(invalidate, entityType, data.id, { includeStats: true });
     });
 
     const unsubPending = wsClient.on('entity_pending', data => {
       const entityType = data.entity_type || data.type;
-      invalidateByEntityType(queryClient, entityType, data.id, { includeStats: true });
+      invalidateByEntityType(invalidate, entityType, data.id, { includeStats: true });
     });
 
     // Entity updated - smart invalidation based on entity type
     const unsubUpdate = wsClient.on('entity_updated', data => {
       const entityType = data.entity_type || data.type;
       // Also invalidate related entities explorer
-      queryClient.invalidateQueries({ queryKey: queryKeys.explore.related(data.id) });
-      invalidateByEntityType(queryClient, entityType, data.id);
+      invalidate(queryKeys.explore.related(data.id));
+      invalidateByEntityType(invalidate, entityType, data.id);
     });
 
     // Entity deleted - remove from cache + smart invalidation
@@ -68,39 +73,39 @@ export function useRealtimeUpdates(isAuthenticated?: boolean) {
       queryClient.removeQueries({ queryKey: queryKeys.tasks.detail(data.id) });
       queryClient.removeQueries({ queryKey: queryKeys.projects.detail(data.id) });
       queryClient.removeQueries({ queryKey: queryKeys.sources.detail(data.id) });
-      invalidateByEntityType(queryClient, entityType, data.id, { includeStats: true });
+      invalidateByEntityType(invalidate, entityType, data.id, { includeStats: true });
     });
 
     // Health update
     const unsubHealth = wsClient.on('health_update', () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.admin.health });
+      invalidate(queryKeys.admin.health);
     });
 
     // Search complete (if backend sends it)
     const unsubSearch = wsClient.on('search_complete', () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.search.all });
+      invalidate(queryKeys.search.all);
     });
 
     const unsubGraphUpdated = wsClient.on('graph_updated', data => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.graph.all });
+      invalidate(queryKeys.graph.all);
       if ((data.new_entities_created ?? 0) > 0) {
-        queryClient.invalidateQueries({ queryKey: queryKeys.entities.all });
-        queryClient.invalidateQueries({ queryKey: queryKeys.admin.stats });
+        invalidate(queryKeys.entities.all);
+        invalidate(queryKeys.admin.stats);
       }
     });
 
     // Permission changed - refresh auth data
     const unsubPermission = wsClient.on('permission_changed', () => {
       // Invalidate auth/me to refresh current user's permissions
-      queryClient.invalidateQueries({ queryKey: queryKeys.auth.me });
+      invalidate(queryKeys.auth.me);
       // Also invalidate org data in case role affects what's visible
-      queryClient.invalidateQueries({ queryKey: queryKeys.orgs.list });
+      invalidate(queryKeys.orgs.list);
     });
 
     // Crawl started - refresh source to show crawling status
     const unsubCrawlStarted = wsClient.on('crawl_started', data => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.sources.detail(data.source_id) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.sources.all });
+      invalidate(queryKeys.sources.detail(data.source_id));
+      invalidate(queryKeys.sources.all);
     });
 
     // Crawl progress - update in real-time with merged data
@@ -161,24 +166,24 @@ export function useRealtimeUpdates(isAuthenticated?: boolean) {
       // Clear the progress data
       queryClient.removeQueries({ queryKey: ['crawl_progress', data.source_id] });
       // Refresh source detail and list
-      queryClient.invalidateQueries({ queryKey: queryKeys.sources.detail(data.source_id) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.sources.all });
+      invalidate(queryKeys.sources.detail(data.source_id));
+      invalidate(queryKeys.sources.all);
       // Refresh any documents/pages for this source
-      queryClient.invalidateQueries({ queryKey: queryKeys.rag.pages(data.source_id) });
+      invalidate(queryKeys.rag.pages(data.source_id));
     });
 
     const unsubCrawlSyncComplete = wsClient.on('crawl_sync_complete', data => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.sources.detail(data.source_id) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.sources.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.rag.pages(data.source_id) });
+      invalidate(queryKeys.sources.detail(data.source_id));
+      invalidate(queryKeys.sources.all);
+      invalidate(queryKeys.rag.pages(data.source_id));
     });
 
     const refreshBackupQueries = (backupId: string, jobId?: string) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.backups.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.backups.detail(backupId) });
+      invalidate(queryKeys.backups.all);
+      invalidate(queryKeys.jobs.all);
+      invalidate(queryKeys.backups.detail(backupId));
       if (jobId) {
-        queryClient.invalidateQueries({ queryKey: queryKeys.backups.jobStatus(jobId) });
+        invalidate(queryKeys.backups.jobStatus(jobId));
       }
     };
 
@@ -195,8 +200,8 @@ export function useRealtimeUpdates(isAuthenticated?: boolean) {
     });
 
     const refreshTaskNotes = (taskId: string) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.notes(taskId) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.detail(taskId) });
+      invalidate(queryKeys.tasks.notes(taskId));
+      invalidate(queryKeys.tasks.detail(taskId));
     };
 
     const unsubNotePending = wsClient.on('note_pending', data => {
@@ -210,15 +215,15 @@ export function useRealtimeUpdates(isAuthenticated?: boolean) {
     const unsubSourceImportUpdated = wsClient.on('source_import_updated', data => {
       queryClient.setQueryData(queryKeys.memory.sourceImport(data.import_id), data);
       if (['paused', 'completed', 'failed', 'canceled'].includes(data.status)) {
-        queryClient.invalidateQueries({ queryKey: queryKeys.memory.all });
-        queryClient.invalidateQueries({ queryKey: queryKeys.rawCaptures.all });
+        invalidate(queryKeys.memory.all);
+        invalidate(queryKeys.rawCaptures.all);
       }
     });
 
     const unsubRawCaptureChanged = wsClient.on('raw_capture_changed', data => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.rawCaptures.all });
+      invalidate(queryKeys.rawCaptures.all);
       for (const rawMemoryId of data.raw_memory_ids) {
-        queryClient.invalidateQueries({ queryKey: queryKeys.rawCaptures.detail(rawMemoryId) });
+        invalidate(queryKeys.rawCaptures.detail(rawMemoryId));
       }
     });
 
@@ -243,6 +248,7 @@ export function useRealtimeUpdates(isAuthenticated?: boolean) {
       unsubNoteCreated();
       unsubSourceImportUpdated();
       unsubRawCaptureChanged();
+      scheduler.cancel();
       wsClient.disconnect();
     };
   }, [queryClient, isAuthenticated]);

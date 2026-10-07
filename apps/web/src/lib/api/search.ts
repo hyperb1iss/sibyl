@@ -1,6 +1,6 @@
 import type { MemoryScope } from './memory';
 import type { BaseMetadata } from './shared';
-import { fetchApi } from './transport';
+import { fetchApi, type RequestOptions } from './transport';
 
 export interface SearchResultMetadata extends BaseMetadata {
   document_id?: string;
@@ -152,38 +152,42 @@ export interface DocumentRelatedEntitiesResponse {
 }
 
 export const searchApi = {
-  query: (params: {
-    query: string;
-    types?: string[];
-    language?: string;
-    category?: string;
-    status?: string;
-    project?: string;
-    project_ids?: string[];
-    source?: string;
-    source_id?: string;
-    source_name?: string;
-    assignee?: string;
-    since?: string;
-    as_of?: string;
-    limit?: number;
-    include_content?: boolean;
-    include_documents?: boolean;
-    include_graph?: boolean;
-    include_raw_memory?: boolean;
-    memory_scope?: MemoryScope;
-    scope_key?: string;
-    participants?: string[];
-    labels?: string[];
-    thread_id?: string;
-    occurred_after?: string;
-    occurred_before?: string;
-    use_enhanced?: boolean;
-    boost_recent?: boolean;
-  }) =>
+  query: (
+    params: {
+      query: string;
+      types?: string[];
+      language?: string;
+      category?: string;
+      status?: string;
+      project?: string;
+      project_ids?: string[];
+      source?: string;
+      source_id?: string;
+      source_name?: string;
+      assignee?: string;
+      since?: string;
+      as_of?: string;
+      limit?: number;
+      include_content?: boolean;
+      include_documents?: boolean;
+      include_graph?: boolean;
+      include_raw_memory?: boolean;
+      memory_scope?: MemoryScope;
+      scope_key?: string;
+      participants?: string[];
+      labels?: string[];
+      thread_id?: string;
+      occurred_after?: string;
+      occurred_before?: string;
+      use_enhanced?: boolean;
+      boost_recent?: boolean;
+    },
+    options?: RequestOptions
+  ) =>
     fetchApi<SearchResponse>('/search', {
       method: 'POST',
       body: JSON.stringify(params),
+      signal: options?.signal,
     }),
 
   explore: (params: {

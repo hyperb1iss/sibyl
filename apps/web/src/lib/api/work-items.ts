@@ -1,6 +1,6 @@
 import type { Entity } from './graph';
 import type { BaseMetadata } from './shared';
-import { fetchApi } from './transport';
+import { fetchApi, type RequestOptions } from './transport';
 
 export interface TaskMetadata extends BaseMetadata {
   status?: TaskStatus;
@@ -179,6 +179,8 @@ export interface TaskListResponse {
   filters: Record<string, unknown>;
   has_more?: boolean;
   actual_total?: number | null;
+  /** Where the next page starts when the server pages by database window. */
+  next_offset?: number | null;
 }
 
 export interface TaskSummary {
@@ -305,7 +307,8 @@ export const LEGACY_TASK_PAGE_SIZE = 200;
 export const tasksApi = {
   list: (
     params?: { project?: string; project_ids?: string[]; status?: TaskStatus },
-    page?: { limit?: number; offset?: number }
+    page?: { limit?: number; offset?: number },
+    options?: RequestOptions
   ) =>
     fetchApi<TaskListResponse>('/search/explore', {
       method: 'POST',
@@ -318,9 +321,11 @@ export const tasksApi = {
         limit: page?.limit ?? TASK_PAGE_SIZE,
         offset: page?.offset ?? 0,
       }),
+      signal: options?.signal,
     }),
 
-  get: (id: string) => fetchApi<Entity>(`/entities/${id}`),
+  get: (id: string, options?: RequestOptions) =>
+    fetchApi<Entity>(`/entities/${id}`, { signal: options?.signal }),
 
   updateStatus: (id: string, status: TaskStatus) =>
     fetchApi<Entity>(`/entities/${id}`, {
@@ -330,8 +335,10 @@ export const tasksApi = {
 
   // Task Notes
   notes: {
-    list: (taskId: string, limit = 50) =>
-      fetchApi<NotesListResponse>(`/tasks/${taskId}/notes?limit=${limit}`),
+    list: (taskId: string, limit = 50, options?: RequestOptions) =>
+      fetchApi<NotesListResponse>(`/tasks/${taskId}/notes?limit=${limit}`, {
+        signal: options?.signal,
+      }),
 
     create: (taskId: string, data: CreateNoteRequest) =>
       fetchApi<Note>(`/tasks/${taskId}/notes`, {
@@ -342,7 +349,7 @@ export const tasksApi = {
 };
 
 export const projectsApi = {
-  list: (options?: { includeArchived?: boolean }) =>
+  list: (options?: { includeArchived?: boolean } & RequestOptions) =>
     fetchApi<TaskListResponse>('/search/explore', {
       method: 'POST',
       body: JSON.stringify({
@@ -351,6 +358,7 @@ export const projectsApi = {
         limit: 100,
         include_archived: options?.includeArchived ?? false,
       }),
+      signal: options?.signal,
     }),
 
   members: {
@@ -368,7 +376,10 @@ export const projectsApi = {
 };
 
 export const epicsApi = {
-  list: (params?: { project?: string; project_ids?: string[]; status?: EpicStatus }) =>
+  list: (
+    params?: { project?: string; project_ids?: string[]; status?: EpicStatus },
+    options?: RequestOptions
+  ) =>
     fetchApi<EpicListResponse>('/search/explore', {
       method: 'POST',
       body: JSON.stringify({
@@ -379,11 +390,13 @@ export const epicsApi = {
         status: params?.status,
         limit: 200,
       }),
+      signal: options?.signal,
     }),
 
-  get: (id: string) => fetchApi<Entity>(`/entities/${id}`),
+  get: (id: string, options?: RequestOptions) =>
+    fetchApi<Entity>(`/entities/${id}`, { signal: options?.signal }),
 
-  tasks: (id: string) =>
+  tasks: (id: string, options?: RequestOptions) =>
     fetchApi<TaskListResponse>('/search/explore', {
       method: 'POST',
       body: JSON.stringify({
@@ -392,17 +405,24 @@ export const epicsApi = {
         epic: id,
         limit: 200,
       }),
+      signal: options?.signal,
     }),
 };
 
 export const metricsApi = {
   // Get org-level metrics
-  org: () => fetchApi<OrgMetricsResponse>('/metrics'),
+  org: (options?: RequestOptions) =>
+    fetchApi<OrgMetricsResponse>('/metrics', { signal: options?.signal }),
 
   // Get lean project summaries
-  projectsSummary: () => fetchApi<ProjectSummariesResponse>('/metrics/projects-summary'),
+  projectsSummary: (options?: RequestOptions) =>
+    fetchApi<ProjectSummariesResponse>('/metrics/projects-summary', {
+      signal: options?.signal,
+    }),
 
   // Get project-level metrics
-  project: (projectId: string) =>
-    fetchApi<ProjectMetricsResponse>(`/metrics/projects/${projectId}`),
+  project: (projectId: string, options?: RequestOptions) =>
+    fetchApi<ProjectMetricsResponse>(`/metrics/projects/${projectId}`, {
+      signal: options?.signal,
+    }),
 };

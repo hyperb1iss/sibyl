@@ -115,6 +115,69 @@ def test_export_tasks_pages_all_results(tmp_path: Path, monkeypatch) -> None:
     ]
 
 
+def test_export_tasks_resumes_at_the_servers_next_offset(tmp_path: Path, monkeypatch) -> None:
+    """A window the recheck shortened or emptied is still a full window.
+
+    Advancing by what came back re-read the tail of a short window into the
+    export, and an empty window with more behind it ended the walk early,
+    which truncated a backup without a word.
+    """
+    output = tmp_path / "tasks.out"
+    short_window = [_FakeEntity("task-1", "Task 1", "task")]
+    filtered_window: list[_FakeEntity] = []
+    last_window = [_FakeEntity("task-2", "Task 2", "task")]
+    explore = AsyncMock(
+        side_effect=[
+            SimpleNamespace(entities=short_window, has_more=True, next_offset=2),
+            SimpleNamespace(entities=filtered_window, has_more=True, next_offset=4),
+            SimpleNamespace(entities=last_window, has_more=False, next_offset=None),
+        ]
+    )
+
+    monkeypatch.setattr(export_cli, "EXPLORE_PAGE_SIZE", 2)
+
+    with patch("sibyl_core.tools.core.explore", explore):
+        result = runner.invoke(
+            export_cli.app,
+            ["tasks", "--format", "json", "--output", str(output)],
+        )
+
+    assert result.exit_code == 0
+    exported = json.loads(output.with_suffix(".json").read_text())
+    assert [item["id"] for item in exported] == ["task-1", "task-2"]
+    assert [kwargs["offset"] for kwargs in (c.kwargs for c in explore.await_args_list)] == [
+        0,
+        2,
+        4,
+    ]
+
+
+def test_export_tasks_widens_an_empty_window_on_a_legacy_server(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Without next_offset, an empty page that still has more advances a full page."""
+    output = tmp_path / "tasks.out"
+    explore = AsyncMock(
+        side_effect=[
+            SimpleNamespace(entities=[], has_more=True),
+            SimpleNamespace(entities=[_FakeEntity("task-9", "Task 9", "task")], has_more=False),
+        ]
+    )
+
+    monkeypatch.setattr(export_cli, "EXPLORE_PAGE_SIZE", 2)
+
+    with patch("sibyl_core.tools.core.explore", explore):
+        result = runner.invoke(
+            export_cli.app,
+            ["tasks", "--format", "json", "--output", str(output)],
+        )
+
+    assert result.exit_code == 0
+    exported = json.loads(output.with_suffix(".json").read_text())
+    assert [item["id"] for item in exported] == ["task-9"]
+    assert [c.kwargs["offset"] for c in explore.await_args_list] == [0, 2]
+
+
 def test_export_entities_pages_all_results(tmp_path: Path, monkeypatch) -> None:
     output = tmp_path / "entities.out"
     page_one = [

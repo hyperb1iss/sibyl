@@ -3062,8 +3062,13 @@ class TestExploreTool:
             assert response.limit == 1000
 
     @pytest.mark.asyncio
-    async def test_explore_list_reports_more_when_the_fetch_window_is_full(self) -> None:
-        """A full over-fetch window means rows past it were never filtered."""
+    async def test_explore_list_reports_more_from_the_raw_window(self) -> None:
+        """A single-type page is one database window of limit + 1 rows.
+
+        Rows the Python project filter drops shorten the page; they never
+        pull the next window in, and has_more answers from the raw row count
+        so a page of one visible row still says the type continues.
+        """
         from sibyl_core.tools.explore import explore
 
         def task(index: int, project_id: str) -> MockEntity:
@@ -3075,10 +3080,9 @@ class TestExploreTool:
                 project_id=project_id,
             )
 
-        # limit 2 + offset 0 + 50 = a 52-row window; 51 rows fall to the
-        # client-side project filter, so the page holds one task even though
-        # the table may hold hundreds more past the window.
-        window = [task(0, "project_a"), *[task(i, "project_other") for i in range(1, 52)]]
+        # limit 2 asks for a 3-row window; two of them fall to the client-side
+        # project filter, so the page holds one task and still has more.
+        window = [task(0, "project_a"), task(1, "project_other"), task(2, "project_other")]
         mock_entity_manager = AsyncMock()
         mock_entity_manager.list_by_type = AsyncMock(return_value=window)
 
@@ -3091,6 +3095,7 @@ class TestExploreTool:
                 types=["task"],
                 project_ids=["project_a", "project_b"],
                 limit=2,
+                offset=4,
                 organization_id="org_123",
                 principal_id="reader-1",
                 accessible_projects={"project_a", "project_b", "project_other"},
@@ -3098,8 +3103,14 @@ class TestExploreTool:
 
         assert [entity.id for entity in response.entities] == ["task_project_a_0"]
         assert response.has_more is True
+        assert response.next_offset == 6
+        mock_entity_manager.list_by_type.assert_awaited_once()
+        kwargs = mock_entity_manager.list_by_type.await_args.kwargs
+        assert kwargs["limit"] == 3
+        assert kwargs["offset"] == 4
+        assert kwargs["exact_window"] is True
 
-        # One row short of the window: the filter saw everything, nothing more.
+        # A window short of limit + 1 rows is the last one.
         mock_entity_manager.list_by_type = AsyncMock(return_value=window[:-1])
         with patch(
             "sibyl_core.tools.explore.get_graph_runtime",
@@ -3110,12 +3121,14 @@ class TestExploreTool:
                 types=["task"],
                 project_ids=["project_a", "project_b"],
                 limit=2,
+                offset=4,
                 organization_id="org_123",
                 principal_id="reader-1",
                 accessible_projects={"project_a", "project_b", "project_other"},
             )
 
         assert response.has_more is False
+        assert response.next_offset is None
 
     @pytest.mark.asyncio
     async def test_explore_clamps_depth(self) -> None:

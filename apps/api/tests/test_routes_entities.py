@@ -16,7 +16,9 @@ from sibyl.auth.context import AuthContext
 from sibyl.auth.errors import ProjectAccessDeniedError
 from sibyl_core.auth import ProjectRole
 from sibyl_core.models.entities import EntityType
-from tests.harness.auth import stub_auth_context
+from tests.harness.auth import DEFAULT_USER_ID, stub_auth_context
+
+READER_ID = str(DEFAULT_USER_ID)
 
 
 def _ctx() -> AuthContext:
@@ -103,9 +105,11 @@ class TestListEntitiesRoute:
         assert manager.list_by_type.await_args_list == [
             call(
                 EntityType.TASK,
-                limit=1000,
+                limit=200,
                 offset=0,
-                include_archived=True,
+                include_archived=False,
+                exact_window=True,
+                private_memory_owner=READER_ID,
                 project_id="proj-1",
             ),
         ]
@@ -159,9 +163,11 @@ class TestListEntitiesRoute:
         assert manager.list_by_type.await_args_list == [
             call(
                 EntityType.TASK,
-                limit=1000,
+                limit=200,
                 offset=0,
-                include_archived=True,
+                include_archived=False,
+                exact_window=True,
+                private_memory_owner=READER_ID,
             ),
         ]
         manager.list_all.assert_not_awaited()
@@ -261,7 +267,7 @@ class TestListEntitiesRoute:
         runtime = SimpleNamespace(entity_manager=manager)
 
         with (
-            patch.object(entities_routes, "LIST_BY_TYPE_PAGE_SIZE", 2),
+            patch.object(entities_routes, "BOUNDED_LIST_WINDOW_ROWS", 2),
             patch(
                 "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
                 AsyncMock(return_value=runtime),
@@ -285,10 +291,15 @@ class TestListEntitiesRoute:
                 sort_order=SortOrder.DESC,
             )
 
+        window = {
+            "include_archived": False,
+            "exact_window": True,
+            "private_memory_owner": READER_ID,
+        }
         assert manager.list_by_type.await_args_list == [
-            call(EntityType.TASK, limit=2, offset=0, include_archived=True),
-            call(EntityType.TASK, limit=2, offset=2, include_archived=True),
-            call(EntityType.TASK, limit=2, offset=4, include_archived=True),
+            call(EntityType.TASK, limit=2, offset=0, **window),
+            call(EntityType.TASK, limit=2, offset=2, **window),
+            call(EntityType.TASK, limit=2, offset=4, **window),
         ]
         manager.list_all.assert_not_awaited()
         assert [entity.id for entity in response.entities] == ["ent-1", "ent-2", "ent-3"]
@@ -310,7 +321,7 @@ class TestListEntitiesRoute:
         runtime = SimpleNamespace(entity_manager=manager)
 
         with (
-            patch.object(entities_routes, "LIST_BY_TYPE_PAGE_SIZE", 2),
+            patch.object(entities_routes, "BOUNDED_LIST_WINDOW_ROWS", 2),
             patch(
                 "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
                 AsyncMock(return_value=runtime),
@@ -338,7 +349,9 @@ class TestListEntitiesRoute:
             EntityType.TASK,
             limit=2,
             offset=0,
-            include_archived=True,
+            include_archived=False,
+            exact_window=True,
+            private_memory_owner=READER_ID,
             project_id="proj-1",
         )
         manager.list_all.assert_not_awaited()
@@ -366,7 +379,7 @@ class TestListEntitiesRoute:
         runtime = SimpleNamespace(entity_manager=manager)
 
         with (
-            patch.object(entities_routes, "LIST_BY_TYPE_PAGE_SIZE", 2),
+            patch.object(entities_routes, "BOUNDED_LIST_WINDOW_ROWS", 2),
             patch(
                 "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
                 AsyncMock(return_value=runtime),
@@ -394,11 +407,116 @@ class TestListEntitiesRoute:
             EntityType.TASK,
             limit=2,
             offset=0,
-            include_archived=True,
+            include_archived=False,
+            exact_window=True,
+            private_memory_owner=READER_ID,
             include_content=False,
             project_id="proj-1",
         )
         assert response.entities[0].content == ""
+
+    @pytest.mark.asyncio
+    async def test_a_page_is_one_window_and_one_availability_pass(self) -> None:
+        """Twenty visible rows cost one statement and one source-verdict batch.
+
+        The walker used to pull 2,000-row batches and filter archived and
+        private rows in Python, running the availability fan-out per batch.
+        """
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        manager = MagicMock()
+        manager.supports_bounded_entity_list = True
+        manager.supports_lightweight_entity_list = True
+        rows = [
+            _entity(f"ent-{index}", project_id="proj-1", name=f"Row {index}") for index in range(20)
+        ]
+        manager.list_all = AsyncMock(return_value=rows)
+        manager.list_by_type = AsyncMock()
+        runtime = SimpleNamespace(entity_manager=manager)
+        availability = AsyncMock(side_effect=lambda _org, candidates, **_kw: dict(candidates))
+
+        with (
+            patch(
+                "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
+                AsyncMock(return_value=runtime),
+            ),
+            patch(
+                "sibyl.api.routes.entity_policy.list_accessible_project_graph_ids",
+                AsyncMock(return_value={"proj-1"}),
+            ),
+            patch("sibyl.api.routes.entity_reads.available_capture_projection_rows", availability),
+        ):
+            response = await list_entities(
+                org=org,
+                ctx=_ctx(),
+                entity_type=None,
+                language=None,
+                category=None,
+                search=None,
+                project_ids=None,
+                page=1,
+                page_size=20,
+                sort_by=SortField.UPDATED_AT,
+                sort_order=SortOrder.DESC,
+            )
+
+        manager.list_all.assert_awaited_once_with(
+            limit=200,
+            offset=0,
+            include_archived=False,
+            exact_window=True,
+            private_memory_owner=READER_ID,
+            include_content=False,
+        )
+        manager.list_by_type.assert_not_awaited()
+        availability.assert_awaited_once()
+        assert len(response.entities) == 20
+        assert response.has_more is False
+
+    @pytest.mark.asyncio
+    async def test_a_narrowed_api_key_drops_every_private_row_in_the_statement(self) -> None:
+        """A key without a private grant never reads private rows, so none are fetched."""
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        manager = MagicMock()
+        manager.supports_bounded_entity_list = True
+        manager.list_all = AsyncMock(return_value=[])
+        manager.list_by_type = AsyncMock()
+        runtime = SimpleNamespace(entity_manager=manager)
+        ctx = stub_auth_context(
+            api_key_id="key-1",
+            api_key_memory_scope_keys={"project:proj-1"},
+        )
+
+        with (
+            patch(
+                "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
+                AsyncMock(return_value=runtime),
+            ),
+            patch(
+                "sibyl.api.routes.entity_policy.list_accessible_project_graph_ids",
+                AsyncMock(return_value={"proj-1"}),
+            ),
+        ):
+            await list_entities(
+                org=org,
+                ctx=ctx,
+                entity_type=None,
+                language=None,
+                category=None,
+                search=None,
+                project_ids=None,
+                page=1,
+                page_size=20,
+                sort_by=SortField.UPDATED_AT,
+                sort_order=SortOrder.DESC,
+            )
+
+        manager.list_all.assert_awaited_once_with(
+            limit=200,
+            offset=0,
+            include_archived=False,
+            exact_window=True,
+            exclude_private_memory=True,
+        )
 
     @pytest.mark.asyncio
     async def test_default_legacy_entity_query_keeps_exhaustive_sorting(self) -> None:
@@ -591,9 +709,11 @@ class TestListEntitiesRoute:
 
         manager.list_by_type.assert_awaited_once_with(
             EntityType.PROJECT,
-            limit=1000,
+            limit=200,
             offset=0,
-            include_archived=True,
+            include_archived=False,
+            exact_window=True,
+            private_memory_owner=READER_ID,
         )
         assert [entity.id for entity in response.entities] == ["project-visible"]
 
@@ -650,9 +770,11 @@ class TestListEntitiesRoute:
 
         manager.list_by_type.assert_not_awaited()
         manager.list_all.assert_awaited_once_with(
-            limit=2000,
+            limit=200,
             offset=0,
-            include_archived=True,
+            include_archived=False,
+            exact_window=True,
+            private_memory_owner=READER_ID,
         )
         assert [entity.id for entity in response.entities] == [
             "task-visible",

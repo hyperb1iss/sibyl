@@ -257,7 +257,13 @@ def _output_tasks_table(
 ) -> None:
     """Output tasks as a formatted table."""
     if not entities:
-        info("No tasks found")
+        if has_more:
+            # A page is one database window, and a window every row of
+            # which was filtered is still a page with more behind it.
+            next_page = (effective_offset // effective_limit) + 2
+            info(f"No tasks on this page (--page {next_page} for more)")
+        else:
+            info("No tasks found")
         return
 
     table = create_table("Tasks", "ID", "Title", "Status", "Priority", "Assignees")

@@ -65,3 +65,10 @@ class ExploreResponse(BaseModel):
     offset: int = Field(default=0, description="Current offset")
     has_more: bool = Field(default=False, description="Whether more results exist")
     actual_total: int | None = Field(default=None, description="Total matching before pagination")
+    next_offset: int | None = Field(
+        default=None,
+        description=(
+            "Offset of the next page when the server pages by database window; "
+            "absent on the last page and on legacy visible-row pagination"
+        ),
+    )

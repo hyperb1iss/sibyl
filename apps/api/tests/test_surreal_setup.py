@@ -43,7 +43,14 @@ async def test_surreal_setup_mode_stays_open_until_admin_org_initialized(
 
     client = FakeClient()
 
-    monkeypatch.setattr(surreal_setup, "build_surreal_auth_client", lambda: client)
+    monkeypatch.setattr(
+        surreal_setup, "get_shared_surreal_auth_client", AsyncMock(return_value=client)
+    )
+    monkeypatch.setattr(
+        surreal_setup,
+        "build_surreal_auth_client",
+        lambda: (_ for _ in ()).throw(AssertionError("setup status must not open a client")),
+    )
     monkeypatch.setattr(
         surreal_setup.SurrealUserRepository,
         "from_client",
@@ -55,7 +62,8 @@ async def test_surreal_setup_mode_stays_open_until_admin_org_initialized(
     assert "FROM users" in client.calls[0]
     assert "FROM organizations" in client.calls[0]
     assert "FROM organization_members" in client.calls[0]
-    assert client.closed is True
+    # The pooled client outlives the request; closing it would tear the pool down.
+    assert client.closed is False
 
 
 @pytest.mark.asyncio
@@ -80,7 +88,14 @@ async def test_surreal_setup_status_batches_user_and_org_probes(
 
     client = FakeClient()
 
-    monkeypatch.setattr(surreal_setup, "build_surreal_auth_client", lambda: client)
+    monkeypatch.setattr(
+        surreal_setup, "get_shared_surreal_auth_client", AsyncMock(return_value=client)
+    )
+    monkeypatch.setattr(
+        surreal_setup,
+        "build_surreal_auth_client",
+        lambda: (_ for _ in ()).throw(AssertionError("setup status must not open a client")),
+    )
     monkeypatch.setattr(
         surreal_setup.SurrealUserRepository,
         "from_client",
@@ -102,7 +117,7 @@ async def test_surreal_setup_status_batches_user_and_org_probes(
     assert "FROM users" in client.calls[0]
     assert "FROM organizations" in client.calls[0]
     assert "FROM organization_members" in client.calls[0]
-    assert client.closed is True
+    assert client.closed is False
 
 
 @pytest.mark.asyncio

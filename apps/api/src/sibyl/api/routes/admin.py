@@ -145,6 +145,12 @@ async def get_graph_stats_payload(group_id: str) -> dict[str, object]:
     return await service(group_id)
 
 
+def peek_graph_stats_payload(group_id: str) -> dict[str, object] | None:
+    from sibyl.persistence.graph_runtime import peek_graph_stats_payload as service
+
+    return service(group_id)
+
+
 async def execute_debug_query(
     cypher: str,
     group_id: str,
@@ -397,18 +403,25 @@ async def get_surreal_observability_status() -> dict[str, object]:
 async def health(
     org: AuthOrganization = Depends(get_current_organization),
 ) -> HealthResponse:
-    """Get server health status."""
+    """Get server health status.
+
+    Polled every 30 s by every open dashboard, so this proves the graph
+    answers with a readiness probe rather than a count of every row. The
+    type counts ride along only when the stats memo already holds them.
+    """
     try:
         from sibyl_core.tools.core import get_health
 
-        health_data = await get_health(organization_id=str(org.id))
+        health_data = await get_health(organization_id=str(org.id), include_entity_counts=False)
+        stats_data = peek_graph_stats_payload(str(org.id)) or {}
+        entity_counts = stats_data.get("entity_counts")
 
         return HealthResponse(
             status=health_data.get("status", "unknown"),
             server_name=health_data.get("server_name", "sibyl"),
             uptime_seconds=health_data.get("uptime_seconds", 0),
             graph_connected=health_data.get("graph_connected", False),
-            entity_counts=health_data.get("entity_counts", {}),
+            entity_counts=entity_counts if isinstance(entity_counts, dict) else {},
             errors=health_data.get("errors", []),
         )
 
@@ -1247,7 +1260,7 @@ async def dev_status(
 
     # Get health and stats
     try:
-        health = await get_health(organization_id=str(org.id))
+        health = await get_health(organization_id=str(org.id), include_entity_counts=False)
         api_healthy = health.get("status") == "healthy"
         graph_healthy = health.get("graph_connected", False)
         uptime = health.get("uptime_seconds", 0)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from sibyl_core.models.entities import Entity, EntityType
@@ -36,6 +36,98 @@ def _scoped_field_clause(field: str) -> str:
         f"({field} = ${field} OR "
         f"({_surreal_indexed_field_missing(field)} AND attributes.{field} = ${field}))"
     )
+
+
+def _private_memory_clauses(
+    *,
+    exclude_private_memory: bool,
+    private_memory_owner: str | None,
+    params: dict[str, object],
+) -> list[str]:
+    """Keep a reader's own private rows and drop everyone else's in SurrealQL.
+
+    The row-level rule (``memory_metadata_read_allowed``) still runs on what
+    comes back; these predicates only remove rows it would deny anyway, so a
+    list window arrives mostly visible instead of mostly filtered. Scope and
+    owner coalesce ``attributes`` over the column, the way the entity reader
+    does. A private row with no stamped principal is left for the row rule.
+    """
+    if exclude_private_memory:
+        return ["(attributes.memory_scope ?? memory_scope) != 'private'"]
+    if private_memory_owner is not None:
+        params["private_memory_owner"] = private_memory_owner
+        return [
+            "NOT ((attributes.memory_scope ?? memory_scope) = 'private'"
+            " AND attributes.principal_id != NONE"
+            " AND attributes.principal_id != $private_memory_owner)"
+        ]
+    return []
+
+
+def _summary_rows(value: object) -> list[Mapping[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [row for row in value if isinstance(row, Mapping)]
+
+
+# Status is read as the entity reader reads it (attributes over the column)
+# where it is displayed or grouped, and as the plain column where it selects
+# rows, so each bucket stays on idx_entity_type_status_updated or
+# idx_entity_type_project_updated instead of filtering the whole project.
+_SUMMARY_TASK_FIELDS = (
+    "uuid, name, attributes.status ?? status AS status, "
+    "attributes.priority ?? priority AS priority, updated_at"
+)
+_SUMMARY_TASK_SCOPE = "group_id = $group_id AND entity_type = 'task' AND project_id = $project_id"
+_SUMMARY_OPEN = "(status IS NONE OR status NOT IN ['done', 'archived'])"
+_PROJECT_SUMMARY_STATEMENT = f"""
+RETURN {{
+    status_counts: (
+        SELECT attributes.status ?? status AS status, count() AS n
+        FROM entity
+        WHERE {_SUMMARY_TASK_SCOPE}
+        GROUP BY status
+    ),
+    doing: (
+        SELECT {_SUMMARY_TASK_FIELDS} FROM entity
+        WHERE {_SUMMARY_TASK_SCOPE} AND status = 'doing'
+        ORDER BY updated_at DESC LIMIT $actionable_limit
+    ),
+    blocked: (
+        SELECT {_SUMMARY_TASK_FIELDS} FROM entity
+        WHERE {_SUMMARY_TASK_SCOPE} AND status = 'blocked'
+        ORDER BY updated_at DESC LIMIT $actionable_limit
+    ),
+    review: (
+        SELECT {_SUMMARY_TASK_FIELDS} FROM entity
+        WHERE {_SUMMARY_TASK_SCOPE} AND status = 'review'
+        ORDER BY updated_at DESC LIMIT $actionable_limit
+    ),
+    recent: (
+        SELECT {_SUMMARY_TASK_FIELDS} FROM entity
+        WHERE {_SUMMARY_TASK_SCOPE}
+          AND (status IS NONE OR status NOT IN ['doing', 'blocked', 'review'])
+        ORDER BY updated_at DESC LIMIT $actionable_limit
+    ),
+    critical: (
+        SELECT {_SUMMARY_TASK_FIELDS} FROM entity
+        WHERE {_SUMMARY_TASK_SCOPE} AND {_SUMMARY_OPEN} AND priority = 'critical'
+        ORDER BY updated_at DESC LIMIT $critical_limit
+    ),
+    high: (
+        SELECT {_SUMMARY_TASK_FIELDS} FROM entity
+        WHERE {_SUMMARY_TASK_SCOPE} AND {_SUMMARY_OPEN} AND priority = 'high'
+        ORDER BY updated_at DESC LIMIT $critical_limit
+    ),
+    flagged: (
+        SELECT {_SUMMARY_TASK_FIELDS} FROM entity
+        WHERE {_SUMMARY_TASK_SCOPE} AND {_SUMMARY_OPEN}
+          AND (priority IS NONE OR priority NOT IN ['critical', 'high'])
+          AND string::contains(string::uppercase(name), 'CRITICAL')
+        ORDER BY updated_at DESC LIMIT $critical_limit
+    ),
+}};
+"""
 
 
 class _EntityWorkItemManager(_EntitySearchManager):
@@ -100,88 +192,80 @@ class _EntityWorkItemManager(_EntitySearchManager):
         critical_limit: int = 3,
         epic_limit: int = 3,
     ) -> dict[str, Any]:
-        tasks: list[Entity] = []
-        offset = 0
-        page_size = 1000
-        while True:
-            page = await self.list_by_type(
-                EntityType.TASK,
+        """Roll a project's tasks up to counts and a few actionable rows.
+
+        One statement answers it: status counts grouped in the database, and
+        each actionable bucket (doing, blocked, review, the rest) and each
+        critical bucket as its own ordered, limited select on the project
+        index. This used to page every task of the project with SELECT *
+        and reduce the rows in Python; the hub project paid 1,150 rows over
+        three restarted pages to fill five slots.
+        """
+        rows = normalize_records(
+            await self._client.execute_query(
+                _PROJECT_SUMMARY_STATEMENT,
+                group_id=self._group_id,
                 project_id=project_id,
-                limit=page_size,
-                offset=offset,
-                include_archived=True,
+                actionable_limit=max(int(actionable_limit), 1),
+                critical_limit=max(int(critical_limit), 1),
             )
-            if not page:
-                break
-            tasks.extend(page)
-            if len(page) < page_size:
-                break
-            offset += len(page)
+        )
+        payload: dict[str, Any] = rows[0] if rows else {}
 
+        # Keyed the way count_by_status keys its counts: a status-less task is
+        # todo and the key is lowercase, so the summary and the completion
+        # counters the write path maintains read one task the same way.
         status_counts: dict[str, int] = {}
-        doing_tasks: list[dict[str, Any]] = []
-        blocked_tasks: list[dict[str, Any]] = []
-        review_tasks: list[dict[str, Any]] = []
-        recent_tasks: list[dict[str, Any]] = []
-        critical_tasks: list[dict[str, Any]] = []
-        epic_progress: dict[str, dict[str, int]] = {}
+        for row in _summary_rows(payload.get("status_counts")):
+            status_value = str(row.get("status") or "todo").lower()
+            status_counts[status_value] = status_counts.get(status_value, 0) + _int_value(
+                row.get("n")
+            )
 
-        for task in tasks:
-            metadata = task.metadata or {}
-            status_value = str(metadata.get("status") or "todo")
-            priority = str(metadata.get("priority") or "")
-            epic_ref = metadata.get("parent_task_id") or metadata.get("epic_id")
-
-            status_counts[status_value] = status_counts.get(status_value, 0) + 1
-            if epic_ref:
-                counters = epic_progress.setdefault(
-                    str(epic_ref),
-                    {"total_tasks": 0, "completed_tasks": 0},
-                )
-                counters["total_tasks"] += 1
-                if status_value == "done":
-                    counters["completed_tasks"] += 1
-
-            task_info = {
-                "id": task.id,
-                "name": task.name,
-                "status": status_value,
-                "priority": priority,
+        def task_info(row: Mapping[str, Any]) -> dict[str, Any]:
+            return {
+                "id": str(row.get("uuid") or ""),
+                "name": str(row.get("name") or ""),
+                "status": str(row.get("status") or "todo"),
+                "priority": str(row.get("priority") or ""),
             }
-            is_critical = (
-                priority.lower() in ("critical", "high") or "CRITICAL" in task.name.upper()
-            ) and status_value not in ("done", "archived")
-            if is_critical:
-                critical_tasks.append(task_info)
-            if status_value == "doing" and len(doing_tasks) < actionable_limit:
-                doing_tasks.append(task_info)
-            elif status_value == "blocked" and len(blocked_tasks) < actionable_limit:
-                blocked_tasks.append(task_info)
-            elif status_value == "review" and len(review_tasks) < actionable_limit:
-                review_tasks.append(task_info)
-            elif len(recent_tasks) < actionable_limit:
-                recent_tasks.append(task_info)
 
         actionable: list[dict[str, Any]] = []
-        critical_tasks = sorted(critical_tasks, key=_task_priority_rank)[:critical_limit]
-        for pool in (doing_tasks, blocked_tasks, review_tasks, recent_tasks):
-            for task_info in pool:
+        seen: set[str] = set()
+        for bucket in ("doing", "blocked", "review", "recent"):
+            for row in _summary_rows(payload.get(bucket)):
                 if len(actionable) >= actionable_limit:
                     break
-                if task_info["id"] not in {task["id"] for task in actionable}:
-                    actionable.append(task_info)
+                info = task_info(row)
+                if info["id"] in seen:
+                    continue
+                seen.add(info["id"])
+                actionable.append(info)
             if len(actionable) >= actionable_limit:
                 break
 
+        critical_candidates = [
+            task_info(row)
+            for bucket in ("critical", "high", "flagged")
+            for row in _summary_rows(payload.get(bucket))
+        ]
+        critical_tasks = sorted(critical_candidates, key=_task_priority_rank)[:critical_limit]
+
         epics: list[dict[str, Any]] = []
-        for epic in await self.list_epics_for_project(
+        listed_epics = await self.list_epics_for_project(
             project_id,
             limit=epic_limit,
             enrich_progress=False,
-        ):
+        )
+        epic_progress = (
+            await self._epic_progress_map({epic.id for epic in listed_epics}, project_id=project_id)
+            if listed_epics
+            else {}
+        )
+        for epic in listed_epics:
             progress = epic_progress.get(epic.id, {})
-            total_tasks = progress.get("total_tasks", 0)
-            completed_tasks = progress.get("completed_tasks", 0)
+            total_tasks = int(progress.get("total_tasks", 0))
+            completed_tasks = int(progress.get("completed_tasks", 0))
             epics.append(
                 {
                     "id": epic.id,
@@ -281,7 +365,22 @@ class _EntityWorkItemManager(_EntitySearchManager):
         include_archived: bool = False,
         enrich_epic_progress: bool = False,
         include_content: bool = True,
+        exact_window: bool = False,
+        exclude_private_memory: bool = False,
+        private_memory_owner: str | None = None,
     ) -> list[Entity]:
+        """List one type newest-first, with ``offset`` counting visible rows.
+
+        A filter whose SurrealQL predicate admits a superset of the Python
+        recheck (legacy rows keep the value under ``attributes``) restarts the
+        walk at ``START 0`` so the visible offset stays exact. ``exact_window``
+        instead addresses the ordered index directly: one statement of
+        ``limit`` rows from ``START offset``, no recheck, no fill. A caller
+        paging a large type reads O(limit) per page that way and runs the
+        recheck on the rows it gets back. ``exclude_private_memory`` and
+        ``private_memory_owner`` push the reader's private-scope rule into
+        the statement (see ``_private_memory_clauses``).
+        """
         if limit <= 0:
             return []
 
@@ -360,18 +459,40 @@ class _EntityWorkItemManager(_EntitySearchManager):
             query_params["feature"] = feature.lower()
         if not include_archived:
             where_clauses.append("(status IS NONE OR status = '' OR status != 'archived')")
+        where_clauses.extend(
+            _private_memory_clauses(
+                exclude_private_memory=exclude_private_memory,
+                private_memory_owner=private_memory_owner,
+                params=query_params,
+            )
+        )
         select_fields = _entity_select_fields(include_content)
+        statement = f"""
+            SELECT {select_fields}
+            FROM entity
+            WHERE {" AND ".join(where_clauses)}
+            ORDER BY updated_at DESC, created_at DESC, uuid DESC
+            LIMIT $limit START $offset;
+            """
+
+        if exact_window:
+            rows = normalize_records(
+                await self._client.execute_query(
+                    statement,
+                    **query_params,
+                    limit=max(int(limit), 1),
+                    offset=max(int(offset), 0),
+                )
+            )
+            entities = [_entity_from_row(row) for row in rows]
+            if entity_type == EntityType.EPIC and enrich_epic_progress:
+                return await self._with_epic_progress(entities, project_id=project_id)
+            return entities
 
         while len(entities) < target_count:
             rows = normalize_records(
                 await self._client.execute_query(
-                    f"""
-                    SELECT {select_fields}
-                    FROM entity
-                    WHERE {" AND ".join(where_clauses)}
-                    ORDER BY updated_at DESC, created_at DESC, uuid DESC
-                    LIMIT $limit START $offset;
-                    """,
+                    statement,
                     **query_params,
                     limit=page_size,
                     offset=query_offset,
@@ -432,7 +553,11 @@ class _EntityWorkItemManager(_EntitySearchManager):
         offset: int = 0,
         include_archived: bool = False,
         include_content: bool = True,
+        exact_window: bool = False,
+        exclude_private_memory: bool = False,
+        private_memory_owner: str | None = None,
     ) -> list[Entity]:
+        """List every type newest-first; the keyword contract matches list_by_type."""
         if limit <= 0:
             return []
         target_count = max(int(offset), 0) + max(int(limit), 1) if not include_archived else limit
@@ -442,23 +567,43 @@ class _EntityWorkItemManager(_EntitySearchManager):
         seen_entity_ids: set[str] = set()
         seen_pages: set[tuple[str | None, ...]] = set()
         where_clauses = ["group_id = $group_id"]
+        query_params: dict[str, object] = {"group_id": self._group_id}
         if not include_archived:
             where_clauses.append(
                 "string::lowercase(status ?? attributes.status ?? '') != 'archived'"
             )
+        where_clauses.extend(
+            _private_memory_clauses(
+                exclude_private_memory=exclude_private_memory,
+                private_memory_owner=private_memory_owner,
+                params=query_params,
+            )
+        )
         select_fields = _entity_select_fields(include_content)
+        statement = f"""
+            SELECT {select_fields}
+            FROM entity
+            WHERE {" AND ".join(where_clauses)}
+            ORDER BY updated_at DESC, created_at DESC, uuid DESC
+            LIMIT $limit START $offset;
+            """
+
+        if exact_window:
+            rows = normalize_records(
+                await self._client.execute_query(
+                    statement,
+                    **query_params,
+                    limit=max(int(limit), 1),
+                    offset=max(int(offset), 0),
+                )
+            )
+            return [_entity_from_row(row) for row in rows]
 
         while len(entities) < target_count:
             rows = normalize_records(
                 await self._client.execute_query(
-                    f"""
-                    SELECT {select_fields}
-                    FROM entity
-                    WHERE {" AND ".join(where_clauses)}
-                    ORDER BY updated_at DESC, created_at DESC, uuid DESC
-                    LIMIT $limit START $offset;
-                    """,
-                    group_id=self._group_id,
+                    statement,
+                    **query_params,
                     limit=page_size,
                     offset=query_offset,
                 )

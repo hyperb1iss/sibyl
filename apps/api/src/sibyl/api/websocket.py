@@ -25,12 +25,28 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 from sibyl import config as config_module
 from sibyl.api.event_types import WSEvent
 from sibyl.auth.websocket import resolve_active_websocket_claims
+from sibyl.persistence.read_memo import invalidate_org_read_memos
 from sibyl_core.observability import telemetry_registry
 
 log = structlog.get_logger()
 
 # Flag to track if Redis pub/sub is available
 _pubsub_enabled: bool = False
+
+# Events that mean the organization's graph rows changed. The per-org read
+# memos (task rollups, type counts) are dropped on these before the fan-out,
+# so the refetch every tab issues in response computes against fresh rows.
+READ_MEMO_INVALIDATING_EVENTS = frozenset(
+    {
+        WSEvent.ENTITY_CREATED,
+        WSEvent.ENTITY_UPDATED,
+        WSEvent.ENTITY_DELETED,
+        WSEvent.ENTITY_PENDING,
+        WSEvent.GRAPH_UPDATED,
+        WSEvent.NOTE_CREATED,
+        WSEvent.NOTE_PENDING,
+    }
+)
 
 
 @dataclass
@@ -94,6 +110,9 @@ class ConnectionManager:
             org_id: If provided, only broadcast to clients in this org.
                    If None, broadcast to all clients (system events).
         """
+        if org_id and event in READ_MEMO_INVALIDATING_EVENTS:
+            invalidate_org_read_memos(org_id)
+
         if not self.active_connections:
             return
 

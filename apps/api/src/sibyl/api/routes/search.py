@@ -377,6 +377,7 @@ async def explore(
             offset=getattr(result, "offset", request.offset),
             has_more=getattr(result, "has_more", False),
             actual_total=getattr(result, "actual_total", None),
+            next_offset=getattr(result, "next_offset", None),
         )
         telemetry_registry().record_search_operation(
             surface=f"explore_{request.mode}",

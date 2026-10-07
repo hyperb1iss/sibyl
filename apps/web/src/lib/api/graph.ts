@@ -1,5 +1,5 @@
 import type { BaseMetadata } from './shared';
-import { fetchApi } from './transport';
+import { fetchApi, type RequestOptions } from './transport';
 
 export interface GraphNodeMetadata extends BaseMetadata {
   entity_type?: string;
@@ -126,17 +126,20 @@ export interface HierarchicalGraphResponse {
 }
 
 export const entitiesApi = {
-  list: (params?: {
-    entity_type?: string;
-    language?: string;
-    category?: string;
-    search?: string;
-    project_ids?: string[];
-    page?: number;
-    page_size?: number;
-    sort_by?: 'name' | 'created_at' | 'updated_at' | 'entity_type';
-    sort_order?: 'asc' | 'desc';
-  }) => {
+  list: (
+    params?: {
+      entity_type?: string;
+      language?: string;
+      category?: string;
+      search?: string;
+      project_ids?: string[];
+      page?: number;
+      page_size?: number;
+      sort_by?: 'name' | 'created_at' | 'updated_at' | 'entity_type';
+      sort_order?: 'asc' | 'desc';
+    },
+    options?: RequestOptions
+  ) => {
     const searchParams = new URLSearchParams();
     if (params?.entity_type) searchParams.set('entity_type', params.entity_type);
     if (params?.language) searchParams.set('language', params.language);
@@ -153,17 +156,21 @@ export const entitiesApi = {
     if (params?.sort_by) searchParams.set('sort_by', params.sort_by);
     if (params?.sort_order) searchParams.set('sort_order', params.sort_order);
     const query = searchParams.toString();
-    return fetchApi<EntityListResponse>(`/entities${query ? `?${query}` : ''}`);
+    return fetchApi<EntityListResponse>(`/entities${query ? `?${query}` : ''}`, {
+      signal: options?.signal,
+    });
   },
 
-  get: (id: string, params?: EntityGetParams) => {
+  get: (id: string, params?: EntityGetParams, options?: RequestOptions) => {
     const searchParams = new URLSearchParams();
     if (params?.include_summary === false) searchParams.set('include_summary', 'false');
     if (params?.related_limit !== undefined) {
       searchParams.set('related_limit', params.related_limit.toString());
     }
     const query = searchParams.toString();
-    return fetchApi<Entity>(`/entities/${id}${query ? `?${query}` : ''}`);
+    return fetchApi<Entity>(`/entities/${id}${query ? `?${query}` : ''}`, {
+      signal: options?.signal,
+    });
   },
 
   create: (entity: EntityCreate) =>
@@ -186,15 +193,18 @@ export const entitiesApi = {
 
 export const graphApi = {
   // Hierarchical graph with cluster assignments for rich visualization
-  hierarchical: (params?: {
-    max_nodes?: number;
-    max_edges?: number;
-    projects?: string[];
-    types?: string[];
-    refresh?: boolean;
-    resolution?: GraphResolution;
-    cluster_id?: string;
-  }) => {
+  hierarchical: (
+    params?: {
+      max_nodes?: number;
+      max_edges?: number;
+      projects?: string[];
+      types?: string[];
+      refresh?: boolean;
+      resolution?: GraphResolution;
+      cluster_id?: string;
+    },
+    options?: RequestOptions
+  ) => {
     const searchParams = new URLSearchParams();
     if (params?.max_nodes) searchParams.set('max_nodes', params.max_nodes.toString());
     if (params?.max_edges) searchParams.set('max_edges', params.max_edges.toString());
@@ -208,6 +218,8 @@ export const graphApi = {
     if (params?.resolution) searchParams.set('resolution', params.resolution);
     if (params?.cluster_id) searchParams.set('cluster_id', params.cluster_id);
     const query = searchParams.toString();
-    return fetchApi<HierarchicalGraphResponse>(`/graph/hierarchical${query ? `?${query}` : ''}`);
+    return fetchApi<HierarchicalGraphResponse>(`/graph/hierarchical${query ? `?${query}` : ''}`, {
+      signal: options?.signal,
+    });
   },
 };
