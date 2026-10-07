@@ -376,6 +376,58 @@ class LocalSentenceTransformerEmbeddingProvider:
             )
 
 
+class _EmbeddingCacheState:
+    """One LRU and one in-flight table for a vector space on one event loop."""
+
+    __slots__ = ("cache", "lock", "max_size", "pending")
+
+    def __init__(self, max_size: int) -> None:
+        self.cache: OrderedDict[str, list[float]] = OrderedDict()
+        self.pending: dict[str, asyncio.Future[list[float]]] = {}
+        self.lock = asyncio.Lock()
+        self.max_size = max_size
+
+
+# Vectors from two providers in the same space are interchangeable, so their
+# caches are one: the raw-memory and document providers embed the same query
+# at the same model and dimensions, and a /api/search embedded it twice when
+# each provider kept a cache of its own under its namespace. Keyed per event
+# loop like the configured providers, so a cache never carries a lock or a
+# future into another loop.
+_embedding_cache_states: weakref.WeakKeyDictionary[
+    asyncio.AbstractEventLoop, dict[str, _EmbeddingCacheState]
+] = weakref.WeakKeyDictionary()
+_embedding_cache_states_lock = threading.Lock()
+
+
+def embedding_space_key(metadata: EmbeddingMetadata) -> str:
+    """What makes two providers' vectors interchangeable: the stamp minus its namespace."""
+    return "\x1f".join(
+        (
+            metadata.provider,
+            metadata.model,
+            str(metadata.dimensions),
+            metadata.text_version,
+            metadata.tokenizer_estimate_method,
+            f"normalize={metadata.normalize}",
+            f"input_kind_sensitive={metadata.input_kind_sensitive}",
+        )
+    )
+
+
+def _embedding_cache_state(metadata: EmbeddingMetadata, *, max_size: int) -> _EmbeddingCacheState:
+    loop = asyncio.get_running_loop()
+    key = embedding_space_key(metadata)
+    with _embedding_cache_states_lock:
+        states = _embedding_cache_states.setdefault(loop, {})
+        state = states.get(key)
+        if state is None:
+            state = states[key] = _EmbeddingCacheState(max_size)
+        elif max_size > state.max_size:
+            state.max_size = max_size
+        return state
+
+
 class CachedEmbeddingProvider:
     def __init__(
         self,
@@ -386,14 +438,14 @@ class CachedEmbeddingProvider:
     ) -> None:
         self._provider = provider
         self._max_size = max_size
-        self._cache: OrderedDict[str, list[float]] = OrderedDict()
-        self._pending: dict[str, asyncio.Future[list[float]]] = {}
-        self._lock = asyncio.Lock()
         self._stats = stats
 
     @property
     def metadata(self) -> EmbeddingMetadata:
         return self._provider.metadata
+
+    def _state(self) -> _EmbeddingCacheState:
+        return _embedding_cache_state(self.metadata, max_size=self._max_size)
 
     async def embed_texts(
         self,
@@ -404,23 +456,24 @@ class CachedEmbeddingProvider:
         results: list[list[float] | None] = [None] * len(texts)
         missing: list[tuple[int, str, str, asyncio.Future[list[float]]]] = []
         pending: list[tuple[int, asyncio.Future[list[float]]]] = []
+        state = self._state()
 
-        async with self._lock:
+        async with state.lock:
             for index, text in enumerate(texts):
                 cache_key = embedding_cache_key(
                     self.metadata,
                     text,
                     input_kind=input_kind,
                 )
-                if cache_key in self._cache:
+                if cache_key in state.cache:
                     _increment_stat(self._stats, "hits")
-                    self._cache.move_to_end(cache_key)
-                    results[index] = self._cache[cache_key]
-                elif cache_key in self._pending:
-                    pending.append((index, self._pending[cache_key]))
+                    state.cache.move_to_end(cache_key)
+                    results[index] = state.cache[cache_key]
+                elif cache_key in state.pending:
+                    pending.append((index, state.pending[cache_key]))
                 else:
                     future = asyncio.get_running_loop().create_future()
-                    self._pending[cache_key] = future
+                    state.pending[cache_key] = future
                     missing.append((index, text, cache_key, future))
 
         if missing:
@@ -436,33 +489,33 @@ class CachedEmbeddingProvider:
                         f"{len(new_embeddings)} vectors for {len(missing)} texts"
                     )
             except asyncio.CancelledError:
-                async with self._lock:
+                async with state.lock:
                     for _index, _text, cache_key, future in missing:
-                        self._pending.pop(cache_key, None)
+                        state.pending.pop(cache_key, None)
                         _set_future_exception(future, asyncio.CancelledError())
                 raise
             except Exception as exc:
-                async with self._lock:
+                async with state.lock:
                     for _index, _text, cache_key, future in missing:
-                        self._pending.pop(cache_key, None)
+                        state.pending.pop(cache_key, None)
                         _set_future_exception(future, exc)
                 raise
 
-            async with self._lock:
+            async with state.lock:
                 for (index, _text, cache_key, future), embedding in zip(
                     missing,
                     new_embeddings,
                     strict=True,
                 ):
                     vector = [float(value) for value in embedding]
-                    self._cache[cache_key] = vector
-                    self._cache.move_to_end(cache_key)
-                    self._pending.pop(cache_key, None)
+                    state.cache[cache_key] = vector
+                    state.cache.move_to_end(cache_key)
+                    state.pending.pop(cache_key, None)
                     if not future.done():
                         future.set_result(vector)
                     results[index] = vector
-                while len(self._cache) > self._max_size:
-                    self._cache.popitem(last=False)
+                while len(state.cache) > state.max_size:
+                    state.cache.popitem(last=False)
                     _increment_stat(self._stats, "evictions")
 
         if pending:
@@ -479,10 +532,10 @@ class CachedEmbeddingProvider:
         return cast(list[list[float]], results)
 
     def cache_size(self) -> int:
-        return len(self._cache)
+        return len(self._state().cache)
 
     def clear_cache(self) -> None:
-        self._cache.clear()
+        self._state().cache.clear()
 
     def usage_snapshot(self) -> dict[str, str | int | float]:
         snapshot = getattr(self._provider, "usage_snapshot", None)
@@ -955,21 +1008,11 @@ def embedding_cache_key(
     *,
     input_kind: EmbeddingInputKind,
 ) -> str:
+    # The namespace labels the provider, never the vector: two providers in
+    # one space share their cache (`_embedding_cache_state`), so it is no part
+    # of the key.
     kind_bucket = input_kind if metadata.input_kind_sensitive else "shared"
-    payload = "\x1f".join(
-        (
-            metadata.cache_namespace,
-            metadata.provider,
-            metadata.model,
-            str(metadata.dimensions),
-            metadata.text_version,
-            metadata.tokenizer_estimate_method,
-            f"normalize={metadata.normalize}",
-            f"input_kind_sensitive={metadata.input_kind_sensitive}",
-            kind_bucket,
-            text.strip(),
-        )
-    )
+    payload = "\x1f".join((embedding_space_key(metadata), kind_bucket, text.strip()))
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
