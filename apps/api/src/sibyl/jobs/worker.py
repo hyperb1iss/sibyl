@@ -140,6 +140,11 @@ async def job_start(ctx: dict[str, Any]) -> None:
 
 
 async def job_end(ctx: dict[str, Any]) -> None:
+    # Structural graph writes this job made reach the other processes now,
+    # whichever client it used, instead of waiting out their cache TTL.
+    from sibyl_core.services.graph_cache_invalidation import announce_graph_updates
+
+    await announce_graph_updates()
     started_at = ctx.get("telemetry_started_at")
     if not isinstance(started_at, float):
         return

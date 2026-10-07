@@ -32,8 +32,15 @@ def get_pubsub() -> EventBus:
 
 
 def _invalidate_graph_caches_for_event(event: str, org_id: str | None) -> None:
+    # An event is already the announcement; retiring on it must not queue
+    # another one, or two pods would announce to each other forever.
     if org_id is not None and event in GRAPH_MUTATION_EVENTS:
-        invalidate_graph_caches(org_id)
+        invalidate_graph_caches(org_id, announce=False)
+
+
+async def announce_graph_update(org_id: str) -> None:
+    """The graph-update announcer: one GRAPH_UPDATED on the bus for the organization."""
+    await publish_event(WSEvent.GRAPH_UPDATED, {"organization_id": org_id}, org_id=org_id)
 
 
 async def _graph_cache_subscriber(event: str, data: dict[str, Any], org_id: str | None) -> None:

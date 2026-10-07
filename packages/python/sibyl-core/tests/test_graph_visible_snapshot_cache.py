@@ -299,6 +299,7 @@ async def test_graph_client_keeps_caches_warm_for_labelled_bookkeeping() -> None
     client = SurrealGraphClient(group_id=f"label-{uuid4().hex}", url="memory://")
     try:
         await client.execute_query("CREATE probe:one SET value = 1;")
+        invalidation._pending_announcements.discard(client.group_id)
         before = invalidation.graph_generation(client.group_id)
 
         await client.execute_query(
@@ -309,8 +310,11 @@ async def test_graph_client_keeps_caches_warm_for_labelled_bookkeeping() -> None
         )
         assert invalidation.graph_generation(client.group_id) == before
 
+        assert client.group_id not in invalidation.pending_graph_updates()
         await client.execute_query("UPDATE probe:one SET value = 4;")
         assert invalidation.graph_generation(client.group_id) == before + 1
+        assert client.group_id in invalidation.pending_graph_updates()
+        invalidation._pending_announcements.discard(client.group_id)
         await client.execute_query("UPDATE probe:one SET value = 5;", _query_label="other")
         assert invalidation.graph_generation(client.group_id) == before + 2
     finally:
