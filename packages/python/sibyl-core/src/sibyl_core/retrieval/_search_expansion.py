@@ -405,18 +405,28 @@ async def _community_member_hops(
     )
     if not community_ids:
         return []
+    # The constant `name` equality steers the 3.x planner onto the name index
+    # and walks every BELONGS_TO edge of the namespace, and an ORDER BY on the
+    # indexed target column turns even the hinted lookup into a full ordered
+    # index walk. The hint keeps one point lookup per community (the index is
+    # part of the base graph schema) and the order applies to that result by
+    # its projected name: the inner select renames target_id to community_id,
+    # and on 3.x an ORDER BY naming a key the rows lack sorts nothing, which
+    # would let LIMIT pick a different member set than the ordered walk did.
     rows = await _execute_query_records(
         client,
         """
-        SELECT source_id AS uuid, target_id AS community_id, uuid AS relationship_id
-        FROM relates_to
-        WHERE target_id IN $community_uuids
-          AND source_id NOT IN $source_uuids
-          AND name = "BELONGS_TO"
-          AND group_id = $group_id
-          AND in.group_id = $group_id
-          AND in.entity_type != "community"
-        ORDER BY target_id
+        SELECT * FROM (
+            SELECT source_id AS uuid, target_id AS community_id, uuid AS relationship_id
+            FROM relates_to WITH INDEX idx_relates_target
+            WHERE target_id IN $community_uuids
+              AND source_id NOT IN $source_uuids
+              AND name = "BELONGS_TO"
+              AND group_id = $group_id
+              AND in.group_id = $group_id
+              AND in.entity_type != "community"
+        )
+        ORDER BY community_id
         LIMIT $limit;
         """,
         community_uuids=community_ids,
@@ -450,11 +460,14 @@ async def _community_ids_for_entities(
     limit: int,
     relationship_ids_available: _RelationshipBatchGuard | None = None,
 ) -> list[str]:
+    # With several seeds the planner prefers the constant `name` equality and
+    # walks every BELONGS_TO edge of the namespace; the hint keeps one point
+    # lookup per seed on the source index, which is part of the base schema.
     rows = await _execute_query_records(
         client,
         """
         SELECT target_id AS uuid, uuid AS relationship_id
-        FROM relates_to
+        FROM relates_to WITH INDEX idx_relates_source
         WHERE source_id IN $source_uuids
           AND name = "BELONGS_TO"
           AND group_id = $group_id

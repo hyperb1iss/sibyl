@@ -201,8 +201,8 @@ async def unavailable_publication_ids(
                             $bindings.map(|$binding| $binding.capture_id)));
                         RETURN {
                             publications: $publications,
-                            captures: (SELECT * FROM raw_captures
-                                WHERE organization_id = $organization_id AND uuid IN $capture_ids),
+                            captures: array::flatten($capture_ids.map(|$capture_id|
+                                (SELECT * FROM raw_captures WHERE uuid = $capture_id LIMIT 1))),
                             attempts: (SELECT * FROM eval_attempts
                                 WHERE organization_id = $organization_id
                                     AND experiment_id IN $bindings.map(|$binding| $binding.experiment_id)
@@ -216,10 +216,23 @@ async def unavailable_publication_ids(
                 )
                 if len(snapshots) != 1:
                     raise RuntimeError("publication retrieval snapshot is unavailable")
+                # The capture list is computed inside the statement and may
+                # exceed the planner's `IN` union cap, so each id is its own
+                # uuid-index point lookup. An organization equality beside the
+                # lookup would plan as a whole-org scan on 3.x; the
+                # organization is verified here instead (uuid is unique
+                # table-wide).
+                snapshot = dict(snapshots[0])
+                captures = snapshot.get("captures")
+                snapshot["captures"] = [
+                    row
+                    for row in (captures if isinstance(captures, list) else [])
+                    if isinstance(row, Mapping) and row.get("organization_id") == organization_id
+                ]
                 unavailable.update(
                     await asyncio.to_thread(
                         _unavailable_snapshot,
-                        snapshots[0],
+                        snapshot,
                         references,
                         rows,
                     )

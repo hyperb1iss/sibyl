@@ -149,9 +149,9 @@ async def test_capture_batch_failure_preserves_other_healthy_batches(
     original_select = content_client.select_many
     original_batches = content_client.value_batches
 
-    def batches(values):
+    def batches(values, **kwargs):
         if set(values) != {memory.id, healthy.id}:
-            yield from original_batches(values)
+            yield from original_batches(values, **kwargs)
             return
         yield [memory.id]
         yield [healthy.id]

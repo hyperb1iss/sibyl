@@ -14,9 +14,8 @@ from sibyl_core.services.graph_records import (
     _entity_select_fields,
     _entity_to_task,
     _int_value,
-    _surreal_indexed_field_equals_or_missing,
-    _surreal_indexed_field_in_or_missing,
     _surreal_indexed_field_missing,
+    entity_type_literal,
 )
 from sibyl_core.services.graph_search import count_task_status as _count_task_status
 from sibyl_core.services.graph_search import (
@@ -28,14 +27,6 @@ from sibyl_core.services.graph_search import lower_sequence_values as _lower_seq
 from sibyl_core.services.graph_search import metadata_scalar as _metadata_scalar
 from sibyl_core.services.graph_search import new_task_progress as _new_task_progress
 from sibyl_core.services.graph_search import task_priority_rank as _task_priority_rank
-
-
-def _scoped_field_clause(field: str) -> str:
-    """Match a promoted scope column, or its attribute on a pre-promotion row."""
-    return (
-        f"({field} = ${field} OR "
-        f"({_surreal_indexed_field_missing(field)} AND attributes.{field} = ${field}))"
-    )
 
 
 def _private_memory_clauses(
@@ -301,10 +292,10 @@ class _EntityWorkItemManager(_EntitySearchManager):
 
         Archived rows are included and a row without a status counts as todo,
         the same reading list_by_type's callers apply to task metadata. The
-        scope filters accept the promoted column or, on a row written before
-        the column existed, the attribute it was promoted from, so the counts
-        agree with what list_by_type returns for the same scope without
-        loading a single row.
+        scope filters are exact column matches, the same predicates
+        list_by_type uses, so the aggregate stays on the compound
+        (entity_type, project_id, ...) indexes; rows written before the
+        columns existed were promoted by graph migrations 7 and 36.
         """
         where_clauses = [
             "group_id = $group_id",
@@ -315,16 +306,10 @@ class _EntityWorkItemManager(_EntitySearchManager):
             "entity_type": entity_type.value,
         }
         if project_id is not None:
-            where_clauses.append(_scoped_field_clause("project_id"))
+            where_clauses.append("project_id = $project_id")
             query_params["project_id"] = project_id
         if epic_id is not None:
-            where_clauses.append(
-                "("
-                + _scoped_field_clause("parent_task_id")
-                + " OR "
-                + _scoped_field_clause("epic_id")
-                + ")"
-            )
+            where_clauses.append("(parent_task_id = $parent_task_id OR epic_id = $epic_id)")
             query_params["epic_id"] = epic_id
             query_params["parent_task_id"] = epic_id
         rows = normalize_records(
@@ -371,9 +356,9 @@ class _EntityWorkItemManager(_EntitySearchManager):
     ) -> list[Entity]:
         """List one type newest-first, with ``offset`` counting visible rows.
 
-        A filter whose SurrealQL predicate admits a superset of the Python
-        recheck (legacy rows keep the value under ``attributes``) restarts the
-        walk at ``START 0`` so the visible offset stays exact. ``exact_window``
+        Every column filter is an exact predicate, so the database page is the
+        page; only the Python-side tag filter restarts the walk at ``START 0``
+        to keep the visible offset exact. ``exact_window``
         instead addresses the ordered index directly: one statement of
         ``limit`` rows from ``START offset``, no recheck, no fill. A caller
         paging a large type reads O(limit) per page that way and runs the
@@ -388,20 +373,13 @@ class _EntityWorkItemManager(_EntitySearchManager):
         priority_values = _lower_filter_values(priority)
         complexity_values = _lower_filter_values(complexity)
         tag_values = _lower_sequence_values(tags)
-        requires_recheck = any(
-            [
-                project_id is not None,
-                epic_id is not None,
-                no_epic,
-                parent_task_id is not None,
-                bool(status_values),
-                bool(priority_values),
-                bool(complexity_values),
-                bool(feature),
-                bool(tag_values),
-                not include_archived,
-            ]
-        )
+        # Every filter below is an exact column predicate, so the database
+        # page is the page: only tags (Python-only) force a restart from the
+        # first row. The old "or missing" branches admitted rows the recheck
+        # then dropped, which also pushed the planner off the compound
+        # (entity_type, project_id, ...) index onto a walk of every row of
+        # the type.
+        requires_recheck = bool(tag_values)
         target_count = max(int(offset), 0) + max(int(limit), 1) if requires_recheck else limit
         query_offset = 0 if requires_recheck else max(int(offset), 0)
         page_size = min(max(target_count, 1), 1000)
@@ -418,16 +396,10 @@ class _EntityWorkItemManager(_EntitySearchManager):
         }
 
         if project_id is not None:
-            where_clauses.append(_surreal_indexed_field_equals_or_missing("project_id"))
+            where_clauses.append("project_id = $project_id")
             query_params["project_id"] = project_id
         if epic_id is not None:
-            where_clauses.append(
-                "("
-                + _surreal_indexed_field_equals_or_missing("parent_task_id")
-                + " OR "
-                + _surreal_indexed_field_equals_or_missing("epic_id")
-                + ")"
-            )
+            where_clauses.append("(parent_task_id = $parent_task_id OR epic_id = $epic_id)")
             query_params["epic_id"] = epic_id
             query_params["parent_task_id"] = epic_id
         if no_epic:
@@ -439,23 +411,19 @@ class _EntityWorkItemManager(_EntitySearchManager):
                 + ")"
             )
         if parent_task_id is not None:
-            where_clauses.append(_surreal_indexed_field_equals_or_missing("parent_task_id"))
+            where_clauses.append("parent_task_id = $parent_task_id")
             query_params["parent_task_id"] = parent_task_id
         if status_values:
-            where_clauses.append(_surreal_indexed_field_in_or_missing("status", "status_values"))
+            where_clauses.append("status IN $status_values")
             query_params["status_values"] = status_values
         if priority_values:
-            where_clauses.append(
-                _surreal_indexed_field_in_or_missing("priority", "priority_values")
-            )
+            where_clauses.append("priority IN $priority_values")
             query_params["priority_values"] = priority_values
         if complexity_values:
-            where_clauses.append(
-                _surreal_indexed_field_in_or_missing("complexity", "complexity_values")
-            )
+            where_clauses.append("complexity IN $complexity_values")
             query_params["complexity_values"] = complexity_values
         if feature:
-            where_clauses.append(_surreal_indexed_field_equals_or_missing("feature"))
+            where_clauses.append("feature = $feature")
             query_params["feature"] = feature.lower()
         if not include_archived:
             where_clauses.append("(status IS NONE OR status = '' OR status != 'archived')")
@@ -642,28 +610,60 @@ class _EntityWorkItemManager(_EntitySearchManager):
         return entities[: max(int(limit), 1)]
 
     async def count_by_type(self, *, include_archived: bool = False) -> dict[str, int]:
-        where_clauses = ["group_id = $group_id"]
+        # Every row of an organization namespace shares group_id, so that
+        # predicate only disabled the count optimisation: with it, or with a
+        # GROUP BY, the 3.x planner scans and decodes the whole table. One
+        # single-column equality per type plans as an IndexCountScan, and the
+        # archived rows come from one scan of the status index.
+        types = list(EntityType)
+        # Literal types, not parameters: bound, the equality plans as an
+        # Aggregate over an IndexScan of the type's rows (2,754 rows, 34 ms
+        # for tasks on the dev namespace); literal, it is an IndexCountScan.
+        statements = [
+            "SELECT count() AS entity_count FROM entity "
+            f"WHERE entity_type = {entity_type_literal(entity_type)} GROUP ALL;"
+            for entity_type in types
+        ]
         if not include_archived:
-            where_clauses.append("(status IS NONE OR status = '' OR status != 'archived')")
-        rows = normalize_records(
-            await self._client.execute_query(
-                """
-                SELECT entity_type, count() AS entity_count
-                FROM entity
-                WHERE """
-                + " AND ".join(where_clauses)
-                + """
-                GROUP BY entity_type;
-                """,
-                group_id=self._group_id,
+            statements.append(
+                "SELECT entity_type, count() AS entity_count FROM entity "
+                "WHERE status = 'archived' GROUP BY entity_type;"
             )
-        )
-        counts = {entity_type.value: 0 for entity_type in EntityType}
-        for row in rows:
-            entity_type = row.get("entity_type")
-            if isinstance(entity_type, str) and entity_type:
-                counts[entity_type] = _int_value(row.get("entity_count"))
+        results = await self._client.execute_query_batch("\n".join(statements))
+        if not isinstance(results, list) or len(results) != len(statements):
+            raise RuntimeError("entity type counts returned an unexpected statement set")
+        counts: dict[str, int] = {}
+        for entity_type, result in zip(types, results[: len(types)], strict=True):
+            rows = normalize_records(result)
+            counts[entity_type.value] = _int_value(rows[0].get("entity_count")) if rows else 0
+        if not include_archived:
+            for row in normalize_records(results[-1]):
+                entity_type_value = row.get("entity_type")
+                if isinstance(entity_type_value, str) and entity_type_value in counts:
+                    counts[entity_type_value] = max(
+                        counts[entity_type_value] - _int_value(row.get("entity_count")), 0
+                    )
         return counts
+
+    async def has_entities_of_types(self, entity_types: Sequence[EntityType]) -> bool:
+        """Whether any row of the given types exists, without counting anything.
+
+        One type per statement: a multi-type `IN` list makes the planner
+        materialise every branch before the limit applies, while a single
+        equality with no residual filter pushes LIMIT 1 into the index scan
+        and reads one row. Archived rows count as existing; the reads that
+        follow a positive answer apply their own archived filter.
+        """
+        for entity_type in entity_types:
+            rows = normalize_records(
+                await self._client.execute_query(
+                    "SELECT uuid FROM entity WHERE entity_type = $entity_type LIMIT 1;",
+                    entity_type=entity_type.value,
+                )
+            )
+            if rows:
+                return True
+        return False
 
     async def _with_epic_progress(
         self, epics: list[Entity], *, project_id: str | None = None
@@ -703,68 +703,34 @@ class _EntityWorkItemManager(_EntitySearchManager):
             return {}
 
         epic_id_list = sorted(epic_ids)
-        where_clauses = [
-            "group_id = $group_id",
-            "entity_type = 'task'",
-            "parent_task_id IN $epic_ids",
+        # One equality per epic binds the (entity_type, parent_task_id, ...)
+        # compound index exactly. An `IN` list over the epics made the planner
+        # walk every task of the type, and hinting the single-column parent
+        # index turned the grouped read into a table scan. Values that older
+        # rows kept only in attributes were promoted into parent_task_id by
+        # migrations 7 and 36, so no attribute-level read remains.
+        project_clause = " AND project_id = $project_id" if project_id is not None else ""
+        statements = [
+            "SELECT status, count() AS task_count FROM entity "
+            "WHERE group_id = $group_id AND entity_type = 'task' "
+            f"AND parent_task_id = $epic_{index}{project_clause} GROUP BY status;"
+            for index in range(len(epic_id_list))
         ]
         params: dict[str, Any] = {
             "group_id": self._group_id,
-            "epic_ids": epic_id_list,
+            **{f"epic_{index}": epic_id for index, epic_id in enumerate(epic_id_list)},
         }
         if project_id is not None:
-            where_clauses.append("project_id = $project_id")
             params["project_id"] = project_id
-
-        rows = normalize_records(
-            await self._client.execute_query(
-                """
-                SELECT parent_task_id AS epic_id, status, count() AS task_count
-                FROM entity
-                WHERE """
-                + " AND ".join(where_clauses)
-                + """
-                GROUP BY parent_task_id, status;
-                """,
-                **params,
-            )
-        )
-        legacy_where_clauses = [
-            "group_id = $group_id",
-            "entity_type = 'task'",
-            _surreal_indexed_field_missing("parent_task_id"),
-            "(attributes.parent_task_id IN $epic_ids OR attributes.epic_id IN $epic_ids)",
-        ]
-        if project_id is not None:
-            legacy_where_clauses.append(
-                "(project_id = $project_id OR attributes.project_id = $project_id)"
-            )
-        rows.extend(
-            normalize_records(
-                await self._client.execute_query(
-                    """
-                    SELECT attributes.epic_id AS epic_id,
-                           attributes.status AS status,
-                           count() AS task_count
-                    FROM entity
-                    WHERE """
-                    + " AND ".join(legacy_where_clauses)
-                    + """
-                    GROUP BY attributes.epic_id, attributes.status;
-                    """,
-                    **params,
+        results = await self._client.execute_query_batch("\n".join(statements), **params)
+        if not isinstance(results, list) or len(results) != len(statements):
+            raise RuntimeError("epic progress returned an unexpected statement set")
+        for epic_id, result in zip(epic_id_list, results, strict=True):
+            counters = progress[epic_id]
+            for row in normalize_records(result):
+                _count_task_status(
+                    counters, row.get("status"), count=_int_value(row.get("task_count"))
                 )
-            )
-        )
-
-        for row in rows:
-            epic_ref = row.get("epic_id")
-            if epic_ref is None:
-                continue
-            counters = progress.get(str(epic_ref))
-            if counters is None:
-                continue
-            _count_task_status(counters, row.get("status"), count=_int_value(row.get("task_count")))
 
         return {
             epic_id: _finalize_task_progress(counters) for epic_id, counters in progress.items()

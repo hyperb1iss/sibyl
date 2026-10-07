@@ -32,6 +32,9 @@ from sibyl_core.backends.surreal.schema_version import (
     get_schema_version,
     record_schema_version,
 )
+from sibyl_core.backends.surreal.schema_work_item_columns import (
+    canonicalize_entity_work_item_columns,
+)
 from sibyl_core.embeddings.providers import (
     DeterministicEmbeddingProvider,
     EmbeddingInputKind,
@@ -1997,6 +2000,7 @@ async def test_native_entity_manager_search_overlaps_fulltext_and_vector_branche
         "entity.search.fulltext",
         "entity.search.vector",
         "entity.search.vector.exact",
+        "entity.search.vector.type_total",
     }
     vector_query = next(
         query
@@ -3655,6 +3659,11 @@ async def test_graph_filters_recheck_metadata_only_denormalized_fields() -> None
                     }
                 ),
             )
+
+        # Listing predicates are exact column matches; rows in this shape are
+        # promoted once by the canonicalization migration rather than admitted
+        # by an "or missing" branch and rechecked in Python on every read.
+        await canonicalize_entity_work_item_columns(client.execute_query)
 
         filtered = await entity_manager.list_by_type(
             EntityType.TASK,

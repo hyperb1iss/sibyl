@@ -26,14 +26,19 @@ from sibyl_core.services.source_observations import (
 )
 from sibyl_core.services.source_state_store import source_snapshot_from_records
 
+# `uuid IN $ids ORDER BY uuid` makes the 3.x planner walk the whole uuid index
+# in order and filter it (every entity and every edge of the namespace for a
+# handful of ids). Sorting the union lookup in an outer select keeps the point
+# lookups and yields the same rows in the same order, so the fingerprint is
+# unchanged.
 _SNAPSHOT = """
-LET $targets = SELECT * FROM entity WHERE group_id=$org AND uuid IN $ids ORDER BY uuid;
+LET $targets = SELECT * FROM (SELECT * FROM entity WHERE group_id=$org AND uuid IN $ids) ORDER BY uuid;
 LET $associations = SELECT * OMIT validation_write_witness FROM memory_derivations WHERE organization_id=$org
     AND target_kind='graph_entity' AND target_id IN $ids ORDER BY target_id;
 LET $states = SELECT * OMIT validation_write_witness FROM source_states
     WHERE organization_id=$org AND source_kind='graph_entity' AND source_id IN $ids ORDER BY source_id;
-LET $relationships = SELECT *, in.uuid AS source_uuid, out.uuid AS target_uuid FROM relates_to
-    WHERE group_id=$org AND uuid IN $relationship_ids ORDER BY uuid;
+LET $relationships = SELECT * FROM (SELECT *, in.uuid AS source_uuid, out.uuid AS target_uuid FROM relates_to
+    WHERE group_id=$org AND uuid IN $relationship_ids) ORDER BY uuid;
 LET $relationship_evidence = SELECT * OMIT attributes.operational_write_witness FROM $relationships;
 LET $operational_snapshot_fingerprint = crypto::sha256(type::string([$targets,$associations,$states,$relationship_evidence]));
 """

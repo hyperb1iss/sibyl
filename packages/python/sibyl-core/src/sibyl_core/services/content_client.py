@@ -21,6 +21,14 @@ CONTENT_KNN_EF_FLOOR = 40
 
 DEFAULT_BATCH_SIZE = 128
 
+# SurrealDB 3.x unions one index lookup per value of an `IN` list only up to
+# 32 values; a longer list is planned as a full table scan. Statements whose
+# only usable index is the single-column uuid index batch at the planner's
+# cap. Statements that lead with an organization-prefixed composite keep the
+# default: the planner walks that prefix and filters the list, so the cap would
+# only multiply round trips.
+ID_LOOKUP_BATCH_SIZE = 32
+
 DIRECT_SEARCH_QUERY_TIMEOUT_SECONDS = 3.0
 
 LIFECYCLE_FILTER_OVERFETCH_FACTOR = 4

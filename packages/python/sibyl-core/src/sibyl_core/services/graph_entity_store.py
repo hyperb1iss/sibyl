@@ -90,6 +90,18 @@ def _pending_upsert_entries(key: str) -> str:
     """.replace("@key@", key)
 
 
+# `uuid IN $ids ORDER BY uuid` makes the 3.x planner walk the whole uuid index
+# in order and filter it (every entity of the namespace for a handful of ids).
+# Sorting the union lookup in an outer select keeps the point lookups and
+# yields the same rows in the same order, so the fingerprint is unchanged.
+_OPERATIONAL_TARGET_SNAPSHOT = """
+        LET $targets = SELECT * FROM (SELECT * FROM entity WHERE uuid IN $ids) ORDER BY uuid;
+        LET $associations = SELECT * FROM memory_derivations WHERE organization_id=$org
+            AND target_kind='graph_entity' AND target_id IN $ids ORDER BY target_id;
+        LET $states = SELECT * FROM source_states WHERE organization_id=$org
+            AND source_kind='graph_entity' AND source_id IN $ids ORDER BY source_id;
+"""
+
 _ENTITY_BULK_UPSERT_QUERY = f"""
 INSERT INTO entity $rows ON DUPLICATE KEY UPDATE
     uuid = $input.uuid,
@@ -1180,12 +1192,9 @@ async def _publish_operational_inventory(
         raise SourceUnavailableError()
     snapshots = normalize_records(
         await client.execute_query(
-            """RETURN {
-                LET $targets = SELECT * FROM entity WHERE uuid IN $ids ORDER BY uuid;
-                LET $associations = SELECT * FROM memory_derivations WHERE organization_id=$org
-                    AND target_kind='graph_entity' AND target_id IN $ids ORDER BY target_id;
-                LET $states = SELECT * FROM source_states WHERE organization_id=$org
-                    AND source_kind='graph_entity' AND source_id IN $ids ORDER BY source_id;
+            "RETURN {"
+            + _OPERATIONAL_TARGET_SNAPSHOT
+            + """
                 RETURN {targets:$targets, associations:$associations, states:$states,
                     fingerprint:crypto::sha256(type::string([$targets,$associations,$states]))};
             };""",
@@ -1363,18 +1372,15 @@ async def _publish_operational_inventory(
         .rstrip(";")
     )
     written = await client.execute_query(
-        """RETURN {
-        LET $targets = SELECT * FROM entity WHERE uuid IN $ids ORDER BY uuid;
-        LET $associations = SELECT * FROM memory_derivations WHERE organization_id=$org
-            AND target_kind='graph_entity' AND target_id IN $ids ORDER BY target_id;
-        LET $states = SELECT * FROM source_states WHERE organization_id=$org
-            AND source_kind='graph_entity' AND source_id IN $ids ORDER BY source_id;
+        "RETURN {"
+        + _OPERATIONAL_TARGET_SNAPSHOT
+        + """
         IF crypto::sha256(type::string([$targets,$associations,$states])) != $fingerprint {
             THROW 'operational graph target changed during publication';
         };
         IF $legacy_fingerprint != NONE {
-            LET $legacy_edges = SELECT *, in.uuid AS source_uuid, out.uuid AS target_uuid
-                FROM relates_to WHERE group_id=$org AND uuid IN $legacy_edge_ids ORDER BY uuid;
+            LET $legacy_edges = SELECT * FROM (SELECT *, in.uuid AS source_uuid, out.uuid AS target_uuid
+                FROM relates_to WHERE group_id=$org AND uuid IN $legacy_edge_ids) ORDER BY uuid;
             IF crypto::sha256(type::string($legacy_edges)) != $legacy_fingerprint {
                 RETURN {applied:false};
             };

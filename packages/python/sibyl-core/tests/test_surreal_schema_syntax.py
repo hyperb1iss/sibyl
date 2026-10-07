@@ -165,7 +165,13 @@ class _RecordingSchemaClient:
             return []
         if statement.startswith("INFO FOR INDEX idx_entity_lifecycle_repair_key"):
             return [{"building": {"status": "ready"}}]
-        if self.duplicate_index_name and self.duplicate_index_name in statement:
+        if (
+            self.duplicate_index_name
+            and self.duplicate_index_name in statement
+            and stripped.startswith("DEFINE")
+        ):
+            # The DEFINE is the tolerated failure; a REBUILD of the same index
+            # is expected to propagate instead, so the stub lets it succeed.
             raise RuntimeError(
                 f"Database index `{self.duplicate_index_name}` already contains 'dirty-row'"
             )

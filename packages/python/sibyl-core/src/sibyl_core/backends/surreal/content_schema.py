@@ -99,6 +99,15 @@ RAW_CAPTURE_ORGANIZATION_UUID_INDEX = (
     "DEFINE INDEX IF NOT EXISTS idx_raw_captures_org_uuid "
     "ON raw_captures FIELDS organization_id, uuid UNIQUE;"
 )
+# Capture id lookups are served by `idx_raw_captures_uuid` alone (an
+# organization equality beside `uuid IN` plans as a whole-org scan on 3.x). A
+# live namespace was found with that unique index reporting `ready` while every
+# row created before an earlier index build was absent from it, so point reads
+# by uuid silently missed those captures. Rebuild it from the table so the
+# index covers every row before the lookups depend on it.
+RAW_CAPTURE_UUID_INDEX_REBUILD = (
+    "REBUILD INDEX IF EXISTS idx_raw_captures_uuid ON TABLE raw_captures;"
+)
 
 if TYPE_CHECKING:
     from sibyl_core.backends.surreal.content_client import SurrealContentClient
@@ -145,7 +154,7 @@ CONTENT_TABLES = (
     *RAW_LEXICAL_TABLES,
     RAW_LEXICAL_STATE_TABLE,
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 53
+CONTENT_SCHEMA_CURRENT_VERSION = 56
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -634,6 +643,48 @@ DEFINE INDEX IF NOT EXISTS idx_raw_captures_dedupe_lookup
     ON raw_captures FIELDS metadata.dedupe_key, organization_id, memory_scope, scope_key;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_source_lookup
     ON raw_captures FIELDS source_id, organization_id, memory_scope, scope_key;
+"""
+
+# Recall, memory listing and the embedding coverage probe read one scope
+# (organization, memory_scope, then principal or scope key) ordered by
+# captured_at. The scope index ends at scope_key, which private captures leave
+# empty, so the planner matched every private capture of the organization and
+# sorted it in memory on each call. These indexes end in the order the readers
+# use, so the scan streams in index order and the limit bounds it. The review
+# and listing indexes do the same for the reflection review page and the
+# capture list.
+CONTENT_RAW_CAPTURE_RECENT_INDEX_MIGRATION_DEFINITIONS = """
+DEFINE INDEX IF NOT EXISTS idx_raw_captures_private_recent
+    ON raw_captures FIELDS organization_id, memory_scope, principal_id, captured_at, uuid;
+DEFINE INDEX IF NOT EXISTS idx_raw_captures_scoped_recent
+    ON raw_captures FIELDS organization_id, memory_scope, scope_key, captured_at, uuid;
+DEFINE INDEX IF NOT EXISTS idx_raw_captures_surface_review
+    ON raw_captures FIELDS organization_id, capture_surface, review_state, captured_at, uuid;
+DEFINE INDEX IF NOT EXISTS idx_raw_captures_org_created
+    ON raw_captures FIELDS organization_id, created_at, uuid;
+"""
+
+# raw_captures carried 22 indexes, every one maintained on each capture write
+# and on every recall exposure stamp. The two FULLTEXT indexes tokenise title
+# and content into BM25 postings that no statement reads (the lexical lane
+# queries the raw_lexical_* mirror tables), the single-column source and
+# org_dedupe indexes duplicate the (source_id, ...) and (dedupe_key, ...)
+# lookup composites, the captured_at and created_at singles were never chosen
+# over the organization index and are superseded by the recent-first
+# composites, and nothing filters captures by entity_id. purge_after stays:
+# the purge job ranges on it without an organization. The source lineage
+# element index is re-asserted here because a live namespace at the current
+# version was found without it although migration 26 defines it; the hinted
+# lineage lookup silently table-scans whenever the index is absent.
+CONTENT_RAW_CAPTURE_INDEX_PRUNE_MIGRATION_DEFINITIONS = """
+REMOVE INDEX IF EXISTS idx_raw_captures_title_ft ON TABLE raw_captures;
+REMOVE INDEX IF EXISTS idx_raw_captures_content_ft ON TABLE raw_captures;
+REMOVE INDEX IF EXISTS idx_raw_captures_source ON TABLE raw_captures;
+REMOVE INDEX IF EXISTS idx_raw_captures_org_dedupe ON TABLE raw_captures;
+REMOVE INDEX IF EXISTS idx_raw_captures_captured_at ON TABLE raw_captures;
+REMOVE INDEX IF EXISTS idx_raw_captures_created_at ON TABLE raw_captures;
+REMOVE INDEX IF EXISTS idx_raw_captures_entity_id ON TABLE raw_captures;
+DEFINE INDEX IF NOT EXISTS idx_raw_captures_source_lineage ON raw_captures FIELDS metadata.raw_source_ids.*;
 """
 
 CONTENT_LIFECYCLE_REVIEW_SPLIT_MIGRATION_DEFINITIONS = f"""
@@ -1211,6 +1262,27 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             statements=(
                 "DEFINE INDEX IF NOT EXISTS idx_raw_captures_validation_pending "
                 "ON raw_captures FIELDS metadata.source_validation_pending, organization_id",
+            ),
+        ),
+        # 53 (the validation-pending index) merged from a parallel lane; the
+        # query-plan work takes the numbers after it.
+        SchemaMigration(
+            version=54,
+            name="content_raw_capture_uuid_index_rebuild",
+            statements=(RAW_CAPTURE_UUID_INDEX_REBUILD,),
+        ),
+        SchemaMigration(
+            version=55,
+            name="content_raw_capture_recent_indexes",
+            statements=tuple(
+                split_statements(CONTENT_RAW_CAPTURE_RECENT_INDEX_MIGRATION_DEFINITIONS)
+            ),
+        ),
+        SchemaMigration(
+            version=56,
+            name="content_raw_capture_index_prune",
+            statements=tuple(
+                split_statements(CONTENT_RAW_CAPTURE_INDEX_PRUNE_MIGRATION_DEFINITIONS)
             ),
         ),
     )

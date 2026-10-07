@@ -31,7 +31,11 @@ from sibyl_core.services.graph_embeddings import (
     _embed_texts_with_timeout,
     _embedding_vector_from_batch,
 )
-from sibyl_core.services.graph_records import _ENTITY_SEARCH_FIELDS, _entity_from_row
+from sibyl_core.services.graph_records import (
+    _ENTITY_SEARCH_FIELDS,
+    _entity_from_row,
+    entity_type_literal,
+)
 from sibyl_core.services.graph_search import (
     bounded_similarity_score as _bounded_similarity_score,
 )
@@ -177,11 +181,15 @@ class _EntitySearchManager:
         return [rows_by_id[entity_id] for entity_id in ordered_ids if entity_id in rows_by_id]
 
     async def get_notes_for_task(self, task_id: str, limit: int = 50) -> list[Entity]:
+        # Among several usable equalities the 3.x planner picks the type
+        # index and walks every note; the hint keeps the lookup on the task
+        # index (part of the base graph schema), which holds only this task's
+        # notes.
         rows = normalize_records(
             await self._client.execute_query(
                 """
                 SELECT *
-                FROM entity
+                FROM entity WITH INDEX idx_entity_task
                 WHERE group_id = $group_id
                   AND entity_type = 'note'
                   AND task_id = $task_id
@@ -548,25 +556,32 @@ class _EntitySearchManager:
             )
             if len(rows) < candidate_limit:
                 # Filtered HNSW can exhaust its traversal before the eligible
-                # rows. Score the whole eligible slice before limiting output.
+                # rows. Score the whole eligible slice before limiting output,
+                # unless the walk already returned every row of the requested
+                # types: a type smaller than the candidate pool always falls
+                # short, and the exact pass over it would only re-score rows
+                # the walk has in hand.
                 try:
-                    rows = normalize_records(
-                        await self._client.execute_query(
-                            self._exact_vector_query(
-                                type_count=len(type_values),
-                                admit_unstamped=readiness.admit_unstamped,
-                            ),
-                            group_id=self._group_id,
-                            query_embedding=query_embedding,
-                            **{f"entity_type_{i}": value for i, value in enumerate(type_values)},
-                            limit=candidate_limit,
-                            **{
-                                f"embedding_{field}": embedding_metadata[field]
-                                for field in VECTOR_SPACE_FIELDS
-                            },
-                            _query_label="entity.search.vector.exact",
+                    if not await self._vector_walk_exhausted(type_values, len(rows)):
+                        rows = normalize_records(
+                            await self._client.execute_query(
+                                self._exact_vector_query(
+                                    type_count=len(type_values),
+                                    admit_unstamped=readiness.admit_unstamped,
+                                ),
+                                group_id=self._group_id,
+                                query_embedding=query_embedding,
+                                **{
+                                    f"entity_type_{i}": value for i, value in enumerate(type_values)
+                                },
+                                limit=candidate_limit,
+                                **{
+                                    f"embedding_{field}": embedding_metadata[field]
+                                    for field in VECTOR_SPACE_FIELDS
+                                },
+                                _query_label="entity.search.vector.exact",
+                            )
                         )
-                    )
                 except Exception as exc:
                     log.warning(
                         "entity_vector_search_completion_failed",
@@ -582,6 +597,39 @@ class _EntitySearchManager:
             return []
 
         return [(_entity_from_row(row), _row_score(row)) for row in rows]
+
+    async def _vector_walk_exhausted(self, type_values: Sequence[str], returned: int) -> bool:
+        """Whether a filtered vector walk already returned every row it could.
+
+        Counts the requested types through one IndexCountScan each (the whole
+        table through a CountScan when untyped). An unanswered count reports
+        False so the exact pass still runs.
+        """
+        # Literal types: a parameter-bound equality plans as an Aggregate over
+        # an IndexScan of the type's rows, a literal as an IndexCountScan.
+        statements = (
+            [
+                "SELECT count() AS total FROM entity "
+                f"WHERE entity_type = {entity_type_literal(value)} GROUP ALL;"
+                for value in type_values
+            ]
+            if type_values
+            else ["SELECT count() AS total FROM entity GROUP ALL;"]
+        )
+        total = 0
+        for statement in statements:
+            counted = normalize_records(
+                await self._client.execute_query(
+                    statement, _query_label="entity.search.vector.type_total"
+                )
+            )
+            if not counted:
+                return False
+            raw_total = counted[0].get("total")
+            if not isinstance(raw_total, int | float):
+                return False
+            total += int(raw_total)
+        return returned >= total
 
     async def _fallback_text_search(
         self,
@@ -635,12 +683,15 @@ class _EntitySearchManager:
     ) -> list[tuple[Entity, float]]:
         type_values = [entity_type.value for entity_type in entity_types or ()]
         type_clause = "AND entity_type IN $entity_types" if type_values else ""
+        # The name index (graph migration 37) turns this from a table scan
+        # into a point lookup; the hint matters when a type filter is present,
+        # since the planner otherwise prefers the broader type index.
         rows = normalize_records(
             await self._client.execute_query(
                 "SELECT "
                 + _ENTITY_SEARCH_FIELDS
                 + """
-                FROM entity
+                FROM entity WITH INDEX idx_entity_name
                 WHERE group_id = $group_id
                   AND name = $name_query
                 """

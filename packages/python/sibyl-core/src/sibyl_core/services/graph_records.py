@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from enum import Enum
@@ -516,16 +517,25 @@ def _row_embedding(value: object) -> list[float] | None:
     return embedding
 
 
+_ENTITY_TYPE_LITERAL = re.compile(r"[a-z][a-z0-9_]*")
+
+
+def entity_type_literal(value: str | EntityType) -> str:
+    """Quote an EntityType value for inline use in a statement.
+
+    A `count()` over `entity_type = $param` plans as an Aggregate over an
+    IndexScan of every row of the type; the same equality against a literal
+    plans as an IndexCountScan. Only enum members pass, and their values are
+    lower-case identifiers, so the literal cannot carry a quote.
+    """
+    text = EntityType(value).value
+    if not _ENTITY_TYPE_LITERAL.fullmatch(text):
+        raise ValueError(f"entity type {text!r} is not a plain identifier")
+    return f"'{text}'"
+
+
 def _surreal_indexed_field_missing(field: str) -> str:
     return f"({field} IS NONE OR {field} = '')"
-
-
-def _surreal_indexed_field_equals_or_missing(field: str) -> str:
-    return f"({field} = ${field} OR {_surreal_indexed_field_missing(field)})"
-
-
-def _surreal_indexed_field_in_or_missing(field: str, param: str) -> str:
-    return f"({field} IN ${param} OR {_surreal_indexed_field_missing(field)})"
 
 
 def _relationship_metadata(row: Mapping[str, object]) -> dict[str, object]:
