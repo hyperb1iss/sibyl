@@ -389,6 +389,8 @@ async def _stamp_graph_entities(
             _GRAPH_ENTITY_STAMP_QUERY,
             organization_id=organization_id,
             stamps=[_stamp_parameters(stamp) for stamp in stamps],
+            # Bookkeeping only: the graph caches stay warm (BOOKKEEPING_QUERY_LABELS).
+            _query_label="usage.graph_stamp",
         )
     )
     return _stamps_from_rows(

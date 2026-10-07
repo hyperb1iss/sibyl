@@ -8,10 +8,6 @@ from typing import Any
 import structlog
 
 from sibyl_core.services.graph_community_detection import _detect_communities_from_graph
-from sibyl_core.services.graph_community_managers import (
-    _list_all_entities,
-    _list_all_relationships,
-)
 from sibyl_core.services.graph_community_models import (
     GRAPH_RESOLUTION_DETAIL,
     GRAPH_RESOLUTION_OVERVIEW,
@@ -24,15 +20,13 @@ from sibyl_core.services.graph_community_selection import (
     DETECTION_MAX_ENTITIES,
     DETECTION_MAX_RELATIONSHIPS,
     _build_cluster_detail_graph_from_snapshot,
-    _build_graph_edges_from_snapshot,
-    _build_graph_nodes_from_snapshot,
     _build_overview_graph_from_snapshot,
     _focused_entity_ids,
-    _graph_totals_from_snapshot,
     _lod_cache_key,
     _snapshot_to_networkx,
 )
 from sibyl_core.services.graph_community_snapshot import (
+    BoundedTTLCache,
     _get_visible_graph_snapshot,
     _reader_cache_key,
     _ReaderCacheKey,
@@ -41,94 +35,17 @@ from sibyl_core.services.graph_community_snapshot import (
 
 log = structlog.get_logger()
 
-HIERARCHICAL_CACHE: dict[
+HIERARCHICAL_CACHE_TTL = timedelta(minutes=5)
+HIERARCHICAL_CACHE_SIZE = 128
+HIERARCHICAL_CACHE: BoundedTTLCache[
     tuple[str, _ReaderCacheKey],
     tuple[datetime, str, dict[str, str], list[dict[str, Any]]],
-] = {}
-HIERARCHICAL_CACHE_TTL = timedelta(minutes=5)
-GRAPH_LOD_CACHE: dict[tuple[Any, ...], tuple[datetime, str, HierarchicalGraphData]] = {}
+] = BoundedTTLCache(maxsize=HIERARCHICAL_CACHE_SIZE, ttl=HIERARCHICAL_CACHE_TTL)
 GRAPH_LOD_CACHE_TTL = timedelta(minutes=2)
-
-
-async def _get_graph_totals(
-    client: Any,
-    organization_id: str,
-    project_ids: list[str] | None = None,
-    entity_types: list[str] | None = None,
-    include_neighbors: bool = True,
-) -> tuple[int, int]:
-    """Get total node and edge counts (no LIMIT) for stats display.
-
-    Args:
-        client: Graph client.
-        organization_id: Organization UUID.
-        project_ids: Optional list of project IDs to filter by.
-        include_neighbors: If True, include 1-hop neighbors of project entities.
-
-    Returns:
-        Tuple of (total_nodes, total_edges) matching the filter criteria.
-    """
-    # NOTE: include_neighbors is intentionally ignored for totals.
-    # Totals reflect the focused subset selected by project filters.
-    try:
-        entities = await _list_all_entities(client, organization_id)
-        relationships = await _list_all_relationships(client, organization_id)
-        return _graph_totals_from_snapshot(
-            entities,
-            relationships,
-            project_ids=project_ids,
-            entity_types=entity_types,
-        )
-    except Exception as e:
-        log.warning("count_graph_totals_failed", error=str(e))
-        return 0, 0
-
-
-async def _fetch_graph_nodes(
-    client: Any,
-    organization_id: str,
-    node_to_cluster: dict[str, str],
-    max_nodes: int,
-    project_ids: list[str] | None = None,
-    entity_types: list[str] | None = None,
-) -> tuple[list[dict[str, Any]], set[str]]:
-    """Fetch nodes with cluster assignments, optionally filtered by project/type."""
-    try:
-        entities = await _list_all_entities(client, organization_id)
-        relationships = await _list_all_relationships(client, organization_id)
-        return _build_graph_nodes_from_snapshot(
-            entities,
-            relationships,
-            node_to_cluster,
-            max_nodes=max_nodes,
-            project_ids=project_ids,
-            entity_types=entity_types,
-        )
-    except Exception as e:
-        log.warning("fetch_nodes_failed", error=str(e))
-        return [], set()
-
-
-async def _fetch_graph_edges(
-    client: Any,
-    organization_id: str,
-    node_ids: set[str],
-    max_edges: int,
-) -> list[dict[str, Any]]:
-    """Fetch edges between nodes in our set."""
-    if not node_ids:
-        return []
-
-    try:
-        relationships = await _list_all_relationships(client, organization_id)
-        return _build_graph_edges_from_snapshot(
-            relationships,
-            node_ids,
-            max_edges=max_edges,
-        )
-    except Exception as e:
-        log.warning("fetch_edges_failed", error=str(e))
-        return []
+GRAPH_LOD_CACHE_SIZE = 256
+GRAPH_LOD_CACHE: BoundedTTLCache[tuple[Any, ...], tuple[datetime, str, HierarchicalGraphData]] = (
+    BoundedTTLCache(maxsize=GRAPH_LOD_CACHE_SIZE, ttl=GRAPH_LOD_CACHE_TTL)
+)
 
 
 async def get_hierarchical_graph(

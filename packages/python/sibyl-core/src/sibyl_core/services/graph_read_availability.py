@@ -150,6 +150,7 @@ async def available_graph_entities(
     read: GraphReadValidation | None = None,
     source_visible: SourceVisible | None = None,
     memo: GraphReadMemo | None = None,
+    include_embeddings: bool = True,
 ) -> dict[str, Entity]:
     """Refresh actual rows and reject missing, retired, or unavailable ancestry.
 
@@ -158,6 +159,9 @@ async def available_graph_entities(
     rows, rather than cached values with the same IDs. Each standalone call owns
     a fresh validation phase unless its caller supplies one. A memo settles each
     id once for the request that owns it, and cannot share an explicit phase.
+    Callers that only compare or render rows pass include_embeddings=False: the
+    proofs never consult vectors, and a 1024-float column dominates the row
+    payload. A memo keeps vector-free rows apart from full ones.
     """
     if read is not None and read.content_execute_query is not None:
         raise ValueError("explicit validation readers require supplied entity rows")
@@ -168,17 +172,27 @@ async def available_graph_entities(
         if read is not None:
             raise ValueError("a read memo cannot share an explicit validation phase")
         memo._check_org(organization_id)
+        rows_kind = "rows" if include_embeddings else "rows_without_vectors"
         verdicts = await memo.once(
-            f"entity:{memo.reader_scope(source_visible)}",
+            f"entity:{memo.reader_scope(source_visible)}:{rows_kind}",
             ids,
             lambda missing: _load_available_graph_entities(
-                organization_id, missing, runtime=runtime, source_visible=source_visible
+                organization_id,
+                missing,
+                runtime=runtime,
+                source_visible=source_visible,
+                include_embeddings=include_embeddings,
             ),
             missing=None,
         )
         return {identifier: row for identifier, row in verdicts.items() if row is not None}
     return await _load_available_graph_entities(
-        organization_id, ids, runtime=runtime, read=read, source_visible=source_visible
+        organization_id,
+        ids,
+        runtime=runtime,
+        read=read,
+        source_visible=source_visible,
+        include_embeddings=include_embeddings,
     )
 
 
@@ -189,13 +203,22 @@ async def _load_available_graph_entities(
     runtime: GraphRuntime | None,
     read: GraphReadValidation | None = None,
     source_visible: SourceVisible | None,
+    include_embeddings: bool = True,
 ) -> dict[str, Entity]:
     graph = runtime or await get_surreal_graph_runtime(organization_id, ensure_schema=False)
     validation = read if read is not None else GraphReadValidation(organization_id)
+    manager = graph.entity_manager
+    vector_free = not include_embeddings and getattr(
+        manager, "supports_embedding_free_reads", False
+    )
     current: dict[str, Entity] = {}
     for offset in range(0, len(ids), _READ_BATCH_SIZE):
         batch = ids[offset : offset + _READ_BATCH_SIZE]
-        rows = await graph.entity_manager.get_many(batch)
+        rows = (
+            await manager.get_many(batch, include_embeddings=False)
+            if vector_free
+            else await manager.get_many(batch)
+        )
         for row in rows:
             if row.id in batch:
                 current[row.id] = row
@@ -307,6 +330,7 @@ async def _load_available_graph_relationships(
             read=None if memo is not None else read,
             source_visible=source_visible,
             memo=memo,
+            include_embeddings=False,
         )
         for snapshot in snapshots:
             targets = {r["uuid"]: r for r in snapshot["targets"]}
@@ -318,9 +342,13 @@ async def _load_available_graph_relationships(
                     for key in ("source_uuid", "target_uuid")
                 ):
                     continue
+                # Vectors are storage, not evidence: entity_read_evidence
+                # leaves them out and the endpoint rows were read without them.
                 if any(
-                    current[endpoint].model_dump(mode="json")
-                    != entity_from_surreal_row(targets[endpoint]).model_dump(mode="json")
+                    current[endpoint].model_dump(mode="json", exclude={"embedding"})
+                    != entity_from_surreal_row(targets[endpoint]).model_dump(
+                        mode="json", exclude={"embedding"}
+                    )
                     or current[endpoint].derivation_required
                     != entity_from_surreal_row(targets[endpoint]).derivation_required
                     or current[endpoint].observed_revision

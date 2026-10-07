@@ -20,6 +20,7 @@ from sibyl_core.models.reflection import (
     with_reflection_finding_metadata,
 )
 from sibyl_core.services import memory_lifecycle
+from sibyl_core.services.graph_cache_invalidation import invalidate_graph_caches
 from sibyl_core.services.memory_contract import MemoryCorrectionPreview, MemoryCorrectionResult
 from sibyl_core.services.memory_lifecycle import _project_correction_to_graph
 from sibyl_core.services.memory_lineage import discover_source_correction_descendants
@@ -781,6 +782,9 @@ async def apply_memory_correction(
         accessible_delegations=accessible_delegations,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
     )
+    # A correction can retire graph descendants through content-side state
+    # alone, which the graph client's write seam never sees.
+    invalidate_graph_caches(organization_id)
     return MemoryCorrectionResult(
         applied=True,
         preview=preview,

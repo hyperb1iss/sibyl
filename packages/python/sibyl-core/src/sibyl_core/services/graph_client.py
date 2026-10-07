@@ -16,6 +16,11 @@ from sibyl_core.backends.surreal.schema import EMBEDDING_DIM, bootstrap_schema
 from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
 from sibyl_core.config import settings
 from sibyl_core.embeddings.providers import EmbeddingProvider
+from sibyl_core.services.graph_cache_invalidation import (
+    announce_graph_updates,
+    invalidate_graph_caches,
+    query_mutates_graph,
+)
 
 
 class SurrealGraphClient(DedicatedSurrealClient):
@@ -53,6 +58,21 @@ class SurrealGraphClient(DedicatedSurrealClient):
     def is_embedded(self) -> bool:
         """Whether this client runs an in-process engine rather than a server."""
         return is_embedded_surreal_url(self._url)
+
+    async def _execute(self, query: str, **kwargs: Any) -> object:
+        # Every in-process graph write for this organization passes through
+        # here, so one seam keeps the reader caches honest without each writer
+        # remembering to invalidate. Reads never bump, and neither do writes
+        # a call site labels as bookkeeping (see BOOKKEEPING_QUERY_LABELS).
+        # The bump also follows a failed statement, since a multi-statement
+        # write may have landed in part. Origin attribution for slow-query
+        # logs is resolved by the public execute methods before this frame.
+        label = kwargs.get("query_label")
+        try:
+            return await super()._execute(query, **kwargs)
+        finally:
+            if query_mutates_graph(query, label=label if isinstance(label, str) else None):
+                invalidate_graph_caches(self._group_id)
 
 
 _prepared_groups: set[str] = set()
@@ -195,6 +215,9 @@ async def _release_background_lease(group_id: str, lease: _BackgroundLease) -> N
         closing = lease.closing
     if closing is not None:
         await closing
+    # A background operation that wrote structural rows tells the other
+    # processes now, rather than leaving their reader caches to the TTL.
+    await announce_graph_updates(group_id)
 
 
 @asynccontextmanager

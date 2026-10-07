@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any, Self
@@ -576,6 +577,11 @@ class TaskGraphRuntime:
     relationship_manager: Any
 
 
+# The planner unions point lookups for an IN list up to this size; one more
+# id and it scans the table.
+_ENDPOINT_SEEK_BATCH_SIZE = 32
+
+
 class GraphQueryAdapter:
     """Thin graph query surface for routes that still need runtime reads."""
 
@@ -748,18 +754,45 @@ class GraphQueryAdapter:
 
         counts = dict.fromkeys(scoped_entity_ids, 0)
         type_clause = "AND name IN $relationship_types" if relationship_types else ""
-        rows = _normalize_result(
-            await self._client.execute_query(
-                f"""
-                SELECT *
-                FROM relates_to
-                WHERE group_id = $group_id
-                  AND (source_id IN $entity_ids OR target_id IN $entity_ids)
-                  {type_clause};
-                """,  # noqa: S608
+        type_values = [rel.value for rel in relationship_types or []]
+        # One OR across both endpoint columns defeats the index union and
+        # scans every edge. Each column gets its own seek per batch of ids
+        # at the planner's IN-union limit; the hits merge here by uuid.
+        statements = [
+            f"""
+            SELECT uuid
+            FROM relates_to
+            WHERE group_id = $group_id
+              AND {column} IN $entity_ids
+              {type_clause};
+            """  # noqa: S608
+            for column in ("source_id", "target_id")
+        ]
+        ordered_ids = sorted(scoped_entity_ids)
+        batches = [
+            ordered_ids[start : start + _ENDPOINT_SEEK_BATCH_SIZE]
+            for start in range(0, len(ordered_ids), _ENDPOINT_SEEK_BATCH_SIZE)
+        ]
+        seeks = [(statement, batch) for batch in batches for statement in statements]
+
+        async def seek(statement: str, batch: list[str]) -> object:
+            return await self._client.execute_query(
+                statement,
                 group_id=self._group_id,
-                entity_ids=sorted(scoped_entity_ids),
-                relationship_types=[rel.value for rel in relationship_types or []],
+                entity_ids=batch,
+                relationship_types=type_values,
+            )
+
+        # Overlap the seeks only when the pool has slots to run them on; a
+        # single-slot pool would only queue them, binding its queue to this
+        # event loop.
+        if getattr(self._client, "pool_size", 1) > 1:
+            results = await asyncio.gather(*(seek(statement, batch) for statement, batch in seeks))
+        else:
+            results = [await seek(statement, batch) for statement, batch in seeks]
+        edge_ids = list(
+            dict.fromkeys(
+                str(row["uuid"]) for result in results for row in _normalize_result(result)
             )
         )
         from sibyl_core.services.graph_read_availability import (
@@ -769,7 +802,7 @@ class GraphQueryAdapter:
 
         relationships = await available_graph_relationships(
             self._group_id,
-            [str(row["uuid"]) for row in rows],
+            edge_ids,
             runtime=self._runtime,
         )
         endpoints = {
@@ -782,6 +815,7 @@ class GraphQueryAdapter:
             sorted(endpoints),
             runtime=self._runtime,
             source_visible=entity_visible,
+            include_embeddings=False,
         )
         visible = {identity for identity, entity in current.items() if entity_visible(entity)}
         for relationship in relationships.values():

@@ -22,7 +22,7 @@ def discovery_boundary(surface):
     return {
         "nodes": (GraphQueryAdapter, "get_connection_counts"),
         "full": (GraphQueryAdapter, "list_relationships_for_entities"),
-        "subgraph": (RelationshipManager, "get_related_entities"),
+        "subgraph": (RelationshipManager, "get_related_entities_batch"),
         "clusters": (graph_community_clusters, "_native_relationship_edges_between_ids"),
         "debug": (RelationshipManager, "list_all"),
     }[surface]

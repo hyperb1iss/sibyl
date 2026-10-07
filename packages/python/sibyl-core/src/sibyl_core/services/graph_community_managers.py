@@ -149,6 +149,84 @@ def _runtime_for_client(client: Any, organization_id: str) -> GraphRuntime:
     )
 
 
+_ENUMERATION_PAGE_SIZE = 1000
+_ENTITY_ORDER = "ORDER BY updated_at DESC, created_at DESC, uuid DESC"
+_RELATIONSHIP_ORDER = "ORDER BY created_at DESC, uuid DESC"
+# Vector columns are the bulk of an edge and never render. Everything else is
+# projected exactly as the validation snapshot reads it, so an enumerated edge
+# decodes to the same Relationship as its refreshed counterpart and the view
+# comparison sees one body rather than two projections of it.
+_RELATIONSHIP_ENUMERATION_FIELDS = (
+    "*, in.uuid AS source_uuid, out.uuid AS target_uuid, "
+    "<string>created_at AS created_at_text "
+    "OMIT fact_embedding, attributes.fact_embedding, attributes.embedding"
+)
+# Keyset cursors travel as the stored ISO text. A datetime that round-trips
+# through the SDK keeps only microseconds, and a bound truncated that way
+# skips every row inside the dropped nanoseconds. The embedded 2.x engine
+# refuses to cast an undated row's NONE; its text is never used as a cursor.
+_ENTITY_CURSOR_FIELDS = (
+    "<string>(updated_at ?? created_at) AS updated_at_text, <string>created_at AS created_at_text"
+)
+
+
+def _native_graph_client(client: Any) -> bool:
+    from sibyl_core.services.graph_client import SurrealGraphClient
+
+    return isinstance(client, SurrealGraphClient)
+
+
+def _cursor_binding(client: Any) -> tuple[str, str, Callable[[str], object]]:
+    """How a cursor reaches the engine: datetime and text bound templates, a value.
+
+    The server seeks the composite index for a native datetime parameter, so
+    the ISO text is sent as one through the SDK's Datetime wrapper, which
+    keeps its nanoseconds, and a uuid travels as a plain parameter. The
+    embedded 2.x engine returns the lowest rows for a DESC LIMIT page bounded
+    by any bare parameter, datetime or string; an inline cast of the text
+    keeps it off that path, and it has no planner to lose.
+    """
+    from surrealdb.data.types.datetime import Datetime
+
+    from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
+
+    if is_embedded_surreal_url(client._url):
+        return "<datetime>${}", "<string>${}", str
+    return "${}", "${}", Datetime
+
+
+def _page_limit(collected: int, *, batch_size: int, max_items: int | None) -> int:
+    limit = min(max(int(batch_size), 1), _ENUMERATION_PAGE_SIZE)
+    if max_items is not None:
+        limit = min(limit, max(max_items - collected, 0))
+    return limit
+
+
+async def _page_results(
+    client: Any, selects: list[str], params: dict[str, Any]
+) -> list[list[dict[str, Any]]]:
+    """One round trip for one or more top-level statements, results per statement."""
+    from sibyl_core.services.graph_common import normalize_graph_records
+
+    if len(selects) == 1:
+        return [normalize_graph_records(await client.execute_query(selects[0], **params))]
+    results = await client.execute_query_batch(" ".join(selects), **params)
+    if not isinstance(results, list) or len(results) != len(selects):
+        raise RuntimeError("graph enumeration page returned no statement results")
+    return [normalize_graph_records(result) for result in results]
+
+
+async def _page_rows(
+    client: Any, selects: list[str], params: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """One round trip per page: the cursor's tie seek, then the strict range.
+
+    Two top-level statements in one batch, each planned against the bound
+    cursor parameter; the client returns their results in statement order.
+    """
+    return [row for result in await _page_results(client, selects, params) for row in result]
+
+
 async def _list_all_entities(
     client: Any,
     organization_id: str,
@@ -156,6 +234,11 @@ async def _list_all_entities(
     batch_size: int = 1000,
     max_items: int | None = None,
 ) -> list[Entity]:
+    if _entity_manager_factory is None and _native_graph_client(client):
+        return await _walk_entities(
+            client, organization_id, batch_size=batch_size, max_items=max_items
+        )
+
     manager = _entity_manager_for_client(client, organization_id)
     entities: list[Entity] = []
     offset = 0
@@ -186,6 +269,111 @@ async def _list_all_entities(
     return entities
 
 
+async def _walk_entities(
+    client: Any,
+    organization_id: str,
+    *,
+    batch_size: int,
+    max_items: int | None,
+) -> list[Entity]:
+    """Enumerate every entity by keyset over the (updated_at, created_at, uuid) index.
+
+    An offset page costs the scan of every page before it; a keyset page seeks
+    the index at its cursor. Only the leading column ever carries a datetime
+    bound: a range page is ``updated_at < cursor`` in index order, and the
+    rows sharing the cursor's updated_at are drained as one group ordered and
+    sought by uuid alone, skipping those the range page already returned. A
+    residual ``created_at`` comparison would disagree with the index inside a
+    tie group: the index orders a whole-second datetime ahead of fractional
+    ones in the same second while the comparison goes by value, which both
+    skipped and duplicated rows on 3.2. Rows without updated_at sort after
+    every dated row and drain the same way.
+    """
+    from sibyl_core.services.graph_records import _ENTITY_LIST_FIELDS, _entity_from_row
+
+    # The list projection, plus the cursor text; its OMIT list stays the
+    # single source of what an enumerated row leaves behind.
+    fields = f"*, {_ENTITY_CURSOR_FIELDS} {_ENTITY_LIST_FIELDS.removeprefix('*').strip()}"
+    select = f"SELECT {fields} FROM entity WHERE group_id = $group_id"
+    datetime_bound, text_bound, cursor_value = _cursor_binding(client)
+    updated_bound = datetime_bound.format("updated_at")
+    uuid_bound = text_bound.format("uuid")
+    group_order = "ORDER BY uuid DESC"
+    base_params: dict[str, Any] = {"group_id": organization_id}
+    entities: list[Entity] = []
+
+    def budget() -> int:
+        return _page_limit(len(entities), batch_size=batch_size, max_items=max_items)
+
+    def emit(rows: list[dict[str, Any]], seen: set[str] | None = None) -> None:
+        for row in rows:
+            uuid = str(row.get("uuid"))
+            if seen is not None:
+                if uuid in seen:
+                    continue
+                seen.add(uuid)
+            if max_items is not None and len(entities) >= max_items:
+                return
+            entities.append(_entity_from_row(row))
+
+    async def drain(predicate: str, params: dict[str, Any], seen: set[str]) -> None:
+        """Walk one group (one updated_at, or the undated tail) by uuid."""
+        cursor: str | None = None
+        while (limit := budget()) > 0:
+            page_params = {**params, "limit": limit}
+            seek = ""
+            if cursor is not None:
+                page_params["uuid"] = cursor
+                seek = f" AND uuid < {uuid_bound}"
+            (rows,) = await _page_results(
+                client, [f"{select} AND {predicate}{seek} {group_order} LIMIT $limit;"], page_params
+            )
+            emit(rows, seen)
+            if len(rows) < limit:
+                return
+            cursor = str(rows[-1].get("uuid"))
+
+    limit = budget()
+    if limit <= 0:
+        return entities
+    (rows,) = await _page_results(
+        client, [f"{select} {_ENTITY_ORDER} LIMIT $limit;"], {**base_params, "limit": limit}
+    )
+    undated_seen: set[str] = set()
+    while True:
+        dated_rows = [row for row in rows if row.get("updated_at") is not None]
+        undated_rows = rows[len(dated_rows) :]
+        emit(dated_rows)
+        emit(undated_rows, undated_seen)
+        if budget() <= 0:
+            return entities
+        if undated_rows or len(rows) < limit or not dated_rows:
+            break
+        # The page ended inside a group: finish that group by uuid, and fetch
+        # the range below it in the same round trip.
+        group = str(dated_rows[-1].get("updated_at_text"))
+        seen = {str(row.get("uuid")) for row in dated_rows if row.get("updated_at_text") == group}
+        limit = budget()
+        params = {**base_params, "limit": limit, "updated_at": cursor_value(group)}
+        group_rows, rows = await _page_results(
+            client,
+            [
+                f"{select} AND updated_at = {updated_bound} {group_order} LIMIT $limit;",
+                f"{select} AND updated_at < {updated_bound} {_ENTITY_ORDER} LIMIT $limit;",
+            ],
+            params,
+        )
+        emit(group_rows, seen)
+        if len(group_rows) >= limit:
+            await drain(
+                f"updated_at = {updated_bound} AND uuid < {uuid_bound}",
+                {**params, "uuid": str(group_rows[-1].get("uuid"))},
+                seen,
+            )
+    await drain("updated_at IS NONE", base_params, undated_seen)
+    return entities
+
+
 async def _list_all_relationships(
     client: Any,
     organization_id: str,
@@ -194,6 +382,15 @@ async def _list_all_relationships(
     max_items: int | None = None,
     relationship_types: list[RelationshipType] | None = None,
 ) -> list[Relationship]:
+    if _relationship_manager_factory is None and _native_graph_client(client):
+        return await _walk_relationships(
+            client,
+            organization_id,
+            batch_size=batch_size,
+            max_items=max_items,
+            relationship_types=relationship_types,
+        )
+
     manager = _relationship_manager_for_client(client, organization_id)
     relationships: list[Relationship] = []
     offset = 0
@@ -217,5 +414,79 @@ async def _list_all_relationships(
         if len(batch) < page_limit:
             break
         offset += page_limit
+
+    return relationships
+
+
+async def _walk_relationships(
+    client: Any,
+    organization_id: str,
+    *,
+    batch_size: int,
+    max_items: int | None,
+    relationship_types: list[RelationshipType] | None,
+) -> list[Relationship]:
+    """Enumerate every edge by keyset over the (created_at, uuid) index.
+
+    The readable legacy metadata encodings are captured once for the whole
+    walk; the per-page query it used to precede is a full decode of every
+    edge, and the walk reads the same rows that capture guards.
+    """
+    from sibyl_core.services.graph_records import (
+        readable_legacy_relationship_metadata,
+        readable_relationship_from_surreal_row,
+        relationship_weight_predicate,
+    )
+
+    type_values = [rel_type.value for rel_type in relationship_types or ()]
+    type_clause = "AND name IN $relationship_types" if type_values else ""
+    readable_metadata = await readable_legacy_relationship_metadata(
+        client,
+        f"group_id = $group_id {type_clause}",
+        group_id=organization_id,
+        relationship_types=type_values,
+    )
+    select = (
+        f"SELECT {_RELATIONSHIP_ENUMERATION_FIELDS} FROM relates_to "
+        f"WHERE group_id = $group_id {type_clause} {relationship_weight_predicate(client)}"
+    )
+    datetime_bound, text_bound, cursor_value = _cursor_binding(client)
+    created_bound = datetime_bound.format("created_at")
+    uuid_bound = text_bound.format("uuid")
+    relationships: list[Relationship] = []
+    cursor: dict[str, Any] | None = None
+
+    while True:
+        limit = _page_limit(len(relationships), batch_size=batch_size, max_items=max_items)
+        if limit <= 0:
+            break
+        params: dict[str, Any] = {
+            "group_id": organization_id,
+            "limit": limit,
+            "relationship_types": type_values,
+            "readable_relationship_metadata": readable_metadata,
+            "nan_relationship_weight": float("nan"),
+            **(cursor or {}),
+        }
+        if cursor is None:
+            selects = [f"{select} {_RELATIONSHIP_ORDER} LIMIT $limit;"]
+        else:
+            selects = [
+                f"{select} AND created_at = {created_bound} AND uuid < {uuid_bound} "
+                f"{_RELATIONSHIP_ORDER} LIMIT $limit;",
+                f"{select} AND created_at < {created_bound} {_RELATIONSHIP_ORDER} LIMIT $limit;",
+            ]
+        rows = (await _page_rows(client, selects, params))[:limit]
+        relationships.extend(
+            relationship
+            for row in rows
+            if (relationship := readable_relationship_from_surreal_row(row)) is not None
+        )
+        if len(rows) < limit:
+            break
+        cursor = {
+            "created_at": cursor_value(str(rows[-1].get("created_at_text"))),
+            "uuid": rows[-1].get("uuid"),
+        }
 
     return relationships

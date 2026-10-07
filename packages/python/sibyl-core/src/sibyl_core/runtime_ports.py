@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -146,8 +146,11 @@ class _NoAuditPort:
         return None
 
 
+type GraphUpdateAnnouncer = Callable[[str], Awaitable[None]]
+
 _source_authority_resolver: SourceAuthorityResolver | None = None
 _queue_port: QueuePort | None = None
+_graph_update_announcer: GraphUpdateAnnouncer | None = None
 _content_port: ContentPort | None = None
 _graph_link_port: GraphLinkPort | None = None
 _audit_port: AuditPort = _NoAuditPort()
@@ -169,6 +172,17 @@ def install_queue_port(port: QueuePort) -> None:
     _queue_port = port
 
 
+def install_graph_update_announcer(announcer: GraphUpdateAnnouncer | None) -> None:
+    """Route graph-changed announcements to the host's event bus."""
+    global _graph_update_announcer
+    _graph_update_announcer = announcer
+
+
+def get_graph_update_announcer() -> GraphUpdateAnnouncer | None:
+    """The installed announcer, or None when this process has no bus to announce on."""
+    return _graph_update_announcer
+
+
 def install_content_port(port: ContentPort) -> None:
     global _content_port
     _content_port = port
@@ -186,6 +200,8 @@ def install_audit_port(port: AuditPort) -> None:
 
 def reset_runtime_ports() -> None:
     global _audit_port, _content_port, _graph_link_port, _queue_port, _source_authority_resolver
+    global _graph_update_announcer
+    _graph_update_announcer = None
     _source_authority_resolver = None
     _queue_port = None
     _content_port = None
