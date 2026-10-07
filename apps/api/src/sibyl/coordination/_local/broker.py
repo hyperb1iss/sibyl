@@ -48,6 +48,11 @@ _VECTOR_KEYS = frozenset(
 )
 _VECTOR_SUFFIXES = ("_embedding", "_embeddings", "_vector", "_vectors")
 _VECTOR_MIN_LENGTH = 32
+# A finished record is never retired by count while it is this young: a
+# client polls a job's status for a while after it finishes, and a burst of
+# completions must not take that away. Older records still expire after the
+# result TTL.
+_RETIREMENT_FLOOR = timedelta(seconds=600)
 
 
 def _is_vector_key(key: object) -> bool:
@@ -55,20 +60,29 @@ def _is_vector_key(key: object) -> bool:
     return name in _VECTOR_KEYS or name.endswith(_VECTOR_SUFFIXES)
 
 
-def _slim_payload(value: Any) -> Any:
+def _slim_payload(value: Any, *, numeric_lists: bool) -> Any:
     """A copy of a job payload with its vectors dropped, for a finished record.
 
-    Named vector fields go, and so does any long list of numbers whatever
-    its name; everything else, ids included, is kept as it was.
+    Named vector fields go. With ``numeric_lists`` so does any long list of
+    numbers whatever its name, which suits a job's inputs, where a vector
+    rides in an entity payload under a key its producer chose; a result
+    keeps its lists, since a count series there is data, not a vector.
+    Everything else, ids included, is kept as it was.
     """
     if isinstance(value, dict):
-        return {key: _slim_payload(item) for key, item in value.items() if not _is_vector_key(key)}
+        return {
+            key: _slim_payload(item, numeric_lists=numeric_lists)
+            for key, item in value.items()
+            if not _is_vector_key(key)
+        }
     if isinstance(value, list | tuple):
-        if len(value) >= _VECTOR_MIN_LENGTH and all(
-            isinstance(item, int | float) and not isinstance(item, bool) for item in value
+        if (
+            numeric_lists
+            and len(value) >= _VECTOR_MIN_LENGTH
+            and all(isinstance(item, int | float) and not isinstance(item, bool) for item in value)
         ):
             return f"<{len(value)} numbers dropped>"
-        slimmed = [_slim_payload(item) for item in value]
+        slimmed = [_slim_payload(item, numeric_lists=numeric_lists) for item in value]
         return tuple(slimmed) if isinstance(value, tuple) else slimmed
     return value
 
@@ -885,21 +899,30 @@ class LocalQueueBroker:
         """Close a record: outcome, expiry, and a payload that no longer carries vectors."""
         record.status = status
         record.finish_time = datetime.now(UTC)
-        record.result = _slim_payload(result)
+        record.result = _slim_payload(result, numeric_lists=False)
         record.error = error
         record.expires_at = record.finish_time + self._result_ttl
-        record.args = _slim_payload(record.args)
-        record.kwargs = _slim_payload(record.kwargs)
+        record.args = _slim_payload(record.args, numeric_lists=True)
+        record.kwargs = _slim_payload(record.kwargs, numeric_lists=True)
         heapq.heappush(
             self._expiring, (record.expires_at, next(self._expiry_sequence), record.job_id)
         )
         self._finished.append((record.job_id, record.finish_time))
         self._retire_finished_beyond_limit()
 
-    def _retire_finished_beyond_limit(self) -> None:
-        """Drop the oldest finished records once more than the recent index can list."""
+    def _retire_finished_beyond_limit(self, *, now: datetime | None = None) -> None:
+        """Drop the oldest finished records once more than the recent index can list.
+
+        A record younger than the retirement floor is kept whatever the
+        count, so a burst of completions never hides a job from a client
+        that has not polled it yet; the result TTL still bounds its life.
+        """
+        now = now or datetime.now(UTC)
         while len(self._finished) > self._recent_job_limit:
-            job_id, finish_time = self._finished.popleft()
+            job_id, finish_time = self._finished[0]
+            if now - finish_time < _RETIREMENT_FLOOR:
+                break
+            self._finished.popleft()
             record = self._jobs.get(job_id)
             # The same id re-enqueued since is a newer record with its own
             # place in the order; only the record that finished then goes.

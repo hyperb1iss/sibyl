@@ -1131,10 +1131,11 @@ async def test_local_queue_broker_keeps_no_vectors_in_a_finished_record() -> Non
         "org-1",
     )
     assert info.kwargs == {"relationships": [{"source_id": "a"}]}
+    # A result keeps its number series; only vectors by name go.
     assert info.result == {
         "group_id": "org-1",
         "embedded": 1,
-        "scores": "<64 numbers dropped>",
+        "scores": [0.5] * 64,
         "ids": ["entity-1"],
     }
 
@@ -1169,7 +1170,13 @@ async def test_local_queue_broker_retires_finished_history_and_purges_without_a_
     for job_id in job_ids[-8:]:
         await _wait_for_job_status(broker, job_id, JobStatus.COMPLETE)
 
-    # Finished records live on only as far back as the recent index can list.
+    # A burst never hides a fresh result from a client that has not polled yet.
+    assert len(broker._jobs) == 5_000
+    assert (await broker.get_job_status(job_ids[0])).status == JobStatus.COMPLETE
+    assert (await broker.get_job_status(job_ids[-1])).status == JobStatus.COMPLETE
+    # Once the oldest are past the retirement floor, finished records live on
+    # only as far back as the recent index can list.
+    broker._retire_finished_beyond_limit(now=datetime.now(UTC) + timedelta(seconds=601))
     assert len(broker._jobs) <= RECENT_JOB_INDEX_LIMIT
     assert (await broker.get_job_status(job_ids[-1])).status == JobStatus.COMPLETE
     assert (await broker.get_job_status(job_ids[0])).status == JobStatus.NOT_FOUND
