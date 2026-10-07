@@ -76,6 +76,7 @@ interface ExploreResponse {
   offset: number;
   has_more: boolean;
   actual_total?: number; // Total matching (for pagination)
+  next_offset?: number; // Where the next page starts (list mode, single type)
 }
 
 interface EntitySummary {
@@ -131,9 +132,16 @@ Browse entities by type with optional filters.
   ],
   "total": 3,
   "has_more": false,
-  "actual_total": 3
+  "actual_total": 3,
+  "next_offset": null
 }
 ```
+
+A single-type list pages over one database window per call. Rows the server filters after the window
+(archived rows, memory the caller cannot read) shorten the page without moving it, so a page can
+hold fewer than `limit` entities, or none, while `has_more` is still true. To walk every row, pass
+`next_offset` back as `offset` until `has_more` is false; a page with no `next_offset` is the last
+one. `actual_total` is reported only when a single page holds the whole result.
 
 ### List Epics in Project
 

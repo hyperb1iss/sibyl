@@ -276,9 +276,15 @@ curl -X POST "http://localhost:3334/api/search/explore" \
   "limit": 20,
   "offset": 0,
   "has_more": false,
-  "actual_total": 8
+  "actual_total": 8,
+  "next_offset": null
 }
 ```
+
+A single-type list (`types` with one entry) pages over one database window per call. Rows filtered
+after the window shorten the page without moving it, so a page can hold fewer than `limit` entities,
+or none, while `has_more` is still true. Walk the list by passing `next_offset` back as `offset`
+until `has_more` is false. `actual_total` is set only when one page holds the whole result.
 
 ### Temporal Query
 
@@ -471,7 +477,9 @@ Use `limit` and `offset` for pagination:
 }
 ```
 
-Check `has_more` in response to determine if more results exist.
+Check `has_more` in response to determine if more results exist. Explore list responses also carry
+`next_offset`: the offset of the next page when the server pages by database window, absent on the
+last page.
 
 ## Error Responses
 
