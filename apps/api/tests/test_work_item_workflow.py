@@ -323,3 +323,22 @@ class TestLockSerialization:
             )
 
         assert peak == 2, "distinct work items must not serialize against each other"
+
+
+@pytest.mark.parametrize(
+    ("current", "requested", "actor", "stamped"),
+    [
+        ("doing", "done", "user-1", True),
+        (None, SimpleNamespace(value="done"), "user-1", True),
+        ("done", "done", "user-1", False),
+        ("doing", "review", "user-1", False),
+        ("doing", "done", None, False),
+    ],
+)
+def test_completion_stamp_only_marks_a_move_into_done(current, requested, actor, stamped) -> None:
+    stamp = wiw.completion_stamp(current, requested, actor)
+    if stamped:
+        assert stamp["completed_by"] == actor
+        assert stamp["completed_at"]
+    else:
+        assert stamp == {}

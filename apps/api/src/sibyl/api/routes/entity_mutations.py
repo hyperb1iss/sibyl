@@ -49,6 +49,7 @@ from sibyl.persistence.auth_runtime import (
 from sibyl.persistence.content_runtime import (
     get_content_read_session_dependency,
 )
+from sibyl.services.work_item_workflow import completion_stamp
 from sibyl_core.auth import AuthOrganization, ProjectRole
 from sibyl_core.auth.memory_policy import (
     SERVER_OWNED_METADATA_KEYS,
@@ -604,6 +605,16 @@ async def update_entity(
                         if key not in SERVER_OWNED_METADATA_KEYS
                     },
                 }
+                if existing.entity_type == EntityType.TASK and "status" in update.metadata:
+                    # Moving a task to done here records who finished it, as
+                    # the complete transition does.
+                    update_data["metadata"].update(
+                        completion_stamp(
+                            existing_meta.get("status") or getattr(existing, "status", None),
+                            update.metadata.get("status"),
+                            str(ctx.user.id) if ctx.user is not None else None,
+                        )
+                    )
 
             structure_metadata_changed = (
                 update.spans is not None or update.atomic is not None or update.content is not None

@@ -33,7 +33,11 @@ from sibyl.auth.dependencies import (
 from sibyl.jobs.entities import serialize_memory_policy_context
 from sibyl.locks import entity_lock
 from sibyl.persistence.auth_runtime import list_accessible_project_graph_ids
-from sibyl.services.work_item_workflow import WorkItemAction, transition_work_item
+from sibyl.services.work_item_workflow import (
+    WorkItemAction,
+    completion_stamp,
+    transition_work_item,
+)
 from sibyl_core.auth import AuthOrganization, AuthUser, OrganizationRole, ProjectRole
 from sibyl_core.auth.memory_policy import (
     memory_metadata_read_allowed,
@@ -896,10 +900,19 @@ async def update_task(
     """
     from sibyl.jobs.queue import enqueue_update_task as enqueue_update_task_async
 
-    await _verify_task_access(task_id, org, auth)
+    verified_task = await _verify_task_access(task_id, org, auth)
 
     group_id = str(org.id)
     update_data = _build_update_data(request, str(user.id))
+    if request.status is not None:
+        update_data.update(
+            completion_stamp(
+                (getattr(verified_task, "metadata", None) or {}).get("status")
+                or getattr(verified_task, "status", None),
+                request.status,
+                str(user.id),
+            )
+        )
     idempotency_path = f"/tasks/{task_id}"
     idempotency_payload = {
         "body": request.model_dump(mode="json"),

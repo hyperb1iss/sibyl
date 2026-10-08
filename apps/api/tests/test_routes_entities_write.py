@@ -2057,6 +2057,78 @@ async def test_update_entity_keeps_owner_metadata_out_of_the_caller_merge() -> N
     assert merged["note"] == "kept"
 
 
+_ctx_for_completion = _ctx()
+
+
+def _task_entity(status: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        id="task_done_by_patch",
+        entity_type=EntityType.TASK,
+        name="Ship the board",
+        description="",
+        content="",
+        category=None,
+        languages=[],
+        tags=[],
+        metadata={"status": status, "project_id": "project_mine"},
+        source_file=None,
+        created_at=None,
+        updated_at=None,
+    )
+
+
+async def _patch_task(existing: SimpleNamespace, metadata: dict[str, object]) -> dict:
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(return_value=existing),
+            update=AsyncMock(return_value=existing),
+        )
+    )
+    with (
+        patch("sibyl.locks.entity_lock", _locked_entity),
+        patch(
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        patch("sibyl.api.routes.entity_mutations.verify_entity_project_access", AsyncMock()),
+        patch(
+            "sibyl.api.routes.entity_policy.list_accessible_project_graph_ids",
+            AsyncMock(return_value={"project_mine"}),
+        ),
+        patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
+    ):
+        await update_entity(
+            entity_id=existing.id,
+            update=EntityUpdate(metadata=metadata),
+            request=_request(),
+            org=_org(),
+            ctx=_ctx_for_completion,
+            content_session=None,
+        )
+    return runtime.entity_manager.update.await_args.args[1]["metadata"]
+
+
+@pytest.mark.asyncio
+async def test_moving_a_task_to_done_by_patch_records_who_finished_it() -> None:
+    merged = await _patch_task(
+        _task_entity("doing"), {"status": "done", "completed_by": "someone-else"}
+    )
+
+    assert merged["completed_by"] == str(_ctx_for_completion.user.id)
+    assert merged["completed_at"]
+    assert merged["status"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_editing_a_task_that_is_already_done_keeps_its_completion() -> None:
+    existing = _task_entity("done")
+    existing.metadata["completed_by"] = "original-finisher"
+    merged = await _patch_task(existing, {"status": "done", "completed_by": "someone-else"})
+
+    assert merged["completed_by"] == "original-finisher"
+    assert "completed_at" not in merged
+
+
 @pytest.mark.asyncio
 async def test_update_entity_refuses_a_project_row_keyed_outside_accessible_projects() -> None:
     org = _org()

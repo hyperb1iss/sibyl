@@ -26,6 +26,7 @@ from sibyl.persistence.content_common import ApiIdempotencyRecord
 from sibyl.services.work_item_workflow import WorkItemAction, WorkItemTransition
 from sibyl_core.auth import MemoryPolicyContext, OrganizationRole, ProjectRole
 from sibyl_core.models.entities import EntityType
+from sibyl_core.models.tasks import TaskStatus
 
 
 def _request(*, idempotency_key: str | None = None) -> MagicMock:
@@ -411,6 +412,38 @@ async def test_update_task_sync_allows_title_description_with_actor_attribution(
             "description": "Updated body",
         },
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("current", "stamped"), [("doing", True), ("done", False)])
+async def test_update_task_to_done_records_who_finished_it(current: str, stamped: bool) -> None:
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    user = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000222"))
+    enqueue = AsyncMock(return_value="job-123")
+    existing = SimpleNamespace(metadata={"status": current})
+
+    with (
+        patch("sibyl.api.routes.tasks._verify_task_access", AsyncMock(return_value=existing)),
+        patch("sibyl.jobs.queue.enqueue_update_task", enqueue),
+    ):
+        await update_task(
+            task_id="task-123",
+            request=UpdateTaskRequest(status=TaskStatus.DONE),
+            sync=False,
+            org=org,
+            user=user,
+            auth=SimpleNamespace(),
+        )
+
+    update_data = enqueue.await_args.args[1]
+    assert update_data["status"] == TaskStatus.DONE
+    assert update_data["modified_by"] == str(user.id)
+    if stamped:
+        assert update_data["completed_by"] == str(user.id)
+        assert update_data["completed_at"]
+    else:
+        assert "completed_by" not in update_data
+        assert "completed_at" not in update_data
 
 
 @pytest.mark.asyncio
