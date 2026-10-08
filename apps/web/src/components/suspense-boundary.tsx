@@ -487,6 +487,82 @@ export function GraphSkeleton() {
   );
 }
 
+/** Team page: a grid of person cards. */
+export function TeamPeopleSkeleton() {
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div
+          key={i}
+          className="space-y-4 rounded-xl border border-sc-fg-subtle/20 bg-sc-bg-elevated p-4"
+        >
+          <div className="flex items-start gap-3">
+            <Skeleton className="h-11 w-11 rounded-full" />
+            <div className="flex-1 space-y-2">
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-3 w-36" />
+            </div>
+            <Skeleton className="h-7 w-8" />
+          </div>
+          <Skeleton className="h-1.5 w-full rounded-full" />
+          <div className="flex gap-1.5">
+            <Skeleton className="h-5 w-20 rounded-full" />
+            <Skeleton className="h-5 w-16 rounded-full" />
+            <Skeleton className="h-5 w-14 rounded-full" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Team page: the activity feed, a day heading over icon rows. */
+export function TeamFeedSkeleton() {
+  return (
+    <div className="rounded-xl border border-sc-fg-subtle/20 bg-sc-bg-elevated">
+      <div className="flex items-center gap-2.5 border-b border-sc-fg-subtle/10 px-4 py-3">
+        <Skeleton className="h-8 w-8 rounded-lg" />
+        <Skeleton className="h-5 w-20" />
+      </div>
+      <div className="divide-y divide-sc-fg-subtle/10">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="flex items-start gap-3 px-4 py-3">
+            <Skeleton className="h-8 w-8 rounded-lg" />
+            <div className="flex-1 space-y-2">
+              <Skeleton className="h-4 w-3/5" />
+              <Skeleton className="h-3 w-2/5" />
+            </div>
+            <Skeleton className="h-3 w-10" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Team page skeleton: header with controls, people grid, activity feed. */
+export function TeamSkeleton() {
+  return (
+    <div className="space-y-4 sm:space-y-6 animate-fade-in">
+      <div className="flex flex-col gap-4 rounded-xl border border-sc-fg-subtle/20 bg-sc-bg-elevated p-4 sm:p-6 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex items-center gap-3">
+          <Skeleton className="h-12 w-12 rounded-xl" />
+          <div className="space-y-2">
+            <Skeleton className="h-6 w-40" />
+            <Skeleton className="h-4 w-56" />
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Skeleton className="h-[42px] w-52 rounded-lg" />
+          <Skeleton className="h-[42px] w-52 rounded-lg" />
+        </div>
+      </div>
+      <TeamPeopleSkeleton />
+      <TeamFeedSkeleton />
+    </div>
+  );
+}
+
 /** Generic page skeleton — header + a list. Used for unknown route fallback. */
 export function GenericPageSkeleton() {
   return (
