@@ -24,7 +24,7 @@ interface PlaygroundProps {
 
 /** The view with local state standing in for the URL and project context. */
 function TeamActivityPlayground({ scenario, theme }: PlaygroundProps) {
-  const [window, setWindow] = useState<TeamActivityWindow>('7d');
+  const [activityWindow, setActivityWindow] = useState<TeamActivityWindow>('7d');
   const [selected, setSelected] = useState<string[]>([]);
 
   useLayoutEffect(() => {
@@ -32,13 +32,13 @@ function TeamActivityPlayground({ scenario, theme }: PlaygroundProps) {
     document.documentElement.style.colorScheme = theme === 'dawn' ? 'light' : 'dark';
   }, [theme]);
 
-  const data: TeamActivityResponse | undefined = responseFor(scenario, window);
+  const data: TeamActivityResponse | undefined = responseFor(scenario, activityWindow);
 
   return (
     <div className="min-h-screen bg-sc-bg-dark p-3 font-sans sm:p-4 md:p-6">
       <TeamActivityView
-        window={window}
-        onWindowChange={setWindow}
+        activityWindow={activityWindow}
+        onWindowChange={setActivityWindow}
         projects={FIXTURE_PROJECTS}
         projectNames={PROJECT_NAMES}
         selectedProjectIds={selected}

@@ -182,7 +182,7 @@ export function ActivityFeed({
             title={`Nothing from ${person.name} in ${windowPhrase}`}
             description={
               truncated
-                ? `The feed holds the latest ${TEAM_ACTIVITY_RECENT_LIMIT} team updates, and none of them are theirs. Narrow the window or pick a project to look further back.`
+                ? `The feed holds the latest ${TEAM_ACTIVITY_RECENT_LIMIT} team updates, and none of them are theirs. Pick one project to look further back.`
                 : 'Their captures, tasks, decisions, and notes land here as they happen.'
             }
             variant="filtered"
@@ -234,7 +234,7 @@ export function ActivityFeed({
           <span>
             Showing the latest {TEAM_ACTIVITY_RECENT_LIMIT} team updates.{' '}
             {person ? `Earlier work from ${person.name} may sit past that cut. ` : ''}
-            Narrow the window or pick a project to look further back.
+            Pick one project to look further back in its history.
           </span>
         </p>
       )}

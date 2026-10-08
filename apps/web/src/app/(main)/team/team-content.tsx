@@ -56,7 +56,7 @@ export function TeamContent() {
 
   return (
     <TeamActivityView
-      window={activityWindow}
+      activityWindow={activityWindow}
       onWindowChange={setWindow}
       projects={projects}
       projectNames={projectNames}

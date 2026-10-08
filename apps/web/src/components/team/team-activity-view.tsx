@@ -25,7 +25,7 @@ import { type ProjectOption, ProjectScopeSelect } from './project-scope-select';
 import { WindowSwitcher } from './window-switcher';
 
 export interface TeamActivityViewProps {
-  window: TeamActivityWindow;
+  activityWindow: TeamActivityWindow;
   onWindowChange: (window: TeamActivityWindow) => void;
   /** Projects offered by the scope picker. */
   projects: ProjectOption[];
@@ -65,7 +65,7 @@ function sumCounts(people: TeamActivityPerson[]): TeamActivityCounts {
  * in through props so the page, stories, and tests share one renderer.
  */
 export function TeamActivityView({
-  window,
+  activityWindow,
   onWindowChange,
   projects,
   projectNames,
@@ -81,7 +81,8 @@ export function TeamActivityView({
 
   // Describe the window the data on screen covers, which trails the switcher
   // while a new window loads.
-  const shownWindow = data && isTeamActivityWindow(data.window.label) ? data.window.label : window;
+  const shownWindow =
+    data && isTeamActivityWindow(data.window.label) ? data.window.label : activityWindow;
   const windowPhrase = TEAM_ACTIVITY_WINDOW_CONFIG[shownWindow].phrase;
 
   const people = data?.people ?? [];
@@ -135,9 +136,10 @@ export function TeamActivityView({
             </div>
           </div>
           <div className="flex flex-col gap-2 xs:flex-row xs:flex-wrap xs:items-center">
-            <WindowSwitcher value={window} onChange={onWindowChange} />
+            <WindowSwitcher value={activityWindow} onChange={onWindowChange} />
             <ProjectScopeSelect
               projects={projects}
+              projectNames={projectNames}
               selectedIds={selectedProjectIds}
               onSelectAll={onSelectAllProjects}
               onSelectProject={onSelectProject}

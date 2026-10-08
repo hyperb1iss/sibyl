@@ -19,6 +19,8 @@ export interface ProjectOption {
 
 interface ProjectScopeSelectProps {
   projects: ProjectOption[];
+  /** Names for projects the option list leaves out, such as archived ones. */
+  projectNames?: Record<string, string>;
   /** The global project selection; empty means every project. */
   selectedIds: string[];
   onSelectAll: () => void;
@@ -31,6 +33,7 @@ interface ProjectScopeSelectProps {
  */
 export function ProjectScopeSelect({
   projects,
+  projectNames = {},
   selectedIds,
   onSelectAll,
   onSelectProject,
@@ -45,7 +48,9 @@ export function ProjectScopeSelect({
     selectedIds.length === 0
       ? 'All projects'
       : selectedIds.length === 1
-        ? (projects.find(project => project.id === selectedIds[0])?.name ?? 'Selected project')
+        ? (projects.find(project => project.id === selectedIds[0])?.name ??
+          projectNames[selectedIds[0]] ??
+          'Selected project')
         : `${selectedIds.length} projects`;
 
   // A selected project the list does not carry (archived, or past the first
@@ -68,7 +73,7 @@ export function ProjectScopeSelect({
         className="h-[42px] min-w-0 sm:w-[220px] focus-visible:ring-offset-sc-bg-elevated"
       >
         <span className="flex min-w-0 items-center gap-2">
-          <Folder width={14} height={14} className="shrink-0 text-sc-fg-muted" />
+          <Folder width={14} height={14} aria-hidden="true" className="shrink-0 text-sc-fg-muted" />
           <SelectValue>
             <span className="truncate">{label}</span>
           </SelectValue>
